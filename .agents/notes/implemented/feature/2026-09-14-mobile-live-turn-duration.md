@@ -16,7 +16,7 @@ that moment (how long has this been going?) had no answer on screen. The slot no
 counts up once a second from the turn's own `timestamp`, the same anchor the
 finished label resolves from, so when the turn ends the number stops rather than
 jumps. The ticking is confined to a leaf component subscribed to the shared
-`useStableNow(1000)` ticker, so one live turn costs one re-rendering span rather
+shared `useStableNow` ticker, so one live turn costs one re-rendering span rather
 than a re-render of every visible footer. The limit worth naming: "live" means
 the conversation's last assistant turn with `finished !== true`, which is a
 structural claim, not a liveness probe — a turn the machine abandoned without
@@ -67,12 +67,30 @@ composer.
 
 ### Why a leaf component
 
-`useStableNow(1000)` is a shared ticker: subscribers get one interval between
-them and a tick re-renders only what subscribed. Calling it in
-`AssistantTurnFooter` would have re-rendered every visible turn's footer once a
-second, including finished ones with nothing to update. `LiveTurnDurationLabel`
-is mounted only on the live turn, so the subscription exists exactly when there
-is something to count.
+`useStableNow` is a shared ticker: subscribers get one interval between them and
+a tick re-renders only what subscribed. Calling it in `AssistantTurnFooter` would
+have re-rendered every visible turn's footer on every tick, including finished
+ones with nothing to update. `LiveTurnDurationLabel` is mounted only on the live
+turn, so the subscription exists exactly when there is something to count.
+
+### Sampled faster than it is displayed
+
+The label changes once a second but samples at 300ms, because "once a second" and
+"on the second" are not the same thing here. The shared ticker's phase is set by
+whichever subscriber mounted first — it has no relation to when this turn
+started — so a 1s sample can land anywhere inside the elapsed second. The digit
+would then change at a visibly arbitrary instant and, worse, sit up to a full
+second behind the truth: a turn 5.4s old reads `5s` until the sample fires, which
+may be 600ms after it should already have read `6s`.
+
+Sampling at 300ms bounds that error to 300ms without changing what is rendered:
+the formatted string is identical across the extra samples, so React reconciles
+the same text and writes nothing to the DOM. The cost is two additional leaf
+renders per second, on one span, and only while a turn is live. Anchoring a
+private `setTimeout` to the turn's own start would be exact rather than bounded,
+but it trades the shared ticker for a timer per live turn and re-introduces the
+drift handling `useStableNow` already owns; 300ms is close enough that the
+difference is not observable.
 
 `SessionChatActionContext` is now exported. An unfinished turn's action bar is
 gated on a copy-context handler existing, so that gate is part of the state under
@@ -83,10 +101,12 @@ test, not scaffolding around it; the test drives the real component through it.
 `tests/session-history-duration.test.ts` pins the live resolver, including that it
 agrees with the finished form on the same turn and clamps a future start.
 `tests/assistant-turn-action-inset.test.ts` renders the mobile footer under fake
-timers: a live turn advances `Worked for 5s` → `Worked for 7s`, a finished turn
-holds its recorded value across five seconds, and a non-live unfinished turn
-leaves the slot empty with its reserved `min-width` intact. Removing the live
-branch fails the first of those and only that one.
+timers: a live turn advances `Worked for 5s` → `Worked for 7s`; a turn whose
+start is offset from the ticker's phase by 400ms holds `5s` at 5.9s elapsed and
+already reads `6s` at 6.1s; a finished turn holds its recorded value across five
+seconds; and a non-live unfinished turn leaves the slot empty with its reserved
+`min-width` intact. Removing the live branch fails the first of those and only
+that one; restoring a 1s sample period fails the phase case and only that one.
 
 `MobileTurnDurationSlot.stories.tsx` renders both states in a phone frame;
 driving the live story in a browser read `Worked for 48s` and `Worked for 51s`

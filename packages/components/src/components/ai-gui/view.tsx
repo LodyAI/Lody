@@ -3774,17 +3774,27 @@ export const MOBILE_TURN_ACTION_LEADING_INSET_PX = 48;
  * same anchor the finished label resolves from, so the number does not jump
  * when the turn ends — it simply stops.
  *
- * Its own leaf component so that the 1s tick re-renders this span alone: the
+ * Its own leaf component so that the tick re-renders this span alone: the
  * shared `useStableNow` ticker is subscribed here, never by the footer (which
  * every visible turn mounts) or by a finished turn (which has nothing to tick).
  */
+/** Sample period for the live label; see the comment at its `useStableNow` call. */
+const LIVE_TURN_DURATION_SAMPLE_MS = 300;
+
 const LiveTurnDurationLabel = ({
   message,
 }: {
   message: Pick<SessionHistoryParsed, 'timestamp' | 'permissionWaitMs'>;
 }) => {
   const { t } = useTranslation();
-  const now = useStableNow(1_000);
+  /* Sampled faster than it is displayed. The shared ticker's phase is set by
+     whoever mounts first, not by this turn's start, so a 1s sample lands up to
+     a full second away from the instant the elapsed span crosses a whole second
+     — the digit would change at a visibly arbitrary moment and read as stale.
+     Sampling at 300ms bounds that error to 300ms; the rendered string still
+     changes once a second, so the extra samples cost a leaf re-render each and
+     no DOM write. */
+  const now = useStableNow(LIVE_TURN_DURATION_SAMPLE_MS);
   const durationMs = resolveLiveSessionHistoryDurationMs(message, now.getTime());
   if (durationMs === null) return null;
   const duration = formatDurationCompact(durationMs, {

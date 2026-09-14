@@ -139,10 +139,47 @@ describe('mobile assistant-turn duration slot', () => {
     const { container, root } = await renderMobileFooter(message);
     expect(leadingSlotText(container)).toBe('Worked for 5s');
 
+    /* A whole number of sample periods, not a round 2s: the label is sampled
+       faster than it changes, so the last sample inside the advanced window is
+       what the span shows. */
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.advanceTimersByTimeAsync(2_100);
     });
     expect(leadingSlotText(container)).toBe('Worked for 7s');
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it('flips the digit within a sample period of the real second boundary', async () => {
+    /* The shared ticker's phase comes from whoever mounted first, not from this
+       turn, so a once-a-second sample can land anywhere inside the second and
+       the displayed value would sit up to a full second behind. Here the turn
+       started 5.4s ago: the span becomes 6s at +600ms, and the label must say
+       so well before a 1s sample would have noticed. */
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-10T03:00:00.000Z'));
+    const message = {
+      id: 'assistant-turn-live-phase',
+      role: 'assistant',
+      timestamp: '2026-09-10T02:59:54.600Z',
+      items: [{ type: 'text', text: 'Still writing…' }],
+    } as unknown as SessionHistoryParsed;
+
+    const { container, root } = await renderMobileFooter(message);
+    expect(leadingSlotText(container)).toBe('Worked for 5s');
+
+    // 5.9s elapsed: six whole seconds have NOT passed, so the digit holds.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(500);
+    });
+    expect(leadingSlotText(container)).toBe('Worked for 5s');
+
+    // 6.1s elapsed, i.e. 100ms past the boundary — already updated.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+    expect(leadingSlotText(container)).toBe('Worked for 6s');
 
     await act(async () => root.unmount());
     container.remove();
