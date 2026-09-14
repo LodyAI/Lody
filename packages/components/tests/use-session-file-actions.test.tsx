@@ -20,6 +20,14 @@ import { atom, Provider } from 'jotai';
 // the Flock rows for that machine have not arrived yet.
 let localHomeDir: string | null = '/home/dev';
 let localMachineId: string | null = null;
+let nativeShell = false;
+let sharedBytes: Uint8Array | undefined;
+vi.mock('../src/lib/native-platform', () => ({ isNativeAppShell: () => nativeShell }));
+vi.mock('../src/lib/session-file-native-save', () => ({
+  shareFileBytesNatively: async (_name: string, bytes: Uint8Array) => {
+    sharedBytes = bytes;
+  },
+}));
 
 vi.mock('../src/atoms/local-probe', () => ({
   localHomeDirAtom: atom(() => localHomeDir),
@@ -97,6 +105,8 @@ describe('remote file download action', () => {
     await initI18n('en');
     toastError.mockClear();
     downloadBytesAsFile.mockClear();
+    nativeShell = false;
+    sharedBytes = undefined;
     localHomeDir = '/home/dev';
     localMachineId = null;
     container = document.createElement('div');
@@ -140,6 +150,19 @@ describe('remote file download action', () => {
 
     expect(downloadBytesAsFile).toHaveBeenCalledTimes(1);
     expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it('exports the complete binary snapshot in the native shell', async () => {
+    nativeShell = true;
+    const bytes = Uint8Array.of(0, 255, 7);
+    await runDownload({
+      status: 'ready',
+      entry: { entryType: 'file', fileId: 'package.deb', path: 'package.deb' },
+      snapshot: { kind: 'binary', bytes },
+    } as unknown as FileWorkspaceOpenResult);
+    expect(sharedBytes).toEqual(bytes);
+    expect(downloadBytesAsFile).not.toHaveBeenCalled();
+    nativeShell = false;
   });
 
   it('names the real ceiling when the file is past what one response carries', async () => {

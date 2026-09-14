@@ -1,6 +1,6 @@
-import { useCallback, useMemo, type ComponentType, type SVGProps } from 'react';
+import { useCallback, useMemo, useRef, useState, type ComponentType, type SVGProps } from 'react';
 import { useAtomValue } from 'jotai';
-import { Copy, Download, ExternalLink, FolderOpen } from 'lucide-react';
+import { Copy, Download, ExternalLink, FolderOpen, Share2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import {
@@ -12,7 +12,9 @@ import { getMachineMetaByIdAtomFamily } from '@/atoms';
 import { localHomeDirAtom, localMachineIdAtom } from '@/atoms/local-probe';
 import { useMachineFlockRows } from '@/hooks/use-machine-flock-rows';
 import { writeTextToClipboard } from '@/lib/clipboard';
-import { downloadBytesAsFile } from '@/lib/download-file';
+import { downloadBytesAsFile, getDownloadFileName } from '@/lib/download-file';
+import { isNativeAppShell } from '@/lib/native-platform';
+import { shareFileBytesNatively } from '@/lib/session-file-native-save';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import type { FileWorkspaceOpenResult } from '@/lib/file-workspace-provider';
 import {
@@ -95,6 +97,9 @@ export function useSessionFileActions({
   } | null;
 }): SessionFileActions {
   const { t } = useTranslation();
+  const nativeShell = isNativeAppShell();
+  const exportingRef = useRef(false);
+  const [sharing, setSharing] = useState(false);
   const localMachineId = useAtomValue(localMachineIdAtom);
   const localHomeDir = useAtomValue(localHomeDirAtom);
   const sessionMachine = useAtomValue(
@@ -373,8 +378,15 @@ export function useSessionFileActions({
     };
 
     return (filePath: string) => {
+      if (exportingRef.current) return;
+      exportingRef.current = true;
+      setSharing(true);
       void (async () => {
         try {
+          const exportBytes = async (bytes: Uint8Array) => {
+            if (nativeShell) await shareFileBytesNatively(getDownloadFileName(filePath), bytes);
+            else downloadBytesAsFile(filePath, bytes);
+          };
           const result = await fileProvider.openFile(filePath);
           if (result.status !== 'ready') {
             reportUnavailable(result.reason);
@@ -382,29 +394,40 @@ export function useSessionFileActions({
           }
           const snapshot = result.snapshot;
           if (snapshot.kind === 'text') {
-            downloadBytesAsFile(filePath, new TextEncoder().encode(snapshot.text));
+            await exportBytes(new TextEncoder().encode(snapshot.text));
             return;
           }
           if (snapshot.kind === 'binary' && snapshot.bytes) {
-            downloadBytesAsFile(filePath, snapshot.bytes);
+            await exportBytes(snapshot.bytes);
             return;
           }
           // A `binary` snapshot with no bytes is the machine declining to send
           // them, which is the same "too big for one response" situation.
           reportUnavailable('no-bytes');
         } catch {
-          toast.error(t('sessions.fileActions.downloadFailed', 'Could not download that file.'));
+          toast.error(
+            nativeShell
+              ? t('sessions.fileActions.shareFailed', 'Could not share that file.')
+              : t('sessions.fileActions.downloadFailed', 'Could not download that file.')
+          );
+        } finally {
+          exportingRef.current = false;
+          setSharing(false);
         }
       })();
     };
-  }, [availability.download, fileProvider, session, t]);
+  }, [availability.download, fileProvider, nativeShell, session, t]);
 
   const buildErrorActions = useCallback(
     (filePath: string): SessionFileErrorActions | undefined => {
       const trimmed = filePath.trim();
       if (!session || !trimmed) return undefined;
       const onCopyPath = () => copyPath(trimmed);
-      if (!localHost || !resolveHostPath(trimmed)) return { onCopyPath };
+      if (!localHost || !resolveHostPath(trimmed))
+        return {
+          onCopyPath,
+          ...(nativeShell && download ? { onShare: () => download(trimmed), sharing } : {}),
+        };
       return {
         onCopyPath,
         localHost: {
@@ -415,7 +438,7 @@ export function useSessionFileActions({
         },
       };
     },
-    [copyPath, localHost, resolveHostPath, session]
+    [copyPath, download, localHost, nativeShell, resolveHostPath, session, sharing]
   );
 
   const menuItems = useMemo<readonly SessionFileMenuItem[]>(() => {
@@ -448,13 +471,15 @@ export function useSessionFileActions({
     if (download) {
       items.push({
         id: 'download',
-        label: t('sessions.fileActions.download', 'Download file'),
-        icon: Download,
+        label: nativeShell
+          ? t('sessions.fileActions.share', 'Share file…')
+          : t('sessions.fileActions.download', 'Download file'),
+        icon: nativeShell ? Share2 : Download,
         run: download,
       });
     }
     return items;
-  }, [copyPath, download, localHost, session, t]);
+  }, [copyPath, download, localHost, nativeShell, session, t]);
 
   return { resolveHostPath, copyPath, localHost, download, buildErrorActions, menuItems };
 }

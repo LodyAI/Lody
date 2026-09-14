@@ -4024,6 +4024,8 @@
   "sessions.fileActions.revealInFileManager": "Reveal in file manager",
   "sessions.fileActions.openInEditor": "Open in {{editor}}",
   "sessions.fileActions.download": "Download file",
+  "sessions.fileActions.share": "Share file…",
+  "sessions.fileActions.shareFailed": "Could not share that file.",
   "sessions.fileActions.downloadFailed": "Could not download that file.",
   "sessions.fileActions.fileMissing": "That file no longer exists.",
   "sessions.fileActions.pathUnresolved": "The file path could not be resolved. Copy the details to check the requested path and workspace folder.",

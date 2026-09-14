@@ -4024,6 +4024,8 @@
   "sessions.fileActions.revealInFileManager": "在文件管理器中显示",
   "sessions.fileActions.openInEditor": "用 {{editor}} 打开",
   "sessions.fileActions.download": "下载文件",
+  "sessions.fileActions.share": "分享文件…",
+  "sessions.fileActions.shareFailed": "无法分享该文件。",
   "sessions.fileActions.downloadFailed": "无法下载该文件。",
   "sessions.fileActions.fileMissing": "该文件已不存在。",
   "sessions.fileActions.pathUnresolved": "无法确定文件的实际路径。请复制错误详情，检查文件路径和工作区目录。",
