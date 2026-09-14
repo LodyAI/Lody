@@ -554,8 +554,10 @@ Honest clients require `mayWriteDocument` to **seal** a snapshot. That does not
 constrain a malicious client. Publication admission is the host port
 `createContentSnapshotPublication` from `@lody/e2ee-core/snapshot-admission`:
 current device document-write, authenticated submitting device bound to the
-signing device, and the existing worst 15-minute authorization lease, checked in
-the same local operation that stores the exact snapshot bytes. Identical retries
+signing device, and the existing worst 15-minute authorization lease. The
+original lease is copied before any await and rechecked after signature
+verification, immediately before storing the exact snapshot bytes; async verify
+must not extend it. Identical retries
 are idempotent; different bytes cannot occupy an already admitted offset; a later
 offset may become current, an earlier offset cannot. The independent-package test
 host fail-closes snapshot PUT until that port is supplied. Production JWT/gateway

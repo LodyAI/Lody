@@ -190,6 +190,7 @@ it('rejects expired and delayed submissions without extending the original lease
   await expect(
     host.admit(put('10', body, 'writer', clock, { issued, expires }))
   ).rejects.toMatchObject({ message: 'snapshot-lease-expired' });
+  expect(host.current('docs/doc-1')).toBeUndefined();
   clock.now = issued;
   await expect(
     host.admit(
@@ -201,6 +202,80 @@ it('rejects expired and delayed submissions without extending the original lease
   ).rejects.toMatchObject({ message: 'snapshot-lease-invalid' });
 });
 
+it('review: lease expiring during real signature verification must not publish', async () => {
+  const clock = { now: 1_000 };
+  const expires = 61_000;
+  const body = await attackerSnapshot(writerAuthor, '10');
+  const host = createContentSnapshotPublication({
+    cipher: new ContentCipher({
+      authorize(header) {
+        if (header.device !== 'writer') throw new Error('unauthorized');
+        // Deterministic elapsed time during authenticate; real Ed25519 verification follows.
+        clock.now = expires;
+        return writerPublic;
+      },
+    }),
+    mayWriteDocument: () => true,
+    now: () => clock.now,
+  });
+  await expect(
+    host.admit(
+      put('10', body, 'writer', clock, {
+        issued: 1_000,
+        expires,
+      })
+    )
+  ).rejects.toMatchObject({ message: 'snapshot-lease-expired' });
+  expect(host.current('docs/doc-1')).toBeUndefined();
+});
+
+it('rejects when write is revoked during real signature verification', async () => {
+  const clock = { now: 1_000 };
+  const writable = new Set(['writer']);
+  const body = await attackerSnapshot(writerAuthor, '10');
+  const host = createContentSnapshotPublication({
+    cipher: new ContentCipher({
+      authorize(header) {
+        if (header.device !== 'writer') throw new Error('unauthorized');
+        writable.delete('writer');
+        return writerPublic;
+      },
+    }),
+    mayWriteDocument: (author) => writable.has(author.device),
+    now: () => clock.now,
+  });
+  await expect(host.admit(put('10', body, 'writer', clock))).rejects.toMatchObject({
+    message: 'unauthorized',
+  });
+  expect(host.current('docs/doc-1')).toBeUndefined();
+});
+
+it('keeps the original lease while queued and ignores later mutation of the request object', async () => {
+  const clock = { now: 1_000 };
+  const expires = 61_000;
+  const firstBody = await attackerSnapshot(writerAuthor, '10', 'first');
+  const secondBody = await attackerSnapshot(writerAuthor, '20', 'second');
+  const host = createContentSnapshotPublication({
+    cipher: new ContentCipher({
+      authorize(header) {
+        if (header.device !== 'writer') throw new Error('unauthorized');
+        clock.now = expires;
+        return writerPublic;
+      },
+    }),
+    mayWriteDocument: () => true,
+    now: () => clock.now,
+  });
+  const first = put('10', firstBody, 'writer', clock, { issued: 1_000, expires });
+  const second = put('20', secondBody, 'writer', clock, { issued: 1_000, expires });
+  const firstAdmit = host.admit(first);
+  const queued = host.admit(second);
+  second.leaseExpiresAt = expires + 60_000;
+  await expect(firstAdmit).rejects.toMatchObject({ message: 'snapshot-lease-expired' });
+  await expect(queued).rejects.toMatchObject({ message: 'snapshot-lease-expired' });
+  expect(host.current('docs/doc-1')).toBeUndefined();
+});
+
 it('keeps content identity: identical retries are idempotent and different bytes cannot replace an offset', async () => {
   const clock = { now: 1_000 };
   const host = publication(new Set(['writer']), clock);
@@ -208,6 +283,9 @@ it('keeps content identity: identical retries are idempotent and different bytes
   const second = await attackerSnapshot(writerAuthor, '10', 'two');
   expect((await host.admit(put('10', first, 'writer', clock))).status).toBe('accepted');
   expect((await host.admit(put('10', first, 'writer', clock))).status).toBe('idempotent');
+  clock.now += CONTENT_SNAPSHOT_ADMISSION_WINDOW_MS;
+  expect((await host.admit(put('10', first, 'writer', clock))).status).toBe('idempotent');
+  clock.now = 1_000;
   await expect(host.admit(put('10', second, 'writer', clock))).rejects.toMatchObject({
     message: 'snapshot-identity-conflict',
   });

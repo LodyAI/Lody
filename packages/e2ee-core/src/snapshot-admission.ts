@@ -83,9 +83,17 @@ export function createContentSnapshotPublication(options: ContentSnapshotAdmissi
         input.body instanceof Uint8Array && input.body.byteLength > 0,
         'invalid-snapshot-body'
       );
+      // Copy caller-owned admission inputs before any await/queue so later mutation
+      // cannot extend the original lease or swap the bound device/room.
+      const streamKey = input.streamKey;
       const body = input.body.slice();
-      return await exclusive(input.streamKey, async () => {
-        const row = streams.get(input.streamKey);
+      const submittingDevice = input.submittingDevice;
+      const leaseIssuedAt = input.leaseIssuedAt;
+      const leaseExpiresAt = input.leaseExpiresAt;
+      const expectedGenesis = input.expectedGenesis;
+      const expectedResource = input.expectedResource;
+      return await exclusive(streamKey, async () => {
+        const row = streams.get(streamKey);
         const existing = row?.admitted.get(offset);
         if (row && existing && equalBytes(existing, body)) {
           return {
@@ -108,15 +116,14 @@ export function createContentSnapshotPublication(options: ContentSnapshotAdmissi
           throw new ControlLogError('snapshot-identity-conflict');
         }
 
-        checkLease(now(), input.leaseIssuedAt, input.leaseExpiresAt);
+        checkLease(now(), leaseIssuedAt, leaseExpiresAt);
         const header = await authenticateSnapshot(cipher, body);
-        invariant(header.device === input.submittingDevice, 'snapshot-device-mismatch');
+        invariant(header.device === submittingDevice, 'snapshot-device-mismatch');
         invariant(
-          header.genesis === input.expectedGenesis && header.resource === input.expectedResource,
+          header.genesis === expectedGenesis && header.resource === expectedResource,
           'content-context-mismatch'
         );
         invariant(SNAPSHOT_PURPOSES.has(header.purpose), 'invalid-content-purpose');
-        invariant(mayWriteDocument(header) === true, 'unauthorized');
 
         if (row) {
           const order = compareOffsets(offset, row.currentOffset);
@@ -128,6 +135,10 @@ export function createContentSnapshotPublication(options: ContentSnapshotAdmissi
             );
         }
 
+        // Recheck current write and the original lease after async verify, with no
+        // await between this gate and storing the accepted bytes.
+        invariant(mayWriteDocument(header) === true, 'unauthorized');
+        checkLease(now(), leaseIssuedAt, leaseExpiresAt);
         const stored = body.slice();
         if (!row) {
           const created: StreamPublication = {
@@ -135,7 +146,7 @@ export function createContentSnapshotPublication(options: ContentSnapshotAdmissi
             currentBody: stored,
             admitted: new Map([[offset, stored]]),
           };
-          streams.set(input.streamKey, created);
+          streams.set(streamKey, created);
         } else {
           row.admitted.set(offset, stored);
           row.currentOffset = offset;

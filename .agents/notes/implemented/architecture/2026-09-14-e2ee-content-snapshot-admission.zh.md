@@ -11,7 +11,7 @@ Translation: current
 
 ## 决定与范围
 
-提交时授权与读时历史接受分开。`mayWriteDocument` 只约束诚实 `seal`；恶意客户端绕过它。宿主在同一本地排他操作里：验签（不解密）、提交设备 === 签名设备、当前文档写、注入时钟上的原租约截止、按精确字节记录 `(offset → body)`。同 offset 同字节返回幂等且不把当前指针移回旧位置；同 offset 不同字节拒绝；数值更大的新 offset 可成为当前快照；更早 offset 拒绝。无跨流事务。测试对等体在未提供准入端口时对 snapshot PUT 返回 403。
+提交时授权与读时历史接受分开。`mayWriteDocument` 只约束诚实 `seal`；恶意客户端绕过它。宿主在同一本地排他操作里：验签（不解密）、提交设备 === 签名设备、当前文档写、注入时钟上的原租约截止、按精确字节记录 `(offset → body)`。原租约在任何 await 之前拷贝；异步验签与当前写权限之后、写入紧前再核同一截止，不重签、不重新起算。`now == expires` 视为过期。同 offset 同字节返回幂等且不把当前指针移回旧位置；同 offset 不同字节拒绝；数值更大的新 offset 可成为当前快照；更早 offset 拒绝。无跨流事务。测试对等体在未提供准入端口时对 snapshot PUT 返回 403。
 
 不改变账本快照 `7d8d553`、增量 update_batch 加密、权限账本背书资格，也不接线 Convex/生产网关。
 
@@ -19,4 +19,4 @@ Translation: current
 
 曾把「宿主返回的 offset 字节」写成发表证据，那不是用户确认项，已撤回。不用当前 `deviceMayWriteDocument` 在 `open` 上拒绝，否则合法历史会在撤权后失效。不用 receipt：未获单独批准，且本阶段明确信任宿主执行。
 
-测试：`test/snapshot-admission.test.ts`（guest/陌生/设备不一致/过期与延迟不续期/同 offset 替换/幂等/撤权后新发表失败且历史仍可 open/无端口 fail-closed/校验失败不推进游标），以及 C1 加密快照 bootstrap 走准入头。生产 JWT 截止未验。
+测试：`test/snapshot-admission.test.ts`（guest/陌生/设备不一致/过期与延迟不续期/验签期间租约到期不得发表/验签期间撤权/排队中改请求对象不延长原截止/同 offset 替换/幂等/撤权后新发表失败且历史仍可 open/无端口 fail-closed/校验失败不推进游标），以及 C1 加密快照 bootstrap 走准入头。生产 JWT 截止未验。独立 review 在 `baea079` 上用真实 Ed25519 验签把时钟推到 `expires` 后仍 accepted，属 P1；修复后不得再只在 `authenticate` 之前检查租约。

@@ -58,8 +58,9 @@ in-package tests only; do not re-export it.
   `deviceMayWriteDocument` to seal snapshots; guests cannot. Bind Org/genesis,
   resource, kind/model, epoch, and the opaque continuation offset. Publication
   admission is `./snapshot-admission`: current device write, submitter bound to
-  signing device, and the 15-minute lease, checked in the same local operation
-  as storing exact bytes. Identical retries are idempotent; different bytes at
+  signing device, and the 15-minute lease. Recheck that original lease after
+  async verify, immediately before storing exact bytes; do not restart it.
+  Identical retries are idempotent; different bytes at
   an admitted offset are rejected. Open does not re-check current write.
   Decryption, transport offset, old head, self-declared time, or `verified=true`
   are not admission evidence. Production JWT/gateway is unimplemented. Do not
