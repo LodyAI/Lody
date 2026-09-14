@@ -103,9 +103,11 @@ Ownership and explanations: [README.md](README.md).
 ## Share cards
 
 - `chat-share-card.tsx` is ONE fixed template, not an appearance editor: two forms
-  (`phone`/`desktop`) derived from the device, light/dark as the only switch, one
-  gutter for every band, left-aligned turns, unconditional code wrap, no height cap
-  and no QR. Padding lives in its `LAYOUT` table, never in the markup.
-  `sessions/chat-share-image-dialog.tsx` is a preview with that one switch and two
-  actions — a drawer on a handset, a dialog otherwise — and never offers the form.
+  (`phone`/`desktop`) derived from the device, one gutter for every band, left-aligned
+  turns, unconditional code wrap, no height cap and no QR. Palette and backdrop are
+  the ONLY choices, and neither changes the layout; a `none` backdrop keeps the
+  sign-off in the caption instead of adding a band. Padding lives in its `LAYOUT`
+  table, never in the markup. `sessions/chat-share-image-dialog.tsx` is a preview
+  with exactly those two controls and two actions — a drawer on a handset, a dialog
+  otherwise — and never offers the form.
   Intent: [chat image export](../../../../specs/chat-share-image.md).

@@ -45,6 +45,8 @@ export interface ChatShareCardProps {
    * `.dark`.
    */
   theme: 'light' | 'dark';
+  /** Canvas printed behind the card; `none` exports the card on its own corners. */
+  backdrop: ChatShareCardBackdrop;
   meta?: ChatShareCardMeta;
   className?: string;
 }
@@ -120,19 +122,62 @@ const LAYOUT: Record<ChatShareCardFormat, CardLayout> = {
 };
 
 /**
- * The one backdrop. Deep-sea night from the brand mark's palette (#35c8b0 teal,
- * #2f77bf blue, #1f4f7f navy) with a soft horizon glow and a vignette that
- * keeps the edges quiet. It carries both card palettes: a light card reads as
- * paper on it, and a dark one separates on its hairline and shadow.
+ * The canvas the card is printed on. It is part of the exported image, not a
+ * border added around it, and it is the one thing about the card the user still
+ * picks: the rest of the template is fixed, so this choice cannot make a card
+ * that reads differently, only one that reads against a different ground.
+ * `none` prints the card alone, on its own corners.
  */
-const BACKDROP: CSSProperties = {
-  background:
-    'radial-gradient(52% 38% at 18% 12%, rgba(53,200,176,0.45), transparent 70%),' +
-    'radial-gradient(48% 36% at 86% 16%, rgba(47,119,191,0.5), transparent 70%),' +
-    'radial-gradient(70% 55% at 68% 96%, rgba(31,79,127,0.65), transparent 75%),' +
-    'radial-gradient(120% 100% at 50% 50%, transparent 55%, rgba(2,10,18,0.55) 100%),' +
-    'linear-gradient(165deg, #0a1c2b 0%, #0c2438 55%, #081626 100%)',
+export type ChatShareCardBackdrop = 'none' | 'lody' | 'aurora' | 'ocean' | 'sunset' | 'welcome';
+
+export const CHAT_SHARE_BACKDROPS: ChatShareCardBackdrop[] = [
+  'none',
+  'lody',
+  'welcome',
+  'aurora',
+  'ocean',
+  'sunset',
+];
+
+export const CHAT_SHARE_BACKDROP_STYLES: Record<
+  Exclude<ChatShareCardBackdrop, 'none'>,
+  CSSProperties
+> = {
+  // Signature: deep-sea night base with teal/blue aurora blooms from the brand
+  // mark's palette (#35c8b0 teal, #2f77bf blue, #1f4f7f navy), a soft horizon
+  // glow at the bottom, and a vignette to keep the edges quiet.
+  lody: {
+    background:
+      'radial-gradient(52% 38% at 18% 12%, rgba(53,200,176,0.45), transparent 70%),' +
+      'radial-gradient(48% 36% at 86% 16%, rgba(47,119,191,0.5), transparent 70%),' +
+      'radial-gradient(70% 55% at 68% 96%, rgba(31,79,127,0.65), transparent 75%),' +
+      'radial-gradient(120% 100% at 50% 50%, transparent 55%, rgba(2,10,18,0.55) 100%),' +
+      'linear-gradient(165deg, #0a1c2b 0%, #0c2438 55%, #081626 100%)',
+  },
+  // Export-safe still of the opening ceremony's shallow-water field, and the one
+  // light ground in the set. The live onboarding scene is a WebGL shader, which
+  // a DOM PNG capture cannot faithfully serialize, so this is hand-built rather
+  // than sampled and has no other home in the product.
+  welcome: {
+    background:
+      'linear-gradient(90deg, rgba(25,58,68,.14) 1px, transparent 1px),' +
+      'radial-gradient(ellipse at 18% 18%, rgba(255,255,255,.58), transparent 46%),' +
+      'radial-gradient(ellipse at 82% 72%, rgba(42,93,111,.13), transparent 56%),' +
+      'linear-gradient(180deg, rgba(255,255,255,.2), rgba(33,68,79,.06)),' +
+      '#dce5e7',
+    backgroundSize: '88px 100%, auto, auto, auto, auto',
+  },
+  aurora: { background: 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 45%, #db2777 100%)' },
+  ocean: { background: 'linear-gradient(135deg, #0369a1 0%, #0891b2 50%, #34d399 100%)' },
+  sunset: { background: 'linear-gradient(135deg, #9a3412 0%, #ea580c 45%, #f59e0b 100%)' },
 };
+
+/**
+ * The sign-off prints white on every gradient because all five are dark enough
+ * to carry it — except `welcome`, which is a pale shallow-water ground and needs
+ * the ink the other way round.
+ */
+const LIGHT_BACKDROPS = new Set<ChatShareCardBackdrop>(['welcome']);
 
 /** Prose size, fixed for both formats and independent of the app's font-size setting. */
 const BODY_FONT_SIZE = 15;
@@ -186,14 +231,16 @@ const CODE_CSS = [
  * shared image has no "me" side to hang a bubble from — with the human prompt
  * as a tinted block and the reply as ordinary prose through `MarkdownRenderer`,
  * exactly as a finished turn renders in the app. Provenance is a single caption
- * band at the foot of the card, and the product sign-off prints on the backdrop
- * below it, where it costs the conversation no room.
+ * band at the foot of the card; the product sign-off prints on the backdrop
+ * below it, where it costs the conversation no room, and falls back into the
+ * caption when the user exports without one.
  */
 export function ChatShareCard({
   messages,
   title,
   format,
   theme,
+  backdrop,
   meta,
   className,
 }: ChatShareCardProps) {
@@ -202,15 +249,18 @@ export function ChatShareCard({
   ensureShareThemeScopes();
   const themeScopeClass = theme === 'light' ? 'light-scope' : 'dark-scope';
   const captionParams = meta?.params?.filter((param) => param.trim().length > 0) ?? [];
+  const framed = backdrop !== 'none';
 
-  return (
-    <div className={cn('w-fit', layout.frame, themeScopeClass, className)} style={BACKDROP}>
+  const card = (
+    <>
       <style>{CODE_CSS}</style>
       <div
         className={cn(
           'relative overflow-hidden bg-card text-card-foreground',
           layout.radius,
-          'shadow-[0_28px_70px_-20px_rgba(2,10,18,0.6)]',
+          // A drop shadow needs a ground to fall on; without a backdrop it would
+          // only darken the PNG's own transparent corners.
+          framed && 'shadow-[0_28px_70px_-20px_rgba(2,10,18,0.6)]',
           'ring-1 ring-inset ring-black/[0.06] dark:ring-white/[0.10]'
         )}
         style={{ width: layout.width }}
@@ -273,7 +323,9 @@ export function ChatShareCard({
 
         {/* Caption band, camera-style: the runtime that produced the
             conversation on the left, its parameters and the capture date on the
-            right. It carries no brand mark — the backdrop below signs the card. */}
+            right. The brand mark is normally the backdrop's job; an unframed
+            card has no backdrop, so the sign-off takes the second line of the
+            left column rather than a band of its own. */}
         <div
           className={cn(
             'flex items-center gap-2.5 border-t border-border/70',
@@ -284,8 +336,15 @@ export function ChatShareCard({
           <div className="shrink-0">
             {meta?.icon ?? <img src={lodyLogo} alt="" className="size-5 scale-[1.64] rounded-md" />}
           </div>
-          <div className="min-w-0 flex-1 truncate text-[13px] font-semibold text-foreground">
-            {meta?.name ?? 'Lody'}
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-[13px] font-semibold text-foreground">
+              {meta?.name ?? 'Lody'}
+            </div>
+            {framed ? null : (
+              <div className="mt-0.5 truncate text-[10.5px] leading-tight text-muted-foreground">
+                lody.ai
+              </div>
+            )}
           </div>
           {captionParams.length > 0 || meta?.date ? (
             <div className="min-w-0 max-w-[62%] text-right">
@@ -303,10 +362,31 @@ export function ChatShareCard({
           ) : null}
         </div>
       </div>
+    </>
+  );
 
+  // Without a ground there is nothing to print the sign-off on, and nothing to
+  // inset the card from: the card itself is the whole exported image.
+  if (backdrop === 'none') {
+    return <div className={cn('w-fit', themeScopeClass, className)}>{card}</div>;
+  }
+
+  return (
+    <div
+      className={cn('w-fit', layout.frame, themeScopeClass, className)}
+      style={CHAT_SHARE_BACKDROP_STYLES[backdrop]}
+    >
+      {card}
       <div className={cn(layout.signature, 'flex items-center justify-center gap-2')}>
         <img src={lodyLogo} alt="" className="size-4 scale-[1.64] rounded" />
-        <span className="text-[12px] font-medium tracking-wide text-white/85">lody.ai</span>
+        <span
+          className={cn(
+            'text-[12px] font-medium tracking-wide',
+            LIGHT_BACKDROPS.has(backdrop) ? 'text-[rgba(32,66,76,0.78)]' : 'text-white/85'
+          )}
+        >
+          lody.ai
+        </span>
       </div>
     </div>
   );

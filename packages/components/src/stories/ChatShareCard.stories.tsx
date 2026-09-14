@@ -17,7 +17,13 @@ const meta = {
     theme: {
       control: 'inline-radio',
       options: ['light', 'dark'],
-      description: 'The only switch the fixed card template keeps.',
+      description: 'The palette the card is printed in, independent of the app theme.',
+    },
+    backdrop: {
+      control: 'inline-radio',
+      options: ['none', 'lody', 'welcome', 'aurora', 'ocean', 'sunset'],
+      description:
+        'The ground the card is printed on; part of the exported image. `none` drops the mat, and the sign-off falls back into the caption.',
     },
   },
   tags: ['autodocs'],
@@ -90,6 +96,7 @@ export const DesktopLight: Story = {
     messages: multiTurnMessages,
     format: 'desktop',
     theme: 'light',
+    backdrop: 'lody',
     meta: demoMeta,
   },
 };
@@ -104,6 +111,28 @@ export const PhoneLight: Story = {
 
 export const PhoneDark: Story = {
   args: { ...DesktopLight.args, format: 'phone', theme: 'dark' },
+};
+
+/** The only light ground in the set: the sign-off has to ink the other way. */
+export const WelcomeBackdrop: Story = {
+  args: { ...DesktopLight.args, backdrop: 'welcome' },
+};
+
+export const WelcomeBackdropDarkCard: Story = {
+  args: { ...DesktopLight.args, backdrop: 'welcome', theme: 'dark' },
+};
+
+export const SunsetBackdrop: Story = {
+  args: { ...DesktopLight.args, backdrop: 'sunset', theme: 'dark' },
+};
+
+/** No mat: the card is the whole image, and `lody.ai` moves into the caption. */
+export const NoBackdrop: Story = {
+  args: { ...DesktopLight.args, backdrop: 'none' },
+};
+
+export const NoBackdropDarkCard: Story = {
+  args: { ...DesktopLight.args, backdrop: 'none', theme: 'dark' },
 };
 
 export const Untitled: Story = {
@@ -122,6 +151,7 @@ export const Untitled: Story = {
     ],
     format: 'phone',
     theme: 'light',
+    backdrop: 'welcome',
     meta: demoMeta,
   },
 };
@@ -165,6 +195,7 @@ export const LongCodeLines: Story = {
     messages: codeHeavyMessages,
     format: 'desktop',
     theme: 'dark',
+    backdrop: 'lody',
     meta: demoMeta,
   },
 };

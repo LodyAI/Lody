@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check, Copy, Download, X } from 'lucide-react';
+import { Check, Copy, Download, Slash, X } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import { estimateTokenCount, type SessionMeta, type ConversationMessage } from '@lody/shared';
 import { formatCompactNumber } from '@/lib/format-compact-number';
@@ -12,8 +12,17 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { Button } from '@/ui/button';
 import { copyShareImage, exportShareImage } from '@/lib/share-image-export';
-import { ChatShareCard, type ChatShareCardFormat } from '@/components/chat-share-card';
+import {
+  ChatShareCard,
+  CHAT_SHARE_BACKDROPS,
+  CHAT_SHARE_BACKDROP_STYLES,
+  type ChatShareCardBackdrop,
+  type ChatShareCardFormat,
+} from '@/components/chat-share-card';
 import { AgentIcon, getAgentDisplayName } from '@/components/icons/agent-icon';
+
+/** Opening ground: the brand's own, so an untouched export is the signature card. */
+const DEFAULT_BACKDROP: ChatShareCardBackdrop = 'lody';
 
 /** Capture date on the card: fixed `YYYY-MM-DD HH:mm` regardless of product language. */
 function formatShareImageDate(timestamp: string | undefined): string | undefined {
@@ -85,7 +94,7 @@ function FitPreview({ children }: { children: ReactNode }) {
   );
 }
 
-/** Two-state palette switch — the preview's only control. */
+/** Two-state palette switch: the card's own light and dark, not the app's. */
 function PaletteToggle({
   value,
   onChange,
@@ -133,6 +142,72 @@ function PaletteToggle({
   );
 }
 
+/**
+ * Backdrop swatches. Each option paints the gradient it stands for, because a
+ * word cannot describe a ground and this is the one choice left in the preview;
+ * `none` is drawn as an absent ground rather than named, so the row reads as one
+ * control instead of a button plus five swatches.
+ */
+function BackdropPicker({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: ChatShareCardBackdrop;
+  onChange: (backdrop: ChatShareCardBackdrop) => void;
+  disabled?: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div
+      role="radiogroup"
+      aria-label={t('sessions.shareImage.backdrop', 'Background')}
+      className="flex items-center gap-1.5"
+    >
+      {CHAT_SHARE_BACKDROPS.map((backdrop) => {
+        const selected = value === backdrop;
+        const label = t(
+          `sessions.shareImage.backdrop${backdrop[0].toUpperCase()}${backdrop.slice(1)}`,
+          backdrop
+        );
+        return (
+          <button
+            key={backdrop}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            aria-label={label}
+            title={label}
+            disabled={disabled}
+            onClick={() => onChange(backdrop)}
+            className={cn(
+              'relative size-7 shrink-0 overflow-hidden rounded-md border transition-shadow',
+              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
+              'disabled:pointer-events-none disabled:opacity-60',
+              selected
+                ? 'border-primary ring-2 ring-primary'
+                : 'border-border/70 hover:ring-2 hover:ring-primary/40'
+            )}
+            style={backdrop === 'none' ? undefined : CHAT_SHARE_BACKDROP_STYLES[backdrop]}
+          >
+            {backdrop === 'none' ? (
+              <Slash
+                className="absolute inset-0 m-auto size-3.5 text-muted-foreground"
+                aria-hidden="true"
+              />
+            ) : null}
+            {selected ? (
+              <span className="absolute inset-0 flex items-center justify-center bg-black/15 text-white">
+                <Check className="size-3.5 drop-shadow" aria-hidden="true" />
+              </span>
+            ) : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export interface ChatShareImageDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -153,13 +228,15 @@ export interface ChatShareImageDialogProps {
 }
 
 /**
- * Preview and export for "Share as image". The card is a fixed template, so
- * this surface is a preview with one control (light or dark) and two actions,
- * not an editor: the phone form and the desktop form are chosen by the device
- * being shared from, and everything else about the image is already decided.
+ * Preview and export for "Share as image". The card is a fixed template, so this
+ * surface is a preview with two controls and two actions rather than an editor:
+ * the palette the card is printed in, and the ground it is printed on. The phone
+ * and desktop forms are chosen by the device being shared from, and everything
+ * else about the image — its bands, their order, their margins, their type — is
+ * already decided.
  *
- * The same preview and actions render in a bottom drawer on a handset and in a
- * dialog on a desktop.
+ * The same preview, controls and actions render in a bottom drawer on a handset
+ * and in a dialog on a desktop.
  */
 export function ChatShareImageDialog({
   open,
@@ -184,6 +261,7 @@ export function ChatShareImageDialog({
     [messages]
   );
   const [theme, setTheme] = useState<'light' | 'dark'>(appTheme);
+  const [backdrop, setBackdrop] = useState<ChatShareCardBackdrop>(DEFAULT_BACKDROP);
   const exportRef = useRef<HTMLDivElement>(null);
   const exportingRef = useRef(false);
   const [exporting, setExporting] = useState(false);
@@ -199,6 +277,7 @@ export function ChatShareImageDialog({
     setLastOpen(open);
     if (open) {
       setTheme(appTheme);
+      setBackdrop(DEFAULT_BACKDROP);
       setExportError(false);
       setCopied(false);
     }
@@ -273,6 +352,7 @@ export function ChatShareImageDialog({
           title={session?.title?.trim() || undefined}
           format={format}
           theme={theme}
+          backdrop={backdrop}
           meta={meta}
         />
       </div>
@@ -353,8 +433,9 @@ export function ChatShareImageDialog({
             <div className="flex min-h-0 flex-1 flex-col bg-muted/40 px-4 py-4">{preview}</div>
             <div className="shrink-0 space-y-3 border-t border-border/70 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
               {status}
-              <div className="flex justify-center">
+              <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-3">
                 <PaletteToggle value={theme} onChange={setTheme} disabled={exporting} />
+                <BackdropPicker value={backdrop} onChange={setBackdrop} disabled={exporting} />
               </div>
               <div className="grid grid-cols-2 gap-2 [&>button]:w-full">
                 {copyButton}
@@ -379,12 +460,18 @@ export function ChatShareImageDialog({
 
         <div className="flex min-h-0 flex-1 flex-col bg-muted/40 p-6">{preview}</div>
 
-        <div className="flex shrink-0 items-center gap-3 border-t border-border/70 px-5 py-3">
-          <PaletteToggle value={theme} onChange={setTheme} disabled={exporting} />
-          <div className="ml-auto flex items-center gap-3">
-            {status}
-            {copyButton}
-            {exportButton}
+        {/* Two thin rows rather than one: the controls hold a fixed width, and a
+            status line sharing that row would have to squeeze them to fit. */}
+        <div className="flex shrink-0 flex-col border-t border-border/70">
+          {status ? <div className="px-5 pt-2.5">{status}</div> : null}
+          <div className="flex items-center gap-4 px-5 py-3">
+            <PaletteToggle value={theme} onChange={setTheme} disabled={exporting} />
+            <span className="h-6 w-px shrink-0 bg-border/70" aria-hidden="true" />
+            <BackdropPicker value={backdrop} onChange={setBackdrop} disabled={exporting} />
+            <div className="ml-auto flex shrink-0 items-center gap-3">
+              {copyButton}
+              {exportButton}
+            </div>
           </div>
         </div>
       </DialogContent>

@@ -13,8 +13,10 @@ numeric code-collapse field, roughly a thousand reachable combinations of which
 only a few produced an image worth sending. The controls also hid two defects —
 the default footer printed the agent's name with no Lody mark anywhere on the
 image, and the default QR code always encoded the product home page rather than
-the conversation. The card is now one template with a single light/dark switch,
-issued in a phone form and a desktop form that the sharing device selects; every
+the conversation. The card is now one template with two choices — the palette it
+is printed in and the ground it is printed on, neither of which can change its
+layout — issued in a phone form and a desktop form that the sharing device
+selects; every
 band shares one horizontal inset, turns are left-aligned with an unequal vertical
 rhythm instead of right-hung bubbles, and the preview is a preview with two
 actions rather than a control panel. The card still grows without a height limit,
@@ -55,6 +57,22 @@ states the same thing in a tenth of the area. Removing it also removed the
 asynchronous asset it introduced — export no longer needs an `assetsReady` gate,
 because the remaining assets are fonts and one bundled image, which the capture
 pipeline already awaits.
+
+The backdrop stayed a choice, and that is a correction: the first cut of this
+change deleted all six grounds and hardcoded the signature gradient, on the
+reasoning that a choice which cannot make the card better is only noise. That
+reasoning was wrong about one of them. `welcome` is a hand-built export-safe still
+of the opening ceremony's shallow-water field — the live scene is a WebGL shader
+that a DOM capture cannot serialize — and it lives nowhere else in the product, so
+deleting it destroyed an asset rather than removing an option. It is also the only
+light ground, which the sign-off now has to ink against. `aurora`, `ocean` and
+`sunset` survive in the usage card either way. The distinction that holds is
+between a choice that changes how a card _reads_ — footer layout, padding, which
+turns are hung where — and one that only changes what it reads _against_; the
+former is the editor this change removes, the latter is taste and belongs to the
+user. `none` keeps its place in that set and takes the sign-off into the caption's
+left column, the same fallback the usage card already documents, rather than
+earning a band of its own.
 
 Code soft-wrapping became unconditional. An image has no horizontal scrollbar, so
 an unwrapped line is a line the reader cannot see; that is a property of the
@@ -98,14 +116,22 @@ with the surrounding UI adapting per device was also considered and rejected in
 favour of two image forms, on the grounds that a card pasted into a phone chat
 thread and one pasted into a post are read at different widths.
 
+Fixing every ground into one — the signature gradient, chosen by the light/dark
+switch — was implemented and then reverted on the requester's judgement. It would
+have been the tidier rule and would have paired a light card with a light ground
+automatically, but it still ends with five grounds deleted and one of them
+unrecoverable, to save a control that costs one row of swatches.
+
 ## Evidence and limits
 
 [The draft specification](../../../../specs/chat-share-image.md) owns the
 intended behavior and was updated in the same change, including the stale
 sentence in [the usage card spec](../../../../specs/usage-share-image.md) that
 described this card as justifying a large set of appearance controls. Stories
-cover both forms in both palettes, an untitled card, and a code block whose
-signature line is far wider than either card.
+cover both forms in both palettes, every ground that needs its own judgement — the
+pale one against both card palettes, a saturated one, and no ground at all in both
+palettes — an untitled card, and a code block whose signature line is far wider
+than either card.
 
 Workspace typechecks, lint, the i18n key check, and the Code Collab, platform and
 public-boundary guards pass. The `@lody/components` suite is 474 of 476 files
