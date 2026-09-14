@@ -58,6 +58,7 @@ export function createWorkspaceSessionSendJournal(args: {
   let notify = () => {};
   return createSessionSendJournal({
     resources: runtime.sendResources,
+    preparationReplica: args.sourceReplica,
     storage,
     observeExternal: (refresh) => {
       if (typeof BroadcastChannel === 'undefined') return () => {};

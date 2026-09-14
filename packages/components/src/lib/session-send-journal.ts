@@ -31,6 +31,7 @@ export type SessionSendJournalStorage = {
 
 export type SessionSendJournalPorts = {
   resources: SessionSendResources;
+  preparationReplica?: string;
   storage: SessionSendJournalStorage;
   observeExternal?(refresh: () => void): () => void;
   notifyExternal?(): void;
@@ -96,7 +97,13 @@ export function createSessionSendJournal(ports: SessionSendJournalPorts) {
             if (record.stage === 'saved') {
               const update = await ports.prepare(record, signal);
               throwIfSendAborted(signal);
-              record = { ...record, update, stage: 'prepared', error: undefined };
+              record = {
+                ...record,
+                update,
+                sourceReplica: ports.preparationReplica ?? record.sourceReplica,
+                stage: 'prepared',
+                error: undefined,
+              };
               // No externally visible mutation may precede this storage receipt.
               await ports.storage.put(record);
             }

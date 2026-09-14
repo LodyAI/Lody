@@ -257,3 +257,11 @@ it('holds the session delivery lock until raw delivery settles', async () => {
   await Promise.all([first, second]);
   expect(delivered).toEqual(['first', 'second']);
 });
+
+it('records the replica that actually prepared operations when another window takes over', async () => {
+  const f = fixture({ preparationReplica: 'executor-replica' });
+  await f.journal.accept(record('cross-window'));
+  await f.journal.submit('session' as SessionId);
+  expect((await f.ports.storage.list())[0]?.sourceReplica).toBe('executor-replica');
+  expect(f.writer.readStored().map((turn) => turn.id)).toEqual(['cross-window']);
+});
