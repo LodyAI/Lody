@@ -525,18 +525,26 @@ export function ChatShareImageDialog({
     </p>
   ) : null;
 
+  // `sm` is also `text-xs`, which every other control in this footer already uses:
+  // at the default size the two buttons are the only `text-sm` thing in it. The
+  // drawer keeps the default size instead — there they are the primary touch
+  // targets, and `h-9` is already under the 44pt guidance without shrinking it.
+  const actionSize = isMobile ? 'default' : 'sm';
+  const iconSize = isMobile ? 'size-4' : 'size-3.5';
+
   const copyButton = (
     <Button
       variant="outline"
+      size={actionSize}
       onClick={() => void handleCopy()}
       disabled={exporting || !hasMessages}
     >
       {operation === 'copy' ? (
-        <Spinner className="size-4" />
+        <Spinner className={iconSize} />
       ) : copied ? (
-        <Check className="size-4" />
+        <Check className={iconSize} />
       ) : (
-        <Copy className="size-4" />
+        <Copy className={iconSize} />
       )}
       {operation === 'copy'
         ? t('sessions.shareImage.copying', 'Copying...')
@@ -545,8 +553,16 @@ export function ChatShareImageDialog({
   );
 
   const exportButton = (
-    <Button onClick={() => void handleExport()} disabled={exporting || !hasMessages}>
-      {operation === 'export' ? <Spinner className="size-4" /> : <Download className="size-4" />}
+    <Button
+      size={actionSize}
+      onClick={() => void handleExport()}
+      disabled={exporting || !hasMessages}
+    >
+      {operation === 'export' ? (
+        <Spinner className={iconSize} />
+      ) : (
+        <Download className={iconSize} />
+      )}
       {operation === 'export'
         ? t('sessions.shareImage.exporting', 'Exporting...')
         : t('sessions.shareImage.exportPng', 'Export PNG')}

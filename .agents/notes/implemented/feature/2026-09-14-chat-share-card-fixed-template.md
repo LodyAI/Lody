@@ -145,6 +145,13 @@ OS-correct touch target, so only the track and thumb are ours. Two global rules 
 "Pro focus style" outlines the whole control, and the `*:focus-visible` reset kills
 `ring-*` utilities on the thumb through inherited custom properties.
 
+The two actions take the `sm` button size in the dialog and the default size in
+the drawer. `sm` is also `text-xs`, which every other control in that footer
+already uses, so at the default size the buttons were the only `text-sm` thing in
+it; on a handset they are the primary touch targets instead, and `h-9` is already
+under the 44pt guidance without shrinking it further. Do not unify the two for
+consistency — the inconsistency is the point.
+
 The preview surface follows: one palette switch, `Copy image` and `Export PNG`.
 It opens on whatever appearance the app is currently wearing, reset in a
 render-phase branch rather than an effect so a reopened dialog never paints the
