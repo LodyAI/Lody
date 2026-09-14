@@ -67,6 +67,8 @@ Remove the previous owner when migrating a responsibility. Never run real upload
 
 ## Stack implementation status
 
+PR 1: [#705](https://github.com/LodyAI/Lody/pull/705) — `refactor/attachment-submission-boundary` → `main`.
+
 Layer 1 extracts `lib/session-submission.ts` from `use-session-actions.ts` and
 keeps React bindings for billing admission, analytics, and observable atoms.
 Creation, initial history, continuation, dispatch, and guide still use the same
