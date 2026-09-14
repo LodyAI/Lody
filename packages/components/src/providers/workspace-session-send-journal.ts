@@ -1,4 +1,13 @@
 import {
+  evaluateBillingQuota,
+  evaluateSessionCreateQuota,
+  formatSessionQuotaRejection,
+  FREE_SESSION_TURN_LIMIT,
+  countPendingQueuedUserTurns,
+  type BillingQuotaEntitlement,
+} from '@lody/shared';
+import { prepareDraftAttachments } from '../lib/session-attachment-preparation';
+import {
   getSessionRoomId,
   isLoroRepoDocDeleted,
   normalizeSessionTurnInputConfig,
@@ -17,6 +26,12 @@ import { throwIfSendAborted } from '../lib/session-send-resources';
 
 export function createWorkspaceSessionSendJournal(args: {
   accountId: string;
+  getAdmissionContext?: () => {
+    entitlement?: BillingQuotaEntitlement;
+    sessionCount: number | null;
+  };
+  token(): string | null;
+  localMachineId(): MachineId | null;
   sourceReplica: string;
   runtime: Pick<
     WorkspaceRuntime,
@@ -55,6 +70,46 @@ export function createWorkspaceSessionSendJournal(args: {
       throw new Error('Target conversation is not available in this replica');
     return meta;
   };
+  const checkEligibility = async (record: SessionSendRecord, signal: AbortSignal) => {
+    const context = args.getAdmissionContext?.();
+    if (!context) return;
+    const entitlement = context.entitlement ?? { effectivePlanTier: undefined };
+    const meta = (await runtime.repo.getDocMeta(getSessionRoomId(record.sessionId)))?.meta;
+    if (record.creation && !meta?.id) {
+      const admission = evaluateSessionCreateQuota({
+        ...entitlement,
+        sessionCount: context.sessionCount,
+      });
+      if (!admission.allowed)
+        throw new Error(formatSessionQuotaRejection('session_create', admission));
+    }
+    await runtime.sendResources.withSessionStore(
+      record.sessionId,
+      async (store) => {
+        const rows = await store.sessionData.history.readDirectory(
+          0,
+          await store.sessionData.history.count()
+        );
+        const queue = store.getState().mq ?? [];
+        if (
+          rows.some((row) => row.turnId === record.id) ||
+          queue.some((item) => item.userTurnId === record.id)
+        )
+          return;
+        const current =
+          rows.filter((row) => row.scalars?.role === 'user').length +
+          countPendingQueuedUserTurns(queue);
+        const admission = evaluateBillingQuota({
+          ...entitlement,
+          current,
+          limit: FREE_SESSION_TURN_LIMIT,
+        });
+        if (!admission.allowed)
+          throw new Error(formatSessionQuotaRejection('session_turn', admission));
+      },
+      signal
+    );
+  };
   let notify = () => {};
   return createSessionSendJournal({
     resources: runtime.sendResources,
@@ -86,8 +141,21 @@ export function createWorkspaceSessionSendJournal(args: {
         execute
       );
     },
+    prepareInput: async (record, signal, checkpoint, report) => {
+      await requireAvailable(record);
+      await prepareDraftAttachments({
+        record,
+        signal,
+        checkpoint,
+        report,
+        resources: runtime.sendResources,
+        token: args.token,
+        localMachineId: args.localMachineId,
+      });
+    },
     prepare: async (record, signal) => {
       await requireAvailable(record);
+      await checkEligibility(record, signal);
       return runtime.sendResources.withSessionStore(
         record.sessionId,
         async (store) => {
@@ -109,6 +177,7 @@ export function createWorkspaceSessionSendJournal(args: {
     },
     commit: async (record, signal) => {
       const meta = await requireAvailable(record);
+      await checkEligibility(record, signal);
       await runtime.sendResources.withSessionStore(
         record.sessionId,
         async (store) => {
@@ -150,12 +219,13 @@ export function createWorkspaceSessionSendJournal(args: {
     },
     deliver: async (record, signal, checkpoint) => {
       const meta = await requireAvailable(record);
-      const machineId = meta?.machineId ?? record.creation?.machineId;
+      const machineId = record.targetMachineId ?? meta?.machineId ?? record.creation?.machineId;
       if (!machineId) throw new Error('Target machine is unavailable');
       const inputConfig = normalizeSessionTurnInputConfig(record.entry.inputConfig);
       const userId = record.entry.userId?.trim();
       if (!inputConfig || !userId)
         throw new Error('Saved submission has invalid input configuration');
+      if (meta?.acpSessionId) inputConfig.resume = meta.acpSessionId;
       let dispatch = record.delivery.kind === 'dispatch';
       if (record.delivery.kind === 'guide') {
         let offer = record.guideOffer;
@@ -173,6 +243,22 @@ export function createWorkspaceSessionSendJournal(args: {
               ? 'applied'
               : 'not-applied';
           await checkpoint({ guideOffer: offer });
+        }
+        if (!offer) {
+          const expectedTurnId = record.delivery.expectedTurnId;
+          const target = await runtime.sendResources.withSessionStore(
+            record.sessionId,
+            (store) => store.sessionData.history.readTurn(expectedTurnId),
+            signal
+          );
+          if (
+            target.state === 'ready' &&
+            target.turn.role === 'assistant' &&
+            target.turn.finished
+          ) {
+            offer = 'not-applied';
+            await checkpoint({ guideOffer: offer });
+          }
         }
         if (!offer) {
           await checkpoint({ guideOffer: 'offered' });

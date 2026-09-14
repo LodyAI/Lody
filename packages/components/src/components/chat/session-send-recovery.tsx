@@ -1,3 +1,6 @@
+import { useSetAtom } from 'jotai';
+import { getSessionRoomId } from '@lody/shared';
+import { pendingSendSessionMetasAtom } from '@/atoms/doc-meta';
 import { getIpcServices, onIpcEvent } from '@/lib/electron-ipc-client';
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useBlocker } from '@tanstack/react-router';
@@ -37,6 +40,21 @@ export function SessionSendRecovery({ runtime }: { runtime: WorkspaceRuntime | n
     emptySnapshot
   );
   const pending = records.filter((record) => record.stage !== 'delivered');
+  const setPendingMetas = useSetAtom(pendingSendSessionMetasAtom);
+  useEffect(() => {
+    const next = Object.fromEntries(
+      records
+        .filter(
+          (record) => record.creation && record.stage !== 'delivered' && !record.cancelRequested
+        )
+        .map((record) => [getSessionRoomId(record.sessionId), record.creation!])
+    );
+    setPendingMetas((previous) =>
+      JSON.stringify(previous) === JSON.stringify(next) ? previous : next
+    );
+  }, [records, setPendingMetas]);
+  useEffect(() => () => setPendingMetas({}), [runtime, setPendingMetas]);
+
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [exitRequest, setExitRequest] = useState<ExitRequest | null>(null);
@@ -165,6 +183,9 @@ export function SessionSendRecovery({ runtime }: { runtime: WorkspaceRuntime | n
     setBusy(record.id);
     try {
       await journal.cancel(record.id);
+      void journal
+        .retry(record.sessionId)
+        .catch((failure: unknown) => console.warn('Following message remains pending', failure));
       setError(null);
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : t('sessions.sendRecoveryUnavailable'));
@@ -222,6 +243,24 @@ export function SessionSendRecovery({ runtime }: { runtime: WorkspaceRuntime | n
                         : 'sessions.sendSavedLocally'
                   )}
                 </p>
+                {record.attachments?.map((attachment) => (
+                  <div key={attachment.id} className="space-y-1 text-xs">
+                    <p className="truncate">{attachment.name}</p>
+                    <p>
+                      {attachment.ready
+                        ? t('sessions.attachmentPrepared')
+                        : (attachment.error ?? t('sessions.attachmentPreparingNotSent'))}
+                    </p>
+                    {!attachment.ready && !attachment.error ? (
+                      <progress
+                        className="h-1 w-full"
+                        aria-label={attachment.name}
+                        max={100}
+                        value={attachment.progress ?? 0}
+                      />
+                    ) : null}
+                  </div>
+                ))}
                 {record.error ? <p className="text-xs text-destructive">{record.error}</p> : null}
                 <div className="flex gap-2">
                   <Button
@@ -238,7 +277,7 @@ export function SessionSendRecovery({ runtime }: { runtime: WorkspaceRuntime | n
                     <Button
                       size="sm"
                       variant="ghost"
-                      disabled={busy !== null}
+                      disabled={record.cancelRequested}
                       onClick={() => {
                         void cancel(record);
                       }}

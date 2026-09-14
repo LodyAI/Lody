@@ -109,4 +109,12 @@ public-boundary 检查及文档检查分别通过。已运行 `pnpm format` 并�
 
 Layer 3 validation: full `TMPDIR=/private/tmp NODE_ENV=test pnpm check` passes, including 479 component files / 3,670 tests. Queue preparation uses the existing WorkspaceWriter and retains queue format. 原生 queue-steer 保留 queued journal 的身份，但会先将已经投递的 queue 操作提升回已保存的 history 工作；history turn 已持久准备并提交后，才能删除 queue 行或开始 guide 投递。prepared 或 committed 记录只能在披露后显式丢弃；退出登录/清缓存会写入强制清理标记，并在下次启动时实际删除恢复数据库。被恢复记录阻挡的非强制清理会保留请求，但不会阻止 runtime 初始化。`pnpm format` and docs check completed; docs report zero errors. No packaged-device acceptance is claimed.
 
+## 第四层实现
+
+第三层已提交 [#709](https://github.com/LodyAI/Lody/pull/709)，基于 #707。第四层让首页、已有及子对话输入框都在 Send 后才准备附件。IndexedDB 确认保存不可变 Blob 快照后释放输入框，本地元数据覆盖层保持新对话入口可达，不提前发布。共用逐文件结果保存、重试、取消和同会话顺序；准备完成后重新检查当前资格。导航或偏好保存失败不能把已接管消息变回可重复发送的草稿，活动更新也不能提前写入残缺的新会话。
+
+预热取消等待原启动及清理结束。持久化取消保护跨窗口迟到结果，取消第一条消息会把建会话信息交给下一条；后续接管也保存该信息，覆盖取消与下一条保存同时发生的情况。version 2 阻止旧读取器发送不完整输入；与操作一起保存实际准备窗口的副本标识。已经结束的 Guide 目标改为后续输入；先前提交结果未知时只核对，不再次 offer。
+
+验证：最终 `TMPDIR=/private/tmp NODE_ENV=test pnpm check` 通过，含 480 个组件测试文件、3,677 项测试；随后资源与预热定向测试 9 项及组件类型检查通过，覆盖空闲预热不触发未保存输入提示。重排及并发接管修正后，定向测试 60 项和组件类型检查通过。根格式化、组件 Prettier 和文档检查完成，文档零错误。打包设备、多窗口真实网络及原生移动壳尚未验收；本文仍为 proposed，不推断人工批准。
+
 跨窗口接管时记录实际准备操作的副本；接管输入的窗口不一定拥有原操作基线。确定性 journal 测试覆盖此恢复边界。

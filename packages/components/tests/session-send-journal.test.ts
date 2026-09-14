@@ -43,6 +43,14 @@ function memoryStorage() {
     put: async (value) => {
       records.set(value.id, structuredClone(value));
     },
+    requestCancel: async (id) => {
+      const current = records.get(id);
+      if (!current) return undefined;
+      if (current.stage !== 'saved') throw new Error('Submission may already be accepted');
+      const next = { ...current, cancelRequested: true };
+      records.set(id, next);
+      return next;
+    },
     remove: async (id) => {
       records.delete(id);
     },

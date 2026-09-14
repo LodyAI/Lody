@@ -87,10 +87,18 @@ export function createSessionSendResources(stores: {
     }
   };
 
-  const runTracked = async <A>(work: (signal: AbortSignal) => Promise<A>, signal?: AbortSignal): Promise<A> => {
-    activeOperations += 1;
-    try { return await run(work, signal); }
-    finally { activeOperations -= 1; }
+  const runTracked = async <A>(
+    work: (signal: AbortSignal) => Promise<A>,
+    signal?: AbortSignal,
+    options?: { protectExit?: boolean }
+  ): Promise<A> => {
+    const protectsInput = options?.protectExit !== false;
+    if (protectsInput) activeOperations += 1;
+    try {
+      return await run(work, signal);
+    } finally {
+      if (protectsInput) activeOperations -= 1;
+    }
   };
 
   return {
