@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/682
 
 [中文](2026-09-14-share-dialog-copy.zh.md)
 
