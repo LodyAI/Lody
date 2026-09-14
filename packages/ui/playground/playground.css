@@ -1,0 +1,36 @@
+/*
+ * The page under the playground, and the one thing StyleX cannot state.
+ *
+ * This file also exists so that the build emits a stylesheet at all: the
+ * package's `stylexOptions` injects the compiled StyleX into the chunk named
+ * `index-<hash>.css`, and with no CSS of its own the bundle would have no such
+ * chunk and the page would come out unstyled.
+ */
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family:
+    ui-sans-serif,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    system-ui,
+    sans-serif;
+}
+
+/*
+ * Slow motion, for watching `--lody-icon-t` interpolate rather than inferring
+ * it from the two ends. The duration is a token inside the package and not a
+ * prop, and a stateful icon states its own `style` after its rest props, so a
+ * holder cannot pass one in: the host overrides it, which is a host's business.
+ */
+[data-slow-motion='on'] svg {
+  transition-duration: 2.4s !important;
+}

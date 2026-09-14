@@ -83,10 +83,10 @@ into one component at a time. Source-consumed: consumers compile it through
   flex minimum widens a 16px circle. Circle is a person, tile a thing; identity
   colour is a `style`. A `Kbd` is never a menu row's shortcut;
   `Tooltip.Content`'s `kbdOnInvertedTheme` inverts a cap on a chip.
-- Icons are drawn in `src/icons` on the 24 grid at a 1.5 stroke, never taken
-  from a package. A variant is a layer treatment of one drawing; a glyph cuts
-  through a mask, not a panel colour. A stateful icon moves by one number,
-  `--lody-icon-t`; no morphing.
+- Icons are drawn in `src/icons` on the 24 grid at 1.5, never taken from a
+  package. A variant is a layer treatment of one drawing; a glyph cuts through
+  a mask, not a panel colour. A stateful icon moves by one number,
+  `--lody-icon-t`; no morphing. Their surface is `playground/`, not the board.
 - A forced palette travels to a portalled popup: `ThemeRoot` publishes its mode
   and `Content` re-declares it on the positioner, since a popup mounts outside
   the subtree declaring it — a light panel would otherwise open a dark list.
@@ -104,12 +104,11 @@ into one component at a time. Source-consumed: consumers compile it through
   custom property declared only at the root keeps the root palette in a themed
   subtree. A family shares one group (`field` the label, every control and
   their messages; `popup` the lists they open), not one per component.
-- `src/gallery` is the visual reference. A new token, variant, size, tone or
-  shape lands with its board entry in the same change; the board reads sample
-  values off the rendered node rather than repeating one. `test/gallery.test.tsx`
-  fails when a token has no entry. **A sample that is a rung needs a different
-  rung under it**: the panel is the card rung, and in dark region and card are
-  one value. No test sees this; open the board.
+- `src/gallery` is the token board: a new token, variant, size, tone or shape
+  lands with its entry in the same change, read off the rendered node, not
+  repeated. `test/gallery.test.tsx` fails when a token has no entry. **A
+  sample that is a rung needs a different rung under it**: the panel is the
+  card rung, and in dark region and card are one value. No test sees this.
 - `corner.shape` goes wherever a radius goes, except `radius.full`: a pill or a
   circle takes `corner.round`, since a squircle there is a superellipse; round
   corners are the fallback outside Chromium.

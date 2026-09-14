@@ -1494,7 +1494,7 @@ importers:
     devDependencies:
       '@stylexjs/unplugin':
         specifier: 0.19.0
-        version: 0.19.0(unplugin@3.3.0(esbuild@0.28.2)(rolldown@1.1.5)(rollup@4.57.1)(vite@8.1.5(@types/node@24.10.12)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)))
+        version: 0.19.0(unplugin@3.3.0(esbuild@0.28.2)(rolldown@1.1.5)(rollup@4.57.1)(vite@6.4.1(@types/node@24.10.12)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)))
       '@types/node':
         specifier: 'catalog:'
         version: 24.10.12
@@ -1504,6 +1504,9 @@ importers:
       '@types/react-dom':
         specifier: 'catalog:'
         version: 19.2.3(@types/react@19.2.17)
+      '@vitejs/plugin-react':
+        specifier: 'catalog:'
+        version: 4.7.0(vite@6.4.1(@types/node@24.10.12)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2))
       jsdom:
         specifier: ^26.1.0
         version: 26.1.0
@@ -1516,6 +1519,9 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
+      vite:
+        specifier: 'catalog:'
+        version: 6.4.1(@types/node@24.10.12)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)
       vitest:
         specifier: ^3.2.4
         version: 3.2.4(@types/debug@4.1.12)(@types/node@24.10.12)(jiti@2.7.0)(jsdom@26.1.0)(lightningcss@1.32.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)
@@ -13489,12 +13495,12 @@ snapshots:
   '@babel/plugin-transform-react-jsx-self@7.27.1(@babel/core@7.29.0)':
     dependencies:
       '@babel/core': 7.29.0
-      '@babel/helper-plugin-utils': 7.28.6
+      '@babel/helper-plugin-utils': 7.29.7
 
   '@babel/plugin-transform-react-jsx-source@7.27.1(@babel/core@7.29.0)':
     dependencies:
       '@babel/core': 7.29.0
-      '@babel/helper-plugin-utils': 7.28.6
+      '@babel/helper-plugin-utils': 7.29.7
 
   '@babel/runtime@7.28.6': {}
 
@@ -17206,6 +17212,19 @@ snapshots:
       css-mediaquery: 0.1.2
       invariant: 2.2.4
       styleq: 0.2.1
+
+  '@stylexjs/unplugin@0.19.0(unplugin@3.3.0(esbuild@0.24.2)(rolldown@1.1.5)(rollup@4.57.1)(vite@6.4.1(@types/node@24.10.12)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)))':
+    dependencies:
+      '@babel/core': 7.29.0
+      '@babel/plugin-syntax-flow': 7.29.7(@babel/core@7.29.0)
+      '@babel/plugin-syntax-jsx': 7.29.7(@babel/core@7.29.0)
+      '@babel/plugin-syntax-typescript': 7.29.7(@babel/core@7.29.0)
+      '@stylexjs/babel-plugin': 0.19.0
+      browserslist: 4.28.1
+      lightningcss: 1.32.0
+      unplugin: 3.3.0(esbuild@0.24.2)(rolldown@1.1.5)(rollup@4.57.1)(vite@6.4.1(@types/node@24.10.12)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2))
+    transitivePeerDependencies:
+      - supports-color
 
   '@stylexjs/unplugin@0.19.0(unplugin@3.3.0(esbuild@0.28.2)(rolldown@1.1.5)(rollup@4.57.1)(vite@6.4.1(@types/node@24.10.12)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)))':
     dependencies:

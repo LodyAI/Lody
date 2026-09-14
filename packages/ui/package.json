@@ -46,6 +46,8 @@
     "./tooltip": "./src/tooltip/tooltip.tsx"
   },
   "scripts": {
+    "playground": "vite --config playground/vite.config.ts",
+    "playground:build": "vite build --config playground/vite.config.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest"
@@ -63,10 +65,12 @@
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
     "jsdom": "^26.1.0",
     "react": "catalog:",
     "react-dom": "catalog:",
     "typescript": "catalog:",
+    "vite": "catalog:",
     "vitest": "^3.2.4"
   }
 }
