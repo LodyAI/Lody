@@ -4,13 +4,14 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
 
 ## Conversation scrolling
 
-- Reveal only after the first window settles; transient visible-range reports must
-  not redirect its lease. Later loads never hide the view. Restore before paint;
+- Reveal only after the first window AND its destination rows are measured and
+  positioned by Virtua; a DOM scroll write alone is not readiness. Transient
+  visible-range reports must not redirect the initial lease. Later loads never hide the view. Restore before paint;
   hydration re-anchors only while following, using DOM extent, not evictable indices.
 - Correct content measurements in ResizeObserver before paint, even with unchanged
   row counts; no RAF deferral. Correct Virtua spacer-height commits in MutationObserver
-  before deferred resize delivery. Observe only spacer height style and direct row
-  mounts/removals (which may overflow it), never subtrees/text. Respect the live follow
+  before deferred resize delivery. Observe spacer height and mounted row geometry
+  (which may overflow it), never message subtrees/text or scroll pointer styles. Respect the live follow
   lock and explicit jump suppression.
 - Virtua owns rows, measurement and index navigation; `use-sticky-scroll.ts` adapts
   `use-stick-to-bottom` to its viewport/content. No content-token effects or upward

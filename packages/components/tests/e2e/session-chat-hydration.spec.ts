@@ -139,3 +139,64 @@ for (const { story, label, colorVariable } of [
     await expect(activity).toHaveCount(0);
   });
 }
+
+test('opening and reopening never reveals an unmeasured tail', async ({ page }) => {
+  await page.addInitScript(() => {
+    const NativeResizeObserver = window.ResizeObserver;
+    let held: (() => void)[] = [];
+    let paused = true;
+    Object.assign(window, {
+      pauseTailMeasurement: () => {
+        paused = true;
+      },
+      releaseTailMeasurement: () => {
+        paused = false;
+        const callbacks = held;
+        held = [];
+        for (const callback of callbacks) callback();
+      },
+      hasHeldTailMeasurement: () => held.length > 0,
+    });
+    window.ResizeObserver = class extends NativeResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        super((entries, observer) => {
+          // Gate the real browser measurement of the destination row. Parent
+          // viewport/spacer observations keep running. No timing assumptions.
+          if (
+            paused &&
+            entries.some(
+              ({ target }) =>
+                target.parentElement?.parentElement?.hasAttribute(
+                  'data-message-selection-scroll'
+                ) && target.querySelector('[data-cold-tail]')
+            )
+          ) {
+            held.push(() => callback(entries, observer));
+          } else callback(entries, observer);
+        });
+      }
+    };
+  });
+  await page.goto('/iframe.html?id=sessions-sessionchathydration--cold-tail&viewMode=story');
+  const open = page.getByRole('button', { name: 'Open conversation', exact: true });
+  await open.waitFor({ state: 'visible' });
+  for (let i = 0; i < 2; i++) {
+    await page.evaluate(() =>
+      (window as typeof window & { pauseTailMeasurement: () => void }).pauseTailMeasurement()
+    );
+    await open.click();
+    await page.waitForFunction(() =>
+      (window as typeof window & { hasHeldTailMeasurement: () => boolean }).hasHeldTailMeasurement()
+    );
+    const viewport = page.locator('[data-message-selection-scroll]');
+    await expect(viewport).toHaveCSS('visibility', 'hidden');
+    await page.evaluate(() =>
+      (window as typeof window & { releaseTailMeasurement: () => void }).releaseTailMeasurement()
+    );
+    await expect(viewport).toHaveCSS('visibility', 'visible');
+    await expect(page.locator('[data-cold-tail]')).toBeInViewport();
+    await expect
+      .poll(() => viewport.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop))
+      .toBeLessThanOrEqual(1);
+  }
+});

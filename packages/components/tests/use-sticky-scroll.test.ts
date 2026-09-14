@@ -54,6 +54,7 @@ class MockResizeObserver {
 type ScrollFixture = {
   scrollElement: HTMLDivElement;
   contentElement: HTMLDivElement;
+  lastRow: HTMLDivElement;
   setScrollTop: (value: number) => void;
   getScrollTop: () => number;
   setContentHeight: (value: number) => void;
@@ -150,9 +151,16 @@ function createScrollFixture(): ScrollFixture {
       toJSON: () => ({}),
     }) as DOMRect;
 
+  const lastRow = document.createElement('div');
+  lastRow.dataset.virtualIndex = '3';
+  contentElement.append(lastRow);
+  lastRow.getBoundingClientRect = () =>
+    new DOMRect(0, scrollHeight - 124 - scrollTop, clientWidth, 100);
+
   return {
     scrollElement,
     contentElement,
+    lastRow,
     setScrollTop: (value) => {
       scrollTop = value;
     },
@@ -176,6 +184,7 @@ function createMockVirtualizerHandle(scrollElement: HTMLElement): MockVirtualize
   const handle = {
     scrollSize: 640,
     viewportSize: 400,
+    findItemIndex: () => 3,
     scrollToIndex: vi.fn(),
     scrollTo: vi.fn((offset: number) => {
       scrollElement.scrollTop = offset;
@@ -295,7 +304,7 @@ describe('useStickyScroll Virtua adapter', () => {
     vi.useRealTimers();
   });
 
-  it('restores a followed session before waiting for an animation frame', async () => {
+  it('reveals an already measured followed session before waiting for an animation frame', async () => {
     const sessionId = 'session-initial-paint' as SessionId;
     const fixture = createScrollFixture();
     const vlist = createMockVirtualizerHandle(fixture.scrollElement);
@@ -321,6 +330,85 @@ describe('useStickyScroll Virtua adapter', () => {
       expect(fixture.getScrollTop()).toBe(type === 'end' ? 1240 : 96);
     }
   );
+
+  it('keeps the viewport hidden until the destination row is mounted and measured', async () => {
+    const fixture = createScrollFixture();
+    fixture.lastRow.remove();
+    await renderHarness({
+      sessionId: 'session-measurement-gate' as SessionId,
+      vlist: createMockVirtualizerHandle(fixture.scrollElement),
+      scrollElement: fixture.scrollElement,
+      itemCount: 4,
+    });
+    expect(fixture.getScrollTop()).toBe(240);
+    expect(latestResult?.initialScrollRestored).toBe(false);
+    await act(async () => {
+      fixture.lastRow.style.visibility = 'hidden';
+      fixture.contentElement.append(fixture.lastRow);
+    });
+    expect(latestResult?.initialScrollRestored).toBe(false);
+    await act(async () => {
+      fixture.setScrollHeight(1640);
+      fixture.lastRow.style.visibility = '';
+      emitResize(fixture.lastRow);
+    });
+    expect(fixture.getScrollTop()).toBe(1240);
+    expect(latestResult?.initialScrollRestored).toBe(true);
+  });
+
+  it('waits for Virtua to apply an asynchronous cached-offset restoration', async () => {
+    const sessionId = 'session-delayed-offset' as SessionId;
+    saveScrollPosition(sessionId, { type: 'offset', scrollOffset: 96 });
+    const fixture = createScrollFixture();
+    const vlist = createMockVirtualizerHandle(fixture.scrollElement);
+    vlist.scrollTo.mockImplementation(() => {});
+    await renderHarness({ sessionId, vlist, scrollElement: fixture.scrollElement, itemCount: 4 });
+    expect(latestResult?.initialScrollRestored).toBe(false);
+    expect(getScrollPosition(sessionId)).toEqual({ type: 'offset', scrollOffset: 96 });
+    await act(async () => {
+      fixture.setScrollTop(96);
+      latestResult?.handleScroll(96);
+    });
+    expect(latestResult?.initialScrollRestored).toBe(true);
+  });
+
+  it('accepts the subpixel geometry of a measured tail', async () => {
+    const fixture = createScrollFixture();
+    const originalRect = fixture.lastRow.getBoundingClientRect;
+    fixture.lastRow.getBoundingClientRect = () => {
+      const rect = originalRect();
+      return new DOMRect(rect.x, rect.y + 1.5, rect.width, rect.height);
+    };
+    await renderHarness({
+      sessionId: 'session-fractional-tail' as SessionId,
+      vlist: createMockVirtualizerHandle(fixture.scrollElement),
+      scrollElement: fixture.scrollElement,
+      itemCount: 4,
+    });
+    expect(latestResult?.initialScrollRestored).toBe(true);
+  });
+
+  it('follows row growth before the spacer resize is delivered', async () => {
+    const fixture = createScrollFixture();
+    await renderHarness({
+      sessionId: 'session-row-measurement' as SessionId,
+      vlist: createMockVirtualizerHandle(fixture.scrollElement),
+      scrollElement: fixture.scrollElement,
+      itemCount: 4,
+    });
+    fixture.setScrollHeight(1640);
+    act(() => emitResize(fixture.lastRow));
+    expect(fixture.getScrollTop()).toBe(1240);
+    // No spacer notification, animation frame or item-count change is needed.
+    fixture.setScrollHeight(940);
+    act(() => emitResize(fixture.lastRow));
+    expect(fixture.getScrollTop()).toBe(540);
+    await act(async () => {
+      fixture.scrollElement.dispatchEvent(new Event('scroll'));
+      vi.advanceTimersByTime(2);
+    });
+    expect(latestResult?.isSticky).toBe(true);
+  });
 
   it('follows mounted row overflow before Virtua commits the new spacer height', async () => {
     const fixture = createScrollFixture();

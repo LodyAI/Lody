@@ -116,3 +116,47 @@ export const PermissionActivity: Story = {
 export const MobileLeadingContent: Story = {
   args: { ...PermissionActivity.args, topInset: 64 },
 };
+
+/** Cold virtualizer mount with enough rows to expose estimated-height restoration. */
+function ColdTailStory() {
+  const [opened, setOpened] = useState(0);
+  const items: ChatStreamItem[] = Array.from({ length: 1000 }, (_, turnIndex) => ({
+    type: 'message',
+    turnIndex,
+    sessionId,
+    message: {
+      id: `cold-${turnIndex}`,
+      role: 'user',
+      timestamp: '2026-09-13T00:00:00.000Z',
+      items: [{ type: 'text', text: `Message ${turnIndex}` }],
+    },
+  }));
+  return (
+    <PlatformContext.Provider value={platform}>
+      <div className="flex h-screen flex-col">
+        <Button onClick={() => setOpened((n) => n + 1)}>Open conversation</Button>
+        <div className="min-h-0 flex-1">
+          {opened > 0 && (
+            <SessionChatStreamView
+              key={opened}
+              sessionId={sessionId}
+              className="h-full"
+              items={items}
+              showScrollToLatest={false}
+              renderMessageRow={({ message }) => (
+                <div
+                  data-cold-tail={message.id === 'cold-999' ? '' : undefined}
+                  style={{ minHeight: message.id === 'cold-999' ? 420 : 80, padding: 16 }}
+                >
+                  {message.id}
+                </div>
+              )}
+            />
+          )}
+        </div>
+      </div>
+    </PlatformContext.Provider>
+  );
+}
+
+export const ColdTail: Story = { render: () => <ColdTailStory /> };

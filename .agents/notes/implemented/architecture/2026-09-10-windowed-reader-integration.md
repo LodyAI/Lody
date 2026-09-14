@@ -29,3 +29,19 @@ no alternate session view, feature switch or complete memory command backend.
 Reader, writer and CLI regressions use synthetic Loro fixtures. The component
 benchmark measures the shipped reader. Device-scale cold-open, streaming frame
 time and long-session JS/WASM memory remain separate acceptance work.
+
+## Initial viewport measurement
+
+The first range promise only establishes data availability. Setting `scrollTop`
+to the estimated end does not establish that Virtua has mounted and measured the
+destination rows. Revealing at that point exposed an empty or intermediate window.
+The viewport now waits for the measured destination, visible row geometry and
+Virtua's observed offset to agree; mounted-row measurements also correct following
+before deferred spacer resizes. Corrections use the sticky library's setter so
+layout changes do not masquerade as upward user scrolling. There is no settle
+sleep, and later window hydration does not hide the viewport again.
+
+A browser regression holds the real destination-row ResizeObserver delivery:
+the previous hook reveals while held; the fixed hook stays hidden and opens at
+the measured tail after release, including remount. Unit coverage retains cached
+reading positions, user escape, composer resize suppression and row growth.

@@ -39,7 +39,7 @@ import {
 import { useAtomValue } from 'jotai';
 import { getRpcDeliveredTurnKey, rpcDeliveredTurnsAtom } from '@/atoms/session-dispatch-delivery';
 import { selectAtom } from 'jotai/utils';
-import { Virtualizer, type VirtualizerHandle } from 'virtua';
+import { Virtualizer, type VirtualizerHandle, type CustomItemComponentProps } from 'virtua';
 import {
   type AgentConfigCliType,
   type ChatFailedCode,
@@ -447,6 +447,11 @@ export const resolveAssistantMessageActions = (
 export type GoalCommand = SessionGoalCommand;
 
 export type VisibleTurnRange = { from: number; to: number };
+
+/** Exposes row identity at the measurement boundary without inspecting message DOM. */
+function ConversationVirtualRow({ index, ...props }: CustomItemComponentProps) {
+  return <div {...props} data-virtual-index={index} />;
+}
 
 export interface SessionChatStreamViewProps {
   initialWindowReady?: boolean;
@@ -1820,6 +1825,7 @@ export const SessionChatStreamView = forwardRef<
             >
               <Virtualizer
                 ref={vlistRef}
+                item={ConversationVirtualRow}
                 shift={false}
                 onScroll={handleStreamScroll}
                 onScrollEnd={handleStreamScrollEnd}

@@ -11,7 +11,11 @@ import {
 import { useStickToBottom } from 'use-stick-to-bottom';
 import type { VirtualizerHandle } from 'virtua';
 import type { SessionId } from '@lody/shared';
-import { scrollViewportToRealBottom } from './sticky-scroll-dom';
+import {
+  getScrollElementMaxOffset,
+  isInitialScrollLayoutReady,
+  scrollViewportToRealBottom,
+} from './sticky-scroll-dom';
 import { getScrollPosition, saveScrollPosition } from './use-scroll-position-cache';
 
 export interface UseStickyScrollOptions {
@@ -83,7 +87,6 @@ function useStickyViewportResizeObserver(options: {
     if (!scrollElement || typeof ResizeObserver === 'undefined') return undefined;
 
     let previousHeight = scrollElement.getBoundingClientRect().height;
-    let rafId: number | null = null;
 
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -92,28 +95,16 @@ function useStickyViewportResizeObserver(options: {
         previousHeight = height;
         if (skipNextViewportResizeAutoScrollRef?.current) {
           skipNextViewportResizeAutoScrollRef.current = false;
-          if (rafId !== null) {
-            cancelAnimationFrame(rafId);
-            rafId = null;
-          }
           continue;
         }
         if (!stickyBottomRef.current || itemCountRef.current <= 0) continue;
-        if (suppressAutoScrollRef?.current || rafId !== null) continue;
-
-        rafId = requestAnimationFrame(() => {
-          rafId = null;
-          if (stickyBottomRef.current && !suppressAutoScrollRef?.current) {
-            scrollToRealBottom();
-          }
-        });
+        if (!suppressAutoScrollRef?.current) scrollToRealBottom();
       }
     });
 
     observer.observe(scrollElement);
     return () => {
       observer.disconnect();
-      if (rafId !== null) cancelAnimationFrame(rafId);
     };
   }, [
     itemCountRef,
@@ -162,6 +153,8 @@ export function useStickyScroll({
   const scrollElementRef = useRef<HTMLDivElement | null>(null);
   const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null);
   const initialScrollRestoredRef = useRef(false);
+  const initialPositionAppliedRef = useRef(false);
+  const settleInitialLayoutRef = useRef(() => {});
   const [initialScrollRestored, setInitialScrollRestored] = useState(false);
 
   const handleWheelUp = useCallback(
@@ -197,46 +190,99 @@ export function useStickyScroll({
   );
 
   const scrollToRealBottom = useCallback(() => {
-    const currentScrollElement = scrollElementRef.current;
     scrollViewportToRealBottom({
+      scrollElement: scrollElementRef.current,
       itemCount: itemCountRef.current,
-      scrollElement: currentScrollElement,
+      // Mark programmatic corrections so shrinking content does not look like
+      // a user scrolling upward and releasing the follow lock.
+      setScrollTop: (offset) => {
+        state.scrollTop = offset;
+      },
     });
-  }, [itemCountRef]);
+  }, [state]);
 
-  // Virtua can commit a new spacer height from inside its row ResizeObserver.
-  // Another ResizeObserver on that spacer may not run until the next frame:
-  // by then Virtua has painted its intermediate scroll correction. Observe
-  // the committed height as well, so following catches up in that commit's
-  // microtask checkpoint. Direct row mounts can overflow the old spacer too.
-  // Never observe row subtrees or streamed text.
+  const settleInitialLayout = useCallback(() => {
+    if (initialScrollRestoredRef.current || !initialPositionAppliedRef.current) return;
+    const viewport = scrollElementRef.current;
+    const virtualizer = vlistRef.current;
+    if (!viewport || !virtualizer) return;
+    const cached = cachedPositionAtMountRef.current;
+    if (cached?.type === 'offset') {
+      const target = Math.min(cached.scrollOffset, getScrollElementMaxOffset(viewport));
+      if (Math.abs(viewport.scrollTop - target) > 1) return;
+    }
+    if (
+      !isInitialScrollLayoutReady(viewport, virtualizer, itemCountRef.current, state.isAtBottom)
+    ) {
+      return;
+    }
+    initialScrollRestoredRef.current = true;
+    setInitialScrollRestored(true);
+  }, [state, vlistRef]);
+  settleInitialLayoutRef.current = settleInitialLayout;
+
+  // Observe the bounded mounted row set, not streamed descendants. A row can
+  // grow before Virtua commits its spacer, so observing only the spacer misses
+  // a paint. Row measurement, spacer commits and scroll delivery all converge
+  // on the same initial-layout check; no guessed number of frames or timer.
   useLayoutEffect(() => {
     const content = scrollElement?.firstElementChild;
     if (!(content instanceof HTMLElement)) return undefined;
     const follow = () => {
-      if (initialScrollRestoredRef.current && state.isAtBottom && !suppressAutoScrollRef?.current) {
+      if (
+        initialPositionAppliedRef.current &&
+        state.isAtBottom &&
+        !suppressAutoScrollRef?.current
+      ) {
         scrollToRealBottom();
       }
+      settleInitialLayout();
     };
     const resizeObserver = new ResizeObserver(follow);
     resizeObserver.observe(content);
-    let height = content.style.height;
+    const rows = new Set<Element>();
+    const observeRows = () => {
+      for (const row of rows) {
+        if (row.parentElement !== content) {
+          resizeObserver.unobserve(row);
+          rows.delete(row);
+        }
+      }
+      for (const row of content.children) {
+        if (!rows.has(row)) {
+          rows.add(row);
+          resizeObserver.observe(row);
+        }
+      }
+      mutationObserver.disconnect();
+      mutationObserver.observe(content, {
+        attributes: true,
+        attributeFilter: ['style'],
+        childList: true,
+      });
+      for (const row of rows)
+        mutationObserver.observe(row, { attributes: true, attributeFilter: ['style'] });
+    };
+    let spacerHeight = content.style.height;
     const mutationObserver = new MutationObserver((records) => {
-      const nextHeight = content.style.height;
-      if (height === nextHeight && !records.some((record) => record.type === 'childList')) return;
-      height = nextHeight;
-      follow();
+      const membershipChanged = records.some((record) => record.type === 'childList');
+      const geometryChanged =
+        membershipChanged ||
+        spacerHeight !== content.style.height ||
+        records.some((record) => record.target !== content);
+      spacerHeight = content.style.height;
+      if (membershipChanged) observeRows();
+      // Virtua also toggles pointer-events during scrolling. That is not a
+      // geometry change and must not compete with a scrollbar drag.
+      if (geometryChanged) follow();
     });
-    mutationObserver.observe(content, {
-      attributes: true,
-      attributeFilter: ['style'],
-      childList: true,
-    });
+    observeRows();
+    follow();
     return () => {
       resizeObserver.disconnect();
       mutationObserver.disconnect();
     };
-  }, [scrollElement, scrollToRealBottom, state, suppressAutoScrollRef]);
+  }, [scrollElement, scrollToRealBottom, settleInitialLayout, state, suppressAutoScrollRef]);
 
   // Restore before paint, and keep the same follow intent when a placeholder
   // becomes several Virtua rows. Waiting for the content ResizeObserver's RAF
@@ -246,8 +292,9 @@ export function useStickyScroll({
     const currentVlist = vlistRef.current;
     if (!currentVlist) return;
 
-    if (initialScrollRestoredRef.current) {
+    if (initialPositionAppliedRef.current) {
       if (state.isAtBottom && !suppressAutoScrollRef?.current) scrollToRealBottom();
+      settleInitialLayout();
       return;
     }
 
@@ -259,14 +306,15 @@ export function useStickyScroll({
       void scrollToBottomWithLock({ animation: 'instant' });
       scrollToRealBottom();
     }
-    initialScrollRestoredRef.current = true;
-    setInitialScrollRestored(true);
+    initialPositionAppliedRef.current = true;
+    settleInitialLayout();
   }, [
     itemCount,
     initialContentReady,
     scrollElement,
     scrollToBottomWithLock,
     scrollToRealBottom,
+    settleInitialLayout,
     state,
     stopScroll,
     suppressAutoScrollRef,
@@ -289,6 +337,8 @@ export function useStickyScroll({
 
   const handleScroll = useCallback(
     (offset: number) => {
+      settleInitialLayoutRef.current();
+      if (!initialScrollRestoredRef.current) return;
       const scrollOffset = scrollElementRef.current?.scrollTop ?? offset;
       const followingBottom = state.isAtBottom;
       saveScrollPosition(
