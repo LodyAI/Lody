@@ -9,6 +9,15 @@ import type { SessionSendRecord } from '@/lib/session-send-journal';
 
 const sessionId = 'attachment-draft-story' as SessionId;
 const workspaceId = 'attachment-draft-workspace' as WorkspaceId;
+const imageSource = new Blob(
+  [[
+    '<svg xmlns="http://www.w3.org/2000/svg" width="320" height="320">',
+    '<rect width="100%" height="100%" fill="#cbd5e1"/>',
+    '<path d="M0 230 90 140l60 50 55-70 115 110v90H0Z" fill="#64748b"/>',
+    '</svg>',
+  ].join('')],
+  { type: 'image/svg+xml' }
+);
 
 const textEntry = (id: string, text: string): SessionHistory =>
   ({
@@ -82,7 +91,7 @@ export const Preparing: Story = {
           {
             id: 'design-image',
             kind: 'image',
-            source: new Blob(['image']),
+            source: imageSource,
             name: 'design.png',
             mimeType: 'image/png',
             lastModified: 0,
@@ -112,7 +121,7 @@ export const RetryOnlyTheFailedAttachment: Story = {
           {
             id: 'design-image',
             kind: 'image',
-            source: new Blob(['image']),
+            source: imageSource,
             name: 'design.png',
             mimeType: 'image/png',
             lastModified: 0,
@@ -149,7 +158,7 @@ export const ConfirmingTheOriginalSend: Story = {
           {
             id: 'design-image',
             kind: 'image',
-            source: new Blob(['image']),
+            source: imageSource,
             name: 'design.png',
             mimeType: 'image/png',
             lastModified: 0,

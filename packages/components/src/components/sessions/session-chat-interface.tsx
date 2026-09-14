@@ -6008,6 +6008,7 @@ export const SessionChatInterface = memo(
                               </>
                             }
                             emptyState={chatStreamEmptyState}
+                            trailingContent={<SessionPendingMessages sessionId={session.id} />}
                             agentActivityLabel={agentActivityLabel}
                             agentActivityTone={agentActivityTone}
                             onFileDiffClick={onFileDiffClick}
@@ -6196,7 +6197,6 @@ export const SessionChatInterface = memo(
                         freeTurnLimitNotice={freeSessionTurnNotice}
                         queueDisplay={
                           <>
-                            <SessionPendingMessages sessionId={session.id} />
                             {messageQueue.length > 0 ? (
                               <MessageQueueDisplay
                                 sessionId={session.id}
