@@ -46,11 +46,18 @@ the queue by hand.
   preconditions. Indeterminate delivery must propagate without replay; local failures recover
   from durable evidence and never imply non-delivery by themselves.
 
-  A remote renderer must authorize the target before writing the request, using its
-  authenticated authoritative machine-access snapshot and failing closed if that snapshot is
-  unavailable. The request carries no requester identity: workspace Machine RPC cannot
+  Both `session/queue-steer` and `session/queue-mutate` must pass one source-side session
+  authorization before a remote request is written. The session metadata must match the target
+  machine; access follows `isSessionVisibleToUser` using authenticated machine visibility,
+  local-project visibility and the current user. Visible machine access alone does not grant
+  access to another user's private local-project session. Missing metadata or an incomplete
+  authorization snapshot fails closed, with no machine-only fallback.
+  The request carries no requester identity: workspace Machine RPC cannot
   authenticate a caller-supplied member ID, and the target daemon must not use one for an owner
   fast path. Same-host local IPC is already the trusted local control boundary.
+  Routing is resolved before transport availability: local with no sender returns a local
+  transport error, and unresolved routing returns an error. Neither can create a Streams
+  client or append a remote request; transport failure cannot change the selected plane.
 
   Native exact Steer must derive its requester identity from the authenticated active
   invocation, never from the shared queue row. If that frozen identity is unavailable, the
@@ -83,9 +90,11 @@ the queue by hand.
   Any failure to persist the reservation, history, or removal forbids provider submission.
   Removing the row before the network call is necessary but does not replace the ownership
   boundary during steps 1–4. Native recovery uses the machine-local marker plus frozen history,
-  not an editable queue row as a retry token. A pre-history reservation interrupted by a crash
-  must be reconciled as unsubmitted before its surviving row becomes editable again; it must not
-  report a stale edit as saved or construct a turn from later queue content. Once history is
+  not an editable queue row as a retry token. A `reserved` marker with no history is unsubmitted:
+  recovery clears the marker, leaves the surviving row untouched and creates no terminal receipt.
+  The same queue item/expected turn may retry immediately, including within the current request,
+  after rereading and validating the queue and live turn as a new reservation. Failed marker
+  cleanup blocks that retry. Once history is
   durable, recovery can finish removal and recover the same turn without requiring the row to
   exist. A new missing-row request still fails; replay of the same reserved operation resolves
   through its marker or receipt.

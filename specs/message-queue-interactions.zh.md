@@ -40,10 +40,16 @@ Translation: current
   交付不确定须向上传递，禁止 replay；本地失败依据 durable evidence 恢复，不能仅凭本地
   失败推断未交付。
 
-  远程 Renderer 在写入请求前，必须使用其已认证的权威 machine-access 快照验证目标；快照
-  不可用时应 fail closed。请求不得携带请求者身份：workspace Machine RPC 无法认证调用方
+  `session/queue-steer` 与 `session/queue-mutate` 在写入远程请求前，必须共用 source-side
+  session 授权。Session metadata 必须匹配目标 machine；权限通过 `isSessionVisibleToUser`
+  根据已认证的 machine visibility、local-project visibility 和 current user 判断。
+  Machine 可见不意味着其他用户的私有 local-project session 可见。Metadata 缺失或授权快照
+  不完整时 fail closed，绝不降级成 machine-only 检查。
+  请求不得携带请求者身份：workspace Machine RPC 无法认证调用方
   声称的成员 ID，目标 daemon 也不得用它命中 owner fast path。同机 local IPC 已是可信的
   本地控制边界。
+  先确定 routing plane，再检查 transport：local 缺少 sender 返回本地传输错误，路由未确定
+  则返回路由错误。两者都不得创建 Streams client 或追加远程请求；传输失败不能改变已选 plane。
 
   Native 精确“引导”的 requester identity 必须来自已认证的活动 invocation，绝不来自共享
   queue row。若该冻结身份不可用，daemon 必须在消费 row、提交 provider 或停止 turn 之前失败。
@@ -71,9 +77,10 @@ Translation: current
 
   reservation、history 或删除任一持久化失败，都禁止提交 provider。网络调用前删除 row
   是必要条件，但不能替代步骤 1–4 期间的 ownership 边界。Native 恢复依赖 machine-local
-  marker 与冻结 history，不再拿可编辑 queue row 当 retry token。若在 history 持久化前
-  崩溃，须先将 reservation 对账为未提交，剩余 row 才能恢复可编辑；不得把旧客户端编辑
-  报成保存成功，也不得从后来的 queue 内容构建 turn。history 持久化后，恢复可完成删除并
+  marker 与冻结 history，不再拿可编辑 queue row 当 retry token。`reserved` marker 没有
+  history 时属于未提交：恢复清除 marker，保留剩余 row，不生成终态 receipt。同一个 queue
+  item/expected turn 可立即重试，包括继续当前请求，但必须重新读取并验证 queue 和 live turn，
+  建立新的 reservation。Marker 清理失败时不得继续重试。history 持久化后，恢复可完成删除并
   恢复同一个 turn，无需 row 仍存在。新的缺失 row 请求仍失败；同一 reserved operation
   的重试通过 marker 或 receipt 解析。
 

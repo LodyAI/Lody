@@ -1,4 +1,12 @@
 import { queueItemRevision } from '@lody/shared';
+import { CURRENT_MACHINE_PROTOCOL_CAPABILITIES } from '@lody/shared';
+import { createWorkspaceMachineRpcFacade } from '../../../packages/components/src/providers/workspace-machine-rpc-facade';
+import {
+  LoroStreamsMachineRpcClient,
+  LoroStreamsMachineRpcServer,
+  type LoroStreamsJsonStreamClient,
+  type LoroJsonLiveBatchHandler,
+} from '@lody/loro-streams-rpc';
 import { SessionDocument } from '../src/lib/loro/doc';
 import { composeTestSessionDoc } from './session-doc-fixture';
 import { withHistoryPort } from './history-port-fixture';
@@ -330,6 +338,189 @@ describe('SessionExecutionService', () => {
       request: { sessionId, expectedTurnId: runtime.turnId, queueItemId: rows[2]!.$cid },
     };
   };
+
+  it.each(['startup', 'same-request', 'clear-failure'] as const)(
+    'retries C/T after pre-history recovery via %s',
+    async (mode) => {
+      const h = await ownedQueue();
+      await h.deps.queueSteerOperationStore.record({
+        version: 2,
+        workspaceId: 'workspace-1',
+        machineId: 'machine-1',
+        ...h.request,
+        operationKey: JSON.stringify([
+          h.request.sessionId,
+          h.request.expectedTurnId,
+          h.request.queueItemId,
+        ]),
+        userTurnId: 'user:C',
+        phase: 'reserved',
+        updatedAt: 1,
+      });
+      const restarted = new SessionExecutionService(h.deps);
+      if (mode === 'startup') {
+        await restarted.recoverPendingQueueSteers();
+        expect(await h.deps.queueSteerOperationStore.read(h.request.sessionId)).toBeNull();
+        expect(await h.doc.getMessageQueue()).toEqual(h.rows);
+        expect(await h.doc.sessionData.history.readAll()).toEqual([]);
+      }
+      (
+        restarted as unknown as { turnRuntimeBySession: Map<SessionId, unknown> }
+      ).turnRuntimeBySession.set(h.request.sessionId, h.runtime);
+      h.steerPrompt.mockImplementation(() => ({
+        applied: Promise.resolve({ release: () => {} }),
+        completion: Promise.resolve(),
+      }));
+      if (mode === 'clear-failure') {
+        vi.spyOn(h.deps.queueSteerOperationStore, 'clear').mockRejectedValueOnce(
+          new Error('marker clear failed')
+        );
+        expect(await restarted.steerQueuedMessage(h.request)).toMatchObject({
+          accepted: false,
+          error: 'marker clear failed',
+        });
+        expect(await h.deps.queueSteerOperationStore.read(h.request.sessionId)).toMatchObject({
+          phase: 'reserved',
+        });
+        expect(await h.doc.getMessageQueue()).toEqual(h.rows);
+        expect(await h.doc.sessionData.history.readAll()).toEqual([]);
+        expect(h.runtime.userTurnId).toBe('user:active');
+      }
+      expect(await restarted.steerQueuedMessage(h.request)).toMatchObject({ accepted: true });
+      expect((await h.doc.getMessageQueue()).map((row) => row.task)).toEqual(['A', 'B']);
+      expect(h.runtime.userTurnId).toBe('user:C');
+      expect(await h.deps.queueSteerOperationStore.read(h.request.sessionId)).toMatchObject({
+        phase: 'applied',
+        response: { disposition: 'accepted' },
+      });
+    }
+  );
+
+  it.each(['private-project', 'local-sender-missing'] as const)(
+    'traces %s rejection before Streams and daemon state changes',
+    async (scenario) => {
+      const h = await ownedQueue();
+      const machineId = 'machine-1' as MachineId;
+      const meta = await h.doc.getMetaState();
+      vi.spyOn(h.doc, 'getMetaState').mockResolvedValue({
+        ...meta,
+        project: { kind: 'local', localProjectId: 'private-P' },
+      } as SessionMeta);
+      const appended: unknown[] = [];
+      const readers = new Map<string, LoroJsonLiveBatchHandler>();
+      const streamClient: LoroStreamsJsonStreamClient = {
+        ensureJsonStream: async () => {},
+        appendJson: async (streamId, value) => {
+          appended.push(value);
+          const reader = readers.get(streamId);
+          if (!reader) throw new Error('Missing test stream reader');
+          await reader({ messages: [value], nextOffset: String(appended.length), upToDate: true });
+          return String(appended.length);
+        },
+        readJsonLive: async (streamId, _state, onBatch, options) => {
+          readers.set(streamId, onBatch);
+          await new Promise<void>((resolve) => {
+            if (options?.signal?.aborted) resolve();
+            else options?.signal?.addEventListener('abort', () => resolve(), { once: true });
+          });
+          readers.delete(streamId);
+        },
+      };
+      const server = new LoroStreamsMachineRpcServer({
+        workspaceId: h.deps.workspaceId,
+        machineId,
+        logger: createSilentLogger(),
+        streamClient,
+        getMachineStatus: vi.fn(),
+        refreshMachineAcpCapabilities: vi.fn(),
+        steerQueuedMessage: (args) => h.service.steerQueuedMessage(args),
+        mutateQueuedMessage: (args) => h.service.mutateQueuedMessage(args),
+      });
+      const client = new LoroStreamsMachineRpcClient({
+        workspaceId: h.deps.workspaceId,
+        machineId,
+        streamClient,
+      });
+      let projectVisible = false;
+      let plane: 'local' | 'cloud' = scenario === 'private-project' ? 'cloud' : 'local';
+      const getMachineRpcClient = vi.fn(async () => client);
+      const facade = createWorkspaceMachineRpcFacade({
+        workspaceId: h.deps.workspaceId,
+        targetRouter: {
+          getPlaneForMachine: () => plane,
+          resolvePlaneForMachine: async () => plane,
+        },
+        getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        getSessionMeta: async () => h.doc.getMetaState(),
+        getSessionControlAuthorization: () => ({
+          visibleMachineIds: new Set([machineId]),
+          visibleLocalProjectKeys: new Set(projectVisible ? [machineId + ':private-P'] : []),
+          currentUserId: 'user-U',
+        }),
+        getMachineRpcClient,
+      });
+      await server.start();
+      try {
+        const error =
+          scenario === 'private-project'
+            ? 'Source authorization for this session is unavailable or denied.'
+            : 'Local queue control is unavailable.';
+        expect(await facade.requestSessionQueueSteer(machineId, h.request)).toMatchObject({
+          accepted: false,
+          error,
+        });
+        expect(
+          await facade.requestSessionQueueMutation(machineId, {
+            sessionId: h.request.sessionId,
+            mutation: {
+              kind: 'remove',
+              queueItemId: h.request.queueItemId,
+              expectedRevision: queueItemRevision(h.rows[2]),
+            },
+          })
+        ).toMatchObject({ success: false, error });
+        expect(getMachineRpcClient).not.toHaveBeenCalled();
+        expect(appended).toEqual([]);
+        expect(await h.deps.queueSteerOperationStore.read(h.request.sessionId)).toBeNull();
+        expect(await h.doc.getMessageQueue()).toEqual(h.rows);
+        expect(await h.doc.sessionData.history.readAll()).toEqual([]);
+        expect(h.runtime.userTurnId).toBe('user:active');
+        expect(h.runtime.promptInFlight).toBe(true);
+        // Positive control traverses the same real RPC client/server and execution service.
+        projectVisible = true;
+        plane = 'cloud';
+        h.steerPrompt.mockImplementation(() => ({
+          applied: Promise.resolve({ release: () => {} }),
+          completion: Promise.resolve(),
+        }));
+        expect(await facade.requestSessionQueueSteer(machineId, h.request)).toMatchObject({
+          accepted: true,
+        });
+        expect(appended.length).toBeGreaterThan(0);
+        expect((await h.doc.getMessageQueue()).map((row) => row.task)).toEqual(['A', 'B']);
+        expect(h.runtime.userTurnId).toBe('user:C');
+        expect(await h.deps.queueSteerOperationStore.read(h.request.sessionId)).toMatchObject({
+          phase: 'applied',
+        });
+        const secondRow = h.rows[1];
+        if (!secondRow) throw new Error('Missing B fixture');
+        expect(
+          await facade.requestSessionQueueMutation(machineId, {
+            sessionId: h.request.sessionId,
+            mutation: {
+              kind: 'remove',
+              queueItemId: secondRow.$cid,
+              expectedRevision: queueItemRevision(secondRow),
+            },
+          })
+        ).toMatchObject({ success: true });
+        expect((await h.doc.getMessageQueue()).map((row) => row.task)).toEqual(['A']);
+      } finally {
+        client.stop();
+        server.stop();
+      }
+    }
+  );
 
   it.each(['update', 'remove', 'reorder'] as const)(
     'rejects a stale second-client %s after reservation, with removal durable before submission',
@@ -1344,47 +1535,6 @@ describe('SessionExecutionService', () => {
     await expect(
       queueSteerOperationStore.read('session-foreign' as SessionId)
     ).resolves.toMatchObject({ machineId: 'machine-2', phase: 'reserved' });
-  });
-
-  it('leaves the row queued when a crash precedes the reserved history write', async () => {
-    const sessionId = 'session-native-steer-pre-history-crash' as SessionId;
-    const queueSteerOperationStore = createMemoryQueueSteerOperationStore();
-    await queueSteerOperationStore.record({
-      version: 1,
-      workspaceId: 'workspace-1',
-      machineId: 'machine-1',
-      sessionId,
-      operationKey: 'pre-history-operation',
-      queueItemId: 'C',
-      expectedTurnId: 'assistant:old',
-      userTurnId: 'user:C',
-      phase: 'reserved',
-      updatedAt: 1,
-    });
-    const removeMessageQueueItem = vi.fn(async () => {});
-    const sessionDoc = withHistoryPort({
-      waitUntilSynced: vi.fn(async () => {}),
-      getHistory: () => [],
-      getMessageQueue: vi.fn(async () => [{ $cid: 'C', task: 'task C' }]),
-      removeMessageQueueItem,
-    });
-    const deps = createBaseDeps({
-      queueSteerOperationStore,
-      workspaceDocument: {
-        repo: { upsertDocMeta: vi.fn(async () => {}) },
-        getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
-      } as unknown as LoroDocumentManager,
-    });
-    const service = new SessionExecutionService(deps);
-
-    await service.recoverPendingQueueSteers();
-
-    expect(removeMessageQueueItem).not.toHaveBeenCalled();
-    await expect(queueSteerOperationStore.read(sessionId)).resolves.toMatchObject({
-      phase: 'reserved',
-      completedAt: expect.any(Number),
-      response: { disposition: 'error' },
-    });
   });
 
   it('advances one session owner through consecutive prompt handoffs', async () => {

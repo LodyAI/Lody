@@ -127,6 +127,7 @@ import { META_REMOTE_CURSOR_BYPASS_STORAGE_KEY_PREFIX } from '@/lib/clear-local-
 import { runStartupAcpCapabilitiesRefresh } from './startup-acp-capabilities-refresh';
 import { createLocalLoroDataPlaneConnection } from './local-loro-data-plane-connection';
 import { createWorkspaceMachineRpcFacade } from './workspace-machine-rpc-facade';
+import type { SessionControlAuthorization } from './session-control-authorization';
 import { resyncMachineFlockRows } from '@/hooks/use-machine-flock-rows';
 import { createCodeCollabFileIndexCache } from '@/lib/code-collab-file-index-cache';
 import { getIpcServices, onIpcEvent, sendLocalSessionControl } from '@/lib/electron-ipc-client';
@@ -203,6 +204,7 @@ type RuntimeDeps = {
    * authorization is not ready, so optional startup capability refresh is skipped.
    */
   getAuthorizedMachineIds?: () => ReadonlySet<MachineId> | null;
+  getSessionControlAuthorization?: () => SessionControlAuthorization | null;
   eagerSyncSurface?: EagerSyncSurface;
 };
 
@@ -1722,7 +1724,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       const entry = await repo.getDocMeta(getMachineRoomId(machineId));
       return (entry?.meta as Partial<MachineMeta> | undefined)?.protocolCapabilities;
     },
-    getAuthorizedMachineIds: deps.getAuthorizedMachineIds,
+    getSessionControlAuthorization: deps.getSessionControlAuthorization,
+    getSessionMeta: async (sessionId) => {
+      const entry = await repo.getDocMeta(getSessionRoomId(sessionId));
+      return entry?.meta as SessionMeta | undefined;
+    },
     workspaceId,
     targetRouter,
     getMachineRpcClient,

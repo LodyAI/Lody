@@ -30,8 +30,13 @@ editing lease is inactive, then preserves native ACP Steer when acknowledged or 
 ordinary follow-up before cancelling the expected turn. The ordinary path retains the queue
 row until history and its activation pointer are durable. Missing, editing, and stale targets
 do neither.
-Before a remote renderer writes this control request, it fails closed against its authenticated
-`machines:listVisibleMachines` snapshot. The retained request contains no requester identity:
+Before either remote queue control is written, the shared
+[source authorizer](../../packages/components/src/providers/session-control-authorization.ts)
+matches session metadata to the target machine and applies the existing session visibility
+policy to authenticated machine/project snapshots and current user. Incomplete snapshots fail
+closed; shared machine access does not expose another user's private project. Local routing
+with an unavailable sender fails locally without creating a Streams client.
+The retained request contains no requester identity:
 the target daemon cannot authenticate such a claim and must not grant its owner fast path from it.
 Native queue Steer instead inherits the frozen requester from the authenticated active invocation;
 it fails before consumption when that identity is unavailable and never trusts the queue row.

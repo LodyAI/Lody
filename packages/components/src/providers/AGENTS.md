@@ -56,6 +56,9 @@ and update only decision fields through HistoryWriter; never replace a rendered 
 - Queue edit/remove/reorder on queueItemSteer v2 use the narrow daemon domain RPC,
   with revision checks against reservation ownership. Never direct-write after RPC failure.
   Enqueue and other user writes retain their renderer authority.
+- Remote queue Steer and mutation share source-side session visibility authorization:
+  verify target metadata against authenticated machine/project visibility and current user.
+  Missing metadata or incomplete snapshots fail closed; machine access alone is insufficient.
 - Repo storage, durable Streams cursors, and eager-sync high-water state must use the
   same per-renderer cache namespace. A checkpoint must never be shared by independently
   persisted Repo views.

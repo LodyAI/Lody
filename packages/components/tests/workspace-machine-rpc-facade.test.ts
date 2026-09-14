@@ -17,6 +17,61 @@ afterEach(() => {
 });
 
 describe('createWorkspaceMachineRpcFacade', () => {
+  it.each([
+    'snapshot-missing',
+    'meta-missing',
+    'wrong-machine',
+    'revoked-during-meta-read',
+    'route-missing',
+  ] as const)('fails both session controls closed for %s', async (scenario) => {
+    let authorization =
+      scenario === 'snapshot-missing'
+        ? null
+        : {
+            visibleMachineIds: new Set([remoteMachineId]),
+            visibleLocalProjectKeys: new Set<string>(),
+            currentUserId: 'user-U',
+          };
+    const getMachineRpcClient = vi.fn(async () => {
+      throw new Error('Remote client must not be created');
+    });
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      getSessionControlAuthorization: () => authorization,
+      getSessionMeta: async () => {
+        if (scenario === 'revoked-during-meta-read') authorization = null;
+        return scenario === 'meta-missing'
+          ? undefined
+          : {
+              machineId: scenario === 'wrong-machine' ? localMachineId : remoteMachineId,
+            };
+      },
+      targetRouter: {
+        getPlaneForMachine: () => (scenario === 'route-missing' ? null : 'cloud'),
+        resolvePlaneForMachine: async () => null,
+      },
+      getMachineRpcClient,
+    });
+    const error =
+      scenario === 'route-missing'
+        ? 'Session control routing is unavailable.'
+        : 'Source authorization for this session is unavailable or denied.';
+    expect(
+      await facade.requestSessionQueueSteer(remoteMachineId, {
+        sessionId,
+        queueItemId: 'C',
+        expectedTurnId: 'T',
+      })
+    ).toMatchObject({ accepted: false, error });
+    expect(
+      await facade.requestSessionQueueMutation(remoteMachineId, {
+        sessionId,
+        mutation: { kind: 'remove', queueItemId: 'C', expectedRevision: '{}' },
+      })
+    ).toMatchObject({ success: false, error });
+    expect(getMachineRpcClient).not.toHaveBeenCalled();
+  });
   it.each([undefined, { queueItemSteer: 1 }])(
     'disables every old-daemon queue row for %j',
     async (capabilities) => {
@@ -24,8 +79,8 @@ describe('createWorkspaceMachineRpcFacade', () => {
         workspaceId,
         getMachineProtocolCapabilities: async () => capabilities,
         targetRouter: {
-          getPlaneForMachine: () => 'remote',
-          resolvePlaneForMachine: async () => 'remote',
+          getPlaneForMachine: () => 'cloud',
+          resolvePlaneForMachine: async () => 'cloud',
         },
         getMachineRpcClient: async () => {
           throw new Error('Legacy delivery must not run');
@@ -133,8 +188,8 @@ describe('createWorkspaceMachineRpcFacade', () => {
       workspaceId,
       getMachineProtocolCapabilities: async () => undefined,
       targetRouter: {
-        getPlaneForMachine: () => 'remote',
-        resolvePlaneForMachine: async () => 'remote',
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
       },
       getMachineRpcClient,
     });
@@ -155,10 +210,10 @@ describe('createWorkspaceMachineRpcFacade', () => {
     const facade = createWorkspaceMachineRpcFacade({
       workspaceId,
       getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
-      getAuthorizedMachineIds: () => null,
+      getSessionControlAuthorization: () => null,
       targetRouter: {
-        getPlaneForMachine: () => 'remote',
-        resolvePlaneForMachine: async () => 'remote',
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
       },
       getMachineRpcClient,
     });
@@ -185,10 +240,14 @@ describe('createWorkspaceMachineRpcFacade', () => {
     const facade = createWorkspaceMachineRpcFacade({
       workspaceId,
       getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
-      getAuthorizedMachineIds: () => new Set([remoteMachineId]),
+      getSessionMeta: async () => ({ machineId: remoteMachineId }),
+      getSessionControlAuthorization: () => ({
+        visibleMachineIds: new Set([remoteMachineId]),
+        visibleLocalProjectKeys: new Set(),
+      }),
       targetRouter: {
-        getPlaneForMachine: () => 'remote',
-        resolvePlaneForMachine: async () => 'remote',
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
       },
       getMachineRpcClient: async () => ({ requestSessionQueueSteer }) as never,
     });
@@ -213,8 +272,8 @@ describe('createWorkspaceMachineRpcFacade', () => {
       workspaceId,
       getMachineProtocolCapabilities: async () => undefined,
       targetRouter: {
-        getPlaneForMachine: () => 'remote',
-        resolvePlaneForMachine: async () => 'remote',
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
       },
       getMachineRpcClient: async () => {
         throw new Error('Unexpected RPC');

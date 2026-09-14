@@ -5,33 +5,45 @@ import {
   queueItemRevision,
   resolveSessionHistoryStatus,
   type SessionId,
+  type WorkspaceId,
+  type MachineId,
+  type ChatFailedReason,
+  type ChatFailedCode,
   type SessionQueueSteerResponse,
   type SessionQueueMutation,
   type SessionQueueMutationResponse,
 } from '@lody/shared';
 import { readSessionHistory } from '@lody/shared/session-data';
-import { hasActiveMessageQueueEditingLease, type SessionDocument } from '@/lib/loro/doc';
+import {
+  hasActiveMessageQueueEditingLease,
+  type SessionDocument,
+  type LoroDocumentManager,
+} from '@/lib/loro/doc';
+import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 import { ActiveTurnSteerPort, PersistenceFailure } from './active-turn-steer-port';
 import { buildQueuedMessageUserTurn } from './queued-message-turn';
 import {
   isQueueSteerMarkerOwnedBy,
   type QueueSteerOperationMarker,
+  type QueueSteerOperationStore,
 } from './session-queue-steer-operation-store';
-import type { SessionExecutionServiceDeps } from './session-execution-service';
 
 type Request = { sessionId: SessionId; expectedTurnId: string; queueItemId: string };
 type Marker = QueueSteerOperationMarker;
-type Recovery = SessionQueueSteerResponse | 'deferred' | null;
-type Deps = Pick<
-  SessionExecutionServiceDeps,
-  | 'workspaceId'
-  | 'machineId'
-  | 'workspaceDocument'
-  | 'queueSteerOperationStore'
-  | 'recordChatFailure'
-  | 'logger'
-> & {
+type Recovery = SessionQueueSteerResponse | 'deferred' | 'retryable' | null;
+export type QueueSteerServiceDeps = {
+  workspaceId: WorkspaceId;
+  machineId: MachineId;
+  workspaceDocument: Pick<LoroDocumentManager, 'getOrCreateSessionDoc' | 'persistPendingChanges'>;
+  queueSteerOperationStore: QueueSteerOperationStore;
+  logger: Logger;
+  recordChatFailure(
+    sessionDoc: SessionDocument,
+    reason: ChatFailedReason,
+    message?: string,
+    code?: ChatFailedCode
+  ): Promise<void>;
   requeue(
     sessionId: SessionId,
     userTurnId: string
@@ -70,11 +82,11 @@ export class QueueSteerService extends Context.Tag('lody/QueueSteerService')<
     mutate(request: SessionQueueMutation): Effect.Effect<SessionQueueMutationResponse>;
   }
 >() {
-  static layer(deps: Deps) {
+  static layer(deps: QueueSteerServiceDeps) {
     return Layer.effect(QueueSteerService, QueueSteerService.make(deps));
   }
 
-  static make(deps: Deps) {
+  static make(deps: QueueSteerServiceDeps) {
     return Effect.gen(function* () {
       const active = yield* ActiveTurnSteerPort;
       const receipts = new Map<string, SessionQueueSteerResponse>();
@@ -218,14 +230,8 @@ export class QueueSteerService extends Context.Tag('lody/QueueSteerService')<
         const request = { sessionId, queueItemId: marker.queueItemId };
         if (!entry) {
           if (marker.phase !== 'reserved') return 'deferred';
-          return yield* complete(
-            sessionId,
-            marker,
-            respond(request, 'error', {
-              userTurnId: marker.userTurnId,
-              error: 'Reservation ended before history was persisted. The message remains queued.',
-            })
-          );
+          yield* persist(() => deps.queueSteerOperationStore.clear(sessionId));
+          return 'retryable';
         }
         if (marker.phase === 'reserved' || marker.phase === 'fallback') {
           return yield* fallback(
@@ -306,13 +312,13 @@ export class QueueSteerService extends Context.Tag('lody/QueueSteerService')<
               if (previous.operationKey === operationKey) {
                 if (previousReceipt) return remember(operationKey, previousReceipt);
                 const recovered = yield* recoverMarker(sessionId, doc, previous);
-                return recovered && recovered !== 'deferred'
-                  ? recovered
-                  : respond(request, 'error', {
-                      error: 'The previous delivery is still indeterminate.',
-                    });
-              }
-              if (!previousReceipt)
+                if (recovered !== 'retryable')
+                  return recovered && recovered !== 'deferred'
+                    ? recovered
+                    : respond(request, 'error', {
+                        error: 'The previous delivery is still indeterminate.',
+                      });
+              } else if (!previousReceipt)
                 return respond(request, 'busy', {
                   error: 'Another queue operation is being recovered.',
                 });

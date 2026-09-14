@@ -56,9 +56,9 @@ Contract: specs/session-orchestration.md.
   tombstone; CLI dispatch producers keep their own marker policy.
 - Ordinary turn execution writes only `processingUserMsgId` and `lastHandledUserMsgId`; no start
   or terminal path may read-await-rewrite the other slots.
-- Never steer after Stop; late ACK is indeterminate. Reserve against queue mutations/promotion;
-  persist marker, frozen history and removal BEFORE native submission. Scope owns local guards,
-  not provider effects. Only proven non-delivery may requeue; unknown delivery never replays.
+- No Steer after Stop; late ACK never replays. Exclude queue mutations/promotion; persist
+  marker/history/removal before submission. Scope owns guards only. Requeue only proven
+  non-delivery. Reserved without history clears marker, not row: retryable, no receipt.
 - Resume must REOPEN the in-progress assistant entry, clearing
   `finished`/`endedAt`/`permissionWaitMs` there only; never write `finished=false` from teardown.
 - Keep JSON-RPC/transport matching in `acp-error-classification.ts`: disposed/stale `-32603` is

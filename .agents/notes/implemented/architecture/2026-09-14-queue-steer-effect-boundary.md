@@ -51,8 +51,16 @@ were read as supplementary evidence, not run or assumed identical to the pinned 
 
 The queue service never reads runtime maps, agentClient, promptInFlight, invocation or successor,
 and receives no onSubmitting/onAcknowledged/onApplied/onUndelivered callbacks.
+It defines its own narrow dependency contract, without importing SessionExecutionServiceDeps.
 Provider requester identity comes from the active invocation, not the shared queue author.
 Ordinary turn and composer routing remain unchanged.
+
+The source facade shares [session authorization](../../../../packages/components/src/providers/session-control-authorization.ts)
+between queue Steer and mutation, using the existing session visibility predicate and complete
+authenticated machine/project snapshots. A machine-only check would expose private-project
+sessions. RuntimeProvider supplies a workspace-fenced snapshot; missing metadata or authorization
+fails closed. Routing plane is decided independently of sender availability: local failure cannot
+fall through to Streams. The target daemon cannot authenticate a caller identity from this RPC.
 
 ## Resources and failures
 
@@ -86,7 +94,11 @@ Recovery uses marker and frozen history, without requiring a surviving row. Exis
 remain readable. A legacy row without a revision may be removed only when its frozen content
 is provably unchanged and it is not being edited; otherwise preserve it for reconciliation.
 
-Reserved/fallback recover the same ordinary turn; submitting/acknowledged never replay;
+Reserved without history clears its marker and leaves the queue untouched, with no terminal
+receipt. Same C/T retries revalidate and reserve anew, either after startup recovery or within
+the current request; a failed clear prevents proceeding. A cached error here would incorrectly
+make a proven-unsubmitted operation permanently unsteerable for the remaining active turn.
+Reserved with history/fallback recover the same ordinary turn; submitting/acknowledged never replay;
 applied recovers an accepted receipt. Ordinary cancel-and-dispatch retains its history/activation
 publication order and in-memory receipts. The [Spec](../../../../specs/message-queue-interactions.md)
 owns the full contract and remains draft. This supersedes the
@@ -105,6 +117,13 @@ Explicit promise gates prove durable removal before submission, zero submissions
 reservation/history/removal/submission-marker persistence failure, marker-plus-history recovery,
 and local guard release. Components verify displaced-draft retention; shared negotiation rejects v1.
 No race assertion depends on sleeps or real network scheduling.
+
+The execution suite connects the real source facade, Streams client/server, LoroDoc and execution
+service over an in-memory transport. A visible machine with a denied private project rejects
+both controls with zero appends, no marker, and unchanged queue/history/active turn. Local routing
+with no sender also rejects without constructing the remote client. A positive project-access
+control reaches the daemon and applies C. Restart and in-request pre-history recovery both allow
+the same C/T to proceed. These are deterministic synthetic traces, not production-user traces.
 
 Direct CLI/components typechecks and targeted tests were run. Root pnpm check / pnpm format
 cannot start because corepack is absent; installed pnpm runs targeted checks and Prettier instead.

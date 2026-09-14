@@ -2,7 +2,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { LODY_PRESENCE_HEARTBEAT_MS, type MachineId, type WorkspaceId } from '@lody/shared';
 import { authTokenAtom, runtimeAtom } from '@/atoms/runtime';
-import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms';
+import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom, userAtom } from '@/atoms';
 import { clearDocMetaCacheAtom, docMetaSubscriptionAtom } from '@/atoms/doc-meta';
 import {
   clearLodyPresenceStatesAtom,
@@ -35,6 +35,9 @@ import { isElectronRenderer } from '@/lib/electron';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { usePlatform } from '@lody/platform/react';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
+import { useVisibleLocalProjectsFromMachineIndex } from '@/hooks/use-visible-local-projects';
+import { useAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
+import type { SessionControlAuthorization } from './session-control-authorization';
 
 const isExpectedRuntimeShutdownError = (error: unknown): boolean => {
   if (!(error instanceof Error)) {
@@ -87,6 +90,29 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     includeMachineFlock: false,
     syncMachineFlock: false,
   });
+  const visibleProjectIndex = useVisibleLocalProjectsFromMachineIndex(visibleMachineIndex);
+  const currentUserId = useAtomValue(userAtom)?.id;
+  const authentication = useAuthenticatedConvex();
+  const sessionAuthorizationRef = useRef<{
+    workspaceId: WorkspaceId;
+    authorization: SessionControlAuthorization;
+  } | null>(null);
+  sessionAuthorizationRef.current =
+    !workspaceId ||
+    !currentUserId ||
+    !authentication.isAuthenticated ||
+    authentication.isLoading ||
+    visibleMachineIndex.isLoading ||
+    visibleProjectIndex.isLoading
+      ? null
+      : {
+          workspaceId,
+          authorization: {
+            visibleMachineIds: new Set(visibleMachineIndex.convexAuthorizedMachineIds),
+            visibleLocalProjectKeys: new Set(visibleProjectIndex.accessByProjectKey.keys()),
+            currentUserId,
+          },
+        };
   const authorizedMachineIdsRef = useRef<{
     machineIds: ReadonlySet<MachineId>;
     workspaceId: WorkspaceId;
@@ -264,9 +290,16 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
             const snapshot = authorizedMachineIdsRef.current;
             return snapshot?.workspaceId === effectiveWorkspaceId ? snapshot.machineIds : null;
           },
+          getSessionControlAuthorization: () => {
+            const snapshot = sessionAuthorizationRef.current;
+            return snapshot?.workspaceId === effectiveWorkspaceId ? snapshot.authorization : null;
+          },
           ...(telemetryEnabled
             ? {
-                onAnalyticsEvent: (event: { name: string; properties?: Record<string, unknown> }) => {
+                onAnalyticsEvent: (event: {
+                  name: string;
+                  properties?: Record<string, unknown>;
+                }) => {
                   capturePostHogEvent(postHogRef.current, event.name, event.properties);
                 },
               }

@@ -49,7 +49,14 @@ CLI 规则引用的 `context/cli-effect-ts.md` 在当前 checkout 缺失。
 
 Queue 服务不读取 runtime map、agentClient、promptInFlight、invocation 或 successor，
 也不使用 onSubmitting/onAcknowledged/onApplied/onUndelivered 回调。Provider requester
-来自活动 invocation，不相信队列作者。既有普通 turn 与 composer 路由不变。
+来自活动 invocation，不相信队列作者。服务定义自己的窄依赖契约，不导入
+SessionExecutionServiceDeps。既有普通 turn 与 composer 路由不变。
+
+Source facade 为队列 Steer 和 mutation 共用 [session 授权](../../../../packages/components/src/providers/session-control-authorization.ts)，
+使用已有 session visibility 判断和完整的已认证 machine/project 快照。Machine-only 检查会暴露
+私有项目 session。RuntimeProvider 提供按 workspace 隔离的快照；metadata 或授权缺失时
+fail closed。Routing plane 独立于 sender 可用性，local 失败不能落入 Streams。
+目标 daemon 无法从此 RPC 认证调用方身份。
 
 ## 资源和失败
 
@@ -80,7 +87,10 @@ Native 顺序是 reservation marker → pending_apply history durable → queue 
 恢复使用 marker 和冻结 history；不要求原 row 存在。旧 marker 仍可读；若残留 row 无 revision，
 只有可证明与冻结内容一致且不在编辑中才删除，否则保留并等待对账。不能通过恢复丢掉已接受编辑。
 
-`reserved`/`fallback` 可恢复同一个普通 turn；`submitting`/`acknowledged` 不重放；
+没有 history 的 `reserved` 清除 marker、保留 queue，不生成终态 receipt。相同 C/T 的重试
+重新验证并建立 reservation，既支持启动恢复后重试，也支持当前请求继续；clear 失败则不能继续。
+此处缓存错误会让确定未提交的操作在当前 active turn 剩余期间永久无法再次 Steer。
+有 history 的 `reserved`/`fallback` 可恢复同一个普通 turn；`submitting`/`acknowledged` 不重放；
 `applied` 恢复 accepted 回执。普通 cancel-and-dispatch 保留既有 history/activation
 发布顺序与内存回执。完整契约由 [Spec](../../../../specs/message-queue-interactions.zh.md) 拥有；
 它仍是 draft。本决策替代[原记录](../feature/2026-09-13-queue-steer-controls.zh.md)的
@@ -96,6 +106,12 @@ receipt/restart，以及真实 LoroDoc 上的 reservation 与 edit/remove/reorde
 显式 promise gate 验证删除持久化先于 provider，以及 reservation/history/removal/submission-marker
 持久化失败时零提交、marker 加 history 的恢复和本地 guard 释放。组件覆盖 row 消失后的草稿保留，
 共享协议拒绝 v1。测试不使用睡眠或真实网络来决定竞态。
+
+Execution suite 用内存传输连接真实 source facade、Streams client/server、LoroDoc 和
+execution service。Machine 可见但私有项目不可见时，两种 control 均拒绝：零 append、无 marker，
+queue/history/active turn 不变。Local 缺 sender 同样拒绝且不创建远程 client。开放项目权限的
+正向对照可到达 daemon 并应用 C。重启恢复和请求内 pre-history 恢复都允许相同 C/T 继续。
+这些是确定性合成数据 trace，不是生产用户 trace。
 
 直接 CLI、components 类型检查与目标测试已运行；根级 pnpm check / pnpm format
 因缺少 corepack 无法启动，改用已安装 pnpm 运行目标检查和 Prettier。

@@ -67,9 +67,13 @@ import {
   sessionForkFailure,
   sessionEditAndResendFailure,
 } from '@lody/shared';
-import { createAsyncConcurrencyGate } from '@/lib/async-concurrency-gate';
-import { getIpcServices } from '@/lib/electron-ipc-client';
+import { createAsyncConcurrencyGate } from '../lib/async-concurrency-gate';
+import { getIpcServices } from '../lib/electron-ipc-client';
 import type { WorkspaceTargetRouter } from './workspace-target-router';
+import {
+  authorizeSessionControl,
+  type SessionControlAuthorizationDeps,
+} from './session-control-authorization';
 
 const LOCAL_MACHINE_ID_READY_TIMEOUT_MS = 2_000;
 const CODE_COLLAB_DIFF_RPC_CONCURRENCY_LIMIT = 4;
@@ -90,14 +94,12 @@ type LspRequest = {
   readonly character?: number;
 };
 
-export type WorkspaceMachineRpcFacadeDeps = {
+export type WorkspaceMachineRpcFacadeDeps = SessionControlAuthorizationDeps & {
   workspaceId: WorkspaceId;
   targetRouter: Pick<WorkspaceTargetRouter, 'getPlaneForMachine' | 'resolvePlaneForMachine'>;
   getMachineProtocolCapabilities: (
     machineId: MachineId
   ) => Promise<MachineProtocolCapabilities | undefined>;
-  /** Authenticated source snapshot; null means cloud authorization is not ready. */
-  getAuthorizedMachineIds?: () => ReadonlySet<MachineId> | null;
   getMachineRpcClient: (machineId: MachineId) => Promise<LoroStreamsMachineRpcClient>;
 };
 
@@ -135,6 +137,18 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       getLocalMachineRpcSender() &&
       targetRouter.getPlaneForMachine(machineId) === 'local'
     );
+  };
+
+  const resolveSessionControlPlane = async (machineId: MachineId) => {
+    const plane =
+      targetRouter.getPlaneForMachine(machineId) ??
+      (await targetRouter.resolvePlaneForMachine(machineId, {
+        timeoutMs: LOCAL_MACHINE_ID_READY_TIMEOUT_MS,
+      }));
+    if (plane !== 'local' && plane !== 'cloud') {
+      throw new Error('Session control routing is unavailable.');
+    }
+    return plane;
   };
 
   const sendLocalMachineRpcRequest = async (
@@ -780,7 +794,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
       if (!machineSupportsQueueItemSteerProtocol({ protocolCapabilities })) {
         throw new Error('This daemon does not support queue ownership controls.');
       }
-      if (await canUseLocalMachineRpc(machineId)) {
+      if ((await resolveSessionControlPlane(machineId)) === 'local') {
         const response = await getLocalMachineRpcSender()?.({
           machineId,
           workspaceId,
@@ -792,8 +806,8 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         if (!response.ok) throw new Error(response.error);
         return response.result as SessionQueueMutationResponse;
       }
-      if (!deps.getAuthorizedMachineIds?.()?.has(machineId)) {
-        throw new Error('Source authorization for this machine is unavailable or denied.');
+      if (!(await authorizeSessionControl(deps, args.sessionId, machineId))) {
+        throw new Error('Source authorization for this session is unavailable or denied.');
       }
       return await (await getMachineRpcClient(machineId)).requestSessionQueueMutation(args);
     } catch (error) {
@@ -826,7 +840,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           error: 'This machine does not support exact queued-message steering.',
         };
       }
-      if (await canUseLocalMachineRpc(machineId)) {
+      if ((await resolveSessionControlPlane(machineId)) === 'local') {
         const response = await getLocalMachineRpcSender()?.({
           machineId,
           workspaceId,
@@ -847,15 +861,14 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         if (response?.ok) return response.result as SessionQueueSteerResponse;
         throw new Error('Local queue control is unavailable.');
       }
-      const authorizedMachineIds = deps.getAuthorizedMachineIds?.() ?? null;
-      if (!authorizedMachineIds?.has(machineId)) {
+      if (!(await authorizeSessionControl(deps, args.sessionId, machineId))) {
         return {
           type: 'session/queue-steer_response',
           sessionId: args.sessionId,
           queueItemId: args.queueItemId,
           accepted: false,
           disposition: 'error',
-          error: 'Source authorization for this machine is unavailable or denied.',
+          error: 'Source authorization for this session is unavailable or denied.',
         };
       }
       return await (
