@@ -105,7 +105,9 @@ inside the live turn, and the caller re-sends an undelivered steer — so wideni
 replacing) user Harness config and launches the pinned package closure through
 `dsh --profile`. The generated profile composes `@deepseek-ai/dsh-base` with a Lody overlay
 that disables the product telemetry, request-inventory, and LLM-title rows, so the host keeps
-the upstream base composition without inheriting the web product surface. CLI production and dev
+the upstream base composition without inheriting the web product surface. Never compose the
+product app bundles, and install every launcher package as an exact `name@version` (the Cordis
+ecosystem rides its own releases). CLI production and dev
 builds copy the extension's pinned official presets beside `deepseek-acp.js`; the generated
 roster also discovers `$DSH_HOME/.agent-presets`. The host mounts Harness's file settings
 provider for `$DSH_HOME/settings.yaml` (default `~/.dsh/settings.yaml`); refresh provider

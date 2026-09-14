@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -91,14 +91,17 @@ describe('resolveDeepSeekHarnessProcessLaunch', () => {
     if (!name) throw new Error('Generated profile has no ACP adapter entry');
     const specifier: unknown = JSON.parse(name.slice('      name: '.length));
     if (typeof specifier !== 'string') throw new Error('ACP adapter entry is not a string');
-    expect(resolve(specifier)).toBe(resolve(adapterPath));
+    // Cordis resolves `name` as a module specifier, so the generator renders a
+    // `file:` URL. A raw Windows drive path would parse as the `c:` scheme.
+    expect(specifier.startsWith('file:')).toBe(true);
+    expect(resolve(fileURLToPath(specifier))).toBe(resolve(adapterPath));
 
     // A separate Node process exercises its native ESM loader, not Vite's import transform.
     const { stdout } = await promisify(execFile)(process.execPath, [
       '--input-type=module',
       '-e',
       'const adapter = await import(process.argv[1]); console.log(adapter.marker);',
-      pathToFileURL(specifier).href,
+      specifier,
     ]);
     expect(stdout.trim()).toBe('synthetic-acp-loaded');
     expect(profile.cordisPatchYml).toContain(
