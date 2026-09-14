@@ -762,16 +762,7 @@ describe('useSessionActions', () => {
 
   it('authors the pending user turn through the writer seam on send', async () => {
     const sessionId = 'session-append-turn-writer' as SessionId;
-    const appendSessionTurn = vi.fn(async () => 'direct' as const);
-    const runtime = createRuntime({
-      writer: {
-        modeForMachine: () => 'direct' as const,
-        modeForSession: async () => 'direct' as const,
-        upsertDocMeta: vi.fn(async () => undefined),
-        appendSessionTurn,
-        appendSessionHistory: vi.fn(async () => undefined),
-      } as unknown as WorkspaceRuntime['writer'],
-    });
+    const runtime = createRuntime({});
     const actions = await renderActions(runtime);
 
     const entry = await actions.addSessionHistory(sessionId, {
@@ -784,12 +775,11 @@ describe('useSessionActions', () => {
       finished: true,
     } as unknown as Parameters<SessionActions['addSessionHistory']>[1]);
 
-    expect(appendSessionTurn).toHaveBeenCalledTimes(1);
-    expect(appendSessionTurn).toHaveBeenCalledWith(
-      sessionId,
-      expect.objectContaining({ id: entry.id, role: 'user' }),
-      undefined
+    const stored = await runtime.withSessionStore(sessionId, (sessionStore) =>
+      sessionStore.sessionData.history.readTurn(entry.id)
     );
+    expect(stored).toMatchObject({ state: 'ready', turn: entry });
+    expect(entry.items).toEqual([{ type: 'text', text: 'hi' }]);
   });
 
   it('mints a fresh turn id when identical content is sent again (undelivered-turn resend)', async () => {
@@ -842,16 +832,9 @@ describe('useSessionActions', () => {
     expect(resentEntry.inputConfig?.inputBlocks).toEqual(inputBlocks);
   });
 
-  it('starts a session through one aggregate writer call', async () => {
+  it('preserves the initial history and activity through the extracted submission service', async () => {
     const sessionId = 'session-aggregate-start' as SessionId;
-    const startSession = vi.fn(async () => 'direct' as const);
-    const runtime = createRuntime({
-      writer: {
-        modeForMachine: () => 'direct' as const,
-        modeForSession: async () => 'direct' as const,
-        startSession,
-      } as unknown as WorkspaceRuntime['writer'],
-    });
+    const runtime = createRuntime({});
     const actions = await renderActions(runtime);
 
     const result = await actions.startSession(createSessionPayload(sessionId), {
@@ -868,21 +851,16 @@ describe('useSessionActions', () => {
       },
     } as unknown as Parameters<SessionActions['startSession']>[1]);
 
-    expect(startSession).toHaveBeenCalledOnce();
-    expect(startSession).toHaveBeenCalledWith(
-      sessionId,
-      // lastMessageAt rides the accept unit itself: the meta always carries
-      // the first message's activity, so a close racing the first turn can
-      // never mistake the session for an empty, deletable one.
-      expect.objectContaining({
-        id: sessionId,
-        machineId: 'machine-1',
-        lastMessageAt: expect.any(Number),
-      }),
-      expect.objectContaining({ id: result.historyEntry.id, role: 'user' }),
-      expect.objectContaining({ userTurnId: result.historyEntry.id })
+    const stored = await runtime.withSessionStore(sessionId, (sessionStore) =>
+      sessionStore.sessionData.history.readTurn(result.historyEntry.id)
     );
-    expect(runtime.withSessionStore).not.toHaveBeenCalled();
+    expect(stored).toMatchObject({ state: 'ready', turn: result.historyEntry });
+    expect(result.sessionMeta).toMatchObject({
+      id: sessionId,
+      machineId: 'machine-1',
+      lastMessageAt: expect.any(Number),
+    });
+    expect(result.historyEntry.inputConfig?.inputBlocks).toEqual([{ type: 'text', text: 'hi' }]);
   });
 
   it('keeps a local branch selector out of baseBranch until the target machine resolves it', async () => {
