@@ -479,6 +479,8 @@ export interface SessionChatStreamViewProps {
   className?: string;
   /** Scrolls as the first conversation row (for example, Session provenance). */
   leadingContent?: ReactNode;
+  /** Scrolls after history as a local, not-yet-committed user message. */
+  trailingContent?: ReactNode;
   emptyState?: ReactNode;
   onAtBottomChange?: (atBottom: boolean) => void;
   showScrollToLatest?: boolean;
@@ -1257,6 +1259,7 @@ export const SessionChatStreamView = forwardRef<
       initialWindowReady = true,
       className,
       leadingContent,
+      trailingContent,
       emptyState,
       onAtBottomChange,
       showScrollToLatest = true,
@@ -1447,6 +1450,7 @@ export const SessionChatStreamView = forwardRef<
     // before `Virtualizer` mounts, yet every hook above that return has already
     // run — including the one that reads the stored row measurements.
     const hasVirtualizedRows = virtualRows.length > 0;
+    const trailingRowCount = trailingContent == null ? 0 : 1;
 
     const {
       scrollRef: scrollContainerRef,
@@ -1464,7 +1468,8 @@ export const SessionChatStreamView = forwardRef<
       hasVirtualizedRows,
       // `leadingContent` is a real first Virtua row, so it counts here — sticky
       // scroll otherwise targets an index short of the true bottom.
-      itemCount: virtualRows.length + leadingRowCount + (shouldShowAgentActivity ? 1 : 0),
+      itemCount:
+        virtualRows.length + leadingRowCount + trailingRowCount + (shouldShowAgentActivity ? 1 : 0),
       onAtBottomChange,
       skipNextViewportResizeAutoScrollRef,
       suppressAutoScrollRef: autoScrollSuppressedRef,
@@ -1817,6 +1822,11 @@ export const SessionChatStreamView = forwardRef<
                     </div>
                   )}
                 </div>
+                {trailingContent == null ? null : (
+                  <div className="shrink-0" data-conversation-trailing-content="">
+                    {trailingContent}
+                  </div>
+                )}
               </div>
             </ContainerQueryProvider>
           </SessionImagePreviewContext.Provider>
@@ -1937,6 +1947,9 @@ export const SessionChatStreamView = forwardRef<
                     </MessageSelectionRow>
                   );
                 })}
+                {trailingContent == null ? null : (
+                  <div data-conversation-trailing-content="">{trailingContent}</div>
+                )}
                 {shouldShowAgentActivity && agentActivityLabel && (
                   <AgentActivityRow label={agentActivityLabel} tone={agentActivityTone} />
                 )}
