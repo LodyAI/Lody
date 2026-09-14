@@ -71,6 +71,7 @@ import {
   Cluster,
   Grid,
   LegendKey,
+  Note,
   PaletteSplit,
   Row,
   Rows,
@@ -2443,11 +2444,11 @@ function TablePressRow() {
           onRowPress={(row) => setOpened(row.name)}
         />
       </div>
-      <span {...stylex.props(styles.rungUse)}>
+      <Note>
         The pointer is answered only where pressing a row does something, and a row that can be
         pressed is reachable by the keyboard and rings where the keyboard is.{' '}
         {opened ? `Opened ${opened}.` : 'Nothing opened yet.'}
-      </span>
+      </Note>
     </Row>
   );
 }
@@ -2468,10 +2469,10 @@ function TableSelectRow() {
           rowLabel={(row) => `Select ${row.name}`}
         />
       </div>
-      <span {...stylex.props(styles.rungUse)}>
+      <Note>
         The box in the head is derived, never passed: none, some — which is mixed — or all. The tick
         is what says a row is taken; the fill is so a person can find them again.
-      </span>
+      </Note>
     </Row>
   );
 }
@@ -2502,10 +2503,10 @@ function TableSortRow() {
           onSortChange={setSort}
         />
       </div>
-      <span {...stylex.props(styles.rungUse)}>
+      <Note>
         One column wears the arrow, because two is a state a table cannot be in. The table never
         reorders the rows — the order is the surface's, and here the board sorts its own.
-      </span>
+      </Note>
     </Row>
   );
 }
@@ -2524,11 +2525,11 @@ function TableStickyRow() {
       <div {...stylex.props(styles.disclosureBlock)}>
         <Table columns={BOARD_COLUMNS} rows={many} rowKey={sessionKey} maxHeight={168} />
       </div>
-      <span {...stylex.props(styles.rungUse)}>
+      <Note>
         A table told how tall it may be owns a scroll box, and its head stays in it. A head that
         stays is no longer a row: it takes the region rung, because a transparent one is not a
         quieter design — the records are painted through the column names.
-      </span>
+      </Note>
     </Row>
   );
 }
@@ -2594,12 +2595,12 @@ function TableStackRow() {
       <div {...stylex.props(styles.narrowTable)}>
         <Table columns={BOARD_COLUMNS} rows={SESSIONS.slice(0, 2)} rowKey={sessionKey} />
       </div>
-      <span {...stylex.props(styles.rungUse)}>
+      <Note>
         A table narrower than its columns need is not a table with a scrollbar: it is a list of
         records, each a stack of label-and-value lines. It asks about its own box rather than the
         window, so a table in a narrow side panel stacks on a wide screen — and the labels are the
         head's own words, which only a table that was told its columns can reach.
-      </span>
+      </Note>
     </Row>
   );
 }
@@ -2623,10 +2624,10 @@ function TablePartsRow() {
           </Table.Body>
         </Table.Root>
       </div>
-      <span {...stylex.props(styles.rungUse)}>
+      <Note>
         A two-column list of facts is not a list of records, so it reads its labels as row headers
         and assembles the elements itself.
-      </span>
+      </Note>
     </Row>
   );
 }
@@ -3997,7 +3998,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
         title="Table · rows on the page"
         rule="The one part of this package with no surface of its own: no background, no shadow, no radius. A table is rows on whatever the surface around it already was, so the card holding one keeps owning its edges — and what it draws is the single edge the rules give a list, separator, between one row and the next. The head takes that line too: it is the row before the first record, and the rule against a line under a header is about a heading over a surface. The last record draws none, because there is no next row there. The two fills are the palette's own hoverFill and selectedFill rather than a mix of the surface — the rules name those two for a row on the page and card rungs, and this is that row; a popup derives its own only because on the floating rung they collapse into it. The pointer is answered only where pressing a row does something: a table of facts is read, not operated. A row is on the control ladder, and the size is stated once on the table, because a row's height and a cell's padding are one decision."
       >
-        <PaletteSplit palettes={palettes}>
+        <PaletteSplit palettes={palettes} wide>
           <Rows>
             {TABLE_SIZES.map((entry) => (
               <TableSizeRow key={entry.name} {...entry} />
