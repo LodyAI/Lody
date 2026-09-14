@@ -21,6 +21,7 @@
     "./drawer": "./src/drawer/drawer.tsx",
     "./field": "./src/field/field.tsx",
     "./gallery": "./src/gallery/gallery.tsx",
+    "./icons": "./src/icons/index.ts",
     "./input": "./src/field/input.tsx",
     "./kbd": "./src/kbd/kbd.tsx",
     "./menu": "./src/menu/menu.tsx",
