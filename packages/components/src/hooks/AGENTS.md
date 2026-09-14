@@ -4,39 +4,31 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
 
 ## Conversation scrolling
 
-- The first window settles before the viewport is revealed; transient visible-range
-  reports must not redirect that initial lease. Later window loads never hide the view.
-- Restore before paint; hydration re-anchors only while following. Bottom
-  following uses DOM extent, never a row index that eviction can invalidate.
-  Correct content measurement changes in ResizeObserver delivery before paint,
-  including unchanged row counts; do not defer this correction to RAF. Virtua
-  commits its spacer height from row measurement: also correct that height
-  commit in a MutationObserver microtask, before a deferred spacer resize
-  notification. Observe only the spacer height style and direct row mounts/removals (which
-  can overflow its old height), never row subtrees or text. Respect the live follow lock and explicit jump suppression.
-- Keep virtualization and bottom-following separate: `virtua` owns mounted rows,
-  measurement, and index navigation; `use-sticky-scroll.ts` adapts `use-stick-to-bottom`
-  to Virtua's viewport and content elements. Never restore a content-token effect or a
-  distance-based upward-scroll threshold. Any real upward wheel, touch, selection, or
-  scrollbar movement releases streaming follow at once.
-- Sticky-scroll binds through the real scroll viewport's React callback ref, on Virtua's
-  public `Virtualizer` primitive with that explicit viewport. Never recover the element
-  from a `VList` handle, DOM query, item-count effect, observer retry, or timer.
-  Bind on viewport mount and detach on unmount, including empty-to-populated lists.
-- Treat `use-stick-to-bottom`'s `state.isAtBottom` as the follow-lock truth: the returned
-  `isAtBottom` adds near-bottom tolerance, and `escapedFromLock` is escape history that
-  survives explicit re-locking.
-- Follow viewport-size changes from the viewport's `ResizeObserver` records; never
-  restore resize-event pumps, guessed transition durations, or stop timers. Only HEIGHT
-  changes may re-anchor the viewport; never forward width-only records.
-- A session composer height change sets a one-shot ref immediately before its inline
-  height write. Consume that ref only for the next viewport _height_ resize, without
-  calling `scrollToRealBottom`, and keep it separate from jump suppression.
-- Group expansion scrolls after Virtua descendants finish their layout effects and
-  releases sticky suppression in the later parent layout effect of the same commit;
-  no frame retries or guessed settle timers.
-- Preserve per-session restoration, search/expansion suppression, and viewport
-  resize handling for keyboards and terminal docks.
+- Reveal only after the first window settles; transient visible-range reports must
+  not redirect its lease. Later loads never hide the view. Restore before paint;
+  hydration re-anchors only while following, using DOM extent, not evictable indices.
+- Correct content measurements in ResizeObserver before paint, even with unchanged
+  row counts; no RAF deferral. Correct Virtua spacer-height commits in MutationObserver
+  before deferred resize delivery. Observe only spacer height style and direct row
+  mounts/removals (which may overflow it), never subtrees/text. Respect the live follow
+  lock and explicit jump suppression.
+- Virtua owns rows, measurement and index navigation; `use-sticky-scroll.ts` adapts
+  `use-stick-to-bottom` to its viewport/content. No content-token effects or upward
+  distance thresholds: real upward wheel, touch, selection or scrollbar movement
+  releases streaming follow immediately.
+- Bind through the viewport's React callback ref on Virtua's public `Virtualizer`;
+  detach on unmount, including empty-to-populated transitions. Never recover it from
+  a `VList` handle, DOM query, item-count effect, observer retry or timer.
+- Follow-lock truth is `state.isAtBottom`: the returned `isAtBottom` includes tolerance;
+  `escapedFromLock` records escape history and survives explicit re-locking.
+- Handle viewport HEIGHT changes through ResizeObserver; ignore width-only records.
+  No resize-event pumps, guessed transition durations or stop timers. Before a composer
+  inline-height write, set a one-shot ref consumed only by the next viewport height
+  resize, without `scrollToRealBottom`; keep it separate from jump suppression.
+- Group expansion scrolls after Virtua descendants' layout effects; release suppression
+  in the later parent layout effect of that commit. No frame retries/settle timers.
+- Preserve per-session restoration, search/expansion suppression and viewport resizing
+  for keyboards and terminal docks.
 
 ## Session, auth, and app shell
 
@@ -66,34 +58,29 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
 
 ## Workspace catalog
 
-- `use-workspace-catalog.ts` reads a ref-counted per-workspace room in
-  `lib/workspace-catalog-room.ts`; it must not open the Flock document, subscribe, or
-  join the room per mount. MCP servers and Agent Roles are two row families of that ONE
-  document, so `use-workspace-mcp-catalog.ts` and `use-workspace-agent-roles.ts` derive
-  from that room instead of opening a second one. Keep the shared snapshot identity
-  stable across mounts.
-- Catalog `upsert`/`remove` (Agent Roles and MCP alike) resolve on DURABILITY; the
-  upload runs on its own and no surface waits for it or reports it.
-- `use-workspace-agent-roles.ts` filters the catalog through the shared
-  `listAccessibleAgentRoles` / `resolveAgentRoleAvailability` rules, never a local
-  predicate. Availability stays `unknown` — not `unavailable` — until that machine's
-  agent-config rows are read, so subscribe exactly the machines the given Roles point at.
-  A Settings row states only reasons about its own binding; `machine_offline` belongs to
-  the group's machine pill.
+- `use-workspace-catalog.ts` reads the ref-counted room in
+  `lib/workspace-catalog-room.ts`. Never open, subscribe or join per mount. MCP servers
+  and Agent Roles share that ONE Flock document; their hooks derive from the room and
+  preserve snapshot identity across mounts.
+- Role/MCP catalog `upsert`/`remove` resolve on DURABILITY; upload runs independently
+  and no surface waits for or reports it.
+- Role filtering uses shared `listAccessibleAgentRoles` / `resolveAgentRoleAvailability`,
+  never local predicates. Availability stays `unknown` until bound machine configs load;
+  subscribe exactly those machines. Settings rows describe their own binding;
+  `machine_offline` belongs to the group pill.
 
 ## Code Collab
 
-- Code Collab file-index hooks borrow owner-session resources from the workspace-owned
-  Effect `ScopedCache`; do not open, scan, subscribe, or join the same Flock once per
-  React mount. The resource subscribes before its cold scan, advances by batch events,
-  and compares the Flock version before any remote catch-up rescan. Each entry holds a
-  loro-repo Flock lease: LRU eviction closes its room and Flock subscriptions, releases
-  the lease, then unloads the replica, in that order; a room that finishes joining after
-  eviction is unsubscribed and best-effort unloaded again. Never cache a failed open;
-  invalidate a failed room resource after its last borrower releases. Workspace disposal
-  closes every borrower Scope before destroying the repo, and cache-resource identity is
-  part of provider memoization. Local-machine RPC snapshots seed the shared resource
-  before it is visible; later Flock events stay deduplicated across mounts.
+- File-index hooks borrow owner-session resources from the workspace Effect
+  `ScopedCache`, never open/scan/subscribe/join per mount. Subscribe before cold scan,
+  advance by batches and compare Flock versions before remote catch-up rescans.
+- Each entry owns a loro-repo Flock lease. LRU eviction closes room and Flock
+  subscriptions, releases the lease, then unloads the replica. Late room joins after
+  eviction must unsubscribe and best-effort unload again. Never cache failed opens;
+  invalidate failed resources after their last borrower releases.
+- Workspace disposal closes borrower Scopes before destroying the repo. Provider
+  memoization includes cache-resource identity. Local-machine RPC snapshots seed the
+  shared resource before exposure; later Flock events stay deduplicated across mounts.
 
 ## Mobile prompts and Live Activity
 
