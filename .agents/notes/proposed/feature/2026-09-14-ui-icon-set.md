@@ -88,13 +88,36 @@ Base UI and StyleX alone at runtime.
 
 **A stateful icon moves by one number.** `--lody-icon-t` is registered with
 `CSS.registerProperty` as a `<number>` so CSS can transition it; every part of
-the icon is a function of it — the sidebar's divider slides 3 units, its dashes
-scale out, a chevron rotates 180°, a check draws through `pathLength` and dash
-offset, a bell swings by `sin` and comes back to rest. Only transform, opacity
-and dash offset move, no path morphs, so at rest each state is the static
-drawing and a host without property transitions snaps to the right state.
-`prefers-reduced-motion` sets the duration to zero. Nine icons ship this way;
-the pattern covers displacement, rotation, draw-in, fill-and-pop and crossfade.
+the icon is a function of it — the sidebar's divider slides 1.5 units and its
+rows retract by their dash, a chevron rotates 180°, a check draws through
+`pathLength` and dash offset, a bell swings by `sin` and comes back to rest.
+Only transform, opacity and dash offset move, no path morphs, so at rest each
+state is the static drawing and a host without property transitions snaps to
+the right state. `prefers-reduced-motion` sets the duration to zero. Nine icons
+ship this way; the pattern covers displacement, rotation, draw-in,
+fill-and-pop and crossfade.
+
+**Correction: the collapsed sidebar was drawn into a rail that could not hold
+it, and scaled where it should have retracted.** As first drawn, the collapsed
+state put its divider at 6.5, leaving a 3-unit rail; the two strokes bounding
+that rail take 1.5 of it, so the marks inside had 1.5 units to live in and were
+drawn 2 wide. They overlapped the frame on one side and the divider on the
+other, and the icon read as three lumps rather than a rail — which is what
+opening the playground showed. The animated state was wrong a second way: it
+shrank the rows with `scaleX`, and a horizontal scale leaves a stroke's
+thickness alone while squashing its round caps, so at t = 1 the marks were 0.8
+wide against the static drawing's 2. The two ends of the transition were two
+different drawings, against the rule stated above.
+
+Both are redrawn. The divider collapses to 8.5, so the rail is 5 units and the
+3.5 between its strokes holds one mark of 2 with 0.75 of air on either side.
+The rows retract by dash instead: a dash shortened to zero length is a round
+cap and nothing else, which is a dot, and the uniform scale carrying it from
+1.5 to 2 grows the stroke without touching its shape. Two marks, not three —
+at 2 wide a third leaves a 1-unit gap, and a size ladder shows three dots
+smearing into one vertical stroke by 20px while two stay separate. The middle
+row fades; the outer two become the marks at (6, 9.5) and (6, 14.5), which is
+what `sidebar-collapsed` now draws.
 
 ## Alternatives
 
@@ -130,15 +153,24 @@ the test that fails on a token without an entry has nothing to say about one.
 
 The drawings themselves were seen earlier on the static Storybook board in
 Chromium, both palettes — every icon in its 24px box, the four sizes, the four
-treatments with transparent glyph cuts, the two-state pairs — and the transition
-was driven live there: `--lody-icon-t` resolves as a registered number, the
-sidebar divider computes to `translateX(-3px)` in the collapsed state, and
-flipping the property interpolates it over ~330 ms
-(`-1.56 → -2.45 → -2.82 → -2.97 → -3`). That check predates the move and is the
-evidence for the drawings, not for the playground: **the playground page itself
-has not been opened.** Whoever picks this up runs
-`pnpm --filter @lody/ui playground` and `pnpm --filter @lody/ui typecheck`
-first.
+treatments with transparent glyph cuts, the two-state pairs. That check reported
+the sidebar divider computing to `translateX(-3px)`, which was the measurement
+of the drawing corrected above and no longer holds; it is `-1.5px` now. Reading
+a number off a broken drawing and recording it as evidence is what that check
+did wrong: it proved the property was transitioning, not that the icon was
+right.
+
+The redrawn sidebar was checked in the playground in Chromium at 64px. The
+animated state at t = 1 and the static `sidebar-collapsed` were screenshotted
+and compared pixel by pixel: 825 ink pixels against 833, differing only by a
+one-pixel fringe on every stroke in the same direction, which is a sub-pixel
+crop offset rather than a difference in shape. The two marks land in the same
+place in both. The transition was rendered at t = 0, 0.25, 0.5, 0.75 and 1: the
+rows retract, the middle one fades, the caps stay round throughout, and no
+sliver appears. A size ladder at 16, 20, 24, 32 and 48 decided two marks over
+three. At 16px the rail is 2px wide and its marks are gone — the same limit the
+expanded drawing already has there, and the reason this set still owes an
+optically corrected small size.
 
 ## Deliberately not done
 

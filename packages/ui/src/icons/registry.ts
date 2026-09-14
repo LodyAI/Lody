@@ -186,9 +186,14 @@ export const ICONS: Record<IconName, IconDefinition> = {
     ],
   },
   'sidebar-collapsed': {
+    // The rail is 3.5 units of air between two strokes, so it holds one mark of
+    // 2 with 0.75 either side, and two of them down its length. A narrower rail
+    // — the 3 units this was first drawn at — leaves 1.5, and a 2-wide mark in
+    // it merges into the frame on one side and the divider on the other.
     marks: [
       { path: 'M5.5 4.5h13a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2z' },
-      { path: 'M6.5 4.5v15M4.75 8h.5M4.75 10.5h.5M4.75 13h.5' },
+      { path: 'M8.5 4.5v15' },
+      { path: 'M6 9.5h.01M6 14.5h.01', weight: 2 },
     ],
   },
   search: {
