@@ -1,3 +1,4 @@
+import type { CacheSnapshot } from 'virtua';
 import type { SessionId } from '@lody/shared';
 import { LRUCache } from '@/lib/lru-cache';
 
@@ -37,6 +38,46 @@ export function getScrollPosition(sessionId: SessionId): ScrollPositionState | u
 }
 
 /**
+ * Virtua's measured row sizes, plus the row count they were measured against.
+ *
+ * A cold virtualizer knows no row heights, so it lays a long conversation out
+ * at an estimated total height, writes the restore offset into that wrong
+ * coordinate space, and only corrects once the first rows have been measured.
+ * The conversation stays hidden across those commits, which is the blank flash
+ * on open. Handing the previous measurements back makes the first layout the
+ * real one.
+ *
+ * The row count guards the restore: Virtua's snapshot is positional, so it is
+ * only meaningful for a list of the same length. A conversation that grew
+ * while it was closed falls back to a cold start rather than restoring sizes
+ * against shifted indexes.
+ */
+interface VirtualizerCacheEntry {
+  snapshot: CacheSnapshot;
+  rowCount: number;
+}
+
+const virtualizerCache = new LRUCache<SessionId, VirtualizerCacheEntry>(DEFAULT_MAX_CACHE_SIZE);
+
+/** Save Virtua's row measurements for a session. */
+export function saveVirtualizerCache(
+  sessionId: SessionId,
+  snapshot: CacheSnapshot,
+  rowCount: number
+): void {
+  virtualizerCache.set(sessionId, { snapshot, rowCount });
+}
+
+/** Row measurements for a session, only when the list still has `rowCount` rows. */
+export function getVirtualizerCache(
+  sessionId: SessionId,
+  rowCount: number
+): CacheSnapshot | undefined {
+  const entry = virtualizerCache.get(sessionId);
+  return entry && entry.rowCount === rowCount ? entry.snapshot : undefined;
+}
+
+/**
  * Check if a session has cached scroll position.
  */
 export function hasScrollPosition(sessionId: SessionId): boolean {
@@ -48,6 +89,7 @@ export function hasScrollPosition(sessionId: SessionId): boolean {
  */
 export function clearScrollPosition(sessionId: SessionId): void {
   scrollPositionCache.delete(sessionId);
+  virtualizerCache.delete(sessionId);
 }
 
 /**
@@ -55,4 +97,5 @@ export function clearScrollPosition(sessionId: SessionId): void {
  */
 export function clearAllScrollPositions(): void {
   scrollPositionCache.clear();
+  virtualizerCache.clear();
 }

@@ -1429,6 +1429,8 @@ export const SessionChatStreamView = forwardRef<
       isSticky,
       scrollToBottom,
       initialScrollRestored,
+      initialVirtualizerCache,
+      persistVirtualizerCache,
       handleScroll,
     } = useStickyScroll({
       sessionId,
@@ -1578,6 +1580,8 @@ export const SessionChatStreamView = forwardRef<
     );
 
     const handleStreamScrollEnd = useCallback(() => {
+      // Scrolling measured more rows; keep them for the next open.
+      persistVirtualizerCache();
       const pending = pendingOutlineJumpRef.current;
       if (!pending) return;
       if (
@@ -1595,7 +1599,7 @@ export const SessionChatStreamView = forwardRef<
         attempts: pending.attempts + 1,
       };
       scrollRowToTop(pending.rowIndex);
-    }, [outlineJumpDrift, scrollRowToTop]);
+    }, [outlineJumpDrift, persistVirtualizerCache, scrollRowToTop]);
 
     // Any real input abandons the correction: a reader who starts scrolling
     // must never be yanked back by a jump they have already moved on from.
@@ -1826,6 +1830,10 @@ export const SessionChatStreamView = forwardRef<
               <Virtualizer
                 ref={vlistRef}
                 item={ConversationVirtualRow}
+                // Row heights measured the last time this session was open, so
+                // the first layout is the real one instead of an estimate that
+                // has to be corrected before the conversation can be shown.
+                cache={initialVirtualizerCache}
                 shift={false}
                 onScroll={handleStreamScroll}
                 onScrollEnd={handleStreamScrollEnd}
