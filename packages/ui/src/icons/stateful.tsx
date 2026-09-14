@@ -42,18 +42,14 @@ const styles = stylex.create({
     transitionTimingFunction: ease.standard,
   },
   centred: { transformBox: 'view-box', transformOrigin: '12px 12px' },
-  // sidebar: the divider slides from 9.5 to 6.5, the dashes scale out, the chevron slides in.
-  sidebarDivider: { transformBox: 'view-box', transform: `translateX(calc(${t} * -3px))` },
-  sidebarDashes: {
+  // sidebar: the divider slides from 10 to 6.5 and the rows shrink into the
+  // rail as dots, so the collapsed state is still a sidebar — a narrow one
+  // showing only marks — rather than a frame with a symbol pasted on it.
+  sidebarDivider: { transformBox: 'view-box', transform: `translateX(calc(${t} * -3.5px))` },
+  sidebarRows: {
     transformBox: 'view-box',
     transformOrigin: '5.5px 0',
-    opacity: `calc(1 - ${t})`,
-    transform: `scaleX(calc(1 - ${t}))`,
-  },
-  sidebarChevron: {
-    transformBox: 'view-box',
-    opacity: t,
-    transform: `translateX(calc((1 - ${t}) * -2px))`,
+    transform: `translateX(calc(${t} * -0.75px)) scaleX(calc(1 - ${t} * 0.8))`,
   },
   chevron: {
     transformBox: 'view-box',
@@ -143,7 +139,10 @@ const Frame = forwardRef<SVGSVGElement, FrameProps>(function Frame(
 
 const PANEL = 'M5.5 4.5h13a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2z';
 
-/** The sidebar, and whether it is there: the same frame, its divider moved and its rows gone. */
+/**
+ * The sidebar, and whether it is open: the same frame, its divider moved and
+ * its rows shrunk to the marks of a rail. Nothing is added in either state.
+ */
 export const SidebarToggleIcon = forwardRef<
   SVGSVGElement,
   StatefulIconProps & { collapsed: boolean }
@@ -151,11 +150,10 @@ export const SidebarToggleIcon = forwardRef<
   return (
     <Frame ref={ref} t={collapsed ? 1 : 0} {...rest}>
       <path d={PANEL} />
-      <path d="M9.5 4.5v15" {...stylex.props(styles.sidebarDivider)} />
-      <g {...stylex.props(styles.sidebarDashes)}>
-        <path d="M6 8h1.5M6 10.5h1.5M6 13h1.5" />
+      <path d="M10 4.5v15" {...stylex.props(styles.sidebarDivider)} />
+      <g {...stylex.props(styles.sidebarRows)}>
+        <path d="M5.5 8h2.5M5.5 10.5h2.5M5.5 13h2.5" />
       </g>
-      <path d="M12.5 9.5l2.5 2.5-2.5 2.5" {...stylex.props(styles.sidebarChevron)} />
     </Frame>
   );
 });
