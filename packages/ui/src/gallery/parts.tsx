@@ -84,6 +84,15 @@ const styles = stylex.create({
     gap: space[3],
     gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
   },
+  /**
+   * One palette per row rather than two side by side, for a sample that needs
+   * the page's width to be itself. A `Table` is the case that forced this: it
+   * asks about its own container, and two panels beside each other leave it
+   * 342px — under the width at which the rules say a table stops being columns
+   * — so the board rendered every table as the stacked list, including the one
+   * sample whose whole point is that it is the exception.
+   */
+  splitWide: { gridTemplateColumns: '1fr' },
   panel: {
     display: 'flex',
     flexDirection: 'column',
@@ -134,6 +143,24 @@ const styles = stylex.create({
     lineHeight: text.captionLeading,
     color: colors.tertiaryLabel,
     overflowWrap: 'anywhere',
+  },
+  /**
+   * A sentence about the sample above it. In a wrapping row it always takes its
+   * own line: a note sharing the row competes with the sample for width, and
+   * the sample is the thing the board is for — which is how two tables of the
+   * same size came to be laid out 260px and 342px wide on one board.
+   */
+  note: {
+    // `flex-basis: 100%` and no `max-width`. A max width would be the wrong
+    // kind of correct here: the flex base size is clamped by it *before* the
+    // line is broken, so a 72ch note fits beside a sample after all and the
+    // sample is squeezed to its minimum — which is the bug this part exists to
+    // fix, wearing a reading measure.
+    flexBasis: '100%',
+    margin: 0,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
+    color: colors.secondaryLabel,
   },
   legendKey: {
     flexBasis: '168px',
@@ -201,13 +228,16 @@ function modesFor(palettes: GalleryPalettes): ThemeMode[] {
  */
 export function PaletteSplit({
   palettes,
+  wide = false,
   children,
 }: {
   palettes: GalleryPalettes;
+  /** One palette per row, for a sample that needs the width to be itself. */
+  wide?: boolean;
   children: ReactNode;
 }) {
   return (
-    <div {...stylex.props(styles.split)}>
+    <div {...stylex.props(styles.split, wide && styles.splitWide)}>
       {modesFor(palettes).map((mode) => (
         <ThemeRoot key={mode} mode={mode}>
           <div {...stylex.props(styles.panel)}>
@@ -234,6 +264,11 @@ export function Row({ children }: { children: ReactNode }) {
 
 export function Cluster({ children }: { children: ReactNode }) {
   return <div {...stylex.props(styles.cluster)}>{children}</div>;
+}
+
+/** A sentence about the sample, on its own line under it. */
+export function Note({ children }: { children: ReactNode }) {
+  return <p {...stylex.props(styles.note)}>{children}</p>;
 }
 
 export function LegendKey({ children }: { children: ReactNode }) {

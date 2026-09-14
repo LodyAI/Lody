@@ -233,6 +233,42 @@ The container query is also beyond jsdom: the tests pin that the stacked classes
 are applied and that `stack={false}` withholds them, and Chromium is where the
 layout itself was read, at 320px and 640px, against the same markup.
 
+### Follow-up, 2026-09-14: the board was showing only the stacked form
+
+The component was measured at two widths in Chromium; **the board it lives on
+was not**, and it turned out to hand every table sample a 342px box — under the
+480px at which the rules say a table stops being columns. So every sample on
+that section rendered as the stacked list, including the one sample whose entire
+point is that it is the exception, and the section read as a wall of
+label-and-value pairs rather than as a table.
+
+Two board defects, neither of them the primitive's:
+
+- The section used the two-palette split, which is `minmax(340px, 1fr)` twice
+  across a 1120px page; with the 168px legend column beside it, a sample got
+  342px. `PaletteSplit` now takes `wide`, which puts one palette per row, and
+  the Table section asks for it. Samples measure 908px, and the one sample with
+  a 320px box is the only one that stacks — which is what makes it a
+  demonstration.
+- A sample's explanatory note shared the wrapping row with the sample and
+  competed with it for width, so two tables of the same size were laid out
+  260px and 342px wide on one board. Notes are now a `Note` part at
+  `flex-basis: 100%`, which always takes its own line. It carries **no**
+  `max-width`: a flex item's base size is clamped by `max-width` before the line
+  is broken, so a 72ch note fits beside the sample after all and squeezes it to
+  its minimum — the same bug wearing a reading measure.
+
+The 480px stack width is unchanged. It is conservative for a three-column table
+whose stated widths total about 300px, but it is the system's number and leaves
+room for the values rather than only the column names; a caller that wants the
+scrollbar instead still says `stack={false}`.
+
+What this says about the board generally: a sample is only a reference if it is
+given the width it needs, and nothing in this package's tests can tell that it
+was not. That is a thing to read off the rendered page, and it is now the reason
+`parts.tsx` carries both `splitWide` and `Note` with their rationale beside
+them.
+
 `ReviewerMachineConfigTable`'s own story cannot render in Storybook — it reaches
 `useCloudQuery` through the run-config menu and the story carries no
 `PlatformContext`, which is true of it before this change as well — so that
