@@ -169,7 +169,10 @@ import {
 import { TerminalComponent } from './terminal-component';
 import { prepareTerminalOutputBlocksPreview } from './terminal-preview';
 import { type DurationUnitLabels, formatDurationCompact } from '@/lib/format-duration';
-import { resolveSessionHistoryDurationMs } from '@/lib/session-history-duration';
+import {
+  resolveLiveSessionHistoryDurationMs,
+  resolveSessionHistoryDurationMs,
+} from '@/lib/session-history-duration';
 import { cn } from '@/lib/utils';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import type { TurnIndexRow } from '@/lib/conversation-view';
@@ -239,6 +242,7 @@ import {
 } from './conversation-font-size-classes';
 import { useSessionPin } from '@/components/sessions/session-pin-context';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useStableNow } from '@/hooks/use-stable-now';
 import {
   SEARCH_HIGHLIGHT_CONTAINER_ACTIVE_CLASS_NAME,
   SEARCH_HIGHLIGHT_CONTAINER_MATCHED_CLASS_NAME,
@@ -370,7 +374,13 @@ type AssistantVirtualContent =
       isThinking: boolean;
     }
   | { kind: 'subagent_tasks' }
-  | { kind: 'footer'; showDuration: boolean };
+  | {
+      kind: 'footer';
+      showDuration: boolean;
+      /** The turn is the conversation's last one and has not ended: its
+       *  duration slot counts up instead of standing empty. */
+      isLive: boolean;
+    };
 
 type AssistantChatVirtualRow = {
   type: 'assistant';
@@ -501,7 +511,11 @@ export interface SessionChatStreamViewProps {
   suppressStickyAutoScrollRef?: React.RefObject<boolean>;
 }
 
-const SessionChatActionContext = createContext<{
+/* Exported so the turn footer can be driven through its real gate in tests: an
+   UNFINISHED turn renders its action bar only when a copy-context handler
+   exists, which is exactly the state whose leading duration slot this file
+   fills. */
+export const SessionChatActionContext = createContext<{
   sendMessage?: (message: ClientToServer) => void;
   openHtmlFile?: (file: SessionFilePayload) => boolean;
   copyContext?: (messageId: string) => void;
@@ -1194,7 +1208,11 @@ export const buildChatVirtualRows = ({
         key: `assistant:${message.id}:footer`,
         messageIndex,
         item,
-        content: { kind: 'footer', showDuration: showDurationInFooter },
+        content: {
+          kind: 'footer',
+          showDuration: showDurationInFooter,
+          isLive: isLastAssistantMessage && message.finished !== true,
+        },
         isLastRowForMessage: false,
       });
     }
@@ -3746,6 +3764,38 @@ const AssistantThoughtVirtualRow = memo(function AssistantThoughtVirtualRow({
  */
 export const MOBILE_TURN_ACTION_LEADING_INSET_PX = 48;
 
+/**
+ * The live counterpart of the mobile footer's "Worked for {duration}" label.
+ *
+ * While the turn runs, that leading slot used to stand empty — the slot is
+ * reserved unconditionally (it is what pushes the copy button clear of the
+ * back-swipe strip), so an in-flight turn showed two icons floating beside a
+ * blank gutter. It now counts up from the turn's own `timestamp`, which is the
+ * same anchor the finished label resolves from, so the number does not jump
+ * when the turn ends — it simply stops.
+ *
+ * Its own leaf component so that the 1s tick re-renders this span alone: the
+ * shared `useStableNow` ticker is subscribed here, never by the footer (which
+ * every visible turn mounts) or by a finished turn (which has nothing to tick).
+ */
+const LiveTurnDurationLabel = ({
+  message,
+}: {
+  message: Pick<SessionHistoryParsed, 'timestamp' | 'permissionWaitMs'>;
+}) => {
+  const { t } = useTranslation();
+  const now = useStableNow(1_000);
+  const durationMs = resolveLiveSessionHistoryDurationMs(message, now.getTime());
+  if (durationMs === null) return null;
+  const duration = formatDurationCompact(durationMs, {
+    hour: t('time.unitShort.hour', 'h'),
+    minute: t('time.unitShort.minute', 'm'),
+    second: t('time.unitShort.second', 's'),
+  });
+  if (!duration) return null;
+  return <>{t('sessions.workedFor', { duration, defaultValue: 'Worked for {{duration}}' })}</>;
+};
+
 const AssistantForkButton = ({
   turnId,
   className,
@@ -3803,6 +3853,7 @@ export const AssistantTurnFooter = ({
   assistantActions,
   onFileDiffClick,
   showDuration,
+  isLive = false,
   isTurnHovered,
   onFork,
   forkWorktreeAvailability = 'hidden',
@@ -3815,6 +3866,8 @@ export const AssistantTurnFooter = ({
   assistantActions?: AssistantMessageAction[];
   onFileDiffClick?: (turnId: string, filePath: string) => void;
   showDuration: boolean;
+  /** This turn is the live one: its duration slot counts up. */
+  isLive?: boolean;
   isTurnHovered: boolean;
   onFork?: (turnId: string, destination?: SessionForkDestination) => void;
   forkWorktreeAvailability?: SessionForkWorktreeAvailability;
@@ -3922,7 +3975,13 @@ export const AssistantTurnFooter = ({
               className="shrink-0 tabular-nums"
               style={{ minWidth: MOBILE_TURN_ACTION_LEADING_INSET_PX }}
             >
-              {showFinishedMetadata ? mobileDurationLabel : ''}
+              {showFinishedMetadata ? (
+                mobileDurationLabel
+              ) : isLive ? (
+                <LiveTurnDurationLabel message={message} />
+              ) : (
+                ''
+              )}
             </span>
           ) : null}
           {/* Icon buttons are 28px boxes around 14px glyphs, so their own 7px of
@@ -4247,6 +4306,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
             assistantActions={assistantActions}
             onFileDiffClick={onFileDiffClick}
             showDuration={content.showDuration}
+            isLive={content.isLive}
             isTurnHovered={isTurnHovered}
             onFork={onFork}
             forkWorktreeAvailability={forkWorktreeAvailability}

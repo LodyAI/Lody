@@ -40,6 +40,10 @@ the reasoning behind those rules.
 `AssistantTurnAlignment.stories`, and the multiple-sender states in
 `SessionConversationPage.stories.tsx`.
 
+The mobile footer's leading duration slot — live and finished — is pinned by
+`tests/assistant-turn-action-inset.test.ts` and `tests/session-history-duration.test.ts`,
+and shown by `MobileTurnDurationSlot.stories.tsx`.
+
 ## Why the rules read the way they do
 
 - **Final answer tails.** Generated `image_group`s and the `switch_mode`
