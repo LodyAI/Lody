@@ -55,6 +55,7 @@ export const ICON_FAMILIES = {
     'chevron-right',
     'arrow-left',
     'arrow-right',
+    'arrow-up',
     'arrow-down',
     'send',
     'external-link',
@@ -73,15 +74,19 @@ export const ICON_FAMILIES = {
     'pause',
     'stop',
     'refresh',
+    'undo',
     'edit',
     'trash',
     'copy',
     'download',
     'upload',
+    'save',
     'filter',
     'pin',
+    'pin-off',
     'attach',
     'link',
+    'quote',
   ],
   files: [
     'file',
@@ -89,16 +94,20 @@ export const ICON_FAMILIES = {
     'file-code',
     'folder',
     'folder-open',
+    'folder-plus',
     'worktree',
     'archive',
     'inbox',
     'layers',
+    'image',
   ],
   git: [
     'branch',
+    'fork',
     'commit',
     'merge',
     'pull-request',
+    'pull-request-closed',
     'diff',
     'issue',
     'code',
@@ -109,13 +118,16 @@ export const ICON_FAMILIES = {
   status: [
     'check-circle',
     'x-circle',
+    'alert-circle',
     'warning',
     'info-circle',
     'help-circle',
+    'circle',
     'clock',
     'history',
     'star',
     'shield-check',
+    'shield-alert',
     'lock',
     'eye',
     'eye-off',
@@ -127,11 +139,15 @@ export const ICON_FAMILIES = {
     'model',
     'cpu',
     'terminal',
+    'monitor',
     'zap',
     'globe',
     'user',
+    'users',
+    'mail',
     'bell',
     'settings',
+    'wrench',
     'sun',
     'moon',
   ],
@@ -139,6 +155,16 @@ export const ICON_FAMILIES = {
 
 export type IconFamily = keyof typeof ICON_FAMILIES;
 export type IconName = (typeof ICON_FAMILIES)[IconFamily][number];
+
+/**
+ * The arrow the composer sends with. `send` and `arrow-up` are one drawing and
+ * two meanings — a caller states what it means, not what it looks like — so the
+ * path is stated once rather than maintained twice.
+ */
+const ARROW_UP = 'M12 19.5v-15M5.5 11 12 4.5 18.5 11';
+
+/** The pin, and the pin with a line through it: one body, stated once. */
+const PIN = 'M9 4.5h6V7l-1 1v3.5l2.5 2.5V15h-9v-1l2.5-2.5V8l-1-1zM12 15v5.5';
 
 export const ICONS: Record<IconName, IconDefinition> = {
   'chevron-up': {
@@ -163,7 +189,10 @@ export const ICONS: Record<IconName, IconDefinition> = {
     marks: [{ path: 'M12 4.5v15M5.5 13l6.5 6.5 6.5-6.5' }],
   },
   send: {
-    marks: [{ path: 'M12 19.5v-15M5.5 11L12 4.5 18.5 11' }],
+    marks: [{ path: ARROW_UP }],
+  },
+  'arrow-up': {
+    marks: [{ path: ARROW_UP }],
   },
   'external-link': {
     marks: [
@@ -272,7 +301,7 @@ export const ICONS: Record<IconName, IconDefinition> = {
     marks: [{ path: 'M4.5 5.5h15l-5.5 6.5v5.5l-4 2v-7.5z' }],
   },
   pin: {
-    marks: [{ path: 'M9 4.5h6V7l-1 1v3.5l2.5 2.5V15h-9v-1l2.5-2.5V8l-1-1zM12 15v5.5' }],
+    marks: [{ path: PIN }],
   },
   attach: {
     marks: [
@@ -287,6 +316,46 @@ export const ICONS: Record<IconName, IconDefinition> = {
         path: 'M10 14a3.5 3.5 0 0 0 5 0l3-3a3.5 3.5 0 0 0-5-5l-1 1M14 10a3.5 3.5 0 0 0-5 0l-3 3a3.5 3.5 0 0 0 5 5l1-1',
       },
     ],
+  },
+  undo: {
+    // The turn `history` makes, gone the other way and ending in a head rather
+    // than a hand: back to where this was, not back through where it has been.
+    marks: [{ path: 'M8.5 5.5 4.5 9.5l4 4M4.5 9.5h9.5a5.5 5.5 0 0 1 0 11H9' }],
+  },
+  save: {
+    // The file family's folded sheet is a document; this is the disk it is
+    // written to, so it takes the same 2px container with the corner cut off
+    // the other way — the shutter at the top, the label at the foot.
+    marks: [
+      {
+        path: 'M5.5 4.5h10.5l4.5 4.5v8.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2z',
+      },
+      { path: 'M8 4.5v4h7v-4M7.5 19.5v-5h9v5' },
+    ],
+    layers: {
+      mass: 'M5.5 4.5h10.5l4.5 4.5v8.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2z',
+      front: 'M7.5 14.5h9v5h-9z',
+      detail: 'M8 4.5v4h7v-4M7.5 19.5v-5h9v5',
+      bulkDetail: 'M8 4.5v4h7v-4',
+    },
+  },
+  quote: {
+    // Two hooks, not two blocks. A quote mark is a ball with a tail off the top
+    // of it; drawn as a block with the tail notched out of a corner it reads as
+    // a pair of counters by 20px, which is what the first draft did. The hook
+    // is the set's own stroke, so it thins with everything else.
+    marks: [
+      {
+        path: 'M8.5 15a2.5 2.5 0 1 1-2.5-2.5c0-2.2 1.3-3.8 3.5-4.5M18.5 15a2.5 2.5 0 1 1-2.5-2.5c0-2.2 1.3-3.8 3.5-4.5',
+      },
+    ],
+  },
+  'pin-off': {
+    // `eye-off` breaks its drawing because a line across an eye lands on the
+    // pupil and reads as part of it. A pin has no such centre, and broken into
+    // fragments it stops being a pin at all — so this one stays whole and takes
+    // the line across it.
+    marks: [{ path: PIN }, { path: 'M4.5 4.5l15 15' }],
   },
   file: {
     marks: [
@@ -352,6 +421,34 @@ export const ICONS: Record<IconName, IconDefinition> = {
       { path: 'M3.5 12.5l8.5 4 8.5-4M3.5 16.5l8.5 4 8.5-4' },
     ],
   },
+  'folder-plus': {
+    // The folder's skeleton with a cross in its front panel, on the panel's
+    // centre line rather than the folder's: the tab is not part of the face.
+    //
+    // No layer model, like `folder-open`. `folder` fills its front panel at
+    // 100% over a 35% body, and a cross drawn on top of that panel is
+    // currentColor on currentColor — it disappears, and what is left is
+    // `folder`. A variant is a treatment of one drawing; where the treatment
+    // costs the drawing its meaning, the icon does not have one.
+    marks: [
+      { path: 'M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z' },
+      { path: 'M3.5 10.5h17M12 12.5v4M10 14.5h4' },
+    ],
+  },
+  image: {
+    // The 17x15 container `sidebar`, `terminal` and `monitor` share, holding a
+    // horizon instead of a screen: one sun and two ridges, the near one cutting
+    // in front of the far one so the depth survives the fill.
+    marks: [
+      { path: 'M5.5 4.5h13a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2z' },
+      { circle: [8.5, 9, 1.5] },
+      { path: 'M3.5 16.5l4-4 4.5 4.5M11 15l3-3 6.5 6.5' },
+    ],
+    layers: {
+      mass: 'M5.5 4.5h13a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2z',
+      detail: 'M7 9a1.5 1.5 0 1 1 3 0 1.5 1.5 0 1 1-3 0M3.5 16.5l4-4 4.5 4.5M11 15l3-3 6.5 6.5',
+    },
+  },
   branch: {
     marks: [
       { circle: [7, 5, 2] },
@@ -412,6 +509,27 @@ export const ICONS: Record<IconName, IconDefinition> = {
       {
         path: 'M4.5 6.5L6 8l3-3M4.5 12.5L6 14l3-3M4.5 18.5L6 20l3-3M12 6.5h7.5M12 12h7.5M12 17.5h7.5',
       },
+    ],
+  },
+  fork: {
+    // The git family's two node columns, opened: one line down from each head
+    // into a shoulder, and a single trunk from the shoulder to the foot.
+    marks: [
+      { circle: [6.5, 5, 2] },
+      { circle: [17.5, 5, 2] },
+      { circle: [12, 19, 2] },
+      { path: 'M17.5 7v1.5a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2V7M12 10.5v6.5' },
+    ],
+  },
+  'pull-request-closed': {
+    // `pull-request` with its arrow struck out: the same three nodes and the
+    // same trunk, and the branch it would have landed on stops at a cross.
+    marks: [
+      { circle: [7, 5, 2] },
+      { circle: [7, 19, 2] },
+      { circle: [17, 19, 2] },
+      { path: 'M7 7v10M17 17v-4.5' },
+      { path: 'M14.75 7.25l4.5 4.5M19.25 7.25l-4.5 4.5' },
     ],
   },
   'check-circle': {
@@ -476,6 +594,23 @@ export const ICONS: Record<IconName, IconDefinition> = {
       {
         path: 'M4.5 4.5l15 15M9.9 9.9a3 3 0 0 0 4.2 4.2M6.8 6.9C5.4 8 4.3 9.7 3.5 12c2 4.5 5 6.5 8.5 6.5 1.6 0 3-.4 4.3-1.1M10.3 5.7c.5-.1 1.1-.2 1.7-.2 3.5 0 6.5 2 8.5 6.5-.5 1.1-1 2-1.6 2.8',
       },
+    ],
+  },
+  'alert-circle': {
+    // The circle family's ring, and `info-circle` turned over: a bar under the
+    // dot says what this is, a bar over it says what to do about it.
+    marks: [{ circle: [12, 12, 8.5] }, { path: 'M12 8v5' }, { path: 'M12 16h.01', weight: 2 }],
+  },
+  circle: {
+    // The ring with nothing in it: a state that has not happened yet. `issue`
+    // is this ring with its dot, and a ring that is filled is a `check-circle`.
+    marks: [{ circle: [12, 12, 8.5] }],
+  },
+  'shield-alert': {
+    marks: [
+      { path: 'M12 3.5l7.5 2.8v5.7c0 4.2-3 7.3-7.5 8.5-4.5-1.2-7.5-4.3-7.5-8.5V6.3z' },
+      { path: 'M12 8.5v4' },
+      { path: 'M12 15.5h.01', weight: 2 },
     ],
   },
   session: {
@@ -606,6 +741,56 @@ export const ICONS: Record<IconName, IconDefinition> = {
   },
   moon: {
     marks: [{ path: 'M19.5 14.5A7.5 7.5 0 0 1 9.5 4.5a7.5 7.5 0 1 0 10 10z' }],
+  },
+  monitor: {
+    // The machine this product is mostly about. The same 2px container as
+    // `sidebar` and `terminal`, three units shorter, standing on a foot: the
+    // foot is `outer`, so a glyph keeps the silhouette a screen alone loses.
+    marks: [
+      { path: 'M5.5 4.5h13a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z' },
+      { path: 'M12 16.5v3M8.5 19.5h7' },
+    ],
+    layers: {
+      mass: 'M5.5 4.5h13a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z',
+      outer: 'M12 16.5v3M8.5 19.5h7',
+    },
+  },
+  users: {
+    // `user` twice on one skeleton: the same head and the same shoulders, the
+    // second set cut off by the frame so the two read as a group and not as a
+    // pair. The one in front is whole; the one behind gives its far half.
+    //
+    // No layer model, like `user`. The one behind is half a person, and half
+    // a person as a stroke beside a filled one is not a person behind it —
+    // it is two fragments floating off the shoulder of a silhouette.
+    marks: [
+      { circle: [9.5, 8.5, 3.25] },
+      { path: 'M3 20c0-3.4 2.9-5.5 6.5-5.5s6.5 2.1 6.5 5.5' },
+      { path: 'M15.5 5.6a3.25 3.25 0 0 1 0 5.8M16.8 14.7c2.5.6 4.2 2.5 4.2 5.3' },
+    ],
+  },
+  mail: {
+    // A 2px container again, and the flap folded into it. The flap is `detail`
+    // rather than a second panel: it is a crease on the face, not a layer over
+    // it, so a glyph cuts it and bulk leaves the face flat.
+    marks: [
+      { path: 'M5.5 5.5h13a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2z' },
+      { path: 'M3.5 8l8.5 5.5L20.5 8' },
+    ],
+    layers: {
+      mass: 'M5.5 5.5h13a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2z',
+      detail: 'M3.5 8l8.5 5.5L20.5 8',
+    },
+  },
+  wrench: {
+    marks: [
+      {
+        path: 'M14.8 4.6a5 5 0 0 0-6.4 6.4l-4.3 4.3a2 2 0 0 0 2.8 2.8l4.3-4.3a5 5 0 0 0 6.4-6.4l-2.9 2.9-2.8-.7-.7-2.8z',
+      },
+    ],
+    layers: {
+      mass: 'M14.8 4.6a5 5 0 0 0-6.4 6.4l-4.3 4.3a2 2 0 0 0 2.8 2.8l4.3-4.3a5 5 0 0 0 6.4-6.4l-2.9 2.9-2.8-.7-.7-2.8z',
+    },
   },
 };
 
