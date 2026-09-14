@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { Loader2 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { getBasename } from '@/lib';
 import type { SessionFileProvider, SessionFileProviderEntry } from '@/lib/session-file-provider';
@@ -220,7 +220,7 @@ export function SessionFileQuickOpen({
           >
             <CommandEmpty>
               <div className="flex items-center justify-center gap-2 px-3 text-muted-foreground">
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                {loading ? <Spinner className="h-4 w-4" /> : null}
                 <span>{emptyLabel}</span>
               </div>
             </CommandEmpty>

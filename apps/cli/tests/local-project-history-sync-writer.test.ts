@@ -11,7 +11,6 @@ import {
   type MachineId,
   type SessionId,
   type SessionMeta,
-  type SessionHistoryInput,
   type WorkspaceId,
 } from '@lody/shared';
 
@@ -192,19 +191,23 @@ describe('history import through the real SessionDocument writer', () => {
     const before = loro.toJSON();
     const version = loro.version().toJSON();
     await expect(
-      doc.updateHistoryAndCursor(
-        (history) => [
-          ...history,
-          {
-            id: 'invalid',
-            role: 'assistant',
-            timestamp: 'synthetic',
-            items: [{ type: 'text', text: 3 }],
-          } as unknown as SessionHistoryInput,
-        ],
-        () => ({ importedTurnHashes: ['must-not-be-saved'] })
-      )
-    ).rejects.toThrow('Invalid history write');
+      doc.sessionData.commands.applyHistoryImport({
+        mode: 'initialize',
+        replay: {
+          history: [
+            {
+              id: 'invalid',
+              role: 'assistant',
+              timestamp: 'synthetic',
+              items: [{ type: 'text', text: 3 }],
+            },
+          ],
+          turnHashes: ['must-not-be-saved'],
+          replayDigest: 'digest',
+          droppedNotifications: 0,
+        },
+      })
+    ).resolves.toMatchObject({ status: 'rejected', reason: { code: 'invalid_input' } });
     expect(loro.toJSON()).toEqual(before);
     expect(loro.version().toJSON()).toEqual(version);
   });
@@ -326,8 +329,11 @@ describe('history import through the real SessionDocument writer', () => {
     peer.import(loro.export({ mode: 'snapshot' }));
     location(peer).set('endColumn', 99);
     peer.commit();
-    const original = doc.updateHistoryAndCursor.bind(doc);
-    vi.spyOn(doc, 'updateHistoryAndCursor').mockImplementationOnce((...args) => {
+    // Hook the port command the service now drives: the peer edit lands before
+    // the synchronous write block, so the write-time decision must see it.
+    const commands = doc.sessionData.commands;
+    const original = commands.applyHistoryImport.bind(commands);
+    vi.spyOn(commands, 'applyHistoryImport').mockImplementationOnce((...args) => {
       loro.import(peer.export({ mode: 'update', from: loro.version() }));
       return original(...args);
     });
@@ -358,7 +364,7 @@ describe('history import through the real SessionDocument writer', () => {
     const harness = await createHarness();
     expect((await harness.importTurns(1)).summary).toMatchObject({ imported: 1, failed: 0 });
     const { doc, sessionId } = harness.getOnlyDoc();
-    const initialHistory = await doc.getHistory();
+    const initialHistory = await doc.sessionData.history.readAll();
     expect(initialHistory).toHaveLength(2);
     expect(JSON.stringify(initialHistory)).toContain('"endColumn":12');
     const initialCursor = await doc.getExternalHistoryCursor();
@@ -369,7 +375,7 @@ describe('history import through the real SessionDocument writer', () => {
       conflicted: 0,
       failed: 0,
     });
-    const history = await doc.getHistory();
+    const history = await doc.sessionData.history.readAll();
     expect(history).toHaveLength(4);
     expect(history.slice(0, 2)).toEqual(initialHistory);
     expect(history.slice(0, 2).map((entry) => entry.id)).toEqual(initialIds);

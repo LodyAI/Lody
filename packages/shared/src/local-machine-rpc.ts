@@ -158,6 +158,7 @@ export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
       .object({
         sessionId: SessionIdSchema,
         turnId: z.string().trim().min(1),
+        subagentTaskId: z.string().trim().min(1).optional(),
       })
       .strict(),
   }).strict(),

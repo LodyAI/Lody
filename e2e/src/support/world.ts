@@ -27,6 +27,7 @@ import { AgentRoleFixture } from './fixtures/agent-role-fixture.js';
 import { AgentRolePage, type AgentRoleResources } from './pages/agent-role-page.js';
 import { ShortcutPage } from './pages/shortcut-page.js';
 import { SettingsAppearancePage } from './pages/settings-appearance-page.js';
+import { DesktopWindowCachePage } from './pages/desktop-window-cache-page.js';
 import { createScenarioArtifacts, type ScenarioArtifacts } from './world-utils.js';
 
 export class LodyWorld extends World {
@@ -47,6 +48,7 @@ export class LodyWorld extends World {
   agentRolePage: AgentRolePage | null = null;
   shortcutPage: ShortcutPage | null = null;
   appearancePage: SettingsAppearancePage | null = null;
+  desktopWindowCachePage: DesktopWindowCachePage | null = null;
   workFixture: WorkSessionFixture | null = null;
   projectReopenFixture: ProjectReopenFixture | null = null;
   mcpFixture: McpCatalogFixture | null = null;
@@ -76,6 +78,7 @@ export class LodyWorld extends World {
     this.reviewPage = new ReviewPage(this.harness.page);
     this.workPage = new WorkSessionPage(this.harness.page);
     this.shortcutPage = new ShortcutPage(this.harness.page);
+    this.desktopWindowCachePage = new DesktopWindowCachePage(this.harness.page);
   }
 
   async configureSessionManagementJourney(): Promise<void> {

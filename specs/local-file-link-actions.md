@@ -1,7 +1,9 @@
 # Local file links and system actions
 
 Status: draft
-Translation: pending
+Translation: current
+
+[中文](local-file-link-actions.zh.md)
 
 When an assistant links to a local source file or build artifact, the user can
 open it in the session's right-side preview. The inline link uses blue text and
@@ -17,6 +19,14 @@ More menu use the same system action and the same file identity, including local
 absolute and parent-relative paths outside the workspace. Remote sessions never open a path on the
 viewer's machine. Clicking the assistant link itself only opens the preview;
 opening the OS application requires a separate user click.
+
+Native mobile offers Share file in the binary notice and file menu. It exports
+the complete authorized preview bytes into an isolated app-cache file and opens
+the system share sheet, preserving the filename extension. Copy file path remains
+available. Repeated exports are suppressed while one is pending; dismissal is not
+an error, and cache cleanup is best-effort after handoff or failure. Existing
+remote preview limits still apply (5 MiB binary); oversized or unavailable content
+is not shared. This does not introduce a large-file transfer protocol.
 
 Failures identify the action and give a next step for unresolved paths, missing
 files, access denial, unavailable desktop IPC, or editor startup failures. A local

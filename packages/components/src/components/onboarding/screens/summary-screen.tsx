@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check, Clock3, Loader2, Minus, RotateCcw, XCircle } from 'lucide-react';
+import { Check, Clock3, Minus, RotateCcw, XCircle } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import type { ProviderSetupFailureCode } from '@lody/shared';
 import { Table, TableBody, TableCell, TableRow } from '@/ui/table';
 import { Button } from '@/ui/button';
@@ -148,11 +149,7 @@ export function SummaryScreen({
                 .finally(() => setRetryingAgent(false));
             }}
           >
-            {retryingAgent ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              <RotateCcw className="size-3.5" />
-            )}
+            {retryingAgent ? <Spinner className="size-3.5" /> : <RotateCcw className="size-3.5" />}
             {t('common.retry', 'Retry')}
           </Button>
         </div>

@@ -1,3 +1,5 @@
+import { readSessionHistory } from '@lody/shared/session-data';
+import { readLatestTurn } from '@lody/shared/session-data';
 import os from 'os';
 import fs from 'fs';
 import path from 'path';
@@ -34,7 +36,6 @@ import {
   CliType,
   AgentConfigCliType,
   type AgentConfigId,
-  type AgentWarningMeta,
   type BuiltinRuntimeOverrides,
   type CustomAcpLaunchSpec,
   type TitleGenerationConfig,
@@ -49,8 +50,8 @@ import {
   type MachineResourceInfo,
   SessionMeta,
   LocalProjectId,
-  type NeedToDeleteSessionQueueItem,
   getMachineRoomId,
+  getSessionIdFromRoomId,
   getSessionRoomId,
   type IssuePRMention,
   type SessionImageGroupContent,
@@ -138,19 +139,14 @@ import {
   type SessionGoalResponse,
   resolveLatestSessionGoalFromHistory,
   resolveProjectGitHubRepo,
-  type RepoId,
   deleteMachineFlockRowFromFlock,
   getMachineFlockDeleteLocalProjectEntries,
   getMachineFlockDocId,
-  getMachineFlockLocalProjects,
   machineFlockKeys,
-  machineDeleteCommandToQueueItem,
   parseMachineFlockKey,
   readMachineFlockRowsFromFlock,
-  serializeMachineFlockKey,
   writeMachineFlockRowToFlock,
   type MachineDeleteLocalProjectCommand,
-  type MachineDeleteSessionCommand,
   type MachineFlockEvent,
   type MachineFlockKey,
   type MachineFlockRow,
@@ -177,7 +173,7 @@ import {
 } from '@lody/shared';
 import { ISession, SessionManager } from '../session/session-manager';
 import { captureCli } from '@/lib/analytics/posthog';
-import { LoroDocumentManager, SessionDocument } from './loro/doc';
+import { LoroDocumentManager, SessionDocument, subscribeSessionChanges } from './loro/doc';
 import {
   type ContentBlock,
   RequestPermissionRequest,
@@ -224,7 +220,6 @@ import {
 } from '@/lib/session-file-blob-store';
 import {
   SESSION_FILE_BACKFILL_MAX_ATTEMPTS,
-  flipFileTransportToR2,
   sessionFileBackfillDelayMs,
 } from '@/lib/session-file-backfill';
 import {
@@ -245,7 +240,6 @@ import {
 } from '@/lib/notifications';
 import {
   appendACPNotificationsToAssistantEntry,
-  applyMessageContentsBatch,
   ensurePermissionRequestOnToolCall,
   updatePermissionOutcomeInHistory,
   findPermissionOutcomeInHistory,
@@ -264,7 +258,6 @@ import {
   resolveImageGenerationStatusWrite,
   shouldRestoreRunningAfterPermission,
 } from './session-activity-status';
-import { markAssistantTurnFinished } from './assistant-turn-finalize';
 import type { RepoWatchHandle } from 'loro-repo';
 import {
   AgentClient,
@@ -274,6 +267,7 @@ import {
 } from 'src/agent/agent-client';
 import type { RateLimit, SessionUsageUpdate } from 'acp-extension-core';
 import { getWorktreeManager } from '@/session/worktree/worktree-manager';
+import { WorktreeGarbageCollector, type WorktreeOwnerState } from '@/session/worktree/worktree-gc';
 import { createWorktreeScriptHistoryRecorder } from '@/session/worktree/worktree-script-history';
 import { runWorktreeCleanup } from '@/session/worktree/worktree-setup-runner';
 import {
@@ -312,7 +306,6 @@ import {
   type AuthContext,
 } from '@/lib/command-runtime';
 import { makeSessionAccessPolicy } from '@/session/session-access-policy';
-import { AutoPromptRunner } from '@/session/auto-prompt-runner';
 import { TurnPostProcessingService } from '@/session/turn-post-processing-service';
 import {
   applyAcpSessionRunConfig,
@@ -483,36 +476,20 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-type DeleteRequest = NeedToDeleteSessionQueueItem | MachineDeleteSessionCommand;
-type DeleteRequestRecord = Exclude<NeedToDeleteSessionQueueItem, boolean>;
 type MachineCommandSnapshot = {
   machineMeta: MachineLegacyMetaFields | undefined;
   machineFlockRows: MachineFlockRowMap;
-  archiveSessionIds: SessionId[];
-  deleteEntries: [SessionId, DeleteRequest][];
-  deleteSessionIds: Set<SessionId>;
   deleteLocalProjectEntries: [LocalProjectId, MachineDeleteLocalProjectCommand][];
 };
 
 function getMachineCommandEventImpact(events: readonly MachineFlockEvent[]): {
-  archive: boolean;
-  delete: boolean;
   deleteLocalProject: boolean;
   providerSetup: boolean;
 } {
-  let archive = false;
-  let deleteCommand = false;
   let deleteLocalProject = false;
   let providerSetup = false;
   for (const event of events) {
     const parsed = parseMachineFlockKey(event.key);
-    if (parsed?.kind === 'archiveSessionCommand') {
-      archive = true;
-    }
-    if (parsed?.kind === 'deleteSessionCommand') {
-      archive = true;
-      deleteCommand = true;
-    }
     if (parsed?.kind === 'deleteLocalProjectCommand') {
       deleteLocalProject = true;
     }
@@ -520,91 +497,29 @@ function getMachineCommandEventImpact(events: readonly MachineFlockEvent[]): {
       providerSetup = true;
     }
   }
-  return { archive, delete: deleteCommand, deleteLocalProject, providerSetup };
-}
-
-function getMachineFlockArchiveSessionIds(rows: MachineFlockRowMap): SessionId[] {
-  const sessionIds: SessionId[] = [];
-  for (const row of Object.values(rows)) {
-    const parsed = parseMachineFlockKey(row.key);
-    if (parsed?.kind === 'archiveSessionCommand') {
-      sessionIds.push(parsed.sessionId);
-    }
-  }
-  return sessionIds;
-}
-
-function getMachineFlockDeleteEntries(
-  rows: MachineFlockRowMap
-): [SessionId, MachineDeleteSessionCommand][] {
-  const entries: [SessionId, MachineDeleteSessionCommand][] = [];
-  for (const row of Object.values(rows)) {
-    const parsed = parseMachineFlockKey(row.key);
-    if (parsed?.kind === 'deleteSessionCommand') {
-      entries.push([parsed.sessionId, row.value as MachineDeleteSessionCommand]);
-    }
-  }
-  return entries;
-}
-
-function getMachineFlockDeleteCommand(
-  rows: MachineFlockRowMap,
-  sessionId: SessionId
-): MachineDeleteSessionCommand | undefined {
-  const key = machineFlockKeys.deleteSessionCommand(sessionId);
-  const row = rows[serializeMachineFlockKey(key)];
-  if (!row) {
-    return undefined;
-  }
-  const parsed = parseMachineFlockKey(row.key);
-  if (parsed?.kind !== 'deleteSessionCommand') {
-    return undefined;
-  }
-  return row.value as MachineDeleteSessionCommand;
+  return { deleteLocalProject, providerSetup };
 }
 
 function buildMachineCommandSnapshot(
   machineMeta: MachineLegacyMetaFields | undefined,
   machineFlockRows: MachineFlockRowMap
 ): MachineCommandSnapshot {
-  const needToArchiveSessions = machineMeta?.needToArchiveSessions ?? {};
-  const archiveSessionIds = Array.from(
-    new Set<SessionId>([
-      ...(Object.keys(needToArchiveSessions) as SessionId[]),
-      ...getMachineFlockArchiveSessionIds(machineFlockRows),
-    ])
-  );
-
-  const entriesBySessionId = new Map<SessionId, DeleteRequest>();
-  for (const [sessionId, request] of getMachineFlockDeleteEntries(machineFlockRows)) {
-    entriesBySessionId.set(sessionId, request);
-  }
-  for (const [sessionId, request] of Object.entries(machineMeta?.needToDeleteSessions ?? {}) as [
-    SessionId,
-    NeedToDeleteSessionQueueItem,
-  ][]) {
-    if (!entriesBySessionId.has(sessionId)) {
-      entriesBySessionId.set(sessionId, request);
-    }
-  }
-
-  const deleteEntries = Array.from(entriesBySessionId.entries());
   return {
     machineMeta,
     machineFlockRows,
-    archiveSessionIds,
-    deleteEntries,
-    deleteSessionIds: new Set(deleteEntries.map(([sessionId]) => sessionId)),
     deleteLocalProjectEntries: getMachineFlockDeleteLocalProjectEntries(machineFlockRows),
   };
 }
 
-type WorktreeCleanupTarget = {
-  repoId: RepoId;
-  source?: { kind: 'local-shared'; originalRootPath: string };
-  branchName?: string;
-  baseBranchName?: string;
-};
+/**
+ * Session archive and delete requests are no longer commands. Older clients
+ * still write them; a new daemon discards the rows so they stop accumulating.
+ * The Sessions they name are covered by the archived or deleted state those
+ * clients also wrote, which the worktree reconciler and lifecycle watcher use.
+ */
+const LEGACY_SESSION_COMMAND_FAMILIES = ['archiveSessionCommand', 'deleteSessionCommand'] as const;
+
+const WORKTREE_GC_INTERVAL_MS = 10 * 60_000;
 
 type LiveActivitySummary = {
   activityId: string;
@@ -826,13 +741,14 @@ export class MessageHandler {
   private readonly store = new SessionTransientStore();
   private sessionActivePresence!: SessionActivePresenceController;
   private readonly titleGenerationInFlight = new Map<SessionId, Promise<string | null>>();
-  // Note: titleGenerationInFlight, archiveInFlight, deleteInFlight are self-cleaning
+  // Note: titleGenerationInFlight, archiveInFlight are self-cleaning
   // and stay as independent tracking. All other per-session state lives in this.store.
-  private archiveWatchHandle: RepoWatchHandle | null = null;
+  private sessionLifecycleWatchHandles: RepoWatchHandle[] = [];
   private readonly archiveInFlight = new Set<SessionId>();
-  private deleteWatchHandle: RepoWatchHandle | null = null;
-  private readonly deleteInFlight = new Set<SessionId>();
   private readonly deletedSessionIds = new Set<SessionId>();
+  private readonly worktreeGc: WorktreeGarbageCollector;
+  private worktreeGcTimer: NodeJS.Timeout | null = null;
+  private detachWorktreeGcSyncListener: (() => void) | null = null;
   private readonly deleteLocalProjectInFlight = new Set<LocalProjectId>();
   private machineFlockCommandWatcher: MachineFlockCommandWatcher;
   // Desktop local-transport backfill: in-flight task keys (`${sessionId}:${fileId}`)
@@ -896,7 +812,6 @@ export class MessageHandler {
   private sessionForkService: SessionForkService;
   private sessionEditAndResendService: SessionEditAndResendService;
   private operationCoordinator: LodyOperationCoordinator;
-  private autoPromptRunner: AutoPromptRunner;
   private turnPostProcessingService: TurnPostProcessingService;
   private localProjectControlService: LocalProjectControlService;
   private localWorkspaceCatalog: LocalWorkspaceCatalogService;
@@ -1060,51 +975,22 @@ export class MessageHandler {
     });
     this.logger.debug(`[${sessionId}] Creating assistant entry for turn ${turnId}`);
     try {
-      await sessionDoc.updateHistory((history) => {
-        const existingEntry = history.find(
-          (entry) => entry.id === turnId && entry.role === 'assistant'
-        );
-        if (existingEntry) {
-          return history.map((entry) => {
-            if (entry.id !== turnId || entry.role !== 'assistant') {
-              return entry;
-            }
-            // Reopen a reused assistant entry for a live turn: clear the terminal
-            // footprint that `finalizeACPState` may have stamped on it. Assistant
-            // entry ids are deterministic (`assistant:<userTurnId>`), so when a turn
-            // is re-dispatched after the machine died/restarted mid-turn (durable
-            // pointer recovery), execution reuses THIS finalized entry and streams
-            // fresh output into it. Without this reset `finished`/`endedAt` stay true
-            // from the pre-death teardown finalize, and the web renderer folds the
-            // still-streaming turn into a "Worked for …" summary (and shared
-            // "active assistant entry" logic treats it as terminal). This branch only
-            // runs at genuine turn (re)start via `openAssistantEntry`, so resetting to
-            // the not-finished state here is correctly scoped. See
-            // apps/cli/src/session/AGENTS.md (assistant entry id reuse) and
-            // packages/components/src/components/ai-gui/AGENTS.md ("Worked for …").
-            return {
-              ...entry,
-              userTurnId: entry.userTurnId ?? userTurnId,
-              modelInfo: modelInfo ?? entry.modelInfo,
-              finished: false,
-              endedAt: undefined,
-              permissionWaitMs: undefined,
-            };
-          });
-        }
-
-        history.push({
-          id: turnId,
-          role: 'assistant',
-          userTurnId,
-          items: [] as unknown as SessionHistoryInput['items'],
-          timestamp: new Date(getServerNow()).toISOString(),
-          userId: undefined,
-          read: undefined,
-          modelInfo,
-          fileDiff: [],
-        });
-        return history;
+      // Reopen a reused assistant entry for a live turn, or create it. Assistant
+      // entry ids are deterministic (`assistant:<userTurnId>`), so when a turn is
+      // re-dispatched after the machine died/restarted mid-turn (durable pointer
+      // recovery), execution reuses THIS finalized entry and streams fresh output
+      // into it. Without clearing `finished`/`endedAt`/`permissionWaitMs` they stay
+      // true from the pre-death teardown finalize, and the web renderer folds the
+      // still-streaming turn into a "Worked for …" summary (and shared "active
+      // assistant entry" logic treats it as terminal). This only runs at genuine
+      // turn (re)start via `openAssistantEntry`. See apps/cli/src/session/AGENTS.md
+      // (assistant entry id reuse) and packages/components/src/components/ai-gui/AGENTS.md
+      // ("Worked for …").
+      await sessionDoc.agentWrites.openAssistantTurn({
+        turnId,
+        ...(userTurnId !== undefined ? { userTurnId } : {}),
+        ...(modelInfo !== undefined ? { modelInfo } : {}),
+        timestamp: new Date(getServerNow()).toISOString(),
       });
       span.end();
       this.logger.debug(`[${sessionId}] Assistant entry created`);
@@ -1188,11 +1074,11 @@ export class MessageHandler {
         return;
       }
       const cliType = meta.agentType;
-      const latestAssistant = sessionDoc.getLatestAssistantHistory();
+      const latestAssistant = await readLatestTurn(sessionDoc.sessionData.history, 'assistant');
 
       let userId = latestAssistant?.userId;
       if (!userId) {
-        const history = await sessionDoc.getHistory();
+        const history = readSessionHistory(sessionDoc.sessionData.history);
         for (let i = history.length - 1; i >= 0; i--) {
           const entry = history[i];
           if (entry?.userId) {
@@ -1584,7 +1470,7 @@ export class MessageHandler {
       const meta = await sessionDoc.getMetaState();
       const legacyMeta = meta as SessionLegacyMetaFields | null | undefined;
       const current =
-        resolveLatestSessionGoalFromHistory(await sessionDoc.getHistory()) ??
+        resolveLatestSessionGoalFromHistory(readSessionHistory(sessionDoc.sessionData.history)) ??
         legacyMeta?.latestGoal ??
         null;
       // Skip both the history sweep and the meta write when the snapshot is
@@ -1702,9 +1588,7 @@ export class MessageHandler {
       fileDiff: [],
       items: [noticeItem],
     };
-    await sessionDoc.updateHistory((prevHistory) => {
-      return [...prevHistory, systemNotice];
-    });
+    await sessionDoc.sessionData.commands.appendTurn(systemNotice);
   }
 
   private async applyAcpModeAndModel(
@@ -1883,20 +1767,16 @@ export class MessageHandler {
     content: SessionImageGroupContent;
   }): Promise<boolean> {
     let appended = false;
-    await args.sessionDoc.updateHistory((history) => {
-      for (const entry of history) {
-        if (!entry || entry.id !== args.turnId || entry.role !== 'assistant') {
-          continue;
-        }
-
-        const items = Array.isArray(entry.items) ? [...entry.items] : [];
-        items.push(args.content as unknown as NonNullable<SessionHistoryInput['items']>[number]);
-        entry.items = items as SessionHistoryInput['items'];
-        appended = true;
-        break;
-      }
-      return history;
-    });
+    await args.sessionDoc.sessionData.commands
+      .applyHistoryAction({
+        kind: 'assistant-items',
+        turnId: args.turnId,
+        mode: 'append',
+        items: [args.content],
+      })
+      .then((result) => {
+        appended = result.matched ?? false;
+      });
     return appended;
   }
 
@@ -1909,21 +1789,18 @@ export class MessageHandler {
     await this.awaitTurnHistoryGate(args.sessionId);
     const entryId = `assistant-image-${uuidV4()}`;
     const modelInfo = this.sessionManager.getSession(args.sessionId)?.agentClient?.currentModel;
-    await args.sessionDoc.updateHistory((history) => {
-      history.push({
-        id: entryId,
-        role: 'assistant',
-        items: args.content
-          ? ([args.content] as unknown as SessionHistoryInput['items'])
-          : ([] as unknown as SessionHistoryInput['items']),
-        timestamp: new Date().toISOString(),
-        userId: undefined,
-        read: undefined,
-        modelInfo,
-        fileDiff: [],
-        finished: true,
-      });
-      return history;
+    await args.sessionDoc.sessionData.commands.appendTurn({
+      id: entryId,
+      role: 'assistant',
+      items: args.content
+        ? ([args.content] as unknown as SessionHistoryInput['items'])
+        : ([] as unknown as SessionHistoryInput['items']),
+      timestamp: new Date().toISOString(),
+      userId: undefined,
+      read: undefined,
+      modelInfo,
+      fileDiff: [],
+      finished: true,
     });
     return entryId;
   }
@@ -1934,18 +1811,16 @@ export class MessageHandler {
     content: SessionImageGroupContent;
   }): Promise<boolean> {
     let replaced = false;
-    await args.sessionDoc.updateHistory((history) => {
-      for (const entry of history) {
-        if (!entry || entry.id !== args.entryId || entry.role !== 'assistant') {
-          continue;
-        }
-
-        entry.items = [args.content] as unknown as SessionHistoryInput['items'];
-        replaced = true;
-        break;
-      }
-      return history;
-    });
+    await args.sessionDoc.sessionData.commands
+      .applyHistoryAction({
+        kind: 'assistant-items',
+        turnId: args.entryId,
+        mode: 'replace',
+        items: [args.content],
+      })
+      .then((result) => {
+        replaced = result.matched ?? false;
+      });
     return replaced;
   }
 
@@ -1954,16 +1829,11 @@ export class MessageHandler {
     entryId: string;
   }): Promise<boolean> {
     let removed = false;
-    await args.sessionDoc.updateHistory((history) => {
-      const nextHistory = history.filter((entry) => {
-        if (!entry || entry.id !== args.entryId) {
-          return true;
-        }
-        removed = true;
-        return false;
+    await args.sessionDoc.sessionData.commands
+      .applyHistoryAction({ kind: 'remove-turn', turnId: args.entryId })
+      .then((result) => {
+        removed = result.matched ?? false;
       });
-      return nextHistory;
-    });
     return removed;
   }
 
@@ -3077,24 +2947,12 @@ export class MessageHandler {
         agentClient
       )
     );
-    this.autoPromptRunner = new AutoPromptRunner({
-      workspaceId: this.workspaceId,
-      beginConversationTurn: (sessionId, userTurnId) =>
-        this.beginConversationTurn(sessionId, userTurnId),
-      clearActiveTurnId: (sessionId, turnId) => this.clearActiveTurnIdIfMatches(sessionId, turnId),
-      buildAcpPromptBlocks: async (args) => await this.buildAcpPromptBlocks(args),
-      createAssistantEntryForTurn: async (sessionId, sessionDoc, turnId, modelInfo) =>
-        await this.createAssistantEntryForTurn(sessionId, sessionDoc, turnId, modelInfo),
-      finalizeACPState: async (sessionId) => await this.finalizeACPState(sessionId),
-      flushSessionUsage: async (sessionId) => await this.flushSessionUsage(sessionId),
-    });
     this.turnPostProcessingService = new TurnPostProcessingService({
       logger: this.logger,
       workspaceDocument: this.workspaceDocument,
       workspaceId: this.workspaceId,
       preferredBaseBranch: this.preferredBaseBranch,
       prAssociation: this.cloudPort.prAssociation,
-      runAutoPrompt: async (ctx) => await this.autoPromptRunner.run(ctx),
     });
     this.executionService = new SessionExecutionService({
       logger: this.logger,
@@ -3156,8 +3014,8 @@ export class MessageHandler {
           await this.codeCollabV2Service.refreshSharedStateAfterTurn({ sessionId }),
         detectAndAssociatePR: async (ctx) =>
           await this.turnPostProcessingService.detectAndAssociatePR(ctx),
-        autoCommitAndPushForPR: async (ctx) =>
-          await this.turnPostProcessingService.autoCommitAndPushForPR(ctx),
+        syncWorkspaceGitState: async (sessionId, session) =>
+          await this.turnPostProcessingService.syncWorkspaceGitState(sessionId, session),
         notifySessionCompleted: async (sessionId, userId, occurrenceId) =>
           await this.notifySessionCompleted(sessionId, userId, occurrenceId),
       },
@@ -3216,6 +3074,25 @@ export class MessageHandler {
       onEvents: (events, { authoritative }) =>
         this.rescanMachineCommands(getMachineCommandEventImpact(events), authoritative),
       onReady: () => this.rescanMachineCommands(),
+    });
+    this.worktreeGc = new WorktreeGarbageCollector({
+      reposDir: path.join(getLodyDataDir(), 'repos'),
+      logger: this.logger,
+      // Local mode has no remote to lag behind; in cloud mode the first full
+      // metadata sync is what separates "deleted" from "not seen yet".
+      hasCompleteMetadata: () =>
+        this.cloudPort.kind === 'local' || this.workspaceDocument.hasCompletedInitialMetaSync(),
+      readOwnerState: (sessionId) => this.readWorktreeOwnerState(sessionId),
+      isRuntimeActive: (sessionId) =>
+        this.archiveInFlight.has(sessionId) || this.sessionManager.hasSession(sessionId),
+      runCleanupScript: (input) => this.runArchivedWorktreeCleanupScript(input),
+      // Restore reattaches by `branchName`; a branch renamed in a terminal is
+      // only known to git, so the name archiving reports is written back.
+      recordArchivedBranch: async (sessionId, branchName) => {
+        await this.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId), {
+          branchName,
+        } as Partial<SessionMeta>);
+      },
     });
     this.previewService = new PreviewService({
       logger: this.logger,
@@ -3371,13 +3248,14 @@ export class MessageHandler {
             machineUserId: this.userId,
           });
         },
-        cancelSession: async ({ sessionId, turnId }) => {
+        cancelSession: async ({ sessionId, turnId, subagentTaskId }) => {
           const result = await this.executionService.cancelSession({
             type: 'session/cancel',
             machineId: this.machineId,
             workspaceId: this.workspaceId,
             sessionId,
             turnId,
+            subagentTaskId,
           });
           return {
             type: 'session/cancel_response' as const,
@@ -3582,9 +3460,10 @@ export class MessageHandler {
     this.setupSessionEventHandlers();
     // Machine registration is triggered by the runtime only after SessionManager is initialized.
     // This prevents dispatch from racing ahead of local session startup prerequisites.
-    this.setupArchiveWatcher();
-    this.setupDeleteWatcher();
+    this.setupSessionLifecycleWatchers();
+    this.startWorktreeGc();
     void this.machineFlockCommandWatcher.start();
+    void this.discardLegacySessionCommands();
   }
 
   /**
@@ -3822,8 +3701,6 @@ export class MessageHandler {
     impact?: ReturnType<typeof getMachineCommandEventImpact>,
     authoritative = true
   ): void {
-    if (!impact || impact.archive) void this.processArchiveRequests();
-    if (!impact || impact.delete) void this.processDeleteRequests();
     if (!impact || impact.deleteLocalProject) void this.processDeleteLocalProjectRequests();
     // A stale local setup row must not outrun a remote cancellation, so provider
     // setup drains only once the command room has established remote authority.
@@ -3919,201 +3796,294 @@ export class MessageHandler {
     }
   }
 
-  private setupArchiveWatcher(): void {
-    if (this.archiveWatchHandle) {
+  /**
+   * Archive and delete are observed, not commanded. A Session doc whose
+   * `isArchived` flips to true has its runtime released here; a Session doc
+   * that becomes deleted gets the same release plus the deletion barrier. Disk
+   * follows separately through the worktree reconciler, which needs no event
+   * to be correct — events only make it prompt.
+   */
+  private setupSessionLifecycleWatchers(): void {
+    if (this.sessionLifecycleWatchHandles.length > 0) {
       return;
     }
-    const machineRoomId = getMachineRoomId(this.machineId);
-    this.archiveWatchHandle = this.workspaceDocument.repo.watch(
-      (event) => {
-        if (event.kind !== 'doc-metadata') return;
-        if (event.docId !== machineRoomId) return;
-        this.logger.debug(`[archive] Machine meta updated (docId=${machineRoomId})`);
-        void this.processArchiveRequests();
-      },
-      {
-        docIds: [machineRoomId],
-        kinds: ['doc-metadata'],
-        metadataFields: ['needToArchiveSessions'],
-      }
-    );
-    this.logger.debug(`[archive] Archive watcher registered (docId=${machineRoomId})`);
-    void this.processArchiveRequests();
+    const { repo } = this.workspaceDocument;
+    this.sessionLifecycleWatchHandles = [
+      repo.watch(
+        (event) => {
+          if (event.kind !== 'doc-metadata') return;
+          const sessionId = getSessionIdFromRoomId(event.docId);
+          if (!sessionId) return;
+          if ((event.patch as Partial<SessionMeta>).isArchived !== true) return;
+          void this.handleSessionArchived(sessionId);
+        },
+        { kinds: ['doc-metadata'], metadataFields: ['isArchived'] }
+      ),
+      repo.watch(
+        (event) => {
+          if (event.kind !== 'doc-existence-changed') return;
+          if (event.to !== 'deleted') return;
+          const sessionId = getSessionIdFromRoomId(event.docId);
+          if (!sessionId) return;
+          void this.handleSessionDeleted(sessionId);
+        },
+        { kinds: ['doc-existence-changed'] }
+      ),
+    ];
+    this.logger.debug('[session-lifecycle] Archive and delete watchers registered');
   }
 
-  private async processArchiveRequests(): Promise<void> {
-    const snapshot = await this.readMachineCommandSnapshot();
-    const sessionIds = snapshot.archiveSessionIds;
-    if (sessionIds.length === 0) {
-      this.logger.debug('[archive] No pending archive requests');
+  private startWorktreeGc(): void {
+    if (this.worktreeGcTimer) {
       return;
     }
-
-    this.logger.debug(`[archive] Processing ${sessionIds.length} archive request(s)`);
-    for (const sessionId of sessionIds) {
-      if (snapshot.deleteSessionIds.has(sessionId)) {
+    this.worktreeGcTimer = setInterval(() => {
+      void this.worktreeGc.schedule();
+    }, WORKTREE_GC_INTERVAL_MS);
+    this.worktreeGcTimer.unref?.();
+    if (this.cloudPort.kind === 'local') {
+      void this.worktreeGc.schedule();
+      return;
+    }
+    // Every authoritative resync is a chance to catch Sessions archived or
+    // deleted while this daemon was offline; sweeps coalesce and are idempotent.
+    this.detachWorktreeGcSyncListener = this.workspaceDocument.onMetaRoomSynced(() => {
+      void this.worktreeGc.schedule();
+    });
+    void this.workspaceDocument
+      .waitForInitialMetaSync()
+      .then((completed) => {
+        if (completed) void this.worktreeGc.schedule();
+      })
+      .catch((error: unknown) => {
         this.logger.debug(
-          `[archive] Skipping archive for ${sessionId} (session is queued for deletion)`
+          `[worktree-gc] Initial sweep skipped; metadata sync failed: ${formatErrorMessage(error)}`
         );
-        await this.removeArchiveRequest(sessionId);
-        continue;
-      }
-      if (this.archiveInFlight.has(sessionId)) {
-        this.logger.debug(`[archive] Session ${sessionId} already in progress`);
-        continue;
-      }
-      this.archiveInFlight.add(sessionId);
-      try {
-        this.logger.debug(`[archive] Start archiving session ${sessionId}`);
-        await this.archiveSessionResources(sessionId);
-        await this.removeArchiveRequest(sessionId);
-        this.logger.debug(`[archive] Finished archiving session ${sessionId}`);
-      } catch (error) {
-        this.logger.error(`[${sessionId}] Failed to archive session: ${formatErrorMessage(error)}`);
-      } finally {
-        this.archiveInFlight.delete(sessionId);
-      }
-    }
-
-    void this.processDeleteLocalProjectRequests();
+      });
   }
 
-  private async archiveSessionResources(
+  private async readWorktreeOwnerState(sessionId: SessionId): Promise<WorktreeOwnerState> {
+    const snapshot = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
+    if (!snapshot) {
+      return { kind: 'unknown' };
+    }
+    const meta = snapshot.meta as SessionMeta | undefined;
+    if (snapshot.deleted) {
+      return { kind: 'deleted', meta };
+    }
+    if (meta?.isArchived === true && !meta.parentSessionId) {
+      return { kind: 'archived', meta };
+    }
+    return { kind: 'active' };
+  }
+
+  private async runArchivedWorktreeCleanupScript(input: {
+    sessionId: SessionId;
+    meta: SessionMeta | undefined;
+    worktreePath: string;
+  }): Promise<void> {
+    const { sessionId, meta, worktreePath } = input;
+    if (!meta) {
+      // The Session doc is gone; there is nowhere to record the script run and
+      // no configuration to resolve it from.
+      return;
+    }
+    const config = await resolveSessionWorktreeCleanupConfig({
+      token: this.token,
+      workspaceId: this.workspaceId,
+      machineId: this.machineId,
+      sessionId,
+      sessionMeta: meta,
+      workspaceDocument: this.workspaceDocument,
+      logger: this.logger,
+    });
+    if (!config) {
+      return;
+    }
+    const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
+    await runWorktreeCleanup({
+      config,
+      sessionId,
+      workspaceId: this.workspaceId,
+      workdir: worktreePath,
+      branch: meta.branchName?.trim() ?? '',
+      repoFullName: meta.project?.kind === 'local' ? undefined : meta.repoFullName,
+      localProjectId: meta.project?.kind === 'local' ? meta.project.localProjectId : undefined,
+      logger: this.logger,
+      events: createWorktreeScriptHistoryRecorder({
+        sessionDoc,
+        sessionId,
+        phase: 'cleanup',
+        logger: this.logger,
+      }),
+    });
+  }
+
+  /**
+   * Session docs of every machine flow through the same watcher; only this
+   * machine's Sessions (or ones whose runtime this daemon still holds) get
+   * their runtime released here. Other machines release their own.
+   */
+  private async isSessionOwnedByThisMachine(sessionId: SessionId): Promise<boolean> {
+    if (this.sessionManager.hasSession(sessionId) || this.store.has(sessionId)) {
+      return true;
+    }
+    const snapshot = await this.workspaceDocument.repo.getDocMeta(getSessionRoomId(sessionId));
+    return (snapshot?.meta as SessionMeta | undefined)?.machineId === this.machineId;
+  }
+
+  private async handleSessionArchived(sessionId: SessionId): Promise<void> {
+    if (this.archiveInFlight.has(sessionId)) {
+      return;
+    }
+    if (!(await this.isSessionOwnedByThisMachine(sessionId))) {
+      return;
+    }
+    this.archiveInFlight.add(sessionId);
+    try {
+      await this.releaseArchivedSessionRuntime(sessionId);
+    } catch (error) {
+      this.logger.error(
+        `[${sessionId}] Failed to release archived session runtime: ${formatErrorMessage(error)}`
+      );
+    } finally {
+      this.archiveInFlight.delete(sessionId);
+    }
+    void this.worktreeGc.schedule();
+  }
+
+  /**
+   * Everything archiving needs from the daemon except disk: presence,
+   * terminals, ACP state, preview tunnel, child Sessions, and the agent
+   * process. Idempotent, so repeated observations of the same archive are
+   * harmless.
+   */
+  private async releaseArchivedSessionRuntime(
     sessionId: SessionId,
-    options?: { preserveWorktree?: boolean }
+    options: { writeIdleStatus?: boolean } = {}
   ): Promise<void> {
-    this.logger.debug(`[${sessionId}] Archiving session resources`);
+    this.logger.debug(`[${sessionId}] Releasing archived session runtime`);
 
     this.clearSessionActivePresence(sessionId);
     this.closeSessionTerminals?.(sessionId);
-    this.logger.debug(`[${sessionId}] Active presence cleared`);
 
     await this.finalizeACPState(sessionId);
-    this.logger.debug(`[${sessionId}] ACP state finalized`);
-
     await this.previewService.closeSessionPreviewForCleanup(sessionId, 'Session archived');
-    this.logger.debug(`[${sessionId}] Preview tunnel closed for archive`);
-
-    const sessionRoomId = getSessionRoomId(sessionId);
-    const [sessionMetaDoc, archiveMachineMetaDoc] = await Promise.all([
-      this.workspaceDocument.repo.getDocMeta(sessionRoomId),
-      this.workspaceDocument.repo.getDocMeta(getMachineRoomId(this.machineId)),
-    ]);
-    const sessionMeta = sessionMetaDoc?.meta as SessionMeta | undefined;
-    const archiveMachineMeta = archiveMachineMetaDoc?.meta as MachineLegacyMetaFields | undefined;
-
     await this.terminateActiveChildSessions(sessionId, 'Parent session archived');
 
     if (this.sessionManager.hasSession(sessionId)) {
       this.logger.debug(`[${sessionId}] Terminating active session`);
       await this.sessionManager.terminateSession(sessionId, true);
-    }
-
-    if (!options?.preserveWorktree) {
-      const cleanupTarget = this.resolveWorktreeCleanupTarget({
-        sessionMeta,
-        machineMeta: archiveMachineMeta,
-      });
-      if (cleanupTarget) {
-        const worktreeManager = getWorktreeManager(this.buildWorktreeManagerConfig(cleanupTarget));
-        const worktreePath = worktreeManager.getWorktreeHostPath(sessionId);
-        if (fs.existsSync(worktreePath)) {
-          const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-          await runWorktreeCleanup({
-            config: await resolveSessionWorktreeCleanupConfig({
-              token: this.token,
-              workspaceId: this.workspaceId,
-              machineId: this.machineId,
-              sessionId,
-              sessionMeta,
-              workspaceDocument: this.workspaceDocument,
-              logger: this.logger,
-            }),
-            sessionId,
-            workspaceId: this.workspaceId,
-            workdir: worktreePath,
-            branch: cleanupTarget.branchName ?? sessionMeta?.branchName?.trim() ?? '',
-            repoFullName:
-              sessionMeta?.project?.kind === 'local' ? undefined : sessionMeta?.repoFullName,
-            localProjectId:
-              sessionMeta?.project?.kind === 'local'
-                ? sessionMeta.project.localProjectId
-                : undefined,
-            logger: this.logger,
-            events: createWorktreeScriptHistoryRecorder({
-              sessionDoc,
-              sessionId,
-              phase: 'cleanup',
-              logger: this.logger,
-            }),
-          });
-        }
-        try {
-          const archiveResult = await worktreeManager.archiveWorktree(sessionId);
-          if (
-            archiveResult.branchName &&
-            archiveResult.branchName !== sessionMeta?.branchName?.trim()
-          ) {
-            await this.workspaceDocument.repo.upsertDocMeta(sessionRoomId, {
-              branchName: archiveResult.branchName,
-            } as Partial<SessionMeta>);
-          }
-        } catch (error) {
-          this.logger.debug(
-            `[${sessionId}] Failed to archive worktree: ${formatErrorMessage(error)}`
-          );
-        }
+      if (options.writeIdleStatus !== false) {
+        await this.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(sessionId), {
+          status: SessionStatusFactory.idle(),
+        } as Partial<SessionMeta>);
       }
     }
 
     await this.sessionManager.archiveSession(sessionId);
-    this.logger.debug(`[${sessionId}] Session doc cleaned`);
-
-    await this.workspaceDocument.repo.upsertDocMeta(sessionRoomId, {
-      isArchived: true,
-      status: SessionStatusFactory.idle(),
-    } as Partial<SessionMeta>);
-    this.logger.debug(`[${sessionId}] Session meta archived`);
-
-    // Clean up session-specific logger cache
     this.store.get(sessionId).logger = null;
+    this.logger.debug(`[${sessionId}] Archived session runtime released`);
   }
 
-  private async removeArchiveRequest(sessionId: SessionId): Promise<void> {
-    const machineRoomId = getMachineRoomId(this.machineId);
-    let removedFlockRow = false;
+  private async handleSessionDeleted(sessionId: SessionId): Promise<void> {
+    if (this.deletedSessionIds.has(sessionId)) {
+      return;
+    }
+    if (!(await this.isSessionOwnedByThisMachine(sessionId))) {
+      return;
+    }
+    this.logger.debug(`[${sessionId}] Session doc deleted; releasing runtime`);
     try {
-      removedFlockRow = await this.deleteMachineFlockCommandRow(
-        machineFlockKeys.archiveSessionCommand(sessionId)
-      );
+      // Never write into a deleted doc: the idle-status patch stays archive-only.
+      await this.releaseArchivedSessionRuntime(sessionId, { writeIdleStatus: false });
     } catch (error) {
-      this.logger.debug(
-        `[archive] Failed to remove archive Flock request (${sessionId}): ${formatErrorMessage(
-          error
-        )}`
+      this.logger.error(
+        `[${sessionId}] Failed to release deleted session runtime: ${formatErrorMessage(error)}`
       );
     }
 
-    const machineMeta = (await this.workspaceDocument.repo.getDocMeta(machineRoomId))?.meta as
-      | MachineLegacyMetaFields
-      | undefined;
-    if (!machineMeta?.needToArchiveSessions?.[sessionId]) {
-      if (!removedFlockRow) {
-        this.logger.debug(`[archive] Archive request already cleared (${sessionId})`);
-      } else {
-        this.logger.debug(`[archive] Archive Flock request removed (${sessionId})`);
+    // Point of no return for the daemon's view of the doc: stop accepting late
+    // ACP output and drop any retained retry timer/buffer, otherwise a failed
+    // tail flush could write into a deleted document.
+    this.deletedSessionIds.add(sessionId);
+    await this.quiesceACPFlushForDeletion(sessionId);
+
+    try {
+      // Transient non-owner open: skip the open-time maintenance writes so this
+      // does not contend on the shared WAL store's write lock.
+      const operationStore = new LodyOperationStore(
+        getLodyOperationStorePath(this.machineId),
+        undefined,
+        { maintenance: false }
+      );
+      try {
+        operationStore.deleteRequesterSession(sessionId);
+      } finally {
+        operationStore.close();
       }
-      return;
+    } catch (error) {
+      this.logger.debug(
+        `[${sessionId}] Failed to delete requester-private Operation data: ${formatErrorMessage(error)}`
+      );
     }
-    const nextQueue = { ...machineMeta.needToArchiveSessions };
-    delete nextQueue[sessionId];
-    await this.workspaceDocument.repo.upsertDocMeta(machineRoomId, {
-      needToArchiveSessions: nextQueue,
-    } as RepoDocMetaPatch);
-    if (removedFlockRow) {
-      this.logger.debug(`[archive] Archive request removed (${sessionId})`);
-    } else {
-      this.logger.debug(`[archive] Legacy archive request removed (${sessionId})`);
+
+    try {
+      await this.deleteMachineFlockCommandRow(machineFlockKeys.sessionLaunchConfig(sessionId));
+    } catch (error) {
+      this.logger.debug(
+        `[${sessionId}] Failed to remove legacy session launch config row: ${formatErrorMessage(error)}`
+      );
+    }
+
+    // Some best-effort deletion tails may consult transient session state for
+    // diagnostics. Re-assert the deletion barrier before returning so those
+    // reads cannot leave an empty state record behind.
+    this.store.deleteSession(sessionId);
+    void this.worktreeGc.schedule();
+  }
+
+  private async discardLegacySessionCommands(): Promise<void> {
+    try {
+      const handle = await this.workspaceDocument.repo.openFlockDoc(
+        this.getMachineFlockDocIdForMachine()
+      );
+      const rows = readMachineFlockRowsFromFlock(handle.flock, {
+        families: [...LEGACY_SESSION_COMMAND_FAMILIES],
+      });
+      let discarded = 0;
+      for (const row of Object.values(rows)) {
+        const kind = parseMachineFlockKey(row.key)?.kind;
+        if (kind !== 'archiveSessionCommand' && kind !== 'deleteSessionCommand') continue;
+        if (await this.deleteMachineFlockCommandRow(row.key)) discarded += 1;
+      }
+      const machineRoomId = getMachineRoomId(this.machineId);
+      const machineMeta = (await this.workspaceDocument.repo.getDocMeta(machineRoomId))?.meta as
+        | MachineLegacyMetaFields
+        | undefined;
+      const legacyPatch: Record<string, unknown> = {};
+      if (Object.keys(machineMeta?.needToArchiveSessions ?? {}).length > 0) {
+        legacyPatch.needToArchiveSessions = {};
+      }
+      if (Object.keys(machineMeta?.needToDeleteSessions ?? {}).length > 0) {
+        legacyPatch.needToDeleteSessions = {};
+      }
+      if (Object.keys(legacyPatch).length > 0) {
+        await this.workspaceDocument.repo.upsertDocMeta(
+          machineRoomId,
+          legacyPatch as RepoDocMetaPatch
+        );
+        discarded += 1;
+      }
+      if (discarded > 0) {
+        this.logger.debug(
+          `[session-lifecycle] Discarded ${discarded} legacy archive/delete request record(s)`
+        );
+      }
+    } catch (error) {
+      this.logger.debug(
+        `[session-lifecycle] Failed to discard legacy session commands: ${formatErrorMessage(error)}`
+      );
     }
   }
 
@@ -4141,13 +4111,6 @@ export class MessageHandler {
     const localProjectEntries = snapshot.deleteLocalProjectEntries;
     if (localProjectEntries.length === 0) {
       this.logger.debug('[local-project] No pending delete requests');
-      return;
-    }
-
-    if (snapshot.archiveSessionIds.length > 0 || this.archiveInFlight.size > 0) {
-      this.logger.debug(
-        `[local-project] Deferring ${localProjectEntries.length} delete request(s) until archive requests finish`
-      );
       return;
     }
 
@@ -4209,15 +4172,18 @@ export class MessageHandler {
       ({ meta }) => meta.isArchived !== true && !meta.parentSessionId
     );
     const archivedRootSessionIds = new Set(rootSessions.map(({ meta }) => meta.id));
-    for (const { meta } of rootSessions) {
-      await this.archiveSessionResources(meta.id, { preserveWorktree: true });
+    for (const { roomId, meta } of rootSessions) {
+      await this.releaseArchivedSessionRuntime(meta.id);
+      await this.workspaceDocument.repo.upsertDocMeta(roomId, {
+        isArchived: true,
+        status: SessionStatusFactory.idle(),
+      } as Partial<SessionMeta>);
     }
 
     for (const { roomId, meta } of sessions) {
       if (archivedRootSessionIds.has(meta.id)) continue;
       if (this.sessionManager.hasSession(meta.id)) {
-        await this.archiveSessionResources(meta.id, { preserveWorktree: true });
-        continue;
+        await this.releaseArchivedSessionRuntime(meta.id);
       }
       if (meta.isArchived === true) continue;
       await this.workspaceDocument.repo.upsertDocMeta(roomId, {
@@ -4288,48 +4254,6 @@ export class MessageHandler {
     return cleanupResult;
   }
 
-  private toDeleteRequestRecord(request: DeleteRequest | undefined): DeleteRequestRecord {
-    if (!request || typeof request !== 'object') {
-      return {};
-    }
-    if ('v' in request) {
-      return machineDeleteCommandToQueueItem(request);
-    }
-    return request;
-  }
-
-  private async isDeleteRequestQueued(sessionId: SessionId): Promise<boolean> {
-    const snapshot = await this.readMachineCommandSnapshot();
-    return snapshot.deleteSessionIds.has(sessionId);
-  }
-
-  private async writeKeptWorktreePath(
-    sessionId: SessionId,
-    request: DeleteRequest | undefined,
-    keptWorktreePath: string
-  ): Promise<void> {
-    const machineFlockRows = await this.tryReadMachineFlockCommandRows();
-    const deleteKey = machineFlockKeys.deleteSessionCommand(sessionId);
-    const currentCommand = getMachineFlockDeleteCommand(machineFlockRows, sessionId);
-
-    const nextRecord = {
-      ...this.toDeleteRequestRecord(request),
-      ...(currentCommand ? this.toDeleteRequestRecord(currentCommand) : {}),
-      keptWorktreePath,
-    };
-    const { isWorktree, requestedAt, ...rest } = nextRecord;
-    const nextCommand: MachineDeleteSessionCommand = {
-      v: 1,
-      ...rest,
-      requestedAt: requestedAt ?? getServerNow(),
-      ...(isWorktree === true ? { isWorktree: true } : {}),
-    };
-    await this.writeMachineFlockRow({
-      key: deleteKey,
-      value: nextCommand,
-    });
-  }
-
   private async terminateActiveChildSessions(
     parentSessionId: SessionId,
     reason: string
@@ -4352,348 +4276,6 @@ export class MessageHandler {
         this.store.get(childSessionId).logger = null;
       })
     );
-  }
-
-  private resolveWorktreeCleanupTarget(options: {
-    sessionMeta: SessionMeta | undefined;
-    request?: DeleteRequest;
-    machineMeta?: MachineLegacyMetaFields;
-    machineFlockRows?: MachineFlockRowMap;
-  }): WorktreeCleanupTarget | null {
-    const { sessionMeta, machineMeta } = options;
-    const localProjects = {
-      ...(machineMeta?.localProjects ?? {}),
-      ...getMachineFlockLocalProjects(options.machineFlockRows ?? ({} as MachineFlockRowMap)),
-    };
-    const requestRecord = this.toDeleteRequestRecord(options.request);
-    const trimmed = (value: string | undefined): string | undefined => {
-      const v = value?.trim();
-      return v ? v : undefined;
-    };
-    const branchName = trimmed(requestRecord.branchName) ?? trimmed(sessionMeta?.branchName);
-    const baseBranchName =
-      trimmed(requestRecord.baseBranchName) ?? trimmed(sessionMeta?.baseBranch);
-    const requestLocalProjectId = trimmed(requestRecord.localProjectId);
-    const requestOriginalRootPath = trimmed(requestRecord.originalRootPath);
-    const requestHasLocalTarget =
-      requestLocalProjectId !== undefined || requestOriginalRootPath !== undefined;
-    const isLocalWorktree =
-      sessionMeta?.project?.kind === 'local'
-        ? sessionMeta.isWorktree === true || requestRecord.isWorktree === true
-        : requestHasLocalTarget && requestRecord.isWorktree === true;
-
-    if (isLocalWorktree) {
-      const localProjectId =
-        requestLocalProjectId ??
-        (sessionMeta?.project?.kind === 'local' ? sessionMeta.project.localProjectId : undefined);
-      const originalRootPath =
-        requestOriginalRootPath ||
-        (localProjectId ? localProjects[localProjectId as LocalProjectId]?.rootPath?.trim() : '');
-      if (!originalRootPath) {
-        return null;
-      }
-      return {
-        repoId: deriveRepoIdFromLocalProjectPath(originalRootPath),
-        source: { kind: 'local-shared', originalRootPath },
-        ...(branchName ? { branchName } : {}),
-        ...(baseBranchName ? { baseBranchName } : {}),
-      };
-    }
-
-    const repoFullName =
-      sessionMeta?.project?.kind === 'local'
-        ? undefined
-        : (trimmed(requestRecord.repoFullName) ?? trimmed(sessionMeta?.repoFullName));
-    if (!repoFullName) {
-      return null;
-    }
-
-    return {
-      repoId: deriveRepoIdFromGitHubRepo(repoFullName),
-      ...(branchName ? { branchName } : {}),
-      ...(baseBranchName ? { baseBranchName } : {}),
-    };
-  }
-
-  private buildWorktreeManagerConfig(target: WorktreeCleanupTarget): {
-    repoId: RepoId;
-    source?: WorktreeCleanupTarget['source'];
-    logger: Logger;
-  } {
-    return {
-      repoId: target.repoId,
-      ...(target.source ? { source: target.source } : {}),
-      logger: this.logger,
-    };
-  }
-
-  private setupDeleteWatcher(): void {
-    if (this.deleteWatchHandle) {
-      return;
-    }
-    const machineRoomId = getMachineRoomId(this.machineId);
-    this.deleteWatchHandle = this.workspaceDocument.repo.watch(
-      (event) => {
-        if (event.kind !== 'doc-metadata') return;
-        if (event.docId !== machineRoomId) return;
-        this.logger.debug(`[delete] Machine meta updated (docId=${machineRoomId})`);
-        void this.processDeleteRequests();
-      },
-      {
-        docIds: [machineRoomId],
-        kinds: ['doc-metadata'],
-        metadataFields: ['needToDeleteSessions'],
-      }
-    );
-    this.logger.debug(`[delete] Delete watcher registered (docId=${machineRoomId})`);
-    void this.processDeleteRequests();
-  }
-
-  private async processDeleteRequests(): Promise<void> {
-    const snapshot = await this.readMachineCommandSnapshot();
-    const entries = snapshot.deleteEntries;
-    if (entries.length === 0) {
-      this.logger.debug('[delete] No pending delete requests');
-      return;
-    }
-
-    this.logger.debug(`[delete] Processing ${entries.length} delete request(s)`);
-    for (const [sessionId, request] of entries) {
-      const keptWorktreePath =
-        typeof request === 'object' && request !== null
-          ? request.keptWorktreePath?.trim()
-          : undefined;
-      if (keptWorktreePath) {
-        this.logger.debug(
-          `[delete] Skipping retry for ${sessionId}; local worktree was preserved at ${keptWorktreePath}`
-        );
-        continue;
-      }
-      if (this.deleteInFlight.has(sessionId)) {
-        this.logger.debug(`[delete] Session ${sessionId} already in progress`);
-        continue;
-      }
-      this.deleteInFlight.add(sessionId);
-      try {
-        this.logger.debug(`[delete] Start deleting session ${sessionId}`);
-        const result = await this.deleteSessionResources(sessionId, request);
-        if (!result.keptWorktreePath) {
-          await this.removeDeleteRequest(sessionId);
-        }
-        this.logger.debug(`[delete] Finished deleting session ${sessionId}`);
-      } catch (error) {
-        this.logger.error(`[${sessionId}] Failed to delete session: ${formatErrorMessage(error)}`);
-      } finally {
-        this.deleteInFlight.delete(sessionId);
-      }
-    }
-  }
-
-  private async deleteSessionResources(
-    sessionId: SessionId,
-    request?: DeleteRequest
-  ): Promise<{ keptWorktreePath?: string }> {
-    this.logger.debug(`[${sessionId}] Deleting session resources permanently`);
-
-    const sessionRoomId = getSessionRoomId(sessionId);
-    const [commandSnapshot, sessionMetaDoc] = await Promise.all([
-      this.readMachineCommandSnapshot(),
-      this.workspaceDocument.repo.getDocMeta(sessionRoomId),
-    ]);
-    const sessionMeta = sessionMetaDoc?.meta as SessionMeta | undefined;
-    if (!commandSnapshot.deleteSessionIds.has(sessionId)) {
-      this.logger.debug(
-        `[${sessionId}] Skipping permanent deletion (delete request is no longer queued)`
-      );
-      return {};
-    }
-
-    if (sessionMeta?.isArchived === false) {
-      this.logger.debug(
-        `[${sessionId}] Skipping permanent deletion (session is not archived anymore)`
-      );
-      return {};
-    }
-
-    // First archive resources if not already done
-    await this.terminateActiveChildSessions(sessionId, 'Parent session deleted');
-
-    this.clearSessionActivePresence(sessionId);
-    this.closeSessionTerminals?.(sessionId);
-
-    await this.finalizeACPState(sessionId);
-
-    await this.previewService.closeSessionPreviewForCleanup(sessionId, 'Session deleted');
-    this.logger.debug(`[${sessionId}] Preview tunnel closed for deletion`);
-
-    if (this.sessionManager.hasSession(sessionId)) {
-      this.logger.debug(`[${sessionId}] Terminating active session`);
-      await this.sessionManager.terminateSession(sessionId, true);
-    }
-
-    if (!(await this.isDeleteRequestQueued(sessionId))) {
-      this.logger.debug(
-        `[${sessionId}] Skipping permanent deletion (delete request was cleared before worktree cleanup)`
-      );
-      return {};
-    }
-
-    const cleanupTarget = this.resolveWorktreeCleanupTarget({
-      sessionMeta,
-      request,
-      machineMeta: commandSnapshot.machineMeta,
-      machineFlockRows: commandSnapshot.machineFlockRows,
-    });
-
-    let keptWorktreePath: string | undefined;
-    if (cleanupTarget) {
-      const worktreeManager = getWorktreeManager(this.buildWorktreeManagerConfig(cleanupTarget));
-      try {
-        await worktreeManager.removeWorktree(
-          sessionId,
-          cleanupTarget.source === undefined,
-          cleanupTarget.branchName,
-          { baseBranchName: cleanupTarget.baseBranchName }
-        );
-      } catch (error) {
-        if (cleanupTarget.source) {
-          const keptPath = worktreeManager.getWorktreeHostPath(sessionId);
-          keptWorktreePath = keptPath;
-          await this.writeKeptWorktreePath(sessionId, request, keptPath);
-          this.logger.warn(
-            `[${sessionId}] Local worktree was kept because cleanup failed or it has uncommitted changes: ${keptPath} (${formatErrorMessage(error)})`
-          );
-        } else {
-          this.logger.debug(
-            `[${sessionId}] Failed to remove worktree: ${formatErrorMessage(error)}`
-          );
-        }
-      }
-    }
-
-    if (keptWorktreePath) {
-      return { keptWorktreePath };
-    }
-
-    if (!(await this.isDeleteRequestQueued(sessionId))) {
-      this.logger.debug(
-        `[${sessionId}] Skipping session doc deletion (delete request was cleared after worktree cleanup)`
-      );
-      return {};
-    }
-
-    // Clean up worktree and disk resources via session manager
-    await this.sessionManager.archiveSession(sessionId);
-    this.logger.debug(`[${sessionId}] Session doc cleaned`);
-
-    if (!(await this.isDeleteRequestQueued(sessionId))) {
-      this.logger.debug(
-        `[${sessionId}] Skipping session doc deletion (delete request was cleared after archive)`
-      );
-      return {};
-    }
-
-    // This is the point of no return for the session document. Stop accepting
-    // late ACP output and drop any retained retry timer/buffer before deleting
-    // the doc, otherwise a failed tail flush can recreate it afterwards.
-    this.deletedSessionIds.add(sessionId);
-    await this.quiesceACPFlushForDeletion(sessionId);
-
-    // Delete the session doc permanently
-    try {
-      await this.workspaceDocument.repo.deleteDoc(sessionRoomId);
-      this.logger.debug(`[${sessionId}] Session doc deleted`);
-    } catch (error) {
-      // The durable delete request must remain retryable. Rolling the barrier
-      // back lets the next attempt quiesce the session again; swallowing this
-      // error would acknowledge a deletion that never happened and reject all
-      // future output forever.
-      this.deletedSessionIds.delete(sessionId);
-      throw error;
-    }
-
-    try {
-      // Transient non-owner open: skip the open-time maintenance writes so this
-      // does not contend on the shared WAL store's write lock.
-      const operationStore = new LodyOperationStore(
-        getLodyOperationStorePath(this.machineId),
-        undefined,
-        { maintenance: false }
-      );
-      try {
-        operationStore.deleteRequesterSession(sessionId);
-      } finally {
-        operationStore.close();
-      }
-    } catch (error) {
-      this.logger.debug(
-        `[${sessionId}] Failed to delete requester-private Operation data: ${formatErrorMessage(error)}`
-      );
-    }
-
-    // Some best-effort deletion tails may consult transient session state for
-    // diagnostics. Re-assert the deletion barrier before returning so those
-    // reads cannot leave an empty state record behind.
-    this.store.deleteSession(sessionId);
-
-    return {};
-  }
-
-  private async removeDeleteRequest(sessionId: SessionId): Promise<void> {
-    const machineRoomId = getMachineRoomId(this.machineId);
-    let removedFlockRow = false;
-    let removedLaunchConfigRow = false;
-    try {
-      removedFlockRow = await this.deleteMachineFlockCommandRow(
-        machineFlockKeys.deleteSessionCommand(sessionId)
-      );
-    } catch (error) {
-      this.logger.debug(
-        `[delete] Failed to remove delete Flock request (${sessionId}): ${formatErrorMessage(
-          error
-        )}`
-      );
-    }
-    try {
-      removedLaunchConfigRow = await this.deleteMachineFlockCommandRow(
-        machineFlockKeys.sessionLaunchConfig(sessionId)
-      );
-    } catch (error) {
-      this.logger.debug(
-        `[delete] Failed to remove session launch config row (${sessionId}): ${formatErrorMessage(
-          error
-        )}`
-      );
-    }
-
-    const machineMeta = (await this.workspaceDocument.repo.getDocMeta(machineRoomId))?.meta as
-      | MachineLegacyMetaFields
-      | undefined;
-    if (!machineMeta?.needToDeleteSessions?.[sessionId]) {
-      if (removedFlockRow || removedLaunchConfigRow) {
-        this.logger.debug(`[delete] Delete Flock request removed (${sessionId})`);
-      } else {
-        this.logger.debug(`[delete] Delete request already cleared (${sessionId})`);
-      }
-      return;
-    }
-    const nextQueue = { ...machineMeta.needToDeleteSessions };
-    delete nextQueue[sessionId];
-    const nextWorkspacePaths = machineMeta.workspacePaths
-      ? { ...machineMeta.workspacePaths }
-      : null;
-    if (nextWorkspacePaths && sessionId in nextWorkspacePaths) {
-      delete nextWorkspacePaths[sessionId];
-    }
-    await this.workspaceDocument.repo.upsertDocMeta(machineRoomId, {
-      needToDeleteSessions: nextQueue,
-      ...(nextWorkspacePaths ? { workspacePaths: nextWorkspacePaths } : {}),
-    } as RepoDocMetaPatch);
-    if (removedFlockRow) {
-      this.logger.debug(`[delete] Delete request removed (${sessionId})`);
-    } else {
-      this.logger.debug(`[delete] Legacy delete request removed (${sessionId})`);
-    }
   }
 
   private enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void {
@@ -5169,14 +4751,13 @@ export class MessageHandler {
       if (contents.length === 0) {
         return;
       }
-      await args.sessionDoc.updateHistory((history) =>
-        applyMessageContentsBatch(history, contents, {
-          targetAssistantEntryId: args.assistantEntryId,
-          createId: () => args.assistantEntryId,
-          now: () => new Date(getServerNow()).toISOString(),
-          model: args.modelInfo,
-        })
-      );
+      await args.sessionDoc.agentWrites.applyAgentBatch({
+        contents,
+        targetAssistantEntryId: args.assistantEntryId,
+        createId: () => args.assistantEntryId,
+        now: () => new Date(getServerNow()).toISOString(),
+        ...(args.modelInfo ? { model: args.modelInfo } : {}),
+      });
     };
 
     let pendingNotifications: AcpSessionNotification[] = [];
@@ -5324,7 +4905,7 @@ export class MessageHandler {
         `[${sessionId}] ACP model info: ${JSON.stringify(this.summarizeModelInfo(modelInfo))}`
       );
       try {
-        const history = sessionDoc ? await sessionDoc.getHistory() : undefined;
+        const history = sessionDoc ? readSessionHistory(sessionDoc.sessionData.history) : undefined;
         this.logger.error(
           `[${sessionId}] ACP history diagnostics: ${
             history ? JSON.stringify(this.summarizeSessionHistoryForDiagnostics(history)) : 'no doc'
@@ -5635,7 +5216,14 @@ export class MessageHandler {
       if (fileDiff.length === 0) {
         return false;
       }
-      const updated = sessionDoc.setLatestAssistantHistoryFileDiff(fileDiff, turnId);
+      const updated =
+        (
+          await sessionDoc.sessionData.commands.applyHistoryAction({
+            kind: 'assistant-file-diff',
+            change: { kind: 'set', value: fileDiff },
+            turnId,
+          })
+        ).matched ?? false;
       if (!updated) {
         this.logger.debug(
           `[${sessionId}] Code Collab v2 diff evidence persisted, but no assistant history entry matched turn ${turnId}`
@@ -5862,14 +5450,13 @@ export class MessageHandler {
 
       // Mark the owning assistant entry as finished and record timing.
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-      await sessionDoc.updateHistory((history) =>
-        markAssistantTurnFinished(history, {
-          turnId,
-          endedAt,
-          permissionWaitMs,
-          settleContextCompactionAsFailed: options?.settleContextCompactionAsFailed,
-        })
-      );
+      await sessionDoc.sessionData.commands.applyHistoryAction({
+        kind: 'finish-assistant',
+        turnId,
+        endedAt,
+        permissionWaitMs,
+        settleContextCompactionAsFailed: options?.settleContextCompactionAsFailed,
+      });
       await sessionDoc.waitUntilSynced();
     } catch (error) {
       this.logger.error(`[${sessionId}] Failed to flush ACP updates during finalization:`, error);
@@ -6028,8 +5615,8 @@ export class MessageHandler {
       logger: this.logger,
       sessionId,
       userTurnId,
-      readHistory: () => sessionDoc.getHistory(),
-      subscribeHistory: (listener) => sessionDoc.mirror?.subscribe(listener),
+      readHistory: async () => readSessionHistory(sessionDoc.sessionData.history),
+      subscribeHistory: (listener) => subscribeSessionChanges(sessionDoc, listener),
       onBeforeOpen: async () => {
         await this.writeAssistantEntryForTurn(
           sessionId,
@@ -6661,6 +6248,7 @@ export class MessageHandler {
           workspaceId: request.workspaceId as WorkspaceId,
           sessionId: request.params.sessionId,
           turnId: request.params.turnId,
+          subagentTaskId: request.params.subagentTaskId,
         });
         return {
           type: 'session/cancel_response' as const,
@@ -7460,18 +7048,11 @@ export class MessageHandler {
       args.files.map(({ downloadUrl: _downloadUrl, ...file }) => file)
     );
     let appended = false;
-    await args.sessionDoc.updateHistory((history) => {
-      for (const entry of history) {
-        if (!entry || entry.id !== args.turnId || entry.role !== 'assistant') {
-          continue;
-        }
-        const existing = Array.isArray(entry.items) ? [...entry.items] : [];
-        entry.items = [...existing, ...items] as SessionHistoryInput['items'];
-        appended = true;
-        break;
-      }
-      return history;
-    });
+    await args.sessionDoc.sessionData.commands
+      .applyHistoryAction({ kind: 'assistant-items', turnId: args.turnId, mode: 'append', items })
+      .then((result) => {
+        appended = result.matched ?? false;
+      });
     return appended;
   }
 
@@ -7486,19 +7067,16 @@ export class MessageHandler {
     const items = args.files
       ? inputBlocksToHistoryItems(args.files.map(({ downloadUrl: _downloadUrl, ...file }) => file))
       : ([] as NonNullable<SessionHistoryInput['items']>);
-    await args.sessionDoc.updateHistory((history) => {
-      history.push({
-        id: entryId,
-        role: 'assistant',
-        items: items as SessionHistoryInput['items'],
-        timestamp: new Date().toISOString(),
-        userId: undefined,
-        read: undefined,
-        modelInfo,
-        fileDiff: [],
-        finished: true,
-      });
-      return history;
+    await args.sessionDoc.sessionData.commands.appendTurn({
+      id: entryId,
+      role: 'assistant',
+      items: items as SessionHistoryInput['items'],
+      timestamp: new Date().toISOString(),
+      userId: undefined,
+      read: undefined,
+      modelInfo,
+      fileDiff: [],
+      finished: true,
     });
     return entryId;
   }
@@ -7880,7 +7458,7 @@ export class MessageHandler {
       throw new Error('remote backfill is disabled');
     }
     const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
-    const history = await sessionDoc.getHistory();
+    const history = readSessionHistory(sessionDoc.sessionData.history);
 
     // Find the persisted block so we upload with its real metadata.
     let target: Extract<SessionInputBlock, { type: 'file' }> | null = null;
@@ -7961,9 +7539,10 @@ export class MessageHandler {
     this.throwIfBackfillSuperseded(generation);
     // Flip transport local -> r2 and adopt the relay-store key (see
     // flipFileTransportToR2 for why fileId must change).
-    await sessionDoc.updateHistory((current) => {
-      const flipped = flipFileTransportToR2(current, fileId, relayFileId);
-      return flipped ?? current;
+    await sessionDoc.sessionData.commands.applyHistoryAction({
+      kind: 'file-backfilled',
+      fileId,
+      relayFileId,
     });
     await markSessionFileBlobBackfilled(blobArgs);
     this.logger.info(`[${sessionId}] Backfilled local file ${fileId} -> relay ${relayFileId}`);
@@ -8577,7 +8156,7 @@ export class MessageHandler {
       sessionTitle = meta?.title;
       metaUserId = meta?.userId;
 
-      const history = await doc.getHistory();
+      const history = readSessionHistory(doc.sessionData.history);
       for (let i = history.length - 1; i >= 0; i -= 1) {
         const entry = history[i];
         if (!entry || entry.role !== 'user') continue;
@@ -8830,22 +8409,19 @@ export class MessageHandler {
         resolve({ outcome });
       };
 
-      // Check if outcome already exists (e.g., from a previous device)
+      // Check if outcome already exists (e.g., from a previous device). Reads the
+      // whole history through the document's explicit full-history API.
       const checkForOutcome = () => {
-        if (resolved || !doc.mirror) return;
-        const history = (doc.mirror.getState().history as SessionHistoryInput[]) ?? [];
+        if (resolved) return;
+        const history = readSessionHistory(doc.sessionData.history);
         const outcome = findPermissionOutcomeInHistory(history, requestId);
-        if (outcome) {
-          void resolveWithOutcome(outcome);
-        }
+        if (outcome) void resolveWithOutcome(outcome);
       };
 
-      // Subscribe to history changes
-      if (doc.mirror) {
-        unsubscribe = doc.mirror.subscribe(() => {
-          checkForOutcome();
-        });
-      }
+      // Subscribe to control and history changes alike.
+      unsubscribe = subscribeSessionChanges(doc, () => {
+        checkForOutcome();
+      });
 
       const checkAutomaticOutcome = (pending: boolean) => {
         // A client decision already written to history wins over a later mode toggle.
@@ -9002,16 +8578,10 @@ export class MessageHandler {
         fileDiff: [],
         items: [noticeItem],
       };
-      await sessionDoc.updateHistory((prevHistory) => {
-        const alreadyRecorded = prevHistory.some((entry) =>
-          entry.items?.some(
-            (item) =>
-              item?.type === 'system_notice' &&
-              item.name === 'agent_warning' &&
-              (item.meta as AgentWarningMeta | undefined)?.message === warning.message
-          )
-        );
-        return alreadyRecorded ? prevHistory : [...prevHistory, systemNotice];
+      await sessionDoc.sessionData.commands.applyHistoryAction({
+        kind: 'agent-warning',
+        turn: systemNotice,
+        message: warning.message,
       });
     } catch (error) {
       this.logger.debug(
@@ -9691,10 +9261,14 @@ export class MessageHandler {
     this.operationCoordinator.stop();
     this.sessionDispatchWatcher.stop();
     this.codeCollabV2Service.dispose();
-    this.archiveWatchHandle?.unsubscribe();
-    this.archiveWatchHandle = null;
-    this.deleteWatchHandle?.unsubscribe();
-    this.deleteWatchHandle = null;
+    for (const handle of this.sessionLifecycleWatchHandles) handle.unsubscribe();
+    this.sessionLifecycleWatchHandles = [];
+    if (this.worktreeGcTimer) {
+      clearInterval(this.worktreeGcTimer);
+      this.worktreeGcTimer = null;
+    }
+    this.detachWorktreeGcSyncListener?.();
+    this.detachWorktreeGcSyncListener = null;
     this.machineFlockCommandWatcher.stop();
     this.providerSetupManager.stop();
     this.sessionActivePresence.clearAll();
@@ -9904,7 +9478,9 @@ export class MessageHandler {
     const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
     const meta = await sessionDoc.getMetaState();
     const legacyMeta = meta as SessionLegacyMetaFields | null | undefined;
-    const historyGoal = resolveLatestSessionGoalFromHistory(await sessionDoc.getHistory());
+    const historyGoal = resolveLatestSessionGoalFromHistory(
+      readSessionHistory(sessionDoc.sessionData.history)
+    );
     return isSessionGoalActive(historyGoal ?? legacyMeta?.latestGoal);
   }
 

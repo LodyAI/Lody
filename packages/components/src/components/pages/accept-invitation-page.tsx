@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
-import { Loader2 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 
 import { Button } from '@/ui/button';
 import { cn } from '@/lib/utils';
@@ -68,10 +68,7 @@ export function AcceptInvitationPage({
         <div className="flex flex-col items-center px-7 pb-7 pt-8 text-center">
           {state === 'loading' ? (
             <>
-              <Loader2
-                className="mb-4 size-6 animate-spin text-muted-foreground"
-                aria-hidden="true"
-              />
+              <Spinner className="mb-4 size-6 text-muted-foreground" aria-hidden="true" />
               <Title>{t('invite.processing.title', 'Processing invitation')}</Title>
               <Description>
                 {t('invite.processing.description', 'Hang tight, this only takes a moment.')}

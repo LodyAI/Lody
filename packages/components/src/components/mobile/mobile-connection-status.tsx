@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowDown, Check, Loader2 } from 'lucide-react';
+import { ArrowDown, Check } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { cn } from '@/lib/utils';
 import type { LodyConnectionUiState } from '@/atoms/control-connection';
 
@@ -35,14 +36,15 @@ import type { LodyConnectionUiState } from '@/atoms/control-connection';
  *   mounted, its inner content cross-fades between states so e.g. the
  *   loader → ✓ swap reads as a smooth transition rather than a jump.
  *
- * Every leading glyph carries `shrink-0`. The pill is a capped-width flex
- * row whose label truncates, so without it a long label compresses the
- * spinner to a non-square box (measured 14×14 → 13.55×15.43 on the
- * reconnecting label) and `animate-spin` then sweeps an ellipse — the
- * glyph visibly wobbles instead of turning in place. `index.css` also
- * pins `transform-box`/`transform-origin` globally for spinners; both
- * are needed, since that rule fixes the pivot but cannot restore a
- * squished box.
+ * Every leading glyph carries `shrink-0` (the shared `Spinner` wrapper
+ * does so itself). The pill is a capped-width flex row whose label
+ * truncates, so without it a long label compresses the spinner to a
+ * non-square box (measured 14×14 → 13.55×15.43 on the reconnecting label)
+ * and the rotation then sweeps an ellipse — the glyph visibly wobbles
+ * instead of turning in place. `index.css` also pins
+ * `transform-box`/`transform-origin` globally for spinners; both are
+ * needed, since that rule fixes the pivot but cannot restore a squished
+ * box.
  */
 
 export type MobileConnectionStatusLabels = {
@@ -123,7 +125,7 @@ function contentFor(
        both at once would be visual noise. */
     return {
       key: 'refreshing',
-      icon: <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />,
+      icon: <Spinner className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />,
       label: labels.refreshing ?? '刷新中…',
       textColor: 'text-muted-foreground',
     };
@@ -139,7 +141,7 @@ function contentFor(
   if (state === 'reconnecting') {
     return {
       key: 'reconnecting',
-      icon: <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />,
+      icon: <Spinner className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />,
       label: labels.reconnecting ?? '正在重连…',
       textColor: 'text-muted-foreground',
     };
@@ -147,7 +149,7 @@ function contentFor(
   if (state === 'loading') {
     return {
       key: 'loading',
-      icon: <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />,
+      icon: <Spinner className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />,
       label: labels.loading ?? '连接中…',
       textColor: 'text-muted-foreground',
     };

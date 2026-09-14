@@ -432,6 +432,7 @@ export const LoroSessionCancelRpcRequestSchema = BaseRpcRequestSchema.extend({
     .object({
       sessionId: SessionIdSchema,
       turnId: z.string().trim().min(1),
+      subagentTaskId: z.string().trim().min(1).optional(),
     })
     .strict(),
 }).strict();
@@ -2642,6 +2643,7 @@ export class LoroStreamsMachineRpcClient {
   async requestSessionCancel(options: {
     sessionId: SessionId;
     turnId: string;
+    subagentTaskId?: string;
     timeoutMs?: number;
   }): Promise<SessionCancelResponse | null> {
     const result = await this.sendRequest({
@@ -2650,6 +2652,7 @@ export class LoroStreamsMachineRpcClient {
       params: {
         sessionId: options.sessionId,
         turnId: options.turnId,
+        subagentTaskId: options.subagentTaskId,
       },
     });
     return result as SessionCancelResponse | null;
@@ -3156,6 +3159,7 @@ export class LoroStreamsMachineRpcClient {
           params: {
             sessionId: SessionId;
             turnId: string;
+            subagentTaskId?: string;
           };
         }
       | {

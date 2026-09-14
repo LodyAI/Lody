@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { usePostHog } from '@posthog/react';
-import { Loader2, Plug, Plus, Trash2 } from 'lucide-react';
+import { Plug, Plus, Trash2 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import {
   describeMcpConnection,
@@ -142,7 +143,7 @@ export function McpSetting() {
             ) : null}
             {!synced ? (
               <span className="flex items-center gap-1 text-[11px] text-muted-foreground/70">
-                <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+                <Spinner className="h-3 w-3" aria-hidden="true" />
                 {t('settings.mcp.syncing')}
               </span>
             ) : null}
@@ -254,7 +255,7 @@ export function McpSetting() {
                 void confirmRemoval();
               }}
             >
-              {removing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {removing ? <Spinner className="mr-2 h-4 w-4" /> : null}
               {t('common.remove')}
             </AlertDialogAction>
           </AlertDialogFooter>

@@ -1,7 +1,9 @@
 # Rank thinking above tool detail in the Markdown export
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-10-conversation-markdown-export-format.zh.md)
 
 ## Abstract
 

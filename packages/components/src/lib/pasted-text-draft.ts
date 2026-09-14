@@ -10,6 +10,17 @@ export interface PastedTextDraft {
 
 export const LARGE_PASTED_TEXT_MIN_CHAR_COUNT = 1024;
 
+/**
+ * Hard ceiling for a single paste, in UTF-8 bytes of the text we would store.
+ *
+ * Above this the collapse stops helping: the chip hides the blob in the
+ * composer, but the full text still rides along in every draft save, every
+ * prompt rewrite, and the turn itself. A log dump this size is never something
+ * the user meant to type into a message, so the paste is refused outright and
+ * they are pointed at the file-attachment path instead.
+ */
+export const MAX_PASTED_TEXT_BYTE_SIZE = 500 * 1024;
+
 export const createPastedTextDraftId = (): string => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
@@ -29,6 +40,19 @@ export const getPastedTextLineCount = (text: string): number => {
   }
   return normalized.split('\n').length;
 };
+
+const pastedTextEncoder = new TextEncoder();
+
+/**
+ * UTF-8 size of the text a paste would actually store, so the ceiling is
+ * measured against the same normalized-and-trimmed string `insertPastedTextDraft`
+ * keeps rather than the raw clipboard payload.
+ */
+export const getPastedTextByteSize = (text: string): number =>
+  pastedTextEncoder.encode(normalizePastedTextDraft(text).trim()).length;
+
+export const isPastedTextTooLarge = (text: string): boolean =>
+  getPastedTextByteSize(text) > MAX_PASTED_TEXT_BYTE_SIZE;
 
 export const isLargePastedText = (text: string): boolean => {
   const characterCount = getPastedTextCharacterCount(text);

@@ -1,3 +1,4 @@
+import { readSessionHistory } from '@lody/shared/session-data';
 import { Command } from 'commander';
 import { promises as fs } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
@@ -23,11 +24,9 @@ import {
   MachineStatusResponseSchema,
   SessionCancelResponseSchema,
   SessionStatusFactory,
-  buildMachineArchiveSessionCommand,
-  buildMachineDeleteSessionCommand,
+  collectSessionArchiveTargets,
   type BillingQuotaAdmission,
   countBillableSessionTurns,
-  deleteMachineFlockRowFromFlock,
   evaluateBillingQuota,
   evaluateSessionCreateQuota,
   formatSessionQuotaRejection,
@@ -37,10 +36,6 @@ import {
   getBuiltinDefaultModeId,
   getMachineFlockAcpCapabilities,
   getMachineFlockDocId,
-  getMachineFlockLocalProjects,
-  getMachineRoomId,
-  machineFlockKeys,
-  machineDeleteCommandToQueueItem,
   readMachineFlockRowsFromFlock,
   resolveActiveAssistantTurnId,
   getServerNow,
@@ -59,11 +54,9 @@ import {
   type AgentRoleId,
   type LocalProjectGitState,
   type LocalProjectId,
-  type MachineLegacyMetaFields,
   type MachineId,
   type MachineMeta,
   type ProjectRef,
-  type SessionDocMeta,
   type SessionHistory,
   type SessionHistoryInput,
   type SessionQuotaKind,
@@ -72,11 +65,8 @@ import {
   type SessionMeta,
   type TaskId,
   type WorkspaceId,
-  shouldQueueMachineDeleteSession,
-  writeMachineFlockRowToFlock,
-  type MachineFlockKey,
-  type MachineFlockRow,
 } from '@lody/shared';
+import type { SessionTurn } from '@lody/shared/session-data';
 import { prepareCliStreamsGatewayBaseUrl } from '@/lib/loro/streams-access';
 import { AuthClient } from '@/lib/auth';
 import {
@@ -444,7 +434,7 @@ export function shouldWaitForSessionCompletion(options: {
   return options.wait === true;
 }
 
-function isTranscriptRole(role: SessionHistoryInput['role']): role is SessionTranscriptRole {
+function isTranscriptRole(role: SessionTurn['role']): role is SessionTranscriptRole {
   return role === 'user' || role === 'assistant' || role === 'system';
 }
 
@@ -509,34 +499,52 @@ function extractTranscriptText(
   return text || undefined;
 }
 
+/**
+ * Whether a raw history row is part of the displayable transcript. Shared by the
+ * whole-history formatter and by bounded paging, so both agree on `limit`
+ * counting displayable entries while positions stay raw.
+ */
+export function isVisibleTranscriptTurn(
+  entry: SessionTurn
+): entry is SessionTurn & { role: SessionTranscriptRole } {
+  if (!isTranscriptRole(entry.role)) return false;
+  if (
+    entry.role === 'system' &&
+    !(entry.items as Array<{ type?: string }> | undefined)?.some(
+      (item) => item.type === 'operation_completion'
+    )
+  ) {
+    return false;
+  }
+  return (
+    extractTranscriptText(entry.items as MessageContent[] | undefined, entry.role) !== undefined
+  );
+}
+
+/** Format one raw row at its raw position, or `undefined` when not displayable. */
+export function toSessionTranscriptEntry(
+  index: number,
+  entry: SessionTurn
+): SessionTranscriptEntry | undefined {
+  if (!isVisibleTranscriptTurn(entry)) return undefined;
+  const text = extractTranscriptText(entry.items as MessageContent[] | undefined, entry.role);
+  if (!text) return undefined;
+  return {
+    index,
+    id: entry.id,
+    role: entry.role,
+    timestamp: entry.timestamp,
+    text,
+  };
+}
+
 export function toSessionTranscriptEntries(
-  history: SessionHistoryInput[]
+  history: readonly SessionTurn[]
 ): SessionTranscriptEntry[] {
   const entries: SessionTranscriptEntry[] = [];
-
   for (const [index, entry] of history.entries()) {
-    if (!isTranscriptRole(entry.role)) {
-      continue;
-    }
-    if (
-      entry.role === 'system' &&
-      !entry.items?.some((item) => item.type === 'operation_completion')
-    ) {
-      continue;
-    }
-
-    const text = extractTranscriptText(entry.items as MessageContent[] | undefined, entry.role);
-    if (!text) {
-      continue;
-    }
-
-    entries.push({
-      index,
-      id: entry.id,
-      role: entry.role,
-      timestamp: entry.timestamp,
-      text,
-    });
+    const formatted = toSessionTranscriptEntry(index, entry);
+    if (formatted) entries.push(formatted);
   }
 
   return entries;
@@ -938,7 +946,7 @@ async function checkSessionTurnQuotaAndReadHistory(args: {
   const entitlement = await getWorkspaceBillingEntitlementBestEffort(args.manager, args.workspace);
   if (!entitlement || isBillingQuotaExempt(entitlement)) return undefined;
   const [history, queue] = await Promise.all([
-    args.sessionDoc.getHistory(),
+    readSessionHistory(args.sessionDoc.sessionData.history),
     args.sessionDoc.getMessageQueue(),
   ]);
   if (
@@ -968,6 +976,30 @@ export async function listChildSessionIds(
       (session) => session.parentSessionId === parentSessionId && session.id !== parentSessionId
     )
     .map((session) => session.id);
+}
+
+export async function listArchiveDescendantSessionIds(
+  manager: LoroDocumentManager,
+  sessionId: SessionId
+): Promise<SessionId[]> {
+  return collectSessionArchiveTargets(sessionId, await listSessionMetasForWorkspace(manager)).map(
+    (session) => session.id
+  );
+}
+
+export async function archiveSessionWithSyncedMetadata(
+  manager: LoroDocumentManager,
+  sessionId: SessionId
+): Promise<SessionId[]> {
+  await syncWorkspaceMetaForRead(manager, `session.archive:${sessionId}:prewrite`);
+  await resolveSessionMetaOrThrow(manager, sessionId);
+  const childSessionIds = await listArchiveDescendantSessionIds(manager, sessionId);
+  // Each owning machine observes archived state and reconciles its resources.
+  await applySessionAndChildren(sessionId, childSessionIds, (id) =>
+    manager.repo.upsertDocMeta(getSessionRoomId(id), buildSessionArchiveMetaPatch())
+  );
+  await ensureWorkspaceMetaSynced(manager, `session.archive:${sessionId}`);
+  return childSessionIds;
 }
 
 async function applySessionAndChildren(
@@ -1243,7 +1275,7 @@ async function resolveRunningAssistantTurnId(
   sessionId: SessionId
 ): Promise<string | undefined> {
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const history = await sessionDoc.getHistory();
+  const history = readSessionHistory(sessionDoc.sessionData.history);
   return resolveActiveAssistantTurnId(history)?.trim();
 }
 
@@ -1259,7 +1291,7 @@ async function appendUserPromptHistory(args: {
   const { sessionDoc, prompt, userId, inputConfig, preallocatedId } = args;
   const historyId = preallocatedId?.trim() || uuidV4();
   if (preallocatedId) {
-    const history = args.knownHistory ?? (await sessionDoc.getHistory());
+    const history = args.knownHistory ?? readSessionHistory(sessionDoc.sessionData.history);
     const existing = history.find((entry) => entry.id === historyId);
     if (existing) {
       const existingText = existing.items?.find((item) => item.type === 'text');
@@ -1291,7 +1323,7 @@ async function appendUserPromptHistory(args: {
     fileDiff: [],
     finished: true,
   };
-  await sessionDoc.updateHistory((history) => [...history, entry]);
+  await sessionDoc.sessionData.commands.appendTurn(entry);
   return {
     id: historyId,
     timestamp,
@@ -1640,7 +1672,7 @@ async function resolveSessionTurnDispatchDefaults(
   agentConfig: AgentConfigMeta
 ): Promise<ResolvedTurnDispatchConfig | undefined> {
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const history = await sessionDoc.getHistory();
+  const history = readSessionHistory(sessionDoc.sessionData.history);
   for (let index = history.length - 1; index >= 0; index -= 1) {
     const entry = history[index];
     if (entry?.role !== 'user') {
@@ -1691,7 +1723,10 @@ async function removeHistoryEntryById(
   sessionDoc: SessionDocument,
   historyId: string
 ): Promise<void> {
-  await sessionDoc.updateHistory((history) => history.filter((entry) => entry.id !== historyId));
+  await sessionDoc.sessionData.commands.applyHistoryAction({
+    kind: 'remove-turn',
+    turnId: historyId,
+  });
 }
 
 export async function updateSessionActivityTimestamps(
@@ -2873,12 +2908,6 @@ async function resolveEffectiveSessionCreateDispatchConfig(args: {
   };
 }
 
-export function shouldQueueMachineDelete(
-  session: Pick<SessionMeta, 'repoFullName' | 'project' | 'isWorktree' | 'parentSessionId'>
-): boolean {
-  return shouldQueueMachineDeleteSession(session);
-}
-
 export function buildSessionArchiveMetaPatch(): Partial<SessionMeta> {
   return {
     isArchived: true,
@@ -2890,69 +2919,6 @@ export function buildSessionRestoreMetaPatch(): Partial<SessionMeta> {
   return {
     isArchived: false,
   };
-}
-
-export function buildLegacyMachineRestoreQueueCleanupPatch(
-  sessionId: SessionId,
-  machineMeta:
-    | Pick<MachineLegacyMetaFields, 'needToArchiveSessions' | 'needToDeleteSessions'>
-    | undefined
-): Pick<MachineLegacyMetaFields, 'needToArchiveSessions' | 'needToDeleteSessions'> | null {
-  const nextNeedToArchiveSessions = { ...(machineMeta?.needToArchiveSessions ?? {}) };
-  const nextNeedToDeleteSessions = { ...(machineMeta?.needToDeleteSessions ?? {}) };
-  let changed = false;
-
-  if (sessionId in nextNeedToArchiveSessions) {
-    delete nextNeedToArchiveSessions[sessionId];
-    changed = true;
-  }
-  if (sessionId in nextNeedToDeleteSessions) {
-    delete nextNeedToDeleteSessions[sessionId];
-    changed = true;
-  }
-
-  if (!changed) {
-    return null;
-  }
-  return {
-    needToArchiveSessions: nextNeedToArchiveSessions,
-    needToDeleteSessions: nextNeedToDeleteSessions,
-  };
-}
-
-async function writeMachineFlockCommandRow(
-  manager: LoroDocumentManager,
-  workspaceId: WorkspaceId,
-  machineId: MachineId,
-  row: MachineFlockRow,
-  nowMs: number
-): Promise<void> {
-  const handle = await manager.repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
-  const changed = writeMachineFlockRowToFlock(handle.flock, row, nowMs);
-  if (!changed) {
-    return;
-  }
-  await manager.repo.flush();
-  await handle.syncOnce();
-}
-
-async function deleteMachineFlockCommandRows(
-  manager: LoroDocumentManager,
-  workspaceId: WorkspaceId,
-  machineId: MachineId,
-  keys: MachineFlockKey[],
-  nowMs: number
-): Promise<void> {
-  const handle = await manager.repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
-  let changed = false;
-  for (const key of keys) {
-    changed = deleteMachineFlockRowFromFlock(handle.flock, key, nowMs) || changed;
-  }
-  if (!changed) {
-    return;
-  }
-  await manager.repo.flush();
-  await handle.syncOnce();
 }
 
 export async function createSessionResult(
@@ -3374,15 +3340,17 @@ async function buildSessionShowResult(
 ): Promise<SessionShowResult> {
   const session = await resolveSessionMetaOrThrow(manager, sessionId);
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const docState = (await sessionDoc.getDocState()) as SessionDocMeta | undefined;
-  const history = docState?.history ?? [];
+  const [directory, queue] = await Promise.all([
+    sessionDoc.sessionData.history.readDirectory(0, Number.MAX_SAFE_INTEGER),
+    sessionDoc.getMessageQueue(),
+  ]);
 
   return {
     workspace,
     session,
-    historyCount: history.length,
-    latestHistoryAt: history[history.length - 1]?.timestamp,
-    messageQueueCount: docState?.mq?.length ?? 0,
+    historyCount: directory.length,
+    latestHistoryAt: directory[directory.length - 1]?.scalars?.timestamp,
+    messageQueueCount: queue.length,
   };
 }
 
@@ -3553,7 +3521,7 @@ async function buildSessionStatusResult(
 ): Promise<SessionStatusResult> {
   const session = await resolveSessionMetaOrThrow(manager, sessionId);
   const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const history = await sessionDoc.getHistory();
+  const history = readSessionHistory(sessionDoc.sessionData.history);
   const assistantTurnId = resolveActiveAssistantTurnId(history);
   const live = await readSessionLiveStatus({
     auth,
@@ -4256,7 +4224,9 @@ const sessionHistoryCommand = new Command('history')
         );
         await resolveSessionMetaOrThrow(manager, sessionId);
         const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-        const transcript = toSessionTranscriptEntries(await sessionDoc.getHistory());
+        const transcript = toSessionTranscriptEntries(
+          readSessionHistory(sessionDoc.sessionData.history)
+        );
         const entries = selectSessionTranscriptEntries(transcript, {
           all: options.all,
           limit: options.limit,
@@ -4425,42 +4395,12 @@ const sessionArchiveCommand = new Command('archive')
         throw new Error('Missing session ID. Pass one explicitly or set LODY_SESSION_ID.');
       }
 
-      const workspace = await resolveWorkspaceForSessionOrThrow(auth, sessionId, options.workspace);
+      const workspace = await resolveWorkspaceForSessionOrThrow(auth, sessionId, {
+        workspace: options.workspace,
+        reason: `session.archive:${sessionId}:resolve`,
+      });
       await withWorkspaceManager(auth, workspace, async (manager) => {
-        const session = await resolveSessionMetaOrThrow(manager, sessionId);
-        const childSessionIds = await listChildSessionIds(manager, sessionId);
-        await applySessionAndChildren(sessionId, childSessionIds, (id) =>
-          manager.repo.upsertDocMeta(getSessionRoomId(id), buildSessionArchiveMetaPatch())
-        );
-
-        if (
-          !session.parentSessionId &&
-          session.machineId !== undefined &&
-          session.machineId.length > 0
-        ) {
-          const requestedAt = getServerNow();
-          await writeMachineFlockCommandRow(
-            manager,
-            workspace.id as WorkspaceId,
-            session.machineId,
-            {
-              key: machineFlockKeys.archiveSessionCommand(sessionId),
-              value: buildMachineArchiveSessionCommand({ requestedAt }),
-            },
-            requestedAt
-          );
-          const machineRoomId = getMachineRoomId(session.machineId);
-          const machineMeta = (await manager.repo.getDocMeta(machineRoomId))?.meta as
-            | MachineLegacyMetaFields
-            | undefined;
-          await manager.repo.upsertDocMeta(machineRoomId, {
-            needToArchiveSessions: {
-              ...(machineMeta?.needToArchiveSessions ?? {}),
-              [sessionId]: true,
-            },
-          });
-        }
-        await ensureWorkspaceMetaSynced(manager, `session.archive:${sessionId}`);
+        const childSessionIds = await archiveSessionWithSyncedMetadata(manager, sessionId);
 
         if (options.json) {
           printJson({ ok: true, sessionId, archivedChildSessionIds: childSessionIds });
@@ -4497,28 +4437,6 @@ const sessionRestoreCommand = new Command('restore')
         await applySessionAndChildren(sessionId, childSessionIds, (id) =>
           manager.repo.upsertDocMeta(getSessionRoomId(id), buildSessionRestoreMetaPatch())
         );
-
-        if (session.machineId !== undefined && session.machineId.length > 0) {
-          const nowMs = getServerNow();
-          const machineRoomId = getMachineRoomId(session.machineId);
-          const machineMeta = (await manager.repo.getDocMeta(machineRoomId))?.meta as
-            | MachineLegacyMetaFields
-            | undefined;
-          const machinePatch = buildLegacyMachineRestoreQueueCleanupPatch(sessionId, machineMeta);
-          if (machinePatch) {
-            await manager.repo.upsertDocMeta(machineRoomId, machinePatch);
-          }
-          await deleteMachineFlockCommandRows(
-            manager,
-            workspace.id as WorkspaceId,
-            session.machineId,
-            [
-              machineFlockKeys.archiveSessionCommand(sessionId),
-              machineFlockKeys.deleteSessionCommand(sessionId),
-            ],
-            nowMs
-          );
-        }
         await ensureWorkspaceMetaSynced(manager, `session.restore:${sessionId}`);
 
         if (options.json) {
@@ -4553,104 +4471,9 @@ const sessionDeleteCommand = new Command('delete')
           throw new Error(`Session ${sessionId} is not archived. Archive it before deleting.`);
         }
         const childSessionIds = await listChildSessionIds(manager, sessionId);
-        const machineId =
-          session.machineId !== undefined && session.machineId.length > 0
-            ? session.machineId
-            : undefined;
-        const shouldQueueDelete = shouldQueueMachineDelete(session);
 
-        if (machineId && shouldQueueDelete) {
-          const requestedAt = getServerNow();
-          const machineRoomId = getMachineRoomId(machineId);
-          const machineMeta = (await manager.repo.getDocMeta(machineRoomId))?.meta as
-            | MachineLegacyMetaFields
-            | undefined;
-          const machineFlockHandle = await manager.repo.openFlockDoc(
-            getMachineFlockDocId(workspace.id as WorkspaceId, machineId)
-          );
-          const machineMetaForCleanup = {
-            ...(machineMeta ?? {}),
-            localProjects: {
-              ...(machineMeta?.localProjects ?? {}),
-              ...getMachineFlockLocalProjects(
-                readMachineFlockRowsFromFlock(machineFlockHandle.flock, {
-                  families: ['localProject'],
-                })
-              ),
-            },
-          } satisfies Pick<
-            MachineLegacyMetaFields,
-            'needToArchiveSessions' | 'needToDeleteSessions' | 'localProjects'
-          >;
-          let nextNeedToArchiveSessions: Record<SessionId, boolean> | undefined;
-          if (machineMetaForCleanup.needToArchiveSessions?.[sessionId] !== undefined) {
-            nextNeedToArchiveSessions = {
-              ...(machineMetaForCleanup.needToArchiveSessions ?? {}),
-            };
-            delete nextNeedToArchiveSessions[sessionId];
-          }
-          await deleteMachineFlockCommandRows(
-            manager,
-            workspace.id as WorkspaceId,
-            machineId,
-            [machineFlockKeys.archiveSessionCommand(sessionId)],
-            requestedAt
-          );
-          const deleteCommand = buildMachineDeleteSessionCommand({
-            session,
-            machineMeta: machineMetaForCleanup,
-            requestedAt,
-            existing: machineMeta?.needToDeleteSessions?.[sessionId],
-          });
-          if (nextNeedToArchiveSessions !== undefined || deleteCommand) {
-            await manager.repo.upsertDocMeta(machineRoomId, {
-              ...(nextNeedToArchiveSessions !== undefined
-                ? { needToArchiveSessions: nextNeedToArchiveSessions }
-                : {}),
-              ...(deleteCommand
-                ? {
-                    needToDeleteSessions: {
-                      ...(machineMeta?.needToDeleteSessions ?? {}),
-                      [sessionId]: machineDeleteCommandToQueueItem(deleteCommand),
-                    },
-                  }
-                : {}),
-            });
-          }
-          if (deleteCommand) {
-            await writeMachineFlockCommandRow(
-              manager,
-              workspace.id as WorkspaceId,
-              machineId,
-              {
-                key: machineFlockKeys.deleteSessionCommand(sessionId),
-                value: deleteCommand,
-              },
-              requestedAt
-            );
-          }
-        } else if (machineId) {
-          const requestedAt = getServerNow();
-          const machineRoomId = getMachineRoomId(machineId);
-          const machineMeta = (await manager.repo.getDocMeta(machineRoomId))?.meta as
-            | MachineLegacyMetaFields
-            | undefined;
-          const machinePatch = buildLegacyMachineRestoreQueueCleanupPatch(sessionId, machineMeta);
-          if (machinePatch) {
-            await manager.repo.upsertDocMeta(machineRoomId, machinePatch);
-          }
-          await deleteMachineFlockCommandRows(
-            manager,
-            workspace.id as WorkspaceId,
-            machineId,
-            [
-              machineFlockKeys.archiveSessionCommand(sessionId),
-              machineFlockKeys.deleteSessionCommand(sessionId),
-            ],
-            requestedAt
-          );
-        }
-
+        // Deleting the doc leaves a deletion marker the owning machine reconciles
+        // its worktree directory against; no machine command is needed.
         await applySessionAndChildren(sessionId, childSessionIds, async (id) => {
           await manager.repo.deleteDoc(getSessionRoomId(id));
           await manager.cleanSessionDoc(id);

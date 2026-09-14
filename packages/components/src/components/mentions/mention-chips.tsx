@@ -80,6 +80,7 @@ const CHIP_KINDS: ReadonlySet<string> = new Set([
   'skill',
   'session',
   'command',
+  'prompt_shortcut',
   'agent_role',
   'issue',
   'pr',

@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Check, Copy, Link2, Loader2, RotateCw, X } from 'lucide-react';
+import { Check, Copy, Link2, RotateCw, X } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
@@ -76,7 +77,7 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
             }
           >
             {busyAction === 'rotate' ? (
-              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              <Spinner className="mr-1.5 h-3.5 w-3.5" />
             ) : activeLink ? (
               <RotateCw className="mr-1.5 h-3.5 w-3.5" />
             ) : (
@@ -128,7 +129,7 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
 
       {!state ? (
         <div className="flex items-center gap-2 px-3 py-3 text-xs text-muted-foreground">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          <Spinner className="h-3.5 w-3.5" />
           {t('joinRequest.admin.loading', 'Loading requests…')}
         </div>
       ) : state.pendingRequests.length === 0 ? (
@@ -166,7 +167,7 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
                     }
                   >
                     {busyAction === `reject:${request.id}` ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <Spinner className="h-3.5 w-3.5" />
                     ) : (
                       <X className="h-4 w-4" />
                     )}
@@ -183,7 +184,7 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
                     }
                   >
                     {busyAction === `approve:${request.id}` ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <Spinner className="h-3.5 w-3.5" />
                     ) : (
                       <Check className="h-4 w-4" />
                     )}

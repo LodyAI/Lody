@@ -14,13 +14,14 @@ describe('turn-diff SQLite runtime support', () => {
   });
 
   it('rejects runtimes that would crash while loading the native addon', () => {
-    expect(
-      describeUnsupportedTurnDiffSqliteRuntime({
-        napi: '9',
-        arch: 'x64',
-        nodeVersion: 'v22.13.1',
-      })
-    ).toMatch(/Node-API 10/);
+    const problem = describeUnsupportedTurnDiffSqliteRuntime({
+      napi: '9',
+      arch: 'x64',
+      nodeVersion: 'v22.13.1',
+    });
+
+    expect(problem).toMatch(/Node-API 10/);
+    expect(problem).toContain('23.6.0');
   });
 
   it('rejects architectures without a prebuilt SQLite binding', () => {

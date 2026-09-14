@@ -32,7 +32,10 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   machine-local marker store.
 - `session-edit-and-resend-service.ts` — same-session replacement of the last normal User turn.
 - `session-launch-config-resolver.ts` — durable launch config resolution.
-- `turn-post-processing-service.ts` — post-turn work (titles, notifications, diff stats).
+- `turn-post-processing-service.ts` — post-turn work (titles, notifications, diff stats,
+  and the `workspaceDirty`/`workspaceUnpushed` probes that drive the Info Bar's
+  Commit & Push action; both cancellation routes run `syncWorkspaceGitState` alone,
+  which self-gates on the session's GitHub binding).
 - `session-diff-stats-target.ts` — chooses which writer owns a session's `diffStats`.
 - `session-access-policy.ts` — local-first dispatch access precheck (optimistic-allow cache,
   D11). It may allow owner-cached turns from the catalog snapshot, deny `remote_missing`
@@ -42,7 +45,10 @@ CLI/MCP orchestration contract is specs/session-orchestration.md.
   validation boundaries and interruptible unbounded retries for an already-durable dispatch.
 - `session-user-resolver.ts` + `git-identity.ts` — the requesting user's commit identity.
 - `worktree/` — repo checkouts, worktrees, branch allocation, setup scripts
-  ([AGENTS.md](worktree/AGENTS.md)).
+  ([AGENTS.md](worktree/AGENTS.md)). `worktree-gc.ts` reconciles the Lody-managed
+  worktree tree against Session state: archived or deleted root Sessions lose their
+  directory (after a backup commit, branch kept); contract in
+  [specs/session-worktree-lifecycle.md](../../../../specs/session-worktree-lifecycle.md).
 
 ## Background
 
@@ -80,6 +86,17 @@ the work per trigger, not the trigger rate; keeping that rate sane is the connec
 boundary's job, and `onMetaRoomSynced` is rate-limited in `../lib/loro/connection-recovery.ts`
 while the cheap "back online" edge moved to `onStreamsOnline`
 (context/code-collab-flow.md).
+
+### Per-session check chain cost
+
+The dispatch branch of a session check awaits the whole agent turn, and the session mirror
+fires a check on every commit while the agent streams, so a long turn accumulates hundreds of
+triggers behind the blocked chain. Each check re-reads the full history (about 130 ms on a
+13 MB session doc) and settles every await on microtasks, so an uncoalesced drain pinned the
+daemon for up to 42 s without ever reaching the timer phase. `enqueueSessionCheck` therefore
+reuses a queued check that has not started yet — at most one follow-up per turn — and a check
+that follows another one in the chain yields one macrotask first
+([note](../../../../.agents/notes/implemented/bug-fix/2026-09-13-dispatch-check-coalescing.md)).
 
 ### Turn ordering
 
@@ -132,6 +149,22 @@ stalled event loop a short command exits and its stdio is destroyed — dropping
 a failed command is indistinguishable from an empty one. This is what made a session that had
 just opened a PR report "detached HEAD" and never associate it. Long-lived ACP stdio
 deliberately does not capture: it streams and would grow unbounded.
+
+### Why an unsplit terminal command line falls back to `sh -c`
+
+ACP `terminal/create` carries the executable in `command` and its argv in `args`, and that pair
+is spawned directly. Some agents instead send the whole shell line in `command` with empty `args`
+(a bare `ls -al`, or a relayed `bash -lc …`). Spawned literally, no such executable exists: on
+Linux the cgroup sandbox awaits the child's pid and the agent sees an untyped errno `-2`, while
+on the darwin fallback the handle resolves first, so `terminal/create` returns an id whose
+`wait_for_exit` never completes.
+
+The fallback is deliberately narrow — empty `args`, whitespace in `command`, and no file at
+that path — so a spec-conformant call is untouched and an executable whose path contains a
+space is still spawned directly. The shell is non-interactive and non-login (`sh -c`, not
+`bash -lc`): the agent asked for one command, not for the user's login profile to run and
+change its environment. A spawn that still fails answers with a JSON-RPC code instead of a bare
+errno, and its error is recorded as an exit status so no waiter is left pending.
 
 ### Fork saga recovery
 

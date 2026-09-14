@@ -6,142 +6,144 @@ import {
 } from '@/components/sharing/session-share-manager';
 import { SessionShareDialogFrame } from '@/components/sharing/session-share-dialog';
 
-const now = 1_800_000_000_000;
 const entry = {
-  title: 'Designing conversation sharing',
   shareId: 'story-share',
   rootSessionId: 'main',
-  authorUserId: 'author',
+  publisherUserId: 'publisher',
+  title: 'Designing static sharing',
   status: 'active' as const,
-  scopeVersion: 1,
+  revision: 1,
   credentialVersion: 1,
-  sessionIds: ['main', 'child'],
-  readableSessionIds: ['main', 'child'],
-  validUntil: now + 60_000,
+  createdAt: 1_800_000_000_000,
+  updatedAt: 1_800_000_000_000,
+  sourceIds: [
+    { sourceId: 'main', conversationId: 'c1' },
+    { sourceId: 'child', conversationId: 'c2' },
+  ],
+  selectedSourceIds: ['main', 'child'],
   canManage: true,
   canRevoke: true,
 };
-const candidates = [
-  { sessionId: 'main', title: 'Designing conversation sharing' },
-  { sessionId: 'child', title: 'Streaming and attachment behavior' },
-  { sessionId: 'next', title: 'Deployment notes' },
-  { sessionId: 'local', title: 'Local experiment' },
-];
-const state = {
-  root: entry,
-  sources: [
-    entry,
-    {
-      ...entry,
-      title: 'Deployment notes',
-      shareId: 'other-share',
-      rootSessionId: 'next',
-      sessionIds: ['next', 'main'],
-      readableSessionIds: ['next', 'main'],
-    },
-  ],
-  candidates: candidates.map((candidate) => ({
-    ...candidate,
-    available: candidate.sessionId !== 'local',
-    validUntil: now + 60_000,
-  })),
-};
+/** Obviously synthetic: never screenshot a real bearer credential. */
+const storyLink = `https://lody.ai/s/demo-share#access=v1.${'demo'.repeat(16)}`;
+const noop = async () => {};
 
 const meta = {
   title: 'Sharing/SessionShareManager',
   component: SessionShareManager,
   parameters: { layout: 'fullscreen' },
-  render: function ShareManagerStory({ frameTitle, ...args }) {
+  render: function Story(args) {
     const [selected, setSelected] = useState(args.selected);
     return (
-      <SessionShareDialogFrame title={frameTitle ?? 'Designing conversation sharing'}>
+      <SessionShareDialogFrame title="Designing static sharing">
         <SessionShareManager {...args} selected={selected} onSelect={setSelected} />
       </SessionShareDialogFrame>
     );
   },
   args: {
     sessionId: 'main',
-    state,
-    candidates,
-    selected: ['main', 'child'],
-    now,
-    copyableShareIds: ['story-share'],
+    entry: null,
+    selected: ['main'],
+    candidates: [
+      { sessionId: 'main', title: 'Designing static sharing' },
+      { sessionId: 'child', title: 'Deployment design' },
+      { sessionId: 'child-2', title: 'Reader layout notes' },
+    ],
+    hasPending: false,
+    phase: 'idle',
+    progress: 0,
+    result: null,
+    shareLink: null,
+    canCapture: true,
+    hasSecret: false,
     busy: false,
     conflict: false,
     error: null,
     notice: null,
     onSelect: () => {},
-    onReload: () => {},
-    onCreate: () => {},
-    onSave: () => {},
-    onReset: () => {},
-    onCopy: () => {},
-    onRevoke: () => {},
+    onPublish: noop,
+    onDiscard: () => {},
+    onCopy: noop,
+    onReset: noop,
+    onRevoke: noop,
+    onClose: () => {},
   },
-} satisfies Meta<SessionShareManagerProps & { frameTitle?: string }>;
+} satisfies Meta<SessionShareManagerProps>;
 export default meta;
 type Story = StoryObj<typeof meta>;
-export const Active: Story = {};
-export const NewLink: Story = {
-  args: { state: { ...state, root: null, sources: [] }, selected: ['main'] },
+
+/** First share: one sentence, one choice, two buttons. */
+export const NewShare: Story = {};
+
+export const NewShareWithoutSubConversations: Story = {
+  args: { candidates: [{ sessionId: 'main', title: 'Designing static sharing' }] },
 };
-export const MissingSecret: Story = { args: { copyableShareIds: [] } };
+
+export const Capturing: Story = { args: { busy: true, phase: 'capturing' } };
+
+export const Uploading: Story = { args: { busy: true, phase: 'uploading', progress: 62 } };
+
+export const Publishing: Story = { args: { busy: true, phase: 'publishing', progress: 100 } };
+
+export const Published: Story = {
+  args: { entry, hasSecret: true, shareLink: storyLink, result: { url: storyLink, copied: true } },
+};
+
+/** A blocked clipboard must never be reported as a successful copy. */
+export const PublishedCopyBlocked: Story = {
+  args: { entry, hasSecret: true, shareLink: storyLink, result: { url: storyLink, copied: false } },
+};
+
+export const AlreadyShared: Story = {
+  args: { entry, selected: ['main', 'child'], hasSecret: true, shareLink: storyLink },
+};
+
+export const PublishFailed: Story = {
+  args: {
+    entry,
+    selected: ['main', 'child'],
+    hasSecret: true,
+    shareLink: storyLink,
+    error: 'Could not update sharing. Check the current settings and try again.',
+    hasPending: true,
+  },
+};
+
+export const Conflict: Story = {
+  args: {
+    entry,
+    selected: ['main', 'child'],
+    hasSecret: true,
+    shareLink: storyLink,
+    conflict: true,
+    hasPending: true,
+  },
+};
+
+export const UnfinishedDraft: Story = {
+  args: { entry: { ...entry, status: 'draft' } },
+};
+
+export const MissingCredential: Story = {
+  args: { entry, selected: ['main', 'child'], hasSecret: false },
+};
+
 export const Administrator: Story = {
-  args: { state: { ...state, root: { ...entry, canManage: false } }, copyableShareIds: [] },
+  args: { entry: { ...entry, canManage: false }, selected: ['main', 'child'] },
 };
-export const Conflict: Story = { args: { conflict: true } };
-export const SourceUnavailable: Story = {
+
+export const SourceDeleted: Story = {
   args: {
-    state: {
-      root: null,
-      sources: [],
-      candidates: state.candidates.map((candidate) => ({
-        ...candidate,
-        available: false,
-        validUntil: null,
-      })),
-    },
-    selected: ['main'],
+    entry,
+    selected: ['main', 'child'],
+    hasSecret: true,
+    shareLink: storyLink,
+    canCapture: false,
   },
 };
-/** A title that cannot fit, alongside a result message. */
-export const LongTitleAndNotice: Story = {
-  args: {
-    frameTitle:
-      'Reworking the conversation sharing dialog so that long session titles, narrow phones and the on-screen keyboard all stay usable',
-    notice: 'Share link copied.',
-  },
+
+export const Revoked: Story = {
+  args: { entry: { ...entry, status: 'revoked', canManage: false, canRevoke: false } },
 };
-/** Nothing to decide: no related conversations, so the switch is not rendered. */
-export const NoSubConversations: Story = {
-  args: {
-    state: {
-      ...state,
-      root: { ...entry, sessionIds: ['main'], readableSessionIds: ['main'] },
-      sources: [],
-      candidates: [state.candidates[0]!],
-    },
-    candidates: [candidates[0]!],
-    selected: ['main'],
-  },
-};
-/** Every related conversation is still syncing, so the switch cannot be turned on. */
-export const NoReadySubConversations: Story = {
-  args: {
-    state: {
-      ...state,
-      root: null,
-      sources: [],
-      candidates: state.candidates.map((candidate) => ({
-        ...candidate,
-        available: candidate.sessionId === 'main',
-        validUntil: candidate.sessionId === 'main' ? now + 60_000 : null,
-      })),
-    },
-    selected: ['main'],
-  },
-};
-export const Failure: Story = {
-  args: { error: 'Could not update sharing. Check the current settings and try again.' },
-};
-export const Loading: Story = { args: { state: undefined } };
+
+export const Loading: Story = { args: { entry: undefined } };

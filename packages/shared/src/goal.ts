@@ -50,7 +50,7 @@ const isSessionGoalMessage = (value: unknown): value is SessionGoalMessage => {
 };
 
 export const resolveLatestSessionGoalFromHistory = (
-  history: ReadonlyArray<Pick<SessionHistoryInput, 'items'> | undefined> | null | undefined
+  history: ReadonlyArray<{ readonly items?: unknown } | undefined> | null | undefined
 ): SessionGoalMessage | null => {
   if (!history?.length) {
     return null;

@@ -26,7 +26,6 @@ import {
   GitPullRequest,
   GripVertical,
   Link2,
-  Loader2,
   LockKeyhole,
   Mail,
   Pencil,
@@ -35,6 +34,7 @@ import {
   Plus,
   Users,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import {
   memo,
   useCallback,
@@ -1117,7 +1117,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
                       {shareMenuState === 'share' ? (
                         <Users />
                       ) : shareMenuState === 'loading' ? (
-                        <Loader2 className="animate-spin" />
+                        <Spinner />
                       ) : (
                         <LockKeyhole />
                       )}

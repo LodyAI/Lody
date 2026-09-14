@@ -8,6 +8,7 @@ void describe('Electron harness environment', () => {
       { NODE_ENV: 'test' },
       {
         DISPLAY: ':99',
+        LODY_E2E_SHOW_WINDOW: '1',
         LODY_PRIVATE_VALUE: 'excluded',
         XAUTHORITY: '/tmp/xvfb-auth',
       }
@@ -15,6 +16,7 @@ void describe('Electron harness environment', () => {
 
     assert.deepEqual(env, {
       DISPLAY: ':99',
+      LODY_E2E_SHOW_WINDOW: '1',
       XAUTHORITY: '/tmp/xvfb-auth',
       NODE_ENV: 'test',
     });

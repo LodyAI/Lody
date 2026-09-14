@@ -132,6 +132,8 @@ export interface SessionCancelRequest {
   workspaceId: WorkspaceId;
   /** Target assistant turn id. This is intentionally not the userTurnId. */
   turnId: string;
+  /** When present, cancel only this native subagent; never cancel the parent turn. */
+  subagentTaskId?: string;
 }
 
 export interface SessionCancelResponse {

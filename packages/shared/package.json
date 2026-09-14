@@ -8,6 +8,18 @@
     "./src/visual-annotation-inspector-global.ts"
   ],
   "exports": {
+    "./streams-snapshot-codec": {
+      "types": "./src/streams-snapshot-codec.ts",
+      "import": "./src/streams-snapshot-codec.ts"
+    },
+    "./prompt-shortcuts": {
+      "types": "./src/prompt-shortcuts/index.ts",
+      "import": "./src/prompt-shortcuts/index.ts"
+    },
+    "./prompt-shortcuts/*": {
+      "types": "./src/prompt-shortcuts/*.ts",
+      "import": "./src/prompt-shortcuts/*.ts"
+    },
     "./session-sharing": {
       "types": "./src/session-sharing.ts",
       "import": "./src/session-sharing.ts"
@@ -80,6 +92,10 @@
       "types": "./src/message-schemas.ts",
       "import": "./src/message-schemas.ts"
     },
+    "./session-data": {
+      "types": "./src/session-data/index.ts",
+      "import": "./src/session-data/index.ts"
+    },
     "./terminal-protocol": {
       "types": "./src/terminal-protocol.ts",
       "import": "./src/terminal-protocol.ts"
@@ -133,6 +149,7 @@
   },
   "dependencies": {
     "immer": "^10.2.0",
+    "fzstd": "0.1.1",
     "@bokuweb/zstd-wasm": "^0.0.27",
     "@loro-dev/streams-crdt": "catalog:",
     "acp-extension-dsh": "workspace:*",

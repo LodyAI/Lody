@@ -39,6 +39,16 @@ height matters: a flex sibling such as the desktop sidebar can animate its width
 every frame, and forwarding width-only records competes with the content observer's
 bottom correction and visibly jitters the conversation.
 
+First-window data readiness does not imply viewport readiness. A DOM `scrollTop`
+write can reach the estimated bottom while Virtua still has no destination rows,
+or has hidden unmeasured rows. Initial reveal waits for the virtualizer's offset,
+measured destination and visible-row geometry to agree. Direct row ResizeObserver
+records and spacer/row geometry commits drive this check without a settle timer.
+Those row records also correct following before the spacer's deferred resize;
+programmatic corrections use the library's scroll setter to preserve user-intent
+tracking. Only mounted rows are observed, and normal window loads never hide a
+previously revealed conversation.
+
 The composer one-shot ref preserves the reader's position while typing without
 changing keyboard, terminal, or window-resize follow behavior, which is why it is
 consumed for exactly one height resize and is not merged into programmatic-jump

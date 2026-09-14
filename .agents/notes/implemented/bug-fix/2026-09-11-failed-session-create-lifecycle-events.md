@@ -1,7 +1,9 @@
 # Detach a failed Session instance before its cleanup terminate
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-11-failed-session-create-lifecycle-events.zh.md)
 
 ## Abstract
 

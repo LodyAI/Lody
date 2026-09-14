@@ -135,7 +135,7 @@ export function useChatLandingFileDraft(args: {
 
   const startUpload = useCallback(
     async (localId: string, file: File, sessionId: SessionId) => {
-      if (!workspaceId || !authToken) {
+      if (!workspaceId) {
         updatePendingFile(localId, (entry) => ({
           ...entry,
           status: 'failed',
@@ -171,6 +171,16 @@ export function useChatLandingFileDraft(args: {
         } catch {
           // Local handoff threw; fall back to the cloud upload path.
         }
+      }
+
+      if (!authToken) {
+        updatePendingFile(localId, (entry) => ({
+          ...entry,
+          status: 'failed',
+          progress: 0,
+          error: fileUploadMissingAuthLabel,
+        }));
+        return;
       }
 
       const abort = new AbortController();

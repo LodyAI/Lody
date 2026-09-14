@@ -1,7 +1,9 @@
 # Codex ACP 的 Worktree 项目归属缺口
 
 Status: proposed
-Translation: pending
+Translation: current
+
+[English](2026-09-08-codex-worktree-project-persistence.md)
 
 ## 摘要
 

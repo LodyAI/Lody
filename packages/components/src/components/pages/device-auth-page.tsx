@@ -1,6 +1,7 @@
 import type { FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertCircle, CheckCircle2, Loader2 } from 'lucide-react';
+import { AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 
 import { Alert, AlertDescription } from '@/ui/alert';
 import { Button } from '@/ui/button';
@@ -101,7 +102,7 @@ export function DeviceAuthPage({
                 <Button type="submit" className="w-full" disabled={!canSubmit || isVerifying}>
                   {isVerifying ? (
                     <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <Spinner className="mr-2 h-4 w-4" />
                       {t('device.verifying')}
                     </>
                   ) : (

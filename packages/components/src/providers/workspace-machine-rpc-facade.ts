@@ -6,6 +6,7 @@ import type {
 import {
   getServerNow,
   machineSupportsLocalFileResourcesProtocol,
+  machineSupportsSubagentCancellation,
   type MachineProtocolCapabilities,
   type CodeCollabV2Error,
   type CodeCollabV2FileIndexRequest,
@@ -498,15 +499,22 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     machineId: MachineId,
     sessionId: SessionId,
     turnId: string,
-    options?: { timeoutMs?: number }
+    options?: { timeoutMs?: number; subagentTaskId?: string }
   ): Promise<SessionCancelResponse | null> => {
     try {
+      if (
+        options?.subagentTaskId &&
+        !machineSupportsSubagentCancellation({
+          protocolCapabilities: await deps.getMachineProtocolCapabilities(machineId),
+        })
+      )
+        throw new Error('This machine does not support individual subagent cancellation.');
       if (await canUseLocalMachineRpc(machineId)) {
         const response = await getLocalMachineRpcSender()?.({
           machineId,
           workspaceId,
           method: 'session/cancel',
-          params: { sessionId, turnId },
+          params: { sessionId, turnId, subagentTaskId: options?.subagentTaskId },
           timeoutMs: options?.timeoutMs ?? 2_000,
         });
         if (response && !response.ok) {
@@ -518,12 +526,14 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           };
         }
         if (response?.ok) return response.result as SessionCancelResponse;
+        if (options?.subagentTaskId) throw new Error('Local machine RPC is unavailable.');
       }
       return await (
         await getMachineRpcClient(machineId)
       ).requestSessionCancel({
         sessionId,
         turnId,
+        subagentTaskId: options?.subagentTaskId,
         timeoutMs: options?.timeoutMs ?? 2_000,
       });
     } catch (error) {

@@ -14,6 +14,7 @@ import {
   restoreAblation,
   validateAndApplyCandidate,
 } from '../../.github/scripts/journey-author-package.mjs';
+import { describeUnsupportedNodeRuntime } from '../../scripts/check-node-runtime.mjs';
 import { loadJourneyRegistry } from './journey-registry.mjs';
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url));
@@ -317,11 +318,18 @@ async function createTask(root, options, runId) {
   });
 }
 
-async function assertToolchain(root) {
-  const nodeMajor = Number.parseInt(process.versions.node.split('.')[0], 10);
-  if (!Number.isInteger(nodeMajor) || nodeMajor < 22) {
-    throw new Error(`Node.js 22 or newer is required; found ${process.versions.node}`);
+export function assertJourneyAuthorNodeRuntime({
+  nodeVersion = process.version,
+  nodeApiVersion = process.versions.napi,
+} = {}) {
+  const problem = describeUnsupportedNodeRuntime({ nodeVersion, nodeApiVersion });
+  if (problem !== undefined) {
+    throw new Error(problem);
   }
+}
+
+async function assertToolchain(root) {
+  assertJourneyAuthorNodeRuntime();
   const manifest = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'));
   const expectedPnpm = /^pnpm@([^+]+)(?:\+|$)/u.exec(manifest.packageManager)?.[1];
   const actualPnpm = runCapture('pnpm', ['--version'], { cwd: root });

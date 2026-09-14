@@ -16,13 +16,13 @@ import {
   FolderOpen,
   Github,
   Info,
-  Loader2,
   MessagesSquare,
   Plus,
   RefreshCw,
   TerminalSquare,
   Wrench,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import {
   getLocalProjectHistoryProviderKey,
   type LocalProjectHistoryCatalogItem,
@@ -612,7 +612,7 @@ function ProjectSettingsDesktop({
 
       {isAnyLoading && totalCount === 0 ? (
         <div className="flex items-center justify-center gap-2 px-3 py-10 text-sm text-muted-foreground">
-          <Loader2 className="h-4 w-4 animate-spin" />
+          <Spinner className="h-4 w-4" />
           {t('workspace.projects.loading', 'Loading projects')}
         </div>
       ) : totalCount === 0 && machineEntries.length === 0 ? (
@@ -1008,9 +1008,7 @@ function ProjectShareControl({
         <div className="flex shrink-0 items-center gap-2">
           <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
             {t('workspace.projects.shareLabel', 'Share project')}
-            {row.isUpdating ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-            ) : null}
+            {row.isUpdating ? <Spinner className="h-3.5 w-3.5 text-muted-foreground" /> : null}
           </span>
           <Switch
             checked={row.sharedWithTeam}
@@ -1427,7 +1425,7 @@ export function WorktreeSetupEditor({
 
       {isLoading ? (
         <div className="flex items-center gap-2 rounded-md bg-foreground/[0.025] px-3 py-6 text-xs text-muted-foreground">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          <Spinner className="h-3.5 w-3.5" />
           {loadingLabel}
         </div>
       ) : shell ? (
@@ -1464,7 +1462,7 @@ export function WorktreeSetupEditor({
           aria-live="polite"
           className="flex items-center justify-end gap-1 text-[11px] text-muted-foreground"
         >
-          <Loader2 className="h-3 w-3 animate-spin" />
+          <Spinner className="h-3 w-3" />
           {savingLabel}
         </div>
       ) : null}
@@ -1598,7 +1596,7 @@ export function ProjectHistoryImportPanel({
                       }}
                     >
                       {state.isSyncing ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <Spinner className="h-3.5 w-3.5" />
                       ) : (
                         <RefreshCw className="h-3.5 w-3.5" />
                       )}
@@ -1626,7 +1624,7 @@ export function ProjectHistoryImportPanel({
                 }}
               >
                 {state.isImporting ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <Spinner className="h-3.5 w-3.5" />
                 ) : (
                   <Download className="h-3.5 w-3.5" />
                 )}
@@ -1742,7 +1740,7 @@ export function ProjectHistoryImportPanel({
                 }}
               >
                 {state.isSyncing ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <Spinner className="h-3.5 w-3.5" />
                 ) : (
                   <RefreshCw className="h-3.5 w-3.5" />
                 )}
@@ -1840,7 +1838,7 @@ export function ProjectHistoryImportPanel({
                         }}
                       >
                         {resolving ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          <Spinner className="h-3.5 w-3.5" />
                         ) : (
                           <RefreshCw className="h-3.5 w-3.5" />
                         )}

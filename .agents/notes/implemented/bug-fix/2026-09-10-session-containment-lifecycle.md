@@ -1,9 +1,11 @@
 # Keep opened Sessions outside opener state cascades
 
 Status: implemented
-Translation: pending
+Translation: current
 
 Contract: [Session relations and operation targets](../../../../specs/session-relations.md)
+
+[中文](2026-09-10-session-containment-lifecycle.zh.md)
 
 ## Abstract
 

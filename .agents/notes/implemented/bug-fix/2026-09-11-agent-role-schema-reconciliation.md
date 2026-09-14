@@ -1,7 +1,9 @@
 # Reconcile obsolete Role options at workspace startup
 
 Status: implemented
-Translation: pending
+Translation: current
+
+[中文](2026-09-11-agent-role-schema-reconciliation.zh.md)
 
 ## Abstract
 

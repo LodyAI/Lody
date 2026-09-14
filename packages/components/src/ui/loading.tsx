@@ -1,4 +1,4 @@
-import { Loader2 } from 'lucide-react';
+import { Spinner } from './spinner';
 import { cn } from '@/lib/utils';
 
 interface LoadingProps {
@@ -18,7 +18,7 @@ export function Loading({ className, size = 'md' }: LoadingProps) {
 
   return (
     <div className={cn('flex items-center justify-center', className)}>
-      <Loader2 className={cn('animate-spin text-muted-foreground', sizeClasses[size])} />
+      <Spinner className={cn('text-muted-foreground', sizeClasses[size])} />
     </div>
   );
 }

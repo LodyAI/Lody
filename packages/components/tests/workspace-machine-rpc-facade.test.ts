@@ -17,6 +17,27 @@ afterEach(() => {
 });
 
 describe('createWorkspaceMachineRpcFacade', () => {
+  it('never sends a scoped cancel to a daemon without the scoped-cancel protocol', async () => {
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => undefined,
+      targetRouter: {
+        getPlaneForMachine: () => 'remote',
+        resolvePlaneForMachine: async () => 'remote',
+      },
+      getMachineRpcClient: async () => {
+        throw new Error('Unexpected RPC');
+      },
+    });
+    expect(
+      await facade.requestSessionCancel(remoteMachineId, sessionId, 'turn-1', {
+        subagentTaskId: 'child-1',
+      })
+    ).toMatchObject({
+      success: false,
+      error: 'This machine does not support individual subagent cancellation.',
+    });
+  });
   it('uses the local-only IPC preview method without creating a cloud client', async () => {
     const invoke = vi.fn(async () => ({
       status: 'ok' as const,

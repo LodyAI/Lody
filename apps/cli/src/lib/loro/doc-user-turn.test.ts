@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createSessionMirror, type SessionHistoryInput, type SessionId } from '@lody/shared';
+import type { SessionHistoryInput, SessionId } from '@lody/shared';
 import { LoroDoc, LoroList, LoroMap } from 'loro-crdt';
 import type { LoroRepo } from 'loro-repo';
 
 import type { Logger } from '@/utils/logger';
 import { SessionDocument } from './doc';
+import { composeTestSessionDoc } from '../../../tests/session-doc-fixture';
 
 const createLogger = (): Logger =>
   ({
@@ -15,23 +16,20 @@ const createLogger = (): Logger =>
   }) as unknown as Logger;
 
 /**
- * Builds a real `SessionDocument` over a stub mirror so the binding's own body
- * runs; `history` mirrors what the CRDT would hold.
+ * Builds a real `SessionDocument` composed over a real `LoroDoc` through
+ * `composeSessionData`, so append/validation paths run against the production
+ * storage entry. `loro.toJSON().history` is the stored state and
+ * `doc.readHistorySnapshot()` reads it back through the session-data seam.
  */
-const createSessionDocument = (repo: Partial<LoroRepo>) => {
-  const state: { history: SessionHistoryInput[] } = { history: [] };
+const createSessionDocument = (repo: Partial<LoroRepo>, loroDoc?: LoroDoc) => {
   const doc = new SessionDocument(
     repo as LoroRepo,
     'session-append-1' as SessionId,
     async () => {},
     createLogger()
   );
-  doc.mirror = {
-    setState: (updateFn: (prev: typeof state) => typeof state) => {
-      updateFn(state);
-    },
-  } as unknown as SessionDocument['mirror'];
-  return { doc, state };
+  const loro = composeTestSessionDoc(doc, loroDoc ? { doc: loroDoc } : undefined);
+  return { doc, loro };
 };
 
 const createUserTurn = (id: string): SessionHistoryInput => ({
@@ -46,13 +44,7 @@ const createUserTurn = (id: string): SessionHistoryInput => ({
 
 describe('SessionDocument.appendUserTurn', () => {
   it('opens old malformed notices without sanitizing stored history', () => {
-    const { doc } = createSessionDocument({});
-    doc.mirror = null;
     const loro = new LoroDoc();
-    createSessionMirror({
-      doc: loro,
-      initialState: { session: { id: 'session-append-1' as SessionId }, history: [] },
-    }).dispose();
     const row = loro.getList('history').pushContainer(new LoroMap());
     row.set('id', 'legacy');
     row.set('role', 'assistant');
@@ -64,10 +56,8 @@ describe('SessionDocument.appendUserTurn', () => {
     loro.commit();
     const version = loro.version().toJSON();
     const history = loro.getList('history').toJSON();
-    // Exercise the actual CLI constructor hook without unrelated repo/network startup.
-    (doc as unknown as { createMirror(handle: { doc: LoroDoc }): void }).createMirror({
-      doc: loro,
-    });
+    // Exercise the actual production composition over pre-existing storage.
+    const { doc } = createSessionDocument({}, loro);
     expect(loro.version().toJSON()).toEqual(version);
     expect(loro.getList('history').toJSON()).toEqual(history);
     doc.mirror?.dispose();
@@ -75,12 +65,7 @@ describe('SessionDocument.appendUserTurn', () => {
 
   it('rejects malformed history before publishing dispatch through the real writer', async () => {
     const upsertDocMeta = vi.fn(async () => {});
-    const { doc } = createSessionDocument({ upsertDocMeta });
-    const loro = new LoroDoc();
-    doc.mirror = createSessionMirror({
-      doc: loro,
-      initialState: { session: { id: 'session-append-1' as SessionId }, history: [] },
-    });
+    const { doc, loro } = createSessionDocument({ upsertDocMeta });
     const version = loro.version().toJSON();
     await expect(
       doc.appendUserTurn({
@@ -93,16 +78,15 @@ describe('SessionDocument.appendUserTurn', () => {
     await doc.appendUserTurn(createUserTurn('valid'));
     expect(loro.toJSON().history[0].id).toBe('valid');
     expect(upsertDocMeta).toHaveBeenCalledWith(doc.roomId, { latestUserMsgId: 'valid' });
-    doc.mirror.dispose();
   });
 
   it('publishes the dispatch pointer together with the history entry', async () => {
     const upsertDocMeta = vi.fn(async () => {});
-    const { doc, state } = createSessionDocument({ upsertDocMeta });
+    const { doc } = createSessionDocument({ upsertDocMeta });
 
     await doc.appendUserTurn(createUserTurn('turn-1'));
 
-    expect(state.history.map((entry) => entry.id)).toEqual(['turn-1']);
+    expect((await doc.sessionData.history.readAll()).map((entry) => entry.id)).toEqual(['turn-1']);
     expect(upsertDocMeta).toHaveBeenCalledWith(doc.roomId, { latestUserMsgId: 'turn-1' });
   });
 
@@ -119,12 +103,12 @@ describe('SessionDocument.appendUserTurn', () => {
 
   it('rejects a non-user entry instead of publishing a pointer for it', async () => {
     const upsertDocMeta = vi.fn(async () => {});
-    const { doc, state } = createSessionDocument({ upsertDocMeta });
+    const { doc } = createSessionDocument({ upsertDocMeta });
 
     await expect(
       doc.appendUserTurn({ ...createUserTurn('turn-3'), role: 'assistant' })
     ).rejects.toThrow(/requires a user entry/);
-    expect(state.history).toEqual([]);
+    expect(await doc.sessionData.history.readAll()).toEqual([]);
     expect(upsertDocMeta).not.toHaveBeenCalled();
   });
 });

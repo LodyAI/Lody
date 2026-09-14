@@ -1,27 +1,33 @@
+import { updateTestHistory } from '../../../tests/history-port-fixture';
 import type { RequestPermissionRequest } from '@agentclientprotocol/sdk';
-import { createSessionMirror, type SessionId } from '@lody/shared';
+import { type SessionControlPlaneMirror, type SessionId } from '@lody/shared';
 import { LoroDoc, LoroList, LoroMap } from 'loro-crdt';
 import type { LoroRepo } from 'loro-repo';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { Logger } from '@/utils/logger';
 import { SessionDocument } from '../loro/doc';
-import { ensurePermissionRequestOnToolCall } from './history';
+import { ensurePermissionRequestOnToolCall, findPermissionOutcomeInHistory } from './history';
+import { composeTestSessionDoc } from '../../../tests/session-doc-fixture';
 
-const mirrors: ReturnType<typeof createSessionMirror>[] = [];
+const mirrors: SessionControlPlaneMirror[] = [];
 afterEach(() => {
   for (const mirror of mirrors.splice(0)) mirror.dispose();
 });
+
+const createLogger = (): Logger =>
+  ({
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  }) as unknown as Logger;
 
 const createStoredTool = (payload: 'unknown' | 'malformed') => {
   // Synthetic old-client storage: it intentionally cannot be authored by the
   // current new-message parser. Import it into an independent current client.
   const oldClient = new LoroDoc();
   const sessionId = 'permission-writer-test' as SessionId;
-  createSessionMirror({
-    doc: oldClient,
-    initialState: { session: { id: sessionId }, history: [] },
-  }).dispose();
   const turn = oldClient.getList('history').pushContainer(new LoroMap());
   turn.set('id', 'assistant-turn');
   turn.set('role', 'assistant');
@@ -41,21 +47,25 @@ const createStoredTool = (payload: 'unknown' | 'malformed') => {
     storedPayload.set('output', 42);
   }
   oldClient.commit();
+  // The old client is a composed session document too, so its doc carries the
+  // same control-plane roots as the current client and the convergence export
+  // below compares identical root sets.
+  const oldClientDoc = new SessionDocument(
+    {} as LoroRepo,
+    sessionId,
+    async () => {},
+    createLogger()
+  );
+  composeTestSessionDoc(oldClientDoc, { doc: oldClient });
+  if (oldClientDoc.mirror) mirrors.push(oldClientDoc.mirror);
 
   const currentClient = new LoroDoc();
   currentClient.import(oldClient.export({ mode: 'snapshot' }));
-  const doc = new SessionDocument({} as LoroRepo, sessionId, async () => {}, {
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  } as unknown as Logger);
-  const mirror = createSessionMirror({
-    doc: currentClient,
-    initialState: { session: { id: sessionId }, history: [] },
-  });
-  doc.mirror = mirror;
-  mirrors.push(mirror);
+  const doc = new SessionDocument({} as LoroRepo, sessionId, async () => {}, createLogger());
+  // Compose the production storage entry (control-plane Mirror + shared writer
+  // + session-data seam) over the imported current client.
+  composeTestSessionDoc(doc, { doc: currentClient });
+  if (doc.mirror) mirrors.push(doc.mirror);
 
   const readStored = () => {
     const storedTurn = currentClient.getList('history').get(0) as LoroMap;
@@ -84,6 +94,75 @@ const permissionRequest = (): RequestPermissionRequest => ({
   options: [{ optionId: 'allow', name: 'Allow once', kind: 'allow_once' }],
 });
 
+it("finalizes only the owning turn's unanswered requests through durable history", async () => {
+  const { doc, readStored } = createStoredTool('unknown');
+  const request = permissionRequest();
+  await ensurePermissionRequestOnToolCall(doc, 'request', request);
+  const before = readStored();
+  await updateTestHistory(doc, (history) => {
+    history[0]?.items.push({ type: 'tool_call', toolCallId: 'late-call', status: 'pending' });
+    history[0]?.items.push({
+      type: 'tool_call',
+      toolCallId: 'answered',
+      status: 'completed',
+      permissionRequest: {
+        requestId: 'answered-request',
+        options: request.options,
+        outcome: { outcome: 'selected', optionId: 'allow' },
+      },
+    });
+    history.push({
+      id: 'next-turn',
+      role: 'assistant',
+      timestamp: '2026-09-12T00:00:00.000Z',
+      items: [
+        {
+          type: 'tool_call',
+          toolCallId: 'next-call',
+          status: 'pending',
+          permissionRequest: { requestId: 'next-request', options: request.options },
+        },
+      ],
+      fileDiff: [],
+    });
+    return history;
+  });
+  // The permission waiter uses this same history subscription to release the ACP request.
+  const observed: unknown[] = [];
+  const unsubscribe = doc.subscribeAll(() => {
+    observed.push(findPermissionOutcomeInHistory(doc.sessionData.history.readAll(), 'request'));
+  });
+  try {
+    await doc.sessionData.commands.applyHistoryAction({
+      kind: 'finish-assistant',
+      turnId: 'assistant-turn',
+      endedAt: 1000,
+    });
+    const history = await doc.sessionData.history.readAll();
+    expect(findPermissionOutcomeInHistory(history, 'request')).toEqual({ outcome: 'cancelled' });
+    expect(observed).toContainEqual({ outcome: 'cancelled' });
+    expect(findPermissionOutcomeInHistory(history, 'answered-request')).toEqual({
+      outcome: 'selected',
+      optionId: 'allow',
+    });
+    expect(findPermissionOutcomeInHistory(history, 'next-request')).toBeUndefined();
+    expect(history[1]?.finished).toBeUndefined();
+    expect(readStored().content).toEqual(before.content);
+    expect(readStored().ids).toEqual(before.ids);
+    // Stop may win while a request is still loading its document. It must not
+    // attach to the finished tool or fall back to the newer active turn.
+    await expect(
+      ensurePermissionRequestOnToolCall(doc, 'late-request', {
+        ...request,
+        toolCall: { ...request.toolCall, toolCallId: 'late-call' },
+      })
+    ).resolves.toBe(false);
+    expect(await doc.sessionData.history.readAll()).toEqual(history);
+  } finally {
+    unsubscribe?.();
+  }
+});
+
 describe.each(['unknown', 'malformed'] as const)(
   'permission enrichment over %s content',
   (payload) => {
@@ -105,7 +184,7 @@ describe.each(['unknown', 'malformed'] as const)(
         permissionRequest: { requestId: 'request', options: request.options },
       });
       // Exercise the production read boundary, not a raw-mirror getHistory stub.
-      expect((await doc.getHistory())[0]?.items[0]).toMatchObject({
+      expect((await doc.sessionData.history.readAll())[0]?.items[0]).toMatchObject({
         type: 'tool_call',
         content: before.content,
         permissionRequest: { requestId: 'request' },
@@ -150,7 +229,7 @@ describe.each(['unknown', 'malformed'] as const)(
       const json = currentClient.toJSON();
 
       await expect(
-        doc.updateHistory((history) => {
+        updateTestHistory(doc, (history) => {
           const tool = history[0]?.items[0];
           if (tool?.type !== 'tool_call') throw new Error('Missing synthetic tool');
           tool.title = 'A valid metadata update';

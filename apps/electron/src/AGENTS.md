@@ -52,6 +52,10 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
   PostHog reporting. De-duplicate the same error across React and window events.
   Renderer-mounted notification must come from a committed layout-effect sentinel,
   never a timer or microtask guess.
+- A CLI-armed reset (`lody app reset-cache`) is consumed once, before any window
+  loads. `hard` is applied natively here because the renderer may not boot; `cache`
+  is handed to the renderer exactly once, because only it can spare the Shortcut
+  outbox and individual localStorage keys. Spec: `specs/desktop-local-reset.md`.
 - Theme changes must also update the native window color in `window-theme.ts`.
   OS appearance changes while `themeSource` is `system` must retint chrome and
   notify the renderer (`app.nativeTheme`). On macOS also subscribe
@@ -65,7 +69,7 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
   (`MAIN_WINDOW_TITLE_BAR_OVERLAY_HEIGHT`); right-edge headers pad `pr-[144px]`
   so toolbar controls do not sit under them.
 - The onboarding window must be native Light before its first renderer paint; normal product windows start from the System theme source.
-  An automatic login launch may suppress the initial product window, but onboarding and deep-link launches must remain visible.
+  An automatic login launch may suppress the initial product window, but onboarding and deep-link launches must remain visible during normal product use. Unpackaged E2E windows are the exception: they stay hidden unless `LODY_E2E_SHOW_WINDOW=1` and always disable background throttling.
 - `sessionControl.send` streams intermediate responses on `sessionControl.response`
   keyed by request id. The renderer subscribes before `invoke`, removes the
   listener after settlement, and treats only the final response as completion.
@@ -98,20 +102,8 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
   menu selection. Naming/filter logic stays in `image-export-core.ts` so it runs
   under `node --test` without the `electron` runtime.
 
-## Local file resources
+## Service contracts
 
-- `services/e2ee-key-protection*` is opt-in main-only epoch/device-key wrapping, not
-  persistence or authorization. Reject plaintext-auth mode, unavailable/unknown
-  OS storage and Linux `basic_text`; never add a plaintext fallback or expose raw
-  keys via IPC. `e2ee-device-service` and `e2ee-user-service` return public descriptors under a main-owned account lease; local mode rejects before auth. See the [E2EE draft](../../../specs/e2ee-control-log.zh.md).
-
-- CLI `file/resolve-local` owns session/path resolution; Electron owns file IO. Never
-  put local file bytes back into the daemon's JSON response or expose filesystem
-  paths in resource URLs. `local-file-resource.ts` issues opaque renderer-lifetime
-  capabilities, bounded per renderer, revoked on navigation/destruction.
-- Each resource read opens a regular file without following a substituted symlink
-  and checks device/inode/size/mtime/ctime before and during reads. Replacement or
-  modification invalidates the preview; no mixing revisions or writes through resources.
-- Text above the editor budget uses fixed bounded Range requests. Binary uses raw
-  streams with backpressure/cancellation; raster header dimensions bound decode cost.
-  The scheme never bypasses CSP, executes file content, or authorizes a remote RPC.
+Before changing local file reads, E2EE IPC, or their callers, read
+[main/services/AGENTS.md](main/services/AGENTS.md). It owns the file capability,
+read integrity, key wrapping, and account-lease rules.

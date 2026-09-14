@@ -14,7 +14,8 @@ import {
   type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
-import { Check, ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { toast } from 'sonner';
 import { activeWorkspaceRuntimeAtom, authTokenAtom, type WorkspaceRuntime } from '@/atoms/runtime';
 import { developerModeEnabledAtom, reviewAgentFeatureEnabledAtom } from '@/atoms/settings';
@@ -983,7 +984,7 @@ export function MachineAgentSettings({
 
   const banner = showBanner ? (
     <div className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      <Spinner className="h-3.5 w-3.5" />
       {t('settings.agent.migration.banner', 'Upgrading agent configs to be per-machine…')}
     </div>
   ) : null;
@@ -1008,7 +1009,7 @@ export function MachineAgentSettings({
   if (isLoading && !hasMachines) {
     return (
       <div className="flex h-full items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" />
+        <Spinner className="h-4 w-4" />
         {t('workspace.machines.loadingVisibility', 'Loading machines')}
       </div>
     );

@@ -41,6 +41,7 @@ lody agent-config update --help
 | `workspace`                           | 查询可访问的 workspace ID 与 slug           | `lody workspace --help`    | [Workspace 命令](#workspace-命令)       |
 | `github`                              | 列出某个 workspace 中已经链接的 GitHub 仓库 | `lody github --help`       | [GitHub 命令](#github-命令)             |
 | `project`                             | 管理本地项目注册                            | `lody project --help`      | [Project 命令](#project-命令)           |
+| `app`                                 | 打开桌面端，或在其卡死时重置本地缓存        | `lody app --help`          | [桌面端命令](#桌面端命令)               |
 | `session`                             | 创建、继续、查看、归档、恢复、删除 session  | `lody session --help`      | [Session 命令](#session-命令)           |
 | `machine`                             | 查看 workspace 中已注册的机器               | `lody machine --help`      | [Machine 命令](#machine-命令)           |
 | `agent-config`                        | 管理 agent config，并刷新运行时能力         | `lody agent-config --help` | [Agent Config 命令](#agent-config-命令) |
@@ -178,6 +179,30 @@ lody project add --help
 lody project list --help
 lody project delete --help
 ```
+
+## 桌面端命令
+
+| 命令                   | 作用                                     | 帮助命令                      |
+| ---------------------- | ---------------------------------------- | ----------------------------- |
+| `lody app [path]`      | 打开桌面端，并在新会话中选中指定目录     | `lody app --help`             |
+| `lody app reset-cache` | 让桌面端在下次启动时清空本地缓存         | `lody app reset-cache --help` |
+
+### 桌面端窗口卡死后的恢复方式
+
+如果桌面端窗口失去响应，或者重启后仍然回到同一个异常状态，原因可能在本地缓存，而此时你也无法点到
+**设置 → 清空缓存** 去修复它。改为在终端里预约同一个修复动作：
+
+```bash
+lody app reset-cache          # 只清理可恢复的缓存，保持登录状态
+lody app reset-cache --hard   # 清除全部本地数据并退出登录
+lody app reset-cache --cancel # 撤销上面任意一种预约
+```
+
+该命令只记录请求，桌面端会在下次启动时执行，因此请**退出桌面端再重新打开**。它不会把任何内容发送到
+外部，也不需要登录或运行中的 daemon。
+
+`lody app reset-cache` 会保留账号、设置和尚未发出的 Shortcut 草稿，会话内容会重新从 workspace 下载。
+只有在此之后仍然卡死时才使用 `--hard`：它还会清除登录状态和本地偏好设置。始终没有被执行的请求会在一天后失效。
 
 ## Session 命令
 

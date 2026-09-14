@@ -90,6 +90,7 @@ export interface SharingReviewReconcileResult extends SharingReviewState {
 }
 
 function capabilityForOperation(name: string): PlatformCapability {
+  if (name.startsWith('promptShortcuts:')) return 'cloudAccount';
   if (name.startsWith('billing:')) return 'billing';
   if (name.startsWith('usage:')) return 'usageAnalytics';
   if (name.startsWith('github:')) return 'githubIntegration';
@@ -161,18 +162,44 @@ export const cloudOperations = {
       } | null
     >('cloudAccount', 'e2eeRecovery:get'),
   },
-  sessionSharing: {
-    requestVerification: mutation<ConvexApi['sessionSharing']['requestVerification']>(
-      'sessionSharing:requestVerification'
+  promptShortcuts: {
+    stageDocument: mutation<ConvexApi['promptShortcuts']['stageDocument']>(
+      'promptShortcuts:stageDocument'
     ),
+    activateDocument: mutation<ConvexApi['promptShortcuts']['activateDocument']>(
+      'promptShortcuts:activateDocument'
+    ),
+    revokeShortcut: mutation<ConvexApi['promptShortcuts']['revokeShortcut']>(
+      'promptShortcuts:revokeShortcut'
+    ),
+    settleDocument: mutation<ConvexApi['promptShortcuts']['settleDocument']>(
+      'promptShortcuts:settleDocument'
+    ),
+    listAccessibleDocuments: query<ConvexApi['promptShortcuts']['listAccessibleDocuments']>(
+      'promptShortcuts:listAccessibleDocuments'
+    ),
+    getStreamToken: action<ConvexApi['promptShortcuts']['getStreamToken']>(
+      'promptShortcuts:getStreamToken'
+    ),
+  },
+  sessionSharing: {
+    listRequests: query<ConvexApi['sessionSharing']['listRequests']>('sessionSharing:listRequests'),
+    cancelRequest: mutation<ConvexApi['sessionSharing']['cancelRequest']>(
+      'sessionSharing:cancelRequest'
+    ),
+    list: query<ConvexApi['sessionSharing']['list']>('sessionSharing:list'),
     getManagement: query<ConvexApi['sessionSharing']['getManagement']>(
       'sessionSharing:getManagement'
     ),
-    create: mutation<ConvexApi['sessionSharing']['create']>('sessionSharing:create'),
-    updateTargets: mutation<ConvexApi['sessionSharing']['updateTargets']>(
-      'sessionSharing:updateTargets'
+    beginDeployment: mutation<ConvexApi['sessionSharing']['beginDeployment']>(
+      'sessionSharing:beginDeployment'
     ),
-    reset: mutation<ConvexApi['sessionSharing']['reset']>('sessionSharing:reset'),
+    publishDeployment: mutation<ConvexApi['sessionSharing']['publishDeployment']>(
+      'sessionSharing:publishDeployment'
+    ),
+    resetCredential: mutation<ConvexApi['sessionSharing']['resetCredential']>(
+      'sessionSharing:resetCredential'
+    ),
     revoke: mutation<ConvexApi['sessionSharing']['revoke']>('sessionSharing:revoke'),
   },
   activity: {

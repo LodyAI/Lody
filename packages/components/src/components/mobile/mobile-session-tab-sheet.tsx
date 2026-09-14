@@ -6,11 +6,11 @@ import {
   FolderOpen,
   GitPullRequest,
   Hand,
-  Loader2,
   MonitorPlay,
   Plus,
   Undo2,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { getServerNow } from '@lody/shared';
 
@@ -317,7 +317,7 @@ function ConversationRow({
         {waitingPermission ? (
           <Hand className="h-4 w-4 text-status-warning" aria-label={waitingPermissionLabel} />
         ) : running ? (
-          <Loader2 className="h-4 w-4 animate-spin text-tab-active-accent" aria-hidden="true" />
+          <Spinner className="h-4 w-4 text-tab-active-accent" aria-hidden="true" />
         ) : unread ? (
           <span className="h-2 w-2 rounded-full bg-primary" aria-label={unreadLabel} />
         ) : null}

@@ -10,6 +10,12 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
 
 ## Layout and components
 
+- `share-management-setting.tsx` lists published static copies via the scoped cloud
+  query. Ordinary members see their publications; admins see the workspace inventory.
+  Draft uploads are not published shares. Reuse `useSessionShareLinkActions` for
+  copy/reset/revoke; settings must never reconstruct a credential from cloud data.
+  Key state by user/workspace and gate the whole surface with `teamSharing`.
+
 - A settings row (`compact-layout.tsx`) is one grid: the label column takes the
   remaining space and the control column hugs its content. Never size either column
   from a viewport breakpoint — settings render in a panel far narrower than the window,

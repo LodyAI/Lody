@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { selectAtom } from 'jotai/utils';
 import { CheckCircle2, Circle, CircleX, LoaderCircle } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import {
   getSessionRoomId,
@@ -75,8 +76,10 @@ export function CreatedSessionOperationCard({
                 : 'text-muted-foreground'
           )}
         >
-          <StatusIcon
-            className={cn('h-3.5 w-3.5', status === 'running' && 'motion-safe:animate-spin')}
+          <Spinner
+            icon={StatusIcon}
+            spinning={status === 'running'}
+            className="h-3.5 w-3.5 motion-reduce:animate-none"
             aria-hidden="true"
           />
           {t(statusLabels[status])}

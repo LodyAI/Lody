@@ -276,7 +276,7 @@ function runDeepSeekAdapterBundleSmoke() {
     process.exit(1);
   }
 
-  for (const presetId of ['standard', 'code', 'minimal', 'cordis']) {
+  for (const presetId of ['standard', 'ptc', 'minimal', 'cordis']) {
     const presetPath = path.join(distDir, 'deepseek-agent-presets', presetId, 'agent.cordis.yml');
     if (!fs.existsSync(presetPath)) {
       console.error(`Published CLI DeepSeek preset is missing: ${presetPath}`);

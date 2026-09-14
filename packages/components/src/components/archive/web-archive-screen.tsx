@@ -67,7 +67,9 @@ export function WebArchiveScreen({
         <header
           className={cn(
             'flex h-[calc(2.75rem+var(--safe-area-top))] w-full shrink-0 items-center gap-3 border-b border-border bg-background pl-[calc(16px+var(--safe-area-left))] pr-[calc(16px+var(--safe-area-right))] pt-[var(--safe-area-top)]',
-            isLeftSidebarHidden && hasMacOSTitlebarInset && 'pl-[4.5rem]',
+            // Compensate for the button's -ml-1: its left edge sits at 96px,
+            // matching Chat Landing and clearing the traffic lights by 24px.
+            isLeftSidebarHidden && hasMacOSTitlebarInset && 'pl-[100px]',
             windowDragClass,
             windowsCaptionPadClass
           )}

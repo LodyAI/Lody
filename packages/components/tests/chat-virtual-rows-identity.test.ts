@@ -43,10 +43,12 @@ const makeMessage = (
     finished,
   }) as unknown as SessionHistoryParsed;
 
+let nextTurnIndex = 0;
 const wrap = (message: SessionHistoryParsed): ChatStreamItem => ({
   type: 'message',
   sessionId,
   message,
+  turnIndex: (nextTurnIndex += 1),
 });
 
 const build = (items: ChatStreamItem[], overrides?: { expansionVersion?: number }) =>
@@ -73,6 +75,17 @@ const makeConversation = () => {
 };
 
 describe('buildChatVirtualRows per-turn row identity', () => {
+  it('skips empty presentation without changing absolute turn positions', () => {
+    const message = wrap(makeMessage('first-user', 'user', [text('hello')]));
+    const rows = build([{ type: 'empty', sessionId }, message]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      type: 'standard',
+      key: 'first-user',
+      messageIndex: message.type === 'message' ? message.turnIndex : -1,
+    });
+  });
+
   it('keeps actions on their plan reply when a newer assistant reply exists', () => {
     const actions: AssistantMessageAction[] = [
       { id: 'implement-plan', label: 'Implement plan', onClick: () => undefined },
@@ -134,7 +147,17 @@ describe('buildChatVirtualRows per-turn row identity', () => {
     const { finishedTurn, streamingTurn, items } = makeConversation();
     const first = build(items);
     const userTurn = wrap(makeMessage('turn-user', 'user', [text('hi')]));
-    const second = build([userTurn, finishedTurn, streamingTurn]);
+    // A prepend moves every later turn's absolute index, and
+    // `buildChatStreamItems` re-wraps a turn whose index changed.
+    const shifted = (item: ChatStreamItem & { type: 'message' }): ChatStreamItem => ({
+      ...item,
+      turnIndex: item.turnIndex + 1,
+    });
+    const second = build([
+      userTurn,
+      shifted(finishedTurn as ChatStreamItem & { type: 'message' }),
+      shifted(streamingTurn as ChatStreamItem & { type: 'message' }),
+    ]);
     const secondAssistantRows = second.filter((row) => row.type === 'assistant');
     secondAssistantRows.forEach((row) => {
       expect(first).not.toContain(row);

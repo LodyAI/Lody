@@ -12,7 +12,6 @@ import {
   type LodyExtensionCapabilities,
   type LodyElicitationMeta,
   type LodyGoalCapability,
-  type LodySubagentTask,
   type RateLimit,
   type RateLimitsGetRequest,
   type RateLimitsSnapshot,
@@ -45,7 +44,7 @@ import {
 import { getLocalControlSocketPath } from '@lody/shared/node/local-ipc';
 import { getLodyMcpHttpEndpoint } from '@/mcp/lody-mcp-http-server';
 import { buildLodyMcpHttpHeaders } from '@/mcp/lody-mcp-http-protocol';
-import { TerminalManager } from '@/session/terminal-manager';
+import { TerminalManager, TerminalSpawnError } from '@/session/terminal-manager';
 import { reportError } from 'src/utils/telemetry';
 import { formatErrorMessage } from '@/utils/format-error';
 import { LODY_AUTH_SITE_URL, LODY_AUTH_URL, LODY_SERVER_URL } from '@/utils/const';
@@ -428,19 +427,6 @@ export type AgentSessionWarning = {
   message: string;
   source?: string;
 };
-
-const LodySubagentTaskSchema = z.object({
-  taskId: z.string().min(1),
-  description: z.string(),
-  status: z.enum(['running', 'completed', 'failed', 'timed_out', 'killed', 'lost']),
-  agentId: z.string().optional(),
-  subagentType: z.string().optional(),
-  modelId: z.string().optional(),
-  thinkingEffort: z.string().optional(),
-  startedAtEpochSeconds: z.number(),
-  endedAtEpochSeconds: z.number().nullable(),
-  stopReason: z.string().optional(),
-});
 
 export type SteerApplicationLease = {
   release: () => void;
@@ -1287,19 +1273,29 @@ export class AgentClient implements acp.Client {
         return acc;
       }, {}) ?? undefined;
 
-    const terminalId = await this.terminalManager.createTerminal(
-      params.sessionId,
-      params.command,
-      params.args ?? [],
-      params.cwd ?? undefined,
-      env,
-      typeof params.outputByteLimit === 'bigint'
-        ? params.outputByteLimit > BigInt(Number.MAX_SAFE_INTEGER)
-          ? Number.MAX_SAFE_INTEGER
-          : Number(params.outputByteLimit)
-        : (params.outputByteLimit ?? undefined)
-    );
-    return { terminalId };
+    try {
+      const terminalId = await this.terminalManager.createTerminal(
+        params.sessionId,
+        params.command,
+        params.args ?? [],
+        params.cwd ?? undefined,
+        env,
+        typeof params.outputByteLimit === 'bigint'
+          ? params.outputByteLimit > BigInt(Number.MAX_SAFE_INTEGER)
+            ? Number.MAX_SAFE_INTEGER
+            : Number(params.outputByteLimit)
+          : (params.outputByteLimit ?? undefined)
+      );
+      return { terminalId };
+    } catch (error) {
+      if (error instanceof TerminalSpawnError) {
+        // An unusable command is a bad request, not a transport failure: answer
+        // with a JSON-RPC code the agent can classify. A raw errno (`-2`) is
+        // untyped on the wire and some agents abandon the ACP session over it.
+        throw acp.RequestError.invalidParams({ details: error.message }, error.message);
+      }
+      throw error;
+    }
   }
   async terminalOutput?(params: acp.TerminalOutputRequest): Promise<acp.TerminalOutputResponse> {
     this.ensureSessionMatch(params.sessionId as ACPSessionId);
@@ -1348,27 +1344,16 @@ export class AgentClient implements acp.Client {
     return parseRateLimitsSnapshot(response);
   }
 
-  async listSubagents(activeOnly = false): Promise<readonly LodySubagentTask[]> {
-    const result = await this.requestSubagentExtension<{ tasks?: unknown }>(
-      LODY_EXTENSION_METHODS.subagentsList,
-      { activeOnly }
-    );
-    return z.array(LodySubagentTaskSchema).parse(result.tasks);
-  }
-
   async cancelSubagent(taskId: string, reason?: string): Promise<void> {
-    await this.requestSubagentExtension(LODY_EXTENSION_METHODS.subagentsCancel, {
-      taskId,
-      reason,
-    });
-  }
-
-  async getSubagentOutput(taskId: string, tail?: number): Promise<string> {
-    const result = await this.requestSubagentExtension<{ output?: unknown }>(
-      LODY_EXTENSION_METHODS.subagentsOutput,
-      { taskId, tail }
-    );
-    return z.string().parse(result.output);
+    if (this.lodyExtensionCapabilities.subagents?.cancel !== true) {
+      throw new Error('[ACP_SUBAGENT_UNSUPPORTED] Agent did not advertise subagent management');
+    }
+    const sessionId = this.acpSessionId;
+    const connection = this.connection;
+    if (!sessionId || !connection) {
+      throw new Error('[ACP_SUBAGENT_UNAVAILABLE] ACP session is not connected');
+    }
+    await connection.request(LODY_EXTENSION_METHODS.subagentsCancel, { sessionId, taskId, reason });
   }
 
   getGoalCapability(): LodyGoalCapability | undefined {
@@ -1446,25 +1431,6 @@ export class AgentClient implements acp.Client {
     );
   }
 
-  private async requestSubagentExtension<T extends Record<string, unknown>>(
-    method: string,
-    params: Record<string, unknown>
-  ): Promise<T> {
-    const subagents = this.lodyExtensionCapabilities.subagents;
-    const supported =
-      (method === LODY_EXTENSION_METHODS.subagentsList && subagents?.list === true) ||
-      (method === LODY_EXTENSION_METHODS.subagentsCancel && subagents?.cancel === true) ||
-      (method === LODY_EXTENSION_METHODS.subagentsOutput && subagents?.output === true);
-    if (!supported) {
-      throw new Error('[ACP_SUBAGENT_UNSUPPORTED] Agent did not advertise subagent management');
-    }
-    const sessionId = this.acpSessionId;
-    const connection = this.connection;
-    if (!sessionId || !connection) {
-      throw new Error('[ACP_SUBAGENT_UNAVAILABLE] ACP session is not connected');
-    }
-    return connection.request<T, Record<string, unknown>>(method, { sessionId, ...params });
-  }
   async extMethod(
     method: string,
     params: Record<string, unknown>

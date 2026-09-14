@@ -15,9 +15,9 @@ import {
   Cpu,
   Gauge,
   Hand,
-  Loader2,
   TerminalSquare,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { Button } from '@/ui/button';
 import { Card } from '@/ui/card';
 import {
@@ -93,7 +93,7 @@ export function DeviceResourceMonitor({
           sectionPadX
         )}
       >
-        <Loader2 className="h-4 w-4 animate-spin" />
+        <Spinner className="h-4 w-4" />
         {t('settings.devices.monitor.observing', 'Waiting for a resource sample')}
       </div>
     );
@@ -364,7 +364,7 @@ function SessionTable({
                     }}
                   >
                     {isTerminating ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      <Spinner className="h-3.5 w-3.5" />
                     ) : (
                       <CircleStop className="h-3.5 w-3.5" />
                     )}
@@ -401,7 +401,7 @@ function SessionTable({
                       }}
                     >
                       {isTerminating ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <Spinner className="h-4 w-4" />
                       ) : (
                         <CircleStop className="h-4 w-4" />
                       )}
@@ -514,7 +514,7 @@ function StatusIcon({
   const icon = (() => {
     switch (status) {
       case 'running':
-        return <Loader2 className="h-3.5 w-3.5 animate-spin text-status-success" />;
+        return <Spinner className="h-3.5 w-3.5 text-status-success" />;
       case 'waiting_permission':
         return <Hand className="h-3.5 w-3.5 text-status-warning" />;
       case 'failed':
@@ -523,7 +523,7 @@ function StatusIcon({
         return <Circle className="h-3 w-3 text-muted-foreground/50" />;
       // initializing / finalizing / stopping — transitional states
       default:
-        return <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground/60" />;
+        return <Spinner className="h-3.5 w-3.5 text-muted-foreground/60" />;
     }
   })();
   if (showLabel) {

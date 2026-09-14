@@ -1,4 +1,5 @@
-import { Check, ChevronDown, GitMerge, Loader2 } from 'lucide-react';
+import { Check, ChevronDown, GitMerge } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import type { GitHubMergeMethod } from '@lody/shared';
 import { cn } from '@/lib/utils';
@@ -40,7 +41,12 @@ const MERGE_METHODS: Array<{
   },
 ];
 
-function PrMergeMethodLabel({ method }: { method: GitHubMergeMethod }) {
+/**
+ * The active merge method as a label. Exported because the info bar can demote
+ * Merge into the overflow menu (a dirty worktree outranks it), and that plain
+ * menu item has to name the same method the split button would have performed.
+ */
+export function PrMergeMethodLabel({ method }: { method: GitHubMergeMethod }) {
   const { t } = useTranslation();
   if (method === 'squash') {
     return <>{t('sessions.prTab.mergeSquashAction', 'Squash and merge')}</>;
@@ -79,11 +85,7 @@ export function PrMergeButton({
 
   const mainContent = (
     <>
-      {isMerging ? (
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-      ) : (
-        <GitMerge className="h-3.5 w-3.5" />
-      )}
+      {isMerging ? <Spinner className="h-3.5 w-3.5" /> : <GitMerge className="h-3.5 w-3.5" />}
       {isMerging ? t('sessions.prTab.merging', 'Merging…') : <PrMergeMethodLabel method={method} />}
     </>
   );

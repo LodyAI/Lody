@@ -3,6 +3,9 @@
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 Root `AGENTS.md` and `site-docs/AGENTS.md` also apply.
 
+- `client.tsx` prepares the matched routes and article modules before React owns
+  the document. Keep initialization failure outside React so prerendered content
+  survives missing client resources.
 - Framework boundary files live here: `src/router.tsx`, `src/routes/__root.tsx`,
   file routes in `src/routes/**`, and shared route/page adapters in
   `src/site-pages/**`. Do not add new route logic under `app/`; `app/` is CSS-only.

@@ -12,23 +12,19 @@ import type {
   SessionToCreate,
   MachineId,
   MachineLegacyMetaFields,
-  SessionDocMeta,
   SessionTurnInputConfig,
   MachineFlockKey,
-  MachineFlockRow,
   SessionGoalAction,
   SessionGoalResponse,
 } from '@lody/shared';
 import {
-  buildMachineArchiveSessionCommand,
-  buildMachineDeleteSessionCommand,
   getMachineRoomId,
+  collectSessionArchiveTargets,
   getMachineFlockDocId,
   getMachineFlockDeleteLocalProjectIds,
   getMachineFlockLocalProjects,
   getSessionRoomId,
   machineFlockKeys,
-  machineDeleteCommandToQueueItem,
   SessionStatusFactory,
   getLocalProjectHistoryProviderKey,
   getServerNow,
@@ -39,7 +35,6 @@ import {
   normalizeSessionTurnInputConfig,
   readMachineFlockRowsFromFlock,
   sanitizeMessageTextSpans,
-  shouldQueueMachineDeleteSession,
 } from '@lody/shared';
 import { useAtomValue, useSetAtom, useStore } from 'jotai';
 import { usePostHog } from '@posthog/react';
@@ -237,17 +232,6 @@ function getDirectChildSessions(
   );
 }
 
-function getArchiveStateTargets(
-  sessionId: SessionId,
-  rootMeta: SessionMeta,
-  sessions: readonly SessionMeta[]
-): SessionMeta[] {
-  return [
-    { ...rootMeta, id: rootMeta.id ?? sessionId },
-    ...getDirectChildSessions(sessionId, sessions),
-  ];
-}
-
 async function assertArchivedLocalProjectCanRestore(
   runtime: WorkspaceRuntime,
   sessionMeta: SessionMeta
@@ -277,31 +261,6 @@ async function assertArchivedLocalProjectCanRestore(
   }
 }
 
-async function writeMachineFlockRowBestEffort(
-  runtime: WorkspaceRuntime,
-  machineId: string,
-  row: MachineFlockRow,
-  reason: string
-): Promise<void> {
-  try {
-    await writeMachineFlockRowRequired(runtime, machineId, row);
-  } catch (error) {
-    log('[machine-flock] failed to write command row', { machineId, reason, error });
-  }
-}
-
-async function writeMachineFlockRowRequired(
-  runtime: WorkspaceRuntime,
-  machineId: string,
-  row: MachineFlockRow
-): Promise<void> {
-  await runtime.writer.flockRowPut(
-    getMachineFlockDocId(runtime.workspaceId, machineId as MachineId),
-    row.key,
-    row.value
-  );
-}
-
 async function deleteMachineFlockRowsBestEffort(
   runtime: WorkspaceRuntime,
   machineId: string,
@@ -316,54 +275,6 @@ async function deleteMachineFlockRowsBestEffort(
   } catch (error) {
     log('[machine-flock] failed to delete command row', { machineId, reason, error });
   }
-}
-
-async function cleanupMachineSessionCommandQueues(
-  runtime: WorkspaceRuntime,
-  machineId: string,
-  sessionId: SessionId,
-  reason: string
-): Promise<void> {
-  const machineRoomId = getMachineRoomId(machineId as MachineId);
-  const machineMeta = (await runtime.repo.getDocMeta(machineRoomId))?.meta as
-    | MachineLegacyMetaFields
-    | undefined;
-  const needToArchiveSessions = machineMeta?.needToArchiveSessions ?? {};
-  const needToDeleteSessions = machineMeta?.needToDeleteSessions ?? {};
-
-  let nextNeedToArchiveSessions: typeof needToArchiveSessions | undefined;
-  let nextNeedToDeleteSessions: typeof needToDeleteSessions | undefined;
-
-  if (needToArchiveSessions[sessionId] !== undefined) {
-    const { [sessionId]: _, ...rest } = needToArchiveSessions;
-    nextNeedToArchiveSessions = rest;
-  }
-
-  if (needToDeleteSessions[sessionId] !== undefined) {
-    const { [sessionId]: _, ...rest } = needToDeleteSessions;
-    nextNeedToDeleteSessions = rest;
-  }
-
-  if (nextNeedToArchiveSessions !== undefined || nextNeedToDeleteSessions !== undefined) {
-    await runtime.writer.upsertDocMeta(machineRoomId, {
-      ...(nextNeedToArchiveSessions !== undefined
-        ? { needToArchiveSessions: nextNeedToArchiveSessions }
-        : {}),
-      ...(nextNeedToDeleteSessions !== undefined
-        ? { needToDeleteSessions: nextNeedToDeleteSessions }
-        : {}),
-    } as unknown as RepoDocMetaPatch);
-  }
-
-  await deleteMachineFlockRowsBestEffort(
-    runtime,
-    machineId,
-    [
-      machineFlockKeys.archiveSessionCommand(sessionId),
-      machineFlockKeys.deleteSessionCommand(sessionId),
-    ],
-    reason
-  );
 }
 
 export type SessionActions = {
@@ -826,11 +737,10 @@ export function useSessionActions(): SessionActions {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      const entry = await runtime.withSessionStore(sessionId, (sessionStore) =>
-        sessionStore
-          .getState()
-          .history.find((item) => item.id === userTurnId && item.role === 'user')
-      );
+      const entry = await runtime.withSessionStore(sessionId, async (sessionStore) => {
+        const read = await sessionStore.sessionData.history.readTurn(userTurnId);
+        return read.state === 'ready' && read.turn.role === 'user' ? read.turn : undefined;
+      });
       const inputConfig =
         options?.inputConfig ?? normalizeSessionTurnInputConfig(entry?.inputConfig);
       const dispatchUserId = entry?.userId?.trim();
@@ -962,11 +872,10 @@ export function useSessionActions(): SessionActions {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
-      const entry = await runtime.withSessionStore(sessionId, (sessionStore) =>
-        sessionStore
-          .getState()
-          .history.find((item) => item.id === userTurnId && item.role === 'user')
-      );
+      const entry = await runtime.withSessionStore(sessionId, async (sessionStore) => {
+        const read = await sessionStore.sessionData.history.readTurn(userTurnId);
+        return read.state === 'ready' && read.turn.role === 'user' ? read.turn : undefined;
+      });
       const inputConfig = normalizeSessionTurnInputConfig(entry?.inputConfig);
       const userId = entry?.userId?.trim();
       const roomId = getSessionRoomId(sessionId);
@@ -1002,20 +911,18 @@ export function useSessionActions(): SessionActions {
         // provider may already have committed the steer.
         // Re-acquire the store for the write: the steer RPC above can run long,
         // and we must not hold a store ref across it.
-        const promoted = await runtime.withSessionStore(sessionId, (sessionStore) => {
-          let didPromote = false;
-          sessionStore.setState((draft: SessionDocMeta) => {
-            const pendingEntry = draft.history.find(
-              (item) => item.id === userTurnId && item.role === 'user'
-            );
-            if (pendingEntry?.status === 'pending_apply') {
-              pendingEntry.status = 'pending';
-              pendingEntry.read = false;
-              didPromote = true;
-            }
-          });
-          return didPromote;
-        });
+        const promoted = await runtime.withSessionStore(
+          sessionId,
+          async (sessionStore) =>
+            (
+              await sessionStore.sessionData.commands.applyHistoryAction({
+                kind: 'user-status',
+                turnId: userTurnId,
+                status: 'pending',
+                onlyPendingApply: true,
+              })
+            ).matched ?? false
+        );
         // A duplicate response must not reset a turn that another request has
         // already promoted, started, or completed.
         if (!promoted) {
@@ -1242,6 +1149,9 @@ export function useSessionActions(): SessionActions {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
+      if (!store.get(docMetaCacheReadyAtom)) {
+        throw new Error('Session metadata is still loading');
+      }
 
       const sessionRoomId = getSessionRoomId(sessionId);
       const repoMeta = (await runtime.repo.getDocMeta(sessionRoomId))?.meta as
@@ -1261,44 +1171,20 @@ export function useSessionActions(): SessionActions {
         machineId: sessionMeta.machineId,
       });
 
-      const archiveTargets = getArchiveStateTargets(
-        sessionId,
-        sessionMeta,
-        Object.values(store.get(sessionMetaCacheAtom))
-      );
+      const archiveTargets = [
+        { ...sessionMeta, id: sessionId },
+        ...collectSessionArchiveTargets(sessionId, Object.values(store.get(sessionMetaCacheAtom))),
+      ];
       for (const session of archiveTargets) {
         if (typeof window !== 'undefined') {
           sendIpc('terminal.closeSession', { sessionId: session.id });
         }
+        // The archived state is the whole request: the owning machine observes
+        // it, releases the runtime, and reconciles the worktree directory.
         await runtime.writer.upsertDocMeta(getSessionRoomId(session.id), {
           isArchived: true,
           status: SessionStatusFactory.idle(),
         } as Partial<SessionMeta>);
-
-        // Child tabs share the owning Session's workspace and machine command.
-        if (session.parentSessionId) continue;
-
-        const machineId = session.machineId;
-        const requestedAt = getServerNow();
-        await writeMachineFlockRowBestEffort(
-          runtime,
-          machineId,
-          {
-            key: machineFlockKeys.archiveSessionCommand(session.id),
-            value: buildMachineArchiveSessionCommand({ requestedAt }),
-          },
-          'archiveSession'
-        );
-        const machineRoomId = getMachineRoomId(machineId);
-        const machineMeta = (await runtime.repo.getDocMeta(machineRoomId))?.meta as
-          | MachineLegacyMetaFields
-          | undefined;
-        await runtime.writer.upsertDocMeta(machineRoomId, {
-          needToArchiveSessions: {
-            ...(machineMeta?.needToArchiveSessions ?? {}),
-            [session.id]: true,
-          },
-        } as unknown as RepoDocMetaPatch);
       }
       log('[session-archive] archived', {
         sessionId,
@@ -1323,24 +1209,15 @@ export function useSessionActions(): SessionActions {
         throw new Error(`Session metadata missing for ${sessionId}`);
       }
       await assertArchivedLocalProjectCanRestore(runtime, sessionMeta);
-      const archiveTargets = getArchiveStateTargets(
-        sessionId,
-        sessionMeta,
-        Object.values(store.get(sessionMetaCacheAtom))
-      );
+      const archiveTargets = [
+        { ...sessionMeta, id: sessionMeta.id ?? sessionId },
+        ...getDirectChildSessions(sessionId, Object.values(store.get(sessionMetaCacheAtom))),
+      ];
 
       for (const session of archiveTargets) {
         await runtime.writer.upsertDocMeta(getSessionRoomId(session.id), {
           isArchived: false,
         } as Partial<SessionMeta>);
-        if (!session.parentSessionId) {
-          await cleanupMachineSessionCommandQueues(
-            runtime,
-            session.machineId,
-            session.id,
-            'restoreSession'
-          );
-        }
       }
       log('[session-restore] restored', {
         sessionId,
@@ -1353,82 +1230,9 @@ export function useSessionActions(): SessionActions {
   const deleteArchivedSessionMeta = useCallback(
     async (sessionMeta: SessionMeta) => {
       if (!runtime) throw new Error('Runtime not ready');
-      const sessionId = sessionMeta.id;
-      const shouldQueueMachineCleanup = shouldQueueMachineDeleteSession(sessionMeta);
-
-      if (!shouldQueueMachineCleanup) {
-        if (sessionMeta.machineId) {
-          await cleanupMachineSessionCommandQueues(
-            runtime,
-            sessionMeta.machineId,
-            sessionId,
-            'deleteSession'
-          );
-        }
-        await deleteSessionDocuments(sessionId);
-        return;
-      }
-
-      const machineId = sessionMeta.machineId;
-      const machineRoomId = getMachineRoomId(machineId);
-      const machineMeta = (await runtime.repo.getDocMeta(machineRoomId))?.meta as
-        | MachineLegacyMetaFields
-        | undefined;
-      const machineFlockHandle = await runtime.repo.openFlockDoc(
-        getMachineFlockDocId(runtime.workspaceId, machineId)
-      );
-      const machineMetaForCleanup = {
-        localProjects: {
-          ...(machineMeta?.localProjects ?? {}),
-          ...getMachineFlockLocalProjects(
-            readMachineFlockRowsFromFlock(machineFlockHandle.flock, {
-              families: ['localProject'],
-            })
-          ),
-        },
-      } satisfies Pick<MachineLegacyMetaFields, 'localProjects'>;
-      const needToArchiveSessions = machineMeta?.needToArchiveSessions ?? {};
-      const needToDeleteSessions = machineMeta?.needToDeleteSessions ?? {};
-      const requestedAt = getServerNow();
-      let nextNeedToArchiveSessions: typeof needToArchiveSessions | undefined;
-      if (needToArchiveSessions[sessionId] !== undefined) {
-        const { [sessionId]: _, ...rest } = needToArchiveSessions;
-        nextNeedToArchiveSessions = rest;
-      }
-
-      const deleteCommand = buildMachineDeleteSessionCommand({
-        session: sessionMeta,
-        machineMeta: machineMetaForCleanup,
-        requestedAt,
-        existing: needToDeleteSessions[sessionId],
-      });
-
-      await deleteMachineFlockRowsBestEffort(
-        runtime,
-        machineId,
-        [machineFlockKeys.archiveSessionCommand(sessionId)],
-        'deleteSession'
-      );
-      await runtime.writer.upsertDocMeta(machineRoomId, {
-        ...(nextNeedToArchiveSessions !== undefined
-          ? { needToArchiveSessions: nextNeedToArchiveSessions }
-          : {}),
-        ...(deleteCommand
-          ? {
-              needToDeleteSessions: {
-                ...needToDeleteSessions,
-                [sessionId]: machineDeleteCommandToQueueItem(deleteCommand),
-              },
-            }
-          : {}),
-      } as unknown as RepoDocMetaPatch);
-      if (deleteCommand) {
-        await writeMachineFlockRowRequired(runtime, machineId, {
-          key: machineFlockKeys.deleteSessionCommand(sessionId),
-          value: deleteCommand,
-        });
-      }
-      await deleteSessionDocuments(sessionId, { cleanupLaunchConfig: false });
+      // Deleting the doc leaves a deletion marker the owning machine reconciles
+      // its worktree directory against; no machine command is needed.
+      await deleteSessionDocuments(sessionMeta.id);
     },
     [runtime, deleteSessionDocuments]
   );
@@ -1447,10 +1251,7 @@ export function useSessionActions(): SessionActions {
       const rootMeta = { ...loadedMeta, id: loadedMeta.id ?? sessionId };
       const deleteTargets = [
         rootMeta,
-        ...getDirectChildSessions(
-          sessionId,
-          Object.values(store.get(sessionMetaCacheAtom))
-        ),
+        ...getDirectChildSessions(sessionId, Object.values(store.get(sessionMetaCacheAtom))),
       ];
 
       for (const session of [...deleteTargets].reverse()) {

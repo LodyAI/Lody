@@ -26,6 +26,14 @@ its bundled CLI cannot attach to the normal local daemon. Teardown first asks
 Electron to quit through its production shutdown barrier, then verifies the
 port can be rebound before deleting temporary state.
 
+The harness keeps E2E windows hidden and disables Chromium background throttling,
+so regression and CI runs do not activate or focus Lody while preserving renderer
+timers and performance instrumentation. Use headed mode only for visual debugging:
+
+```bash
+LODY_E2E_SHOW_WINDOW=1 pnpm e2e:full
+```
+
 ## Commands
 
 ```bash
@@ -50,7 +58,8 @@ pnpm --filter @lody/e2e journey:coverage
 
 `e2e:build` prepares the renderer and synchronized CLI once. The other commands
 never rebuild, which keeps scenario timing about product behavior rather than
-toolchain work. `e2e:acceptance` creates a unique round under
+toolchain work. `e2e:check` also dry-runs every Cucumber scenario so ambiguous
+or undefined step bindings fail before Electron starts. `e2e:acceptance` creates a unique round under
 `e2e/artifacts/acceptance/`; it never overwrites an earlier round. Supported
 subjects are `desktop-local-bootstrap`, `desktop-session-lifecycle`,
 `desktop-review-lifecycle`, `desktop-work-lifecycle`, and `desktop-lifecycle`.
@@ -82,9 +91,10 @@ they never generate selectors, shell commands, or executable product code.
 
 The local Journey Foundry takes one eligible backlog row at a time under the
 [restricted authoring contract](./journeys/AUTHORING.md). It requires a clean
-maintainer checkout, Node.js 22+, the pinned pnpm, macOS desktop prerequisites,
-and an authenticated Codex CLI. `codex login` may use the maintainer's ChatGPT
-account; GitHub receives neither that login nor an API key.
+maintainer checkout, Node.js 22.14-22.x or 23.6+ (Node-API 10+), the pinned pnpm,
+macOS desktop prerequisites, and an authenticated Codex CLI. `codex login` may
+use the maintainer's ChatGPT account; GitHub receives neither that login nor an
+API key.
 
 The author command creates an ephemeral detached worktree and invokes Codex
 there with a restricted environment, ignored user configuration, an ephemeral
