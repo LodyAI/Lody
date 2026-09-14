@@ -41,6 +41,7 @@ Use this pattern for any command:
 | `workspace`                           | Discover accessible workspace IDs and slugs                       | `lody workspace --help`    | [Workspace commands](#workspace-commands)       |
 | `github`                              | List GitHub repositories already linked to a workspace            | `lody github --help`       | [GitHub commands](#github-commands)             |
 | `project`                             | Manage local project registrations                                | `lody project --help`      | [Project commands](#project-commands)           |
+| `app`                                 | Open the desktop app, or reset its local cache when it is stuck   | `lody app --help`          | [Desktop app commands](#desktop-app-commands)   |
 | `session`                             | Create, chat with, inspect, archive, restore, and delete sessions | `lody session --help`      | [Session commands](#session-commands)           |
 | `machine`                             | Inspect machines registered in a workspace                        | `lody machine --help`      | [Machine commands](#machine-commands)           |
 | `agent-config`                        | Manage agent configs and refresh runtime capabilities             | `lody agent-config --help` | [Agent config commands](#agent-config-commands) |
@@ -193,6 +194,34 @@ lody project add --help
 lody project list --help
 lody project delete --help
 ```
+
+## Desktop App Commands
+
+| Command                   | What it does                                              | Help command                  |
+| ------------------------- | --------------------------------------------------------- | ----------------------------- |
+| `lody app [path]`         | Open the desktop app on a new chat with a directory ready  | `lody app --help`             |
+| `lody app reset-cache`    | Clear the desktop app's local cache on its next launch     | `lody app reset-cache --help` |
+
+### Recovering a frozen desktop window
+
+If the desktop window stops responding — or comes back to the same broken state after a restart —
+its local cache may be the cause, and you cannot reach **Settings → Clear cache** to repair it.
+Arm the same repair from a terminal instead:
+
+```bash
+lody app reset-cache          # clear recoverable caches; stay signed in
+lody app reset-cache --hard   # erase all local data and sign out
+lody app reset-cache --cancel # undo either of the above
+```
+
+The command only records the request; the app applies it the next time it starts, so **quit the
+desktop app and open it again**. Nothing is sent anywhere, and it needs neither a sign-in nor a
+running daemon.
+
+`lody app reset-cache` keeps your account, settings, and unsent Shortcut drafts, and re-downloads
+conversations from the workspace. Use `--hard` only when the app is still stuck afterwards: it also
+removes the signed-in session and local preferences. A request that is never applied expires after
+a day.
 
 ## Session Commands
 

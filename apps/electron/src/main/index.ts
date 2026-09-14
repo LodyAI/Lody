@@ -14,6 +14,7 @@ import { registerIpcServices } from './ipc/register-services'
 import { openMainWindow, openOrFocusMainWindow, setMainWindowProductReloadTarget } from './window'
 import { getMainWindow, setAppQuitting, setWindowsTrayAvailable } from './window-state'
 import { CliService } from './services/cli-service'
+import { applyPendingDesktopLocalReset } from './services/local-reset-service'
 import { TerminalRelay } from './services/terminal-relay'
 import { LoroDataPlaneRelay } from './services/loro-data-plane-relay'
 import { NotificationService } from './services/notification-service'
@@ -185,8 +186,12 @@ if (hasSingleInstanceLock) {
 
 if (hasSingleInstanceLock) {
   recordE2EBootDiagnostic('waiting-for-app-ready')
-  const appReady = app.whenReady().then(() => {
+  const appReady = app.whenReady().then(async () => {
     installLocalFileResourceProtocol()
+    // Before any window can reopen the local stores: a reset armed with
+    // `lody app reset-cache` is the way back for a user whose renderer is wedged,
+    // so it has to run while nothing holds that storage open.
+    await applyPendingDesktopLocalReset()
     recordE2EBootDiagnostic('initializing-services')
     if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(macIcon)
 
