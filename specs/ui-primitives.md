@@ -178,14 +178,20 @@ control — a surface may say that pressing the block does something, and then t
 surface provides what is pressed, because what a press does is the product's
 decision and not the block's.
 
-A word that states a fact says what kind of fact by tint alone, never by
-colouring the words: the colours this system gives to outcomes are tuned for a
-mark the size of a glyph rather than for text this small, and a word is never
-wordless, so the tint can carry the kind while the word carries the fact. It
-reports the same four outcomes a message does, and one more — that something is
-happening now — because that is live state and the system has a colour for it.
-It is never a control: nothing about it answers a pointer or takes focus, and a
-surface that needs those needs a button.
+A word that states a fact says what kind of fact twice: by the tint behind it,
+and by the colour of the word itself. The colours this system gives to outcomes
+are tuned for a mark the size of a glyph rather than for text this small, so a
+word does not take one of them as it is — it takes that colour carried half the
+way to the colour text is normally written in, which keeps what kind it is while
+staying as legible as any other word on the surface. The tint alone is not
+enough: a chip this small is a wash a few percent away from whatever it sits on,
+and there is a palette in which two of the five outcomes are near enough in
+colour that no strength of wash tells them apart, while their words do. A fact
+with no kind to state takes the ordinary text colour. It reports the same four
+outcomes a message does, and one more — that something is happening now —
+because that is live state and the system has a colour for it. It is never a
+control: nothing about it answers a pointer or takes focus, and a surface that
+needs those needs a button.
 
 Every control in this family shares one set of state appearances: a sunken
 resting surface with no border, a placeholder in the hint colour, an accent ring

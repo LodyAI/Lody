@@ -68,11 +68,18 @@ const styles = stylex.create({
     // focus or reports a state. A caller who needs one of those needs a Button.
     userSelect: 'none',
   },
+  /**
+   * A tone is two declarations: the film under the word, and the word. The
+   * second is the one that does the work — a 20px chip's tint is a wash a few
+   * percent off its surface, and its word is the mark a person looks at. See
+   * `badge.tokens.stylex.ts` for why a tone's word is that tone pulled halfway
+   * to the ink rather than the tone itself.
+   */
   neutral: { backgroundColor: badge.neutralFill },
-  running: { backgroundColor: badge.runningFill },
-  success: { backgroundColor: badge.successFill },
-  warning: { backgroundColor: badge.warningFill },
-  danger: { backgroundColor: badge.dangerFill },
+  running: { backgroundColor: badge.runningFill, color: badge.runningLabel },
+  success: { backgroundColor: badge.successFill, color: badge.successLabel },
+  warning: { backgroundColor: badge.warningFill, color: badge.warningLabel },
+  danger: { backgroundColor: badge.dangerFill, color: badge.dangerLabel },
   /** The box the caller's glyph is given, and fills. */
   glyph: {
     display: 'inline-flex',

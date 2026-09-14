@@ -541,17 +541,29 @@ in both palettes. Those two started at 8 and 14, which was a film too thin to
 tell apart: the closest pair of tones measured 0.019 apart in oklab in the light
 palette and 0.026 in the dark one, and is now 0.030 and 0.035.
 
-The words stay `badge.label` in every tone, and that is measured rather than
-preferred: `warning` is 2.8:1 on a near-white surface, a colour tuned for a 16px
-mark where the bar is 3:1, used as 11px text where it is 4.5:1. A badge is never
-wordless, so the tint carries the tone and the word carries the fact.
+**The word carries the tone, and it is the tone pulled halfway to `label`.**
+The raw tone cannot: `warning` is 2.8:1 on a near-white surface, a colour tuned
+for a 16px mark where the bar is 3:1, used as 11px text where it is 4.5:1. But
+the raw tone is not the only way to carry a hue. At half the distance to the
+ink, a tone keeps its hue and gains the ink's contrast — the worst of the four
+measures 5.2:1 on its own chip, on every rung, in both palettes.
 
-`badge.label` is `label`, not `secondaryLabel`, and that is the same measurement
-made about the neutral ink rather than the coloured one. A badge's word sits on
-the badge's own film rather than on the page, and there `secondaryLabel` was
-3.9:1 on a danger chip and 3.4:1 inside a popup — under the bar before the films
-were strengthened, not because of it. `label` clears 4.5:1 in every tone on every
-rung in both palettes, by 9:1 at the narrowest.
+The film alone could not do this. A 20px chip's tint is a wash a few percent off
+its surface; its word is the mark a person looks at. The four words land 0.097
+apart in oklab at the closest in the light palette and 0.048 in the dark one,
+against 0.030 and 0.035 for the films under them. The dark palette is where it
+earns its place: there `accent` is a pale peach and `warning` an amber, twenty-six
+degrees apart, so their films are two brown washes that no percentage separates,
+and their words are a peach and a gold at four times the chroma.
+
+Half is not a round number chosen for tidiness. At 60% of the tone the worst word
+is 4.2:1 — under the bar on the floating rung, where the chip is already a step
+darker — and at 40% the hues wash out.
+
+`badge.label` is the neutral word and the ink the rest are pulled toward: `label`,
+not `secondaryLabel`. A badge's word sits on the badge's own film rather than on
+the page, and there `secondaryLabel` was 3.9:1 on a danger chip and 3.4:1 inside
+a popup — under the bar before the films were strengthened, not because of it.
 
 It is metadata, so it takes the caption step the rules give a row's trailing
 metadata — which is how it stays quieter than the thing it is attached to, by

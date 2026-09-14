@@ -803,7 +803,23 @@ const CARD_COLORS = [
 const BADGE_TONES: BadgeTone[] = ['neutral', 'running', 'success', 'warning', 'danger'];
 
 const BADGE_COLORS = [
-  { name: 'badge.label', value: badgeTokens.label, note: 'ink in every tone' },
+  { name: 'badge.label', value: badgeTokens.label, note: 'the neutral word, and the ink' },
+  {
+    name: 'badge.runningLabel',
+    value: badgeTokens.runningLabel,
+    note: 'the tone, halfway to the ink',
+  },
+  {
+    name: 'badge.successLabel',
+    value: badgeTokens.successLabel,
+    note: 'it worked, in its own hue',
+  },
+  {
+    name: 'badge.warningLabel',
+    value: badgeTokens.warningLabel,
+    note: 'the one the rules warn of',
+  },
+  { name: 'badge.dangerLabel', value: badgeTokens.dangerLabel, note: 'it did not, in its own hue' },
   {
     name: 'badge.neutralFill',
     value: badgeTokens.neutralFill,
