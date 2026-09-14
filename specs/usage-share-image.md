@@ -14,8 +14,8 @@ can be laid side by side and read against each other. The user chooses the frame
 — portrait or wide, a backdrop, a pinned or app-following palette — and two
 content questions; nothing else about the layout is adjustable. It keeps more
 appearance controls than [chat image selection and export](chat-share-image.md),
-whose template now fixes everything but the palette, the backdrop, and the
-destination that sizes the card.
+whose template now fixes everything but the palette, the backdrop, the card's
+size, and how much backdrop shows around it.
 
 The period the card describes is the range selected on the Usage screen, and the
 headline total is that range's own total, so the card cannot disagree with the

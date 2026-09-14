@@ -12,8 +12,12 @@ const meta = {
     destination: {
       control: 'inline-radio',
       options: ['chat', 'post'],
+      description: "The card's own size: `chat` is 360pt, `post` is 560pt.",
+    },
+    mat: {
+      control: { type: 'range', min: 0, max: 96, step: 4 },
       description:
-        "Where the image is going: the card's width and its mat together. `chat` is 360 in a thin bleed, `post` is 560 in a real mat.",
+        'Ground showing around the card, in px. Below 12 the sign-off moves into the caption; ignored entirely when `backdrop` is `none`.',
     },
     theme: {
       control: 'inline-radio',
@@ -24,7 +28,7 @@ const meta = {
       control: 'inline-radio',
       options: ['none', 'lody', 'welcome', 'aurora', 'ocean', 'sunset'],
       description:
-        'The ground the card is printed on; part of the exported image. `none` drops the mat, and the sign-off falls back into the caption.',
+        'The ground the card is printed on; part of the exported image. `none` prints the card alone and moves the sign-off into the caption.',
     },
   },
   tags: ['autodocs'],
@@ -96,6 +100,7 @@ export const PostLight: Story = {
     title: '渲染性能排查',
     messages: multiTurnMessages,
     destination: 'post',
+    mat: 56,
     theme: 'light',
     backdrop: 'lody',
     meta: demoMeta,
@@ -107,11 +112,21 @@ export const PostDark: Story = {
 };
 
 export const ChatLight: Story = {
-  args: { ...PostLight.args, destination: 'chat' },
+  args: { ...PostLight.args, destination: 'chat', mat: 16 },
 };
 
 export const ChatDark: Story = {
-  args: { ...PostLight.args, destination: 'chat', theme: 'dark' },
+  args: { ...PostLight.args, destination: 'chat', mat: 16, theme: 'dark' },
+};
+
+/** The slider's tight end: no mat to sign on, so `lody.ai` drops into the caption. */
+export const FlushMat: Story = {
+  args: { ...PostLight.args, mat: 0 },
+};
+
+/** The slider's loose end. */
+export const WideMat: Story = {
+  args: { ...PostLight.args, mat: 96 },
 };
 
 /** The only light ground in the set: the sign-off has to ink the other way. */
@@ -151,6 +166,7 @@ export const Untitled: Story = {
       },
     ],
     destination: 'chat',
+    mat: 16,
     theme: 'light',
     backdrop: 'welcome',
     meta: demoMeta,
@@ -195,6 +211,7 @@ export const LongCodeLines: Story = {
     title: '并发 helper review',
     messages: codeHeavyMessages,
     destination: 'post',
+    mat: 56,
     theme: 'dark',
     backdrop: 'lody',
     meta: demoMeta,

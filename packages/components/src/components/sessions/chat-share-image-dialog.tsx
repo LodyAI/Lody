@@ -11,11 +11,16 @@ import { useResolvedTheme } from '@/theme-provider';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui/dialog';
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { Button } from '@/ui/button';
+import { Slider } from '@/ui/slider';
 import { copyShareImage, exportShareImage } from '@/lib/share-image-export';
 import {
   ChatShareCard,
   CHAT_SHARE_BACKDROPS,
   CHAT_SHARE_BACKDROP_STYLES,
+  DEFAULT_MAT,
+  MAT_STEP,
+  MAX_MAT,
+  MIN_MAT,
   type ChatShareCardBackdrop,
   type ChatShareCardDestination,
 } from '@/components/chat-share-card';
@@ -153,10 +158,10 @@ function PaletteToggle({
 }
 
 /**
- * Where the image is going, which is the card's width and its mat together.
- * Named for the destination rather than for either measurement: the person
- * exporting knows whether this is going into a thread or onto a feed, and has no
- * way to judge "360 × thin" against "560 × matted".
+ * The card's size, asked as where the image is going. It is a preset, not just a
+ * width: picking one also re-seeds the mat to that size's ordinary look, which is
+ * what makes the pair of controls read as "pick a starting point, then adjust"
+ * rather than as two unrelated knobs.
  */
 function DestinationToggle({
   value,
@@ -283,6 +288,55 @@ function BackdropPicker({
   );
 }
 
+/**
+ * The mat, as a slider over pixels.
+ *
+ * This is the one dimension the template does not decide, and it is the one
+ * control here that is honestly a measurement. The usual argument against
+ * exposing a number — that nobody can judge 32 against 56 — holds on a settings
+ * screen and dissolves next to a live preview: you do not read the value, you
+ * drag and watch the picture. Quantising a continuous quantity into two or three
+ * named buckets would be the designer choosing for the user in the one place the
+ * user can see the answer directly.
+ *
+ * The readout is the pixel count so the look is reproducible, the step is the
+ * template's own 4px grid, and zero is reachable — a card flush to the image edge
+ * is what pasting into a document wants. Below `MIN_SIGN_OFF_MAT` the card signs
+ * itself in its caption instead, so the tight end never puts type on the edge.
+ */
+function MatSlider({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: number;
+  onChange: (mat: number) => void;
+  disabled?: boolean;
+}) {
+  const { t } = useTranslation();
+  const label = t('sessions.shareImage.mat', 'Padding');
+  return (
+    <div className={cn('flex min-w-52 flex-1 items-center gap-3', disabled && 'opacity-60')}>
+      <span id="chat-share-mat-label" className="shrink-0 text-xs text-muted-foreground">
+        {label}
+      </span>
+      <Slider
+        aria-labelledby="chat-share-mat-label"
+        min={MIN_MAT}
+        max={MAX_MAT}
+        step={MAT_STEP}
+        value={value}
+        onValueChange={onChange}
+        disabled={disabled}
+        className="min-w-24 flex-1"
+      />
+      <span className="w-7 shrink-0 text-right font-mono text-xs tabular-nums text-muted-foreground">
+        {value}
+      </span>
+    </div>
+  );
+}
+
 export interface ChatShareImageDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -304,12 +358,13 @@ export interface ChatShareImageDialogProps {
 
 /**
  * Preview and export for "Share as image". The card is a fixed template, so this
- * surface is a preview with three controls and two actions rather than an editor:
- * where the image is going, which is the card's whole shape; the ground it is
- * printed on; and the palette it is printed in. Everything else about the image —
- * its bands, their order, their margins, their type — is already decided. The
- * device chooses nothing about the image, only the opening guess at its
- * destination and whether this surface is a dialog or a drawer.
+ * surface is a preview with four controls and two actions rather than an editor.
+ * Two of them are the card's shape — where the image is going, which sets its
+ * width and seeds its mat, and the mat itself on a slider — and two are its
+ * surface: the ground it is printed on and the palette it is printed in. Its
+ * bands, their order, their gutters and their type are not on offer. The device
+ * chooses nothing about the image, only the opening guess at its destination and
+ * whether this surface is a dialog or a drawer.
  *
  * The same preview, controls and actions render in a bottom drawer on a handset
  * and in a dialog on a desktop.
@@ -340,6 +395,18 @@ export function ChatShareImageDialog({
   const [destination, setDestination] = useState<ChatShareCardDestination>(
     initialDestination ?? defaultDestination(isMobile)
   );
+  const [mat, setMat] = useState<number>(
+    DEFAULT_MAT[initialDestination ?? defaultDestination(isMobile)]
+  );
+
+  // Picking a size is picking a starting point, so it re-seeds the mat. There is
+  // no "has the user touched the slider" bit behind this on purpose: a hidden
+  // flag that sometimes keeps a value and sometimes does not is harder to predict
+  // than a preset that always resets, and the preview shows the result instantly.
+  const chooseDestination = (next: ChatShareCardDestination) => {
+    setDestination(next);
+    setMat(DEFAULT_MAT[next]);
+  };
   const exportRef = useRef<HTMLDivElement>(null);
   const exportingRef = useRef(false);
   const [exporting, setExporting] = useState(false);
@@ -356,7 +423,9 @@ export function ChatShareImageDialog({
     if (open) {
       setTheme(appTheme);
       setBackdrop(DEFAULT_BACKDROP);
-      setDestination(initialDestination ?? defaultDestination(isMobile));
+      const opening = initialDestination ?? defaultDestination(isMobile);
+      setDestination(opening);
+      setMat(DEFAULT_MAT[opening]);
       setExportError(false);
       setCopied(false);
     }
@@ -430,6 +499,7 @@ export function ChatShareImageDialog({
           messages={messages}
           title={session?.title?.trim() || undefined}
           destination={destination}
+          mat={mat}
           theme={theme}
           backdrop={backdrop}
           meta={meta}
@@ -483,9 +553,19 @@ export function ChatShareImageDialog({
     </Button>
   );
 
-  const controls = (
+  // Grouped by what they do to the image: the first row is its shape, the second
+  // is its surface. The mat is inert without a ground, and stays visible while it
+  // is — a control that vanishes on a swatch click relayouts the row under the
+  // pointer.
+  const shapeControls = (
     <>
-      <DestinationToggle value={destination} onChange={setDestination} disabled={exporting} />
+      <DestinationToggle value={destination} onChange={chooseDestination} disabled={exporting} />
+      <MatSlider value={mat} onChange={setMat} disabled={exporting || backdrop === 'none'} />
+    </>
+  );
+
+  const surfaceControls = (
+    <>
       <BackdropPicker value={backdrop} onChange={setBackdrop} disabled={exporting} />
       <PaletteToggle value={theme} onChange={setTheme} disabled={exporting} />
     </>
@@ -521,7 +601,19 @@ export function ChatShareImageDialog({
             <div className="shrink-0 space-y-3 border-t border-border/70 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
               {status}
               <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-3">
-                {controls}
+                <DestinationToggle
+                  value={destination}
+                  onChange={chooseDestination}
+                  disabled={exporting}
+                />
+              </div>
+              <MatSlider
+                value={mat}
+                onChange={setMat}
+                disabled={exporting || backdrop === 'none'}
+              />
+              <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-3">
+                {surfaceControls}
               </div>
               <div className="grid grid-cols-2 gap-2 [&>button]:w-full">
                 {copyButton}
@@ -550,8 +642,11 @@ export function ChatShareImageDialog({
             and two buttons do not share a line, and a status message sharing one
             would have to squeeze whatever is beside it. */}
         <div className="flex shrink-0 flex-col border-t border-border/70">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-3 px-5 pt-3">
+            {shapeControls}
+          </div>
           <div className="flex flex-wrap items-center gap-x-5 gap-y-3 px-5 pb-2.5 pt-3">
-            {controls}
+            {surfaceControls}
           </div>
           <div className="flex items-center gap-3 px-5 pb-3">
             {status}

@@ -22,33 +22,45 @@ not the current composer. Multiple-model aggregation is outside this scope.
 Custom runtimes use the current session configuration's display name. The date
 remains the session creation date; elapsed runtime is not displayed.
 
-The card is a fixed template. Its bands, their order, their type scale and their
-margins are the same on every card, and the preview offers exactly three choices,
-none of which can change that: where the image is going, the ground it is printed
-on, and the palette it is printed in. The palette opens on whichever appearance
+The card is a fixed template. Its bands, their order, their gutters and their
+type scale are the same on every card, and the preview offers four choices, none
+of which can change any of that: the card's size, how much ground shows around
+it, which ground, and which palette. The palette opens on whichever appearance
 the app is currently wearing.
 
-Where the image is going is the card's whole shape — its width and its mat
-together, because they answer the same question. A card sent into a message
-thread is read inside a conversation the reader is already looking at, so it is
-sized to a handset's own content width and matted in a thin bleed; the mat there
-is mostly wasted height. A card posted to a feed, a README or a slide stands
-alone, so it is wide enough for a line of prose and a genuine line of code, and
-its ground has to hold it off whatever is behind it. The two mats are
-deliberately not the same fraction of their card: a message wants the least
-wasted height that still reads as a card, a post wants presentation.
+The card's size is a content decision, because it sets the measure: how much
+prose fits on a line, and whether a line of code survives without wrapping. It is
+asked as where the image is going, since that is what the answer depends on and
+what the person exporting actually knows. A card sent into a message thread is
+read at a handset's own content width; a card posted to a feed, a README or a
+slide needs room for a line of prose and a genuine line of code. Those are the
+two useful answers, so it is a choice between two, not a dimension to nudge.
+
+How much ground shows is the one continuous dimension the template does not
+decide, and it is offered as a slider over pixels. This is the single place the
+card asks for a measurement rather than an intent, and that is deliberate: the
+usual reason to avoid exposing a number — that nobody can judge one against
+another — describes a settings form, not a surface with the result rendered
+beside the control. Here the person does not read the value, they drag and watch
+the picture, which is a stronger answer than any name could be. Quantising it
+into named steps would be the product deciding for someone who can already see
+the result. The size seeds it with an ordinary value for that size, so an
+untouched export is still a considered one.
+
+Zero is reachable, because a card flush to the image's edge is what pasting into
+a document wants. Below the point where the ground stops being a margin, the
+sign-off moves into the caption rather than sitting on the image's own edge, and
+the card's shadow goes with it — a shadow needs a ground to fall on.
 
 The device doing the exporting decides nothing about the image. It is only the
-opening guess at the destination, which one tap overrides. Using it to pick the
-card's shape was wrong in both directions — a desktop user sending a card into a
+opening guess at the size, which one tap overrides. Using it to pick that size
+outright was wrong in both directions — a desktop user sending a card into a
 group chat got the wide one, and a handset user posting to a feed got the narrow
-one — so the destination is asked directly instead. Asking it as a destination
-rather than as a measurement is the point: the person exporting knows where the
-image is going and cannot judge one width or one margin against another.
+one — so the question is asked instead of inferred.
 
-The two forms differ in measure and margin only. Type sizes are shared, and are
-independent of the reader's conversation font setting, so a chat card and a post
-card set the same words at the same size.
+The two sizes differ in measure and interior scale only. Type sizes are shared,
+and are independent of the reader's conversation font setting, so a chat card and
+a post card set the same words at the same size.
 
 A chosen ground is part of the exported image rather than a border added around
 it, the same as on the usage card. The set is the product's own — its signature
@@ -71,8 +83,9 @@ Provenance is one caption band at the foot of the card: the runtime that produce
 the conversation, its model, the rough token estimate, and the absolute capture
 date. The product sign-off prints on the ground below the card, where it costs the
 conversation no room and cannot be mistaken for part of the transcript; a card
-exported without a ground has nowhere to print it, so it takes the second line of
-the caption's left column rather than a band of its own. Either way it inks for
+exported without a ground, or with too little of one to hold a line of type off
+the edge, takes it onto the second line of the caption's left column rather than
+a band of its own. Either way it inks for
 the ground it sits on. The card carries no QR code, because the code encoded the
 product's home page rather than this conversation, which a legible wordmark states
 in a tenth of the space.
@@ -100,8 +113,11 @@ copy leaves the preview open for retry. Copying does not publish the conversatio
 or change the saved image behavior.
 
 The preview is a preview and not an editor: the palette switch, the ground
-swatches, the destination switch and the two actions are all it carries. The
-destination stays live without a ground: it still sets the card's width. It is a dialog on a desktop and a bottom drawer on a
+swatches, the size switch, the ground slider and the two actions are all it
+carries. The controls are grouped by what they do: the card's shape first, then
+its surface. The size switch stays live without a ground — it still sets the
+card's width — while the slider goes inert, because there is then no ground to
+size. It is a dialog on a desktop and a bottom drawer on a
 handset, with the same preview, the same control and the same actions in both.
 
 Evidence: [selection tests](../packages/components/tests/message-selection.test.tsx),

@@ -11,28 +11,54 @@ export interface ChatShareCardMessage {
 }
 
 /**
- * The card has exactly two forms, and where the image is going picks one. This
- * is the whole shape of the card: its width and its mat are one decision, not
- * two, because they answer the same question.
+ * The card's own size, which is a content decision: it sets the measure, so it
+ * decides how much prose fits on a line and whether a line of code survives
+ * without wrapping. It is discrete because the useful answers are, and because
+ * a measure is not something to nudge.
  *
- * `chat` is a 360pt card in a thin bleed. The image lands inside a message
- * thread, so it is read at a handset's own content width — its text sets at the
- * size the reader's other apps set theirs — and the mat is mostly wasted height
- * in a conversation the reader is already looking at.
+ * `chat` is 360pt — a handset's own content width, so an image opened in a
+ * message thread sets its text at the size the reader's other apps set theirs.
+ * `post` is 560pt — room for a ~70-character line of prose and a real line of
+ * code, which is what a feed, a README or a slide wants.
  *
- * `post` is a 560pt card in a real mat. The image stands alone in a feed, a
- * README or a slide, so it gets room for a ~70-character line of prose and a
- * genuine line of code, and a ground that holds it off whatever is behind it.
+ * Named for where the image is going rather than for a number, because the
+ * width is chosen by how the image will be read, and the person exporting knows
+ * that. It also seeds the mat, which is then free.
  *
  * The device doing the exporting decides nothing here. It used to, as a proxy
  * for the destination, which was wrong in both directions: a desktop user
  * sending a card into a group chat got a wide card, and a phone user posting to
- * a feed got a narrow one. The destination is now asked directly.
+ * a feed got a narrow one.
  *
- * The two differ in measure and margin only — type sizes are shared — so a chat
- * card and a post card set the same words at the same size.
+ * The two differ in measure and interior scale only — type sizes are shared —
+ * so a chat card and a post card set the same words at the same size.
  */
 export type ChatShareCardDestination = 'chat' | 'post';
+
+/**
+ * How much ground shows around the card, in CSS pixels, and the one dimension of
+ * this template that is continuous. It is not a taste the card can guess: a
+ * 560pt card flush in a README wants none of it and the same card on a feed
+ * wants a lot, and both are the same destination. `mat` is what the preview's
+ * slider writes.
+ */
+export const MIN_MAT = 0;
+export const MAX_MAT = 96;
+/** The slider lands on the same 4px grid every other dimension sits on. */
+export const MAT_STEP = 4;
+
+/**
+ * Below this the ground is a hairline rather than a margin, and a sign-off
+ * printed on it would sit on the image's own edge. The card signs itself in the
+ * caption instead — the same fallback a card with no ground at all takes.
+ */
+export const MIN_SIGN_OFF_MAT = 12;
+
+/** Where the slider starts for each size; both are a deliberate, ordinary look. */
+export const DEFAULT_MAT: Record<ChatShareCardDestination, number> = {
+  chat: 16,
+  post: 56,
+};
 
 export interface ChatShareCardMeta {
   /** Runtime/agent display name — the caption's subject. */
@@ -48,8 +74,10 @@ export interface ChatShareCardMeta {
 export interface ChatShareCardProps {
   messages: ChatShareCardMessage[];
   title?: string;
-  /** Where the image is going: the card's width and its mat, as one decision. */
+  /** The card's own size; also what the caller seeded `mat` from. */
   destination: ChatShareCardDestination;
+  /** Ground showing around the card, in px. Ignored when `backdrop` is `none`. */
+  mat: number;
   /**
    * Pins the exported palette to a bundled Lody theme rather than following the
    * app: the image must look the way the preview did, whatever the app is
@@ -65,9 +93,8 @@ export interface ChatShareCardProps {
 }
 
 interface CardLayout {
-  /** Card width in CSS pixels; a ground adds `frame` on every side of it. */
+  /** Card width in CSS pixels; the mat adds to it on every side. */
   width: number;
-  frame: string;
   radius: string;
   /**
    * The one horizontal inset every band uses — title, conversation and caption
@@ -93,21 +120,19 @@ interface CardLayout {
 }
 
 /**
- * Every dimension of both cards, as two rows rather than values sprinkled
- * through the markup, so "a post breathes more than a message" stays one
- * decision instead of a dozen. Every value sits on a 4px grid, and the vertical
- * rhythm is deliberately unequal: the gap that separates two exchanges is twice
- * the gap that binds a prompt to its reply, which is what makes a tall card
- * scannable without speaker labels.
+ * Every interior dimension of both cards, as two rows rather than values
+ * sprinkled through the markup, so "a post breathes more than a message" stays
+ * one decision instead of a dozen. The mat is deliberately not in here: it is
+ * the one continuous dimension and the caller owns it.
  *
- * The mats are deliberately NOT the same fraction of their card. A message wants
- * the least wasted height it can get away with while still reading as a card, a
- * post wants presentation; 4% and 10% is that difference, not an inconsistency.
+ * Every value sits on a 4px grid, and the vertical rhythm is deliberately
+ * unequal: the gap that separates two exchanges is twice the gap that binds a
+ * prompt to its reply, which is what makes a tall card scannable without
+ * speaker labels.
  */
 const LAYOUT: Record<ChatShareCardDestination, CardLayout> = {
   chat: {
     width: 360,
-    frame: 'p-4',
     radius: 'rounded-[22px]',
     gutter: 'px-5',
     top: 'pt-6',
@@ -123,7 +148,6 @@ const LAYOUT: Record<ChatShareCardDestination, CardLayout> = {
   },
   post: {
     width: 560,
-    frame: 'p-14',
     radius: 'rounded-[26px]',
     gutter: 'px-7',
     top: 'pt-7',
@@ -258,17 +282,21 @@ export function ChatShareCard({
   messages,
   title,
   destination,
+  mat,
   theme,
   backdrop,
   meta,
   className,
 }: ChatShareCardProps) {
   const layout = LAYOUT[destination];
+  const matPx = backdrop === 'none' ? 0 : Math.max(MIN_MAT, mat);
+  // The sign-off needs a margin to sign in. Without a ground, or with one too
+  // thin to hold a line of type off the image's edge, it moves into the caption.
+  const signOffOnMat = backdrop !== 'none' && matPx >= MIN_SIGN_OFF_MAT;
   // Injects the scoped theme rules before first paint; idempotent no-op after.
   ensureShareThemeScopes();
   const themeScopeClass = theme === 'light' ? 'light-scope' : 'dark-scope';
   const captionParams = meta?.params?.filter((param) => param.trim().length > 0) ?? [];
-  const framed = backdrop !== 'none';
 
   const card = (
     <>
@@ -277,9 +305,9 @@ export function ChatShareCard({
         className={cn(
           'relative overflow-hidden bg-card text-card-foreground',
           layout.radius,
-          // A drop shadow needs a ground to fall on; without a backdrop it would
-          // only darken the PNG's own transparent corners.
-          framed && 'shadow-[0_28px_70px_-20px_rgba(2,10,18,0.6)]',
+          // A drop shadow needs a ground to fall on. Without one — or with a mat
+          // too thin to catch it — it would only darken the image's own edge.
+          matPx >= MIN_SIGN_OFF_MAT && 'shadow-[0_28px_70px_-20px_rgba(2,10,18,0.6)]',
           'ring-1 ring-inset ring-black/[0.06] dark:ring-white/[0.10]'
         )}
         style={{ width: layout.width }}
@@ -342,9 +370,9 @@ export function ChatShareCard({
 
         {/* Caption band, camera-style: the runtime that produced the
             conversation on the left, its parameters and the capture date on the
-            right. The brand mark is normally the backdrop's job; an unframed
-            card has no backdrop, so the sign-off takes the second line of the
-            left column rather than a band of its own. */}
+            right. The brand mark is normally the ground's job; a card with no
+            ground, or too thin a one to sign, takes the sign-off onto the second
+            line of the left column rather than a band of its own. */}
         <div
           className={cn(
             'flex items-center gap-2.5 border-t border-border/70',
@@ -359,7 +387,7 @@ export function ChatShareCard({
             <div className="truncate text-[13px] font-semibold text-foreground">
               {meta?.name ?? 'Lody'}
             </div>
-            {framed ? null : (
+            {signOffOnMat ? null : (
               <div className="mt-0.5 truncate text-[10.5px] leading-tight text-muted-foreground">
                 lody.ai
               </div>
@@ -384,31 +412,32 @@ export function ChatShareCard({
     </>
   );
 
-  // Without a ground there is nothing to print the sign-off on and no mat to
-  // inset: the card itself is the whole exported image. Its width still follows
-  // the destination.
-  //
+  // Without a ground there is nothing to inset from and nothing to sign on: the
+  // card itself is the whole exported image. Its width still follows the
+  // destination.
   if (backdrop === 'none') {
     return <div className={cn('w-fit', themeScopeClass, className)}>{card}</div>;
   }
 
   return (
     <div
-      className={cn('w-fit', layout.frame, themeScopeClass, className)}
-      style={CHAT_SHARE_BACKDROP_STYLES[backdrop]}
+      className={cn('w-fit', themeScopeClass, className)}
+      style={{ ...CHAT_SHARE_BACKDROP_STYLES[backdrop], padding: matPx }}
     >
       {card}
-      <div className={cn(layout.signature, 'flex items-center justify-center gap-2')}>
-        <img src={lodyLogo} alt="" className="size-4 scale-[1.64] rounded" />
-        <span
-          className={cn(
-            'text-[12px] font-medium tracking-wide',
-            LIGHT_BACKDROPS.has(backdrop) ? 'text-[rgba(32,66,76,0.78)]' : 'text-white/85'
-          )}
-        >
-          lody.ai
-        </span>
-      </div>
+      {!signOffOnMat ? null : (
+        <div className={cn(layout.signature, 'flex items-center justify-center gap-2')}>
+          <img src={lodyLogo} alt="" className="size-4 scale-[1.64] rounded" />
+          <span
+            className={cn(
+              'text-[12px] font-medium tracking-wide',
+              LIGHT_BACKDROPS.has(backdrop) ? 'text-[rgba(32,66,76,0.78)]' : 'text-white/85'
+            )}
+          >
+            lody.ai
+          </span>
+        </div>
+      )}
     </div>
   );
 }

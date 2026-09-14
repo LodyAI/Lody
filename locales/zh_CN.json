@@ -2102,6 +2102,7 @@
   "sessions.shareImage.destination": "分享到",
   "sessions.shareImage.destinationChat": "聊天",
   "sessions.shareImage.destinationPost": "帖子",
+  "sessions.shareImage.mat": "留白",
   "sessions.shareImage.exportPng": "导出 PNG",
   "sessions.shareImage.exporting": "正在导出...",
   "sessions.shareImage.exportFailed": "图片操作失败，请重试。",
