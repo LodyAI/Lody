@@ -119,6 +119,35 @@ smearing into one vertical stroke by 20px while two stay separate. The middle
 row fades; the outer two become the marks at (6, 9.5) and (6, 14.5), which is
 what `sidebar-collapsed` now draws.
 
+**Correction: the bell was a tube, and its flange was a spike.** Drawn with an
+11-wide dome over 6 units of straight side it was 14 across and 13 down, which
+is not the proportion of a bell; the playground showed that too. The dome is 12
+now and the side sweeps out to a mouth 16.4 across a 12.7-tall body.
+
+The interesting part is the mouth. The first widening kept the flange — a
+straight flare from the side to the mouth line — and made it bigger, and the
+filled variants grew horns: the flare met the mouth at 39 degrees, and a
+39-degree tip is a spike that `stroke-linejoin: round` hides in the outline and
+a fill cannot. Rounding the spike is not available either, because a 0.8 radius
+at that angle consumes 2.28 units of a 3.2-unit flare and there is no flange
+left. So the flange is gone: the side arrives at the mouth vertically through a
+curve, turns through a 0.7 corner, and the mouth is a line under it. The corner
+is 90 degrees, which a fill can hold. This is the general form of the rule the
+set already had for glyphs — **what the outline's stroke rounds, the mass has to
+round itself**, since a variant is a treatment of one drawing and the fill has
+no join to round.
+
+Widening the bell also widened its swing: the mouth is 16 units from the nub it
+pivots on, and at the old 14 degrees the corner furthest from the pivot put its
+stroke 0.03 from the canvas. That is inside, and it is not a margin. The swing
+is 12 degrees now, which leaves 0.42 and reads the same.
+
+`BellRingIcon` no longer restates the path. It reads `ICONS.bell` — the bell
+swings as one piece, so there is one drawing and the state only rotates it —
+and `test/icons.test.tsx` holds it there. That is the guard the sidebar did not
+have: both of these corrections are a stateful icon and a static icon drifting
+apart, and where a state moves the whole drawing the drift is now impossible.
+
 ## Alternatives
 
 An icon package — Lucide, Phosphor, Tabler, Iconify through `unplugin-icons` —
