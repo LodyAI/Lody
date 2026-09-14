@@ -26,15 +26,25 @@ the queue by hand.
   durable queue identity and expected active turn. The daemon, not the renderer, chooses the
   execution mechanism:
 
-  | Active daemon/runtime                                         | Steer behavior                                                                                                                   |
-  | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-  | Exact-item protocol and acknowledged native ACP Steer         | Reserve the selected row as `pending_apply`, retain it through the durable handoff saga, then inject it through `steerPrompt`.   |
-  | Exact-item protocol without native ACP Steer                  | Persist and activate the selected row as the next user turn, remove it from the queue, then stop only the expected turn.         |
-  | Older daemon with authoritative acknowledged native ACP Steer | Preserve the legacy native Steer path.                                                                                           |
-  | Older daemon without acknowledged native ACP Steer            | Keep the established queue-head interrupt behavior; disable Steer on later rows and require a daemon update for exact selection. |
+  | Active daemon/runtime                                 | Steer behavior                                                                                                                 |
+  | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+  | Exact-item protocol and acknowledged native ACP Steer | Reserve the selected row as `pending_apply`, retain it through the durable handoff saga, then inject it through `steerPrompt`. |
+  | Exact-item protocol without native ACP Steer          | Persist and activate the selected row as the next user turn, remove it from the queue, then stop only the expected turn.       |
+  | No supported `queueItemSteer` capability              | Queue Steer is unavailable on every row, including the head, regardless of native ACP capability.                              |
 
-  No compatibility path may reorder a later item and then cancel. Selecting C from
+  Queue Steer provides no old-daemon compatibility path: no renderer-side history
+  materialization, legacy native Steer, or queue-head cancellation. The UI exposes one
+  exact-item operation and does not choose provider delivery. Selecting C from
   `[A, B, C]` through the exact protocol consumes C and leaves `[A, B]` in that order.
+
+  `QueueSteerService` owns exact selection, validation, durable recovery evidence, fallback
+  policy, and results/receipts. `ActiveTurnSteerPort` owns live-turn ownership, native provider
+  submission, prompt handoff, and serialization with Stop. The queue operation never accesses
+  runtime maps or the provider client and receives domain results rather than phase callbacks.
+  Local ownership guards may be scoped resources; provider submission is an irreversible
+  external side effect. Only proven non-delivery is eligible for fallback, subject to operation
+  preconditions. Indeterminate delivery must propagate without replay; local failures recover
+  from durable evidence and never imply non-delivery by themselves.
 
   A remote renderer must authorize the target before writing the request, using its
   authenticated authoritative machine-access snapshot and failing closed if that snapshot is
@@ -89,6 +99,12 @@ offer exactly-once recovery without protocol support: indeterminate native submi
 reported, never silently replayed.
 
 ## Implementation evidence
+
+The service/port split and capability-only availability above are intended changes, not
+completed implementation. The renderer still contains old-daemon native/head paths and the
+execution service still owns queue orchestration. Removal and regression verification remain
+pending under the [Effect boundary proposal](../.agents/notes/proposed/architecture/2026-09-14-queue-steer-effect-boundary.md).
+The new availability policy applies to queued-row Steer, not composer submission routing.
 
 - `packages/components/src/components/sessions/session-message-submit-route.ts`
 - `packages/components/src/components/sessions/session-chat-input-area.tsx`

@@ -21,15 +21,24 @@ Translation: current
   `session/queue-steer`；缺少 capability 即表示不支持。请求携带持久队列 ID 和预期活动 turn，
   具体执行方式由 daemon 而非 Renderer 决定：
 
-  | 当前 daemon/runtime                                                           | 引导行为                                                                          |
-  | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-  | 支持精确队列项协议，且支持 acknowledged native ACP Steer                      | 将目标保留为 `pending_apply`，通过持久 handoff saga 后由 `steerPrompt` 注入。     |
-  | 支持精确队列项协议，但不支持 native ACP Steer                                 | 将目标行持久化并激活为下一用户 turn，从队列删除后再只停止预期 turn。              |
-  | 旧 daemon，但 authoritative capability 声明支持 acknowledged native ACP Steer | 保留旧版真正 native Steer 路径。                                                  |
-  | 旧 daemon，且不支持 acknowledged native ACP Steer                             | 仅保留既有队首 interrupt 行为；禁用后续行“引导”，并要求升级 daemon 才能精确选择。 |
+  | 当前 daemon/runtime                                      | 引导行为                                                                      |
+  | -------------------------------------------------------- | ----------------------------------------------------------------------------- |
+  | 支持精确队列项协议，且支持 acknowledged native ACP Steer | 将目标保留为 `pending_apply`，通过持久 handoff saga 后由 `steerPrompt` 注入。 |
+  | 支持精确队列项协议，但不支持 native ACP Steer            | 将目标行持久化并激活为下一用户 turn，从队列删除后再只停止预期 turn。          |
+  | 未声明受支持的 `queueItemSteer` capability               | 所有行的队列“引导”均不可用，包括队首；不因 native ACP capability 而例外。     |
 
-  任何兼容路径都不得先重排后续项再取消。从 `[A, B, C]` 通过精确协议选择 C 时，只消费 C，
+  队列“引导”不提供旧 daemon 兼容路径：不允许 renderer 写历史、legacy native Steer 或
+  队首取消。UI 只暴露一个精确队列项 operation，不选择 provider 交付方式。
+  从 `[A, B, C]` 通过精确协议选择 C 时，只消费 C，
   剩余队列保持 `[A, B]`。
+
+  `QueueSteerService` 负责精确选择、验证、持久恢复证据、fallback 策略和结果/回执。
+  `ActiveTurnSteerPort` 负责 live turn ownership、native provider 提交、prompt handoff
+  以及与 Stop 的串行化。队列 operation 不得访问 runtime map 或 provider client，接收
+  领域结果而非 phase callback。本地 ownership guard 可作为 scope 资源；provider 提交是
+  不可撤销的外部副作用。只有证明未交付且 operation 前提仍成立时才有资格 fallback。
+  交付不确定须向上传递，禁止 replay；本地失败依据 durable evidence 恢复，不能仅凭本地
+  失败推断未交付。
 
   远程 Renderer 在写入请求前，必须使用其已认证的权威 machine-access 快照验证目标；快照
   不可用时应 fail closed。请求不得携带请求者身份：workspace Machine RPC 无法认证调用方
@@ -73,6 +82,11 @@ Translation: current
 实现 exactly-once 恢复；结果不确定的 native 提交必须明确报错，绝不能静默重放。
 
 ## 实现证据
+
+上述 service/port 拆分与仅按 capability 开放能力是待实现的意图变更。renderer 仍包含
+旧 daemon 的 native/head 路径，execution service 仍拥有队列编排。移除旧路径与回归验证
+待按 [Effect 边界提案](../.agents/notes/proposed/architecture/2026-09-14-queue-steer-effect-boundary.zh.md)
+完成。新的可用性策略只适用于队列行“引导”，不改变 composer 提交路由。
 
 - `packages/components/src/components/sessions/session-message-submit-route.ts`
 - `packages/components/src/components/sessions/session-chat-input-area.tsx`

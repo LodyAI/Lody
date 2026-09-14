@@ -9,88 +9,150 @@ Translation: current
 
 Queue Steer currently distributes delivery decisions across the renderer and
 operation bookkeeping across `SessionExecutionService`. The proposed boundary
-puts exact-item selection behind one daemon operation and gives `QueueSteerService`
-ownership of delivery, resource lifetimes, receipts, and recovery. Effect can
-express those lifetimes and failures compositionally, but its core runtime does
-not make ACP delivery transactional or durable. This source investigation establishes
-implementation constraints; the refactor and its behavioral verification remain pending.
+gives `QueueSteerService` exact selection, validation, durable recovery evidence,
+fallback policy, and results; `ActiveTurnSteerPort` owns native submission and
+live-turn handoff. Effect expresses local resource lifetimes and typed failure
+semantics without making provider submission reversible. Queue Steer requires a
+supported `queueItemSteer` capability, with no old-daemon compatibility path.
+The design is revised; implementation and behavioral verification remain pending.
 
 ## Source evidence
 
-The installed package is `effect@3.18.4`. Its npm package contains source, but no
-`AGENTS.md`. The official v3 checkout has an
-[AGENTS.md](https://github.com/Effect-TS/effect/blob/1af4232fea7bc613e1dc68db9bec7b1f596d9e68/AGENTS.md)
+The [workspace catalog](../../../../pnpm-workspace.yaml) pins `effect: 3.18.4`,
+and [CLI dependencies](../../../../apps/cli/package.json) consume `catalog:`.
+[SessionExecutionService](../../../../apps/cli/src/session/session-execution-service.ts)
+already uses `Effect.gen` and `Effect.acquireRelease` for turn ownership and
+finalization. The proposal extends that existing approach.
+
+The installed package has source but no `AGENTS.md`. The official v3 checkout has
+[agent instructions](https://github.com/Effect-TS/effect/blob/1af4232fea7bc613e1dc68db9bec7b1f596d9e68/AGENTS.md)
 and a [documentation entry](https://github.com/Effect-TS/effect/blob/1af4232fea7bc613e1dc68db9bec7b1f596d9e68/docs/index.md).
-Current upstream `main` develops v4; examples using `Context.Service` or
-`Effect.catch` must not be copied into this v3 application. CLI instructions
-reference `context/cli-effect-ts.md`, which is absent from this checkout.
+Upstream v4 examples using `Context.Service` or `Effect.catch` must not be copied
+into this v3 application. CLI instructions reference `context/cli-effect-ts.md`,
+which is absent from this checkout.
 
-| Principle                        | Verified meaning                                                                                                                              | Consequence for Steer                                                                                                                            |
-| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| A program is a value             | `Effect<A, E, R>` describes a lazy computation, its expected failures, and required services.                                                 | Compose the operation before running it; Promise execution belongs at the integration boundary.                                                  |
-| Failures have different meanings | Expected failures are typed; defects and interruption remain distinguishable through `Cause` and `Exit`.                                      | Model missing, editing, stale, rejected, and indeterminate outcomes explicitly; never turn every failure into fallback delivery.                 |
-| Resources have an owner          | `acquireRelease` protects acquisition and finalizer registration against interruption; `acquireUseRelease` restores interruptibility for use. | Scope rewrite leases and provider application leases; cleanup must also run on failure and interruption.                                         |
-| Concurrency has a lifetime       | Fibers have supervision and scope relationships. A Promise adapter cannot cancel external work without cooperation.                           | Keep session serialization shared with prompt completion; Stop must preserve the ACP owner's lifetime until completion or confirmed termination. |
-| Dependencies are explicit        | v3 `Context.Tag` identifies a service and `Layer` constructs its implementation.                                                              | Inject storage and execution ports; avoid passing the entire execution service or its mutable maps into the new service.                         |
-
-The installed implementation was inspected in `src/internal/core.ts`
-(`acquireUseRelease`), `src/internal/fiberRuntime.ts` (`acquireRelease`),
-`src/internal/core-effect.ts` (`tryPromise`), and `src/ManagedRuntime.ts`.
+The installed implementations of `acquireUseRelease` in `src/internal/core.ts`,
+`acquireRelease` in `src/internal/fiberRuntime.ts`, `tryPromise` in
+`src/internal/core-effect.ts`, and the `ManagedRuntime` API were inspected.
 The corresponding [3.18.4 source](https://github.com/Effect-TS/effect/tree/ede2ea11c2abe7038bac3c83fb7b5eef101858d2/packages/effect/src)
 is the API authority. Upstream v3
 [resource tests](https://github.com/Effect-TS/effect/blob/1af4232fea7bc613e1dc68db9bec7b1f596d9e68/packages/effect/test/Effect/acquire-release.test.ts)
 and [interruption tests](https://github.com/Effect-TS/effect/blob/1af4232fea7bc613e1dc68db9bec7b1f596d9e68/packages/effect/test/Effect/interruption.test.ts)
-were read as additional semantic evidence, not run or assumed identical to the pinned release.
+were read as supplementary evidence, not run or assumed identical to the pinned release.
 
-## Proposed boundary
+## Responsibilities
 
-The UI supplies `{ sessionId, queueItemId, expectedTurnId }` for the selected row.
-It displays the result without choosing provider delivery. The daemon operation
-validates those identities and editing ownership, then chooses native delivery
-or cancel-and-dispatch inside `QueueSteerService`. Effect owns composition,
-typed failures, leases, and finalization within that service.
+| Owner                 | Responsibility                                                                                                                 |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| UI                    | Pass `{ sessionId, queueItemId, expectedTurnId }` for the selected row; display the result.                                    |
+| `QueueSteerService`   | Exact queue-item selection, validation, durable recovery evidence, fallback policy, result and receipt.                        |
+| `ActiveTurnSteerPort` | Live-turn ownership, provider native submission, prompt handoff, and serialization with Stop and other active-turn operations. |
+| Queue storage         | Existing history and activation publication responsibilities.                                                                  |
+| Integration boundary  | Provide v3 `Context.Tag` services through `Layer`; execute the composed operation and map its result to the response contract. |
 
-`SessionExecutionService` retains ownership of the live turn and exposes narrow
-execution operations. It should not receive queue phases or callbacks such as
-`onSubmitting` solely to advance a queue recovery journal. Queue storage retains
-its existing history and activation publication responsibilities. Request handlers
-convert Effect results to the existing response contract at one boundary.
+The active-turn implementation stays with the execution owner. QueueSteerService
+must not access `runtime.session.agentClient`, runtime maps, `promptInFlight`,
+`successor`, or `invocation`. The port derives the frozen requester identity
+from the active invocation and validates the expected turn under its own
+serialization boundary; caller validation never replaces that check.
 
-Native preparation, provider submission, acknowledged ownership handoff, and
-receipt completion form one composed delivery path. Cancel-and-dispatch forms
-the other. Use `Effect.gen` for sequencing and tagged recovery handlers for
-specific recoverable failures. Merely wrapping the current async method in
-`Effect.tryPromise` would leave lifecycle ownership unchanged.
+The native operation exposes a domain result, conceptually:
 
-The existing renderer also supports older daemons. That compatibility policy
-must be reconciled with the single-operation UI before implementation: preserving
-it requires encapsulating legacy behavior below the UI; removing it requires
-updating the draft [interaction Spec](../../../../specs/message-queue-interactions.md)
-and compatibility tests. This investigation does not silently remove it.
+```ts
+interface ActiveTurnSteerPort {
+  steer(input: {
+    sessionId: SessionId;
+    expectedTurnId: string;
+    turn: SteerTurn;
+  }): Effect.Effect<NativeSteerApplied, StaleTurn | ProviderRejected | ProviderDeliveryUnknown>;
+}
+```
 
-## Recovery boundary
+`SteerTurn` is validated immutable turn data, not a runtime handle.
+`NativeSteerApplied` proves successful local handoff, not prompt completion.
+`StaleTurn` proves rejection before submission. Lost ownership after submission
+cannot be reported as that safe rejection.
 
-Finalizers release owned resources; they cannot undo provider acceptance. A typed
-provider refusal can authorize ordinary dispatch, while an indeterminate submission
-cannot. Do not apply `Effect.retry` to the complete delivery operation or interpret
-timeout/interruption as evidence of non-delivery.
+This is the native operation's contract, not an exhaustive interface for every
+execution operation. Native-support discovery and expected-turn cancellation
+also stay behind execution-owned operations. QueueSteerService chooses the policy
+without inspecting the provider client. Never expose `onSubmitting`,
+`onAcknowledged`, `onApplied`, or `onUndelivered` callbacks to advance a queue
+journal. The new service must not be the existing runtime-dependent code moved
+to another file.
 
-Keep the existing machine-local recovery evidence and fail-closed replay rules
-from the [original decision](../../implemented/feature/2026-09-13-queue-steer-controls.md).
-Move its ownership into the operation service; do not add a durable phase for
-each Effect step. Core `Scope` cleanup does not survive process death. A workflow
-engine would be a separate dependency and architectural decision, and is not
-required merely to express these two delivery paths.
+## Resource and failure model
+
+`Effect<A, E, R>` describes a lazy computation with explicit expected failures
+and dependencies. Use `Effect.gen` to compose operations, with typed recovery
+handlers at the owner of the policy. A single `Effect.tryPromise` around the
+existing async workflow would not change lifecycle ownership.
+
+Rewrite leases and local live-turn ownership/serialization guards belong to
+`Scope`. Provider submission is an irreversible external side effect, not a
+resource that can be released. The sequence is acquire local ownership, submit
+the provider side effect, then release local ownership when its contract allows.
+Finalizers prevent local ownership leaks; they do not prove non-execution.
+An existing adapter acknowledgment handle is only a local synchronization
+resource and stays internal to the port.
+
+The expected error model has three categories:
+
+| Category               | Evidence and examples                                                                                     | Recovery policy                                                                                                                                               |
+| ---------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Safe rejection         | Provider did not execute: `ProviderRejected`, pre-submission `StaleTurn`.                                 | Fallback/retry is eligible only if operation preconditions still hold. Stale, missing, or editing selections remain failed no-ops; they must not stop a turn. |
+| Indeterminate delivery | `ProviderDeliveryUnknown`: submission may have executed, including acknowledgment or handoff uncertainty. | Propagate the failure; no fallback handler and no replay.                                                                                                     |
+| Local failure          | `PersistenceFailure`, validation or lease acquisition failure.                                            | Recover from durable evidence; a local error alone never establishes non-delivery.                                                                            |
+
+Use distinct v3 `Data.TaggedError` classes for `ProviderRejected`,
+`ProviderDeliveryUnknown`, and `PersistenceFailure`. The native port classifies
+delivery evidence; the operation's persistence boundary owns `PersistenceFailure`.
+A local failure after submission must preserve possible delivery and cannot be
+reclassified as `ProviderRejected`.
+
+The policy handler is `Effect.catchTag("ProviderRejected", fallbackToDispatch)`.
+There is no corresponding fallback handler for `ProviderDeliveryUnknown`.
+Defects and interruption remain distinguishable through `Cause`/`Exit`;
+neither a timeout nor an interrupted Promise establishes provider non-execution.
+Do not retry the complete delivery operation.
+
+## Durability and capability policy
+
+QueueSteerService owns durable recovery evidence, including write-ahead evidence
+before entering a potentially submitting port call and durable receipts after its
+result. A crash between these boundaries remains conservatively indeterminate
+unless authoritative evidence proves otherwise. Implement the journal contract
+without phase callbacks or exposing live runtime state. Preserve recovery of the
+existing markers and fail-closed replay guarantees from the
+[original decision](../../implemented/feature/2026-09-13-queue-steer-controls.md);
+do not add a durable phase for every Effect step.
+
+Core Scope cleanup cannot survive process death. Stop must retain the ACP owner
+until raw completion or confirmed termination; a Promise wrapper cannot cancel
+external work without its cooperation. A workflow engine is a separate
+architectural decision, not required for these two delivery paths.
+
+Queue Steer has no old-daemon compatibility path. Without an advertised supported
+`queueItemSteer` version, every row's Steer action is unavailable, including the
+queue head. Do not fall back to renderer history materialization, legacy native
+Steer, or queue-head cancel. On supported daemons every row passes its own queue
+identity; the daemon chooses native delivery or cancel-and-dispatch.
+
+This supersedes the original decision's old-daemon compatibility policy for
+queue Steer only. Composer submission behavior is outside this change.
+The draft [interaction Spec](../../../../specs/message-queue-interactions.md)
+records the revised intent; the renderer still contains the old paths.
 
 ## Verification still required
 
-Implementation should retain observable coverage for selecting C while preserving
-A/B, missing or editing rows, stale expected turns, native acceptance/refusal,
-Stop racing acknowledgment, failed persistence, and response-loss/restart recovery.
-Add deterministic failure/interruption coverage that proves leases are released
-without relinquishing a still-running ACP owner. Check UI invocation through the
-single operation and verify legacy compatibility at its chosen boundary.
+Retain observable coverage for selecting C while preserving A/B, missing/editing
+rows, stale expected turns, native acceptance/refusal, Stop racing acknowledgment,
+failed persistence, and response-loss/restart recovery. Verify each error category:
+only eligible safe rejections dispatch fallback; indeterminate outcomes never
+replay; local failures recover according to durable evidence. Deterministic
+failure/interruption tests must prove local guards release without relinquishing
+a still-running ACP owner. Unsupported daemons must expose no usable queue Steer
+action on any row and issue no legacy submission or cancellation.
 
-This note records source inspection and a proposed decomposition only. Business
-code, dependency versions, and the existing Spec are unchanged; no runtime tests
-were executed for the proposal.
+Business code and dependency versions are unchanged. This revised design and
+Spec are not implementation evidence; no runtime tests were executed.
