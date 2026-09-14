@@ -11,6 +11,7 @@ import {
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronRight, CloudOff, FileText, FolderOpen, Home, Loader2 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import type { FileTreeItem } from '@lody/shared';
 
 import { useAtomValue } from 'jotai';
@@ -806,12 +807,18 @@ function StatusPanel({
   icon: Icon,
   title,
   description,
-  spin,
+  spin = false,
   tone = 'muted',
 }: {
   readonly icon: typeof FileText;
   readonly title: ReactNode;
   readonly description?: ReactNode;
+  /**
+   * Rotates the icon: the panel is a loading state. Defaults to false, and
+   * MUST keep a default here — `Spinner` treats an omitted `spinning` as a
+   * loading indicator, so forwarding this prop while it is `undefined` would
+   * spin the resting states' icons forever.
+   */
   readonly spin?: boolean;
   readonly tone?: 'muted' | 'destructive';
 }) {
@@ -822,7 +829,7 @@ function StatusPanel({
         tone === 'destructive' ? 'text-destructive' : 'text-muted-foreground'
       )}
     >
-      <Icon className={cn('h-6 w-6', spin && 'animate-spin')} aria-hidden />
+      <Spinner icon={Icon} spinning={spin} className="h-6 w-6" aria-hidden />
       <span className="text-[0.95rem]">{title}</span>
       {description ? (
         <span className="text-[0.8125rem] text-muted-foreground">{description}</span>

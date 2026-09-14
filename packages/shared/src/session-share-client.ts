@@ -8,6 +8,8 @@ import {
   verifyShareObject,
 } from './session-share-package';
 import type { PreparedSharePackage } from './session-share-export';
+import { decodeShareHistoryBytes } from './session-share-codec';
+import { mapShareConcurrent } from './session-share-concurrency';
 
 const resolvedSchema = z
   .object({
@@ -176,7 +178,10 @@ export async function openStaticShare(options: {
         (entry) => entry.id === conversationId
       );
       if (!conversation) throw new Error('Share conversation unavailable');
-      return validateShareHistory(readJson(await readObject(conversation.historyObjectId, signal)));
+      const bytes = await readObject(conversation.historyObjectId, signal);
+      return validateShareHistory(
+        readJson(decodeShareHistoryBytes(bytes, inventory.get(conversation.historyObjectId)!))
+      );
     },
     async readAttachment(attachmentId: string, signal?: AbortSignal) {
       const attachment = resolved.manifest.attachments.find((entry) => entry.id === attachmentId);
@@ -209,21 +214,27 @@ export async function uploadPreparedShare(options: {
     0
   );
   let uploadedBytes = 0;
-  // Serial uploads bound memory and simplify cancellation/retry; inventory and
-  // SHA checks allow identical retries without changing an existing object.
-  for (const object of options.prepared.manifest.objects) {
-    const bytes = options.prepared.objects.get(object.id);
-    if (!bytes) throw new Error('Incomplete share package');
-    await verifyShareObject(bytes, object);
-    const response = await request(`/api/share-deployments/${deploymentId}/objects/${object.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/octet-stream' },
-      body: bytes.slice().buffer,
-    });
-    await response.body?.cancel();
-    uploadedBytes += object.sizeBytes;
-    options.onProgress?.(uploadedBytes, totalBytes);
-  }
+  await mapShareConcurrent(
+    options.prepared.manifest.objects,
+    async (object, _index, signal) => {
+      const bytes = options.prepared.objects.get(object.id);
+      if (!bytes) throw new Error('Incomplete share package');
+      await verifyShareObject(bytes, object);
+      const response = await request(
+        `/api/share-deployments/${deploymentId}/objects/${object.id}`,
+        {
+          method: 'PUT',
+          signal,
+          headers: { 'Content-Type': 'application/octet-stream' },
+          body: bytes.slice().buffer,
+        }
+      );
+      await response.body?.cancel();
+      uploadedBytes += object.sizeBytes;
+      options.onProgress?.(uploadedBytes, totalBytes);
+    },
+    options.signal
+  );
   const response = await request(`/api/share-deployments/${deploymentId}/seal`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

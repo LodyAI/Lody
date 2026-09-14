@@ -5,9 +5,122 @@ import {
   uploadPreparedShare,
 } from '../src/session-share-client';
 import { prepareSharePackage } from '../src/session-share-export';
+import { compress } from '@loro-dev/streams-crdt/zstd';
 
 const origin = 'https://api.example.test';
 const secret = 'a'.repeat(64);
+it('uploads four objects concurrently, reports compressed bytes and seals only after every object completes', async () => {
+  const prepared = await prepareSharePackage({
+    rootSourceId: 's0',
+    capturedAt: '2026-09-12T00:00:00.000Z',
+    conversations: Array.from({ length: 9 }, (_, i) => ({
+      sourceId: `s${i}`,
+      title: '',
+      history: [
+        { id: 't', role: 'assistant', items: [{ type: 'text', text: 'repeated'.repeat(3000) }] },
+      ],
+    })),
+    compressHistory: compress,
+    readAttachment: async () => {
+      throw new Error('Unexpected attachment');
+    },
+  });
+  let release!: () => void;
+  const barrier = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let active = 0,
+    peak = 0,
+    completed = 0;
+  const progress: number[] = [];
+  await uploadPreparedShare({
+    origin,
+    deploymentId: 'd',
+    secret,
+    prepared,
+    onProgress: (done) => progress.push(done),
+    fetch: async (input, init) => {
+      if (String(input).endsWith('/seal')) {
+        expect(completed).toBe(9);
+        return new Response(null, { status: 204 });
+      }
+      active++;
+      peak = Math.max(active, peak);
+      if (active === 4) release();
+      await barrier;
+      expect(init?.body).toBeInstanceOf(ArrayBuffer);
+      active--;
+      completed++;
+      return new Response(null, { status: 204 });
+    },
+  });
+  expect(peak).toBe(4);
+  expect(progress).toEqual([...progress].sort((a, b) => a - b));
+  expect(progress.at(-1)).toBe(prepared.manifest.objects.reduce((n, o) => n + o.sizeBytes, 0));
+  const share = await openStaticShare({
+    origin,
+    shareId: 's',
+    secret,
+    fetch: async (input) =>
+      String(input).endsWith('/s')
+        ? Response.json({ shareId: 's', deploymentId: 'd', manifest: prepared.manifest })
+        : new Response(prepared.objects.get('h1')!.slice().buffer),
+  });
+  expect((await share.readHistory('c1'))[0]!.items![0]!.text).toBe('repeated'.repeat(3000));
+});
+
+it('aborts sibling uploads and never seals a partially failed package', async () => {
+  const prepared = await prepareSharePackage({
+    rootSourceId: 's0',
+    capturedAt: '2026-09-12T00:00:00.000Z',
+    conversations: Array.from({ length: 9 }, (_, i) => ({
+      sourceId: `s${i}`,
+      title: '',
+      history: [],
+    })),
+    readAttachment: async () => {
+      throw new Error('Unexpected attachment');
+    },
+  });
+  let rejectFirst!: () => void,
+    started = 0,
+    settled = 0,
+    seals = 0;
+  const failure = new Promise<Response>((_, reject) => {
+    rejectFirst = () => reject(new Error('Upload failed'));
+  });
+  await expect(
+    uploadPreparedShare({
+      origin,
+      deploymentId: 'd',
+      secret,
+      prepared,
+      fetch: async (input, init) => {
+        if (String(input).endsWith('/seal')) {
+          seals++;
+          return new Response(null);
+        }
+        const index = started++;
+        if (started === 4) rejectFirst();
+        try {
+          if (!index) return await failure;
+          return await new Promise<Response>((_, reject) => {
+            if (init!.signal!.aborted) reject(new Error('Cancelled'));
+            else
+              init!.signal!.addEventListener('abort', () => reject(new Error('Cancelled')), {
+                once: true,
+              });
+          });
+        } finally {
+          settled++;
+        }
+      },
+    })
+  ).rejects.toThrow('Upload failed');
+  expect(started).toBe(4);
+  expect(settled).toBe(started);
+  expect(seals).toBe(0);
+});
 it('creates pinned agent access through bearer authorization and rejects foreign access URLs', async () => {
   const prepared = await fixture();
   let foreign = false;

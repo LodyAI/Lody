@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { usePlatformSession } from '@lody/platform/react';
-import { ExternalLink, Loader2, LogIn } from 'lucide-react';
+import { ExternalLink, LogIn } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { Button } from '@/ui/button';
 import { OnboardingBackButton, OnboardingShell } from '../onboarding-shell';
 import { useOnboardingAnalytics } from '../onboarding-analytics';
@@ -97,7 +98,7 @@ export function LoginScreen({ onBack, onNext }: { onBack: () => void; onNext: ()
       secondaryAction={<OnboardingBackButton onClick={onBack} disabled={locked} />}
       primaryAction={
         <Button size="lg" onClick={handleSignIn} disabled={locked}>
-          {locked ? <Loader2 className="size-4 animate-spin" /> : <LogIn className="size-4" />}
+          {locked ? <Spinner className="size-4" /> : <LogIn className="size-4" />}
           {openingBrowser
             ? t('onboarding.login.openBrowserAgain', 'Open browser again')
             : t('onboarding.login.openBrowser', 'Continue in browser')}

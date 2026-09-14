@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { Check, Copy, ExternalLink, Loader2, LogIn, Square } from 'lucide-react';
+import { Check, Copy, ExternalLink, LogIn, Square } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import {
   machineSupportsAcpAuthenticationInteractionsProtocol,
@@ -575,7 +576,7 @@ export function AcpAuthenticationPanel({
         {phase === 'running' ? (
           <>
             <Button type="button" size="sm" variant="outline" disabled>
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <Spinner className="h-3.5 w-3.5" />
               {t('agents.authentication.waiting', 'Waiting for {{provider}} sign-in', {
                 provider,
               })}
@@ -702,7 +703,7 @@ export function AcpAuthenticationAuthorizationView({
           onClick={onOpenAuthorization}
         >
           {authorizationConsentPending ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <Spinner className="h-3.5 w-3.5" />
           ) : (
             <ExternalLink className="h-3.5 w-3.5" />
           )}
@@ -787,7 +788,7 @@ export function AcpAuthenticationAuthorizationView({
               onClick={onSubmitAuthorizationCode}
             >
               {submittingAuthorizationCode ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <Spinner className="h-3.5 w-3.5" />
               ) : authorizationCodeSubmitted ? (
                 <Check className="h-3.5 w-3.5" />
               ) : null}
@@ -920,7 +921,7 @@ export function AcpAuthenticationInteractionView({
         disabled={submitting || invalid}
         onClick={() => onSubmit({ action: 'accept', content: values })}
       >
-        {submitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+        {submitting ? <Spinner className="h-3.5 w-3.5" /> : null}
         {t('common.continue', 'Continue')}
       </Button>
     </div>

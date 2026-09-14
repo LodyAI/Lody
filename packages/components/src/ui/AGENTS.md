@@ -44,3 +44,19 @@ strings on i18n rather than the registry's inline English.
   `[data-lody-dialog-content]`; a body portal is outside Radix remove-scroll handling.
 - `DiffViewer` uses the shared `@pierre/diffs` worker pools for syntax work regardless
   of file size. Do not create or terminate a worker pool per viewer.
+
+## Spinner
+
+- `animate-spin` goes on `ui/spinner.tsx` only, never on an `<svg>`. Chromium will
+  not composite a transform animation on an SVG target at DPR≠1 (crbug.com/1186312),
+  so an svg spinner re-runs style, pre-paint and layerize on the main thread every
+  vsync: two idle sidebar spinners measured 40–50% renderer CPU on a Retina Mac.
+  `Spinner` animates an HTML wrapper; put sizing, margin and colour classes on it and
+  use `icon` / `spinning` for a refresh glyph that only turns while in flight. Any
+  other infinite transform animation (the readiness orbit) follows the same rule.
+- `Spinner`'s `spinning` defaults to TRUE, so a component that forwards its OWN
+  optional `spinning`/`loading`/`spin` prop must give it a default of `false`.
+  Forwarding `undefined` reaches the primitive's default and spins the icon in
+  every non-loading state; that shipped as a permanently rotating "No machines
+  available" and "Files unavailable" icon.
+  Evidence: [spinner note](../../../../.agents/notes/implemented/bug-fix/2026-09-13-spinner-off-svg-retina-composite.md).

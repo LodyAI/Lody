@@ -12,6 +12,10 @@ Demo sequencing and screenshot notes live in
 
 ## Marketing landing
 
+- Mobile public navigation uses native `details`/`summary`: opening the menu and
+  following its links must work before hydration and with JavaScript disabled.
+  React may enhance dismissal and scroll locking, not own basic disclosure.
+
 - The landing (`/`, `/home`, `/zh`, `/zh/home`) is an immersive WebGL "underwater
   point-cloud" hero. `landing.tsx` owns copy/nav/footer and mounts
   `underwater-experience.tsx`, which renders `underwater-background.tsx`

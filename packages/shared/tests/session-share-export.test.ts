@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { compress } from '@loro-dev/streams-crdt/zstd';
+import { decodeShareHistoryBytes } from '../src/session-share-codec';
 import {
   prepareSharePackage as captureSharePackage,
   type PreparedSharePackage,
@@ -16,7 +18,10 @@ function readPreparedShareHistory(
   const conversation = prepared.manifest.conversations.find((entry) => entry.id === conversationId);
   const bytes = conversation && prepared.objects.get(conversation.historyObjectId);
   if (!bytes) throw new Error('Share conversation unavailable');
-  return validateShareHistory(JSON.parse(new TextDecoder().decode(bytes)));
+  const descriptor = prepared.manifest.objects.find((o) => o.id === conversation.historyObjectId)!;
+  return validateShareHistory(
+    JSON.parse(new TextDecoder().decode(decodeShareHistoryBytes(bytes, descriptor)))
+  );
 }
 
 const capturedAt = '2026-09-12T00:00:00.000Z';
@@ -286,7 +291,7 @@ describe('client static share export', () => {
       }),
     });
     const entry = readPreparedShareHistory(result, 'c1')[0]!;
-    expect(entry.inputConfig).toEqual({ inputBlocks: [entry.items[0]], modelId: 'synthetic' });
+    expect(entry.inputConfig).toEqual({ inputBlocks: [entry.items[0]] });
     expect(result.manifest.attachments).toHaveLength(1);
     expect(JSON.stringify(entry)).not.toContain('inherited-source');
     expect(JSON.stringify(entry)).not.toContain('/source/private.txt');
@@ -334,4 +339,113 @@ describe('client static share export', () => {
     expect(prepared.manifest.attachments).toEqual([]);
     expect(readPreparedShareHistory(prepared, 'c1')).toEqual(source);
   });
+});
+
+it('omits terminal output and runtime metadata without touching other content, actors or source', async () => {
+  const source = [
+    {
+      id: 't',
+      role: 'assistant',
+      read: true,
+      userId: 'private-user',
+      acpTurnId: 'runtime-turn',
+      userTurnId: 'runtime-user-turn',
+      fileDiff: { unused: 'diff' },
+      inputConfig: { agentRoleId: 'role-id', prompt: 'repeat', resume: { snapshot: 'large' } },
+      items: [
+        { type: 'text', text: 'Visible answer', actor: { kind: 'agent', name: 'Researcher' } },
+        { type: 'thought', text: 'Reasoning' },
+        {
+          type: 'tool_call',
+          title: 'build',
+          rawOutput: { output: 'opaque result' },
+          permissionRequest: { options: [] },
+          content: [
+            { type: 'terminal', terminalId: 'live-only' },
+            { type: 'terminal_command', command: 'build' },
+            {
+              type: 'terminal_output',
+              output: 'x'.repeat(8000) + 'FAILED',
+              terminalId: 'live-only',
+              exitStatus: { exitCode: 1 },
+            },
+          ],
+        },
+      ],
+    },
+  ];
+  const before = structuredClone(source);
+  const prepared = await captureSharePackage({
+    rootSourceId: 'root',
+    capturedAt,
+    conversations: [{ sourceId: 'root', title: '', history: source }],
+    compressHistory: compress,
+    readAttachment: async () => {
+      throw new Error('Unexpected read');
+    },
+  });
+  const projected = readPreparedShareHistory(prepared, 'c1');
+  expect(projected[0]).not.toHaveProperty('inputConfig');
+  for (const key of ['read', 'userId', 'acpTurnId', 'userTurnId', 'fileDiff'])
+    expect(projected[0]).not.toHaveProperty(key);
+  expect(projected[0]!.role).toBe('assistant');
+  expect(projected[0]!.items!.slice(0, 2)).toEqual(source[0]!.items.slice(0, 2));
+  expect(projected[0]!.items![2]).toEqual({
+    type: 'tool_call',
+    title: 'build',
+    rawOutput: { output: 'opaque result' },
+    content: [{ type: 'terminal_command', command: 'build' }],
+  });
+  expect(source).toEqual(before);
+  const descriptor = prepared.manifest.objects[0]!;
+  expect(descriptor.contentEncoding).toBe('zstd');
+  expect(descriptor.sizeBytes).toBeLessThan(descriptor.decodedSizeBytes!);
+  const wire = JSON.parse(
+    new TextDecoder().decode(
+      decodeShareHistoryBytes(prepared.objects.get(descriptor.id)!, descriptor)
+    )
+  );
+  expect(wire[0].items[2]).toEqual({
+    type: 'tool_call',
+    rawOutput: { output: 'opaque result' },
+    content: [{ type: 'terminal_command', command: 'build' }],
+  });
+});
+
+it('copies independent attachments concurrently with stable ids and deduplicates shared references', async () => {
+  let release!: () => void;
+  const barrier = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const active: string[] = [];
+  const prepared = await captureSharePackage({
+    rootSourceId: 's0',
+    capturedAt,
+    conversations: Array.from({ length: 4 }, (_, i) => ({
+      sourceId: `s${i}`,
+      title: '',
+      history: [
+        {
+          id: 't',
+          role: 'user',
+          items: [
+            { type: 'image', imageId: `i${i}` },
+            { type: 'image', imageId: 'shared', storageSessionId: 's0' },
+          ],
+        },
+      ],
+    })),
+    readAttachment: async ({ reference }) => {
+      active.push(String(reference.imageId));
+      if (active.length === 4) release();
+      await barrier;
+      return { bytes: new Uint8Array([active.length]), mediaType: 'image/png' };
+    },
+  });
+  expect(active.filter((id) => id === 'shared')).toHaveLength(1);
+  expect(prepared.manifest.attachments).toHaveLength(5);
+  for (const c of prepared.manifest.conversations) {
+    const projected = readPreparedShareHistory(prepared, c.id);
+    expect(projected[0]!.items![1]!.imageId).toBe('a2');
+  }
 });

@@ -7,7 +7,8 @@ import {
   type MachineViewMeta,
   type ProviderSetupTask,
 } from '@lody/shared';
-import { Check, Copy, Loader2, RotateCcw, Trash2, XCircle } from 'lucide-react';
+import { Check, Copy, RotateCcw, Trash2, XCircle } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 
 import { AgentReadinessMark, type AgentReadiness } from '@/components/shared/agent-readiness-mark';
 import { Button } from '@/ui/button';
@@ -204,7 +205,7 @@ export function ProviderSetupRow({
                 onClick={() => void runAction('retry', onRetry)}
               >
                 {actionPending === 'retry' ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <Spinner className="h-3.5 w-3.5" />
                 ) : (
                   <RotateCcw className="h-3.5 w-3.5" />
                 )}
@@ -222,7 +223,7 @@ export function ProviderSetupRow({
             onClick={() => void runAction('delete', onDelete)}
           >
             {actionPending === 'delete' ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <Spinner className="h-3.5 w-3.5" />
             ) : (
               <Trash2 className="h-3.5 w-3.5" />
             )}

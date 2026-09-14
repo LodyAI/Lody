@@ -4,7 +4,8 @@ import {
   type EmojiPickerListRowProps,
   EmojiPicker as EmojiPickerPrimitive,
 } from 'frimousse';
-import { LoaderIcon, SearchIcon } from 'lucide-react';
+import { SearchIcon } from 'lucide-react';
+import { Spinner } from './spinner';
 import type * as React from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -109,7 +110,7 @@ function EmojiPickerContent({
         className="absolute inset-0 flex items-center justify-center text-muted-foreground"
         data-slot="emoji-picker-loading"
       >
-        <LoaderIcon className="size-4 animate-spin" />
+        <Spinner className="size-4" />
       </EmojiPickerPrimitive.Loading>
       <EmojiPickerPrimitive.Empty
         className="absolute inset-0 flex items-center justify-center text-muted-foreground text-sm"

@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react';
-import { Loader2, Send, X } from 'lucide-react';
+import { Send, X } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
@@ -67,11 +68,7 @@ export function VisualAnnotationDraftComposer({
       />
       <div className="mt-2 flex justify-end">
         <Button type="button" size="sm" disabled={!value.trim() || submitting} onClick={onSubmit}>
-          {submitting ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Send className="h-3.5 w-3.5" />
-          )}
+          {submitting ? <Spinner className="h-3.5 w-3.5" /> : <Send className="h-3.5 w-3.5" />}
           {t('sessions.preview.annotation.send', 'Send')}
         </Button>
       </div>

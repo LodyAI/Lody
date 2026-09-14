@@ -212,7 +212,7 @@ export function useStickyScroll({
   // Never observe row subtrees or streamed text.
   useLayoutEffect(() => {
     const content = scrollElement?.firstElementChild;
-    if (!(content instanceof HTMLElement)) return;
+    if (!(content instanceof HTMLElement)) return undefined;
     const follow = () => {
       if (initialScrollRestoredRef.current && state.isAtBottom && !suppressAutoScrollRef?.current) {
         scrollToRealBottom();

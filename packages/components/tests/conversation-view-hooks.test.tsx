@@ -83,7 +83,9 @@ describe('conversation view React readers', () => {
     }
     await act(async () => root.render(<Probe />));
     expect(container.textContent).toBe('false');
-    act(() => stream.onVisibleTurnRangeChange({ from: 0, to: 8 }));
+    await act(async () => {
+      stream.onVisibleTurnRangeChange({ from: 0, to: 8 });
+    });
     await flush();
     expect(view.isHydrated(0)).toBe(false);
     expect(container.textContent).toBe('false');
@@ -91,7 +93,9 @@ describe('conversation view React readers', () => {
       releaseReady();
     });
     expect(container.textContent).toBe('true');
-    act(() => stream.onVisibleTurnRangeChange({ from: 0, to: 8 }));
+    await act(async () => {
+      stream.onVisibleTurnRangeChange({ from: 0, to: 8 });
+    });
     await flush();
     expect(view.isHydrated(0)).toBe(true);
     expect(container.textContent).toBe('true');

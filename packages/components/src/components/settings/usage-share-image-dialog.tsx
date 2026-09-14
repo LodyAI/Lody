@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check, Copy, Download, Loader2 } from 'lucide-react';
+import { Check, Copy, Download } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui/dialog';
 import { Label } from '@/ui/label';
@@ -65,7 +66,10 @@ function FitPreview({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <div ref={containerRef} className="flex h-full w-full items-center justify-center overflow-hidden">
+    <div
+      ref={containerRef}
+      className="flex h-full w-full items-center justify-center overflow-hidden"
+    >
       <div
         className="relative"
         style={scaledSize ? { width: scaledSize.width, height: scaledSize.height } : undefined}
@@ -244,9 +248,7 @@ export function UsageShareImageDialog({
                   <SelectItem value="portrait">
                     {t('workspace.usage.shareImage.aspectPortrait')}
                   </SelectItem>
-                  <SelectItem value="wide">
-                    {t('workspace.usage.shareImage.aspectWide')}
-                  </SelectItem>
+                  <SelectItem value="wide">{t('workspace.usage.shareImage.aspectWide')}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -306,9 +308,7 @@ export function UsageShareImageDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="card">
-                    {t('workspace.usage.shareImage.footerCard')}
-                  </SelectItem>
+                  <SelectItem value="card">{t('workspace.usage.shareImage.footerCard')}</SelectItem>
                   <SelectItem value="canvas">
                     {t('workspace.usage.shareImage.footerCanvas')}
                   </SelectItem>
@@ -409,7 +409,7 @@ export function UsageShareImageDialog({
             disabled={exporting || !assetsReady}
           >
             {operation === 'copy' ? (
-              <Loader2 className="size-4 animate-spin" />
+              <Spinner className="size-4" />
             ) : copied ? (
               <Check className="size-4" />
             ) : (
@@ -419,7 +419,7 @@ export function UsageShareImageDialog({
           </Button>
           <Button onClick={() => void run('export')} disabled={exporting || !assetsReady}>
             {operation === 'export' ? (
-              <Loader2 className="size-4 animate-spin" />
+              <Spinner className="size-4" />
             ) : (
               <Download className="size-4" />
             )}

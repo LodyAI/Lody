@@ -2,7 +2,6 @@ import { useEffect, useRef, type ComponentProps, type FormEvent, type ReactNode 
 import {
   ArrowLeft,
   ArrowRight,
-  Loader2,
   MessageCircle,
   Monitor,
   Power,
@@ -10,6 +9,7 @@ import {
   Share2,
   X,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/ui/button';
@@ -198,7 +198,7 @@ export function SessionBrowserToolbar({
           disabled={!shareAvailable || busy}
           onClick={onShare}
         >
-          {sharing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Share2 className="h-4 w-4" />}
+          {sharing ? <Spinner className="h-4 w-4" /> : <Share2 className="h-4 w-4" />}
         </ToolbarButton>
         {hasShareUrl ? (
           <ToolbarButton

@@ -7,13 +7,13 @@ import {
   File as FileIcon,
   Github,
   Hand,
-  Loader2,
   MessageCircle,
   Pin,
   Search,
   Settings as SettingsIcon,
   X,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { MdChat, MdSettings } from 'react-icons/md';
 import { FaRegFileCode } from 'react-icons/fa';
 import type { IconType } from 'react-icons';
@@ -50,7 +50,10 @@ function MobileReactIcon({ icon: Icon, className }: { icon: IconType; className?
   /* Fill the sized wrapper — not size="1em" (inherits the tab label's 0.72rem). */
   return (
     <span
-      className={cn('inline-flex shrink-0 items-center justify-center [&_svg]:h-full [&_svg]:w-full', className)}
+      className={cn(
+        'inline-flex shrink-0 items-center justify-center [&_svg]:h-full [&_svg]:w-full',
+        className
+      )}
       aria-hidden="true"
     >
       <Icon />
@@ -277,7 +280,7 @@ export type MobileProjectScreenProps = {
  * Status indicator — priority matches desktop `TaskIndicator`:
  *
  *   waiting-permission  →  <Hand>  text-status-warning
- *   working             →  <Loader2 animate-spin>  text-primary
+ *   working             →  <Spinner>  text-primary
  *   unread              →  small primary dot (not a large filled disc)
  *   idle                →  null (slot stays reserved for title alignment)
  * ----------------------------------------------------------------------- */
@@ -296,7 +299,7 @@ function StatusIndicator({
     );
   }
   if (isWorking) {
-    return <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" aria-label="running" />;
+    return <Spinner className="h-4 w-4 shrink-0 text-primary" aria-label="running" />;
   }
   if (hasUnreadMessages) {
     return (
@@ -541,9 +544,7 @@ export function ConversationRow({
         'mobile-project-conversation-row relative flex min-h-11 w-full items-center gap-2.5 border-0 px-4 py-2.5 text-left shadow-none outline-none transition-colors',
         /* Solid canvas (not transparent) so nothing under the row can
            read as a divider hairline between list items. */
-        selected && !selectionMode
-          ? 'bg-muted/50'
-          : 'bg-background active:bg-muted/40',
+        selected && !selectionMode ? 'bg-muted/50' : 'bg-background active:bg-muted/40',
         selectionMode && isSelected && 'bg-primary/10'
       )}
     >
@@ -579,7 +580,11 @@ export function ConversationRow({
         {conversation.isPinned ? (
           /* h-4 matches ~15px title optically (glyph fills less than
              the box, so h-3 read as much smaller than the type). */
-          <Pin aria-label="pinned" className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={2} />
+          <Pin
+            aria-label="pinned"
+            className="h-4 w-4 shrink-0 text-muted-foreground"
+            strokeWidth={2}
+          />
         ) : null}
         <span
           className={cn(
@@ -853,9 +858,7 @@ export function MobileProjectScreen({
                    the archived surface keeps a heading so the mode is
                    obvious. */
                 flatHeading={
-                  showArchived
-                    ? (labels.archivedConversationsHeading ?? '归档对话')
-                    : undefined
+                  showArchived ? (labels.archivedConversationsHeading ?? '归档对话') : undefined
                 }
                 firstGroupTrailing={
                   hasFilterPills ? (

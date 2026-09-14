@@ -1,6 +1,7 @@
 import type { FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CheckCircle2, KeyRound, Loader2 } from 'lucide-react';
+import { CheckCircle2, KeyRound } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 
 import { Alert, AlertDescription } from '@/ui/alert';
 import { Button } from '@/ui/button';
@@ -137,7 +138,7 @@ export function ResetPasswordPage({
             >
               {submitting ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Spinner className="mr-2 h-4 w-4" />
                   {t('resetPassword.saving', 'Saving password...')}
                 </>
               ) : (

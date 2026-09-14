@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Globe2, Loader2, ShieldAlert } from 'lucide-react';
+import { Globe2, ShieldAlert } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import type { ElectronPublicBrowserBounds, ElectronPublicBrowserState } from '@lody/shared';
 
@@ -232,7 +233,7 @@ export function PublicBrowserSurface({
     >
       {phase === 'loading' ? (
         <div className="absolute inset-0 flex items-center justify-center bg-background">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          <Spinner className="h-5 w-5 text-muted-foreground" />
         </div>
       ) : null}
       {localError ? (

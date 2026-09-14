@@ -336,7 +336,9 @@ describe('useStickyScroll Virtua adapter', () => {
       await Promise.resolve();
     });
     expect(fixture.getScrollTop()).toBe(1240);
-    act(() => fixture.scrollElement.dispatchEvent(new WheelEvent('wheel', { deltaY: -10 })));
+    await act(async () => {
+      fixture.scrollElement.dispatchEvent(new WheelEvent('wheel', { deltaY: -10 }));
+    });
     fixture.setScrollTop(96);
     fixture.setScrollHeight(2640);
     await act(async () => {

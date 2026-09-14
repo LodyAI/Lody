@@ -57,3 +57,38 @@ Chromium. There is no second legacy site tree.
 
 The dev server runs on port 3002. Use
 `pnpm --filter @lody/site-docs preview:static` to emulate the static host.
+
+## Static content and client startup
+
+Every published URL is prerendered. `src/client.tsx` prepares the current router
+and runs its loaders to populate browser MDX caches before calling React hydration.
+`lib/prepare-hydration.ts` also observes Vite preload errors, since TanStack lazy
+component preloads can swallow import failures. Failed preparation leaves the
+original HTML and links intact. Optional landing effects use
+`components/optional-enhancement.tsx` to isolate later render failures.
+
+This protects direct visits with missing JavaScript; it does not guarantee recovery
+from every error after successful hydration. The intended boundary is documented
+in the [static content Spec](../specs/public-site-static-content.md).
+
+### Browser verification of the production build
+
+After installing dependencies (and building `acp-extension-core` if install scripts
+were skipped), run:
+
+```sh
+pnpm --filter @lody/site-docs build
+BROWSER_EXECUTABLE=/usr/bin/chromium pnpm --filter @lody/site-docs test:static
+```
+
+`BROWSER_EXECUTABLE` may point to any installed Chromium. Without it, install the
+matching browser with `pnpm --filter @lody/site-docs exec playwright-core install chromium`.
+The suite starts its own loopback static host and blocks all external requests.
+It checks every published HTML page with JavaScript disabled, internal link targets,
+404 behavior, actual desktop/mobile navigation, and route/article/static-data failure
+recovery on real landing, blog, and Fumadocs pages. Healthy pages must also respond
+to a theme change. `STATIC_TEST_PHASE=scan|faults|navigation` selects a focused phase;
+the default runs all phases. JSON results and screenshots go to `out/static-verification`.
+
+The mobile menu is a native disclosure so navigation remains usable when client
+startup fails. React only adds dismissal and scroll locking.

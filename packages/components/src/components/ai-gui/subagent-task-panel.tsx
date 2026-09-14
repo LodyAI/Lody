@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check, ChevronRight, CircleDashed, Loader2, X } from 'lucide-react';
+import { Check, ChevronRight, CircleDashed, X } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import type { MessageContent } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { Badge } from '@/ui/badge';
@@ -59,7 +60,7 @@ const StatusIcon = ({ task }: { task: SubagentTask }) => {
   if (task.status === 'pending') {
     return <CircleDashed className="h-3.5 w-3.5 flex-none shrink-0 text-muted-foreground" />;
   }
-  return <Loader2 className="h-3.5 w-3.5 flex-none shrink-0 animate-spin text-muted-foreground" />;
+  return <Spinner className="h-3.5 w-3.5 flex-none shrink-0 text-muted-foreground" />;
 };
 
 const SubagentTaskRow = ({
@@ -212,7 +213,7 @@ export const SubagentTaskPanel = ({
         aria-expanded={canToggle ? expanded : undefined}
       >
         {hasRunning ? (
-          <Loader2 className="h-3.5 w-3.5 flex-none shrink-0 animate-spin" />
+          <Spinner className="h-3.5 w-3.5 flex-none shrink-0" />
         ) : (
           <ChevronRight
             className={cn(

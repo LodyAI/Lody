@@ -80,6 +80,11 @@ tuning shortcut are in [`README.md`](README.md).
 
 ## SEO and routing contracts
 
+- Public copy and metadata must be present in static HTML. `src/client.tsx`
+  prepares matched routes and MDX before hydrating; failed preparation retains
+  the document. Optional landing effects must contain their rendering errors.
+  See [static content Spec](../specs/public-site-static-content.md).
+
 - SEO lives in `lib/metadata.ts` and TanStack route `head()` functions. Docs,
   blog, changelog, and pricing `head()` titles go through `brandTitle` so they
   get `| Lody`; landing/download titles already include the brand and must not be

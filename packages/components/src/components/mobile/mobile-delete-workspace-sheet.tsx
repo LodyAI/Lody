@@ -1,14 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, Loader2, X } from 'lucide-react';
+import { AlertTriangle, X } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 
-import {
-  Drawer,
-  DrawerClose,
-  DrawerContent,
-  DrawerDescription,
-  DrawerTitle,
-} from '@/ui/drawer';
+import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { Button } from '@/ui/button';
 import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
@@ -117,8 +112,7 @@ export function MobileDeleteWorkspaceSheet({
           <DrawerDescription className="px-4 pb-3 text-[0.78rem] leading-relaxed text-muted-foreground">
             {t('workspace.danger.deleteWorkspace.confirmDescription', {
               workspace: workspaceName,
-              defaultValue:
-                'Permanently delete "{{workspace}}". This action cannot be undone.',
+              defaultValue: 'Permanently delete "{{workspace}}". This action cannot be undone.',
             })}
           </DrawerDescription>
 
@@ -195,7 +189,7 @@ export function MobileDeleteWorkspaceSheet({
             >
               {isDeleting ? (
                 <>
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  <Spinner className="mr-1.5 h-3.5 w-3.5" />
                   {t('common.processing', 'Processing...')}
                 </>
               ) : (

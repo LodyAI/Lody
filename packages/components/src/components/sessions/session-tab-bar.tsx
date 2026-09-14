@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Loader2, X, History, Undo2, Pin, FileDiff, Hand } from 'lucide-react';
+import { Plus, X, History, Undo2, Pin, FileDiff, Hand } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { cn } from '@/lib/utils';
 import { WINDOW_DRAG_EXEMPT_CLASS, useWindowDragRegionClass } from '@/ui/window-drag-region';
 import { getSessionLaunchConfigLegacyFields, type SessionId, type SessionMeta } from '@lody/shared';
@@ -275,7 +276,7 @@ function TabContent({
         {isWaiting ? (
           <Hand className="h-3 w-3 text-status-warning" />
         ) : isWorking ? (
-          <Loader2 className="h-3 w-3 animate-spin text-tab-active-accent" />
+          <Spinner className="h-3 w-3 text-tab-active-accent" />
         ) : isUnread ? (
           <span
             data-session-tab-unread=""

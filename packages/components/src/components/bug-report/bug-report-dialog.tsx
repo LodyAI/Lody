@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CircleCheck, Loader2 } from 'lucide-react';
+import { CircleCheck } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import type { MachineId } from '@lody/shared';
 import {
   Dialog,
@@ -209,7 +210,7 @@ export function BugReportDialog({
               >
                 {submitting ? (
                   <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <Spinner className="h-4 w-4" />
                     {machineId != null
                       ? t('bugReport.submitting', 'Uploading logs...')
                       : t('bugReport.submittingNoLogs', 'Submitting...')}

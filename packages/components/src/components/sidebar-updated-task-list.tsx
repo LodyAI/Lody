@@ -12,13 +12,13 @@ import {
   GitBranch,
   GitPullRequest,
   Link2,
-  Loader2,
   LockKeyhole,
   Pencil,
   Pin,
   PinOff,
   Users,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
@@ -928,7 +928,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             {shareMenuState === 'share' ? (
               <Users />
             ) : shareMenuState === 'loading' ? (
-              <Loader2 className="animate-spin" />
+              <Spinner />
             ) : (
               <LockKeyhole />
             )}
