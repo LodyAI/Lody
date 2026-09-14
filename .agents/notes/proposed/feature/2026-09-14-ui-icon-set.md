@@ -34,7 +34,7 @@ between the two states animated.
 
 ## Decisions
 
-**One grid, in the package.** 75 icons on a 24 canvas with a 20 live area, 1.5
+**One grid, in the package.** 91 icons on a 24 canvas with a 20 live area, 1.5
 stroke, round caps and joins, 2px corners on containers, 2px nodes for the git
 family, strokes on .5 coordinates. A family shares one skeleton: the chat family
 one bubble, the file family one folded sheet, the git family the same two node
@@ -72,7 +72,7 @@ colour it applies from the outside.
 set in `src/gallery` as four more rows, and the gallery is reached through
 `packages/components`' Storybook. That was wrong twice. The board's question is
 "what is this token's value", answered once per token off the rendered node; an
-icon has no token, and its question is asked 75 times — find the drawing, put it
+icon has no token, and its question is asked once per drawing — find it, put it
 at the size the surface uses, in that surface's colour, on the rung it will sit
 on, and take it away as markup. Those are controls, not samples, and a row on a
 board cannot carry them. And the set is `@lody/ui`'s, while Storybook belongs to
@@ -147,6 +147,28 @@ swings as one piece, so there is one drawing and the state only rotates it —
 and `test/icons.test.tsx` holds it there. That is the guard the sidebar did not
 have: both of these corrections are a stateful icon and a static icon drifting
 apart, and where a state moves the whole drawing the drift is now impossible.
+
+**Sixteen more drawings, picked from what the product already reaches for.**
+`packages/components` imports 239 distinct icons from `lucide-react` across 295
+files, 2138 usages. Collapsed onto the drawings that would serve them, the set
+covered 78% of that before this change; the sixteen added here — `monitor`,
+`alert-circle`, `users`, `circle`, `shield-alert`, `folder-plus`, `arrow-up`,
+`mail`, `wrench`, `undo`, `quote`, `save`, `image`, `pin-off`, `fork` and
+`pull-request-closed` — take it to 91%. `monitor` alone answers 52 usages, which
+is what a product about machines looks like from the icon layer.
+
+Three of them were redrawn after the first pass, and all three failed the same
+way — a shape that reads at 120px and not at 20. `quote` as a block with the
+tail notched out of a corner is a pair of counters by 20px; it is a hook now.
+`pin-off` broken into fragments the way `eye-off` breaks is not a pin; the pin
+stays whole and takes the line across it, because a pin has no centre for a
+line to be mistaken for. `pull-request-closed` had its cross floating two units
+clear of the branch it closes, so it read as two drawings.
+
+`package` was dropped from the batch rather than drawn: a box with a lid is
+`archive` and an isometric one is `model`. And `folder-plus` and `users` lost
+their layer models on the same inspection that produced the rule above — the
+playground's bulk column is where both showed.
 
 ## Alternatives
 

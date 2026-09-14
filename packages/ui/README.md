@@ -644,7 +644,7 @@ board being edited. A new token or primitive state lands with its board entry;
 `test/gallery.test.tsx` fails when a token has no entry.
 
 The icon set has a page of its own instead, because the board answers the wrong
-question about it: a token has one value to show, and an icon has 75 drawings
+question about it: a token has one value to show, and an icon has 91 drawings
 you need to search, size, recolour and take away. Run
 `pnpm --filter @lody/ui playground` and open the printed URL. It is a Vite
 server over `packages/ui/playground` with no Storybook under it: search the set,
