@@ -15,7 +15,8 @@
     "./node-received-key-store": "./src/node-received-key-store.ts",
     "./node-key-outbox": "./src/node-key-outbox.ts",
     "./streams": "./src/streams.ts",
-    "./streams-content": "./src/streams-content.ts"
+    "./streams-content": "./src/streams-content.ts",
+    "./snapshot-admission": "./src/snapshot-admission.ts"
   },
   "scripts": {
     "typecheck": "tsgo --noEmit",

@@ -481,12 +481,23 @@ hash chain 能发现相对于本地锚点的篡改，却不能证明服务器没
 配对恢复和 Machine RPC 鉴权仍是启用生产 E2EE 前的门槛。
 本阶段不提供前向安全、密码学安全证明或 Lean 证明。
 
+内容快照发表（2026-09-14 确认方向，独立包宿主端口，非生产 JWT）：提交时宿主须核验
+当前设备文档写权限，并把已认证提交设备绑到快照签名设备；截止仍是最坏 15 分钟
+授权窗口，过期不得新发表。已接纳快照的内容身份不可被不同字节占用同一位置；
+完全相同的重试可以幂等。读端仍验签并绑定 Org/文档/epoch/purpose/continuation
+offset；合法已接纳历史在作者后撤后仍可打开。这信任宿主执行准入，不抵抗恶意
+宿主与已撤权设备串通。解密、运输 offset、旧 head、自称时间或 `verified=true`
+都不是发表许可。无跨流事务、无 MLS、无新的 receipt/transparency 权威。生产
+网关/JWT 接线仍是后续阶段。
+
 ## 实现证据
 
 - [核心与验证入口](../packages/e2ee-core/README.md)
 - [签名及重放测试](../packages/e2ee-core/test/control-log.test.ts)
 - [真实 Org 策略测试](../packages/e2ee-core/test/team.test.ts)
 - [内容信封及真实 CRDT 测试](../packages/e2ee-core/test/content.test.ts)
+- [内容快照宿主准入](../packages/e2ee-core/src/snapshot-admission.ts)
+- [内容快照准入测试](../packages/e2ee-core/test/snapshot-admission.test.ts)
 - [真实文件与进程终止测试](../packages/e2ee-core/test/node-store.test.ts)
 - [SDK 分页、CAS 与故障恢复测试](../packages/e2ee-core/test/streams.test.ts)
 - [决策与验证边界](../.agents/notes/proposed/architecture/2026-09-12-e2ee-control-log.zh.md)

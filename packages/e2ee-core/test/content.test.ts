@@ -198,6 +198,8 @@ describe('signed content envelope', () => {
     await expect(rejecting.open(scope, epochKey, wire)).rejects.toThrow('not-admitted');
     const weak = new ContentCipher({ authorize: () => '01' + '00'.repeat(31) });
     await expect(weak.open(scope, epochKey, wire)).rejects.toThrow('invalid-signing-key');
+    expect(await cipher().authenticate(wire)).toMatchObject({ ...scope, ...author });
+    await expect(rejecting.authenticate(wire)).rejects.toThrow('not-admitted');
   });
 
   it('rejects tampering in header, nonce, body, tag or signature without releasing plaintext', async () => {

@@ -190,12 +190,41 @@ type ContentRow = {
   snapshot: { offset: string; body: Uint8Array } | null;
 };
 
+export interface DurableContentSnapshotPut {
+  readonly streamKey: string;
+  readonly offset: string;
+  readonly body: Uint8Array;
+  readonly submittingDevice: string;
+  readonly leaseIssuedAt: number;
+  readonly leaseExpiresAt: number;
+}
+
+export interface DurableContentSnapshotAdmission {
+  readonly status: 'accepted' | 'idempotent';
+  readonly currentOffset: string;
+  readonly currentBody: Uint8Array;
+}
+
+export interface DurableContentOptions {
+  /**
+   * Host publication gate. Without this, snapshot PUT fail-closes.
+   * Not production JWT/CAS; the caller supplies authenticated device + lease.
+   */
+  readonly admitSnapshot?: (
+    input: DurableContentSnapshotPut
+  ) => Promise<DurableContentSnapshotAdmission>;
+}
+
 /**
  * Durable Streams peer for streams-crdt content rooms: ordinary POST append,
  * GET /bootstrap (empty snapshot + retained updates), PUT/GET snapshot, 410
- * when reading before the snapshot offset. Not production JWT/CAS.
+ * when reading before the snapshot offset. Snapshot PUT is fail-closed until
+ * `admitSnapshot` is supplied. Not production JWT/CAS.
  */
-export async function listenDurableContent(store = new DurableCasStore()): Promise<{
+export async function listenDurableContent(
+  store = new DurableCasStore(),
+  options: DurableContentOptions = {}
+): Promise<{
   server: Server;
   baseUrl: string;
   streamUrl: (bucket: string, stream: string) => string;
@@ -286,18 +315,63 @@ export async function listenDurableContent(store = new DurableCasStore()): Promi
         return;
       }
       if (req.method === 'PUT' && sub === 'snapshot' && parts[4]) {
-        const row = ensure(key);
         const chunks: Buffer[] = [];
         for await (const chunk of req) chunks.push(chunk as Buffer);
         const body = new Uint8Array(Buffer.concat(chunks));
         const offset = decodeURIComponent(parts[4]!);
-        row.snapshot = { offset, body };
-        const parsed = Number.parseInt(offset, 10);
-        if (Number.isSafeInteger(parsed) && parsed >= 0 && parsed <= row.tail) {
-          row.earliest = parsed;
-          row.frames = row.frames.filter((frame) => frame.start >= parsed);
+        if (!options.admitSnapshot) {
+          res.writeHead(403).end('snapshot-admission-required');
+          return;
         }
-        res.writeHead(204).end();
+        const submittingDevice = String(req.headers['x-lody-snapshot-device'] ?? '');
+        const leaseIssuedAt = Number.parseInt(
+          String(req.headers['x-lody-lease-issued-at'] ?? ''),
+          10
+        );
+        const leaseExpiresAt = Number.parseInt(
+          String(req.headers['x-lody-lease-expires-at'] ?? ''),
+          10
+        );
+        if (
+          !submittingDevice ||
+          !Number.isSafeInteger(leaseIssuedAt) ||
+          !Number.isSafeInteger(leaseExpiresAt)
+        ) {
+          res.writeHead(401).end('snapshot-admission-missing');
+          return;
+        }
+        try {
+          await store.exclusive(async () => {
+            const published = await options.admitSnapshot!({
+              streamKey: key,
+              offset,
+              body,
+              submittingDevice,
+              leaseIssuedAt,
+              leaseExpiresAt,
+            });
+            const row = ensure(key);
+            row.snapshot = {
+              offset: published.currentOffset,
+              body: published.currentBody.slice(),
+            };
+            if (published.status === 'accepted') {
+              const parsed = Number.parseInt(published.currentOffset, 10);
+              if (Number.isSafeInteger(parsed) && parsed >= 0 && parsed <= row.tail) {
+                row.earliest = parsed;
+                row.frames = row.frames.filter((frame) => frame.start >= parsed);
+              }
+            }
+          });
+          res.writeHead(204).end();
+        } catch (error) {
+          const code = error instanceof Error ? error.message : 'snapshot-admission-rejected';
+          const conflict =
+            code === 'snapshot-identity-conflict' ||
+            code === 'snapshot-offset-regression' ||
+            code === 'snapshot-offset-incomparable';
+          res.writeHead(conflict ? 409 : 403).end(code);
+        }
         return;
       }
       if (req.method === 'GET' && sub === 'snapshot') {

@@ -265,6 +265,21 @@ export class ContentCipher {
       plaintext.fill(0);
     }
   }
+  /** Verify the signature and return the header. Does not decrypt and is not publication admission. */
+  async authenticate(frame: Uint8Array): Promise<Readonly<ContentHeader>> {
+    const parsed = parse(frame);
+    const publicKey = this.authorize(parsed.header);
+    invariant(
+      await this.verifier.verify(
+        publicKey,
+        concat(signatureDomain, parsed.unsigned),
+        parsed.signature
+      ),
+      'bad-content-signature'
+    );
+    this.authorize(parsed.header, publicKey);
+    return parsed.header;
+  }
   async open(
     scope: ContentScope,
     epochKey: Uint8Array,

@@ -21,9 +21,10 @@ export interface StreamsContentOptions {
   /** Local lookup only. Never fetch a URL or accept keys supplied by unverified headers. */
   readonly readKey: (epoch: number) => Uint8Array | undefined;
   /**
-   * Device document-write capability, not account role or mere possession of the
-   * epoch key. Required to seal content snapshots. Open of an admitted snapshot
-   * does not re-check this (historical snapshots stay valid after later revoke).
+   * Honest-client seal check: device document-write, not account role or mere
+   * possession of the epoch key. Does not constrain a malicious client. Host
+   * publication uses `./snapshot-admission`. Open of an admitted snapshot does
+   * not re-check this (historical snapshots stay valid after later revoke).
    */
   readonly mayWriteDocument?: (author: ContentAuthor) => boolean;
 }

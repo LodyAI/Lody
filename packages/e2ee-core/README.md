@@ -367,13 +367,15 @@ native/JS string copies and initially exportable generation handles are not guar
 Three additional tests restore real signatures/DH through the recovery-file cipher,
 reject authenticated-but-mismatched key material, and capture input before async crypto.
 
-`ContentCipher` provides `seal({ scope, author, epochKey, signingKey, plaintext })`
-and `open(scope, epochKey, frame)`. The caller supplies a mandatory
-`ContentPolicy.authorize(header)` that returns a verified signing key or throws.
-It must select the appropriate current/historical authorization and epoch eligibility;
-this package never trusts a header's identity claims or installs an active-member default.
-The policy is checked again after asynchronous crypto before releasing an envelope or
-plaintext. The caller still owns authorization between return, CRDT import and persistence.
+`ContentCipher` provides `seal({ scope, author, epochKey, signingKey, plaintext })`,
+`authenticate(frame)`, and `open(scope, epochKey, frame)`. The caller supplies a
+mandatory `ContentPolicy.authorize(header)` that returns a verified signing key or
+throws. It must select the appropriate current/historical authorization and epoch
+eligibility; this package never trusts a header's identity claims or installs an
+active-member default. The policy is checked again after asynchronous crypto before
+releasing an envelope or plaintext. `authenticate` verifies the signature without
+decrypting and is **not** publication admission. The caller still owns authorization
+between return, CRDT import and persistence.
 
 Scope binds Org genesis, epoch, logical resource ID and purpose. Purposes distinguish
 Loro/Flock updates and snapshots, blobs, presence, RPC requests and responses. Keys are
@@ -539,21 +541,38 @@ one logical resource, CRDT model, author and write epoch; historical keys come f
 a caller-owned local lookup. Drain and replace the room session for an epoch change.
 No Org, bucket or server URL is added to the synchronization library's abstraction.
 
-The opaque provider header is one byte (`1`). The complete content frame is the
-sealed body. Inside its authenticated ciphertext is `u16be(aad.length) || aad ||
-originalPayload`, binding the exact SDK-supplied AAD (bounded to 1024 bytes).
-The provider invokes the SDK's AAD builder once, checks the binding before returning
-plaintext, and declares its outgoing overhead within the SDK's 4096-byte cap.
-Existing content framing is unchanged; no alternate crypto suite.
+The opaque provider header is one byte (`1` update, `2` snapshot). The complete
+content frame is the sealed body. Inside its authenticated ciphertext is
+`u16be(aad.length) || aad ||` optional snapshot `u16be(offset.length) || offset ||`
+originalPayload, binding the exact SDK-supplied AAD (bounded to 1024 bytes) and,
+for snapshots, the opaque continuation offset. The provider invokes the SDK's AAD
+builder once, checks the binding before returning plaintext, and declares its
+outgoing overhead within the SDK's 4096-byte cap. Existing update framing is
+unchanged; no alternate crypto suite.
 
-**Snapshots are explicitly rejected on reads and writes**, until source evidence is
-implemented. Do not enable this in a production room requiring snapshot bootstrap
-or 410 recovery. Even an update batch's signer is its publisher, not proof of every
-embedded operation's original author; command dispatch needs its own signed request.
-Real SDK write-only/catchup tests check decryption before import, state persistence
+Honest clients require `mayWriteDocument` to **seal** a snapshot. That does not
+constrain a malicious client. Publication admission is the host port
+`createContentSnapshotPublication` from `@lody/e2ee-core/snapshot-admission`:
+current device document-write, authenticated submitting device bound to the
+signing device, and the existing worst 15-minute authorization lease, checked in
+the same local operation that stores the exact snapshot bytes. Identical retries
+are idempotent; different bytes cannot occupy an already admitted offset; a later
+offset may become current, an earlier offset cannot. The independent-package test
+host fail-closes snapshot PUT until that port is supplied. Production JWT/gateway
+wiring is unimplemented and not claimed. Clients still verify signatures,
+Org/document/epoch/purpose/offset on **open**; a later revoke does not invalidate
+an already admitted snapshot. Decryption, transport offset, old head, a
+self-declared timestamp, or `verified=true` are not publication permission. This
+trusts host admission enforcement and does not resist a malicious host colluding
+with a revoked device.
+
+Even an update batch's signer is its publisher, not proof of every embedded
+operation's original author; command dispatch needs its own signed request. Real
+SDK write-only/catchup tests check decryption before import, state persistence
 before cursor save, and replay after persistence failure. They do not connect a
-deployed backend or Lody runtime. See `src/streams-content.ts` and
-`test/streams-content.test.ts` for this opt-in boundary.
+deployed backend or Lody runtime. See `src/streams-content.ts`,
+`src/snapshot-admission.ts`, `test/streams-content.test.ts`, and
+`test/snapshot-admission.test.ts`.
 
 ## Node persistence
 

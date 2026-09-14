@@ -7,9 +7,10 @@ in-package tests only; do not re-export it.
 
 - Public exports: root `Ledger`/`LedgerError`/`ContentCipher`/recovery-file/
   `createUserIdentity`/`restoreUserIdentity`/`ControlFreshnessLease`; subpaths
-  `./ledger`, `./ledger-node`, `./streams`, `./streams-content`. Never pass
-  `verified=true`. Snapshot join uses out-of-band genesis, endorser, attested
-  head, and the endorser's signature over that head.
+  `./ledger`, `./ledger-node`, `./streams`, `./streams-content`,
+  `./snapshot-admission`. Never pass `verified=true`. Snapshot join uses
+  out-of-band genesis, endorser, attested head, and the endorser's signature
+  over that head.
 - Org identity is the genesis record hash. `protocolVersion=1` only in genesis.
   Ordinary records omit Org ID, sequence, and generic operation IDs. Wire is
   `@ipld/dag-cbor` fixed arrays; keys, signatures, and hashes are raw bytes.
@@ -51,13 +52,18 @@ in-package tests only; do not re-export it.
   implicitly. Synthetic fixtures only; real signatures; no crypto stubs.
 - `content.ts`: fixed XChaCha20-Poly1305, HKDF-SHA-256, strict Ed25519. Caller
   policy supplies authority; `inspectContent` is UNVERIFIED routing metadata.
-  `streams-content.ts` seals updates and content snapshots through the existing
-  streams-crdt provider `seal`/`open` (no parallel encryptSnapshot API). Snapshot
-  writers must have document-write capability (`deviceMayWriteDocument`); guests
-  cannot. Bind Org/genesis, resource, kind/model, epoch, and the opaque
-  continuation offset. Host-admitted bootstrap offset is the publication
-  evidence under the existing 15-minute backend-trust cutoff; a later revoke
-  does not invalidate that admitted snapshot. Do not enable production E2EE.
+  `authenticate` verifies a signature without decrypting and is not publication
+  permission. `streams-content.ts` seals updates and content snapshots through
+  the existing streams-crdt provider `seal`/`open`. Honest clients require
+  `deviceMayWriteDocument` to seal snapshots; guests cannot. Bind Org/genesis,
+  resource, kind/model, epoch, and the opaque continuation offset. Publication
+  admission is `./snapshot-admission`: current device write, submitter bound to
+  signing device, and the 15-minute lease, checked in the same local operation
+  as storing exact bytes. Identical retries are idempotent; different bytes at
+  an admitted offset are rejected. Open does not re-check current write.
+  Decryption, transport offset, old head, self-declared time, or `verified=true`
+  are not admission evidence. Production JWT/gateway is unimplemented. Do not
+  enable production E2EE.
 - `streams.ts` uses the pinned SDK read/`appendCas` APIs and length framing.
   Never invent offsets, fall back to ordinary append, or auto-re-sign. HTTP
   reads can split frames; checkpoint only complete frames/pages.

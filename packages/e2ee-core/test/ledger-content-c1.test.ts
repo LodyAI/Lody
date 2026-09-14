@@ -28,6 +28,13 @@ import {
   signingBytesForBody,
 } from '@lody/e2ee-core/ledger';
 import { createStreamsContentProvider } from '@lody/e2ee-core/streams-content';
+import {
+  CONTENT_SNAPSHOT_ADMISSION_WINDOW_MS,
+  SNAPSHOT_ADMISSION_DEVICE_HEADER,
+  SNAPSHOT_ADMISSION_LEASE_EXPIRES_HEADER,
+  SNAPSHOT_ADMISSION_LEASE_ISSUED_HEADER,
+  createContentSnapshotPublication,
+} from '@lody/e2ee-core/snapshot-admission';
 import { listenDurableContent } from '../bench/ds-cas-server';
 
 const author = { actor: 'owner', memberInstance: 'm0', device: 'd0' };
@@ -438,7 +445,7 @@ describe('C1 public-API streams-crdt over a real Durable Streams peer', () => {
     onlyK0.free();
   });
 
-  it('fail-closes snapshots and still bootstraps after 410 without leaking plaintext', async () => {
+  it('fail-closes snapshot PUT without a host admission port and missing snapshot offset', async () => {
     const { server, streamUrl } = await listenDurableContent();
     servers.push({ close: () => closeHttp(server) });
     const { anchor, recovered } = await rotatedOrg();
@@ -498,31 +505,35 @@ describe('C1 public-API streams-crdt over a real Durable Streams peer', () => {
       headers: { 'Content-Type': 'application/octet-stream' },
       body: new Uint8Array([9, 9, 9]),
     });
-    expect(compacted.status).toBe(204);
-    const gone = await fetch(`${url}?offset=-1`);
-    expect(gone.status).toBe(410);
-
-    const reader = new LoroDoc();
-    const catchup = new StreamsCrdt({
-      streamUrl: url,
-      adapter: createLoroDocAdapter(reader),
-      remoteCursorStore: new InMemoryRemoteCursorStore(),
-      payloadProtectionRequired: true,
-      e2ee: { provider, readPolicy: 'encrypted-only', writePolicy: 'encrypt' },
-      fetch: globalThis.fetch.bind(globalThis),
-    });
-    const recoveredRead = await catchup.sync();
-    expect(recoveredRead.ok).toBe(false);
-    expect(reader.getText('text').toString()).not.toBe('snapshot-secret');
-    await catchup.close();
-    reader.free();
+    expect(compacted.status).toBe(403);
+    expect(await compacted.text()).toBe('snapshot-admission-required');
+    const bootstrap = await fetch(`${url}/bootstrap`);
+    expect(bootstrap.headers.get('Stream-Snapshot-Offset')).toBe('-1');
   });
 
   it('bootstraps an encrypted content snapshot plus a suffix without leaking plaintext', async () => {
-    const { server, streamUrl } = await listenDurableContent();
-    servers.push({ close: () => closeHttp(server) });
     const { anchor, recovered } = await rotatedOrg();
     const { pair, signingPublic } = await signingPair();
+    const clock = { now: 1_000 };
+    const publication = createContentSnapshotPublication({
+      cipher: new ContentCipher({
+        authorize(header) {
+          if (header.actor !== author.actor) throw new Error('unauthorized');
+          return signingPublic;
+        },
+      }),
+      mayWriteDocument: (who) => who.device === author.device,
+      now: () => clock.now,
+    });
+    const { server, streamUrl } = await listenDurableContent(undefined, {
+      admitSnapshot: (input) =>
+        publication.admit({
+          ...input,
+          expectedGenesis: hex(anchor),
+          expectedResource: 'doc-snap-ok',
+        }),
+    });
+    servers.push({ close: () => closeHttp(server) });
     const url = streamUrl('c1docs', 'snap-ok');
     const provider = providerFor(
       anchor,
@@ -532,13 +543,28 @@ describe('C1 public-API streams-crdt over a real Durable Streams peer', () => {
       1,
       'doc-snap-ok'
     );
+    const fetchWithAdmission: typeof fetch = async (input, init) => {
+      const target = new URL(String(input));
+      const method = (init?.method ?? 'GET').toUpperCase();
+      if (method === 'PUT' && target.pathname.includes('/snapshot/')) {
+        const headers = new Headers(init?.headers);
+        headers.set(SNAPSHOT_ADMISSION_DEVICE_HEADER, author.device);
+        headers.set(SNAPSHOT_ADMISSION_LEASE_ISSUED_HEADER, String(clock.now));
+        headers.set(
+          SNAPSHOT_ADMISSION_LEASE_EXPIRES_HEADER,
+          String(clock.now + CONTENT_SNAPSHOT_ADMISSION_WINDOW_MS)
+        );
+        return await globalThis.fetch(input, { ...init, headers });
+      }
+      return await globalThis.fetch(input, init);
+    };
     const writerDoc = new LoroDoc();
     const writer = new StreamsCrdt({
       streamUrl: url,
       adapter: createLoroDocAdapter(writerDoc),
       payloadProtectionRequired: true,
       e2ee: { provider, readPolicy: 'encrypted-only', writePolicy: 'encrypt' },
-      fetch: globalThis.fetch.bind(globalThis),
+      fetch: fetchWithAdmission,
     });
     expect((await writer.createStream()).ok).toBe(true);
     writerDoc.getText('text').insert(0, 'snapshot-secret');
