@@ -40,8 +40,8 @@ export function encodeLedgerJournal(journal: LedgerJournal): string {
   if (!hasSnapshot && journal.records.length === 0) fail('oversize');
   const records = journal.records.map((record) => toHex(copyBytes(record)));
   const pending = journal.pending === null ? null : toHex(copyBytes(journal.pending));
-  const text = hasSnapshot
-    ? JSON.stringify([
+  const snapshotRow = hasSnapshot
+    ? [
         SNAPSHOT_FORMAT,
         toHex(journal.genesis),
         records,
@@ -53,8 +53,10 @@ export function encodeLedgerJournal(journal: LedgerJournal): string {
           toHex(copyBytes(trust!.head)),
           toHex(copyBytes(trust!.headSignature)),
         ],
-      ])
-    : JSON.stringify([FORMAT, toHex(journal.genesis), records, pending, journal.offset]);
+        ...(journal.snapshotBound === true ? [true] : []),
+      ]
+    : [FORMAT, toHex(journal.genesis), records, pending, journal.offset];
+  const text = JSON.stringify(snapshotRow);
   if (Buffer.byteLength(text) > MAX_BYTES) fail('oversize');
   return text;
 }
@@ -83,12 +85,14 @@ export function decodeLedgerJournal(text: string): LedgerJournal {
     return journal;
   }
   if (format === SNAPSHOT_FORMAT) {
-    if (parsed.length !== 7) fail('canonical');
-    const [, genesisHex, rows, pendingHex, offset, snapshotHex, trustRow] = parsed as unknown[];
+    if (parsed.length !== 7 && parsed.length !== 8) fail('canonical');
+    const [, genesisHex, rows, pendingHex, offset, snapshotHex, trustRow, boundFlag] =
+      parsed as unknown[];
     if (!Array.isArray(rows) || typeof offset !== 'string' || !Array.isArray(trustRow)) {
       fail('canonical');
     }
     if (trustRow.length !== 3) fail('canonical');
+    if (parsed.length === 8 && boundFlag !== true) fail('canonical');
     const genesis = fromHex(genesisHex);
     const journal: LedgerJournal = {
       genesis,
@@ -102,6 +106,7 @@ export function decodeLedgerJournal(text: string): LedgerJournal {
         head: fromHex(trustRow[1]),
         headSignature: fromHex(trustRow[2]),
       },
+      snapshotBound: parsed.length === 8 ? true : undefined,
     };
     if (encodeLedgerJournal(journal) !== text) fail('canonical');
     return journal;

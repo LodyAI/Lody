@@ -27,6 +27,9 @@ in-package tests only; do not re-export it.
   genesis + endorser + attested head + endorser signature over that head.
   Only Owner/Admin personal+canManage may endorse. No `verified=true`.
   Preserve rollback/CAS/freshness, historical-key and recovery guarantees.
+  Snapshot refresh may skip stream prefix until the attested head is observed
+  or a suffix extends it; after that bound, wrong-parent fails closed and
+  must not advance the journal cursor.
 - Persist exact pending bytes before CAS. Conflicts never re-sign; retry the
   same bytes. `openEpochEnvelope` returns plaintext only when epoch matches and
   `commitEpochKey` equals the ledger commitment.

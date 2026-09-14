@@ -20,6 +20,8 @@ export interface LedgerJournal {
   readonly offset: string;
   readonly snapshot?: Uint8Array;
   readonly snapshotTrust?: SnapshotTrust;
+  /** True after the authenticated snapshot head is observed or a suffix extends it. */
+  readonly snapshotBound?: boolean;
 }
 
 export interface LedgerTransaction {
@@ -82,6 +84,7 @@ function copyJournal(journal: LedgerJournal): LedgerJournal {
     offset: journal.offset,
     snapshot: journal.snapshot ? copyBytes(journal.snapshot) : undefined,
     snapshotTrust: journal.snapshotTrust ? copyTrust(journal.snapshotTrust) : undefined,
+    snapshotBound: journal.snapshotBound === true ? true : undefined,
   };
 }
 
@@ -183,7 +186,8 @@ export class LedgerClient {
     session: Session,
     pending: Uint8Array | null,
     offset = session.journal.offset,
-    records = session.journal.records
+    records = session.journal.records,
+    snapshotBound = session.journal.snapshotBound
   ): Promise<void> {
     const next: LedgerJournal = {
       genesis: this.anchor,
@@ -194,6 +198,7 @@ export class LedgerClient {
       snapshotTrust: session.journal.snapshotTrust
         ? copyTrust(session.journal.snapshotTrust)
         : undefined,
+      snapshotBound: snapshotBound === true ? true : undefined,
     };
     await tx.save(copyJournal(next));
     session.journal = next;
@@ -228,8 +233,30 @@ export class LedgerClient {
 
   private async refresh(tx: LedgerTransaction, session: Session): Promise<void> {
     const seen = new Set([this.stream.initialOffset, session.journal.offset]);
+    const snapshotMode = session.journal.snapshot !== undefined;
+    const snapshotHead = session.journal.snapshotTrust
+      ? copyBytes(session.journal.snapshotTrust.head)
+      : null;
+    let bound =
+      !snapshotMode || session.journal.records.length > 0 || session.journal.snapshotBound === true;
+
+    const applyFresh = async (
+      fresh: Uint8Array[]
+    ): Promise<{ ledger: Ledger; records: Uint8Array[] }> => {
+      if (session.journal.records.length + fresh.length > MAX_LEDGER_RECORDS) fail('oversize');
+      let ledger = session.ledger;
+      let records = [...session.journal.records];
+      for (let i = 0; i < fresh.length; i += MAX_LEDGER_READ_PAGE_RECORDS) {
+        const slice = fresh.slice(i, i + MAX_LEDGER_READ_PAGE_RECORDS);
+        ledger = await ledger.extend(slice);
+        records = [...records, ...slice];
+      }
+      return { ledger, records };
+    };
+
     for (let pageCount = 0; pageCount < MAX_LEDGER_READ_PAGES; pageCount++) {
-      const page = await this.stream.readAfter(session.journal.offset);
+      const pageOffset = session.journal.offset;
+      const page = await this.stream.readAfter(pageOffset);
       checkOffset(page.nextOffset);
       if (!Array.isArray(page.records)) fail('canonical');
       if (typeof page.upToDate !== 'boolean') fail('canonical');
@@ -243,30 +270,63 @@ export class LedgerClient {
       const copied = copyRecordList(page.records);
       const fresh: Uint8Array[] = [];
       let expectedParent = session.ledger.head;
-      const snapshotMode = session.journal.snapshot !== undefined;
+      let skippedUnknown = false;
       for (const record of copied) {
-        if (await containsHash(session.ledger, record)) continue;
+        const digest = await hashRecord(record);
+        if (session.ledger.hasRecordHash(digest)) {
+          if (snapshotHead && bytesEqual(digest, snapshotHead)) bound = true;
+          continue;
+        }
         if (snapshotMode) {
           const decoded = decodeRecord(record);
           if (decoded.body.type === 'genesis') continue;
           if (decoded.body.type !== 'ordinary') fail('canonical');
-          if (!bytesEqual(decoded.body.fields.previousHash, expectedParent)) continue;
-          fresh.push(record);
-          expectedParent = await hashRecord(record);
-          continue;
+          if (bytesEqual(decoded.body.fields.previousHash, expectedParent)) {
+            bound = true;
+            fresh.push(record);
+            expectedParent = digest;
+            continue;
+          }
+          if (!bound) {
+            skippedUnknown = true;
+            continue;
+          }
+          if (fresh.length > 0) {
+            const applied = await applyFresh(fresh);
+            await this.save(
+              tx,
+              session,
+              session.journal.pending,
+              pageOffset,
+              applied.records,
+              true
+            );
+            session.ledger = applied.ledger;
+          } else if (session.journal.snapshotBound !== true) {
+            await this.save(
+              tx,
+              session,
+              session.journal.pending,
+              pageOffset,
+              session.journal.records,
+              true
+            );
+          }
+          fail('wrong-parent');
         }
         fresh.push(record);
       }
-      if (session.journal.records.length + fresh.length > MAX_LEDGER_RECORDS) fail('oversize');
-      let ledger = session.ledger;
-      let records = [...session.journal.records];
-      for (let i = 0; i < fresh.length; i += MAX_LEDGER_READ_PAGE_RECORDS) {
-        const slice = fresh.slice(i, i + MAX_LEDGER_READ_PAGE_RECORDS);
-        ledger = await ledger.extend(slice);
-        records = [...records, ...slice];
-      }
-      await this.save(tx, session, session.journal.pending, page.nextOffset, records);
-      session.ledger = ledger;
+      if (snapshotMode && !bound && skippedUnknown && page.upToDate) fail('wrong-parent');
+      const applied = await applyFresh(fresh);
+      await this.save(
+        tx,
+        session,
+        session.journal.pending,
+        page.nextOffset,
+        applied.records,
+        snapshotMode && bound ? true : undefined
+      );
+      session.ledger = applied.ledger;
       seen.add(page.nextOffset);
       if (page.upToDate) return;
     }
