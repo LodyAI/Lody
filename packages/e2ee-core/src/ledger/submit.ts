@@ -239,6 +239,8 @@ export class LedgerClient {
       : null;
     let bound =
       !snapshotMode || session.journal.records.length > 0 || session.journal.snapshotBound === true;
+    let readOffset = session.journal.offset;
+    let skippedUnknown = false;
 
     const applyFresh = async (
       fresh: Uint8Array[]
@@ -255,14 +257,16 @@ export class LedgerClient {
     };
 
     for (let pageCount = 0; pageCount < MAX_LEDGER_READ_PAGES; pageCount++) {
-      const pageOffset = session.journal.offset;
-      const page = await this.stream.readAfter(pageOffset);
+      const page = await this.stream.readAfter(readOffset);
       checkOffset(page.nextOffset);
       if (!Array.isArray(page.records)) fail('canonical');
       if (typeof page.upToDate !== 'boolean') fail('canonical');
       if (page.records.length === 0) {
         if (!page.upToDate) fail('canonical');
-        if (page.nextOffset === session.journal.offset) return;
+        if (page.nextOffset === readOffset) {
+          if (snapshotMode && !bound && skippedUnknown) fail('wrong-parent');
+          return;
+        }
         if (session.journal.records.length !== 1 && !session.journal.snapshot) fail('canonical');
       }
       if (seen.has(page.nextOffset) && page.records.length > 0) fail('replay');
@@ -270,7 +274,6 @@ export class LedgerClient {
       const copied = copyRecordList(page.records);
       const fresh: Uint8Array[] = [];
       let expectedParent = session.ledger.head;
-      let skippedUnknown = false;
       for (const record of copied) {
         const digest = await hashRecord(record);
         const wasBound = bound;
@@ -302,6 +305,12 @@ export class LedgerClient {
         fresh.push(record);
       }
       if (snapshotMode && !bound && skippedUnknown && page.upToDate) fail('wrong-parent');
+      if (snapshotMode && !bound && skippedUnknown) {
+        readOffset = page.nextOffset;
+        seen.add(page.nextOffset);
+        if (page.upToDate) fail('wrong-parent');
+        continue;
+      }
       const applied = await applyFresh(fresh);
       await this.save(
         tx,
@@ -312,6 +321,7 @@ export class LedgerClient {
         snapshotMode && bound ? true : undefined
       );
       session.ledger = applied.ledger;
+      readOffset = page.nextOffset;
       seen.add(page.nextOffset);
       if (page.upToDate) return;
     }

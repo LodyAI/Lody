@@ -11,7 +11,7 @@ Translation: current
 
 ## 决定与范围
 
-边界在页内用内存标记，仅在成功处理到 head 或接上后缀的页之后写入 journal `snapshotBound`。失败不保存该页：offset、records 与 pending 保持原值。从创世打开的客户端仍跳过自己已验证的 hash。无第 8 元 `true` 的 v1 journal 仍可读。
+边界在页内用内存标记，仅在成功处理到 head 或接上后缀的页之后写入 journal `snapshotBound`。失败不保存该页：offset、records 与 pending 保持原值。未知前缀只用本地读游标跳过，直到见到 head；不得把「垃圾页 + 空尾页」写成已追上。从创世打开的客户端仍跳过自己已验证的 hash。无第 8 元 `true` 的 v1 journal 仍可读。
 
 不改变快照信任（DEC-001）、Passkey/真机验收（DEC-002）、生产 CAS，或内容快照出处绑定。
 

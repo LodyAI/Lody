@@ -30,7 +30,8 @@ in-package tests only; do not re-export it.
   Snapshot refresh may skip stream prefix until the attested head is observed
   or a suffix extends it; after that bound, any record that does not extend
   the attested chain (wrong parent, foreign genesis, duplicate known hash)
-  fails closed and must not advance the journal cursor.
+  fails closed and must not advance the journal cursor. Unknown prefix must
+  not become up-to-date success, including junk followed by an empty final page.
 - Persist exact pending bytes before CAS. Conflicts never re-sign; retry the
   same bytes. `openEpochEnvelope` returns plaintext only when epoch matches and
   `commitEpochKey` equals the ledger commitment.

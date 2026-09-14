@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { ControlFreshnessLease } from '@lody/e2ee-core';
-import { Ledger, LedgerClient, MemoryLedgerStore, MemoryLedgerStream } from '../src/ledger';
+import {
+  Ledger,
+  LedgerClient,
+  MemoryLedgerStore,
+  MemoryLedgerStream,
+  type LedgerStream,
+} from '../src/ledger';
 import { decodeSnapshotCbor, encodeSnapshotCbor } from '../src/ledger/cbor';
 import { commitEpochKey, snapshotSigningBytes } from '../src/ledger/crypto';
 import { sealHistoryPacket } from '../src/ledger/keys';
@@ -532,5 +538,53 @@ describe('S3 snapshot LedgerClient', () => {
     await expect(client.read()).rejects.toMatchObject({ code: 'wrong-parent' });
     expect(store.journal?.offset).toBe(before);
     expect(store.journal?.records).toHaveLength(0);
+  });
+
+  it('rejects missing snapshot boundary when junk is followed by an empty final page', async () => {
+    const owner = await ed25519();
+    const g = await signGenesis(owner);
+    const first = await append(
+      g.ledger,
+      owner,
+      await admitDeviceOp(g.anchor, await ed25519(), 'personal', true)
+    );
+    const { snapshot, trust } = await signSnapshot(first.ledger, owner);
+    const foreign = await signGenesis(await ed25519());
+    const fork = await append(
+      g.ledger,
+      owner,
+      await admitDeviceOp(g.anchor, await ed25519(), 'personal', true)
+    );
+
+    const pagedJunk = (junk: Uint8Array): LedgerStream => ({
+      initialOffset: 'empty:/+',
+      async readAfter(offset: string) {
+        if (offset === 'empty:/+') {
+          return { records: [junk], nextOffset: 'after-junk', upToDate: false };
+        }
+        if (offset === 'after-junk') {
+          return { records: [], nextOffset: 'after-junk', upToDate: true };
+        }
+        throw new Error(`unexpected-offset:${offset}`);
+      },
+      async appendCas() {
+        return 'unsupported';
+      },
+    });
+
+    for (const junk of [foreign.record, fork.record]) {
+      const store = new MemoryLedgerStore();
+      const client = await LedgerClient.openFromSnapshot({
+        trust,
+        snapshot,
+        stream: pagedJunk(junk),
+        store,
+      });
+      const before = store.journal?.offset;
+      await expect(client.read()).rejects.toMatchObject({ code: 'wrong-parent' });
+      expect(store.journal?.offset).toBe(before);
+      expect(store.journal?.snapshotBound).toBeUndefined();
+      expect(store.journal?.records).toHaveLength(0);
+    }
   });
 });

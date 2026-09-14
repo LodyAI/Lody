@@ -11,7 +11,7 @@ Snapshot refresh may skip stream prefix until the attested head is observed. Aft
 
 ## Decision and scope
 
-The bound is in-memory during a page and persisted as journal `snapshotBound` only after a successful page that located the head or applied a suffix. Failure does not save that page: offset, records, and pending bytes stay as they were. Genesis-from-zero clients still skip hashes they already verified. v1 journals without the optional eighth `true` remain readable.
+The bound is in-memory during a page and persisted as journal `snapshotBound` only after a successful page that located the head or applied a suffix. Failure does not save that page: offset, records, and pending bytes stay as they were. Unknown prefix is skipped with a local read cursor until the head is found; it is not persisted as up-to-date, including when junk is followed by an empty final page. Genesis-from-zero clients still skip hashes they already verified. v1 journals without the optional eighth `true` remain readable.
 
 This does not change snapshot trust (DEC-001), Passkey/phone acceptance (DEC-002), production CAS, or content-snapshot provenance.
 
