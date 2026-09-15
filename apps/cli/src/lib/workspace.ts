@@ -1,8 +1,16 @@
 import { ConvexHttpClient } from 'convex/browser';
 import { z } from 'zod';
+import { Data, Effect, Schedule } from 'effect';
 import { api } from '@lody/cloud-api';
 import { BILLING_PLAN_TIERS } from '@lody/shared';
 import { LODY_AUTH_URL } from '@/utils/const';
+import { runCommandEffect } from '@/lib/command-effect';
+import {
+  ACCESS_QUERY_RETRY_DELAYS_MS,
+  isTransientAccessQueryError,
+  safeAccessQueryErrorDetails,
+} from '@/utils/access-query-error';
+import { getLogger } from '@/utils/logger';
 
 export const WorkspaceSummarySchema = z.object({
   id: z.string(),
@@ -112,14 +120,116 @@ function createAuthConvexClient(): ConvexHttpClient {
   return authConvexClient;
 }
 
-export async function listWorkspacesForToken(token: string): Promise<WorkspaceSummary[]> {
-  const client = createAuthConvexClient();
-  const raw = await client.query(api.deviceAuth.listMyWorkspacesForCliToken, { token });
-  const parsed = WorkspaceListResultSchema.parse(raw);
-  if (!parsed.valid) {
-    throw new Error('CLI token is invalid or expired. Run `lody login` again.');
+export class WorkspaceAccessError extends Data.TaggedError('WorkspaceAccessError')<{
+  kind: 'unavailable' | 'denied' | 'invalid_response' | 'not_configured';
+  cause?: unknown;
+}> {
+  override get message() {
+    return this.toLodyError().message;
   }
-  return parsed.workspaces;
+  toLodyError() {
+    return {
+      code:
+        this.kind === 'unavailable'
+          ? 'WORKSPACE_ACCESS_UNAVAILABLE'
+          : this.kind === 'denied'
+            ? 'WORKSPACE_ACCESS_DENIED'
+            : 'WORKSPACE_RESOLUTION_FAILED',
+      message:
+        this.kind === 'unavailable'
+          ? 'Workspace access verification is temporarily unavailable. Retry with the same operationId when present.'
+          : this.kind === 'denied'
+            ? 'CLI credentials cannot access workspaces. Run `lody login` again.'
+            : 'Workspace access could not be resolved. Check the CLI configuration and server compatibility.',
+      retryable: this.kind === 'unavailable',
+    };
+  }
+}
+
+/** Four read attempts, at most 5s each and 10s overall; cancellation reaches fetch/body reads. */
+export const listWorkspacesForTokenEffect = (token: string) =>
+  Effect.suspend(() => {
+    const authUrl = LODY_AUTH_URL;
+    if (!authUrl) return Effect.fail(new WorkspaceAccessError({ kind: 'not_configured' }));
+    let attempt = 0;
+    const query = Effect.tryPromise({
+      try: async (signal) => {
+        attempt += 1;
+        // Per-attempt client: AbortSignal must never be shared across concurrent MCP calls.
+        const client = new ConvexHttpClient(authUrl, {
+          logger: false,
+          fetch: async (url, init) => {
+            try {
+              const response = await fetch(url, { ...init, signal });
+              if (!response.ok) {
+                const status = response.status;
+                void response.body?.cancel().catch(() => undefined);
+                throw new WorkspaceAccessError({
+                  kind:
+                    status === 401 || status === 403
+                      ? 'denied'
+                      : isTransientAccessQueryError({ status })
+                        ? 'unavailable'
+                        : 'invalid_response',
+                  cause: { status },
+                });
+              }
+              // Capture body transport failures here, separately from Convex business/schema errors.
+              const body = await response.text();
+              return new Response(body, { status: response.status, headers: response.headers });
+            } catch (cause) {
+              if (cause instanceof WorkspaceAccessError) throw cause;
+              throw new WorkspaceAccessError({
+                kind: isTransientAccessQueryError(cause) ? 'unavailable' : 'invalid_response',
+                cause,
+              });
+            }
+          },
+        });
+        const raw = await client.query(api.deviceAuth.listMyWorkspacesForCliToken, { token });
+        const parsed = WorkspaceListResultSchema.parse(raw);
+        if (!parsed.valid) throw new WorkspaceAccessError({ kind: 'denied' });
+        return parsed.workspaces;
+      },
+      catch: (cause) =>
+        cause instanceof WorkspaceAccessError
+          ? cause
+          : new WorkspaceAccessError({ kind: 'invalid_response', cause }),
+    }).pipe(
+      Effect.timeoutFail({
+        duration: 5_000,
+        onTimeout: () =>
+          new WorkspaceAccessError({ kind: 'unavailable', cause: { code: 'ETIMEDOUT' } }),
+      }),
+      Effect.tapError((error) =>
+        Effect.sync(() =>
+          getLogger('workspace').debug(
+            JSON.stringify({
+              stage: 'workspace.query',
+              endpoint: 'auth.workspace-list',
+              attempt,
+              kind: error.kind,
+              ...safeAccessQueryErrorDetails(error),
+            })
+          )
+        )
+      )
+    );
+    return query.pipe(
+      Effect.retry({
+        schedule: Schedule.fromDelays(...ACCESS_QUERY_RETRY_DELAYS_MS),
+        while: (error) => error.kind === 'unavailable',
+      }),
+      Effect.timeoutFail({
+        duration: 10_000,
+        onTimeout: () =>
+          new WorkspaceAccessError({ kind: 'unavailable', cause: { code: 'ETIMEDOUT' } }),
+      })
+    );
+  });
+
+export async function listWorkspacesForToken(token: string): Promise<WorkspaceSummary[]> {
+  return runCommandEffect(listWorkspacesForTokenEffect(token));
 }
 
 export async function getWorkspaceBillingEntitlementForCliToken(input: {
