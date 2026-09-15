@@ -185,7 +185,6 @@ describe('desktop sidebar mark-unread menus', () => {
             machineName="This device"
             project={project}
             canRemoveProject={false}
-            canNavigateProject
             collapsed={false}
             isSelected={false}
             sessionsForProject={[session]}

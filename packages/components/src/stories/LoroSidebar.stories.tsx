@@ -1008,7 +1008,6 @@ function ProductionLikeTopContent({
                     machineName="Mac Studio"
                     project={project}
                     canRemoveProject
-                    canNavigateProject
                     collapsed={collapsed}
                     isSelected={false}
                     sessionsForProject={
@@ -1063,7 +1062,6 @@ function ProductionLikeTopContent({
                   machineName="MacBook Pro"
                   project={project}
                   canRemoveProject
-                  canNavigateProject
                   collapsed={collapsed}
                   isSelected={false}
                   sessionsForProject={[] as SessionMeta[]}
