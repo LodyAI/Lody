@@ -13,11 +13,11 @@ Translation: current
 - **两类入口共用流程，分别验收。** 新对话保持预留 session ID 和可返回的待发送入口；已有对话冻结本轮配置并接入现有 direct/queue/guide，不改变正在执行的上一轮。
 - **重试、退出和恢复不丢内容、不重复提交。** 固定 turn ID，区分本地接受、持久化与 Daemon 接收；结果未知先核对。关闭/刷新保护覆盖未完成任务，移动端恢复后确认重试，不承诺应用退出后继续上传。
 - **建议分阶段用 Effect 管理任务与资源。** 先抽提交边界，再接管资源，再完善提交/投递，最后同时交付两类入口的 draft。前三步保留添加即传的时机；组件保留普通接口，Effect 留在 workspace 服务内部。持久化、跨窗口互斥与提交结果核对仍需明确实现。
-- **当前 PR 只落实 draft 生命周期。** 复用现有云端上传、本机 handoff、fallback 和 backfill 语义；原路径直引、永久零上传及相关协议/Daemon 改动属于[独立后续 PR](local-attachment-references.zh.md)，不作为本 PR 的依赖。长文本转文件和图片编辑器也不在本版。本文仍为待审阅草稿，尚未实现。
+- **当前 PR 只落实 draft 生命周期。** 复用现有云端上传、本机 handoff、fallback 和 backfill 语义；原路径直引、永久零上传及相关协议/Daemon 改动属于[独立后续 PR](local-attachment-references.zh.md)，不作为本 PR 的依赖。长文本转文件和图片编辑器也不在本版。四层实现已可审阅；本文仍为 draft，打包设备验收尚未完成。
 
 ## 1. 场景与 PR 范围
 
-用户在新对话输入页或已有对话输入框里添加附件，发送前可检查和修改草稿。点击发送后转为本机待发送消息，允许用户去处理其他会话；全部附件传输确认后再进入真正的发送链路。返回原会话可查看进度、失败原因或重试。
+用户在新对话输入页或已有对话输入框里添加附件，发送前可检查和修改草稿。点击发送后先把整条消息保存为本机待发送记录，并立刻进入其对话页；全部附件传输确认后再进入真正的发送链路。待发送项占用该对话中普通用户消息的位置，每个附件直接显示进度，消息层显示等待发送状态；不另做待发送页面或输入框面板。返回原会话可查看进度、失败原因或重试。
 
 “离开会话”指同一承载页面内导航；“离开页面”包括关闭、刷新、外站跳转或应用销毁 runtime。前者继续处理，后者须提示。附件服务可以先接收文件，但不能提前让 Agent 执行这条消息；已有任务和无执行副作用的启动预热不受影响。
 
@@ -163,9 +163,9 @@ guide 冻结所指向的 assistant turn。准备完成前该 turn 已结束且�
 
 | 位置/阶段            | 展示与行为                                             |
 | -------------------- | ------------------------------------------------------ |
-| 输入框附件           | 待准备 / 待上传；支持移除和发送前替换来源              |
-| 本机准备             | “正在准备文件 · 尚未发送”，完成条件沿用现有 handoff    |
-| 远程传输             | “文件上传中，消息尚未发送”，逐附件进度及可信字节总量   |
+| 输入框附件           | 发送前展示 draft，可移除、替换                          |
+| 本机准备             | 立即进入对话页；待发送用户消息显示“正在等待发送”，每个附件直接显示准备进度 |
+| 远程传输             | 同一条待发送用户消息显示“正在等待发送 · 正在上传附件”，每个附件直接显示上传进度 |
 | 服务端确认           | “正在校验文件”，即使字节传输为 100%                    |
 | 失败                 | 明确失败附件与原因，整条消息保留“重试 / 取消发送”      |
 | 结果未知             | “正在确认发送结果”；不能显示“Daemon 尚未收到”          |
@@ -364,3 +364,11 @@ CLI Agent / backfill：各自运行，不是 renderer Scope 的子任务
 - Effect 官方 3.18.4 API 源码：[Scope/fiber 归属](https://github.com/Effect-TS/effect/blob/effect%403.18.4/packages/effect/src/Effect.ts)、[Promise 与取消信号](https://github.com/Effect-TS/effect/blob/effect%403.18.4/packages/effect/src/Effect.ts)、[ManagedRuntime](https://github.com/Effect-TS/effect/blob/effect%403.18.4/packages/effect/src/ManagedRuntime.ts)、[TestClock](https://github.com/Effect-TS/effect/blob/effect%403.18.4/packages/effect/src/TestClock.ts)。实际实验使用临时安装的 3.18.4，未修改仓库依赖。
 
 - 本轮生命周期证据：`packages/components/src/components/chat/submission/use-composer-submission.ts:44`；`hooks/use-session-preparation.ts:113`；`components/sessions/{session-detail.tsx:1979,session-chat-interface.tsx:2394}`；`providers/{workspace-writer-impl.ts:76,create-workspace-runtime.ts:3854,store-ref-tracker.ts:212}`（后四组前缀均为 `packages/components/src/`）。CLI 边界：`apps/cli/src/session/{session-preparation-service.ts:142,session-dispatch-watcher.ts:681,turn-history-gate.ts:5}`。
+
+## 实现证据与兼容性
+
+实现栈依次接入 Promise 提交边界、Effect 资源所有权、持久化提交记录和发送时附件准备。本地记录写入 version 2，包含附件 Blob 快照，并兼容读取 version 1。旧版读取器拒绝 version 2，不能把缺少附件的输入直接发送。回滚必须保留记录并使用兼容读取器。原始副本标识记录实际生成 CRDT 操作的窗口，不能假定它总是接管输入的窗口。
+
+添加附件不触发传输。已接管附件的源数据可在 renderer 重启后恢复；恢复只展示确认重试入口，不自动发送旧消息。已成功附件复用结果；目标确认接收后释放源 Blob 引用，孤立上传仍由现有服务清理。取消新会话第一条消息时，将建会话信息转交下一条已保存消息，保持入口可达。
+
+确定性测试覆盖部分成功后的失败、迟到取消、跨连接取消保护、持久化源文件、取消第一条消息、原操作重放及最新计费检查。仓库检查属于实现证据；打包桌面、多窗口真实网络和另一个仓库中的原生移动壳仍需设备验收。

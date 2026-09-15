@@ -109,4 +109,14 @@ public-boundary 检查及文档检查分别通过。已运行 `pnpm format` 并�
 
 Layer 3 validation: full `TMPDIR=/private/tmp NODE_ENV=test pnpm check` passes, including 479 component files / 3,670 tests. Queue preparation uses the existing WorkspaceWriter and retains queue format. `pnpm format` and docs check completed; docs report zero errors. No packaged-device acceptance is claimed.
 
+## 第四层实现
+
+第三层已提交 [#709](https://github.com/LodyAI/Lody/pull/709)，基于 #707。第四层让首页、已有及子对话输入框都在 Send 后才准备附件。IndexedDB 确认保存不可变 Blob 快照后释放输入框，本地元数据覆盖层保持新对话入口可达，不提前发布。共用逐文件结果保存、重试、取消和同会话顺序；准备完成后重新检查当前资格。导航或偏好保存失败不能把已接管消息变回可重复发送的草稿，活动更新也不能提前写入残缺的新会话。
+
+预热取消等待原启动及清理结束。持久化取消保护跨窗口迟到结果，取消第一条消息会把建会话信息交给下一条；后续接管也保存该信息，覆盖取消与下一条保存同时发生的情况。version 2 阻止旧读取器发送不完整输入；与操作一起保存实际准备窗口的副本标识。已经结束的 Guide 目标改为后续输入；先前提交结果未知时只核对，不再次 offer。
+
+待发送展示属于对话消息流，不能另做恢复卡片或输入框队列。点击发送后，新对话立即打开，已有对话留在当前页。在 history 可提交前，本机待发送记录按普通、右对齐的用户消息行渲染：附件预览/卡片各自显示准备或上传进度，消息行说明正在等待发送；失败仍保留同一行并提供重试/取消。这样用户始终在原消息上下文中看到状态，不会看到同一条输入被拆到无关的第二个区域。
+
+验证：最终 `TMPDIR=/private/tmp NODE_ENV=test pnpm check` 通过，含 480 个组件测试文件、3,677 项测试；随后资源与预热定向测试 9 项及组件类型检查通过，覆盖空闲预热不触发未保存输入提示。重排及并发接管修正后，定向测试 60 项和组件类型检查通过。根格式化、组件 Prettier 和文档检查完成，文档零错误。打包设备、多窗口真实网络及原生移动壳尚未验收；本文仍为 proposed，不推断人工批准。
+
 跨窗口接管时记录实际准备操作的副本；接管输入的窗口不一定拥有原操作基线。确定性 journal 测试覆盖此恢复边界。

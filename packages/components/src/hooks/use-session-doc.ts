@@ -1,9 +1,10 @@
+import { buildDraftUserHistoryEntry } from '@/lib/session-attachment-draft';
+import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import { acceptSessionUserTurn } from '../lib/session-send-admission';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { arrayMove } from '@dnd-kit/sortable';
 import {
   getServerNow,
-  buildPendingUserHistoryEntry,
   normalizeSessionInputBlocks,
   normalizeSessionTurnInputConfig,
   type MessageQueueItem,
@@ -47,6 +48,7 @@ export type PushMessageQueueInput = Omit<
   editingStartedAt?: number;
   timestamp?: string;
   userTurnId?: string;
+  attachments?: SessionAttachmentDraft[];
 };
 
 export type UseSessionDocResult = {
@@ -60,7 +62,11 @@ export type UseSessionDocResult = {
   history: ConversationView | null;
   addHistory: (
     history: Omit<SessionHistoryInput, 'id'> & { id?: string },
-    options?: { dispatch?: boolean; guideExpectedTurnId?: string }
+    options?: {
+      dispatch?: boolean;
+      guideExpectedTurnId?: string;
+      attachments?: SessionAttachmentDraft[];
+    }
   ) => Promise<{ entry: SessionHistory }>;
   pushMessageQueue: (item: PushMessageQueueInput) => Promise<void>;
   removeMessageQueueItem: (cid: string) => Promise<void>;
@@ -266,15 +272,28 @@ export function useSessionDoc(
   const addHistory = useCallback(
     async (
       item: Omit<SessionHistoryInput, 'id'> & { id?: string },
-      writeOptions?: { dispatch?: boolean; guideExpectedTurnId?: string }
+      writeOptions?: {
+        dispatch?: boolean;
+        guideExpectedTurnId?: string;
+        attachments?: SessionAttachmentDraft[];
+      }
     ) => {
       if (!runtime) {
         throw new Error('Runtime not ready');
       }
       const entry = { ...item, id: item.id ?? uuidv4() } as SessionHistory;
       if (entry.role === 'user') {
-        await acceptSessionUserTurn(runtime, sessionId, entry,
-          writeOptions?.guideExpectedTurnId ? { kind: 'guide', expectedTurnId: writeOptions.guideExpectedTurnId } : { kind: writeOptions?.dispatch ? 'dispatch' : 'queue' });
+        await acceptSessionUserTurn(
+          runtime,
+          sessionId,
+          entry,
+          writeOptions?.guideExpectedTurnId
+            ? { kind: 'guide', expectedTurnId: writeOptions.guideExpectedTurnId }
+            : { kind: writeOptions?.dispatch ? 'dispatch' : 'queue' },
+          undefined,
+          undefined,
+          writeOptions?.attachments
+        );
         return { entry };
       }
       if (writeOptions?.dispatch) {
@@ -316,15 +335,26 @@ export function useSessionDoc(
 
       const inputConfig = normalizeSessionTurnInputConfig(entry.acpSessionConfig);
       const userTurnId = entry.userTurnId ?? uuidv4();
-      const pendingTurn = buildPendingUserHistoryEntry({
-        userId: entry.userId,
-        inputBlocks: normalizeSessionInputBlocks(inputConfig?.inputBlocks, entry.task),
-        timestamp: entry.timestamp,
-        inputConfig,
-      });
+      const { attachments, ...wireEntry } = { ...entry, attachments: item.attachments };
+      const pendingTurn = buildDraftUserHistoryEntry(
+        {
+          userId: entry.userId,
+          inputBlocks: normalizeSessionInputBlocks(inputConfig?.inputBlocks, entry.task),
+          timestamp: entry.timestamp,
+          inputConfig,
+        },
+        attachments
+      );
       if (!pendingTurn) throw new Error('Queued message has no effective input');
-      await acceptSessionUserTurn(runtime, sessionId, { ...pendingTurn, id: userTurnId } as SessionHistory,
-        { kind: 'queue' }, undefined, { ...entry, userTurnId });
+      await acceptSessionUserTurn(
+        runtime,
+        sessionId,
+        { ...pendingTurn, id: userTurnId } as SessionHistory,
+        { kind: 'queue' },
+        undefined,
+        { ...wireEntry, userTurnId },
+        attachments
+      );
     },
     [runtime, sessionId]
   );

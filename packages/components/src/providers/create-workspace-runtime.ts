@@ -168,6 +168,11 @@ export function resolveWorkspaceRuntimeCacheIdentity(
 }
 
 type RuntimeDeps = {
+  getSendAdmissionContext?: () => {
+    entitlement?: import('@lody/shared').BillingQuotaEntitlement;
+    sessionCount: number | null;
+  };
+
   accountId?: string | null;
   /**
    * Used for caching the (slug, id) mapping in localStorage.
@@ -3369,7 +3374,9 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     }
   };
 
+  let sendLocalMachineId: MachineId | null = null;
   const setLocalMachineId = (machineId: MachineId | null) => {
+    sendLocalMachineId = machineId;
     targetRouter.setLocalMachineId(machineId);
   };
 
@@ -4622,29 +4629,50 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     acquire: sessionStoreCache.acquire,
     releaseRef: sessionStoreCache.releaseRef,
   });
-  const sendJournal = deps.accountId ? createWorkspaceSessionSendJournal({
-    accountId: deps.accountId,
-    sourceReplica: cacheIdentity.repoDbName,
-    runtime: { workspaceId, repo, writer: workspaceWriter, sendResources, requestSessionDispatchTurn, requestSessionSteer },
-    waitForTargetSync: async (sessionId, signal) => {
-      await waitForPromiseOrAbort(transportReady.promise, signal);
-      throwIfSendAborted(signal);
-      await targetRouter.prepareSessionTarget(sessionId);
-      throwIfSendAborted(signal);
-      const roomId = getSessionRoomId(sessionId);
-      const plane = targetRouter.getReadinessTransportForRoom({ kind: 'doc', id: roomId });
-      // Imported prepared operations do not emit subscribeLocalUpdates. Explicit
-      // sync exports the missing operations and reuses the transport's room.
-      // Upstream sync races its AbortSignal without joining raw stream.sync();
-      // omit that signal here so our owner retains dependencies until it settles.
-      const report = await repo.sync({ scope: 'full', docIds: [roomId], flockDocIds: [], requireTransports: [plane] });
-      throwIfSendAborted(signal);
-      if (!report.transports.some((transport) => transport.transportId === plane && transport.ok) ||
-          targetRouter.getReadinessTransportForRoom({ kind: 'doc', id: roomId }) !== plane) {
-        throw new Error('Target synchronization is not confirmed');
-      }
-    },
-  }) : null;
+  const sendJournal = deps.accountId
+    ? createWorkspaceSessionSendJournal({
+        accountId: deps.accountId,
+        getAdmissionContext: deps.getSendAdmissionContext,
+        token: () => authToken,
+        localMachineId: () => sendLocalMachineId,
+        sourceReplica: cacheIdentity.repoDbName,
+        runtime: {
+          workspaceId,
+          repo,
+          writer: workspaceWriter,
+          sendResources,
+          requestSessionDispatchTurn,
+          requestSessionSteer,
+        },
+        waitForTargetSync: async (sessionId, signal) => {
+          await waitForPromiseOrAbort(transportReady.promise, signal);
+          throwIfSendAborted(signal);
+          await targetRouter.prepareSessionTarget(sessionId);
+          throwIfSendAborted(signal);
+          const roomId = getSessionRoomId(sessionId);
+          const plane = targetRouter.getReadinessTransportForRoom({ kind: 'doc', id: roomId });
+          // Imported prepared operations do not emit subscribeLocalUpdates. Explicit
+          // sync exports the missing operations and reuses the transport's room.
+          // Upstream sync races its AbortSignal without joining raw stream.sync();
+          // omit that signal here so our owner retains dependencies until it settles.
+          const report = await repo.sync({
+            scope: 'full',
+            docIds: [roomId],
+            flockDocIds: [],
+            requireTransports: [plane],
+          });
+          throwIfSendAborted(signal);
+          if (
+            !report.transports.some(
+              (transport) => transport.transportId === plane && transport.ok
+            ) ||
+            targetRouter.getReadinessTransportForRoom({ kind: 'doc', id: roomId }) !== plane
+          ) {
+            throw new Error('Target synchronization is not confirmed');
+          }
+        },
+      })
+    : null;
   return {
     workspaceSlug: deps.workspaceSlug,
     workspaceId,
