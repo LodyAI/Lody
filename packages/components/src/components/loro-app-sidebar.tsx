@@ -1857,26 +1857,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     [closeMobileDrawer, router, workspaceSlug]
   );
 
-  // Unlike the row click, which keeps whatever draft the landing already holds,
-  // this starts the project's chat from scratch via the landing's reset lever.
-  const handleNewChatInProject = useCallback(
-    (machineId: MachineId, localProjectId: string) => {
-      if (!workspaceSlug) return;
-      closeMobileDrawer();
-      void router.navigate({
-        to: '/$workspaceName/chat',
-        params: { workspaceName: workspaceSlug },
-        search: {
-          context: 'local' as const,
-          machine: machineId,
-          project: localProjectId,
-          resetDraftKey: Date.now().toString(36),
-        },
-      });
-    },
-    [closeMobileDrawer, router, workspaceSlug]
-  );
-
   const handleOpenProjectSettings = useCallback(
     (machineId: MachineId, localProjectId: string) => {
       closeMobileDrawer();
@@ -2478,7 +2458,9 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
                         isMobile={isMobile}
                         toggleLabel={toggleLabel}
                         onNavigateProject={handleNavigateToProject}
-                        onNewChatInProject={handleNewChatInProject}
+                        // New Chat selects a target; it must not fork or clear
+                        // the workspace-owned Chat Landing draft.
+                        onNewChatInProject={handleNavigateToProject}
                         onOpenProjectSettings={handleOpenProjectSettings}
                         onRevealProject={
                           isElectron && machineId === localMachineId

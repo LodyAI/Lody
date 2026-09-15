@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import {
   buildPendingUserHistoryEntry,
   buildSessionPreparationRunConfig,
@@ -206,10 +206,7 @@ import {
   arePersistedMentionRangesEqual,
   toPersistedMentionRanges,
 } from '@/components/mentions/mention-persistence';
-import {
-  buildChatLandingDraftKey,
-  chatLandingAppliedResetKeyAtomFamily,
-} from '@/atoms/chat-landing-draft';
+import { buildChatLandingDraftKey } from '@/atoms/chat-landing-draft';
 import { useChatLandingImageDraft } from '@/hooks/use-chat-landing-image-draft';
 import { useChatLandingFileDraft } from '@/hooks/use-chat-landing-file-draft';
 import { useChatLandingDraftSession } from '@/hooks/use-chat-landing-draft-session';
@@ -391,8 +388,6 @@ interface ChatLandingProps {
    * chat route only; mobile keeps its base-context model.
    */
   onSelectionUrlSync?: (search: ChatLandingSearch) => void;
-  resetDraftKey?: string;
-  resetDraftOnKeyChange?: boolean;
 }
 
 const getGitHubOwnerHandle = (fullName: string): string => {
@@ -568,8 +563,6 @@ function WorkspaceChatLanding({
   preSelectedProject,
   preSelectedRepo,
   onSelectionUrlSync,
-  resetDraftKey,
-  resetDraftOnKeyChange = true,
 }: ChatLandingProps) {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
@@ -1329,38 +1322,6 @@ function WorkspaceChatLanding({
     sessionId: draftSessionId,
     ensureSessionId: ensureDraftSessionId,
   });
-  const draftStore = useStore();
-  const appliedResetKeyAtom = chatLandingAppliedResetKeyAtomFamily(chatLandingDraftKey);
-
-  useEffect(() => {
-    if (!resetDraftKey) {
-      return;
-    }
-
-    const scopedResetKey = `${chatLandingDraftKey}:${resetDraftKey}`;
-    if (draftStore.get(appliedResetKeyAtom) === scopedResetKey) {
-      return;
-    }
-    draftStore.set(appliedResetKeyAtom, scopedResetKey);
-    if (resetDraftOnKeyChange) {
-      setSessionState({ prompt: '', pastedTextDrafts: [] });
-    }
-    setComposerStatus(null);
-    clearPendingImages();
-    clearPendingFiles();
-    resetDraftSessionId();
-  }, [
-    appliedResetKeyAtom,
-    chatLandingDraftKey,
-    clearPendingFiles,
-    clearPendingImages,
-    draftStore,
-    resetDraftSessionId,
-    resetDraftKey,
-    resetDraftOnKeyChange,
-    setSessionState,
-  ]);
-
   const insertLargePastedTextAtSelection = useCallback(
     (text: string) => {
       const normalizedText = normalizePastedTextDraft(text).trim();

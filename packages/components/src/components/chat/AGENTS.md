@@ -61,6 +61,9 @@ Index and rationale: [README.md](README.md).
   window launch relationship. Keep the reserved session id and attachments
   in module-level atoms. Route unmount neither revokes previews nor aborts uploads;
   revoke/abort only on removal/full draft clear. App restart may lose attachments.
+- Every new-chat entry point within a workspace reuses that one landing draft. Project
+  selection may change, but navigation MUST NOT clear or replace Composer content;
+  only an accepted submit or an explicit user removal may release draft resources.
 - Submit immediately hides and disables the visible landing draft but preserves
   its controlled text, attachment resources, and reserved session id until
   `startSession` accepts. Failure must reveal the unchanged draft; only acceptance

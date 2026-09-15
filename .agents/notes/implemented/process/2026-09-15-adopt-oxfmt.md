@@ -36,8 +36,14 @@ unchanged. The original community commits remain in the branch history.
 
 The existing recursive Oxfmt checks pass for CLI, Electron, and cloud-api. Two route
 generation runs produce the same SHA-256 and no change from the committed route tree.
-Workspace typecheck and type-aware lint pass, as do all 112 Electron tests and the
-documentation check. The full `pnpm check` was stopped during the component test
-suite after typecheck, lint, and earlier tests passed; it is not a full-suite pass.
-Publication was not tested. This change alone does not publish or repair
+Final workspace typecheck, quick checks, and all 118 Electron tests pass. The full
+`pnpm check` passed 3,690 component tests and 2,835 CLI tests, but exited nonzero on
+five gh-shim tests: an unrelated temporary-directory package marked generated
+CommonJS shims as ESM. All seven tests in that unchanged file pass with an isolated
+CommonJS temporary directory. The latest main integration's 82 focused draft tests
+also pass. This is combined verification, not a clean full-command exit.
+The public frozen lockfile validates; a real parent-workspace installation resolves
+Oxfmt 0.65.0 in all four consuming packages. Independent reviews found no remaining
+P0/P1 after fixing local dependency ownership and disabling the Prettier ESLint rule.
+Publication and packaged-artifact inspection were not tested. This change alone does not publish or repair
 already-created release artifacts.
