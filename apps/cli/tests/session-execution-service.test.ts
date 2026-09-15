@@ -5633,6 +5633,8 @@ describe('SessionExecutionService', () => {
     ).resolves.toEqual({ success: true });
     await continuePromise;
 
+    expect(session.terminate).toHaveBeenCalledWith(true);
+
     const nextMessage = {
       ...firstMessage,
       userTurnId: 'turn-after-interrupt',

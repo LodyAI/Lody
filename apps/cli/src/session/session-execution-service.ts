@@ -3024,6 +3024,7 @@ export class SessionExecutionService {
             const bindSession = (nextSession: ISession): void => {
               runtime.session = nextSession;
               runtime.pendingSession = undefined;
+              runtime.terminateSessionOnCancel = true;
             };
 
             const trackPendingSession = (
