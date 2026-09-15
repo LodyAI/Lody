@@ -3,11 +3,11 @@ import { describe, expect, it } from 'vitest';
 import { normalizeTexMathDelimiters } from '../src/lib/markdown-single-dollar-math';
 
 describe('normalizeTexMathDelimiters', () => {
-  it('normalizes complete inline and display pairs without shifting Unicode text', () => {
+  it('normalizes complete display pairs without shifting Unicode text', () => {
     const markdown = ['😀 before \\(x_i\\).', '', '\\[', 'y = \\boxed{1}', '\\]'].join('\n');
 
     expect(normalizeTexMathDelimiters(markdown)).toBe(
-      ['😀 before $$x_i$$.', '', '$$', 'y = \\boxed{1}', '$$'].join('\n')
+      ['😀 before \\(x_i\\).', '', '$$', 'y = \\boxed{1}', '$$'].join('\n')
     );
   });
 
@@ -17,8 +17,8 @@ describe('normalizeTexMathDelimiters', () => {
     expect(normalizeTexMathDelimiters(markdown)).toBe(markdown);
   });
 
-  it('does not let an incomplete inline delimiter suppress a later formula', () => {
-    const markdown = ['incomplete \\(y', 'next \\(z\\)'].join('\n');
+  it('does not let inline delimiters suppress a later display formula', () => {
+    const markdown = ['incomplete \\(y', 'next \\[z\\]'].join('\n');
 
     expect(normalizeTexMathDelimiters(markdown)).toBe(['incomplete \\(y', 'next $$z$$'].join('\n'));
   });
@@ -36,9 +36,7 @@ describe('normalizeTexMathDelimiters', () => {
       '\\(outside\\)',
     ].join('\n');
 
-    expect(normalizeTexMathDelimiters(markdown)).toBe(
-      ['`\\(inline\\)`', '', '~~~tex', '\\[', 'display', '\\]', '~~~', '', '$$outside$$'].join('\n')
-    );
+    expect(normalizeTexMathDelimiters(markdown)).toBe(markdown);
   });
 
   it('leaves delimiters inside four-column indented code unchanged', () => {
@@ -46,9 +44,7 @@ describe('normalizeTexMathDelimiters', () => {
       '\n'
     );
 
-    expect(normalizeTexMathDelimiters(markdown)).toBe(
-      ['    \\(space_indented\\)', '\t\\[tab_indented\\]', '', '$$outside$$'].join('\n')
-    );
+    expect(normalizeTexMathDelimiters(markdown)).toBe(markdown);
   });
 
   it('leaves delimiters inside container-nested fenced code unchanged', () => {
@@ -90,7 +86,7 @@ describe('normalizeTexMathDelimiters', () => {
         '    \\(ordered_list_literal\\)',
         '    ```',
         '',
-        '$$outside$$',
+        '\\(outside\\)',
       ].join('\n')
     );
   });
