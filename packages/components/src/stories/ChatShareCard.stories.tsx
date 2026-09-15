@@ -206,6 +206,50 @@ const codeHeavyMessages: ChatShareCardMessage[] = [
   },
 ];
 
+// A fenced `diff` renders through `MarkdownDiffBlock`, whose `pre` sets
+// `width: max-content` so a wide patch can scroll inside the app. Nothing else
+// in this file exercises that path, which is how a clipped diff block reached
+// review.
+const diffMessages: ChatShareCardMessage[] = [
+  {
+    id: 'share-diff-user',
+    role: 'user',
+    text: '你改了哪几行？',
+  },
+  {
+    id: 'share-diff-assistant',
+    role: 'assistant',
+    text: [
+      '就两处，一处是签名，一处是调用点：',
+      '',
+      '```diff',
+      '-export async function exportShareImage(element: HTMLElement, title: string | undefined, fallback: string): Promise<void> {',
+      '+export async function exportShareImage(element: HTMLElement, title: string | undefined, fallback: string): Promise<{ saved: boolean }> {',
+      '   const blob = await captureShareImage(element);',
+      '-    return;',
+      '+    return { saved: result.saved === true };',
+      '   }',
+      '```',
+    ].join('\n'),
+  },
+];
+
+export const DiffBlock: Story = {
+  args: {
+    title: '导出契约',
+    messages: diffMessages,
+    destination: 'post',
+    mat: 56,
+    theme: 'light',
+    backdrop: 'lody',
+    meta: demoMeta,
+  },
+};
+
+export const DiffBlockChat: Story = {
+  args: { ...DiffBlock.args, destination: 'chat', mat: 16 },
+};
+
 export const LongCodeLines: Story = {
   args: {
     title: '并发 helper review',

@@ -81,7 +81,13 @@ Translation: current
 完全没有底的卡片走同一条回退路径——卡片的投影也一并去掉，因为投影需要一个落得下的地面。
 
 代码软换行改为无条件生效。图片没有横向滚动条，一行不换行就等于读者看不到的一行；这
-是媒介的属性，不是偏好。配套的 `collapseAfter` 控件随之删除，同时删掉的还有一个
+是媒介的属性，不是偏好。要让这句话真正成立需要两条声明而不是一条，而第二条直到 review
+才被发现：fenced `diff` 走的是 `MarkdownDiffBlock`，它的 `pre` 设了
+`width: max-content`，好让宽 patch 在 App 里横向滚动。只放开 `min-width` 会把那个
+`width` 留在原地，而 `pre-wrap` 下的 `max-content` 仍然是最宽的那一行——于是 diff 块保
+持完整的未换行宽度，顶出卡片的固定边界，被卡片自己的 `overflow-hidden` 裁掉。也就是
+说，"代码永远不会溢出分享卡片"这句话在写下的时候，对其中一种 fence 是假的。现在 Story
+在两种尺寸下都带了一个 `diff` fence；此前一个都没有，这正是截图没能发现它的原因。配套的 `collapseAfter` 控件随之删除，同时删掉的还有一个
 `MutationObserver`——它在每次渲染后改写 Shiki 的代码 DOM 来裁剪过高的代码块并注入
 "+N 行"药丸标签，等于在和渲染器争夺并不属于它的节点。
 

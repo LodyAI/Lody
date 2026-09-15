@@ -117,7 +117,16 @@ to fall on.
 
 Code soft-wrapping became unconditional. An image has no horizontal scrollbar, so
 an unwrapped line is a line the reader cannot see; that is a property of the
-medium, not a preference. The paired `collapseAfter` control went with it, and
+medium, not a preference. Making that true took two declarations, not one, and
+the second was missed until review: a fenced `diff` renders through
+`MarkdownDiffBlock`, whose `pre` sets `width: max-content` so a wide patch can
+scroll inside the app. Relaxing only `min-width` left that `width` standing, and
+`max-content` under `pre-wrap` is still the widest line, so a diff block kept its
+full unwrapped width, pushed past the card's fixed edge and was clipped by the
+card's own `overflow-hidden`. The claim "code never overflows a share card" was
+therefore false for one fence type while it was being written. Stories now carry a
+`diff` fence in both sizes; none did before, which is exactly why screenshots did
+not catch it. The paired `collapseAfter` control went with it, and
 with it a `MutationObserver` that rewrote Shiki's code DOM after every render to
 clip over-tall blocks and inject a "+N lines" pill — a mechanism that fought the
 renderer for ownership of nodes it did not own.

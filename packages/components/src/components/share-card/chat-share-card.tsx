@@ -241,6 +241,15 @@ const CODE_LABEL_CLEARANCE = '1.5rem';
  * an unwrapped line is simply a line the reader cannot see. Soft-wrapping is a
  * property of the medium, not a preference, so it is not a prop.
  *
+ * Wrapping needs `width` reset as well as `min-width`, because of one block that
+ * sets both. A fenced `diff` renders through `MarkdownDiffBlock`, whose `pre`
+ * takes `width: max-content` so a wide patch can scroll inside the app. Relaxing
+ * only `min-width` leaves that `width` intact, and `max-content` under
+ * `pre-wrap` is still the widest line — so the block kept its full unwrapped
+ * width, pushed past the card's fixed edge, and was clipped by the card's own
+ * `overflow-hidden` rather than wrapping. Found in review, not in a screenshot:
+ * none of the stories had a `diff` fence.
+ *
  * The language label is an opaque mask parked over the block's top-right corner,
  * which works in the app because a long first line scrolls out from under it. A
  * wrapped line never scrolls, so it would stay masked forever; a labelled block
@@ -258,7 +267,7 @@ const CODE_LABEL_CLEARANCE = '1.5rem';
  */
 const CODE_CSS = [
   `.${CODE_SCOPE} .markdown-renderer [data-streamdown=code-block-body] pre` +
-    '{min-width:0;white-space:pre-wrap;overflow-wrap:anywhere;}',
+    '{width:auto;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere;}',
   `.${CODE_SCOPE} .markdown-renderer [data-streamdown=code-block][data-language]:not([data-language=''])` +
     ` [data-streamdown=code-block-body] pre{padding-block-start:${CODE_LABEL_CLEARANCE};}`,
   `.${CODE_SCOPE} .markdown-renderer [data-streamdown=code-block-actions]{display:none;}`,
