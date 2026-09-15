@@ -22,6 +22,8 @@ behavior.
 | `src/card`          | The card rung as a component: a block of a page, and its tokens      |
 | `src/badge`         | A standing fact about the thing beside it, on no rung at all         |
 | `src/separator`     | The one line the rules allow: between the rows of a list or a table  |
+| `src/icons`         | The icon set: one 24 grid, four treatments of each drawing, and the icons that move between two states |
+| `playground`        | The icon playground: a standalone Vite page for searching, scaling, recolouring and copying the set |
 | `src/gallery`       | The token board: every token and primitive state, in both palettes  |
 | `stylex-options.ts` | Shared compiler configuration for source-consuming hosts            |
 
@@ -640,6 +642,21 @@ It renders each sample once per palette and reads its values back off the
 rendered nodes, so a token that changes shows its new value there without the
 board being edited. A new token or primitive state lands with its board entry;
 `test/gallery.test.tsx` fails when a token has no entry.
+
+The icon set has a page of its own instead, because the board answers the wrong
+question about it: a token has one value to show, and an icon has 90 drawings
+you need to search, size, recolour and take away. Run
+`pnpm --filter @lody/ui playground` and open the printed URL. It is a Vite
+server over `packages/ui/playground` with no Storybook under it: search the set,
+scale it from 12 to 64, switch the four treatments, recolour it through the
+semantic tones, and stand it on the page, raised, well and accent rungs — the
+accent rung is where you see that a glyph cuts a hole through a mask rather than
+painting its marks the panel's colour. Press an icon for its panel: the drawing
+enlarged on the 24 grid, every size at once, the import line, and `copy svg` for
+the markup a caller would paste. The stateful icons are at the bottom; press one
+to flip it, and turn on _slow motion_ to watch `--lody-icon-t` interpolate
+rather than infer it from the two ends. `playground:build` writes the same page
+to `playground/dist` when it has to be looked at somewhere else.
 
 Run `pnpm --filter @lody/ui typecheck` and `pnpm --filter @lody/ui test` after
 changing a primitive or token.
