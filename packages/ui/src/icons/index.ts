@@ -76,7 +76,6 @@ export const TagIcon = createIcon('tag', 'TagIcon');
 export const ReviewIcon = createIcon('review', 'ReviewIcon');
 export const ChecklistIcon = createIcon('checklist', 'ChecklistIcon');
 export const ForkIcon = createIcon('fork', 'ForkIcon');
-export const PullRequestClosedIcon = createIcon('pull-request-closed', 'PullRequestClosedIcon');
 export const CheckCircleIcon = createIcon('check-circle', 'CheckCircleIcon');
 export const XCircleIcon = createIcon('x-circle', 'XCircleIcon');
 export const WarningIcon = createIcon('warning', 'WarningIcon');

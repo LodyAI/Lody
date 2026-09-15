@@ -148,22 +148,21 @@ and `test/icons.test.tsx` holds it there. That is the guard the sidebar did not
 have: both of these corrections are a stateful icon and a static icon drifting
 apart, and where a state moves the whole drawing the drift is now impossible.
 
-**Sixteen more drawings, picked from what the product already reaches for.**
+**Fifteen more drawings, picked from what the product already reaches for.**
 `packages/components` imports 239 distinct icons from `lucide-react` across 295
 files, 2138 usages. Collapsed onto the drawings that would serve them, the set
-covered 78% of that before this change; the sixteen added here — `monitor`,
+covered 78% of that before this change; the fifteen added here — `monitor`,
 `alert-circle`, `users`, `circle`, `shield-alert`, `folder-plus`, `arrow-up`,
-`mail`, `wrench`, `undo`, `quote`, `save`, `image`, `pin-off`, `fork` and
-`pull-request-closed` — take it to 91%. `monitor` alone answers 52 usages, which
-is what a product about machines looks like from the icon layer.
+`mail`, `wrench`, `undo`, `quote`, `save`, `image`, `pin-off` and `fork` — take
+it to about 90%. `monitor` alone answers 52 usages, which is what a product
+about machines looks like from the icon layer.
 
 Three of them were redrawn after the first pass, and all three failed the same
 way — a shape that reads at 120px and not at 20. `quote` as a block with the
 tail notched out of a corner is a pair of counters by 20px; it is a hook now.
 `pin-off` broken into fragments the way `eye-off` breaks is not a pin; the pin
 stays whole and takes the line across it, because a pin has no centre for a
-line to be mistaken for. `pull-request-closed` had its cross floating two units
-clear of the branch it closes, so it read as two drawings.
+line to be mistaken for.
 
 `package` was dropped from the batch rather than drawn: a box with a lid is
 `archive` and an isometric one is `model`. And `folder-plus` and `users` lost
@@ -179,18 +178,34 @@ thing's**: `save` at 17 by 15 is a letterbox, and a disk is square, so it is 15
 by 15; `code` had 4.5 of chevron travel and a slash 4 wide, which bunched its
 mass in the middle and read narrow beside everything on its row. **A part that
 does not belong to the whole**: `folder-plus` carried the front-panel line as
-well as the cross, and the line splits the face the cross has to sit in;
-`pull-request-closed` drew its cross at an arrowhead's size with the branch
-stopping two units short, so the cross and the branch read as two drawings
-sharing a column — the cross is a node's size now and the branch runs up to
-meet it. And `fork` put its heads on 6.5 and 17.5 while `branch`, `merge` and
+well as the cross, and the line splits the face the cross has to sit in. And
+`fork` put its heads on 6.5 and 17.5 while `branch`, `merge` and
 `pull-request` put theirs on 7 and 17: symmetrical on its own, out of line the
 moment the family is read down a list, which is the only way a family is ever
 read.
 
-None of this is visible from a test, and none of it was visible at 120px. Four
-of the six read fine enlarged and failed at 20, which is the size they will be
+None of this is visible from a test, and none of it was visible at 120px. Most
+of them read fine enlarged and failed at 20, which is the size they will be
 used at.
+
+**`pull-request-closed` is withdrawn**, and the reason is worth keeping. It was
+substituted into the batch when `package` turned out to be `archive`, and it
+went through four drawings without arriving: a cross capping the branch, which
+leaves two columns with nothing between them and reads as two lollipops rather
+than a pull request; the branch run up into the cross to close that gap, which
+came out a spear; `pull-request`'s arm restored with a cross for its arrowhead,
+drawn at the size that fit the room left above the arm rather than the size a
+cross is in this set; and the same again at `x-circle`'s 5. The last was
+defensible and still not good enough to keep.
+
+The lesson is about the batch rather than the drawing. `pull-request-closed`
+answers four usages; everything else in the fifteen answers seven or more, and
+none of them needed more than one redraw. A drawing that has to say a _relation
+did not happen_ — not a thing, not a state — is a harder problem than four
+usages justify, and the honest move when `package` fell out of the batch was to
+draw fifteen, not to fill the slot from the ranked list because it was open.
+`packages/components` keeps `lucide-react`'s at those four sites, as it does for
+every icon this set has not taken over.
 
 ## Alternatives
 
