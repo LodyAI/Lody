@@ -57,6 +57,12 @@ Translation: current
   `not-applied` 的 steer；Edit & Resend、访问撤销和 cleanup 必须保持它。若 Stop 先于
   `applied` 结果发生，晚到结果不能转移 ownership，也不能重放该用户轮次。重复取消竞争时，
   第一次写入的策略生效。
+- pre-prompt ACP 生命周期独立于 pending input：Stop 选择 promote/discard，Edit & Resend
+  选择 preserve/keep，访问撤销选择 preserve/discard。Edit & Resend 必须保留持有 prepared
+  replacement 的进程。create/restore 原有的取消 fence 保持有效。
+- promotion 写入失败不能丢失已确认的未投递结论。CLI 返回 `promotion-failed` 和错误，不能
+  假装恢复成功或改报投递未知。客户端对已变成 pending/seen 的历史仍修复 dispatch，也支持
+  pending_apply 和旧服务返回的 `no-active-turn`。不得复活 active、terminal 或已删除的轮次。
 - foreground run configuration 归属其 turn 的 Effect signal。turn 被中断后，在途配置请求
   可以结束，但不得再发送后续配置 mutation，也不得持久化被中断 turn 的 runtime patch。
 - 已接受的 steer 标记在写入和读取归一化后都必须保留；编辑重发不能把 steer

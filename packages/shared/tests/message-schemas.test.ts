@@ -198,6 +198,16 @@ describe('message-schemas session steer', () => {
         type: 'session/steer_response',
         sessionId: 'session-1',
         userTurnId: 'user-2',
+        applied: false,
+        disposition: 'promotion-failed',
+        error: 'Activation write failed',
+      }).success
+    ).toBe(true);
+    expect(
+      SessionSteerResponseSchema.safeParse({
+        type: 'session/steer_response',
+        sessionId: 'session-1',
+        userTurnId: 'user-2',
         accepted: true,
         disposition: 'accepted',
       }).success

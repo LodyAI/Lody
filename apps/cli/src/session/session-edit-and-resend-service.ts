@@ -256,7 +256,7 @@ export class SessionEditAndResendService {
               workspaceId: this.deps.workspaceId as never,
               turnId: activeTurnId,
             },
-            { pendingInput: 'preserve' }
+            { pendingInput: 'preserve', prePromptSession: 'keep' }
           );
           if (!cancelled.success) {
             await this.closePrepared(runtime, preparedSessionId);

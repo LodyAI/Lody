@@ -1905,7 +1905,7 @@ export class SessionDispatchWatcher {
         workspaceId: this.deps.workspaceId,
         turnId: action.turnId,
       },
-      { pendingInput: 'promote' }
+      { pendingInput: 'promote', prePromptSession: 'discard' }
     );
     if (!isActive()) {
       return;

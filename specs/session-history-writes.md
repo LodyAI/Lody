@@ -78,6 +78,13 @@ That tolerance must not authorize creating new malformed items locally.
   provably `not-applied` steer; Edit & Resend, access revocation, and cleanup preserve it.
   If Stop wins while an `applied` result is pending, the late result must not transfer
   ownership or replay that user turn. The first cancellation policy wins repeated races.
+- Pre-prompt ACP lifetime is independent of pending input: Stop uses promote/discard,
+  Edit & Resend preserve/keep, and access revocation preserve/discard. Edit & Resend must
+  retain the process that owns its prepared replacement. Create/restore fences remain.
+- Proven non-delivery survives a promotion write failure. The CLI returns `promotion-failed`
+  with the error instead of implying successful recovery or unknown delivery. The renderer
+  repairs dispatch for already pending/seen history as well as pending_apply, including
+  legacy `no-active-turn` responses. Active, terminal, and removed turns cannot be revived.
 - Foreground run configuration belongs to its turn's Effect signal. Once that turn is
   interrupted, an in-flight configuration request may finish, but it must not issue a
   later configuration mutation or persist the interrupted turn's runtime patch.

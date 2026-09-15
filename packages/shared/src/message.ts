@@ -169,6 +169,8 @@ export interface SessionSteerResponse {
     | 'stale-turn'
     | 'busy'
     | 'delivery-unknown'
+    /** Proven undelivered, but durable promotion failed; clients may repair dispatch. */
+    | 'promotion-failed'
     | 'error';
   error?: string;
 }

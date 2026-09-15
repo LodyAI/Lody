@@ -1419,9 +1419,15 @@ export class SessionExecutionService {
       disposition: Exclude<SessionSteerResponse['disposition'], 'applied'>,
       error?: string
     ): Promise<SessionSteerResponse> => {
-      await this.requeueUndeliveredSteer(options.sessionId, options.userTurnId, {
-        canWriteHistory: true,
-      });
+      try {
+        await this.requeueUndeliveredSteer(options.sessionId, options.userTurnId, {
+          canWriteHistory: true,
+        });
+      } catch (promotionError) {
+        // Delivery is known even when its recovery write fails. Do not let the
+        // provider-submission catch below reclassify it as delivery-unknown.
+        return reject('promotion-failed', formatErrorMessage(promotionError));
+      }
       return reject(disposition, error);
     };
     const runtime = this.turnRuntimeBySession.get(options.sessionId);
@@ -1431,13 +1437,13 @@ export class SessionExecutionService {
     if (runtime.turnId !== options.expectedTurnId) {
       return await rejectAndPromote('stale-turn');
     }
-    if (!runtime.promptInFlight) {
-      return await rejectAndPromote('no-active-turn');
-    }
     if (runtime.cancelRequested) {
       return runtime.pendingInputOnCancel === 'promote'
         ? await rejectAndPromote('no-active-turn')
         : reject('stale-turn', 'The target turn was cancelled without promoting pending input');
+    }
+    if (!runtime.promptInFlight) {
+      return await rejectAndPromote('no-active-turn');
     }
     if (runtime.userTurnId === options.userTurnId) {
       return {
@@ -1469,15 +1475,15 @@ export class SessionExecutionService {
       ) {
         return await rejectAndPromote('stale-turn');
       }
-      // No provider request has been submitted yet, so this guide is still
-      // ours to run as an ordinary follow-up turn.
-      if (!runtime.promptInFlight) {
-        return await rejectAndPromote('no-active-turn');
-      }
       if (runtime.cancelRequested) {
         return runtime.pendingInputOnCancel === 'promote'
           ? await rejectAndPromote('no-active-turn')
           : reject('stale-turn', 'The target turn was cancelled without promoting pending input');
+      }
+      // No provider request has been submitted yet, so this guide is still
+      // ours to run as an ordinary follow-up turn.
+      if (!runtime.promptInFlight) {
+        return await rejectAndPromote('no-active-turn');
       }
       return null;
     };
@@ -1706,6 +1712,7 @@ export class SessionExecutionService {
           error
         )}`
       );
+      throw error;
     }
   }
 
@@ -3024,7 +3031,6 @@ export class SessionExecutionService {
             const bindSession = (nextSession: ISession): void => {
               runtime.session = nextSession;
               runtime.pendingSession = undefined;
-              runtime.terminateSessionOnCancel = true;
             };
 
             const trackPendingSession = (
@@ -3066,6 +3072,11 @@ export class SessionExecutionService {
                   !self.isTurnCancelled(sessionId, runtime.turnId) &&
                   !userTurnWasCancelled
                 ) {
+                  // A completed create/restore fence must not override a later
+                  // keep cancellation after a replacement has been prepared.
+                  if (cancelOptions?.terminateSession) {
+                    runtime.terminateSessionOnCancel = false;
+                  }
                   return undefined;
                 }
                 yield* self.finalizeCancelledTurnEffect({
@@ -5254,7 +5265,10 @@ export class SessionExecutionService {
 
   async cancelSession(
     message: SessionCancelRequestValidated,
-    options: { pendingInput?: PendingInputCancellationPolicy } = {}
+    options: {
+      pendingInput?: PendingInputCancellationPolicy;
+      prePromptSession?: 'discard' | 'keep';
+    } = {}
   ): Promise<{
     success: boolean;
     error?: string;
@@ -5358,6 +5372,12 @@ export class SessionExecutionService {
     if (runtime) {
       if (!runtime.cancelRequested) {
         runtime.pendingInputOnCancel = pendingInput;
+        // Config calls already sent to ACP can outlive the owner interruption.
+        // Stop discards that process; Edit & Resend keeps its prepared replacement.
+        // Creation/restoration retain their independent terminate-on-cancel fence.
+        if (!runtime.promptStarted && options.prePromptSession !== 'keep') {
+          runtime.terminateSessionOnCancel = true;
+        }
       }
       runtime.cancelRequested = true;
       if (runtime.finalizeStarted) {

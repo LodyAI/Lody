@@ -1931,7 +1931,7 @@ describe('SessionDispatchWatcher', () => {
         sessionId,
         turnId: 'assistant-turn-2',
       }),
-      { pendingInput: 'promote' }
+      { pendingInput: 'promote', prePromptSession: 'discard' }
     );
   });
 
@@ -2025,7 +2025,7 @@ describe('SessionDispatchWatcher', () => {
         sessionId,
         turnId: 'assistant-turn-2b',
       }),
-      { pendingInput: 'promote' }
+      { pendingInput: 'promote', prePromptSession: 'discard' }
     );
 
     resolveContinue?.();

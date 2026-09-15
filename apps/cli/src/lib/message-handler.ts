@@ -3261,7 +3261,7 @@ export class MessageHandler {
               turnId,
               subagentTaskId,
             },
-            { pendingInput: 'promote' }
+            { pendingInput: 'promote', prePromptSession: 'discard' }
           );
           return {
             type: 'session/cancel_response' as const,
@@ -6257,7 +6257,7 @@ export class MessageHandler {
             turnId: request.params.turnId,
             subagentTaskId: request.params.subagentTaskId,
           },
-          { pendingInput: 'promote' }
+          { pendingInput: 'promote', prePromptSession: 'discard' }
         );
         return {
           type: 'session/cancel_response' as const,
@@ -7628,7 +7628,7 @@ export class MessageHandler {
           sessionId,
           turnId,
         },
-        { pendingInput: 'preserve' }
+        { pendingInput: 'preserve', prePromptSession: 'discard' }
       );
     }
   }
@@ -7689,6 +7689,7 @@ export class MessageHandler {
     const { sessionId } = message;
     const result = await this.executionService.cancelSession(message, {
       pendingInput: 'promote',
+      prePromptSession: 'discard',
     });
     dispatchContext.send({
       type: 'session/cancel_response',

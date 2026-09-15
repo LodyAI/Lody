@@ -13,6 +13,9 @@ PR: [#693](https://github.com/LodyAI/Lody/pull/693)
 pending-input 策略。用户 Stop 只提升已证明 `not-applied` 的 steer；内部取消和未知投递保持原状。
 durable Session hold、Goal hold、Operation hold 和 Resume 明确不属于本决策。
 
+同一修复还将 pre-prompt 进程处置与 pending-input 策略分开，并使部分 promotion 可恢复，
+让 Edit & Resend 保住 prepared ACP 资源，避免 activation 写入失败卡住已经 pending 的输入。
+
 ## 决策
 
 `AgentClient.steerPrompt` 将投递结果解析为 `applied`、`not-applied` 或 `unknown`。Codex adapter
@@ -30,8 +33,24 @@ foreground ACP run configuration 接收 owner Effect 的 `AbortSignal`。配置�
 之间以及持久化 runtime patch 前检查该 signal，防止已中断 turn 在后继 turn 启动后继续发送
 后续 mutation。
 
+### 修正：进程 ownership 与部分 promotion
+
+无条件丢弃所有已 bind 的 pre-prompt Session 会杀掉 Edit & Resend 已准备的 replacement。
+取消现在独立选择 `prePromptSession`：Stop 和访问撤销使用 discard，Edit & Resend 使用 keep。
+create/restore 原有的取消 fence 保护尚未完成的初始化，完成后释放，不覆盖配置阶段后续的 keep。
+
+promotion 原先在历史已变成 pending 后吞掉 activation 写入失败。CLI 现在报告
+`promotion-failed`，不得把存储失败改判为 provider 投递未知。客户端对 pending/seen 与
+pending_apply 都可修复普通 dispatch，也支持旧的 no-active-turn 响应；active、terminal
+及已删除的轮次保持不变。
+
 ## 证据与边界
 
 行为测试覆盖 Codex `not-applied` 提升、晚到 `applied`、内部取消保持，以及两次配置 mutation
 之间的 Effect 中断。本次不新增持久化 hold 状态，不暂停 Goal 或 Operation，也不定义 durable
 Resume。
+配置 race 测试将真实 Session termination、Edit & Resend 和 execution service 连起来，
+只通过显式信号控制 ACP/OS 边界，验证退出前 ownership、client 清空及 replacement 在原进程
+内使用，同时覆盖 resident 与刚 restore 完的 session。故障注入覆盖历史 promotion 成功后
+activation 写入失败，以及客户端 dispatch 修复。
+这是确定性的生命周期测试，并非连接真实 provider 的端到端运行。
