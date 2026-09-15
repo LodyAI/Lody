@@ -22,5 +22,6 @@ KaTeX 块。定界符工具的覆盖保留了余下块级归一化对代码 span
 
 ## 验证
 
-待执行：该嵌套 checkout 未安装依赖，因此无法在此运行 components Vitest 套件和类型检查。最终验证前
-`pnpm run docs check` 受既有 ACP extension 子模块链接缺失阻断；已通过 `git diff --check`。
+两个受影响的 Vitest 文件已通过（42 个用例）；`pnpm --filter @lody/components typecheck`、修改文件的
+Oxfmt 检查、`pnpm run docs check` 和 `git diff --check` 也已通过。最初的 CI 失败源于测试错误地要求
+Markdown 保留圆括号字面文本前后的转义反斜杠；解析器正确地移除了这些转义。

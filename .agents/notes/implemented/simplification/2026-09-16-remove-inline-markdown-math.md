@@ -28,7 +28,8 @@ remaining display normalization.
 
 ## Verification
 
-Pending: dependency installation is not present in this nested checkout, so the
-components Vitest suite and typecheck could not be run here. `pnpm run docs check`
-is blocked by pre-existing missing ACP-extension submodule links. `git diff --check`
-passed before final verification.
+The two affected Vitest files passed (42 tests), as did
+`pnpm --filter @lody/components typecheck`, the changed-file Oxfmt check,
+`pnpm run docs check`, and `git diff --check`. The initial CI failure came from
+asserting that Markdown preserved the escape backslashes around literal
+parentheses; the parser correctly removes those escapes.

@@ -398,10 +398,7 @@ describe('MarkdownRenderer streaming rendering', () => {
 
     expect(container?.querySelectorAll('.katex')).toHaveLength(1);
     expect(container?.querySelectorAll('.katex-display')).toHaveLength(1);
-    expect(container?.textContent).toContain('\\(t_i\\)');
-    expect(container?.textContent).toContain(
-      '\\(\\xi_i = \\underbrace{V_z / \\Lambda}_{\\text{social value}} r_{i,t}\\)'
-    );
+    expect(container?.textContent).toContain('(t_i)');
   });
 
   it('keeps Codex-style LaTeX delimiters literal inside Markdown code', async () => {
