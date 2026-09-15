@@ -1,12 +1,15 @@
 import { readSessionHistory } from '@lody/shared/session-data';
 import {
   hashText,
-  hashHistoryEntry,
+  hashHistoryEntryV2,
+  hashHistoryForStoredVersion,
+  resolveImportHashVersion,
   resolveImportedTurnHashes,
   storedBaselineHashes,
   areStringArraysEqual,
   decideHistoryRefresh,
   decideHistoryConflictResolution,
+  HASH_VERSION,
   type HistoryConflictResolutionDecision,
   type HistoryImportInput,
 } from '@lody/shared/session-data';
@@ -103,6 +106,8 @@ export type MaterializedReplay = {
   turnHashes: string[];
   replayDigest: string;
   droppedNotifications: number;
+  /** Canonical-hash version `turnHashes`/`replayDigest` were computed with. */
+  hashVersion: number;
 };
 
 type HistoryCatalogSnapshot = {
@@ -124,7 +129,8 @@ function emptySummary(): LocalProjectHistorySyncSummary {
   };
 }
 
-function materializeReplay(args: {
+// Exported only for unit tests; do not call from outside this module.
+export function materializeReplay(args: {
   provider: LocalProjectHistoryProvider;
   acpSessionId: ACPSessionId;
   replayNotifications: Parameters<typeof buildHistoryReplayImport>[0];
@@ -141,7 +147,10 @@ function materializeReplay(args: {
     createId: () => `${providerKey}:${args.acpSessionId}:tmp:${tempId++}`,
     mode: 'imported_snapshot',
   });
-  const turnHashes = replay.history.map(hashHistoryEntry);
+  // New imports hash the canonical v2 item form: a sealed tool_call skeleton and the
+  // full call it came from hash identically, and tool-payload-only source drift does
+  // not by itself trigger a refresh.
+  const turnHashes = replay.history.map(hashHistoryEntryV2);
   const history = replay.history.map((entry, index) => ({
     ...entry,
     id: `${providerKey}:${args.acpSessionId}:turn:${index}:${turnHashes[index]!.slice(0, 16)}`,
@@ -152,6 +161,7 @@ function materializeReplay(args: {
     turnHashes,
     replayDigest: hashText(turnHashes.join('\n')),
     droppedNotifications: replay.droppedNotifications,
+    hashVersion: HASH_VERSION,
   };
 }
 
@@ -175,9 +185,13 @@ async function applyBoundHistoryImport(
 async function readSessionImportedTurnHashes(
   sessionDoc: SessionDocument,
   externalHistory: ExternalAcpHistorySyncMeta
-): Promise<readonly string[]> {
+): Promise<{ importedTurnHashes: readonly string[]; importedTurnHashVersion: number }> {
   const cursor = await sessionDoc.getExternalHistoryCursor();
-  return resolveImportedTurnHashes(externalHistory, cursor?.importedTurnHashes);
+  return {
+    importedTurnHashes: resolveImportedTurnHashes(externalHistory, cursor?.importedTurnHashes),
+    // The version belongs to whichever holder supplied the effective hashes.
+    importedTurnHashVersion: resolveImportHashVersion(externalHistory, cursor),
+  };
 }
 
 function hasPendingDispatchHistory(history: readonly SessionHistoryInput[]): boolean {
@@ -401,6 +415,8 @@ function buildExternalHistoryMeta(args: {
     sourceAcpSessionId: args.sourceAcpSessionId,
     sourceUpdatedAt: args.sourceUpdatedAt ?? undefined,
     replayDigest: args.materialized.replayDigest,
+    // Versions the digest only. The doc cursor versions its own importedTurnHashes.
+    hashVersion: args.materialized.hashVersion,
     importedTurnCount: args.materialized.turnHashes.length,
     lastSyncAt: getServerNow(),
     status: args.status ?? 'synced',
@@ -659,13 +675,13 @@ export class LocalProjectHistorySyncService {
     }
     if (existingExternalHistory.status !== 'sync_conflict') {
       const cursor = await sessionDoc.getExternalHistoryCursor();
-      const importedTurnHashes = await readSessionImportedTurnHashes(
+      const { importedTurnHashes, importedTurnHashVersion } = await readSessionImportedTurnHashes(
         sessionDoc,
         existingExternalHistory
       );
       if (
         areStringArraysEqual(
-          currentHistoryBeforeReplay.map(hashHistoryEntry),
+          hashHistoryForStoredVersion(currentHistoryBeforeReplay, importedTurnHashVersion),
           storedBaselineHashes(cursor, importedTurnHashes)
         )
       ) {
@@ -709,17 +725,21 @@ export class LocalProjectHistorySyncService {
       throw new Error('Imported session metadata no longer matches the selected ACP history.');
     }
 
-    const latestImportedTurnHashes = await readSessionImportedTurnHashes(
-      sessionDoc,
-      latestExternalHistory
-    );
+    const {
+      importedTurnHashes: latestImportedTurnHashes,
+      importedTurnHashVersion: latestImportedTurnHashVersion,
+    } = await readSessionImportedTurnHashes(sessionDoc, latestExternalHistory);
     const latestCursor = await sessionDoc.getExternalHistoryCursor();
     const latestHistory = readSessionHistory(sessionDoc.sessionData.history);
     const decision = decideHistoryConflictResolution({
       externalHistory: latestExternalHistory,
       importedTurnHashes: latestImportedTurnHashes,
+      importedTurnHashVersion: latestImportedTurnHashVersion,
       materialized,
-      currentHistoryHashes: latestHistory.map(hashHistoryEntry),
+      currentHistoryHashes: hashHistoryForStoredVersion(
+        latestHistory,
+        latestImportedTurnHashVersion
+      ),
       storedHistoryHashes: storedBaselineHashes(latestCursor, latestImportedTurnHashes),
       currentHistoryHasPendingDispatch: hasPendingDispatchHistory(latestHistory),
     });

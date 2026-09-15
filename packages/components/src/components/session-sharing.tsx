@@ -1,8 +1,12 @@
-import { Archive, ChevronDown, LockKeyhole, Monitor, Users } from 'lucide-react';
+import { Archive, ChevronDown, LockKeyhole, Monitor, Share2, Users } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
-import { shouldShowPrivateSharingStatus, type SessionSharingState } from '@/lib/session-sharing';
+import {
+  shouldShowPrivateSharingStatus,
+  type SessionPublicShareStatus,
+  type SessionSharingState,
+} from '@/lib/session-sharing';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import {
   DropdownMenu,
@@ -174,10 +178,16 @@ function getSessionShareActionLabel(
   }
 }
 
-/** Shared chrome for status pills in the session conversation header (Private, Archived). */
+/** Shared chrome for status pills in the session conversation header (Private, Archived).
+ *
+ * The line height is `normal`, not `leading-none`. `items-center` centres the
+ * label's LINE BOX, and a line box shorter than the font's own leaves the
+ * glyphs sitting ~1px above the icon beside them; at `normal` the half-leading
+ * is zero and the ink lands where the font intends, for whatever interface
+ * font is selected. */
 const SESSION_HEADER_STATUS_PILL_CLASS =
   'inline-flex h-6 shrink-0 select-none items-center gap-1.5 rounded-md border border-border/70 bg-transparent px-2 ' +
-  'text-[0.7rem] font-medium leading-none text-muted-foreground transition-colors ' +
+  'text-[0.7rem] font-medium leading-[normal] text-muted-foreground transition-colors ' +
   'hover:border-border hover:text-foreground ' +
   'outline-hidden focus-visible:ring-2 focus-visible:ring-ring/50 ' +
   'text-foreground/80';
@@ -211,25 +221,82 @@ export function SessionArchivedBadge({ className }: { className?: string }) {
   );
 }
 
-/** Persistent access control for private conversations in the desktop toolbar.
- * Its menu explains the inherited machine/project scope before offering the
- * existing confirmation flow. Team and unresolved states stay out of the way. */
+/** Static publication offered by the header control, when this build has a cloud. */
+export type SessionPublicShareControl = {
+  status: SessionPublicShareStatus;
+  /** Opens the publication editor. */
+  onOpen: () => void;
+};
+
+/** The one conversation-access control in the desktop toolbar.
+ *
+ * A reader asks a header a single question — who can see this conversation —
+ * so both access axes answer it in one place. Team visibility picks the shape:
+ * a private conversation keeps the menu that explains its inherited
+ * machine/project scope before offering either sharing action, and anything
+ * else is a plain button. A published static link picks the label in both
+ * shapes, because a link anyone can forward is the wider disclosure and
+ * outranks "Private" as the status worth reading at a glance; the private
+ * scope is still the first thing inside the menu.
+ *
+ * `publicShare` is omitted when the build or workspace cannot publish, which
+ * is also why a team-visible conversation can still render nothing at all. */
 export function SessionAccessControl({
   state,
   onShareWithTeam,
+  publicShare,
   className,
 }: {
-  state: SessionSharingState;
+  state?: SessionSharingState | null;
   onShareWithTeam?: () => void | Promise<void>;
+  publicShare?: SessionPublicShareControl;
   className?: string;
 }) {
   const { t } = useTranslation();
 
-  if (!shouldShowPrivateSharingStatus(state)) {
+  const isPrivate = shouldShowPrivateSharingStatus(state);
+  if (!isPrivate && !publicShare) {
     return null;
   }
 
-  const triggerLabel = t('sessions.sharing.private', 'Private');
+  // `unknown` reads as not-yet-shared: the label upgrades in place once the
+  // control plane answers, rather than a badge appearing and disappearing.
+  const isShared = publicShare?.status === 'shared';
+  const sharedLabel = t('sharing.header.shared', 'Shared');
+  const sharedDescription = t(
+    'sharing.header.sharedDescription',
+    'Anyone with the link can read a published copy of this conversation.'
+  );
+  const shareLabel = t('sharing.manager.title', 'Share conversation');
+  const shareDescription = t(
+    'sharing.header.shareDescription',
+    'Publish a read-only copy of this conversation as a link.'
+  );
+
+  if (!isPrivate) {
+    return (
+      <Tooltip delayDuration={300}>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            aria-label={isShared ? `${sharedLabel}: ${sharedDescription}` : shareLabel}
+            className={cn(SESSION_HEADER_STATUS_PILL_CLASS, className)}
+            onClick={() => {
+              publicShare?.onOpen();
+            }}
+          >
+            <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>{isShared ? sharedLabel : shareLabel}</span>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom" align="end" className="max-w-72 px-2.5 py-2">
+          {isShared ? sharedDescription : shareDescription}
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  const triggerLabel = isShared ? sharedLabel : t('sessions.sharing.private', 'Private');
   const title = t('sessions.sharing.privateToYou', 'Private to you');
   const description = getSessionSharingDescription(t, state);
   const shareDisabled =
@@ -240,14 +307,20 @@ export function SessionAccessControl({
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          aria-label={`${title}: ${description}`}
+          aria-label={
+            isShared ? `${sharedLabel}: ${sharedDescription}` : `${title}: ${description}`
+          }
           className={cn(
             SESSION_HEADER_STATUS_PILL_CLASS,
             'data-[state=open]:border-border data-[state=open]:text-foreground',
             className
           )}
         >
-          <LockKeyhole className="h-3.5 w-3.5" aria-hidden="true" />
+          {isShared ? (
+            <Share2 className="h-3.5 w-3.5" aria-hidden="true" />
+          ) : (
+            <LockKeyhole className="h-3.5 w-3.5" aria-hidden="true" />
+          )}
           <span>{triggerLabel}</span>
           <ChevronDown className="h-3 w-3 opacity-45" aria-hidden="true" />
         </button>
@@ -263,6 +336,17 @@ export function SessionAccessControl({
             <div className="mt-0.5 text-xs leading-4 text-muted-foreground">{description}</div>
           </div>
         </div>
+        {isShared ? (
+          <div className="flex items-start gap-2.5 px-2 pb-2">
+            <Share2 className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-foreground">{sharedLabel}</div>
+              <div className="mt-0.5 text-xs leading-4 text-muted-foreground">
+                {sharedDescription}
+              </div>
+            </div>
+          </div>
+        ) : null}
         <DropdownMenuSeparator />
         <DropdownMenuItem
           disabled={shareDisabled}
@@ -281,6 +365,16 @@ export function SessionAccessControl({
             ? getSessionShareActionLabel(t, state)
             : t('sessions.sharing.onlyOwnerCanShare', 'Only the device owner can share')}
         </DropdownMenuItem>
+        {publicShare ? (
+          <DropdownMenuItem
+            onSelect={() => {
+              publicShare.onOpen();
+            }}
+          >
+            <Share2 className="h-3.5 w-3.5 shrink-0" />
+            {shareLabel}
+          </DropdownMenuItem>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );

@@ -21,7 +21,7 @@ this page is the full text of the rules summarised there.
   panel's ⋯ button (left of `+`, and absent unless the active tab is a file),
   and the file-error card. The split it encodes is the invariant, not a detail:
   `Copy file path` is offered ANYWHERE (every platform can write to the
-  clipboard, and on another machine the path IS the whole answer), while
+  clipboard), while
   reaching a shell — `Open in default app` / `Open in browser`
   (`app.openLocalPath` → `shell.openPath`), `Reveal in file manager` /
   `Show in Finder` / `Show in File Explorer` (`app.revealLocalPath`, labelled per
@@ -39,6 +39,13 @@ this page is the full text of the rules summarised there.
   never a client-side retry loop. Never promote a
   local-host action to a surface that cannot perform it, and never re-derive
   that decision per surface — `lib/session-file-actions.ts` states it once.
+  Native mobile exports those same complete bytes through the Capacitor cache
+  and system share sheet instead of a browser download. The binary notice exposes
+  this as Share file alongside Copy file path only when its binary snapshot has
+  complete bytes (including zero bytes); error cards do not expose sharing.
+  The file menu uses the same action. Only native exports suppress duplicate
+  clicks while pending; browser downloads remain independent. Each export uses an isolated
+  cache filename. No remote host path is passed to the device OS.
   The path is resolved on the OWNING machine (its Flock `dotlodyPath` /
   local-project root) and is built ONLY from that workspace root plus a
   genuinely workspace-relative viewer path — `lib/session-local-file-path.ts`

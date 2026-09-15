@@ -22,6 +22,7 @@ import {
   saveSessionShareSecret,
   sessionShareSecretKey,
 } from '@/lib/session-share-secrets';
+import type { SessionPublicShareStatus } from '@/lib/session-sharing';
 import { useResolvedWorkspaceScope } from './use-resolved-workspace-scope';
 
 const operations = cloudOperations.sessionSharing;
@@ -195,6 +196,29 @@ export function useSessionShareLinkActions(workspaceId: WorkspaceId) {
       return run(() => revokeDeployment(entry));
     },
   };
+}
+
+/**
+ * Read-only companion to `useSessionShareManagement`: it reads the same
+ * management row the editor writes, with no candidates and no mutations, so a
+ * header can say "Shared" without opening the editor or touching a source
+ * document.
+ */
+export function useSessionShareStatus(
+  workspaceId: WorkspaceId | null | undefined,
+  sessionId: string | null | undefined
+): SessionPublicShareStatus {
+  const scope = useResolvedWorkspaceScope({ workspaceId: workspaceId ?? null });
+  const userId = useAtomValue(userAtom)?.id;
+  const entry = useCloudQuery(
+    operations.getManagement,
+    scope.enabled && workspaceId && sessionId && userId
+      ? { workspaceId, rootSessionId: sessionId }
+      : 'skip'
+  );
+  if (!workspaceId || !sessionId) return 'none';
+  if (entry === undefined) return 'unknown';
+  return entry !== null && entry.status === 'active' ? 'shared' : 'none';
 }
 
 type PendingPublication = {

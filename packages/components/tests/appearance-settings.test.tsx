@@ -3,7 +3,9 @@
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createStore, Provider } from 'jotai';
 
+import { conversationFontSizeAtom } from '../src/atoms/settings';
 import { MobileAppearanceSettings } from '../src/components/mobile/mobile-appearance-settings';
 import { AppearanceSettingsView } from '../src/components/settings/appearance-setting';
 import type { Theme } from '../src/theme-provider';
@@ -116,19 +118,56 @@ describe('AppearanceSettingsView', () => {
     expect(container?.textContent).not.toContain('Terminal');
   });
 
-  it('lets the user enter a custom conversation font size', async () => {
+  it('updates the conversation font size readout while sliding', async () => {
     await act(async () => root?.render(<AppearanceHarness isElectron={false} />));
 
     const sizeInput = container?.querySelector<HTMLInputElement>(
-      'input[aria-label="Conversation font size"]'
+      'input[type="range"][aria-label="Conversation font size"]'
     );
-    expect(sizeInput?.value).toBe('14');
+    expect(sizeInput?.value).toBe('2');
 
     await act(async () => {
-      setInputValue(sizeInput!, '24');
+      setInputValue(sizeInput!, '5');
     });
 
-    expect(sizeInput?.value).toBe('24');
+    expect(sizeInput?.value).toBe('5');
+    expect(container?.querySelector('output')?.textContent).toBe('24 px');
+    expect(
+      container?.querySelector<HTMLElement>('[aria-label="Conversation preview"] p')?.style.fontSize
+    ).toBe('24px');
+  });
+
+  it('persists mobile slider changes, including both limits, across remounts', async () => {
+    const store = createStore();
+    store.set(conversationFontSizeAtom, 14);
+    const renderMobile = (settingsStore: ReturnType<typeof createStore>) => (
+      <Provider store={settingsStore}>
+        <MobileAppearanceSettings />
+      </Provider>
+    );
+    await act(async () => root?.render(renderMobile(store)));
+
+    const slider = container?.querySelector<HTMLInputElement>('input[type="range"]');
+    expect(slider).toBeTruthy();
+    for (const [index, size] of [
+      [0, 8],
+      [7, 32],
+      [4, 20],
+    ]) {
+      await act(async () => setInputValue(slider!, String(index)));
+      expect(store.get(conversationFontSizeAtom)).toBe(size);
+      expect(
+        container?.querySelector<HTMLElement>('[aria-label="Conversation preview"] p')?.style
+          .fontSize
+      ).toBe(`${size}px`);
+      expect(container?.querySelector('output')?.textContent).toBe(`${size} px`);
+      expect(JSON.parse(localStorage.getItem('lody-conversation-font-size')!)).toBe(size);
+    }
+
+    await act(async () => root?.render(null));
+    await act(async () => root?.render(renderMobile(createStore())));
+    expect(container?.querySelector<HTMLInputElement>('input[type="range"]')?.value).toBe('4');
+    localStorage.removeItem('lody-conversation-font-size');
   });
 
   it('shows theme and language in mobile appearance settings without terminal settings', async () => {

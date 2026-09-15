@@ -807,6 +807,9 @@ describe('stored history operations', () => {
         turnHashes: ['hash-a', 'hash-b'],
         replayDigest: 'digest',
         droppedNotifications: 0,
+        // Opaque placeholder hashes; initialize never compares, so the version label
+        // only lands on the written cursor.
+        hashVersion: 2,
       },
     });
     expect(imported.status).toBe('accepted');
@@ -967,12 +970,22 @@ describe('loro session data adapter', () => {
         turnHashes: hashes,
         replayDigest: hashText(hashes.join('\n')),
         droppedNotifications: 0,
+        // A genuine v1 fixture: hashes computed with the frozen v1 canonical form.
+        hashVersion: 1,
       },
     });
     expect(result).toMatchObject({ status: 'accepted', appended: 1 });
-    const cursor = cursorState as { importedTurnHashes: string[]; storedHistoryBaseline: string };
+    const cursor = cursorState as {
+      importedTurnHashes: string[];
+      hashVersion?: number;
+      storedHistoryBaseline: string;
+    };
     expect(cursor.importedTurnHashes).toEqual(hashes);
-    expect(JSON.parse(cursor.storedHistoryBaseline).turnHashes).toEqual(
+    // The persisted cursor retains the version; the baseline records the same one.
+    expect(cursor.hashVersion).toBe(1);
+    const baseline = JSON.parse(cursor.storedHistoryBaseline);
+    expect(baseline.hashVersion).toBe(1);
+    expect(baseline.turnHashes).toEqual(
       createHistoryWriter(doc).readStored().map(hashHistoryEntry)
     );
   });

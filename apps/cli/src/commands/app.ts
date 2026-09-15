@@ -17,6 +17,7 @@ import {
   runOneShotCommand,
   type CommonCommandOptions,
 } from '@/lib/command-runtime';
+import { appResetCacheCommand } from '@/commands/app-reset-cache';
 import { buildOpenLocalProjectDeepLink } from '@/lib/desktop-deep-link';
 import {
   extractWorkspaceCandidates,
@@ -122,6 +123,16 @@ export const appCommand = new Command('app')
   .description(
     'Open the Lody desktop app on a new chat with a local directory selected (registers it if needed)'
   )
+  // `lody app reset-cache` wins over the optional path argument, so a directory
+  // with that exact name has to be passed as `./reset-cache`.
+  //
+  // Positional options are REQUIRED here, like on the program: `app` declares
+  // `--json`/`--debug` of its own, and without this Commander lets the parent
+  // swallow them before the subcommand is reached — `app reset-cache --json`
+  // would then print human text. Existing `lody app [path]` spellings, including
+  // a trailing `--json`, keep working.
+  .enablePositionalOptions()
+  .addCommand(appResetCacheCommand)
   .argument('[path]', 'Local project directory to select', '.')
   .option('--workspace <selector>', 'Target workspace id, slug, or name')
   .option('--json', 'Print JSON output')

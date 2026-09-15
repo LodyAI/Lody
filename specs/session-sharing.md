@@ -68,6 +68,13 @@ Administrators and owners can inspect the workspace's share inventory and revoke
 others' shares, but cannot obtain others' link secrets or take over publication.
 Source metadata is not an author-identity certificate.
 
+The conversation header states publication where the consequence is: one control
+carries both team visibility and the published link, and a conversation with an
+active share rooted at it reads as shared whether or not it is private. It
+reports only that share, so a conversation published inside someone else's
+share still reads as unshared, and it never claims "not shared" before the
+control plane answers. Publication still starts only from the editor.
+
 Settings → Share management lists successfully published shares, not unfinished
 uploads. Ordinary members see their own shares; administrators see the workspace
 inventory. The list is paginated and shows title, status, conversation count and
@@ -128,7 +135,10 @@ independent child conversations appear in the left conversation tree and child
 Tabs in the main tab bar. It has no right pane, so a side-panel child appears in
 that same tab bar rather than being hidden; published content is never
 unreachable. Relationships come from the manifest, not hidden references in
-history. Navigation never expands the manifest.
+history. Navigation never expands the manifest. A conversation the visitor has
+already opened reappears without a second fetch: completed reads of the pinned
+deployment stay in memory for the life of the page, and no part of a share is
+written to durable storage.
 
 Markdown is generated only when requested, using the existing conversation-copy
 builder, range selection, budget rules and result notices. It is a readable
@@ -143,7 +153,9 @@ separately as the server record identity. Closing the editor discards upload
 credentials: an unpublished request must then be abandoned and recreated with a
 new retry key; an ordinary draft must be revoked before preparing another copy.
 The client revokes a stale draft as part of the next publish, not when the dialog
-opens.
+opens. When the app cannot read the canonical requests, the card surface says so
+and offers a retry; it neither hides the failure nor takes the conversation down
+with it.
 
 Fork is out of scope for version one. A future fork may import displayable history
 and attachments into the visitor's workspace; a new agent receives Markdown in a
@@ -182,6 +194,9 @@ are disclosed before confirmation, never fetched with workspace authority.
 Reader production-build browser checks cover layout, pinned deployments,
 credential changes, revocation and inert media. Service integration is validated
 separately; no hosted deployment or native-device acceptance is asserted here.
+
+The conversation header reads the same management row read-only to state
+publication; it is capability-gated, so a local build makes no such request.
 
 [Package](../packages/shared/src/session-share-package.ts),
 [exporter](../packages/shared/src/session-share-export.ts),

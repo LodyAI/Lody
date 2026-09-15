@@ -48,7 +48,10 @@ vi.mock('@lody/shared/session-sharing', async (original) => ({
 }));
 import { prepareSharePackage } from '@lody/shared/session-sharing';
 import { userAtom } from '../src/atoms';
-import { useSessionShareManagement } from '../src/hooks/use-session-share-management';
+import {
+  useSessionShareManagement,
+  useSessionShareStatus,
+} from '../src/hooks/use-session-share-management';
 import {
   readSessionShareSecret,
   saveSessionShareSecret,
@@ -398,5 +401,61 @@ describe('static publication client lifecycle', () => {
     expect(control.conflict).toBe(true);
     await act(async () => control.onPublish());
     expect(cloud.mutation).not.toHaveBeenCalled();
+  });
+});
+
+describe('header share status', () => {
+  let root: Root, container: HTMLDivElement, store: ReturnType<typeof createStore>;
+  let status: ReturnType<typeof useSessionShareStatus>;
+  let workspaceId: WorkspaceId | null;
+  function Harness() {
+    status = useSessionShareStatus(workspaceId, 'root');
+    return null;
+  }
+  const render = () =>
+    act(async () =>
+      root.render(
+        <Provider store={store}>
+          <Harness />
+        </Provider>
+      )
+    );
+  beforeEach(() => {
+    cloud.state = null;
+    cloud.enabled = true;
+    store = createStore();
+    workspaceId = 'workspace' as WorkspaceId;
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+  afterEach(async () => {
+    await act(async () => root.unmount());
+    container.remove();
+  });
+  it('reports an active share', async () => {
+    cloud.state = entry;
+    await render();
+    expect(status).toBe('shared');
+  });
+  it('reports a conversation that was never published', async () => {
+    await render();
+    expect(status).toBe('none');
+  });
+  it.each(['draft', 'revoked'] as const)('does not report a %s share as shared', async (state) => {
+    cloud.state = { ...entry, status: state };
+    await render();
+    expect(status).toBe('none');
+  });
+  it('stays unknown until the control plane answers', async () => {
+    cloud.state = undefined as unknown as SessionShareManagement;
+    await render();
+    expect(status).toBe('unknown');
+  });
+  it('reports nothing shared without a workspace, whatever the control plane holds', async () => {
+    workspaceId = null;
+    cloud.state = entry;
+    await render();
+    expect(status).toBe('none');
   });
 });

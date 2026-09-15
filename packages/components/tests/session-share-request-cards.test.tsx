@@ -1,13 +1,21 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, Component, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { SessionMeta, WorkspaceId } from '@lody/shared';
-const cloud = vi.hoisted(() => ({ status: 'pending', cancel: vi.fn() }));
+const cloud = vi.hoisted(() => ({
+  status: 'pending',
+  queryError: null as Error | null,
+  cancel: vi.fn(),
+}));
 vi.mock('@lody/platform/react', () => ({
-  useCloudQuery: () => [
-    { requestId: 'request', sourceSessionId: 'root', sessionIds: ['root'], status: cloud.status },
-  ],
+  useCloudQuery: () => {
+    // Convex surfaces a failed query by throwing out of render.
+    if (cloud.queryError) throw cloud.queryError;
+    return [
+      { requestId: 'request', sourceSessionId: 'root', sessionIds: ['root'], status: cloud.status },
+    ];
+  },
   useCloudMutation: () => cloud.cancel,
 }));
 vi.mock('../src/lib/app-platform', () => ({ useAppCapability: () => true }));
@@ -35,6 +43,17 @@ vi.mock('../src/components/sharing/session-share-dialog', () => ({
   ),
 }));
 import { SessionShareRequestCards } from '../src/components/sharing/session-share-request-cards';
+
+/** Stands in for the chat-stream boundary the cards must never reach. */
+class ConversationBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  override state: { error: Error | null } = { error: null };
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+  override render() {
+    return this.state.error ? <p>conversation crashed</p> : this.props.children;
+  }
+}
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
@@ -42,11 +61,13 @@ let root: Root, container: HTMLDivElement;
 const render = () =>
   act(async () =>
     root.render(
-      <SessionShareRequestCards
-        workspaceId={'workspace' as WorkspaceId}
-        session={{ id: 'root' } as SessionMeta}
-        isVisible
-      />
+      <ConversationBoundary>
+        <SessionShareRequestCards
+          workspaceId={'workspace' as WorkspaceId}
+          session={{ id: 'root' } as SessionMeta}
+          isVisible
+        />
+      </ConversationBoundary>
     )
   );
 const click = (text: string) =>
@@ -57,6 +78,7 @@ const click = (text: string) =>
   );
 beforeEach(() => {
   cloud.status = 'pending';
+  cloud.queryError = null;
   cloud.cancel.mockReset().mockResolvedValue(undefined);
   container = document.createElement('div');
   document.body.append(container);
@@ -93,4 +115,21 @@ it('explains abandon-and-restart after remount and hides completed requests', as
   cloud.status = 'published';
   await render();
   expect(container.querySelector('section')).toBeNull();
+});
+
+it('keeps the conversation alive when the share-request query fails, and recovers on retry', async () => {
+  // React re-logs a caught render error; the boundary under test owns reporting.
+  const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    cloud.queryError = new Error('[CONVEX Q(sessionSharing:listRequests)] Server Error');
+    await render();
+    expect(container.textContent).not.toContain('conversation crashed');
+    expect(container.textContent).toContain('Could not load pending share requests.');
+    cloud.queryError = null;
+    await click('Retry');
+    expect(container.textContent).toContain('Root title');
+    expect(container.textContent).toContain('Review and share');
+  } finally {
+    logged.mockRestore();
+  }
 });

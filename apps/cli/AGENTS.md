@@ -29,6 +29,16 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
   child runtime env, and the three places the Node pin moves together — before changing runtime
   deps, bundle externals, or spawning `process.execPath` with a filtered environment.
 
+## State paths
+
+- INVARIANT: name the state root with `getLodyDataDir()`/`ensureLodyDataDir()`, never literal
+  `~/.lody` — only those honor `LODY_DATA_DIR` and the OSS `.lody-oss`, so a literal join names a
+  sibling that may not exist. Create it before a path inside reaches git or an ACP cwd; git reports
+  only `fatal: Invalid path '<data dir>'`. A path derived from a stored host path keeps THAT path's
+  separator — shape decides, never `process.platform` — since `dotlodyPath` crosses machines and
+  two spellings of one dir never match
+  ([note](../../.agents/notes/implemented/bug-fix/2026-09-14-lody-data-dir-path-root.md)).
+
 ## Coding rules
 
 - Prefer Effect TS idioms for new/refactored CLI code — services via `Context.Tag` + `Layer`,

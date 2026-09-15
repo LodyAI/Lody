@@ -215,14 +215,14 @@ export function SessionShareManager(props: SessionShareManagerProps) {
     return (
       <div className="space-y-3 px-5 pb-5 pt-1">
         {active ? (
-          <div className="flex items-center gap-2 text-sm text-foreground">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <Globe className="size-4 shrink-0 text-muted-foreground" aria-hidden />
             <span>
               {t('sharing.static.publicNotice', 'Anyone with the link can view this conversation.')}
             </span>
           </div>
         ) : (
-          <p className="text-sm leading-6 text-foreground">
+          <p className="text-sm leading-6 text-muted-foreground">
             {t('sharing.static.publicNotice', 'Anyone with the link can view this conversation.')}
           </p>
         )}

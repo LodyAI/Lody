@@ -23,7 +23,7 @@ import {
   MIN_MAT,
   type ChatShareCardBackdrop,
   type ChatShareCardDestination,
-} from '@/components/chat-share-card';
+} from '@/components/share-card/chat-share-card';
 import { AgentIcon, getAgentDisplayName } from '@/components/icons/agent-icon';
 
 /** Opening ground: the brand's own, so an untouched export is the signature card. */

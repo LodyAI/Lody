@@ -48,4 +48,36 @@ describe('local project worktree paths', () => {
       '/Users/alice/.lody/chats/session123'
     );
   });
+
+  it('keeps a Windows machine path in Windows separators', () => {
+    const repoId = 'github---example---project' as RepoId;
+    const sessionId = 'session123' as SessionId;
+
+    expect(getLodyDotlodyPath('C:\\Users\\alice')).toBe('C:\\Users\\alice\\.lody');
+    expect(getLodyReposBaseDirFromDotlodyPath('C:\\Users\\alice\\.lody')).toBe(
+      'C:\\Users\\alice\\.lody\\repos'
+    );
+    expect(getWorktreeHostPathFromDotlodyPath(repoId, sessionId, 'C:\\Users\\alice\\.lody')).toBe(
+      'C:\\Users\\alice\\.lody\\repos\\github---example---project\\worktrees\\session123'
+    );
+    expect(getDefaultSessionWorkdirFromDotlodyPath('C:\\Users\\alice\\.lody', sessionId)).toBe(
+      'C:\\Users\\alice\\.lody\\chats\\session123'
+    );
+  });
+
+  it('treats a drive-rooted forward-slash path as Windows', () => {
+    // `getLodyDotlodyPath` used to emit this shape, so stored rows still carry it.
+    expect(
+      getDefaultSessionWorkdirFromDotlodyPath('C:/Users/alice/.lody', 'session123' as SessionId)
+    ).toBe('C:\\Users\\alice\\.lody\\chats\\session123');
+  });
+
+  it('keeps a UNC machine path rooted on its double backslash', () => {
+    expect(
+      getDefaultSessionWorkdirFromDotlodyPath(
+        '\\\\build01\\home\\alice\\.lody',
+        'session123' as SessionId
+      )
+    ).toBe('\\\\build01\\home\\alice\\.lody\\chats\\session123');
+  });
 });

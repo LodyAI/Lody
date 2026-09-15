@@ -9,20 +9,32 @@ import {
   useState,
 } from 'react';
 import { useStickToBottom } from 'use-stick-to-bottom';
-import type { VirtualizerHandle } from 'virtua';
+import type { CacheSnapshot, VirtualizerHandle } from 'virtua';
 import type { SessionId } from '@lody/shared';
 import {
   getScrollElementMaxOffset,
   isInitialScrollLayoutReady,
   scrollViewportToRealBottom,
 } from './sticky-scroll-dom';
-import { getScrollPosition, saveScrollPosition } from './use-scroll-position-cache';
+import {
+  getScrollPosition,
+  getVirtualizerCache,
+  saveScrollPosition,
+  saveVirtualizerCache,
+} from './use-scroll-position-cache';
 
 export interface UseStickyScrollOptions {
   sessionId: SessionId;
   vlistRef: RefObject<VirtualizerHandle | null>;
   /** Total number of items in the list. Used as the scroll-to target index. */
   itemCount: number;
+  /**
+   * Whether the caller is about to mount the virtualizer. `itemCount` alone
+   * cannot say: a non-null leading fragment counts as a row, so a session that
+   * is still acquiring its document reports one item while rendering an empty
+   * state and no `Virtualizer` at all.
+   */
+  hasVirtualizedRows?: boolean;
   initialContentReady?: boolean;
   onAtBottomChange?: (atBottom: boolean) => void;
   /**
@@ -55,6 +67,13 @@ export interface UseStickyScrollResult {
   scrollToBottom: () => void;
   /** Whether the initial cached/end position has been applied to the virtualizer. */
   initialScrollRestored: boolean;
+  /**
+   * Pass to `Virtualizer.cache`. Read once, at mount: the virtualizer only
+   * consumes it then, and a later value would silently do nothing.
+   */
+  initialVirtualizerCache: CacheSnapshot | undefined;
+  /** Call when scrolling stops, so the next open restores the newest measurements. */
+  persistVirtualizerCache: () => void;
   /** Pass to Virtua's onScroll prop. */
   handleScroll: (offset: number) => void;
 }
@@ -120,12 +139,34 @@ export function useStickyScroll({
   sessionId,
   vlistRef,
   itemCount,
+  hasVirtualizedRows = true,
   initialContentReady = true,
   onAtBottomChange,
   skipNextViewportResizeAutoScrollRef,
   suppressAutoScrollRef,
 }: UseStickyScrollOptions): UseStickyScrollResult {
   const cachedPositionAtMountRef = useRef(getScrollPosition(sessionId));
+  /**
+   * Virtua's measurements from the last time this session was open. Without
+   * them the first layout uses estimated row heights, so the restore offset
+   * lands in the wrong coordinate space and the conversation stays hidden
+   * across the correction — the blank flash on open.
+   *
+   * Taken on the first render that actually mounts the virtualizer, because
+   * `Virtualizer` reads `cache` only at mount and the snapshot is keyed by row
+   * count. Reading it during the empty state a session renders while its
+   * document is acquired would answer for a one-row list and then never ask
+   * again for the real conversation.
+   */
+  const initialVirtualizerCacheRef = useRef<{ taken: boolean; value?: CacheSnapshot }>({
+    taken: false,
+  });
+  if (!initialVirtualizerCacheRef.current.taken && hasVirtualizedRows && itemCount > 0) {
+    initialVirtualizerCacheRef.current = {
+      taken: true,
+      value: getVirtualizerCache(sessionId, itemCount),
+    };
+  }
   const stickToBottom = useStickToBottom({
     initial: cachedPositionAtMountRef.current?.type === 'offset' ? false : 'instant',
     resize: 'instant',
@@ -201,6 +242,18 @@ export function useStickyScroll({
     });
   }, [state]);
 
+  /**
+   * Hand Virtua's current measurements to the session cache. Called when the
+   * layout has settled and after scrolling stops, never at unmount: React
+   * detaches the virtualizer ref before cleanup effects run, so the handle is
+   * already gone there.
+   */
+  const persistVirtualizerCache = useCallback(() => {
+    const virtualizer = vlistRef.current;
+    if (!virtualizer || !initialScrollRestoredRef.current) return;
+    saveVirtualizerCache(sessionId, virtualizer.cache, itemCountRef.current);
+  }, [itemCountRef, sessionId, vlistRef]);
+
   const settleInitialLayout = useCallback(() => {
     if (initialScrollRestoredRef.current || !initialPositionAppliedRef.current) return;
     const viewport = scrollElementRef.current;
@@ -218,7 +271,8 @@ export function useStickyScroll({
     }
     initialScrollRestoredRef.current = true;
     setInitialScrollRestored(true);
-  }, [state, vlistRef]);
+    persistVirtualizerCache();
+  }, [persistVirtualizerCache, state, vlistRef]);
   settleInitialLayoutRef.current = settleInitialLayout;
 
   // Observe the bounded mounted row set, not streamed descendants. A row can
@@ -381,6 +435,8 @@ export function useStickyScroll({
     isSticky,
     scrollToBottom,
     initialScrollRestored,
+    initialVirtualizerCache: initialVirtualizerCacheRef.current.value,
+    persistVirtualizerCache,
     handleScroll,
   };
 }

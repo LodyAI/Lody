@@ -76,8 +76,8 @@ export function resolveSessionFileActionAvailability({
 
 /**
  * Handing the file to the OS. Optional even when the error card has actions —
- * a browser tab or a session on another machine gets the copyable path and
- * nothing else, rather than a button that cannot work.
+ * remote host paths must never be handed to the viewer's shell. Native mobile
+ * shares downloaded bytes through the separate onShare action instead.
  */
 export type SessionFileLocalHostActions = {
   readonly openTarget: 'browser' | 'default-app';
@@ -89,10 +89,12 @@ export type SessionFileLocalHostActions = {
 
 /**
  * Ways out of a file Lody itself will not render. Copying the path is always
- * possible — every platform can put text on the clipboard, and the path is the
- * whole answer for a file on a machine this client cannot touch.
+ * possible — every platform can put text on the clipboard. Native mobile may
+ * additionally export complete bytes through the system share sheet.
  */
 export type SessionFileErrorActions = {
   readonly onCopyPath: () => void;
+  readonly onShare?: () => void;
+  readonly sharing?: boolean;
   readonly localHost?: SessionFileLocalHostActions;
 };

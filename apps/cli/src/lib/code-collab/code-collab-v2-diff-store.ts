@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, realpathSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -16,6 +15,7 @@ import { getLogger } from '@/utils/logger';
 
 import { mapWithConcurrency } from '../bounded-concurrency';
 import { computeTurnEvidenceAsync } from './diff-line-count-pool';
+import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 
 const DEFAULT_RETENTION_DAYS = 100;
 const MIN_RETENTION_DAYS = 1;
@@ -271,8 +271,7 @@ function resolveWorkerOptions(options: {
 
 export function getCodeCollabV2DiffStoreDbPath(workspaceId: string): string {
   return path.join(
-    os.homedir(),
-    '.lody',
+    getLodyDataDir(),
     'code-collab-v2',
     safeWorkspaceSegment(workspaceId),
     'diff-store.sqlite3'

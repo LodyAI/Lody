@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
-import os from 'node:os';
 import path from 'node:path';
 import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { z } from 'zod';
 import { AgentConfigCliTypeSchema, ProjectRefSchema, type SessionId } from '@lody/shared';
+import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 
 /**
  * Machine-local discovery index for in-flight worktree-fork operations.
@@ -104,7 +104,7 @@ export type SessionForkOperationStore = {
 };
 
 function getStoreRoot(): string {
-  return path.join(os.homedir(), '.lody', 'session-fork-operations');
+  return path.join(getLodyDataDir(), 'session-fork-operations');
 }
 
 function getMarkerPath(targetSessionId: SessionId): string {

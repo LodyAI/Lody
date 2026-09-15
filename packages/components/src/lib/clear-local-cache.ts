@@ -16,6 +16,11 @@
  *   the install — auth token, preferences, cookies, all IndexedDB databases, all
  *   Cache Storage entries, service workers. The escape hatch for a user wedged on
  *   a crash loop that survives reloads (e.g. a poisoned sign-in state).
+ *
+ * On the desktop the same two levels can also be armed from outside the app with
+ * `lody app reset-cache`, for a renderer too wedged to click either. That request
+ * reaches the boot path below through the Electron main process instead of the
+ * flag; see `apps/electron/src/main/services/local-reset-service.ts`.
  */
 
 import { LORO_STREAMS_TOKEN_STORAGE_KEY_PREFIX } from '@lody/shared';
@@ -393,6 +398,34 @@ export function readPendingLocalClearMode(): PendingLocalClearMode | null {
   return null;
 }
 
+/** Cap on how long boot waits for the desktop to answer whether a reset is armed. */
+const NATIVE_PENDING_CLEAR_TIMEOUT_MS = 2000;
+
+/**
+ * Ask the desktop whether `lody app reset-cache` armed a clear for this launch.
+ *
+ * A user whose renderer is wedged cannot press Settings → Clear cache, so the CLI
+ * arms it out of band and the Electron main process reports it here — once, so a
+ * later reload of the same window does not repeat the clear. Bounded because this
+ * runs on every desktop boot: a main process that never answers must delay the
+ * first render, not prevent it. Web and mobile have no bridge and skip it.
+ */
+async function readNativePendingClearMode(): Promise<PendingLocalClearMode | null> {
+  const services = getIpcServices();
+  if (!services) return null;
+  try {
+    return await Promise.race([
+      services.app.consumePendingLocalClear(),
+      new Promise<null>((resolve) => {
+        setTimeout(() => resolve(null), NATIVE_PENDING_CLEAR_TIMEOUT_MS);
+      }),
+    ]);
+  } catch (error) {
+    console.warn('[Lody] failed to read a CLI-armed cache clear', error);
+    return null;
+  }
+}
+
 // One clear per page load, shared by every caller. `AppInitializer` kicks it off
 // so a user wedged before any workspace exists (e.g. stuck signing in) still
 // gets the wipe, while `RuntimeProvider` awaits the same promise so the repo DB
@@ -400,7 +433,7 @@ export function readPendingLocalClearMode(): PendingLocalClearMode | null {
 let bootClearPromise: Promise<PendingLocalClearMode | null> | null = null;
 
 async function runPendingClearOnBoot(): Promise<PendingLocalClearMode | null> {
-  const mode = readPendingLocalClearMode();
+  const mode = readPendingLocalClearMode() ?? (await readNativePendingClearMode());
   if (!mode) return null;
   await getIpcServices()?.app.prepareCacheClear();
 

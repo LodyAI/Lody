@@ -49,9 +49,9 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   that gate.
 - `setting.ts`: every builtin requires `resolveACPProcessLaunchAsync()`.
 - `deepseek-harness-runtime.ts` is NOT a managed runtime: keep it out of runtime download,
-  prefetch, override, and interactive-auth flows, and launch the pinned closure, not the
-  all-in-one `@deepseek-ai/dsh` CLI. Credentials stay in the agent config environment;
-  never write them into the generated config. The adapter applies model/reasoning selection
+  prefetch, override, and interactive-auth flows. Launch the pinned closure through
+  `dsh --profile` (see README.md). Credentials stay in the agent config environment; never
+  write them into the generated config. The adapter applies model/reasoning selection
   through the Agent-scoped request waterfall, permissions through Harness presets,
   and `agent_preset` through `AgentPresets.mount/recompose` — never as UI-only state. Presets
   may change only before the first prompt. Per-Agent ACP stdio/HTTP MCP servers belong in the

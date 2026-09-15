@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { resolvePlatformKind, type PlatformKind } from '../platform-kind';
@@ -50,4 +51,51 @@ export function getLodyDataDir(
   const override = process.env.LODY_DATA_DIR?.trim();
   if (override) return path.resolve(override);
   return path.join(homeDir, getInstallationProfile(platform).dataDirectoryName);
+}
+
+export const LODY_DATA_DIR_UNAVAILABLE_CODE = 'lody_data_dir_unavailable' as const;
+
+/**
+ * The installation's data directory could not be created or written.
+ *
+ * Every session workspace hangs off this directory — worktrees under `repos/`, chat
+ * sessions under `chats/` — so when it is absent the first symptom is whatever tool
+ * gets handed a path inside it, typically `git` reporting
+ * `fatal: Invalid path '<data dir>': No such file or directory`. That message names a
+ * path the user never chose and gives no hint that a wrong or unreachable data root
+ * is the cause, so callers raise this instead.
+ */
+export class LodyDataDirUnavailableError extends Error {
+  readonly code = LODY_DATA_DIR_UNAVAILABLE_CODE;
+
+  constructor(
+    readonly dataDir: string,
+    cause: unknown,
+  ) {
+    super(
+      `Lody's data directory is unavailable: ${dataDir}. ` +
+        'Create it, or point LODY_DATA_DIR at a writable directory, then restart the daemon.',
+      { cause },
+    );
+    this.name = 'LodyDataDirUnavailableError';
+  }
+}
+
+/**
+ * Resolve the data directory and make sure it exists before a caller hands a path
+ * inside it to `git`, an ACP process cwd, or the filesystem.
+ *
+ * `LODY_DATA_DIR` and the OSS `.lody-oss` profile both move this root, so deriving it
+ * is the ONLY supported way to name it; a literal `~/.lody` join reaches a directory
+ * that need not exist on the running installation.
+ */
+export function ensureLodyDataDir(platform?: PlatformKind, homeDir?: string): string {
+  const dataDir =
+    homeDir === undefined ? getLodyDataDir(platform) : getLodyDataDir(platform, homeDir);
+  try {
+    fs.mkdirSync(dataDir, { recursive: true });
+  } catch (error) {
+    throw new LodyDataDirUnavailableError(dataDir, error);
+  }
+  return dataDir;
 }

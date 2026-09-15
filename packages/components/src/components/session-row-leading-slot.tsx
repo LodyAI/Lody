@@ -18,7 +18,15 @@ export type SessionRowOpenedByTreeSlot =
 const TREE_CHILD_SLOT_CLASS = 'w-[26px] justify-start';
 const TREE_CONTROL_LEFT_CLASS = 'left-[7px]';
 const TREE_LINE_CLASS = 'bg-sidebar-foreground/20';
-/** Cover row padding/border from the 14px slot, plus 1px for list `gap-px`. */
+/**
+ * Cover row padding/border from the 14px slot, plus 1px for list `gap-px`.
+ *
+ * These two lengths are a contract with the caller's row box: they span exactly one
+ * 30px row (1px border + `py-1` + a 20px title line) and the 1px gap after it, so a
+ * trunk ends where the next row's trunk starts and nesting reads as one line. A row
+ * with different padding, a larger title line, or no `gap-px` breaks the line into a
+ * dash per row. Rationale: `.agents/docs/components-sidebar-session-tree.md`.
+ */
 const TREE_TRUNK_FROM_PREV_CLASS = '-top-2';
 const TREE_TRUNK_INTO_NEXT_CLASS = '-bottom-[9px]';
 

@@ -69,6 +69,7 @@ Ownership and explanations: [README.md](README.md).
   composer text crosses the promotion via the input draft cache, not a component ref.
   After global metadata readiness, `archiveSession` falls back to the rendered meta
   cache when an individual repo read lags; close failures must surface to the user.
+- Desktop handoff: confirm the account, keep PKCE query on switch, render the `lody://` link.
 - Desktop changelogs open in-app as sanitized Markdown with raw HTML off. Only
   missing notes fall back to the website, via `getChangelogUrl` and
   `openExternalUrl`, never a hardcoded link.
@@ -78,6 +79,20 @@ Ownership and explanations: [README.md](README.md).
 - `web-workspace-layout.tsx` owns top/side safe-area insets for desktop surfaces,
   including the iPad native shell. The bottom inset belongs to the adjacent surface
   (the composer uses `env(safe-area-inset-bottom)`); mobile insets per surface.
+
+## Conversation access
+
+- `session-sharing.tsx` owns ONE desktop header control for both access axes.
+  Team visibility picks the shape — private keeps the menu explaining its
+  inherited machine/project scope before either sharing action, anything else is
+  a plain button — and a published link picks the label in both shapes, being
+  the wider disclosure. Never add a second badge beside it; the private scope
+  stays the menu's first block.
+- `useSessionShareStatus` is the only cloud read a header makes while the share
+  editor is CLOSED: the management row, never a source document. `unknown` reads
+  as not-yet-shared, so the label upgrades in place instead of flashing in.
+- The page owns that editor: header control and `…` menu open the same
+  `SessionShareDialog`, keyed by session id so a switching tab cannot retarget it.
 
 ## Local projects
 
@@ -99,17 +114,3 @@ Ownership and explanations: [README.md](README.md).
   worktree. Always state that the original project directory is never deleted; list
   dirty worktrees and keep them by default. A completed cleanup result is not pending
   removal and must be acknowledged visibly even when some worktrees were kept or failed.
-
-## Share cards
-
-- `chat-share-card.tsx` is ONE fixed template, not an appearance editor: one gutter
-  per band, left-aligned turns, unconditional code wrap, no height cap, no QR.
-  Size, `mat`, backdrop and palette are the ONLY choices; none changes the layout.
-  Size ("Chat"/"Post") sets the measure, asked by where the image goes and never as
-  a number; the device only seeds it. `mat` is the one continuous dimension, a
-  slider because the live preview answers it better than any name, seeded from
-  size. Under `MIN_SIGN_OFF_MAT` or with no backdrop, the sign-off moves into the
-  caption and the shadow goes. Interior dimensions live in `LAYOUT`, never the
-  markup. `sessions/chat-share-image-dialog.tsx` previews those four controls and
-  two actions, shape row then surface row; drawer on a handset.
-  Intent: [chat image export](../../../../specs/chat-share-image.md).

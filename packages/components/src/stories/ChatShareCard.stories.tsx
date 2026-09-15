@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { ChatShareCard, type ChatShareCardMessage } from '@/components/chat-share-card';
+import { ChatShareCard, type ChatShareCardMessage } from '@/components/share-card/chat-share-card';
 import { AgentIcon } from '@/components/icons/agent-icon';
 
 const meta = {

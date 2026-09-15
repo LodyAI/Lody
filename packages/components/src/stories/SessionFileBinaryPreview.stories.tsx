@@ -56,3 +56,14 @@ export const LocalArchive: Story = {
 export const RemoteArchive: Story = {
   args: { path: 'build/Lody.zip', fileActions: { onCopyPath: fn() } },
 };
+
+export const NativeArchive: Story = {
+  args: { path: 'build/package.deb', fileActions: { onCopyPath: fn(), onShare: fn() } },
+};
+
+export const NativeSharing: Story = {
+  args: {
+    path: 'build/package.deb',
+    fileActions: { onCopyPath: fn(), onShare: fn(), sharing: true },
+  },
+};

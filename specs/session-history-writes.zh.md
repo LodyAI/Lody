@@ -18,7 +18,13 @@ Translation: current
   保留旧值；另一条合法命令仍可执行。不重新校验无关旧 item。
 - 闭合的新输入对象过滤未知字段，明确的协议扩展字典仍保存 JSON 数据。
   保留已存储的未知字段，以及未修改的未知/损坏 item；读取不意味着迁移或清理数据。
-- 已有 primitive 字符串不升级容器；已有 Text 编辑保留容器身份。存储布局变更单独审查。
+- 已有 primitive 字符串不升级容器；已有 Text 编辑保留容器身份。新写入把普通元数据字符串
+  （工具的 `title`/`status`/`kind`/`toolCallId`、`locations[].path`）存为 primitive，
+  只为真正流式增长的字段创建 Text 容器（`text`/`thought`、`markdown`、工具 block 的
+  `text`/`output` 及嵌套 `content.text`、worktree step 的 `output`）。该规则对每个嵌套层级
+  都成立：嵌套的工具/worktree 元数据如 `command`、`path`、`args`、`cwd`、`terminalId` 和
+  `input` 值都是 primitive，绝不存为 Text。这是一条插入策略：不是迁移，不重写已存储的值，
+  也不对旧数据或未来 payload 增加校验约束。存储布局变更单独审查。
 - Fork 是复制已存历史，不是创建新消息。只能从 writer 捕获的快照复制，保留目标初始化日志，
   保留未改动的未知字段和不透明 item；显式修改及新增 fork notice 仍需解析。
   复制轮次插在目标已有轮次之前，拒绝 id 冲突，保留目标容器。
@@ -55,7 +61,17 @@ Translation: current
 来源 hash 和据此生成的 id 保持不变；文档 cursor 另存带版本的实际写入内容基线。
 刷新时精确比较已有 role/items/plan，不把旧内容裁剪后再比较。没有基线时仍严格比较
 旧来源 hash；用户删除旧轮次应视作冲突，而不是自动恢复。基线只绑定同一 cursor 的
-来源 hashes，不采用可能已提前更新的元数据 digest。显式解决冲突后记录新基线。
+来源 hashes，不采用可能已提前更新的元数据 digest。hash 版本出现之前写入的基线没有
+版本字段，视为 v1，可与 v1 cursor 匹配；把缺失字段当作“不是 v1”会丢弃合法的投影基线，
+把正常追加误报为冲突；真正的 v1/v2 不一致仍被拒绝。显式解决冲突后记录新基线。
+
+规范轮次 hash 带版本。v1 原样哈希 `{role, items, plan}`；v2 哈希规范化的 item 形式，
+使被封存的 tool_call 骨架与封存它的完整 tool_call 得到相同 hash，且只改变工具 payload
+字节的来源变更不改变轮次身份。缺失版本即为 v1。每个 hash 只与同版本的 hash 比较；
+存储的 cursor 记录自己 `importedTurnHashes` 的版本，同步元数据独立记录自己
+`replayDigest` 的版本，因为冲突标记可能只更新元数据。v1 文档 cursor 绝不能按 v2 解读，
+否则会制造假的 `prefix_mismatch`。版本不一致且缺少可用于重算的 replay 历史时是错误，
+而不是宽容猜测。新导入使用 v2；现有 v1 规范化规则不变。
 
 这会新增可选 cursor 元数据，但不迁移历史正文。旧读取端可忽略新字段；旧导入器
 不理解基线，仍可能对已裁剪的历史报告冲突，因此不是任意降级安全保证。
@@ -68,14 +84,19 @@ Translation: current
 不支持任意重排普通 LoroList 中的已有轮次。
 
 目前完整 Mirror 读取仍会物化历史，本次不是 3000 轮性能验收或窗口化 ConversationView 上线。
-非历史控制字段的校验不属于这个 HistoryWriter 契约。
+非历史控制字段的校验不属于这个 HistoryWriter 契约。v2 规范形式只针对本仓库当前写入的
+形状定义。完整的封存骨架特性（读取侧的 `ref` payload 拉取、payload hook 以及消费它们的
+UI）不在本次实现；本次只是保证将来出现这类骨架轮次时不会被误判为 hash 冲突。
 
 ## 实现证据
 
-- `packages/shared/src/{history-writer,history-write-schema,session-mirror}.ts`
-- `packages/shared/tests/history-writer.test.ts` 与 `history-writer.contract.ts`
+- `packages/shared/src/{history-writer,history-write-schema,history-materializer,session-mirror,schema}.ts`
+- `packages/shared/src/session-data/{history-import,loro}.ts`
+- `apps/cli/src/lib/local-project-history-sync-service.ts`
+- `packages/shared/tests/history-writer.test.ts`、`history-writer.contract.ts`、
+  `history-storage-policy.test.ts` 与 `session-history-import-port.test.ts`
+- `apps/cli/tests/local-project-history-sync-service.test.ts` 与 `local-project-history-sync-writer.test.ts`
 - [决策记录](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.zh.md)
-- [业务字段修复与待定 hash 决策](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.zh.md)
-- [外部历史基线修复](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.zh.md)
+- [带版本轮次 hash 与 primitive 元数据插入](../.agents/notes/implemented/architecture/2026-09-14-versioned-history-hashes-and-primitive-metadata.zh.md)
 
 这是供人工审阅的草稿；实现和测试通过不代表 Spec 已获批准。

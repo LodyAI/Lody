@@ -53,6 +53,15 @@ vi.mock('../src/components/sharing/share-attachments', () => ({
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
+/** jsdom implements no `PointerEvent`, and the divider tracks one `pointerId`. */
+class TestPointerEvent extends MouseEvent {
+  readonly pointerId: number;
+  constructor(type: string, init: MouseEventInit & { pointerId: number }) {
+    super(type, { bubbles: true, ...init });
+    this.pointerId = init.pointerId;
+  }
+}
+
 const byText = (text: string) =>
   [...document.querySelectorAll<HTMLButtonElement | HTMLAnchorElement>('button, a')].find((node) =>
     node.textContent?.includes(text)
@@ -117,6 +126,120 @@ describe('static share presentation', () => {
     container.remove();
   });
   const render = () => act(async () => root.render(<SessionShareSurface {...props} />));
+
+  it('keeps a conversation it already read, so returning to it needs no second read', async () => {
+    const reads: string[] = [];
+    // A read that never settles: any second read would leave the page loading,
+    // so a live export proves the transcript came from memory rather than from
+    // a repeat fetch that merely happened to be fast.
+    let hang = false;
+    const open = vi.spyOn(sharing, 'openStaticShare').mockResolvedValue({
+      shareId: 'share',
+      deploymentId: 'deployment',
+      manifest: props.manifest!,
+      createAgentAccess: async () => ({ url: '', expiresAt: '' }),
+      readHistory: async (conversationId: string) => {
+        reads.push(conversationId);
+        if (hang) await new Promise(() => {});
+        return [
+          {
+            id: `m-${conversationId}`,
+            role: 'assistant',
+            timestamp: '2026-09-12T00:00:00Z',
+            finished: true,
+            items: [{ type: 'text', text: `Answer in ${conversationId}` }],
+            fileDiff: [],
+          },
+        ] satisfies SessionHistory[];
+      },
+      readObject: vi.fn(),
+      readAttachment: vi.fn(),
+    });
+    const exportButton = () =>
+      [...container.querySelectorAll<HTMLButtonElement>('button')].find((node) =>
+        node.textContent?.includes('Copy as Markdown')
+      )!;
+    const openTree = (id: string) =>
+      act(async () => {
+        const nav = container.querySelector('nav[aria-label="Conversation tree"]')!;
+        [...nav.querySelectorAll<HTMLButtonElement>('button')]
+          .find((node) => node.textContent === id)!
+          .click();
+      });
+    try {
+      await act(async () =>
+        root.render(
+          <SessionSharePage
+            apiOrigin="https://api.example.test"
+            shareId="share"
+            secret={'a'.repeat(64)}
+          />
+        )
+      );
+      expect(reads).toEqual(['c1']);
+      await openTree('Review');
+      expect(reads).toEqual(['c1', 'c3']);
+      hang = true;
+      await openTree('Main');
+      // No third read, and the export is live immediately: the transcript is
+      // on screen rather than behind a loading state.
+      expect(reads).toEqual(['c1', 'c3']);
+      expect(exportButton().disabled).toBe(false);
+      await act(async () => exportButton().click());
+      expect(writeText.mock.lastCall?.[0]).toContain('Answer in c1');
+    } finally {
+      open.mockRestore();
+      window.history.replaceState(null, '', '/');
+    }
+  });
+
+  it('marks the tree entry the open pane belongs to, including from a child Tab', async () => {
+    const open = vi.spyOn(sharing, 'openStaticShare').mockResolvedValue({
+      shareId: 'share',
+      deploymentId: 'deployment',
+      manifest: props.manifest!,
+      createAgentAccess: async () => ({ url: '', expiresAt: '' }),
+      readHistory: async () => [],
+      readObject: vi.fn(),
+      readAttachment: vi.fn(),
+    });
+    const marked = () =>
+      container.querySelector('nav[aria-label="Conversation tree"] [aria-current="page"]')
+        ?.textContent;
+    try {
+      await act(async () =>
+        root.render(
+          <SessionSharePage
+            apiOrigin="https://api.example.test"
+            shareId="share"
+            secret={'a'.repeat(64)}
+          />
+        )
+      );
+      expect(marked()).toBe('Main');
+      await act(async () =>
+        [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+          .find((node) => node.textContent === 'Notes')!
+          .click()
+      );
+      // A child Tab is named by the tab strip, so the tree keeps pointing at
+      // the independent conversation the visitor is reading inside.
+      expect(marked()).toBe('Main');
+      await act(async () =>
+        [
+          ...container.querySelectorAll<HTMLButtonElement>(
+            'nav[aria-label="Conversation tree"] button'
+          ),
+        ]
+          .find((node) => node.textContent === 'Review')!
+          .click()
+      );
+      expect(marked()).toBe('Review');
+    } finally {
+      open.mockRestore();
+      window.history.replaceState(null, '', '/');
+    }
+  });
 
   it('copies the prompt in the reader language, including after a language switch', async () => {
     const link = {
@@ -220,6 +343,85 @@ describe('static share presentation', () => {
     )!;
     await act(async () => review.click());
     expect(props.onSelect).toHaveBeenCalledWith('c3');
+  });
+
+  it('collapses the sidebar in place so it can animate, and keeps it out of the way', async () => {
+    await render();
+    const sidebarToggle = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Toggle conversation tree"]'
+    )!;
+    const tree = () => container.querySelector('nav[aria-label="Conversation tree"]')!;
+    expect(tree().hasAttribute('inert')).toBe(false);
+    await act(async () => sidebarToggle.click());
+    expect(sidebarToggle.getAttribute('aria-expanded')).toBe('false');
+    // The rows stay mounted — an element that unmounts cannot transition — but
+    // a collapsed tree must not take focus or clicks on the way out.
+    expect(tree().textContent).toContain('Main');
+    expect(tree().hasAttribute('inert')).toBe(true);
+    await act(async () => sidebarToggle.click());
+    expect(tree().hasAttribute('inert')).toBe(false);
+  });
+
+  it('resizes the tree by dragging the divider, and keeps it inside its bounds', async () => {
+    await render();
+    const tree = () => container.querySelector<HTMLElement>('nav[aria-label="Conversation tree"]')!;
+    const divider = () =>
+      container.querySelector<HTMLElement>('[role="separator"][aria-orientation="vertical"]')!;
+    expect(tree().style.width).toBe('224px');
+    const drag = (type: string, clientX: number, pointerId = 1) =>
+      act(async () => {
+        divider().dispatchEvent(new TestPointerEvent(type, { clientX, pointerId, button: 0 }));
+      });
+    await drag('pointerdown', 224);
+    await drag('pointermove', 304);
+    expect(tree().style.width).toBe('304px');
+    expect(divider().getAttribute('aria-valuenow')).toBe('304');
+    // The bounds hold in both directions, so a drag can neither hide the tree
+    // nor crowd out the transcript the page exists to show.
+    await drag('pointermove', 4000);
+    expect(tree().style.width).toBe('480px');
+    await drag('pointermove', -4000);
+    expect(tree().style.width).toBe('180px');
+    // A second pointer's moves are not this drag's.
+    await drag('pointermove', 900, 2);
+    expect(tree().style.width).toBe('180px');
+    await drag('pointerup', -4000);
+    await drag('pointermove', 900);
+    expect(tree().style.width).toBe('180px');
+    // Reachable without a pointer at all.
+    await act(async () => {
+      divider().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    });
+    expect(tree().style.width).toBe('196px');
+    // Nothing to drag while the tree is collapsed, and reopening restores the
+    // width the visitor chose rather than the default.
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('[aria-label="Toggle conversation tree"]')!.click()
+    );
+    expect(container.querySelector('[role="separator"][aria-orientation="vertical"]')).toBeNull();
+    expect(tree().style.width).toBe('0px');
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('[aria-label="Toggle conversation tree"]')!.click()
+    );
+    expect(tree().style.width).toBe('196px');
+  });
+
+  it('marks a tree row without painting over the connector beside it', async () => {
+    props.sessionId = 'c3';
+    await render();
+    const tree = container.querySelector('nav[aria-label="Conversation tree"]')!;
+    const marked = tree.querySelector('[aria-current="page"]')!;
+    expect(marked.textContent).toBe('Review');
+    const trunk = tree.querySelector('[data-session-tree-connector="trunk"]')!;
+    const elbow = tree.querySelector('[data-session-tree-connector="elbow"]')!;
+    // The trunk and elbow run through the gutter of rows they do not belong to,
+    // so the selected row's tint must stay out of that gutter: it covers the
+    // title box only, with the leading slot as its sibling.
+    expect(marked.contains(trunk)).toBe(false);
+    expect(marked.contains(elbow)).toBe(false);
+    expect(trunk.closest('[aria-current]')).toBeNull();
+    expect(marked.parentElement!.contains(trunk)).toBe(true);
+    expect(marked.previousElementSibling!.hasAttribute('data-session-row-leading-slot')).toBe(true);
   });
 
   it('reaches the conversation tree as a drawer where a sidebar does not fit', async () => {

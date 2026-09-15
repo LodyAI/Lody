@@ -6,7 +6,7 @@ import React, { act, useEffect, useLayoutEffect, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionId } from '@lody/shared';
-import type { VirtualizerHandle } from 'virtua';
+import type { CacheSnapshot, VirtualizerHandle } from 'virtua';
 import {
   clearAllScrollPositions,
   getScrollPosition,
@@ -68,11 +68,15 @@ type MockVirtualizerHandle = VirtualizerHandle & {
   scrollTo: ReturnType<typeof vi.fn>;
 };
 
+/** Stand-in for Virtua's opaque row-measurement snapshot; identity is the assertion. */
+const measurementsOf = (label: string): CacheSnapshot => [label] as unknown as CacheSnapshot;
+
 type HarnessProps = {
   sessionId: SessionId;
   vlist: MockVirtualizerHandle | null;
   scrollElement: HTMLDivElement | null;
   itemCount: number;
+  hasVirtualizedRows?: boolean;
   initialContentReady?: boolean;
   onAtBottomChange?: (atBottom: boolean) => void;
   skipNextViewportResizeAutoScrollRef?: React.MutableRefObject<boolean>;
@@ -180,11 +184,15 @@ function createScrollFixture(): ScrollFixture {
   };
 }
 
-function createMockVirtualizerHandle(scrollElement: HTMLElement): MockVirtualizerHandle {
+function createMockVirtualizerHandle(
+  scrollElement: HTMLElement,
+  cache: CacheSnapshot = measurementsOf('default')
+): MockVirtualizerHandle {
   const handle = {
     scrollSize: 640,
     viewportSize: 400,
     findItemIndex: () => 3,
+    cache,
     scrollToIndex: vi.fn(),
     scrollTo: vi.fn((offset: number) => {
       scrollElement.scrollTop = offset;
@@ -230,6 +238,7 @@ function HookHarness({
   vlist,
   scrollElement,
   itemCount,
+  hasVirtualizedRows,
   initialContentReady,
   onAtBottomChange,
   skipNextViewportResizeAutoScrollRef,
@@ -241,6 +250,7 @@ function HookHarness({
     sessionId,
     vlistRef,
     itemCount,
+    hasVirtualizedRows,
     initialContentReady,
     onAtBottomChange,
     skipNextViewportResizeAutoScrollRef,
@@ -257,6 +267,17 @@ function HookHarness({
   }, [result]);
 
   return null;
+}
+
+/** Close the conversation, as switching sessions does. */
+async function closeHarness(): Promise<void> {
+  await act(async () => {
+    root?.unmount();
+  });
+  root = null;
+  renderContainer?.remove();
+  renderContainer = null;
+  latestResult = null;
 }
 
 async function renderHarness(props: HarnessProps): Promise<void> {
@@ -789,5 +810,127 @@ describe('useStickyScroll Virtua adapter', () => {
 
     expect(Math.abs(fixture.getScrollTop() - 320)).toBeLessThanOrEqual(1);
     expect(latestResult?.isSticky).toBe(true);
+  });
+
+  /**
+   * A cold virtualizer knows no row heights, so it lays a long conversation
+   * out at an estimated total height and only corrects once the first rows are
+   * measured — the conversation stays hidden across that correction, which is
+   * the blank flash when a session is opened or switched to.
+   */
+  describe('row measurements across a close and reopen', () => {
+    it('hands the previous measurements back when a settled session reopens', async () => {
+      const sessionId = 'session-measurements-reopen' as SessionId;
+      const measured = measurementsOf('settled');
+      const first = createScrollFixture();
+      await renderHarness({
+        sessionId,
+        vlist: createMockVirtualizerHandle(first.scrollElement, measured),
+        scrollElement: first.scrollElement,
+        itemCount: 4,
+      });
+      expect(latestResult?.initialScrollRestored).toBe(true);
+      // Nothing was stored before this session had ever been laid out.
+      expect(latestResult?.initialVirtualizerCache).toBeUndefined();
+
+      await closeHarness();
+
+      const second = createScrollFixture();
+      await renderHarness({
+        sessionId,
+        vlist: createMockVirtualizerHandle(second.scrollElement, measurementsOf('cold')),
+        scrollElement: second.scrollElement,
+        itemCount: 4,
+      });
+      expect(latestResult?.initialVirtualizerCache).toBe(measured);
+    });
+
+    it('waits for the real rows when the session opens on its empty state', async () => {
+      const sessionId = 'session-measurements-late-rows' as SessionId;
+      const measured = measurementsOf('settled');
+      const first = createScrollFixture();
+      await renderHarness({
+        sessionId,
+        vlist: createMockVirtualizerHandle(first.scrollElement, measured),
+        scrollElement: first.scrollElement,
+        itemCount: 4,
+      });
+      expect(latestResult?.initialScrollRestored).toBe(true);
+
+      await closeHarness();
+
+      // A session whose document is still being acquired renders the empty
+      // sentinel: no virtualized rows, but the non-null leading fragment still
+      // counts as one item. Answering then would answer for a one-row list.
+      const second = createScrollFixture();
+      const props = {
+        sessionId,
+        vlist: createMockVirtualizerHandle(second.scrollElement, measurementsOf('cold')),
+        scrollElement: second.scrollElement,
+      };
+      await renderHarness({ ...props, itemCount: 1, hasVirtualizedRows: false });
+      expect(latestResult?.initialVirtualizerCache).toBeUndefined();
+
+      // The conversation arrives and the virtualizer is about to mount.
+      await renderHarness({ ...props, itemCount: 4, hasVirtualizedRows: true });
+      expect(latestResult?.initialVirtualizerCache).toBe(measured);
+    });
+
+    it('starts cold when the conversation grew while it was closed', async () => {
+      const sessionId = 'session-measurements-grown' as SessionId;
+      const first = createScrollFixture();
+      await renderHarness({
+        sessionId,
+        vlist: createMockVirtualizerHandle(first.scrollElement, measurementsOf('settled')),
+        scrollElement: first.scrollElement,
+        itemCount: 4,
+      });
+      expect(latestResult?.initialScrollRestored).toBe(true);
+
+      await closeHarness();
+
+      // Virtua's snapshot is positional, so replaying it against shifted
+      // indexes would size the wrong rows.
+      const second = createScrollFixture();
+      await renderHarness({
+        sessionId,
+        vlist: createMockVirtualizerHandle(second.scrollElement, measurementsOf('cold')),
+        scrollElement: second.scrollElement,
+        itemCount: 6,
+      });
+      expect(latestResult?.initialVirtualizerCache).toBeUndefined();
+    });
+
+    it('stores nothing from a session whose layout never settled', async () => {
+      const sessionId = 'session-measurements-unsettled' as SessionId;
+      const first = createScrollFixture();
+      // No mounted tail row means the initial layout never becomes ready, so
+      // the handle only holds estimates — storing them would poison the reopen.
+      first.lastRow.remove();
+      await renderHarness({
+        sessionId,
+        vlist: createMockVirtualizerHandle(first.scrollElement, measurementsOf('estimated')),
+        scrollElement: first.scrollElement,
+        itemCount: 4,
+      });
+      expect(latestResult?.initialScrollRestored).toBe(false);
+
+      // Scrolling can stop before the initial layout is ready. Those are the
+      // estimates the reopen is trying to avoid, so they must not be stored.
+      await act(async () => {
+        latestResult?.persistVirtualizerCache();
+      });
+
+      await closeHarness();
+
+      const second = createScrollFixture();
+      await renderHarness({
+        sessionId,
+        vlist: createMockVirtualizerHandle(second.scrollElement, measurementsOf('cold')),
+        scrollElement: second.scrollElement,
+        itemCount: 4,
+      });
+      expect(latestResult?.initialVirtualizerCache).toBeUndefined();
+    });
   });
 });
