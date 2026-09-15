@@ -388,11 +388,11 @@ export function getChatLandingInitialDataLoading({
   localMachineStateAttempted,
   hasSelectableMachine,
 }: ChatLandingInitialDataLoadingArgs): boolean {
-  if (isRuntimeInitializing || !isDocMetaCacheReady || !localMachineStateAttempted) {
+  if (isRuntimeInitializing || !localMachineStateAttempted) {
     return true;
   }
 
-  return isVisibleMachinesLoading && !hasSelectableMachine;
+  return (!isDocMetaCacheReady || isVisibleMachinesLoading) && !hasSelectableMachine;
 }
 
 export function getChatLandingLocalProjectAvailability({
