@@ -937,6 +937,14 @@ export type SessionMeta = {
    * turn it names is terminal, so a later settlement may replace it freely.
    */
   settledActivationUserMsgId?: string;
+  /**
+   * Stopped steer activations whose provider delivery could not be determined.
+   *
+   * This bounded, exact-id fence survives a daemon restart and prevents a late
+   * history replica from dispatching the old steer. The UI may offer an
+   * explicit retry as a new turn; it must never revive one of these ids.
+   */
+  deliveryUnknownSteerUserMsgIds?: string[];
   /** Goal thread id the user dismissed from the banner after it reached a terminal state.
    *  The banner stays hidden until a goal with a different threadId arrives. */
   dismissedGoalThreadId?: string;
@@ -1016,11 +1024,13 @@ export type SessionMeta = {
 export function getPendingUserTurnActivationId(meta: SessionMeta): string | undefined {
   const missingUserTurnId = meta.lastMissingHistoryUserMsgId;
   const settledUserTurnId = meta.settledActivationUserMsgId;
+  const deliveryUnknownSteerUserMsgIds = new Set(meta.deliveryUnknownSteerUserMsgIds ?? []);
   if (
     typeof meta.processingUserMsgId === 'string' &&
     meta.processingUserMsgId.length > 0 &&
     meta.processingUserMsgId !== missingUserTurnId &&
-    meta.processingUserMsgId !== settledUserTurnId
+    meta.processingUserMsgId !== settledUserTurnId &&
+    !deliveryUnknownSteerUserMsgIds.has(meta.processingUserMsgId)
   ) {
     return meta.processingUserMsgId;
   }
@@ -1029,7 +1039,8 @@ export function getPendingUserTurnActivationId(meta: SessionMeta): string | unde
     meta.latestUserMsgId.length > 0 &&
     meta.latestUserMsgId !== meta.lastHandledUserMsgId &&
     meta.latestUserMsgId !== missingUserTurnId &&
-    meta.latestUserMsgId !== settledUserTurnId
+    meta.latestUserMsgId !== settledUserTurnId &&
+    !deliveryUnknownSteerUserMsgIds.has(meta.latestUserMsgId)
   ) {
     return meta.latestUserMsgId;
   }

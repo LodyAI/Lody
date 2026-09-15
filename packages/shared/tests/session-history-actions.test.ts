@@ -56,6 +56,29 @@ for (const backend of ['loro'] as const)
       ).toBe(false);
       expect(await data.history.readAll()).toEqual(after);
     });
+    it('persists the stopped-steer unknown-delivery provenance atomically with status', async () => {
+      const data = create();
+      await data.commands.appendTurn({ ...row('u', 'user'), status: 'pending_apply' });
+      expect(
+        (
+          await data.commands.applyHistoryAction({
+            kind: 'user-status',
+            turnId: 'u',
+            status: 'failed',
+            onlyPendingApply: true,
+            deliveryUnknownSteer: true,
+          })
+        ).matched
+      ).toBe(true);
+      expect((await data.history.readAll())[0]).toMatchObject({
+        status: 'failed',
+        read: true,
+        inputConfig: {
+          _lodyDeliveryKind: 'steer',
+          _lodySteerOutcome: 'delivery_unknown',
+        },
+      });
+    });
     it('preserves permission outcomes when a request is repeated', async () => {
       const data = create();
       await data.commands.appendTurn({

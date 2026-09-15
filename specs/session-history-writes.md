@@ -69,12 +69,13 @@ That tolerance must not authorize creating new malformed items locally.
   The CLI persists unresolved compaction as failed after confirmed cancellation,
   before accepting another turn.
   Opening a Session does not trigger a history-repair RPC or rewrite old outcomes.
-- If Stop wins while a submitted steer awaits acceptance, a later successful ACK must
-  not transfer ownership, change the source invocation or settle the source as handled.
-  Mark that exact steer user turn `canceled` before returning `stale-turn`, without
-  changing dispatch pointers. Keep the current cancellation owner until provider completion.
-  Do not requeue the accepted steer: rejection of the local ownership transfer is not
-  proof of non-delivery.
+- If Stop wins while a submitted steer awaits application, release the local waiter but keep
+  the raw request in ACP cleanup. A proven refusal restores that exact row to `pending` and
+  wakes ordinary dispatch without rewriting `latestUserMsgId`; a late B must not overtake a
+  newer C. Accepted or transport-unknown delivery records a bounded exact-id fence in session
+  metadata and becomes terminal `failed` with explicit steer/delivery-unknown provenance; it
+  may only be retried as a NEW turn. The fence survives restart and a late history replica.
+  Late results must not transfer ownership, change the source invocation, or revive finalized history.
 - Accepted steer provenance survives both writing and read normalization. Editing and
   resending must not reinterpret a steer as an independently replayable user turn.
 - External imports retain their source hashes and derived ids. A separate versioned

@@ -106,6 +106,20 @@ describe('shouldWatchSession', () => {
     ).toBe('turn-c');
   });
 
+  it('suppresses only stopped steer activations with durable unknown delivery', () => {
+    const fencedMeta = {
+      ...baseMeta,
+      latestUserMsgId: 'steer-unknown',
+      processingUserMsgId: 'steer-unknown',
+      deliveryUnknownSteerUserMsgIds: ['steer-older', 'steer-unknown'],
+    };
+    expect(hasPendingUserTurnActivation(fencedMeta)).toBe(false);
+    expect(decide(fencedMeta)).toBe(false);
+    expect(getPendingUserTurnActivationId({ ...fencedMeta, latestUserMsgId: 'turn-new' })).toBe(
+      'turn-new'
+    );
+  });
+
   it('opens rooms for process-local RPC, access-retry, and cancel signals', () => {
     expect(decide(baseMeta, { hasRpcTurnOffer: true })).toBe(true);
     expect(decide(baseMeta, { hasAccessRetry: true })).toBe(true);
@@ -181,6 +195,14 @@ describe('findNextDispatchableUserTurn steer intent', () => {
     expect(
       findNextDispatchableUserTurn([guide], { ...baseMeta, latestUserMsgId: 'guide-user' })
     ).toEqual(guide);
+
+    expect(
+      findNextDispatchableUserTurn([guide], {
+        ...baseMeta,
+        latestUserMsgId: 'guide-user',
+        deliveryUnknownSteerUserMsgIds: ['guide-user'],
+      })
+    ).toBeNull();
   });
 
   it('does not re-dispatch a re-aimed guide that already ran', () => {

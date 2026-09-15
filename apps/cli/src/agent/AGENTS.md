@@ -39,8 +39,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   never between `initialize` and `newSession`.
 - Acknowledged steer is inject-or-refuse. `AgentSteerNotDeliveredError` marks ONLY a provable
   refusal — local pre-write failure or the agent's own JSON-RPC `invalid request`; never widen
-  it. The applied-waiter must await the steer request's answer before giving up on the turn's
-  response.
+  it. Stop may release the applied-waiter, but submitted delivery remains in the ACP drain.
 
 ## Launch and runtimes
 

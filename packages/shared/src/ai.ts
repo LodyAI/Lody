@@ -1725,5 +1725,7 @@ export type ACPSessionConfig = {
 export type SessionTurnInputConfig = Partial<ACPSessionConfig> & {
   /** An accepted steer has no independently editable provider turn boundary. */
   _lodyDeliveryKind?: import('./message-schemas').SessionHistoryDeliveryKind;
+  /** A stopped steer whose application could not be proven either way. */
+  _lodySteerOutcome?: import('./message-schemas').SessionHistorySteerOutcome;
 };
 import type { OperationCompletionContent, OperationProgressContent } from './session-orchestration';

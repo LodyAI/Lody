@@ -91,7 +91,11 @@ import {
   type ManagedRuntimeName,
 } from '@/agent/managed-agent-runtime';
 import type { FetchAcpCapabilitiesOptions } from '@/agent/acp-capabilities';
-import { AcpAuthenticationRequiredError, AgentSteerNotDeliveredError } from '@/agent/agent-client';
+import {
+  AcpAuthenticationRequiredError,
+  AgentSteerNotDeliveredError,
+  type SteerPromptRun,
+} from '@/agent/agent-client';
 import type { GoalPromptControl } from '@/agent/goal-control';
 import {
   AcpAuthenticationManager,
@@ -280,6 +284,16 @@ type TurnRuntimeState = {
   };
   /** Logical prompt tail currently owned by the one session-owner fiber. */
   activePromptRun?: PromptHandoffRun;
+  /** Releases an in-flight steer application wait when Stop takes ownership. */
+  steerAbortController?: AbortController;
+  /** Barrier that lets the active steer release its queue and rewrite lease. */
+  stoppedSteerCleanup?: Promise<void>;
+  /** Delivery evidence retained after Stop cancels only the local application wait. */
+  stoppedSteer?: {
+    userTurnId: string;
+    state: 'pending' | 'accepted' | 'refused' | 'unknown';
+    finalized: boolean;
+  };
   /** Serialized ancillary finalization for yielded logical turns. */
   yieldedFinalization: Promise<void>;
   pendingSession?: Promise<ISession>;
@@ -1473,7 +1487,9 @@ export class SessionExecutionService {
 
     // Everything up to `steerPrompt` returning is provably undelivered; after
     // that only the agent's own inject-or-refuse verdict can say so.
-    let submittedToAgent = false;
+    let steerRun: SteerPromptRun | undefined;
+    const steerAbortController = new AbortController();
+    runtime.steerAbortController = steerAbortController;
     try {
       const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(options.sessionId);
       const inputBlocks = normalizeSessionInputBlocks(
@@ -1511,9 +1527,13 @@ export class SessionExecutionService {
 
       const previousTurnId = runtime.turnId;
       const previousUserTurnId = runtime.userTurnId;
-      const steerRun = agentClient.steerPrompt(acpSessionId, promptBlocks);
-      submittedToAgent = true;
+      steerRun = agentClient.steerPrompt(acpSessionId, promptBlocks, {
+        signal: steerAbortController.signal,
+      });
       const application = await steerRun.applied;
+      if (runtime.steerAbortController === steerAbortController) {
+        runtime.steerAbortController = undefined;
+      }
       try {
         if (
           runtime.cancelRequested ||
@@ -1613,8 +1633,30 @@ export class SessionExecutionService {
         application.release();
       }
     } catch (error) {
-      const notDelivered = !submittedToAgent || error instanceof AgentSteerNotDeliveredError;
+      const notDelivered = !steerRun || error instanceof AgentSteerNotDeliveredError;
       if (!notDelivered) {
+        if (steerAbortController.signal.aborted && steerRun) {
+          const stoppedSteer: NonNullable<TurnRuntimeState['stoppedSteer']> = {
+            userTurnId: options.userTurnId,
+            state: 'pending',
+            finalized: false,
+          };
+          runtime.stoppedSteer = stoppedSteer;
+          void steerRun.delivery.then(
+            () => {
+              if (!stoppedSteer.finalized) stoppedSteer.state = 'accepted';
+            },
+            (deliveryError: unknown) => {
+              if (stoppedSteer.finalized) return;
+              stoppedSteer.state =
+                deliveryError instanceof AgentSteerNotDeliveredError ? 'refused' : 'unknown';
+            }
+          );
+          return reject(
+            'error',
+            'Steer application was stopped; delivery will be reconciled with turn cleanup.'
+          );
+        }
         return reject('error', formatErrorMessage(error));
       }
       // `no-active-turn` for the agent's own refusal: it is the disposition
@@ -1624,6 +1666,10 @@ export class SessionExecutionService {
         error instanceof AgentSteerNotDeliveredError ? 'no-active-turn' : 'error',
         formatErrorMessage(error)
       );
+    } finally {
+      if (runtime.steerAbortController === steerAbortController) {
+        runtime.steerAbortController = undefined;
+      }
     }
   }
 
@@ -1633,12 +1679,9 @@ export class SessionExecutionService {
    * message gets. Without this it would sit in `pending_apply`, which dispatch
    * skips, and never run at all.
    *
-   * The `latestUserMsgId` pointer is the load-bearing half, not the entry status:
-   * `SessionDispatchWatcher.sessionNeedsActiveWatch` reads META only, so a turn
-   * visible solely in history is dropped the moment the session goes idle (the
-   * watcher unsubscribes) and is never reconsidered, including after a daemon
-   * restart. The pointer is also what survives a cancel. It is the same pointer a
-   * Web send writes, so this is the ordinary dispatch signal, not a second path.
+   * The queue update is the wake-up half, not the entry status: the watcher reads
+   * metadata before history. It is deliberately separate from `latestUserMsgId`,
+   * which belongs to producers and may already name a newer user turn.
    */
   private async requeueUndeliveredSteer(
     sessionId: SessionId,
@@ -1665,10 +1708,7 @@ export class SessionExecutionService {
           return;
         }
       }
-      await this.upsertSessionMeta(sessionId, {
-        latestUserMsgId: userTurnId,
-        lastMissingHistoryUserMsgId: undefined,
-      });
+      await this.upsertSessionMeta(sessionId, { messageQueueUpdatedAt: getServerNow() });
       this.deps.logger.info(
         `[${sessionId}] Undelivered steer ${userTurnId} requeued as a follow-up turn`
       );
@@ -1706,6 +1746,34 @@ export class SessionExecutionService {
         queueable = result.matched ?? false;
       });
     return queueable;
+  }
+
+  /**
+   * Stop ended the target turn without an application verdict. Make that exact
+   * steer terminal and visibly retryable as a NEW turn; never revive it or move
+   * a producer-owned dispatch pointer backwards.
+   */
+  private async markStoppedSteerDeliveryUnknown(
+    sessionId: SessionId,
+    sessionDoc: SessionDocument,
+    userTurnId: string
+  ): Promise<void> {
+    const meta = await this.getSessionMeta(sessionId);
+    const previous = (meta?.deliveryUnknownSteerUserMsgIds ?? []).filter(
+      (id): id is string => typeof id === 'string' && id.length > 0 && id !== userTurnId
+    );
+    await this.upsertSessionMeta(sessionId, {
+      deliveryUnknownSteerUserMsgIds: [...previous, userTurnId].slice(
+        -SessionExecutionService.TERMINAL_TURN_RECORD_LIMIT
+      ),
+    });
+    await sessionDoc.sessionData.commands.applyHistoryAction({
+      kind: 'user-status',
+      turnId: userTurnId,
+      status: 'failed',
+      onlyPendingApply: true,
+      deliveryUnknownSteer: true,
+    });
   }
 
   async dispatchPreparedSessionTurn(options: PreparedSessionDispatchOptions): Promise<void> {
@@ -2097,6 +2165,13 @@ export class SessionExecutionService {
         runtime.cancelFinalized = true;
         runtime.cancelRequested = true;
       }
+      if (runtime?.stoppedSteerCleanup) {
+        yield* self.ignoreWithWarning(
+          options.sessionId,
+          'Failed to release stopped steer ownership',
+          self.tryPromise(() => runtime.stoppedSteerCleanup ?? Promise.resolve())
+        );
+      }
       self.deps.clearActiveTurnId(options.sessionId, options.turnId);
 
       const sessionToTerminate = options.session ?? null;
@@ -2174,6 +2249,35 @@ export class SessionExecutionService {
         // Keep the execution owner until ACP has actually finished. Otherwise
         // the next queued turn can reach the still-busy adapter after local abort.
         yield* self.tryPromise(() => self.drainCancelledPrompt(sessionToDrain, runtime));
+      }
+
+      const stoppedSteer = runtime?.stoppedSteer;
+      if (stoppedSteer && !stoppedSteer.finalized) {
+        stoppedSteer.finalized = true;
+        if (stoppedSteer.state === 'refused') {
+          yield* self.ignoreWithWarning(
+            options.sessionId,
+            'Failed to requeue refused stopped steer',
+            self.tryPromise(() =>
+              self.requeueUndeliveredSteer(options.sessionId, stoppedSteer.userTurnId, {
+                canWriteHistory: true,
+              })
+            )
+          );
+        } else {
+          yield* self.ignoreWithWarning(
+            options.sessionId,
+            'Failed to persist unknown stopped steer delivery',
+            self.tryPromise(() =>
+              self.markStoppedSteerDeliveryUnknown(
+                options.sessionId,
+                options.sessionDoc,
+                stoppedSteer.userTurnId
+              )
+            )
+          );
+        }
+        if (runtime?.stoppedSteer === stoppedSteer) runtime.stoppedSteer = undefined;
       }
 
       if (runtime?.promptStarted) {
@@ -5339,6 +5443,8 @@ export class SessionExecutionService {
         }
         // Keep the owner alive until ACP returns; cancel acknowledgement is not prompt completion.
         this.requestAgentCancelInBackground(runtime, 'active');
+        runtime.steerAbortController?.abort(new Error('Steer application stopped with its turn'));
+        runtime.stoppedSteerCleanup = this.steerMutationQueue.enqueue(sessionId, async () => {});
         void this.drainCancelledPrompt(runtimeSession, runtime).catch((error: unknown) => {
           this.deps.logger.warn(
             `[${sessionId}] Failed to drain cancelled prompt: ${formatErrorMessage(error)}`

@@ -45,8 +45,8 @@ restore/delete retain containment-only targets. See [relations](../../specs/sess
 - ACP tool blocks and locations are explicit JSON extension boundaries. Unknown block
   types must not bypass validation of malformed known variants. Preserve declared `_meta`
   and extension keys; closed execution configuration still selects declared fields.
-- Steer provenance is a declared history input-config field, not an unknown extension.
-  Both new writes and read normalization must retain it for edit-and-resend checks.
+- Steer provenance and delivery-unknown outcome are declared history input-config fields, not
+  unknown extensions. New writes and read normalization retain them for safe resend checks.
 - Scalar/fileDiff writes read and diff only the requested field, never the turn's items.
   Writer input parsers derive from schema definitions with all refinements retained;
   never mutate the original RPC schemas. Parsing filters and validates in one pass.

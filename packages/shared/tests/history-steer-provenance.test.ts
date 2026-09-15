@@ -12,7 +12,11 @@ const entry = (): SessionHistoryInput => ({
   status: 'processing',
   read: true,
   items: [{ type: 'text', text: 'synthetic guide' }],
-  inputConfig: { prompt: 'synthetic guide', _lodyDeliveryKind: 'steer' },
+  inputConfig: {
+    prompt: 'synthetic guide',
+    _lodyDeliveryKind: 'steer',
+    _lodySteerOutcome: 'delivery_unknown',
+  },
 });
 
 describe('stored steer provenance', () => {
@@ -28,7 +32,11 @@ describe('stored steer provenance', () => {
       peer.import(doc.export({ mode: 'snapshot' }));
       const stored = peer.getList('history').toJSON()[0];
       expect(stored.inputConfig._lodyDeliveryKind).toBe('steer');
-      expect(normalizeSessionTurnInputConfig(stored.inputConfig)?._lodyDeliveryKind).toBe('steer');
+      expect(stored.inputConfig._lodySteerOutcome).toBe('delivery_unknown');
+      expect(normalizeSessionTurnInputConfig(stored.inputConfig)).toMatchObject({
+        _lodyDeliveryKind: 'steer',
+        _lodySteerOutcome: 'delivery_unknown',
+      });
     } finally {
       mirror.dispose();
     }
@@ -73,5 +81,16 @@ describe('stored steer provenance', () => {
       ).toEqual({
         prompt: 'valid',
       });
+    for (const outcome of ['delivered', 42, null])
+      expect(
+        normalizeSessionTurnInputConfig({
+          prompt: 'valid',
+          _lodyDeliveryKind: 'steer',
+          _lodySteerOutcome: outcome,
+        })
+      ).toEqual({ prompt: 'valid', _lodyDeliveryKind: 'steer' });
+    expect(
+      normalizeSessionTurnInputConfig({ prompt: 'valid', _lodySteerOutcome: 'delivery_unknown' })
+    ).toEqual({ prompt: 'valid' });
   });
 });

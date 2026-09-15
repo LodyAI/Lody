@@ -381,9 +381,24 @@ export const ACPSessionConfigSchema = z
 export const SessionHistoryDeliveryKindSchema = z.literal('steer');
 export type SessionHistoryDeliveryKind = z.infer<typeof SessionHistoryDeliveryKindSchema>;
 
+export const SessionHistorySteerOutcomeSchema = z.literal('delivery_unknown');
+export type SessionHistorySteerOutcome = z.infer<typeof SessionHistorySteerOutcomeSchema>;
+
 export const SessionHistoryInputConfigSchema = ACPSessionConfigSchema.partial()
-  .extend({ _lodyDeliveryKind: SessionHistoryDeliveryKindSchema.optional() })
-  .strip();
+  .extend({
+    _lodyDeliveryKind: SessionHistoryDeliveryKindSchema.optional(),
+    _lodySteerOutcome: SessionHistorySteerOutcomeSchema.optional(),
+  })
+  .strip()
+  .superRefine((config, ctx) => {
+    if (config._lodySteerOutcome && config._lodyDeliveryKind !== 'steer') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['_lodySteerOutcome'],
+        message: 'A steer outcome requires steer delivery provenance',
+      });
+    }
+  });
 
 const LooseSessionTurnInputConfigSchema = SessionHistoryInputConfigSchema.passthrough();
 
@@ -516,6 +531,14 @@ export const normalizeSessionTurnInputConfig = (
   const deliveryKind = maybeParseField(SessionHistoryDeliveryKindSchema, record._lodyDeliveryKind);
   if (deliveryKind !== undefined) {
     normalized._lodyDeliveryKind = deliveryKind;
+  }
+
+  const steerOutcome =
+    deliveryKind === 'steer'
+      ? maybeParseField(SessionHistorySteerOutcomeSchema, record._lodySteerOutcome)
+      : undefined;
+  if (steerOutcome !== undefined) {
+    normalized._lodySteerOutcome = steerOutcome;
   }
 
   const looseParsed = LooseSessionTurnInputConfigSchema.safeParse(record);

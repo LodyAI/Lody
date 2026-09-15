@@ -80,7 +80,11 @@ import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
 import { authTokenAtom, runtimeAtom } from '@/atoms/runtime';
 import { machineSupportsSubagentCancellation } from '@lody/shared';
 import { useStickyScroll } from '@/hooks/use-sticky-scroll';
-import { buildResendInputBlocks, isUndeliveredUserTurnEntry } from '@/lib/undelivered-user-turn';
+import {
+  buildResendInputBlocks,
+  isUncertainSteerUserTurnEntry,
+  isUndeliveredUserTurnEntry,
+} from '@/lib/undelivered-user-turn';
 import { ConversationOutlineRail } from './conversation-outline-rail';
 import { useLatestRef } from '@/hooks/use-latest-ref';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
@@ -2905,9 +2909,13 @@ const UserMessageRowView = ({
     sessionMeta?.lastMissingHistoryUserMsgId,
     message
   );
+  const isUncertainSteer = isUncertainSteerUserTurnEntry(
+    message,
+    sessionMeta?.deliveryUnknownSteerUserMsgIds
+  );
   const pinCtx = useSessionPin();
   const showSendingSpinner =
-    useIsMessageSendingVisible(message.id) && !isDelivered && !isUndelivered;
+    useIsMessageSendingVisible(message.id) && !isDelivered && !isUndelivered && !isUncertainSteer;
 
   const hasTextContent = hasTextContentFromMessageItems(message.items);
   const [didCopy, setDidCopy] = useState(false);
@@ -3001,7 +3009,24 @@ const UserMessageRowView = ({
             </span>
           ) : null}
           {timestampLabel ? <span className="tabular-nums">{timestampLabel}</span> : null}
-          {isUndelivered ? (
+          {isUncertainSteer ? (
+            onResendUndelivered ? (
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 rounded-sm text-status-warning underline-offset-2 transition-colors hover:underline"
+                aria-label={t('sessions.resendUncertainSteer.action', 'Retry as new message')}
+                onClick={() => setResendDialogOpen(true)}
+              >
+                <AlertCircle className="h-3.5 w-3.5" strokeWidth={2} />
+                {!isMobile ? t('sessions.messageStatus.deliveryUnknown', 'Delivery unknown') : null}
+              </button>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-status-warning">
+                <AlertCircle className="h-3.5 w-3.5" strokeWidth={2} />
+                {!isMobile ? t('sessions.messageStatus.deliveryUnknown', 'Delivery unknown') : null}
+              </span>
+            )
+          ) : isUndelivered ? (
             onResendUndelivered ? (
               <button
                 type="button"
@@ -3196,6 +3221,7 @@ const UserMessageRowView = ({
           open={resendDialogOpen}
           onOpenChange={setResendDialogOpen}
           isResending={isResending}
+          deliveryUnknown={isUncertainSteer}
           onConfirm={() => {
             void handleConfirmResend();
           }}
@@ -3275,11 +3301,13 @@ const ResendUndeliveredDialog = ({
   open,
   onOpenChange,
   isResending,
+  deliveryUnknown,
   onConfirm,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   isResending: boolean;
+  deliveryUnknown: boolean;
   onConfirm: () => void;
 }) => {
   const { t } = useTranslation();
@@ -3288,13 +3316,20 @@ const ResendUndeliveredDialog = ({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            {t('sessions.resendUndelivered.title', 'Message not delivered')}
+            {deliveryUnknown
+              ? t('sessions.resendUncertainSteer.title', 'Message delivery is unknown')
+              : t('sessions.resendUndelivered.title', 'Message not delivered')}
           </AlertDialogTitle>
           <AlertDialogDescription>
-            {t(
-              'sessions.resendUndelivered.description',
-              'This message never reached the agent, so it did not run. Resend the same content as a new message?'
-            )}
+            {deliveryUnknown
+              ? t(
+                  'sessions.resendUncertainSteer.description',
+                  'The stopped turn ended before Lody could confirm whether this guidance ran. Retrying sends the same content as a new message and may duplicate work.'
+                )
+              : t(
+                  'sessions.resendUndelivered.description',
+                  'This message never reached the agent, so it did not run. Resend the same content as a new message?'
+                )}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -3303,7 +3338,9 @@ const ResendUndeliveredDialog = ({
           </AlertDialogCancel>
           <AlertDialogAction disabled={isResending} onClick={onConfirm}>
             {isResending ? <Spinner className="h-3.5 w-3.5" strokeWidth={2} /> : null}
-            {t('sessions.resendUndelivered.action', 'Resend message')}
+            {deliveryUnknown
+              ? t('sessions.resendUncertainSteer.action', 'Retry as new message')
+              : t('sessions.resendUndelivered.action', 'Resend message')}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

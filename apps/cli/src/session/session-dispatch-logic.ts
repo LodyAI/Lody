@@ -302,6 +302,12 @@ export function findNextDispatchableUserTurn(
     if (entry.id === meta.lastMissingHistoryUserMsgId) {
       continue;
     }
+    // Stop can win after a provider accepted the steer but before its
+    // acknowledgement reached Lody. The durable exact-id fence prevents a
+    // late history replica or daemon restart from dispatching it again.
+    if (meta.deliveryUnknownSteerUserMsgIds?.includes(entry.id)) {
+      continue;
+    }
 
     // Path 1: New status field — explicit lifecycle state
     if (typeof entry.status === 'string') {

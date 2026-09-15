@@ -17,6 +17,25 @@ import {
 type UserTurnStatusReadable = Pick<SessionHistoryInput, 'id' | 'role' | 'read' | 'status'>;
 
 /**
+ * A submitted steer whose target turn stopped before Lody observed application.
+ * Retrying must create a new turn because the provider may have received it.
+ */
+export const isUncertainSteerUserTurnEntry = (
+  entry:
+    | (UserTurnStatusReadable & {
+        inputConfig?: SessionHistoryInput['inputConfig'];
+      })
+    | null
+    | undefined,
+  deliveryUnknownSteerUserMsgIds: readonly string[] = []
+): boolean =>
+  entry?.role === 'user' &&
+  (deliveryUnknownSteerUserMsgIds.includes(entry.id) ||
+    (entry.status === 'failed' &&
+      (entry.inputConfig as Record<string, unknown> | undefined)?._lodySteerOutcome ===
+        'delivery_unknown'));
+
+/**
  * True when the missing-history marker names this exact entry and the entry is
  * still non-terminal (pending / unseen) — i.e. it visibly never executed.
  * Exact-id match only: a marker naming a different turn must not leak onto

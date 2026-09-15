@@ -42,6 +42,7 @@ export type HistoryAction =
       requeueUndelivered?: boolean;
       onlyPendingApply?: boolean;
       deliveredSteer?: boolean;
+      deliveryUnknownSteer?: boolean;
     }
   | {
       kind: 'finish-assistant';
@@ -190,6 +191,12 @@ export function applyHistoryAction(
       entry.read = action.status !== 'pending' && action.status !== 'pending_apply';
       if (action.deliveredSteer)
         entry.inputConfig = { ...entry.inputConfig, _lodyDeliveryKind: 'steer' };
+      if (action.deliveryUnknownSteer)
+        entry.inputConfig = {
+          ...entry.inputConfig,
+          _lodyDeliveryKind: 'steer',
+          _lodySteerOutcome: 'delivery_unknown',
+        };
       return { turns: history, matched: true };
     }
     case 'finish-assistant': {

@@ -562,6 +562,31 @@ describe('AgentClient plan mode permission restoration', () => {
       expect(error).not.toBeInstanceOf(AgentSteerNotDeliveredError);
     });
 
+    it('releases a stopped application waiter while retaining the raw delivery verdict', async () => {
+      let finishRequest!: (value: unknown) => void;
+      const rawRequest = new Promise((resolve) => {
+        finishRequest = resolve;
+      });
+      const { client } = createSteerClient(() => rawRequest);
+      const controller = new AbortController();
+      const steerRun = client.steerPrompt(
+        'acp-test' as ACPSessionId,
+        [{ type: 'text', text: 'guide' }],
+        { signal: controller.signal }
+      );
+
+      controller.abort();
+      const applicationError = await steerRun.applied.catch((error: unknown) => error);
+      expect(applicationError).toBeInstanceOf(Error);
+      expect(applicationError).not.toBeInstanceOf(AgentSteerNotDeliveredError);
+      expect(client.pendingPromptCompletion).not.toBeNull();
+
+      finishRequest({ outcome: 'injected' });
+      await expect(steerRun.delivery).resolves.toBeUndefined();
+      await client.pendingPromptCompletion;
+      expect(client.pendingPromptCompletion).toBeNull();
+    });
+
     it('lets the refusal win when the steered turn ends before the agent answers', async () => {
       // The Codex adapter drains session notifications before it refuses, so the
       // upstream turn's own response routinely lands first. Rejecting on that

@@ -119,9 +119,10 @@ create (`commands/session.ts` `writeDispatchPointer`), dispatch start and steer 
 transfer (`session-execution-service.ts`), and edit-and-resend; the renderer authors its own
 writes and cannot reach `SessionDocument` at all.
 
-Requeueing a refused steer works through the pointer rather than the entry status because
-`sessionNeedsActiveWatch` reads meta only: a turn visible solely in history is dropped the
-moment the session goes idle and is never reconsidered, restart included.
+Requeueing a refused steer changes its entry back to `pending` and bumps
+`messageQueueUpdatedAt`. It must not rewrite `latestUserMsgId`: that pointer belongs to the
+producer of the newest turn, and a late refusal for steer B must not move it backwards over C.
+The queue signal wakes the existing watcher without creating another dispatch path.
 
 ### Why resume reopens the assistant entry
 

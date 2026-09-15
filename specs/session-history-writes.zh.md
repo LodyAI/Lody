@@ -49,10 +49,12 @@ Translation: current
   也不因重复 Stop 重置。终止失败则继续持有 owner，直到 ACP 结束。start/interrupt ACK
   和压缩 item 的完成均不能释放执行 ownership。CLI 在取消确认后、接受下一轮前，
   将尚未结束的压缩标记为 failed。打开 Session 不触发历史修复 RPC，也不改写旧结果。
-- 已提交的 steer 等待接受时，若 Stop 先发生，则后到的成功 ACK 不得转移 ownership、
-  改变 source invocation 或将 source 结算为 handled。返回 `stale-turn` 前，将该 exact steer
-  用户轮次标为 `canceled`，不改变 dispatch pointer。保持当前 cancellation owner，
-  直到 provider 完成。不得重排该已接受的 steer：拒绝本地 ownership 转移不代表消息未投递。
+- 已提交的 steer 等待应用时，若 Stop 先发生，则释放本地 waiter，但 raw request 仍由 ACP
+  cleanup 持有。明确拒绝时才把该行恢复为 `pending`，并唤醒普通 dispatch，但不得重写
+  `latestUserMsgId`，避免后到的 B 覆盖更新的 C。已接受或传输结果未知时，在 session
+  metadata 中记录有界的精确 id fence，并将可见行终结为 `failed`、记录
+  steer/delivery-unknown 来源；只能作为新轮次重试。该 fence 跨 daemon 重启和迟到 history
+  副本生效。迟到结果不得转移 ownership、改变 source invocation 或复活已终结历史。
 - 已接受的 steer 标记在写入和读取归一化后都必须保留；编辑重发不能把 steer
   当作可独立重放的普通用户轮次。
 

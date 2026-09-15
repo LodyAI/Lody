@@ -713,6 +713,7 @@ export class SessionDispatchWatcher {
       }
       if (
         meta?.lastHandledUserMsgId === userTurnId ||
+        meta?.deliveryUnknownSteerUserMsgIds?.includes(userTurnId) ||
         this.deps.executionService.getTerminalUserTurnStatusWithoutEntry?.(sessionId, userTurnId)
       ) {
         return finish('already-terminal');

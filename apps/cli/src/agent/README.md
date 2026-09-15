@@ -97,7 +97,9 @@ upstream turn's response: the Codex adapter drains session notifications before 
 so the turn's response routinely wins that race and would otherwise mask the refusal. A
 closed connection, a dead agent process, or an internal error may have left the prompt
 inside the live turn, and the caller re-sends an undelivered steer — so widening the
-"not delivered" classification sends the user's message twice.
+"not delivered" classification sends the user's message twice. Stop may cancel the local
+application waiter, but the submitted request remains in `pendingPrompts` until its delivery
+verdict settles or termination closes the connection.
 
 ### DeepSeek Harness is not a managed runtime
 
