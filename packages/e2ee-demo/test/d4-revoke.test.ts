@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createRecoveryDeviceSecret, importRecoveryDevice } from '@lody/e2ee-core';
 import { exportBackup, restoreBackup } from '../src/backup';
+import { readLoro, writeLoro } from '../src/content-session';
 import { generateDevice } from '../src/device';
 import { launchHost, session } from './helpers';
 
@@ -54,5 +55,23 @@ describe('D4 revoke, rotation, history, file restore', () => {
     await restored.reauth();
     const added = await restored.admitDevice(phone, 'personal', false);
     expect(added.status === 'committed' || added.status === 'conflict').toBe(true);
+  });
+
+  it('keeps previously written encrypted history readable after the author is removed', async () => {
+    const host = await launchHost();
+    const alice = await session(host, 'alice');
+    const bob = await session(host, 'bob');
+    await alice.createSpace();
+    const join = await bob.requestJoin(alice.genesisHex!);
+    const approved = await alice.approveJoin(join);
+    await alice.deliverEpochKey(bob.device, 0);
+    const frames = await bob.readKeyFrames();
+    await bob.receiveEpochKey(alice.device, 0, frames[0]!);
+    await bob.readLedger();
+    await writeLoro(bob, 'bob-history');
+    expect((await alice.removeMember(approved.membershipId)).status).toBe('committed');
+    await expect(writeLoro(bob, 'after-revoke')).rejects.toThrow();
+    await alice.readLedger();
+    expect(await readLoro(alice)).toContain('bob-history');
   });
 });
