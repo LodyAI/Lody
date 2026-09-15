@@ -325,28 +325,27 @@ export const ICONS: Record<IconName, IconDefinition> = {
   save: {
     // The file family's folded sheet is a document; this is the disk it is
     // written to, so it takes the same 2px container with the corner cut off
-    // the other way — the shutter at the top, the label at the foot.
+    // the other way — the shutter at the top, the label at the foot. 15 by 15:
+    // a disk is square, and drawn 17 by 15 it reads as a letterbox.
     marks: [
-      {
-        path: 'M5.5 4.5h10.5l4.5 4.5v8.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2z',
-      },
-      { path: 'M8 4.5v4h7v-4M7.5 19.5v-5h9v5' },
+      { path: 'M6.5 4.5h9l4 4v9a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2z' },
+      { path: 'M9 4.5v4h6v-4M8 19.5v-4.5h8v4.5' },
     ],
     layers: {
-      mass: 'M5.5 4.5h10.5l4.5 4.5v8.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2z',
-      front: 'M7.5 14.5h9v5h-9z',
-      detail: 'M8 4.5v4h7v-4M7.5 19.5v-5h9v5',
-      bulkDetail: 'M8 4.5v4h7v-4',
+      mass: 'M6.5 4.5h9l4 4v9a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2z',
+      front: 'M8 15h8v4.5h-8z',
+      detail: 'M9 4.5v4h6v-4M8 19.5v-4.5h8v4.5',
+      bulkDetail: 'M9 4.5v4h6v-4',
     },
   },
   quote: {
-    // Two hooks, not two blocks. A quote mark is a ball with a tail off the top
-    // of it; drawn as a block with the tail notched out of a corner it reads as
-    // a pair of counters by 20px, which is what the first draft did. The hook
-    // is the set's own stroke, so it thins with everything else.
+    // A quote mark is a ball with a tail, so it is drawn as one: two of them,
+    // on the set's own stroke. The first draft notched the tail out of a block
+    // and read as a pair of counters by 20px; the second swept the tail so far
+    // round the ball that it read as a lowercase e.
     marks: [
       {
-        path: 'M8.5 15a2.5 2.5 0 1 1-2.5-2.5c0-2.2 1.3-3.8 3.5-4.5M18.5 15a2.5 2.5 0 1 1-2.5-2.5c0-2.2 1.3-3.8 3.5-4.5',
+        path: 'M7.25 13.5a2.75 2.75 0 1 1 2.75-2.75c0 2.3-1 4-3 5.25M16.75 13.5a2.75 2.75 0 1 1 2.75-2.75c0 2.3-1 4-3 5.25',
       },
     ],
   },
@@ -422,8 +421,9 @@ export const ICONS: Record<IconName, IconDefinition> = {
     ],
   },
   'folder-plus': {
-    // The folder's skeleton with a cross in its front panel, on the panel's
-    // centre line rather than the folder's: the tab is not part of the face.
+    // The folder's skeleton with a cross in it, and no front-panel line: the
+    // line splits the face the cross has to sit in, and two marks in a folder
+    // that small is one too many. The cross centres on the face, not the box.
     //
     // No layer model, like `folder-open`. `folder` fills its front panel at
     // 100% over a 35% body, and a cross drawn on top of that panel is
@@ -432,7 +432,7 @@ export const ICONS: Record<IconName, IconDefinition> = {
     // costs the drawing its meaning, the icon does not have one.
     marks: [
       { path: 'M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z' },
-      { path: 'M3.5 10.5h17M12 12.5v4M10 14.5h4' },
+      { path: 'M12 10v6M9 13h6' },
     ],
   },
   image: {
@@ -486,7 +486,10 @@ export const ICONS: Record<IconName, IconDefinition> = {
     marks: [{ circle: [12, 12, 8.5] }, { circle: [12, 12, 1.5] }],
   },
   code: {
-    marks: [{ path: 'M8 7.5 3.5 12 8 16.5M16 7.5l4.5 4.5-4.5 4.5M14 4.5l-4 15' }],
+    // The chevrons reach the live area and the slash leans across it: drawn
+    // with 4.5 of travel each and a slash 4 wide, the mass bunched in the
+    // middle and the icon read narrow next to everything else on its row.
+    marks: [{ path: 'M8.5 7.5 3 12l5.5 4.5M15.5 7.5 21 12l-5.5 4.5M14.5 5l-5 14' }],
   },
   tag: {
     marks: [
@@ -513,23 +516,28 @@ export const ICONS: Record<IconName, IconDefinition> = {
   },
   fork: {
     // The git family's two node columns, opened: one line down from each head
-    // into a shoulder, and a single trunk from the shoulder to the foot.
+    // into a shoulder, and a single trunk from the shoulder to the foot. The
+    // heads sit on 7 and 17 like `branch`, `merge` and `pull-request`, so the
+    // family still lines up when it is read down a list.
     marks: [
-      { circle: [6.5, 5, 2] },
-      { circle: [17.5, 5, 2] },
+      { circle: [7, 5, 2] },
+      { circle: [17, 5, 2] },
       { circle: [12, 19, 2] },
-      { path: 'M17.5 7v1.5a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2V7M12 10.5v6.5' },
+      { path: 'M17 7v1.5a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V7M12 10.5v6.5' },
     ],
   },
   'pull-request-closed': {
     // `pull-request` with its arrow struck out: the same three nodes and the
-    // same trunk, and the branch it would have landed on stops at a cross.
+    // same trunk, and the branch it would have landed on stops at a cross. The
+    // cross is a node's width, not an arrowhead's, and the branch runs up to
+    // meet it — drawn larger, with the branch stopping short, the two read as
+    // two drawings that happen to share a column.
     marks: [
       { circle: [7, 5, 2] },
       { circle: [7, 19, 2] },
       { circle: [17, 19, 2] },
-      { path: 'M7 7v10M17 17v-4.5' },
-      { path: 'M14.75 7.25l4.5 4.5M19.25 7.25l-4.5 4.5' },
+      { path: 'M7 7v10M17 17v-8' },
+      { path: 'M15.4 5.4l3.2 3.2M18.6 5.4l-3.2 3.2' },
     ],
   },
   'check-circle': {

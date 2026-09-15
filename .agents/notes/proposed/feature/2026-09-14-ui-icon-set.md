@@ -170,6 +170,28 @@ clear of the branch it closes, so it read as two drawings.
 their layer models on the same inspection that produced the rule above — the
 playground's bulk column is where both showed.
 
+A second reading of the board sent six of the sixteen back, and the reasons
+divide into three kinds. **A shape that is not the thing**: `quote` twice — a
+notched block reads as a counter, a ball with the tail swept too far round it
+reads as a lowercase e, and what a quote mark actually is is a ball with a
+short tail, so the third draft is that. **A proportion that is not the
+thing's**: `save` at 17 by 15 is a letterbox, and a disk is square, so it is 15
+by 15; `code` had 4.5 of chevron travel and a slash 4 wide, which bunched its
+mass in the middle and read narrow beside everything on its row. **A part that
+does not belong to the whole**: `folder-plus` carried the front-panel line as
+well as the cross, and the line splits the face the cross has to sit in;
+`pull-request-closed` drew its cross at an arrowhead's size with the branch
+stopping two units short, so the cross and the branch read as two drawings
+sharing a column — the cross is a node's size now and the branch runs up to
+meet it. And `fork` put its heads on 6.5 and 17.5 while `branch`, `merge` and
+`pull-request` put theirs on 7 and 17: symmetrical on its own, out of line the
+moment the family is read down a list, which is the only way a family is ever
+read.
+
+None of this is visible from a test, and none of it was visible at 120px. Four
+of the six read fine enlarged and failed at 20, which is the size they will be
+used at.
+
 ## Alternatives
 
 An icon package — Lucide, Phosphor, Tabler, Iconify through `unplugin-icons` —
