@@ -10,6 +10,8 @@ mobile surfaces. Background for the rules below:
 ## General rules
 
 - Regenerate TanStack routes after changing route files.
+- Use `pnpm --filter @lody/components dev` to generate and format the route tree;
+  CI compares the result with the committed file using the repository's Prettier style.
 - Add Storybook coverage for new presentational components and meaningful states.
 - All user-visible copy must go through i18n.
 - Compact number units (K/M/B vs 万/亿) follow the product language via

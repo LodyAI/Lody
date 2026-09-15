@@ -64,7 +64,7 @@
     }
   },
   "scripts": {
-    "dev": "tsr generate",
+    "dev": "tsr generate && prettier --write src/routeTree.gen.ts",
     "typecheck": "tsgo --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
