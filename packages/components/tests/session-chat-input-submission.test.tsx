@@ -65,6 +65,8 @@ import {
   type SessionChatInputAreaHandle,
 } from '../src/components/sessions/session-chat-input-area';
 import { initI18n } from '../src/i18n';
+import { MAX_PASTED_TEXT_BYTE_SIZE } from '../src/lib/pasted-text-draft';
+import { toast } from 'sonner';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -620,6 +622,64 @@ describe('SessionChatInputArea submission feedback', () => {
     expect(submitted).toEqual([[{ type: 'comment_reference', ...comment }]]);
     await act(async () => acceptance.resolve(false));
     expect(container!.textContent).toContain('Synthetic review comment');
+  });
+
+  /** jsdom has no ClipboardEvent, and React only reads `clipboardData`. */
+  function createPasteEvent(text: string) {
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: {
+        getData: (type: string) => (type === 'text/plain' ? text : ''),
+        items: [],
+        files: [],
+      },
+    });
+    return event;
+  }
+
+  describe('oversize pastes', () => {
+    let errors: string[] = [];
+
+    beforeEach(() => {
+      errors = [];
+      vi.spyOn(toast, 'error').mockImplementation((message) => {
+        errors.push(String(message));
+        return 'toast';
+      });
+    });
+
+    afterEach(() => {
+      vi.mocked(toast.error).mockRestore();
+    });
+
+    it('refuses a paste past the byte ceiling and leaves the draft untouched', async () => {
+      const textarea = await renderComposer({ onSendMessage: async () => true });
+      const event = createPasteEvent('a'.repeat(MAX_PASTED_TEXT_BYTE_SIZE + 1));
+
+      await act(async () => {
+        textarea.dispatchEvent(event);
+      });
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(textarea.value).toBe('focus regression draft');
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain('too large');
+    });
+
+    it('still collapses a paste that sits at the ceiling', async () => {
+      const textarea = await renderComposer({ onSendMessage: async () => true });
+      const event = createPasteEvent('a'.repeat(MAX_PASTED_TEXT_BYTE_SIZE));
+
+      await act(async () => {
+        textarea.dispatchEvent(event);
+      });
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(errors).toEqual([]);
+      expect(textarea.value).toContain('Pasted');
+      expect(textarea.value).toContain('focus regression draft');
+      expect(textarea.value).not.toContain('aaaa');
+    });
   });
 
   it('retires focus ownership when a pending composer unmounts', async () => {

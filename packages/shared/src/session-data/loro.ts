@@ -5,7 +5,8 @@ import {
   HistoryImportRefused,
   planHistoryImport,
   createImportCursor,
-  hashHistoryEntry,
+  hashHistoryEntryForVersion,
+  resolveImportHashVersion,
   resolveImportedTurnHashes,
 } from './history-import';
 import { isSessionHistoryPendingForDispatch } from '../schema';
@@ -446,11 +447,22 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
           input.mode === 'refresh'
             ? resolveImportedTurnHashes(input.externalHistory, cursor?.importedTurnHashes)
             : [];
+        // The projected suffix must be expressed in the stored cursor's own version:
+        // it is compared against stored-version hashes inside the planner.
+        const storedHashVersion =
+          input.mode === 'refresh'
+            ? resolveImportHashVersion(input.externalHistory, cursor)
+            : input.replay.hashVersion;
         const projectedHashes = [
           ...importedHashes,
           ...input.replay.history
             .slice(importedHashes.length)
-            .map((entry) => hashHistoryEntry(parseHistoryWrite(HistoryEntryWriteSchema, entry))),
+            .map((entry) =>
+              hashHistoryEntryForVersion(
+                parseHistoryWrite(HistoryEntryWriteSchema, entry),
+                storedHashVersion
+              )
+            ),
         ];
         writer.update((turns) => {
           const plan = planHistoryImport(
@@ -466,7 +478,11 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
           return [...plan.turns] as SessionHistoryInput[];
         });
         historyWritten = true;
-        const nextCursor = createImportCursor(input.replay.turnHashes, writer.readStored());
+        const nextCursor = createImportCursor(
+          input.replay.turnHashes,
+          writer.readStored(),
+          input.replay.hashVersion
+        );
         options.historyImportCursor.write(nextCursor);
         return { status: 'accepted', appended };
       } catch (error) {

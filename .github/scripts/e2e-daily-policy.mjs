@@ -20,10 +20,17 @@ export function findOwnedDailyFailureIssue(issues, marker) {
     .sort((left, right) => left.number - right.number)[0];
 }
 
+export function hasOwnedComment(comments, marker) {
+  return comments.some(
+    (comment) => isActionsBot(comment) && String(comment?.body ?? '').includes(marker)
+  );
+}
+
 export function hasCompleteOwnedComment(comments, marker, expectedVideos) {
   if (!Number.isInteger(expectedVideos) || expectedVideos < 0 || expectedVideos > 1) {
     throw new Error('expectedVideos must be zero or one');
   }
+  if (expectedVideos === 0) return hasOwnedComment(comments, marker);
   return comments.some((comment) => {
     const body = String(comment?.body ?? '');
     if (!isActionsBot(comment) || !body.includes(marker)) return false;
@@ -31,6 +38,34 @@ export function hasCompleteOwnedComment(comments, marker, expectedVideos) {
       body.match(/https:\/\/github\.com\/user-attachments\/assets\//gu)?.length ?? 0;
     return uploadedVideos >= expectedVideos;
   });
+}
+
+export function dailyFailureCommentMarker(runId) {
+  if (!/^\d+$/u.test(String(runId))) throw new Error('runId must be numeric');
+  return `<!-- desktop-e2e-daily-failure-run:${runId}:summary -->`;
+}
+
+export function buildDailyFailureComment({ runId, runUrl, headSha, artifactName }) {
+  const marker = dailyFailureCommentMarker(runId);
+  if (
+    !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/actions\/runs\/\d+$/u.test(runUrl)
+  ) {
+    throw new Error('runUrl must be a GitHub Actions run URL');
+  }
+  if (!/^[0-9a-f]{40}$/u.test(headSha)) throw new Error('headSha must be a full commit SHA');
+
+  const evidence = artifactName
+    ? `\`${String(artifactName).replaceAll('`', "'")}\``
+    : 'unavailable';
+  return [
+    marker,
+    `Desktop Daily regression failed on commit \`${headSha}\`.`,
+    '',
+    `- Workflow run and artifacts: ${runUrl}`,
+    `- Evidence artifact: ${evidence}`,
+    '',
+    'Failure recordings, traces, screenshots, logs, and runtime evidence remain in the Actions artifact.',
+  ].join('\n');
 }
 
 export function findDailyEvidenceArtifact(artifacts, runId) {

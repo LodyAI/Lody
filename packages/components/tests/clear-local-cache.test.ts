@@ -173,6 +173,76 @@ describe('maybeClearLodyCacheOnBoot', () => {
   });
 });
 
+describe('a clear armed from the CLI', () => {
+  afterEach(() => {
+    delete (window as { ipc?: unknown }).ipc;
+  });
+
+  /** Stands in for the Electron preload bridge; `getIpcServices` needs only `invoke`. */
+  function installFakeIpcBridge(invoke: (channel: string) => Promise<unknown>) {
+    const channels: string[] = [];
+    (window as unknown as { ipc: { invoke: (channel: string) => Promise<unknown> } }).ipc = {
+      invoke: (channel: string) => {
+        channels.push(channel);
+        return invoke(channel);
+      },
+    };
+    return channels;
+  }
+
+  it('runs the precise cache clear the desktop armed, with no flag in localStorage', async () => {
+    localStorage.setItem('lody_auth_token', 'token');
+    localStorage.setItem('lody:githubReposCache', '{}');
+    const channels = installFakeIpcBridge(async (channel) =>
+      channel === 'app.consumePendingLocalClear' ? 'cache' : undefined
+    );
+
+    await maybeClearLodyCacheOnBoot();
+
+    expect(channels).toContain('app.consumePendingLocalClear');
+    expect(deletedDatabases).toContain('lody-loro-repo-db-ws1');
+    expect(deletedDatabases).not.toContain('someone-elses-db');
+    expect(localStorage.getItem('lody:githubReposCache')).toBeNull();
+    // A cache reset keeps the session; only `--hard` signs the user out.
+    expect(localStorage.getItem('lody_auth_token')).toBe('token');
+  });
+
+  it('does not ask the desktop when the in-app flag already answered', async () => {
+    markCacheClearPending();
+    const channels = installFakeIpcBridge(async () => 'hard');
+
+    await maybeClearLodyCacheOnBoot();
+
+    expect(channels).not.toContain('app.consumePendingLocalClear');
+    // The flag said `cache`, so the unrelated database survives.
+    expect(deletedDatabases).not.toContain('someone-elses-db');
+  });
+
+  it('clears nothing when the desktop reports no armed reset', async () => {
+    installFakeIpcBridge(async () => null);
+
+    await maybeClearLodyCacheOnBoot(['lody-loro-repo-db-ws1']);
+
+    expect(deletedDatabases).toEqual([]);
+    expect(deletedCaches).toEqual([]);
+  });
+
+  it('gives up on a desktop that never answers instead of holding up boot', async () => {
+    vi.useFakeTimers();
+    try {
+      installFakeIpcBridge(() => new Promise(() => {}));
+
+      const booting = maybeClearLodyCacheOnBoot(['lody-loro-repo-db-ws1']);
+      await vi.advanceTimersByTimeAsync(2000);
+      await booting;
+
+      expect(deletedDatabases).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('startHardReset sign-out', () => {
   afterEach(() => {
     registerAuthClient(null as unknown as LodyAuthClient);

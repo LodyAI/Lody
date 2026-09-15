@@ -1,0 +1,32 @@
+diff --git a/dist/index.js b/dist/index.js
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -607,7 +607,11 @@
+         };
+         onThumbPositionChange();
+         viewport.addEventListener("scroll", handleScroll);
+-        return () => viewport.removeEventListener("scroll", handleScroll);
++        return () => {
++          viewport.removeEventListener("scroll", handleScroll);
++          removeUnlinkedScrollListenerRef.current?.();
++          removeUnlinkedScrollListenerRef.current = void 0;
++        };
+       }
+     }, [scrollAreaContext.viewport, debounceScrollEnd, onThumbPositionChange]);
+     return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+diff --git a/dist/index.mjs b/dist/index.mjs
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -562,7 +562,11 @@
+         };
+         onThumbPositionChange();
+         viewport.addEventListener("scroll", handleScroll);
+-        return () => viewport.removeEventListener("scroll", handleScroll);
++        return () => {
++          viewport.removeEventListener("scroll", handleScroll);
++          removeUnlinkedScrollListenerRef.current?.();
++          removeUnlinkedScrollListenerRef.current = void 0;
++        };
+       }
+     }, [scrollAreaContext.viewport, debounceScrollEnd, onThumbPositionChange]);
+     return /* @__PURE__ */ jsx(

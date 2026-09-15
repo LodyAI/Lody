@@ -20,6 +20,7 @@ import { getDevbarConfig, getDevbarMetrics } from '../../services/devbar-service
 import { setMenuLanguage } from '../../menu'
 import { localFileActionError } from '../../services/local-file-action-error'
 import { hasPathLauncher, launchLocalPath } from '../../services/local-path-launcher-service'
+import { takePendingRendererLocalClear } from '../../services/local-reset-service'
 import { parseWindowBadge } from '../../services/window-badge-service'
 import {
   findWindow,
@@ -110,6 +111,18 @@ export class AppIpc extends IpcService {
     for (const window of productWindows) {
       if (window.webContents !== event.sender) window.destroy()
     }
+  }
+
+  /**
+   * Reports a cache clear armed from the CLI (`lody app reset-cache`) to the
+   * booting renderer, which owns the precise clear. One-shot: a later reload of
+   * the same window must not repeat it.
+   */
+  @IpcMethod()
+  async consumePendingLocalClear() {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    return takePendingRendererLocalClear()
   }
 
   @IpcMethod()

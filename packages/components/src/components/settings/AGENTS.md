@@ -34,6 +34,9 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
 - Interface and terminal font choices exclude the known symbol families in
   `lib/local-fonts.ts`; persisted selections use the same filter. Font option names
   use the default interface font so they remain readable.
+- Conversation font size uses `conversation-font-size-slider.tsx` on desktop and
+  mobile. Keep the native range input keyboard-free on touch devices and the mobile
+  row stacked; clamping a number input on each keystroke breaks multi-digit editing.
 - The Codex reset forecast chip in the provider row must not fetch on mount and must
   pass `nestedInDialog` for its dialog: [../codex-reset/AGENTS.md](../codex-reset/AGENTS.md).
 - The usage share card is a fixed-format report, not a second `ChatShareCard`: its two

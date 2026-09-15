@@ -12,6 +12,10 @@ Root `AGENTS.md` and `site-docs/AGENTS.md` also apply.
 - Reference public document images as URLs, `<img src="/_docs-assets/name.png" />`.
   Do not use Markdown image syntax here; Vite will treat it as a JS import from
   `public/`.
+- MDX links are resolved by the site's client router, so a link to a path this
+  site does not own renders the 404 page. Web-app paths such as `/login` work only
+  because `components/site-root-provider.tsx` lists them in `APP_OWNED_PATHS`; add
+  a path there before linking it from content.
 - `scripts/generate-llms.mjs` validates docs title/description frontmatter, so every
   docs page needs both.
 - A docs page with an MDX `## FAQ` / `## 常见问题` section emits FAQPage JSON-LD

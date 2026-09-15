@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  CONVERSATION_FONT_SIZE_MAX,
-  CONVERSATION_FONT_SIZE_MIN,
+  CONVERSATION_FONT_SIZES,
   DEFAULT_CONVERSATION_FONT_SIZE,
   DEFAULT_TERMINAL_FONT_SIZE,
   normalizeConversationFontSize,
@@ -46,15 +45,19 @@ describe('terminal appearance settings', () => {
 });
 
 describe('conversation appearance settings', () => {
-  it('accepts custom sizes, bounds invalid values, and migrates legacy presets', () => {
+  it('offers a fixed scale and snaps every persisted value onto it', () => {
+    expect([...CONVERSATION_FONT_SIZES]).toEqual([8, 12, 14, 16, 20, 24, 28, 32]);
+
+    // Sizes a previous build could persist keep the closest step the user picked
+    // instead of being clamped into a range or reset to the default.
     expect(normalizeConversationFontSize(24)).toBe(24);
-    expect(normalizeConversationFontSize(14.7)).toBe(15);
-    expect(normalizeConversationFontSize(CONVERSATION_FONT_SIZE_MIN - 1)).toBe(
-      CONVERSATION_FONT_SIZE_MIN
-    );
-    expect(normalizeConversationFontSize(CONVERSATION_FONT_SIZE_MAX + 1)).toBe(
-      CONVERSATION_FONT_SIZE_MAX
-    );
+    expect(normalizeConversationFontSize(14.7)).toBe(14);
+    expect(normalizeConversationFontSize(13)).toBe(14); // exact tie rounds up
+    expect(normalizeConversationFontSize(9)).toBe(8);
+    expect(normalizeConversationFontSize(30)).toBe(32);
+    expect(normalizeConversationFontSize(1)).toBe(8);
+    expect(normalizeConversationFontSize(400)).toBe(32);
+
     expect(normalizeConversationFontSize('small')).toBe(12);
     expect(normalizeConversationFontSize('default')).toBe(DEFAULT_CONVERSATION_FONT_SIZE);
     expect(normalizeConversationFontSize('large')).toBe(16);

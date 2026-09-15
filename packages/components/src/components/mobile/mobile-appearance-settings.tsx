@@ -5,13 +5,7 @@ import type { SupportedLanguage } from '@lody/shared';
 import { Check, ChevronDown, Monitor, Moon, Sun } from 'lucide-react';
 import { motion } from 'framer-motion';
 
-import {
-  conversationFontSizeAtom,
-  CONVERSATION_FONT_SIZE_MAX,
-  CONVERSATION_FONT_SIZE_MIN,
-  languageAtom,
-  normalizeConversationFontSize,
-} from '@/atoms';
+import { conversationFontSizeAtom, languageAtom } from '@/atoms';
 import {
   MobileInlineMenu,
   MobileInlinePickerCoordinator,
@@ -19,8 +13,9 @@ import {
   type MobileInlinePickerOption,
 } from '@/components/mobile/mobile-inline-picker';
 import { MobileSettingsPickerTrigger } from '@/components/mobile/mobile-settings-picker-trigger';
+import { conversationTextFontSizeStyle } from '@/components/ai-gui/conversation-font-size-classes';
 import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
-import { Input } from '@/ui/input';
+import { ConversationFontSizeSlider } from '@/components/settings/conversation-font-size-slider';
 import { currentSupportedLanguages, languageCodeToName } from '../../i18n';
 import { cn } from '@/lib/utils';
 import { withOneSignal } from '@/lib/onesignal';
@@ -97,27 +92,32 @@ export function MobileAppearanceSettings() {
 
       <MobileSettingsSection>
         <MobileSettingsRow
+          stack
           label={t('settings.conversationFontSize.label', 'Conversation font size')}
           helper={t(
             'settings.conversationFontSize.helper',
             'Adjusts message body text in conversations.'
           )}
         >
-          <Input
-            type="number"
-            min={CONVERSATION_FONT_SIZE_MIN}
-            max={CONVERSATION_FONT_SIZE_MAX}
-            step={1}
+          <ConversationFontSizeSlider
             value={conversationFontSize}
-            aria-label={t('settings.conversationFontSize.label', 'Conversation font size')}
-            className="h-8 w-20 text-center"
-            onChange={(event) => {
-              if (Number.isFinite(event.target.valueAsNumber)) {
-                setConversationFontSize(normalizeConversationFontSize(event.target.valueAsNumber));
-              }
-            }}
+            onChange={setConversationFontSize}
           />
         </MobileSettingsRow>
+        <div
+          aria-label={String(t('settings.conversationFontSize.preview', 'Conversation preview'))}
+          className="border-t border-border px-4 py-3"
+        >
+          <p
+            className="leading-relaxed text-foreground"
+            style={conversationTextFontSizeStyle(conversationFontSize)}
+          >
+            {t(
+              'settings.conversationFontSize.previewText',
+              'This is how message text looks in a conversation.'
+            )}
+          </p>
+        </div>
       </MobileSettingsSection>
     </MobileInlinePickerCoordinator>
   );

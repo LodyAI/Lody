@@ -10,6 +10,13 @@ and the replicated session shell's current shape are in
 Demo sequencing and screenshot notes live in
 [context/landing-demos.md](../context/landing-demos.md).
 
+## Links off this site
+
+- `site-root-provider.tsx` overrides the Fumadocs Tanstack `Link`: hrefs in
+  `APP_OWNED_PATHS` (`/login`) stay plain anchors, because the client router owns no
+  such route and would render the site 404 over the web app. Register new web-app
+  paths there rather than patching one link.
+
 ## Marketing landing
 
 - Mobile public navigation uses native `details`/`summary`: opening the menu and

@@ -1,7 +1,14 @@
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { getInstallationProfile, getLodyDataDir } from '../src/node/installation-profile';
+import {
+  ensureLodyDataDir,
+  getInstallationProfile,
+  getLodyDataDir,
+  LodyDataDirUnavailableError,
+} from '../src/node/installation-profile';
 import { getE2eHostPipe, getLocalCliHostEndpoint } from '../src/node/local-cli-host-lease';
 import {
   getLocalControlSocketPath,
@@ -33,6 +40,51 @@ describe('installation profile', () => {
     });
     expect(getLodyDataDir('cloud', '/home/alice')).toBe(path.join('/home/alice', '.lody'));
     expect(getLodyDataDir('local', '/home/alice')).toBe(path.join('/home/alice', '.lody-oss'));
+  });
+
+  it('creates the data directory a session workspace hangs off', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-data-dir-'));
+    try {
+      const dataDir = path.join(root, 'nested', '.lody');
+      vi.stubEnv('LODY_DATA_DIR', dataDir);
+
+      expect(ensureLodyDataDir()).toBe(dataDir);
+      expect(fs.statSync(dataDir).isDirectory()).toBe(true);
+      // Idempotent: the daemon calls this on every worktree and chat session.
+      expect(ensureLodyDataDir()).toBe(dataDir);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('names its own directory when that directory cannot be created', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-data-dir-'));
+    try {
+      // A regular file where the data root belongs: `mkdir` fails with ENOTDIR, which
+      // is what an unusable data root looks like to every caller downstream.
+      const blocker = path.join(root, 'blocker');
+      fs.writeFileSync(blocker, '');
+      const dataDir = path.join(blocker, '.lody');
+      vi.stubEnv('LODY_DATA_DIR', dataDir);
+
+      let caught: unknown;
+      try {
+        ensureLodyDataDir();
+      } catch (error) {
+        caught = error;
+      }
+
+      expect(caught).toBeInstanceOf(LodyDataDirUnavailableError);
+      const error = caught as LodyDataDirUnavailableError;
+      expect(error.dataDir).toBe(dataDir);
+      expect(error.code).toBe('lody_data_dir_unavailable');
+      // The raw cause stays reachable; the message is the part a user can act on.
+      expect(error.message).toContain(dataDir);
+      expect(error.message).toContain('LODY_DATA_DIR');
+      expect(error.cause).toBeDefined();
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('uses disjoint local host lease endpoints', () => {

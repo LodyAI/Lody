@@ -60,3 +60,10 @@ strings on i18n rather than the registry's inline English.
   every non-loading state; that shipped as a permanently rotating "No machines
   available" and "Files unavailable" icon.
   Evidence: [spinner note](../../../../.agents/notes/implemented/bug-fix/2026-09-13-spinner-off-svg-retina-composite.md).
+
+## Scroll area
+
+- Keep the `@radix-ui/react-scroll-area` patch until an upstream version cancels
+  thumb polling on effect cleanup. Verify both ESM and CommonJS with
+  `tests/scroll-area-lifecycle.test.tsx` when upgrading; removing a thumb during
+  the scroll-end debounce must not retain a frame loop or detached viewport.

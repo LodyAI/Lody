@@ -1194,7 +1194,7 @@ function SessionFileContentViewImpl({
         path={normalizedPath}
         bytes={data.snapshot.bytes}
         url={data.snapshot.url}
-        fileActions={fileErrorActions ?? undefined}
+        fileActions={sessionFileActions.buildErrorActions(normalizedPath, data.snapshot)}
       />
     );
   } else if (data.snapshot.kind === 'missing') {

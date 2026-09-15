@@ -129,6 +129,7 @@ import { useIsMobile } from '../../hooks/use-mobile';
 import { useStableCallback } from '@/hooks/use-stable-callback';
 import { useAppCapability } from '@/lib/app-platform';
 import { SessionShareDialog } from '@/components/sharing/session-share-dialog';
+import { useSessionShareStatus } from '@/hooks/use-session-share-management';
 import {
   conversationFontSizeAtom,
   currentWorkspaceIdAtom,
@@ -937,7 +938,7 @@ export function SessionHeaderMenu({
   machineName,
   onCopyConversationHistory,
   onCopyUrl,
-  publicShareWorkspaceId,
+  onOpenPublicShare,
   sharing,
   onShareWithTeam,
   onShareAsImage,
@@ -964,7 +965,8 @@ export function SessionHeaderMenu({
   machineName?: string | null;
   onCopyConversationHistory?: () => void | Promise<void>;
   onCopyUrl: () => void | Promise<void>;
-  publicShareWorkspaceId?: import('@lody/shared').WorkspaceId;
+  /** Opens the page-owned static-share editor. Omitted when publishing is unavailable. */
+  onOpenPublicShare?: () => void;
   sharing?: SessionSharingState;
   onShareWithTeam?: () => void | Promise<void>;
   /** Opens the share-as-image preview dialog. Pure local feature; no gating. */
@@ -1014,7 +1016,6 @@ export function SessionHeaderMenu({
     (sharing?.visibility === 'private' &&
       (sharing.privateReason === 'machine-not-registered' || !sharing.canManage));
   const [reviewSetupOpen, setReviewSetupOpen] = useState(false);
-  const [publicShareSessionId, setPublicShareSessionId] = useState<string | null>(null);
 
   const openedBySession = openedByRelations?.openedBy ?? null;
   const openedSessions = openedByRelations?.opened ?? [];
@@ -1222,8 +1223,8 @@ export function SessionHeaderMenu({
 
           {openedByRelationRows}
 
-          {publicShareWorkspaceId && (
-            <DropdownMenuItem onClick={() => setPublicShareSessionId(session.id)}>
+          {onOpenPublicShare && (
+            <DropdownMenuItem onClick={onOpenPublicShare}>
               <Share2 className="h-3.5 w-3.5 shrink-0" />
               {t('sharing.manager.title', 'Share conversation')}
             </DropdownMenuItem>
@@ -1502,13 +1503,6 @@ export function SessionHeaderMenu({
               )}
         </DropdownMenuContent>
       </DropdownMenu>
-      {publicShareWorkspaceId && publicShareSessionId === session.id && (
-        <SessionShareDialog
-          workspaceId={publicShareWorkspaceId}
-          session={session}
-          onClose={() => setPublicShareSessionId(null)}
-        />
-      )}
       <ReviewAgentSetupDialog
         open={reviewSetupOpen}
         onOpenChange={setReviewSetupOpen}
@@ -1947,6 +1941,13 @@ export const SessionChatInterface = memo(
     const localeObj = i18n.language?.startsWith('zh') ? zhCN : enUS;
     const workspaceId = useAtomValue(currentWorkspaceIdAtom);
     const publicSharingAvailable = useAppCapability('teamSharing');
+    // One owner for the static-share editor, because both the header control
+    // and the "…" menu open the same one.
+    const publicShareWorkspaceId = publicSharingAvailable && workspaceId ? workspaceId : undefined;
+    // Keyed by session id, not a boolean: a tab that switches underneath an
+    // open editor must not retarget it at the newly shown conversation.
+    const [publicShareSessionId, setPublicShareSessionId] = useState<string | null>(null);
+    const publicShareStatus = useSessionShareStatus(publicShareWorkspaceId ?? null, session.id);
     const currentUser = useAtomValue(userAtom);
     const tasksEnabled = useAtomValue(tasksFeatureEnabledAtom);
     const { openSettings } = useOpenSettings();
@@ -5783,7 +5784,9 @@ export const SessionChatInterface = memo(
     const headerMenuNode = (
       <SessionHeaderMenu
         key={`${workspaceId}:${session.id}`}
-        publicShareWorkspaceId={publicSharingAvailable && workspaceId ? workspaceId : undefined}
+        onOpenPublicShare={
+          publicShareWorkspaceId ? () => setPublicShareSessionId(session.id) : undefined
+        }
         session={session}
         localProjectMeta={resolvedLocalProjectMeta}
         workspacePath={sessionWorkspacePath}
@@ -5825,9 +5828,19 @@ export const SessionChatInterface = memo(
         t={t}
       />
     );
+    // One header control carries both access axes. It survives an absent
+    // `sharing` — a solo workspace resolves no team visibility but can still
+    // publish — and an absent editor, which is the local build.
+    const headerPublicShare = publicShareWorkspaceId
+      ? { status: publicShareStatus, onOpen: () => setPublicShareSessionId(session.id) }
+      : undefined;
     const headerAccessNode =
-      sharing && !isMobile ? (
-        <SessionAccessControl state={sharing} onShareWithTeam={onShareWithTeam} />
+      !isMobile && (sharing || headerPublicShare) ? (
+        <SessionAccessControl
+          state={sharing}
+          onShareWithTeam={onShareWithTeam}
+          publicShare={headerPublicShare}
+        />
       ) : null;
     const headerArchivedNode = session.isArchived === true ? <SessionArchivedBadge /> : null;
 
@@ -6185,6 +6198,13 @@ export const SessionChatInterface = memo(
             target={renameDialogTarget}
             onClose={() => setRenameDialogTarget(null)}
           />
+          {publicShareWorkspaceId && publicShareSessionId === session.id && (
+            <SessionShareDialog
+              workspaceId={publicShareWorkspaceId}
+              session={session}
+              onClose={() => setPublicShareSessionId(null)}
+            />
+          )}
           <AlertDialog
             open={pendingRemoteHtmlFileName !== null}
             onOpenChange={(open) => {

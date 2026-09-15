@@ -20,10 +20,18 @@ let renderAttempts: number;
  * throws, so a test can reproduce "the error comes back every time" (a crash
  * loop) as well as "navigating away fixes it".
  */
-function Subject({ crash, label }: { crash: boolean; label: string }) {
+function Subject({
+  crash,
+  label,
+  message = 'render exploded',
+}: {
+  crash: boolean;
+  label: string;
+  message?: string;
+}) {
   renderAttempts += 1;
   if (crash) {
-    throw new Error('render exploded');
+    throw new Error(message);
   }
   return <div>{label}</div>;
 }
@@ -32,15 +40,17 @@ function renderBoundary({
   crash,
   resetKey,
   label = 'healthy',
+  message,
 }: {
   crash: boolean;
   resetKey: string;
   label?: string;
+  message?: string;
 }) {
   act(() => {
     root.render(
       <ErrorBoundary name="Test" variant="section" resetKeys={[resetKey]}>
-        <Subject crash={crash} label={label} />
+        <Subject crash={crash} label={label} message={message} />
       </ErrorBoundary>
     );
   });
@@ -134,6 +144,29 @@ describe('ErrorBoundary automatic reset', () => {
 
     clickTryAgain();
     expect(container.textContent).toContain('other route');
+  });
+
+  it('stops retrying a repeating failure whose message carries a fresh request id', () => {
+    // A failed Convex query embeds a per-request id, so the raw message differs
+    // on every occurrence even though it is one repeating error. Without
+    // grouping them, a permanently broken query re-renders its crashed subtree
+    // on every reset-key change, forever.
+    const message = (requestId: string) =>
+      `[CONVEX Q(sessionSharing:listRequests)] [Request ID: ${requestId}] Server Error`;
+
+    renderBoundary({ crash: true, resetKey: '/a', message: message('a99e396cc57c8c07') });
+    const attemptsAfterFirstCrash = renderAttempts;
+
+    renderBoundary({ crash: true, resetKey: '/b', message: message('b0f1c2d3e4a5b6c7') });
+    renderBoundary({ crash: true, resetKey: '/c', message: message('c1e2f3a4b5c6d7e8') });
+    const attemptsAfterBudget = renderAttempts;
+    expect(attemptsAfterBudget).toBeGreaterThan(attemptsAfterFirstCrash);
+
+    renderBoundary({ crash: true, resetKey: '/d', message: message('d2f3a4b5c6d7e8f9') });
+    renderBoundary({ crash: true, resetKey: '/e', message: message('e3a4b5c6d7e8f901') });
+
+    expect(renderAttempts).toBe(attemptsAfterBudget);
+    expect(container.textContent).toContain('stopped retrying on its own');
   });
 
   it('restores the automatic budget once the subtree renders cleanly again', () => {
