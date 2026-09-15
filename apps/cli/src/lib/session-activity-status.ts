@@ -1,41 +1,39 @@
-import { SessionStatusFactory, type SessionStatus } from '@lody/shared';
+import { type SessionStatus } from '@lody/shared';
+import type { SessionActivePresencePhase } from './loro/session-active-presence';
 
 /**
  * Decisions for async, post-hoc session status writes that run outside the
- * visible active scope (Codex image-generation activity sync, permission
- * resolution restore). These callbacks can fire after the turn ended and its
- * active presence was cleared; without active presence a working-status write
- * is a lie — the presence entry cannot be kept alive while meta status stays
- * stuck non-idle.
+ * visible active scope (permission resolution restore). Those callbacks can
+ * fire after the turn ended and its active presence was cleared; without
+ * active presence a working-status write is a lie — the presence entry cannot
+ * be kept alive while meta status stays stuck non-idle.
  *
  * Rule: never write a working status without active presence. Stuck statuses
  * left behind by crashes are the dispatch watcher's stale-status recovery job,
  * not these callbacks'.
+ *
+ * Codex image-generation activity is presence-only. Image begin/end must not
+ * write durable SessionMeta.status: that path awaits getDocMeta/upsert and can
+ * land after prompt-end has already published `finalizing` and idle.
  */
 
 /**
- * What (if anything) the Codex image-generation activity sync should write.
- * Returns the status to write, or null to leave the status untouched.
+ * Presence phase the Codex image-generation activity sync may apply.
+ * Only thinking ↔ image_generation. Finalizing, permission, initializing, and
+ * missing presence stay owned by the turn scope.
  */
-export const resolveImageGenerationStatusWrite = (input: {
+export const resolveImageGenerationPresencePhase = (input: {
   hasActiveImageGeneration: boolean;
-  hasActivePresence: boolean;
-  status: SessionStatus | undefined;
-}): SessionStatus | null => {
-  if (!input.hasActivePresence) {
-    return null;
-  }
-  if (input.status?.type === 'idle') {
+  current: SessionStatus | null | undefined;
+}): Extract<SessionActivePresencePhase, 'image_generation' | 'thinking'> | null => {
+  if (input.current?.type !== 'running' || input.current.phase === 'finalizing') {
     return null;
   }
   if (input.hasActiveImageGeneration) {
-    if (input.status?.type === 'requestPermission') {
-      return null;
-    }
-    return SessionStatusFactory.running('image_generation');
+    return 'image_generation';
   }
-  if (input.status?.type === 'running' && input.status.activity === 'image_generation') {
-    return SessionStatusFactory.running();
+  if (input.current.activity === 'image_generation') {
+    return 'thinking';
   }
   return null;
 };

@@ -70,6 +70,7 @@ const ActiveSessionStatusSchema = z.preprocess(
     z.object({
       type: z.literal('running'),
       activity: z.enum(['image_generation']).optional(),
+      phase: z.literal('finalizing').optional(),
     }),
     z.object({
       type: z.literal('requestPermission'),

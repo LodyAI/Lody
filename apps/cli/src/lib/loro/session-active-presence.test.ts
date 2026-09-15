@@ -83,6 +83,27 @@ describe('SessionActivePresenceController', () => {
     );
   });
 
+  it('retains active ownership through finalization and resumes prompt or permission activity', () => {
+    const controller = new SessionActivePresenceController(
+      createWorkspaceDocument() as LoroDocumentManager,
+      machineId,
+      createLogger(),
+      { intervalMs: 1_000 }
+    );
+    controller.start(sessionId, 'thinking');
+    controller.setPhase(sessionId, 'finalizing');
+    expect(controller.getStatus(sessionId)).toEqual({ type: 'running', phase: 'finalizing' });
+    vi.advanceTimersByTime(1_000);
+    expect(controller.has(sessionId)).toBe(true);
+    expect(controller.activeSessionCount()).toBe(1);
+    controller.setPhase(sessionId, 'thinking');
+    expect(controller.getStatus(sessionId)).toEqual({ type: 'running' });
+    controller.setPhase(sessionId, 'requestPermission');
+    expect(controller.getStatus(sessionId)).toEqual({ type: 'requestPermission' });
+    controller.clear(sessionId);
+    expect(controller.getStatus(sessionId)).toBeNull();
+  });
+
   it('publishes managed runtime progress as initializing presence detail', () => {
     const workspaceDocument = createWorkspaceDocument();
     const controller = new SessionActivePresenceController(
