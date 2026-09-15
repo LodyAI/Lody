@@ -69,6 +69,7 @@ Ownership and explanations: [README.md](README.md).
   composer text crosses the promotion via the input draft cache, not a component ref.
   After global metadata readiness, `archiveSession` falls back to the rendered meta
   cache when an individual repo read lags; close failures must surface to the user.
+- Desktop handoff: confirm the account, keep PKCE query on switch, render the `lody://` link.
 - Desktop changelogs open in-app as sanitized Markdown with raw HTML off. Only
   missing notes fall back to the website, via `getChangelogUrl` and
   `openExternalUrl`, never a hardcoded link.

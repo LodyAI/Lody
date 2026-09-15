@@ -8,8 +8,12 @@ import { SETTINGS_DEFAULT_TAB, type SettingsTabId } from '@/components/settings/
 export const languageAtom = atomWithStorage<SupportedLanguage>('lody-language', 'en');
 
 export const DEFAULT_CONVERSATION_FONT_SIZE = 14;
-export const CONVERSATION_FONT_SIZE_MIN = 9;
-export const CONVERSATION_FONT_SIZE_MAX = 32;
+/**
+ * The sizes settings offers, ascending. Free-form entry is deliberately gone: a number
+ * field silently rewrote whatever the user typed (clamped into a range, rounded), which
+ * reads as the app fighting the keystrokes. A short scale has one value per visible step.
+ */
+export const CONVERSATION_FONT_SIZES = [8, 12, 14, 16, 20, 24, 28, 32] as const;
 export type ConversationFontSize = number;
 
 const LEGACY_CONVERSATION_FONT_SIZES: Record<string, ConversationFontSize> = {
@@ -18,14 +22,18 @@ const LEGACY_CONVERSATION_FONT_SIZES: Record<string, ConversationFontSize> = {
   large: 16,
 };
 
+/**
+ * Snaps to the nearest offered size (ties go up) so a value persisted by an older build —
+ * a preset name, or any number the old input accepted — keeps the closest size the user
+ * chose instead of collapsing to the default.
+ */
 export function normalizeConversationFontSize(value: unknown): ConversationFontSize {
   const migratedValue = typeof value === 'string' ? LEGACY_CONVERSATION_FONT_SIZES[value] : value;
   if (typeof migratedValue !== 'number' || !Number.isFinite(migratedValue)) {
     return DEFAULT_CONVERSATION_FONT_SIZE;
   }
-  return Math.min(
-    CONVERSATION_FONT_SIZE_MAX,
-    Math.max(CONVERSATION_FONT_SIZE_MIN, Math.round(migratedValue))
+  return CONVERSATION_FONT_SIZES.reduce((closest, size) =>
+    Math.abs(size - migratedValue) <= Math.abs(closest - migratedValue) ? size : closest
   );
 }
 

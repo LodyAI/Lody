@@ -33,6 +33,13 @@ File attachments use `file` blocks; the product contract is in
   cache dir → Share sheet → best-effort cleanup; never buffers the whole file). Base64
   streaming math is in `@/lib/base64-chunk.ts` (tested by `tests/base64-chunk.test.ts`).
   Capacitor plugins stay dynamically imported so web/electron bundles remain clean.
+- A group of image attachments is ONE wrapping row (`IMAGE_ATTACHMENT_ROW_CLASS` in
+  `view.tsx`), used by `ImageGroupBubble` and the user row's grouped `image` items.
+  Never give it a fixed column count or a max width: the thumbnail is a fixed square,
+  so a `grid-cols-2` turned a thirteen-image turn into a two-wide tower that scrolled
+  for screens. Tiles keep `shrink-0` (flex shrinks before it wraps) and hug the
+  speaker's side. Decision:
+  [image attachment row](../../../../../.agents/notes/implemented/bug-fix/2026-09-15-image-attachment-row-wraps.md).
 
 ## Image-preview overlay (zoom / pan)
 

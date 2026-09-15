@@ -220,6 +220,14 @@ vi.mock('../src/hooks/use-workspace-mcp-catalog', () => ({
   useWorkspaceMcpCatalog: () => ({ servers: CATALOG, synced: true }),
 }));
 const CATALOG = [{ id: 'default-mcp', name: 'Default', enabledByDefault: true }];
+// Deterministic (manual idle, an explicit `yieldToEventLoop` gate, fake timers)
+// but genuinely CPU-heavy: 50 turns whose assistant bodies carry 400 items each,
+// mirrored and hydrated through React. It runs in ~2s idle, which leaves no room
+// under Vitest's 5s default when eight workers share the machine — the timeout
+// then reports as a test failure that says nothing about the behavior. The
+// explicit budget below removes that machine-load dependency; it is not covering
+// for a hang, since nothing here waits on wall-clock time.
+const MCP_SELECTION_HYDRATION_TIMEOUT_MS = 30_000;
 it.each([false, true])(
   'preserves explicit empty MCP selection after mounting composer hooks: windowed=%s',
   async (windowed) => {
@@ -291,5 +299,6 @@ it.each([false, true])(
       session.mirror.dispose();
       doc.free();
     }
-  }
+  },
+  MCP_SELECTION_HYDRATION_TIMEOUT_MS
 );

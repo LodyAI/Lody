@@ -103,6 +103,7 @@ packageExtensions:
 packageManagerStrictVersion: true
 
 patchedDependencies:
+  '@radix-ui/react-scroll-area@1.2.10': patches/@radix-ui__react-scroll-area@1.2.10.patch
   app-builder-lib@26.15.3: patches/app-builder-lib@26.15.3.patch
   '@better-auth/api-key@1.5.5': patches/@better-auth__api-key@1.5.5.patch
   '@better-auth/electron@1.5.5': patches/@better-auth__electron@1.5.5.patch

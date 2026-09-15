@@ -2,11 +2,14 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  buildDailyFailureComment,
   canCloseDailyFailureIssue,
+  dailyFailureCommentMarker,
   findDailyEvidenceArtifact,
   findOwnedDailyFailureIssue,
   findPrEvidenceArtifact,
   hasCompleteOwnedComment,
+  hasOwnedComment,
 } from './e2e-daily-policy.mjs';
 
 const bot = { login: 'github-actions[bot]', type: 'Bot' };
@@ -58,7 +61,44 @@ void test('retries a bot comment until its video reference was uploaded', () => 
 
 void test('accepts one bot-owned summary comment when no video exists', () => {
   const marker = '<!-- desktop-e2e-daily-failure-run:123:summary -->';
+  assert.equal(hasOwnedComment([{ body: marker, user: bot }], marker), true);
+  assert.equal(hasOwnedComment([{ body: marker, user: outsider }], marker), false);
   assert.equal(hasCompleteOwnedComment([{ body: marker, user: bot }], marker, 0), true);
+});
+
+void test('builds an artifact-only Daily failure comment', () => {
+  const body = buildDailyFailureComment({
+    runId: '123',
+    runUrl: 'https://github.com/LodyAI/Lody/actions/runs/123',
+    headSha: 'a'.repeat(40),
+    artifactName: 'desktop-e2e-daily-full-macos-15-123',
+  });
+  assert.equal(
+    body,
+    [
+      '<!-- desktop-e2e-daily-failure-run:123:summary -->',
+      `Desktop Daily regression failed on commit \`${'a'.repeat(40)}\`.`,
+      '',
+      '- Workflow run and artifacts: https://github.com/LodyAI/Lody/actions/runs/123',
+      '- Evidence artifact: `desktop-e2e-daily-full-macos-15-123`',
+      '',
+      'Failure recordings, traces, screenshots, logs, and runtime evidence remain in the Actions artifact.',
+    ].join('\n')
+  );
+});
+
+void test('reports unavailable Daily evidence without changing the run marker', () => {
+  const body = buildDailyFailureComment({
+    runId: '123',
+    runUrl: 'https://github.com/LodyAI/Lody/actions/runs/123',
+    headSha: 'b'.repeat(40),
+    artifactName: '',
+  });
+  assert.equal(
+    dailyFailureCommentMarker('123'),
+    '<!-- desktop-e2e-daily-failure-run:123:summary -->'
+  );
+  assert.equal(body.split('\n')[4], '- Evidence artifact: unavailable');
 });
 
 void test('identifies the suite from the exact Daily evidence artifact', () => {

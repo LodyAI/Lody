@@ -10,6 +10,9 @@ import {
   getPastedTextClipboardTextForSelection,
   insertPastedTextDraft,
   isLargePastedText,
+  isPastedTextTooLarge,
+  getPastedTextByteSize,
+  MAX_PASTED_TEXT_BYTE_SIZE,
   normalizePastedTextDraft,
   sanitizePastedTextDrafts,
   shouldCapturePastedTextDraft,
@@ -340,6 +343,32 @@ describe('isLargePastedText', () => {
     expect(
       isLargePastedText(Array.from({ length: 20 }, (_, index) => `line ${index}`).join('\n'))
     ).toBe(false);
+  });
+});
+
+describe('isPastedTextTooLarge', () => {
+  it('rejects a paste whose stored text exceeds the byte ceiling', () => {
+    expect(isPastedTextTooLarge('a'.repeat(MAX_PASTED_TEXT_BYTE_SIZE + 1))).toBe(true);
+  });
+
+  it('accepts a paste exactly at the byte ceiling', () => {
+    expect(isPastedTextTooLarge('a'.repeat(MAX_PASTED_TEXT_BYTE_SIZE))).toBe(false);
+  });
+
+  it('measures UTF-8 bytes, not characters', () => {
+    // Each CJK character is three UTF-8 bytes, so a third as many characters
+    // is enough to cross a ceiling that a character count would let through.
+    const text = '\u65e5'.repeat(Math.ceil(MAX_PASTED_TEXT_BYTE_SIZE / 3));
+    expect(text.length).toBeLessThan(MAX_PASTED_TEXT_BYTE_SIZE);
+    expect(isPastedTextTooLarge(text)).toBe(true);
+  });
+
+  it('measures the normalized, trimmed text the draft would store', () => {
+    const padding = ' '.repeat(1024);
+    const body = 'a'.repeat(MAX_PASTED_TEXT_BYTE_SIZE);
+    expect(getPastedTextByteSize(`${padding}${body}${padding}`)).toBe(MAX_PASTED_TEXT_BYTE_SIZE);
+    expect(isPastedTextTooLarge(`${padding}${body}${padding}`)).toBe(false);
+    expect(getPastedTextByteSize('a\r\nb')).toBe(3);
   });
 });
 

@@ -122,9 +122,12 @@ import { SESSION_FILE_MAX_COUNT, SESSION_IMAGE_MAX_SIZE_BYTES } from '@lody/shar
 import type { SessionFilePayload } from '@lody/shared';
 import {
   arePastedTextDraftsEqual,
+  getPastedTextByteSize,
   getPastedTextCharacterCount,
   getPastedTextDraftsAfterInsertion,
   insertPastedTextDraft,
+  isPastedTextTooLarge,
+  MAX_PASTED_TEXT_BYTE_SIZE,
   normalizePastedTextDraft,
   shouldCapturePastedTextDraft,
   type PastedTextDraft,
@@ -1625,6 +1628,25 @@ export const SessionChatInputArea = memo(
         }
         const text = event.clipboardData.getData('text/plain');
 
+        // Refuse the whole paste rather than silently truncating it: a blob this
+        // large is a log dump, and a half-pasted log is worse than none.
+        if (text && isPastedTextTooLarge(text)) {
+          event.preventDefault();
+          toast.error(
+            t('composer.pastedTextTooLarge', 'Pasted text is too large ({{size}}).', {
+              size: formatFileSize(getPastedTextByteSize(text)),
+            }),
+            {
+              description: t(
+                'composer.pastedTextTooLargeDescription',
+                'The limit is {{limit}}. Attach it as a file instead.',
+                { limit: formatFileSize(MAX_PASTED_TEXT_BYTE_SIZE) }
+              ),
+            }
+          );
+          return;
+        }
+
         if (text && shouldCapturePastedTextDraft(text)) {
           event.preventDefault();
           if (insertLargePastedTextAtSelection(text)) {
@@ -1661,6 +1683,7 @@ export const SessionChatInputArea = memo(
         handleAddFiles,
         insertLargePastedTextAtSelection,
         isArchived,
+        t,
       ]
     );
     const handleImageDrop = useCallback(

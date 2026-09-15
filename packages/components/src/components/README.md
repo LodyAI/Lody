@@ -19,6 +19,15 @@ navigation must still return to the precise creating Tab.
 - Sidebar Search, immediately below New Chat, opens the shared command palette
   through `lib/commands/palette-state.ts`; see the [Spec](../../../../specs/sidebar-search.md).
 - Chat landing: `chat/chat-landing.tsx`.
+- Browser desktop sign-in handoff: `login-page.tsx` under `?client_id=electron`,
+  the page the desktop app opens in the system browser. A desktop sign-out leaves
+  this browser signed in as the previous account, so the page names that account
+  and transfers it only on an explicit choice, keeps the attempt's
+  `state`/`code_challenge` when the user switches accounts, discards a transfer
+  that lands after the switch, and renders the `lody://auth/callback` URL as a link
+  beside the automatic navigation — a browser that refuses a custom-scheme
+  navigation reports nothing back, so the link must already be on screen.
+  [Decision](../../../../.agents/notes/implemented/bug-fix/2026-09-15-electron-browser-signin-account-choice.md).
 - Desktop update prompt: `sidebar-update-banner.tsx` and
   `update-changelog-dialog.tsx`, driven by the pure selectors in
   `lib/electron-update-banner.ts`.

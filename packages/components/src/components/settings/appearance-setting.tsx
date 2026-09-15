@@ -5,10 +5,7 @@ import { Monitor, Moon, SquareTerminal, Sun } from 'lucide-react';
 
 import {
   conversationFontSizeAtom,
-  CONVERSATION_FONT_SIZE_MAX,
-  CONVERSATION_FONT_SIZE_MIN,
   interfaceFontFamilyAtom,
-  normalizeConversationFontSize,
   normalizeTerminalFontSize,
   terminalFontFamilyAtom,
   terminalFontSizeAtom,
@@ -16,6 +13,7 @@ import {
   TERMINAL_FONT_SIZE_MIN,
   type ConversationFontSize,
 } from '@/atoms';
+import { conversationTextFontSizeStyle } from '@/components/ai-gui/conversation-font-size-classes';
 import { MobileAppearanceSettings } from '@/components/mobile/mobile-appearance-settings';
 import { OptionSelector, type OptionSelectorOption } from '@/components/shared/option-selector';
 import { buildTerminalFontPreviewFamily } from '@/components/terminal/terminal-theme';
@@ -26,6 +24,7 @@ import { LanguageSelector } from '../../i18n';
 import { useTheme, type Theme } from '../../theme-provider';
 import { settingContainerClass } from '.';
 import { CompactRow, CompactSection } from './compact-layout';
+import { ConversationFontSizeSlider } from './conversation-font-size-slider';
 import { PreviewSelect, type PreviewSelectOption } from './preview-select';
 
 export type SystemFontLoadState = 'idle' | 'loading' | 'loaded' | 'error';
@@ -230,23 +229,27 @@ export function AppearanceSettingsView({
             'Adjusts message body text in conversations.'
           )}
         >
-          <Input
-            type="number"
-            min={CONVERSATION_FONT_SIZE_MIN}
-            max={CONVERSATION_FONT_SIZE_MAX}
-            step={1}
-            value={conversationFontSize}
-            aria-label={t('settings.conversationFontSize.label', 'Conversation font size')}
-            className="w-24"
-            onChange={(event) => {
-              if (Number.isFinite(event.target.valueAsNumber)) {
-                onConversationFontSizeChange(
-                  normalizeConversationFontSize(event.target.valueAsNumber)
-                );
-              }
-            }}
-          />
+          <div className="w-full sm:w-[220px]">
+            <ConversationFontSizeSlider
+              value={conversationFontSize}
+              onChange={onConversationFontSizeChange}
+            />
+          </div>
         </CompactRow>
+        <div
+          aria-label={t('settings.conversationFontSize.preview', 'Conversation preview')}
+          className="border-t border-border/60 bg-muted/20 px-3 py-3"
+        >
+          <p
+            className="max-w-[520px] leading-relaxed text-foreground"
+            style={conversationTextFontSizeStyle(conversationFontSize)}
+          >
+            {t(
+              'settings.conversationFontSize.previewText',
+              'This is how message text looks in a conversation.'
+            )}
+          </p>
+        </div>
       </CompactSection>
 
       {isElectron ? (

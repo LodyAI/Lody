@@ -39,12 +39,28 @@ const buildStorySvg = (label: string, from: string, to: string): string => `
   </svg>
 `;
 
-const storySvgByImageId = new Map<string, string>([
-  ['img-1', buildStorySvg('Landing Page', '#0f766e', '#0f172a')],
-  ['img-2', buildStorySvg('Settings Modal', '#b45309', '#7c2d12')],
-  ['img-3', buildStorySvg('Table View', '#2563eb', '#312e81')],
-  ['img-4', buildStorySvg('Mobile Layout', '#be185d', '#701a75')],
-]);
+const storyImageSeeds = [
+  { label: 'Landing Page', fileName: 'landing-page.png', from: '#0f766e', to: '#0f172a' },
+  { label: 'Settings Modal', fileName: 'settings-modal.png', from: '#b45309', to: '#7c2d12' },
+  { label: 'Table View', fileName: 'table-view.png', from: '#2563eb', to: '#312e81' },
+  { label: 'Mobile Layout', fileName: 'mobile-layout.png', from: '#be185d', to: '#701a75' },
+  { label: 'Dark Theme', fileName: 'dark-theme.png', from: '#1d4ed8', to: '#0f172a' },
+  { label: 'Font 12px', fileName: 'font-12.png', from: '#047857', to: '#134e4a' },
+  { label: 'Font 16px', fileName: 'font-16.png', from: '#7c3aed', to: '#3b0764' },
+  { label: 'Font 20px', fileName: 'font-20.png', from: '#c2410c', to: '#7c2d12' },
+  { label: 'Composer', fileName: 'composer.png', from: '#0891b2', to: '#164e63' },
+  { label: 'Session List', fileName: 'session-list.png', from: '#4d7c0f', to: '#1a2e05' },
+  { label: 'Permission', fileName: 'permission.png', from: '#a16207', to: '#422006' },
+  { label: 'Diff View', fileName: 'diff-view.png', from: '#9333ea', to: '#2e1065' },
+  { label: 'Terminal', fileName: 'terminal.png', from: '#334155', to: '#020617' },
+] as const;
+
+const storySvgByImageId = new Map<string, string>(
+  storyImageSeeds.map((seed, index) => [
+    `img-${index + 1}`,
+    buildStorySvg(seed.label, seed.from, seed.to),
+  ])
+);
 
 const fallbackStorySvg = buildStorySvg('Image Preview', '#475569', '#0f172a');
 
@@ -60,7 +76,9 @@ const getRequestUrl = (input: RequestInfo | URL): string => {
 
 const getStoryImageIdFromRequest = (input: RequestInfo | URL): string | null => {
   const decoded = decodeURIComponent(getRequestUrl(input));
-  const match = decoded.match(/\/api\/session-images\/[^/]+\/([^/?]+)/);
+  // `/api/workspaces/<id>/session-images/<sessionId>/<imageId>` (see
+  // `getSessionImageDownloadApiPath`), with the thumbnail query string appended.
+  const match = decoded.match(/\/session-images\/[^/]+\/([^/?]+)/);
   return match?.[1] ?? null;
 };
 
@@ -96,44 +114,19 @@ const installStoryImageFetchMock = (): void => {
 
 installStoryImageFetchMock();
 
-const storyImages = [
-  {
-    imageId: 'img-1',
-    mimeType: 'image/png',
-    fileName: 'landing-page.png',
-    sizeBytes: 180_000,
-    width: 1280,
-    height: 720,
-  },
-  {
-    imageId: 'img-2',
-    mimeType: 'image/png',
-    fileName: 'settings-modal.png',
-    sizeBytes: 164_000,
-    width: 1280,
-    height: 720,
-  },
-  {
-    imageId: 'img-3',
-    mimeType: 'image/png',
-    fileName: 'table-view.png',
-    sizeBytes: 152_000,
-    width: 1280,
-    height: 720,
-  },
-  {
-    imageId: 'img-4',
-    mimeType: 'image/png',
-    fileName: 'mobile-layout.png',
-    sizeBytes: 141_000,
-    width: 1280,
-    height: 720,
-  },
-] as const;
+const storyImages = storyImageSeeds.map((seed, index) => ({
+  imageId: `img-${index + 1}`,
+  mimeType: 'image/png',
+  fileName: seed.fileName,
+  sizeBytes: 180_000 - index * 3_000,
+  width: 1280,
+  height: 720,
+}));
 
 type StoryPreviewProps = {
   align: ImageBubbleAlign;
-  imageCount: 1 | 2 | 3 | 4;
+  /** 1 through `storyImages.length` — a long group is the wrapping case. */
+  imageCount: number;
   speaker: 'assistant' | 'user';
 };
 
@@ -221,5 +214,23 @@ export const ThreeImageGrid: Story = {
 export const FourImageGrid: Story = {
   args: {
     imageCount: 4,
+  },
+};
+
+/**
+ * The case a fixed two-column grid used to turn into a tall narrow tower: a long
+ * agent attachment group wraps along the conversation width instead.
+ */
+export const ThirteenImageWrap: Story = {
+  args: {
+    imageCount: 13,
+  },
+};
+
+export const ThirteenImageWrapFromUser: Story = {
+  args: {
+    align: 'end',
+    imageCount: 13,
+    speaker: 'user',
   },
 };

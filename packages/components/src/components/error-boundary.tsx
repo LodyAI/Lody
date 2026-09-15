@@ -40,15 +40,24 @@ function classifyBoundaryReason(error: Error): string {
 // raw stack, so it is safe to send and stable across users (spec §7.5:
 // error_fingerprint dedupes the product-level signal without re-sending the
 // stack, which now lives on the PostHog $exception captured alongside it).
-function computeErrorFingerprint(error: Error, boundaryName: string): string {
-  const head = (error.message ?? '')
-    // Strip URLs, hex/uuid-ish tokens and digit runs so transient ids do not
-    // fork the fingerprint for what is conceptually one error.
+/**
+ * Strip URLs, hex/uuid-ish tokens and digit runs so transient ids do not fork
+ * what is conceptually one error. A failed Convex query embeds a per-request
+ * id in its message, so without this every occurrence reads as a brand new
+ * error — which silently defeats both the fingerprint grouping below and the
+ * automatic-reset budget, leaving a permanently broken query to re-render its
+ * crashed subtree forever.
+ */
+function normalizeErrorMessage(message: string | undefined): string {
+  return (message ?? '')
     .replace(/https?:\/\/\S+/g, '')
     .replace(/[0-9a-f]{8,}/gi, '')
     .replace(/\d+/g, '')
-    .trim()
-    .slice(0, 120);
+    .trim();
+}
+
+function computeErrorFingerprint(error: Error, boundaryName: string): string {
+  const head = normalizeErrorMessage(error.message).slice(0, 120);
   return hashAnalyticsId(`${boundaryName}|${error.name}|${head}`);
 }
 
@@ -99,7 +108,7 @@ type ErrorBoundaryState = {
 const MAX_AUTOMATIC_RESETS = 2;
 
 function errorSignature(error: Error): string {
-  return `${error.name}|${error.message}`;
+  return `${error.name}|${normalizeErrorMessage(error.message)}`;
 }
 
 function didResetKeysChange(

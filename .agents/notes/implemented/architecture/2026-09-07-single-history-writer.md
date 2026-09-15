@@ -102,12 +102,12 @@ alternating order, complete JSON equality and real-replica checks.
 
 Recorded at 76d0e9be, median sample-average ms per chunk:
 
-| Runtime | Entries | Unpatched reader | Patched reader |
-| --- | ---: | ---: | ---: |
-| Bun 1.3.14 | 50 | 1.060 | 0.189 |
-| Bun 1.3.14 | 200 | 3.839 | 0.156 |
-| Bun 1.3.14 | 400 | 6.067 | 0.180 |
-| Node 24.20.0 + tsx | 200 | 5.225 | 0.181 |
+| Runtime            | Entries | Unpatched reader | Patched reader |
+| ------------------ | ------: | ---------------: | -------------: |
+| Bun 1.3.14         |      50 |            1.060 |          0.189 |
+| Bun 1.3.14         |     200 |            3.839 |          0.156 |
+| Bun 1.3.14         |     400 |            6.067 |          0.180 |
+| Node 24.20.0 + tsx |     200 |            5.225 |          0.181 |
 
 These compare the same writer, not whole applications. Repeated Node seeds in one
 process slowed even with free/GC; fresh processes avoid that measurement confound,
@@ -131,6 +131,11 @@ At the user's request, this bilingual record consolidates the PR's incremental n
 Superseded intermediate claims and detailed run logs remain recoverable in Git history
 through 123e9132. Remove source-string-only tests; retain real behavior and compile-failure
 contracts. Future refinements update the owning note rather than adding a note per fix.
+
+Later work changed two of this record's statements without changing its decision: new
+writes now insert ordinary metadata as primitives and reserve `LoroText` for streaming
+fields, and canonical import turn hashes gained a version. See
+[versioned turn hashes and primitive metadata insertion](2026-09-14-versioned-history-hashes-and-primitive-metadata.md).
 
 Intent: [draft Spec](../../../../specs/session-history-writes.md).
 PR: [#460](https://github.com/LodyAI/Lody/pull/460).

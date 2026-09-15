@@ -30,6 +30,12 @@
 - Import inputs are explicit data. Recheck current history/cursor and bind the
   stored baseline and cursor in the same synchronous write, without an await gap.
   A cursor failure after history mutation is indeterminate.
+- Canonical import hashes are versioned: v1 hashes `{role, items, plan}` verbatim;
+  v2 hashes a canonical item form that excludes tool payload from identity. Cursor,
+  metadata digest and stored baseline each carry their own version; absent means v1.
+  Compare only same-version hashes, recomputing from the replay when versions differ;
+  unknown versions or missing replay data refuse before any write. A metadata-only
+  conflict marker never upgrades the stored cursor by implication.
 - Legacy inline rows and unchanged unknown fields survive updates. Never rewrite
   history while opening or reading. Auto-seen is a separately attached CLI policy
   with a commit-time guard against regressing an advanced execution status.

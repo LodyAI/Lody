@@ -10,6 +10,7 @@ import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
 import { useAppCapability } from '@/lib/app-platform';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
+import { ErrorBoundary } from '@/components/error-boundary';
 import { Button } from '@/ui/button';
 import { SessionShareDialog } from './session-share-dialog';
 
@@ -23,7 +24,39 @@ export function SessionShareRequestCards(props: {
   const scope = useResolvedWorkspaceScope({ workspaceId: props.workspaceId, enabled: supported });
   const userId = useAtomValue(userAtom)?.id;
   if (!scope.enabled || !userId || !props.isVisible) return null;
-  return <RequestCards key={`${userId}:${props.workspaceId}:${props.session.id}`} {...props} />;
+  // The request query reads cloud state and throws into render when the backend
+  // fails. These cards are an optional affordance rendered inside the
+  // conversation, so that throw must not reach the chat-stream boundary and
+  // replace the whole conversation with a crash screen. The boundary still
+  // reports the error; sign-in failures keep propagating to the app's auth
+  // recovery.
+  return (
+    <ErrorBoundary
+      name="SessionShareRequestCards"
+      variant="inline"
+      resetKeys={[userId, props.workspaceId, props.session.id]}
+      fallbackRender={({ resetErrorBoundary }) => (
+        <RequestsUnavailable onRetry={resetErrorBoundary} />
+      )}
+    >
+      <RequestCards key={`${userId}:${props.workspaceId}:${props.session.id}`} {...props} />
+    </ErrorBoundary>
+  );
+}
+
+/** Pending requests stay invisible until the query recovers: nothing is publishable from here. */
+function RequestsUnavailable({ onRetry }: { onRetry: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="my-3 flex items-center gap-2 text-xs text-muted-foreground">
+      <span role="status">
+        {t('sharing.request.unavailable', 'Could not load pending share requests.')}
+      </span>
+      <Button size="sm" variant="ghost" onClick={onRetry}>
+        {t('common.retry', 'Retry')}
+      </Button>
+    </div>
+  );
 }
 
 function RequestCards({

@@ -153,7 +153,9 @@ separately as the server record identity. Closing the editor discards upload
 credentials: an unpublished request must then be abandoned and recreated with a
 new retry key; an ordinary draft must be revoked before preparing another copy.
 The client revokes a stale draft as part of the next publish, not when the dialog
-opens.
+opens. When the app cannot read the canonical requests, the card surface says so
+and offers a retry; it neither hides the failure nor takes the conversation down
+with it.
 
 Fork is out of scope for version one. A future fork may import displayable history
 and attachments into the visitor's workspace; a new agent receives Markdown in a

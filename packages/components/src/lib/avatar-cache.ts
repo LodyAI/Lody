@@ -210,6 +210,20 @@ const maybeRevalidate = (
   });
 };
 
+/**
+ * The background revalidation currently in flight for `image`, or `null` when
+ * none is running (nothing cached, still fresh, or already settled). Resolves
+ * with the new blob URL when the remote changed and `null` otherwise.
+ *
+ * Exposed so a caller can await the swap on an explicit signal instead of
+ * guessing how many event-loop turns the fetch plus Blob byte comparison needs;
+ * `onUpdate` callbacks are registered on this promise before any later `await`,
+ * so they have already run by the time an awaiting caller resumes.
+ */
+export function getPendingAvatarRevalidation(image: string): Promise<string | null> | null {
+  return inFlightRevalidations.get(getAvatarCacheKey(image)) ?? null;
+}
+
 export function peekAvatarBlobUrl(image?: string | null): string | null | undefined {
   if (image == null) {
     return image;
