@@ -289,7 +289,9 @@ type TurnRuntimeState = {
 export type SessionExecutionSnapshot = {
   /** Assistant turn currently owned by this service, if any. */
   activeTurnId?: string;
-  /** True only while a turn runtime is registered and still owns cleanup. */
+  /** True while an engine-opened turn occupies this session's ACP prompt slot. */
+  engineTurnActive: boolean;
+  /** True while either a client-owned or engine-opened turn occupies the ACP prompt slot. */
   hasActiveTurn: boolean;
   /**
    * True when the active turn is waiting for session creation/restoration.
@@ -1107,6 +1109,7 @@ export class SessionExecutionService {
 
     return {
       ...(activeTurnId ? { activeTurnId } : {}),
+      engineTurnActive,
       hasActiveTurn,
       hasBlockingPendingCreate: Boolean(runtime?.pendingSession || (runtime && pendingSession)),
       hasReusableSession: Boolean(this.deps.sessionManager.getSession(sessionId)),

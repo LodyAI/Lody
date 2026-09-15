@@ -43,6 +43,9 @@ const lastUserIndex = (history: readonly SessionHistoryInput[]): number => {
   return -1;
 };
 
+const isEngineTurnActive = (execution: { engineTurnActive: boolean }): boolean =>
+  execution.engineTurnActive;
+
 export class SessionEditAndResendService {
   private readonly inFlight = new Map<string, Promise<SessionEditAndResendResponse>>();
 
@@ -154,6 +157,15 @@ export class SessionEditAndResendService {
     let commitEditable = editable;
     let commitMeta = meta;
     try {
+      const initialExecution = this.deps.executionService.getExecutionSnapshot(spec.sessionId);
+      if (isEngineTurnActive(initialExecution)) {
+        return sessionEditAndResendFailure(
+          spec,
+          'ACTIVE_AUTOMATION',
+          'Edit and resend is unavailable while an engine-opened turn is active.'
+        );
+      }
+
       runtime = await this.getOrRestoreRuntime(
         meta,
         spec.requestedByUserId,
@@ -231,6 +243,15 @@ export class SessionEditAndResendService {
             'Session automation started before the edit could be applied.'
           );
         }
+        if (isEngineTurnActive(freshExecution)) {
+          await this.closePrepared(runtime, preparedSessionId);
+          preparedSessionId = null;
+          return sessionEditAndResendFailure(
+            spec,
+            'ACTIVE_AUTOMATION',
+            'An engine-opened turn started while the replacement was prepared.'
+          );
+        }
         commitEditable = freshEditable;
         commitMeta = freshMeta;
 
@@ -294,6 +315,15 @@ export class SessionEditAndResendService {
           );
         }
         commitMeta = preCommitMeta;
+        if (isEngineTurnActive(this.deps.executionService.getExecutionSnapshot(spec.sessionId))) {
+          await this.closePrepared(runtime, preparedSessionId);
+          preparedSessionId = null;
+          return sessionEditAndResendFailure(
+            spec,
+            'ACTIVE_AUTOMATION',
+            'An engine-opened turn started before the replacement could be committed.'
+          );
+        }
 
         const inputConfig = this.buildReplacementInputConfig(
           commitMeta,
@@ -374,6 +404,11 @@ export class SessionEditAndResendService {
             lastMessageAt: getServerNow(),
           });
           await this.deps.workspaceDocument.persistPendingChanges('session-edit-and-resend-commit');
+          if (isEngineTurnActive(this.deps.executionService.getExecutionSnapshot(spec.sessionId))) {
+            throw new Error(
+              '[ACTIVE_AUTOMATION] An engine-opened turn started while the replacement was committed.'
+            );
+          }
         } catch (error) {
           try {
             // Await the compensation before restoring meta and persisting the

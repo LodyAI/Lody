@@ -105,11 +105,10 @@ Contract: specs/session-orchestration.md.
 - Fork recovery fail-closes interrupted operations, found ONLY in machine-local marker store
   under `withForkOperationLock`; never enumerate rooms or open docs, never `cleanSessionDoc`
   a doc you do not own.
-- Edit-and-resend prepares provider `forkAtTurn` (`session/new` for the first User), cancels the
-  exact active turn, waits for ownership release, then one durable history/meta commit.
-  Its rewrite barrier excludes queue promotion and blocks dispatch and steer; the queue is never
-  rewritten. Keep original User attribution, config, attachments; new turn ids and ACP identity;
-  never replay transcript or roll back files.
+- Edit-and-resend: `forkAtTurn` (`session/new` for first User); cancel exact CLIENT turn, await
+  release, then commit history/meta once. Engine marker rejects it; persistence arrival compensates
+  and closes prepared. Barrier blocks dispatch/steer/queue promotion; preserve User attribution,
+  config, attachments; new ids/ACP identity; never replay or roll back files.
 
 ## Access
 

@@ -40,6 +40,12 @@ That tolerance must not authorize creating new malformed items locally.
   and edits inside that range, except a newly inserted pending user row becoming seen/read
   with every other field unchanged. It is not crash recovery or a distributed transaction.
   External provider imports remain new inputs, not privileged stored-history copies.
+- Edit-and-resend must fail closed when an engine-opened turn occupies the ACP prompt slot:
+  it must not cancel an engine owner, adopt a prepared replacement, or commit a replacement
+  history/meta state. Recheck before preparation, before commit, and after persistence; if the
+  marker appears after the local history/meta write, close the prepared session and run the
+  existing best-effort local history/meta compensation. This detects a provider-admission race;
+  the rewrite barrier alone is not a cross-boundary admission lock.
 - Acceptance here means a local CRDT write. Existing repo persistence and transport
   still own durability, permissions, and remote synchronization.
 - Tool fields other than type/toolCallId
@@ -102,5 +108,6 @@ Non-history control-field validation remains outside this HistoryWriter contract
 - [Decision](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.md)
 - [Business-field repair and pending hash decision](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.md)
 - [Imported-history baseline repair](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.md)
+- [Edit-and-resend admission guard](../.agents/notes/implemented/bug-fix/2026-09-15-edit-resend-engine-admission.md)
 
 Draft for human review; implementation and passing tests do not grant Spec approval.

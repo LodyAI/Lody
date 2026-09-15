@@ -516,6 +516,7 @@ describe('SessionExecutionService', () => {
     const snapshot = service.getExecutionSnapshot('session-1' as SessionId);
     // Dispatch admission reads hasActiveTurn to hold queued work — an engine
     // turn must set it even though it owns no client-turn runtime.
+    expect(snapshot.engineTurnActive).toBe(true);
     expect(snapshot.hasActiveTurn).toBe(true);
     expect(snapshot.activeTurnId).toBeUndefined();
   });
@@ -525,7 +526,10 @@ describe('SessionExecutionService', () => {
       isEngineTurnActive: vi.fn(() => false),
     });
     const service = new SessionExecutionService(deps);
-    expect(service.getExecutionSnapshot('session-1' as SessionId).hasActiveTurn).toBe(false);
+    expect(service.getExecutionSnapshot('session-1' as SessionId)).toMatchObject({
+      engineTurnActive: false,
+      hasActiveTurn: false,
+    });
   });
   it('advances one session owner through consecutive prompt handoffs', async () => {
     const steerPrompt = vi.fn(() => ({

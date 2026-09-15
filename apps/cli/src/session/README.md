@@ -206,8 +206,12 @@ the transient store (`noteEngineTurnActivity`, cleared by the end marker or proc
 termination — process-bounded, never a wall clock): `hasActiveTurn` reads it so the idle GC
 cannot reap the agent mid-engine-turn, and the live-status RPC upgrades `unknown` to
 `running` so the session no longer shows "completed" while the engine turn is still working.
-Decision record:
-[../../../../.agents/notes/implemented/bug-fix/2026-09-12-engine-turn-entries.md](../../../../.agents/notes/implemented/bug-fix/2026-09-12-engine-turn-entries.md).
+Edit-and-resend is currently limited to builtin Codex/Claude; it must fail closed if an engine
+marker is nevertheless active, rechecking around provider preparation and persistence. This is
+detection plus compensation, not an atomic provider-admission lock.
+Decision records:
+[engine-turn entries](../../../../.agents/notes/implemented/bug-fix/2026-09-12-engine-turn-entries.md)
+and [edit-and-resend admission guard](../../../../.agents/notes/implemented/bug-fix/2026-09-15-edit-resend-engine-admission.md).
 
 ### GitHub credential broker
 
