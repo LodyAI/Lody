@@ -96,8 +96,9 @@ describe('usage delivery', () => {
     };
     service.recordSessionUsageUpdate(latest);
     // Mutating caller-owned input must not change an enqueued bill.
-    first.update.usage.inputTokens = 999;
-    first.update.modelUsage = {};
+    latest.update.usage.inputTokens = 999;
+    const latestModel = latest.update.modelUsage?.synthetic;
+    if (latestModel) latestModel.inputTokens = 999;
     await service.flushSessionUsage('s');
     expect(persisted.map((p) => p.usage.inputTokens)).toEqual([200]);
     expect(persisted[0]?.modelUsage?.synthetic).toEqual(input(200).update.usage);
@@ -235,6 +236,8 @@ describe('usage delivery', () => {
     const missing = input(1);
     delete missing.update.modelUsage;
     service.recordSessionUsageUpdate(missing);
+    await service.flushSessionUsage('s');
+    expect(persisted).toEqual([]);
     service.recordSessionUsageUpdate(input(100));
     service.recordSessionUsageUpdate({ ...input(200), acpSessionId: 'b' });
     await service.flushSessionUsage('s');

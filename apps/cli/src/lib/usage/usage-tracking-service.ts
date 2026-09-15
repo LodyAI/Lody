@@ -30,8 +30,8 @@ type PendingState = {
   compacted: SessionUsageUpdate | null;
   // Legacy Codex accounting baseline outlives delivery acknowledgement.
   lastLegacyCodex: SessionUsageUpdate | null;
-  // A failed cumulative snapshot stays queued until acknowledged.
-  queued: RecordSessionUsageInput[];
+  // Keep one unacknowledged payload; newer updates coalesce separately in staged.
+  unacknowledged: RecordSessionUsageInput | null;
   inFlight: Promise<void> | null;
 };
 
@@ -138,6 +138,7 @@ export class UsageTrackingService {
 
   recordSessionUsageUpdate(input: RecordSessionUsageInput): void {
     const key = toPendingKey(input);
+    // Take ownership once; staged/compaction/delivery only replace or merge snapshots.
     const update = this.calculatePrice(cloneUsageUpdate(input.update), input.cliType);
     const latestMeta = {
       workspaceId: input.workspaceId,
@@ -160,7 +161,7 @@ export class UsageTrackingService {
       staged: null,
       compacted: null,
       lastLegacyCodex: null,
-      queued: [],
+      unacknowledged: null,
       inFlight: null,
     };
     this.applyUpdateToState(state, input.cliType, update);
@@ -191,20 +192,19 @@ export class UsageTrackingService {
 
   private async drainPending(state: PendingState): Promise<void> {
     for (;;) {
-      if (state.queued.length === 0) {
+      if (!state.unacknowledged) {
         const update = this.buildFinalUpdate(state);
         if (!update) return;
-        state.queued.push({ ...state.latestMeta, update });
+        state.unacknowledged = { ...state.latestMeta, update };
         state.staged = null;
       }
-      const snapshot = state.queued[0];
-      if (!snapshot) return;
+      const snapshot = state.unacknowledged;
       const { update, ...meta } = snapshot;
       if (!update.modelUsage || Object.keys(update.modelUsage).length === 0) {
         this.logger.debug(
           `[usage] Skipping persist for session=${meta.sessionId} acpSessionId=${meta.acpSessionId}: missing modelUsage`
         );
-        state.queued.shift();
+        state.unacknowledged = null;
         continue;
       }
       try {
@@ -215,7 +215,7 @@ export class UsageTrackingService {
           modelUsage: update.modelUsage,
         });
         if (!result.success) throw new Error('Usage persistence was not acknowledged');
-        state.queued.shift();
+        state.unacknowledged = null;
       } catch (error: unknown) {
         this.logger.debug(
           `[usage] Failed to persist usage for session=${meta.sessionId} acpSessionId=${meta.acpSessionId}: ${formatErrorMessage(error)}`
@@ -236,7 +236,7 @@ export class UsageTrackingService {
       if (state.lastLegacyCodex && !this.isCodexCompaction(state.lastLegacyCodex)) {
         state.compacted = state.compacted
           ? mergeUsageUpdate(state.compacted, state.lastLegacyCodex)
-          : cloneUsageUpdate(state.lastLegacyCodex);
+          : state.lastLegacyCodex;
       }
       state.lastLegacyCodex = update;
       state.staged = update;
@@ -255,7 +255,7 @@ export class UsageTrackingService {
       return null;
     }
     if (!state.compacted) {
-      return state.staged ? cloneUsageUpdate(state.staged) : null;
+      return state.staged;
     }
     return mergeUsageUpdate(state.compacted, state.staged);
   }
@@ -292,7 +292,7 @@ export class UsageTrackingService {
     const state = this.pending.get(key);
     if (!state) return;
     if (state.inFlight) return;
-    if (state.staged || state.compacted || state.queued.length > 0) return;
+    if (state.staged || state.compacted || state.unacknowledged) return;
     if (state.lastLegacyCodex) return;
 
     this.pending.delete(key);

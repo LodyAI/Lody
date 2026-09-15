@@ -116,6 +116,24 @@ target is absent here; the receiver edit is limited to provider eligibility.
 
 ## Review follow-up: scoped repairs
 
+### Delivery ablation (2026-09-15)
+
+The real delivery service ran in the existing isolated test harness (only transport
+stubbed). Strengthened two existing tests first: mutate the actually staged input,
+and flush a missing model map before replacing it. Baseline: 15/15 pass.
+
+| Ablation                                                                 | Observable result                              | Decision                                                          |
+| ------------------------------------------------------------------------ | ---------------------------------------------- | ----------------------------------------------------------------- |
+| Remove internal snapshot re-cloning and redundant staged null check      | 15/15 pass                                     | Keep removal: entry owns a copy; merge helpers return new objects |
+| Replace the at-most-one-element delivery array with one nullable payload | 15/15 pass                                     | Keep: newer updates remain coalesced separately                   |
+| Remove entry ownership copy                                              | 1 failure: caller changes delivered 200 to 999 | Restore                                                           |
+| Remove shared in-flight drain guard                                      | 1 failure: deliveries become 100, 100, 200     | Restore                                                           |
+
+Experiments were sequential, reverting rejected candidates before the next.
+No provider source, pricing, lifetime or persistence contract changes. Passing
+synthetic tests establishes these covered behaviors, not production end-to-end
+verification; full workspace checks remain dependency-limited.
+
 2026-09-14 integration correction: Lody main `6de01729` already includes #664,
 which migrates the DSH launcher to profile files, the `dsh` command, and explicit
 per-package version specifiers. The earlier launcher incompatibility applies to
