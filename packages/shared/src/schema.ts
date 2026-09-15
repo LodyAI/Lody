@@ -604,6 +604,9 @@ export const sessionHistorySchema = schema.LoroMap({
   // Provider-native assistant turn boundary emitted by the ACP adapter.
   // Lody stores and returns this opaque value without interpreting it.
   acpTurnId: schema.String({ required: false }),
+  // Origin kind of an engine-opened turn (`cron_job`, `task`, ...), stamped by
+  // the adapter on every update of that turn. Absent on client-dispatched turns.
+  acpTurnOrigin: schema.String({ required: false }),
   items: schema.LoroList(historyMessageItemSchema, undefined, { required: false }),
   // Plan attached to this turn, updated via notification updates during the agent's response
   plan: schema.LoroList(sessionPlanEntrySchema, undefined, { required: false }),

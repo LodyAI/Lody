@@ -77,6 +77,13 @@ export class MachineRuntime {
         handler(event.sessionId);
       }
     });
+    // An agent process that dies unexpectedly reports only `exit` (never
+    // `terminated`), so the engine-turn marker must clear on that path too —
+    // a crashed agent must not leave its session permanently busy and
+    // GC-exempt.
+    this.sessionManager.on('exit', (event) => {
+      this.handler?.clearEngineTurnActivity(event.sessionId);
+    });
     this.options.logger.debug('Session manager initialized');
 
     this.handler = new MessageHandler(
@@ -97,6 +104,9 @@ export class MachineRuntime {
       machineId,
       () => this.resourceMonitor?.sample() ?? Promise.reject(new Error('Resource monitor stopped'))
     );
+    // A dying ACP process ends any engine-opened turn it hosted: drop the
+    // activity marker so busy status and the idle-GC guard release the session.
+    this.onSessionTerminated((sessionId) => this.handler?.clearEngineTurnActivity(sessionId));
     this.initializeGCManager();
     this.initialized = true;
 

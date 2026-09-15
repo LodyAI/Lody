@@ -54,8 +54,13 @@ type MessageHandlerInternals = {
   deletedSessionIds: Set<SessionId>;
   store: {
     has: (sessionId: SessionId) => boolean;
-    get: (sessionId: SessionId) => { acpFlushInFlight: Promise<void> | null };
+    get: (sessionId: SessionId) => {
+      acpFlushInFlight: Promise<void> | null;
+      engineTurn: { acpTurnId: string } | undefined;
+    };
+    noteEngineTurnActivity: (sessionId: SessionId, acpTurnId: string) => void;
   };
+  executionService: { notifyEngineTurnReleased: (sessionId: SessionId) => void };
   previewService: {
     closeSessionPreviewForCleanup: (sessionId: SessionId, reason: string) => Promise<void>;
   };
@@ -356,6 +361,18 @@ describe('MessageHandler terminal cleanup', () => {
 
     expect(closeSessionTerminals).toHaveBeenCalledWith(childSessionId);
     expect(closeSessionTerminals).toHaveBeenCalledWith(sessionId);
+  });
+
+  it('releases engine-turn ownership before deleting transient session state', async () => {
+    const { handler, sessionId } = createHarness();
+    handler.store.noteEngineTurnActivity(sessionId, 'auto:41');
+    expect(handler.store.get(sessionId).engineTurn?.acpTurnId).toBe('auto:41');
+
+    const notifyEngineTurnReleased = vi.spyOn(handler.executionService, 'notifyEngineTurnReleased');
+    await handler.handleSessionDeleted(sessionId);
+
+    expect(handler.store.has(sessionId)).toBe(false);
+    expect(notifyEngineTurnReleased).toHaveBeenCalledWith(sessionId);
   });
 
   it('drops transient ACP retry state after deletion and rejects late output', async () => {

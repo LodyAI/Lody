@@ -231,7 +231,7 @@ function ShareConversationPane({
               className="min-h-0 flex-1"
               renderMessageRow={renderRow}
               lastAssistantMessageId={stream.lastAssistantMessageId}
-              lastCompletedAssistantMessageId={stream.lastCompletedAssistantMessageId}
+              lastForkableAssistantMessageId={stream.lastForkableAssistantMessageId}
               emptyState={
                 <p role="status" className="p-8 text-center text-sm text-muted-foreground">
                   {snapshot.status === 'loading'

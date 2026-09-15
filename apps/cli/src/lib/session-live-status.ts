@@ -10,6 +10,8 @@ export const resolveSessionLiveStatus = (args: {
   presence: SessionStatus | null;
   execution: SessionExecutionSnapshot;
   hasPendingDispatch: boolean;
+  /** An engine-opened turn (cron fire, task wake) is producing updates. */
+  engineTurnActive?: boolean;
 }): ResolvedSessionLiveStatus => {
   if (args.presence?.type === 'requestPermission') {
     return { state: 'waiting' };
@@ -18,6 +20,11 @@ export const resolveSessionLiveStatus = (args: {
     return { state: 'initializing' };
   }
   if (args.presence?.type === 'running') {
+    return { state: 'running' };
+  }
+  // Engine-opened turns own no client-turn state and write no presence, so
+  // only their activity marker can report them as running.
+  if (args.engineTurnActive) {
     return { state: 'running' };
   }
   if (args.execution.hasActiveTurn || args.execution.hasBlockingPendingCreate) {

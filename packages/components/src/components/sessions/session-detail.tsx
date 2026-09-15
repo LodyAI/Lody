@@ -2591,8 +2591,8 @@ const SessionDetail = ({
       }
       const activeChatRef = chatRefsMap.current.get(activeTabSessionId);
       const turnId =
-        activeChatRef && 'getLastAssistantTurnId' in activeChatRef
-          ? activeChatRef.getLastAssistantTurnId()
+        activeChatRef && 'getLastForkableAssistantTurnId' in activeChatRef
+          ? activeChatRef.getLastForkableAssistantTurnId()
           : null;
       if (!turnId) {
         toast.error(t('sessions.forkNoAssistant', 'No assistant response is available to fork'));
