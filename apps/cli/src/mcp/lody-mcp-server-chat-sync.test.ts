@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   activeInvocation: vi.fn(),
   findMatchingRetry: vi.fn(),
   getDocMeta: vi.fn(),
+  snapshot: vi.fn(),
   validateSessionChatTarget: vi.fn(),
 }));
 
@@ -45,6 +46,7 @@ vi.mock('@/orchestration/operation-store', async (importOriginal) => {
     LodyOperationStore: class {
       findMatchingRetry = mocks.findMatchingRetry;
       accept = mocks.accept;
+      snapshot = mocks.snapshot;
     },
     runWithOperationStoreBusyRetry: vi.fn(async (fn: () => unknown) => await fn()),
   };
@@ -67,6 +69,8 @@ vi.mock('@lody/shared/node/local-ipc', async (importOriginal) => {
 });
 
 import {
+  DAEMON_BUSY_MESSAGE,
+  LocalDaemonAvailabilityError,
   WORKSPACE_SYNC_UNAVAILABLE_MESSAGE,
   WorkspaceSyncUnavailableError,
 } from '@/lib/command-runtime';
@@ -195,5 +199,78 @@ describe('session chat prevalidation sync failures', () => {
     });
     expect(mocks.validateSessionChatTarget).not.toHaveBeenCalled();
     expect(mocks.accept).not.toHaveBeenCalled();
+  });
+});
+
+describe('session chat prevalidation daemon availability failures', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv('LODY_MCP_MACHINE_ID', 'machine-id');
+    vi.stubEnv('LODY_MCP_WORKSPACE_ID', 'workspace-id');
+    vi.stubEnv('LODY_MCP_SESSION_ID', requesterSession.id);
+    mocks.activeInvocation.mockReturnValue({
+      type: 'session/active-invocation-context' as const,
+      sessionId: requesterSession.id,
+      active: true as const,
+      requesterUserId: requesterSession.userId,
+      sourceTurnId: 'requester-turn-id',
+      inputConfig: {},
+    });
+    mocks.findMatchingRetry.mockReturnValue(undefined);
+    mocks.getDocMeta
+      .mockResolvedValueOnce({ meta: requesterSession })
+      .mockResolvedValueOnce({ meta: targetSession });
+    // validateSessionChatTarget -> ensureTargetMachineOnline -> ensureLocalRuntimeAvailable ->
+    // classifyLocalDaemonIpcError(IpcTimeoutError) produces exactly this when the chat target
+    // lives on the machine answering the MCP call.
+    mocks.validateSessionChatTarget.mockRejectedValue(
+      new LocalDaemonAvailabilityError({
+        code: 'DAEMON_BUSY',
+        message: DAEMON_BUSY_MESSAGE,
+        retryable: true,
+      })
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('reports a busy local daemon as retryable instead of a command refusal', async () => {
+    const result = await callAndMapMcpError(() =>
+      startSessionChatOperation({
+        operationId: 'single-chat-operation',
+        sessionId: targetSession.id,
+        prompt: 'continue',
+      })
+    );
+
+    const content = result.content[0];
+    if (!content || content.type !== 'text') throw new Error('expected text result');
+    expect(JSON.parse(content.text)).toEqual({
+      ok: false,
+      error: { code: 'DAEMON_BUSY', message: DAEMON_BUSY_MESSAGE, retryable: true },
+    });
+    expect(mocks.accept).not.toHaveBeenCalled();
+  });
+
+  it('keeps a busy local daemon retryable on the batch item it failed', async () => {
+    mocks.accept.mockImplementation(async (input: { items: unknown[] }) => ({
+      operation: { ...input, state: 'finished' as const },
+      claimedItemIndexes: [] as number[],
+    }));
+    mocks.snapshot.mockImplementation(async (operation: unknown) => operation);
+
+    const operation = (await startSessionChatManyOperation({
+      operationId: 'batch-chat-operation',
+      items: [{ sessionId: targetSession.id, prompt: 'continue' }],
+    })) as { items: { status: string; error: unknown }[] };
+
+    expect(operation.items).toEqual([
+      {
+        status: 'failed',
+        error: { code: 'DAEMON_BUSY', message: DAEMON_BUSY_MESSAGE, retryable: true },
+      },
+    ]);
   });
 });
