@@ -140,6 +140,36 @@ describe('D5 fault matrix', () => {
     expect(response.status === 401 || response.status === 403).toBe(true);
   });
 
+  it('rejects recovery-device content writes on the server', async () => {
+    const host = await launchHost();
+    const alice = await session(host, 'alice');
+    const recovery = await session(host, 'alice-r');
+    await alice.createSpace();
+    const secret = await (await import('@lody/e2ee-core')).createRecoveryDeviceSecret();
+    const handle = await (await import('@lody/e2ee-core')).importRecoveryDevice(secret.secret);
+    const recoveryDevice = {
+      publicKey: handle.publicKey,
+      enc: handle.enc,
+      signing: handle.recipientKeyPair,
+      encryption: handle.recipientKeyPair,
+      sign: (bytes: Uint8Array) => handle.sign(bytes),
+    };
+    expect((await alice.admitDevice(recoveryDevice, 'recovery', false)).status).toBe('committed');
+    recovery.device = recoveryDevice;
+    await recovery.reauth();
+    await recovery.adoptGenesis(alice.genesisHex!);
+    const response = await fetch(`${host.baseUrl}/ds/${alice.genesisHex}/loro`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${recovery.credential!.token}`,
+        [DEVICE_HEADER]: (await import('../src/device')).deviceHex(recovery.device),
+        'content-type': 'application/octet-stream',
+      },
+      body: new Uint8Array([1, 2, 3]),
+    });
+    expect(response.status === 401 || response.status === 403).toBe(true);
+  });
+
   it('killing Node after a committed CAS recovers the same head from disk', async () => {
     const dir = tempDir('e2ee-demo-kill-');
     const first = await spawnCli(dir);
