@@ -1025,6 +1025,7 @@ export class SessionForkService {
         await this.deps.workspaceDocument.persistPendingChanges('session-fork-commit');
         await this.deps.forkOperationStore.clear(targetSessionId).catch(() => {});
       });
+      await targetDoc.syncModelSummary();
     } catch (error) {
       await this.deps.sessionManager.terminateSession(targetSessionId, true).catch(() => {});
       await this.deps.sessionManager.cleanupForkWorktree(config).catch((cleanupError: unknown) => {
