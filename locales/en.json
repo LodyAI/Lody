@@ -2636,6 +2636,8 @@
   "settings.conversationFontSize.default": "Default",
   "settings.conversationFontSize.helper": "Adjusts message body text in conversations.",
   "settings.conversationFontSize.label": "Conversation font size",
+  "settings.conversationFontSize.preview": "Conversation preview",
+  "settings.conversationFontSize.previewText": "This is how message text looks in a conversation.",
   "settings.conversationFontSize.large": "Large",
   "settings.conversationFontSize.small": "Small",
   "settings.autoArchive.description": "Automatically archive a session conversation when one of the following happens. Applies to sessions you own and only on this device.",

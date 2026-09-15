@@ -116,19 +116,78 @@ describe('AppearanceSettingsView', () => {
     expect(container?.textContent).not.toContain('Terminal');
   });
 
-  it('lets the user enter a custom conversation font size', async () => {
+  it('lets the user pick a conversation font size from the offered scale', async () => {
     await act(async () => root?.render(<AppearanceHarness isElectron={false} />));
 
-    const sizeInput = container?.querySelector<HTMLInputElement>(
-      'input[aria-label="Conversation font size"]'
+    const sizeTrigger = Array.from(container?.querySelectorAll('button') ?? []).find((node) =>
+      node.textContent?.includes('14 px')
     );
-    expect(sizeInput?.value).toBe('14');
+    expect(sizeTrigger?.textContent).toContain('Default');
 
     await act(async () => {
-      setInputValue(sizeInput!, '24');
+      sizeTrigger?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    expect(sizeInput?.value).toBe('24');
+    const offered = Array.from(document.body.querySelectorAll('[data-preview-item]')).map((node) =>
+      node.textContent?.trim()
+    );
+    expect(offered).toEqual([
+      '8 px',
+      '12 px',
+      '14 px · Default',
+      '16 px',
+      '20 px',
+      '24 px',
+      '28 px',
+      '32 px',
+    ]);
+
+    const sample = container?.querySelector<HTMLElement>('[aria-label="Conversation preview"] p');
+    expect(sample?.style.fontSize).toBe('14px');
+
+    // Hovering a size shows it in the sample without changing the saved setting.
+    const largeOption = Array.from(document.body.querySelectorAll('[data-preview-item]')).find(
+      (node) => node.textContent?.trim() === '24 px'
+    );
+    await act(async () => {
+      largeOption?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    });
+    expect(sample?.style.fontSize).toBe('24px');
+    expect(sizeTrigger?.textContent).toContain('14 px');
+
+    await act(async () => {
+      largeOption?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(sizeTrigger?.textContent).toContain('24 px');
+    expect(sample?.style.fontSize).toBe('24px');
+  });
+
+  it('drops the hovered size preview when the menu closes without a choice', async () => {
+    await act(async () => root?.render(<AppearanceHarness isElectron={false} />));
+
+    const sizeTrigger = Array.from(container?.querySelectorAll('button') ?? []).find((node) =>
+      node.textContent?.includes('14 px')
+    );
+    await act(async () => {
+      sizeTrigger?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    const sample = container?.querySelector<HTMLElement>('[aria-label="Conversation preview"] p');
+    const hugeOption = Array.from(document.body.querySelectorAll('[data-preview-item]')).find(
+      (node) => node.textContent?.trim() === '32 px'
+    );
+    await act(async () => {
+      hugeOption?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    });
+    expect(sample?.style.fontSize).toBe('32px');
+
+    await act(async () => {
+      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    });
+
+    expect(sample?.style.fontSize).toBe('14px');
+    expect(sizeTrigger?.textContent).toContain('14 px');
   });
 
   it('shows theme and language in mobile appearance settings without terminal settings', async () => {
@@ -137,6 +196,12 @@ describe('AppearanceSettingsView', () => {
     expect(container?.textContent).toContain('Theme');
     expect(container?.textContent).toContain('Language');
     expect(container?.textContent).toContain('Conversation font size');
+    // The size is picked from the same scale as desktop, not typed into a field.
+    expect(container?.querySelector('input[type="number"]')).toBeNull();
+    expect(container?.textContent).toContain('14 px · Default');
+    expect(
+      container?.querySelector<HTMLElement>('[aria-label="Conversation preview"] p')?.style.fontSize
+    ).toBe('14px');
     expect(container?.textContent).not.toContain('Interface font');
     expect(container?.textContent).not.toContain('Terminal');
   });

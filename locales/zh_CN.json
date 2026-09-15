@@ -2636,6 +2636,8 @@
   "settings.conversationFontSize.default": "默认",
   "settings.conversationFontSize.helper": "调整对话中的消息正文大小。",
   "settings.conversationFontSize.label": "对话字号",
+  "settings.conversationFontSize.preview": "对话预览",
+  "settings.conversationFontSize.previewText": "对话中的消息正文大致是这样显示的。",
   "settings.conversationFontSize.large": "大",
   "settings.conversationFontSize.small": "小",
   "settings.autoArchive.description": "在以下情况发生时，自动归档 session 对话。仅对你自己创建的 session 生效，且仅在当前设备上启用。",

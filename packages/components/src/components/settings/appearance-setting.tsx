@@ -5,10 +5,7 @@ import { Monitor, Moon, SquareTerminal, Sun } from 'lucide-react';
 
 import {
   conversationFontSizeAtom,
-  CONVERSATION_FONT_SIZE_MAX,
-  CONVERSATION_FONT_SIZE_MIN,
   interfaceFontFamilyAtom,
-  normalizeConversationFontSize,
   normalizeTerminalFontSize,
   terminalFontFamilyAtom,
   terminalFontSizeAtom,
@@ -16,6 +13,7 @@ import {
   TERMINAL_FONT_SIZE_MIN,
   type ConversationFontSize,
 } from '@/atoms';
+import { conversationTextFontSizeStyle } from '@/components/ai-gui/conversation-font-size-classes';
 import { MobileAppearanceSettings } from '@/components/mobile/mobile-appearance-settings';
 import { OptionSelector, type OptionSelectorOption } from '@/components/shared/option-selector';
 import { buildTerminalFontPreviewFamily } from '@/components/terminal/terminal-theme';
@@ -26,6 +24,7 @@ import { LanguageSelector } from '../../i18n';
 import { useTheme, type Theme } from '../../theme-provider';
 import { settingContainerClass } from '.';
 import { CompactRow, CompactSection } from './compact-layout';
+import { buildConversationFontSizeChoices } from './conversation-font-size-options';
 import { PreviewSelect, type PreviewSelectOption } from './preview-select';
 
 export type SystemFontLoadState = 'idle' | 'loading' | 'loaded' | 'error';
@@ -118,6 +117,19 @@ export function AppearanceSettingsView({
       ),
     },
   ];
+
+  // Hovering a size previews it in the sample below without touching the saved setting;
+  // closing the menu without a choice drops back to the saved size.
+  const [previewFontSize, setPreviewFontSize] = useState<number | null>(null);
+  const sampleFontSize = previewFontSize ?? conversationFontSize;
+
+  const conversationFontSizeOptions = useMemo<PreviewSelectOption<string>[]>(
+    () =>
+      buildConversationFontSizeChoices(t('settings.conversationFontSize.default', 'Default')).map(
+        ({ value, label }) => ({ value, label })
+      ),
+    [t]
+  );
 
   const defaultFontLabel = t('settings.terminal.fontFamily.placeholder', 'Default');
   const interfaceFontOptions = useMemo(
@@ -230,23 +242,34 @@ export function AppearanceSettingsView({
             'Adjusts message body text in conversations.'
           )}
         >
-          <Input
-            type="number"
-            min={CONVERSATION_FONT_SIZE_MIN}
-            max={CONVERSATION_FONT_SIZE_MAX}
-            step={1}
-            value={conversationFontSize}
-            aria-label={t('settings.conversationFontSize.label', 'Conversation font size')}
-            className="w-24"
-            onChange={(event) => {
-              if (Number.isFinite(event.target.valueAsNumber)) {
-                onConversationFontSizeChange(
-                  normalizeConversationFontSize(event.target.valueAsNumber)
-                );
-              }
+          <PreviewSelect
+            value={String(conversationFontSize)}
+            options={conversationFontSizeOptions}
+            onPreview={(value) => setPreviewFontSize(Number(value))}
+            onCommit={(value) => {
+              setPreviewFontSize(null);
+              onConversationFontSizeChange(Number(value));
             }}
+            onCancel={() => setPreviewFontSize(null)}
+            triggerClassName="w-full sm:w-[220px]"
           />
         </CompactRow>
+        {/* The sample stays clear of the open size menu on the right, so hovering a size
+            shows the whole sentence rather than half of it. */}
+        <div
+          aria-label={t('settings.conversationFontSize.preview', 'Conversation preview')}
+          className="border-t border-border/60 bg-muted/20 px-3 py-3"
+        >
+          <p
+            className="max-w-[520px] leading-relaxed text-foreground"
+            style={conversationTextFontSizeStyle(sampleFontSize)}
+          >
+            {t(
+              'settings.conversationFontSize.previewText',
+              'This is how message text looks in a conversation.'
+            )}
+          </p>
+        </div>
       </CompactSection>
 
       {isElectron ? (
