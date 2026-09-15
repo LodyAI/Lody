@@ -302,23 +302,6 @@ function withAbort<T>(promise: Promise<T>, abortPromise?: Promise<never>): Promi
   return Promise.race([promise, abortPromise]);
 }
 
-type SessionModelUsage = NonNullable<SessionUsageUpdate['modelUsage']>[string];
-
-const toModelUsageFromUsage = (usage: SessionUsageUpdate['usage']): SessionModelUsage => {
-  const rawCostUSD = (usage as { costUSD?: unknown }).costUSD;
-  const costUSD =
-    typeof rawCostUSD === 'number' && Number.isFinite(rawCostUSD) ? rawCostUSD : undefined;
-
-  return {
-    inputTokens: usage.inputTokens,
-    outputTokens: usage.outputTokens,
-    cacheReadInputTokens: usage.cacheReadInputTokens,
-    cacheCreationInputTokens: usage.cacheCreationInputTokens,
-    reasoningOutputTokens: usage.reasoningOutputTokens,
-    costUSD,
-  };
-};
-
 const sanitizeModelUsage = (
   modelUsage: SessionUsageUpdate['modelUsage']
 ): SessionUsageUpdate['modelUsage'] => {
@@ -1472,11 +1455,12 @@ export class AgentClient implements acp.Client {
     }
     switch (event.type) {
       case 'usage': {
-        const modelUsage =
-          event.update.modelUsage == null && this.currentModel
-            ? { [this.currentModel.modelId]: toModelUsageFromUsage(event.update.usage) }
-            : sanitizeModelUsage(event.update.modelUsage);
-        this.options.onUsageUpdate?.({ ...event.update, modelUsage });
+        // Never invent a model from the UI selection. Legacy adapters without
+        // modelUsage stay unattributed/skipped instead of being misattributed.
+        this.options.onUsageUpdate?.({
+          ...event.update,
+          modelUsage: sanitizeModelUsage(event.update.modelUsage),
+        });
         return;
       }
       case 'rateLimits':
