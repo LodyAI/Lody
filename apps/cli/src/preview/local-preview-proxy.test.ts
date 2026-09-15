@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket, WebSocketServer } from 'ws';
 import type { PreviewTarget, SessionId } from '@lody/shared';
 import { LocalPreviewProxyManager } from './local-preview-proxy';
+import { verifyPreviewTunnelRoundTrip } from './preview-tunnel-readiness';
 
 const createLogger = () => ({
   debug: () => {},
@@ -193,6 +194,15 @@ describe('LocalPreviewProxyManager', () => {
     expect(refererAuthorizedAssetResponse.status).toBe(200);
     expect(await refererAuthorizedAssetResponse.text()).toContain('rgb(1, 2, 3)');
     expect(styleReferers).toEqual([`http://127.0.0.1:${target.port}/`]);
+
+    // Validate the actual forwarding marker on an unannotated response, not a
+    // synthetic header fixture. The same check guards cloud tunnel readiness.
+    await expect(
+      verifyPreviewTunnelRoundTrip({
+        publicUrl: endpoint.viewerUrl,
+        target: { ...target, path: '/@tanstack-start/styles.css?routes=__root__%2C%2F' },
+      })
+    ).resolves.toBeUndefined();
 
     const reactRefreshUrl = new URL('/@react-refresh', endpoint.viewerUrl);
     const moduleChainAssetResponse = await fetch(reactRefreshUrl, {

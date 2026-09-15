@@ -6,6 +6,7 @@ import {
   clearStoredAuthToken,
   writeStoredAuthToken,
 } from './auth-bootstrap';
+import { getAuthResponseError, type AuthResponseError } from './auth-response';
 import { deferredPostHog } from './deferred-posthog';
 import { registerAuthClient } from './auth-client-singleton';
 import { replaceAppWindowLocation } from './app-location';
@@ -63,7 +64,20 @@ export const persistAuthToken = (token: string) => {
   writeStoredAuthToken(token);
 };
 
-export const signOutWithoutRedirect = async (authClient: LodyAuthClient) => {
+/**
+ * Whether the server actually ended the session. Local state is cleared either
+ * way (see the fence below), so a caller that must not keep acting on the
+ * previous identity — the desktop handoff's "use a different account", where the
+ * session cookie is exactly what the next transfer would hand over — has to be
+ * able to tell a failed sign-out from a successful one. Better Auth reports
+ * transport failures by throwing and API failures in `response.error`; both
+ * arrive here as `ok: false`.
+ */
+export type SignOutOutcome = { ok: true } | { ok: false; error: AuthResponseError };
+
+export const signOutWithoutRedirect = async (
+  authClient: LodyAuthClient
+): Promise<SignOutOutcome> => {
   // Fence token requests at logout intent, before Better Auth's async sign-out
   // updates useSession(). Otherwise a token request that completes in that
   // network window can still authenticate Convex as the previous user.
@@ -71,9 +85,19 @@ export const signOutWithoutRedirect = async (authClient: LodyAuthClient) => {
   clearLocalAuthState();
 
   try {
-    await authClient.signOut();
+    const response = await authClient.signOut();
+    const responseError = getAuthResponseError(response);
+    if (responseError) {
+      console.error('Sign out error:', responseError);
+      return { ok: false, error: responseError };
+    }
+    return { ok: true };
   } catch (error) {
     console.error('Sign out error:', error);
+    return {
+      ok: false,
+      error: { message: error instanceof Error ? error.message : String(error) },
+    };
   }
 };
 

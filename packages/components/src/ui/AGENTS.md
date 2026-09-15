@@ -67,3 +67,22 @@ strings on i18n rather than the registry's inline English.
   thumb polling on effect cleanup. Verify both ESM and CommonJS with
   `tests/scroll-area-lifecycle.test.tsx` when upgrading; removing a thumb during
   the scroll-end debounce must not retain a frame loop or detached viewport.
+
+## Slider
+
+- `ui/slider.tsx` is the native range input, not a library: the platform supplies
+  keyboard stepping, Home/End, the ARIA role and value, and an OS-correct touch
+  target. Two global rules in `tailwind/index.css` must be worked around, and both
+  are why this is a primitive rather than an inline `<input type="range">`.
+  The "Pro focus style" paints an inset `box-shadow` on any focused input through
+  a zero-specificity `:where(…)`, which on a range input outlines the whole
+  control, so the input carries `focus-visible:shadow-none` and the focus ring
+  lives on the thumb. The global `*:focus-visible` reset forces `--tw-ring-shadow`
+  to none with `!important` and custom properties inherit into pseudo-elements, so
+  `ring-*` utilities are dead on the thumb too — its ring is an explicit
+  `box-shadow`.
+- Write every `::-webkit-slider-*` / `::-moz-range-*` class out in full. Tailwind
+  scans source text for literal candidates, so a class built from a template
+  literal is never generated, and a variant prefix binds only to the class right
+  after it. The track fill is a `--lody-slider-fill` percentage set inline, because
+  a pseudo-element cannot take a style attribute.

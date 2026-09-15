@@ -7,6 +7,18 @@ pointer to this page live in
 [that directory's AGENTS.md](../../packages/components/src/components/sessions/AGENTS.md);
 this page is the full text of the rules summarised there.
 
+- [Preview annotation availability](../../specs/preview-annotation-availability.md) separates
+  page loading from optional annotation. Runtime loading reports are optional toolbar
+  hints for in-frame navigation; native iframe load clears them independently. They
+  never gate frame readiness or content visibility;
+  missing runtime messages leave annotation unavailable without a timeout error or content
+  cover. Reload can navigate the frame directly. Runtime control binds the first valid
+  message from `window.parent`, never `document.referrer` (which changes after navigation).
+  A data-free ready signal starts this handshake before page resources finish loading;
+  one pending navigation is retained until the parent binds, keeping its policy in control.
+  Tunnel readiness uses a proxy response marker independent of HTML injection; injection
+  overhead that exceeds the response limit leaves the original document intact.
+
 - Complete `.html` / `.htm` viewer text may switch between Monaco source and Managed Preview without
   a Machine RPC endpoint. Build a policy-owned `srcdoc` from the current complete viewer text,
   inject the shared annotation runtime, and run it in uncached static-document mode

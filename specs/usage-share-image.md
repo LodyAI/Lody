@@ -12,9 +12,10 @@ The card is a fixed-format report, not an editor. Its blocks, their order, and
 their proportions are the same on every card, so two cards taken a month apart
 can be laid side by side and read against each other. The user chooses the frame
 — portrait or wide, a backdrop, a pinned or app-following palette — and two
-content questions; nothing else about the layout is adjustable. This is the
-deliberate difference from [chat image selection and export](chat-share-image.md),
-where content of unpredictable shape justifies a large set of appearance controls.
+content questions; nothing else about the layout is adjustable. It keeps more
+appearance controls than [chat image selection and export](chat-share-image.md),
+whose template now fixes everything but the palette, the backdrop, the card's
+size, and how much backdrop shows around it.
 
 The period the card describes is the range selected on the Usage screen, and the
 headline total is that range's own total, so the card cannot disagree with the

@@ -103,18 +103,24 @@ describe('startPreviewTunnel', () => {
     ).rejects.toThrow(/Preview response exceeds \d+ byte limit/);
   });
 
-  it('rejects HTML injection when the injected response would exceed the body limit', async () => {
+  it('preserves the page when only optional injection would exceed the body limit', async () => {
     const html = '<html><body>small preview document</body></html>';
-
-    await expect(
-      maybeInjectVisualAnnotationRuntime(
-        new Response(html, {
-          headers: { 'content-type': 'text/html; charset=utf-8' },
-        }),
-        'GET',
-        Buffer.byteLength(html, 'utf8')
-      )
-    ).rejects.toThrow(/Preview response exceeds \d+ byte limit/);
+    const result = await maybeInjectVisualAnnotationRuntime(
+      new Response(html, {
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+      }),
+      'GET',
+      Buffer.byteLength(html, 'utf8')
+    );
+    expect(Buffer.from(result?.body ?? []).toString('utf8')).toBe(html);
+    expect(result?.runtimeInjected).toBe(false);
+    const headers = buildInjectedHtmlHeaders(
+      new Headers({ 'content-security-policy': "script-src 'self'" }),
+      Buffer.byteLength(html),
+      false
+    );
+    expect(headers.get('x-lody-preview-runtime')).toBeNull();
+    expect(headers.get('content-security-policy')).toBe("script-src 'self'");
   });
 
   it('requests identity encoding from local preview servers so HTML can be annotated', () => {
@@ -180,7 +186,7 @@ describe('startPreviewTunnel', () => {
       Buffer.byteLength(html, 'utf8') + 100_000
     );
 
-    const injectedHtml = Buffer.from(injected ?? new Uint8Array()).toString('utf8');
+    const injectedHtml = Buffer.from(injected?.body ?? new Uint8Array()).toString('utf8');
     expect(injectedHtml).toContain('data-lody-visual-annotation-runtime="true"');
     expect(injectedHtml).toContain('data-lody-visual-annotation-overlay');
     expect(injectedHtml).toContain('window.__lodyVisualCommentInspector');

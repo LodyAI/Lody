@@ -11,10 +11,7 @@ import { Send, X } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
-import {
-  type SessionMeta,
-  type VisualAnnotationReferencePayload,
-} from '@lody/shared';
+import { type SessionMeta, type VisualAnnotationReferencePayload } from '@lody/shared';
 import {
   createMinimalVisualAnnotationAnchor,
   type VisualAnnotationInspectPayload,
@@ -25,6 +22,7 @@ import {
   MANAGED_BROWSER_COMMAND_MESSAGE_TYPE,
   MANAGED_BROWSER_NAVIGATION_REQUEST_MESSAGE_TYPE,
   MANAGED_BROWSER_STATE_MESSAGE_TYPE,
+  MANAGED_BROWSER_READY_MESSAGE_TYPE,
   VISUAL_ANNOTATION_ANCHORS_RESOLVED_MESSAGE_TYPE,
   VISUAL_ANNOTATION_TARGET_MESSAGE_TYPE,
   type VisualAnnotationAnchorsResolvedMessage,
@@ -304,11 +302,6 @@ export function ManagedPreviewSurface({
     Record<string, VisualAnnotationResolvedAnchor>
   >({});
   const trackedAnchorIdsRef = useRef<ReadonlySet<string>>(new Set());
-  const runtimeHandshakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Whether the CURRENT document's injected runtime has reported in. Browser
-  // commands are delivered by postMessage to that runtime, so without it (proxy
-  // error page, CSP-blocked script, non-injected document) they land nowhere.
-  const runtimeAliveRef = useRef(false);
   const handledCommandIdRef = useRef(0);
   const previewOrigin = useMemo(
     () => (documentHtml === undefined ? new URL(viewerUrl).origin : 'null'),
@@ -408,21 +401,11 @@ export function ManagedPreviewSurface({
   const handleIframeLoad = useStableCallback(() => {
     // A new document starts its handshake from scratch; a live runtime re-reports
     // immediately in response to the SET_ANNOTATION_MODE message below.
-    runtimeAliveRef.current = false;
     setIframeLoaded(true);
     onAnnotationAvailabilityChange(false);
     onLoadingChange(false);
-    if (runtimeHandshakeTimerRef.current) clearTimeout(runtimeHandshakeTimerRef.current);
-    runtimeHandshakeTimerRef.current = setTimeout(() => {
-      runtimeHandshakeTimerRef.current = null;
-      onAnnotationAvailabilityChange(false);
-      onRuntimeError(
-        t(
-          'sessions.browser.errors.annotationRuntimeMissing',
-          'The page loaded, but the annotation runtime did not become ready.'
-        )
-      );
-    }, 3_000);
+    // Annotation is optional. A missing or late handshake must not turn page
+    // loading into an error; a later valid state message enables annotation.
     iframeRef.current?.contentWindow?.postMessage(
       { type: SET_ANNOTATION_MODE_MESSAGE_TYPE, enabled: annotationEnabled },
       previewPostMessageOrigin
@@ -438,7 +421,6 @@ export function ManagedPreviewSurface({
     const iframe = iframeRef.current;
     if (!iframe) return;
     if (documentHtml !== undefined) {
-      runtimeAliveRef.current = false;
       syncFrameLoadState(false);
       iframe.srcdoc = documentHtml;
       return;
@@ -449,7 +431,6 @@ export function ManagedPreviewSurface({
     } catch {
       // Fall back to the acquire-time viewer URL when the logical URL is unusable.
     }
-    runtimeAliveRef.current = false;
     syncFrameLoadState(false);
     iframe.src = nextSrc;
   });
@@ -489,22 +470,11 @@ export function ManagedPreviewSurface({
   }, [managedFrameTitle]);
 
   useEffect(() => {
-    if (runtimeHandshakeTimerRef.current) {
-      clearTimeout(runtimeHandshakeTimerRef.current);
-      runtimeHandshakeTimerRef.current = null;
-    }
-    runtimeAliveRef.current = false;
     setSelectedTarget(null);
     setDraftBody('');
     setResolvedAnchors({});
     onAnnotationAvailabilityChange(false);
     onRuntimeError(null);
-    return () => {
-      if (runtimeHandshakeTimerRef.current) {
-        clearTimeout(runtimeHandshakeTimerRef.current);
-        runtimeHandshakeTimerRef.current = null;
-      }
-    };
   }, [documentHtml, onAnnotationAvailabilityChange, onRuntimeError, session.id, viewerUrl]);
 
   useEffect(() => {
@@ -515,13 +485,9 @@ export function ManagedPreviewSurface({
 
   useEffect(() => {
     if (!command || command.id === handledCommandIdRef.current) return;
-    if (
-      command.action === 'reload' &&
-      (documentHtml !== undefined || !iframeLoaded || !runtimeAliveRef.current)
-    ) {
-      // The document has no live runtime to receive the message (stuck load,
-      // proxy error page, CSP-blocked script): reload from the parent instead
-      // by re-navigating the frame to the current page's viewer URL.
+    if (command.action === 'reload') {
+      // Always reload from the parent: a runtime that once handshook can later
+      // fail or be removed by the page, so it cannot own this recovery action.
       handledCommandIdRef.current = command.id;
       hardReloadFrame();
       return;
@@ -549,12 +515,14 @@ export function ManagedPreviewSurface({
     const handleMessage = (event: MessageEvent<unknown>) => {
       if (event.origin !== previewOrigin || event.source !== iframeRef.current?.contentWindow)
         return;
-      if (isManagedBrowserStateMessage(event.data)) {
-        runtimeAliveRef.current = true;
-        if (runtimeHandshakeTimerRef.current) {
-          clearTimeout(runtimeHandshakeTimerRef.current);
-          runtimeHandshakeTimerRef.current = null;
-        }
+      if (isRecord(event.data) && event.data.type === MANAGED_BROWSER_READY_MESSAGE_TYPE) {
+        // Scripts can be ready while images or other page resources still load.
+        // This reply does not require iframeLoaded and contains no page data.
+        iframeRef.current?.contentWindow?.postMessage(
+          { type: SET_ANNOTATION_MODE_MESSAGE_TYPE, enabled: annotationEnabled },
+          previewPostMessageOrigin
+        );
+      } else if (isManagedBrowserStateMessage(event.data)) {
         let mappedUrl: string;
         try {
           mappedUrl =
@@ -573,6 +541,9 @@ export function ManagedPreviewSurface({
         }
         onAnnotationAvailabilityChange(true);
         onRuntimeError(null);
+        // In-frame navigation does not change the parent's iframe src. Use the
+        // runtime as an optional toolbar hint, never as frame/content readiness.
+        // The native load handler clears this even if the runtime disappears.
         onLoadingChange(event.data.payload.loading);
         onBrowserStateChange({
           ...event.data.payload,
@@ -625,6 +596,7 @@ export function ManagedPreviewSurface({
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
   }, [
+    annotationEnabled,
     documentHtml,
     logicalUrl,
     onAnnotationAvailabilityChange,
@@ -634,6 +606,7 @@ export function ManagedPreviewSurface({
     onRuntimeError,
     postTrackedAnchors,
     previewOrigin,
+    previewPostMessageOrigin,
     t,
     trackedAnchors,
   ]);
@@ -705,7 +678,7 @@ export function ManagedPreviewSurface({
       className={cn('relative min-h-0 flex-1 overflow-hidden bg-white', className)}
     >
       {!iframeLoaded ? (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-background">
+        <div className="pointer-events-none absolute right-3 top-3 z-10">
           <Spinner className="h-5 w-5 text-muted-foreground" />
         </div>
       ) : null}

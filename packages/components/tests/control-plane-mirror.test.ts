@@ -44,20 +44,29 @@ const buildLargeDoc = (turnCount = 1_000): LoroDoc => {
   return fresh;
 };
 
-describe('control-plane Mirror (history: Ignore)', () => {
-  it('does not materialize history when opening a long doc', async () => {
-    // Warm the wasm and JIT paths on a small doc so the measurement is the construction alone.
-    const warm = new LoroDoc();
-    controlPlaneMirror(warm).dispose();
+// Building the 2,000-turn fixture is deterministic wasm work, not a wait, but
+// it is slow enough that Vitest's 5s default leaves no room once eight workers
+// share the machine — the case then reports a timeout instead of its assertion.
+const LARGE_DOC_CASE_TIMEOUT_MS = 30_000;
 
-    const doc = buildLargeDoc();
-    expect((doc.getList('history') as LoroList).length).toBe(2000);
-    const mirror = controlPlaneMirror(doc);
-    const state = mirror!.getState() as { history?: unknown; session?: unknown };
-    expect(state.history).toBeUndefined();
-    expect((state.session as { id?: string }).id).toBe(FIXTURE_SESSION_ID);
-    mirror!.dispose();
-  });
+describe('control-plane Mirror (history: Ignore)', () => {
+  it(
+    'does not materialize history when opening a long doc',
+    async () => {
+      // Warm the wasm and JIT paths on a small doc so the measurement is the construction alone.
+      const warm = new LoroDoc();
+      controlPlaneMirror(warm).dispose();
+
+      const doc = buildLargeDoc();
+      expect((doc.getList('history') as LoroList).length).toBe(2000);
+      const mirror = controlPlaneMirror(doc);
+      const state = mirror!.getState() as { history?: unknown; session?: unknown };
+      expect(state.history).toBeUndefined();
+      expect((state.session as { id?: string }).id).toBe(FIXTURE_SESSION_ID);
+      mirror!.dispose();
+    },
+    LARGE_DOC_CASE_TIMEOUT_MS
+  );
 
   it('leaves an untouched root from a newer peer intact when writing', async () => {
     // Forward compatibility (see providers/AGENTS.md): the facade answers root

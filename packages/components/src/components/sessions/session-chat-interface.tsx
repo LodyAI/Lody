@@ -1807,6 +1807,10 @@ export type SessionChatInterfaceHandle = {
     messages: ConversationMessage[],
     onConfirm: (messages: ConversationMessage[]) => void
   ) => void;
+  /** Drops the share selection and restores the composer. Confirming does not:
+   *  the preview can be reopened against the same selection, so only finishing
+   *  the share or an explicit Cancel ends it. */
+  cancelShareImageSelection: () => void;
   openSearch: () => void;
   getLastAssistantTurnId: () => string | null;
   insertSessionMention: (sessionId: string) => boolean;
@@ -4874,6 +4878,7 @@ export const SessionChatInterface = memo(
           };
         },
         startShareImageSelection: shareSelection.start,
+        cancelShareImageSelection: shareSelection.cancel,
         openSearch,
         getLastAssistantTurnId: () => lastCompletedAssistantMessageId,
         insertSessionMention: (sessionId: string) => {
@@ -4883,6 +4888,7 @@ export const SessionChatInterface = memo(
       [
         handleCopyConversationHistory,
         shareSelection.start,
+        shareSelection.cancel,
         lastCompletedAssistantMessageId,
         openSearch,
         session.cliType,

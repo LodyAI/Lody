@@ -50,7 +50,8 @@ describe('WorktreeGarbageCollector', () => {
   let originalLocksDir: string | undefined;
 
   beforeEach(() => {
-    testDir = fs.mkdtempSync(path.join(os.tmpdir(), 'lody-worktree-gc-'));
+    // Match WorktreeManager's canonical paths (macOS aliases /var to /private/var).
+    testDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'lody-worktree-gc-')));
     originalDataDir = process.env.LODY_DATA_DIR;
     originalLocksDir = process.env.LODY_LOCKS_DIR;
     process.env.LODY_DATA_DIR = path.join(testDir, 'data');
