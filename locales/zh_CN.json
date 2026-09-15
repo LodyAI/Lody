@@ -3648,6 +3648,8 @@
   "tasks.body.linkPlaceholder": "粘贴或输入链接",
   "tasks.body.format.link": "链接",
   "tasks.body.format.removeLink": "移除链接",
+  "tasks.body.format.marks": "标记",
+  "tasks.body.format.blocks": "块",
   "tasks.body.format.more": "更多…",
   "tasks.actions.more": "更多操作",
   "tasks.actions.copyUrl": "复制任务链接",

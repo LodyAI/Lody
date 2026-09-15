@@ -320,6 +320,75 @@ exactly its own padding under `border-box` and overshoots by it under
 `content-box`. A caller migrating a panel that carried its own padding moves it
 inwards.
 
+## Pressed
+
+A control that stays pressed, a set of them, and the bar that holds them. One
+group, `toggle`, covers all three for the reason `disclosure` covers three
+layouts of one idea: what a pressed control looks like and how far apart two of
+them stand cannot become three decisions in three files.
+
+It is **not** the `field` group, and a Toggle is not a Switch. A Switch stores a
+value in a form: it takes a name, answers to a `Field.Root`, can be invalid, and
+is read as a setting. A Toggle says an option is on _right now_ — bold, wrapped
+lines, this filter — so it has no name, no validity and no message under it.
+
+| state    | what it is                                                                 |
+| -------- | -------------------------------------------------------------------------- |
+| off      | a ghost Button: no fill, `toggle.label`, `toggle.hover` under the pointer  |
+| on       | the well rung: `toggle.pressedBackground` under `toggle.pressedWell`       |
+| on hover | the rung mixed 4% toward the ink, the mix a secondary Button already uses  |
+| focus    | 2px `toggle.ring`, composed onto the pressed edge rather than replacing it |
+| disabled | `toggle.disabledOpacity` on the whole control, and the native attribute    |
+
+**On is the well, not ink**, and that is this family's one real decision. The
+rules give a stored state ink, and a toggle does store one — but ink is what a
+control that _already sits in a well_ becomes when it is on. A Switch's off
+state occupies the well, so on has to leave it; a Checkbox's empty box is the
+same. A toggle rests on nothing at all, so the well is still free, and sinking
+into it is the plainest thing this system can say about a button that went down
+and stayed there. It also keeps a bar of eight from reading as eight primary
+buttons, which is what ink would have made of it.
+
+A toggle does not bob either. The motion rules give a press `translateY(1px)`
+and a dropped highlight, and that is a raised thing going down and coming back;
+this one goes down and stays, so what moves is the surface under it.
+
+The ladder is `control`'s — 28, 32, 36, plus the 24 a file viewer's strip of
+actions needs — rather than `Button`'s. A Button and a Toggle in one bar line up
+because both read the same scale, not because one reads the other's group.
+
+### The set, and the strip
+
+A `ToggleGroup` is **not** a `Tabs` strip, and the two cannot be folded
+together. A strip picks what a person _sees_: it is one control, so it is a
+sunken track with one thing raised out of it and one pill sliding between the
+choices. A set stores what is _on_: two of its members can be pressed at once,
+which no sliding pill can say, so it has no track and each member sinks on its
+own. Asked for one choice out of several it still draws no track, because the
+same set with `multiple` on has to look like itself.
+
+The size and the shape are stated once, on the set, the way a tab strip states
+them for its tabs. A set too wide for its row wraps; its members keep their
+width there, because a toggle neither grows nor shrinks.
+
+### The bar
+
+A `Toolbar` draws **nothing at all**: no fill, no shadow, no radius, and not
+even the line a table draws. It is a row of controls on whatever surface the
+product already had there, so a bar inside a panel is not a second panel.
+
+What it is for is the keyboard. A row of eight icon buttons is eight tab stops
+unless something says otherwise, and a person tabbing through a page should pass
+a bar rather than walk it: the bar is one stop, the arrow keys do the walking,
+and a control that cannot be used is stepped over rather than stopped on. That
+is the whole reason it is a part rather than a `div` with a gap.
+
+Two gaps say what belongs with what. `toggle.groupGap` is between the members of
+one set or cluster; `toggle.barGap` is between the clusters, and either side of
+the line between two. The line is `Separator`'s, turned ninety degrees from the
+bar, and the bar states that rather than the caller — a horizontal bar cannot
+then end up with a horizontal line across it.
+
 ## Feedback
 
 What the system says back: what happened, and that it is still working. One

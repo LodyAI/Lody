@@ -40,8 +40,11 @@
     "./textarea": "./src/field/textarea.tsx",
     "./theme": "./src/theme/theme.tsx",
     "./toast": "./src/feedback/toast.tsx",
+    "./toggle": "./src/toggle/toggle.tsx",
+    "./toggle-group": "./src/toggle/toggle-group.tsx",
     "./tokens/colors.stylex": "./src/tokens/colors.stylex.ts",
     "./tokens/scales.stylex": "./src/tokens/scales.stylex.ts",
+    "./toolbar": "./src/toggle/toolbar.tsx",
     "./tooltip": "./src/tooltip/tooltip.tsx"
   },
   "scripts": {

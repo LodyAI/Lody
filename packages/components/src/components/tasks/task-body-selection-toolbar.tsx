@@ -19,7 +19,10 @@ import {
   InlinePopoverPositioner,
   InlinePopoverRoot,
 } from '@prosekit/react/inline-popover';
-import { cn } from '@/lib/utils';
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Toggle } from '@lody/ui/toggle';
+import { Toolbar } from '@lody/ui/toolbar';
 
 /**
  * Floating format toolbar over a text selection.
@@ -65,7 +68,15 @@ export type TaskBodySelectionToolbarProps = {
   onQuote?: () => void;
 };
 
-function ToolbarButton({
+/**
+ * A mark that stays on while the selection carries it.
+ *
+ * `Toolbar.Button` is what puts a control into the bar's roving focus, and
+ * `render` is how a control is composed into a Base UI part here — so the whole
+ * bar is one tab stop and the arrow keys walk it, rather than eight stops on
+ * the way past a text selection.
+ */
+function FormatToggle({
   icon: Icon,
   label,
   active = false,
@@ -77,24 +88,56 @@ function ToolbarButton({
   onTrigger: () => void;
 }) {
   return (
-    <button
-      type="button"
-      // The whole reason the toolbar can act on a selection: pointerdown would
-      // otherwise move focus out of the editor and collapse it before click.
-      onPointerDown={(event) => event.preventDefault()}
-      onClick={onTrigger}
-      aria-label={label}
-      aria-pressed={active}
-      title={label}
-      className={cn(
-        'flex h-7 w-7 items-center justify-center rounded transition-colors',
-        active
-          ? 'bg-muted-foreground/20 text-foreground'
-          : 'text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground'
-      )}
+    <Toolbar.Button
+      render={
+        <Toggle
+          size="small"
+          icon
+          pressed={active}
+          onPressedChange={onTrigger}
+          // The whole reason the toolbar can act on a selection: pointerdown
+          // would otherwise move focus out of the editor and collapse it
+          // before click.
+          onPointerDown={(event) => event.preventDefault()}
+          aria-label={label}
+          title={label}
+        />
+      }
     >
-      <Icon className="h-3.5 w-3.5" />
-    </button>
+      <Icon className="size-full" aria-hidden="true" />
+    </Toolbar.Button>
+  );
+}
+
+/**
+ * A command in the same bar: it acts and leaves nothing pressed behind, so it
+ * is a ghost Button rather than a Toggle.
+ */
+function FormatAction({
+  icon: Icon,
+  label,
+  onTrigger,
+}: {
+  icon: LucideIcon;
+  label: string;
+  onTrigger: () => void;
+}) {
+  return (
+    <Toolbar.Button
+      render={
+        <Button
+          variant="ghost"
+          size="small"
+          icon
+          onClick={onTrigger}
+          onPointerDown={(event) => event.preventDefault()}
+          aria-label={label}
+          title={label}
+        />
+      }
+    >
+      <Icon className="size-full" aria-hidden="true" />
+    </Toolbar.Button>
   );
 }
 
@@ -160,19 +203,22 @@ export function TaskBodySelectionToolbar({ onQuote }: TaskBodySelectionToolbarPr
         hoist
       >
         <InlinePopoverPopup>
-          <div
-            role="toolbar"
+          <Toolbar.Root
             aria-label={t('tasks.body.formatToolbar', 'Format selection')}
-            className="flex items-center gap-0.5 rounded-lg border border-border bg-popover p-1 shadow-md"
+            // The bar itself draws nothing, so the surface under it is this
+            // popover's and stays here until the popover is a primitive too.
+            className="rounded-lg border border-border bg-popover p-1 shadow-md"
             onPointerDown={(event) => event.preventDefault()}
           >
             {linkOpen ? (
               // Link is a sub-state of the same popover, not a second surface:
               // it replaces the row in place so the bar does not jump.
-              <div className="flex items-center gap-1 px-1">
-                <LinkIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                <input
+              <Toolbar.Group className="px-1">
+                <LinkIcon className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <Input
                   ref={linkInputRef}
+                  size="small"
+                  className="w-56"
                   value={href}
                   onChange={(event) => setHref(event.target.value)}
                   onKeyDown={(event) => {
@@ -185,9 +231,8 @@ export function TaskBodySelectionToolbar({ onQuote }: TaskBodySelectionToolbarPr
                     }
                   }}
                   placeholder={t('tasks.body.linkPlaceholder', 'Paste or type a link')}
-                  className="h-6 w-56 bg-transparent text-[13px] outline-none placeholder:text-muted-foreground"
                 />
-                <ToolbarButton
+                <FormatAction
                   icon={Unlink}
                   label={t('tasks.body.format.removeLink', 'Remove link')}
                   onTrigger={() => {
@@ -195,63 +240,66 @@ export function TaskBodySelectionToolbar({ onQuote }: TaskBodySelectionToolbarPr
                     closeLink();
                   }}
                 />
-              </div>
+              </Toolbar.Group>
             ) : (
               <>
-                <ToolbarButton
-                  icon={Bold}
-                  label={t('tasks.body.format.bold', 'Bold')}
-                  active={isMarkActive('strong')}
-                  onTrigger={() => commands?.toggleStrong?.()}
-                />
-                <ToolbarButton
-                  icon={Italic}
-                  label={t('tasks.body.format.italic', 'Italic')}
-                  active={isMarkActive('em')}
-                  onTrigger={() => commands?.toggleEm?.()}
-                />
-                <ToolbarButton
-                  icon={Strikethrough}
-                  label={t('tasks.body.format.strike', 'Strikethrough')}
-                  active={isMarkActive('del')}
-                  onTrigger={() => commands?.toggleDel?.()}
-                />
-                <ToolbarButton
-                  icon={Code}
-                  label={t('tasks.body.format.code', 'Code')}
-                  active={isMarkActive('code')}
-                  onTrigger={() => commands?.toggleCode?.()}
-                />
-                <ToolbarButton
-                  icon={Highlighter}
-                  label={t('tasks.body.format.highlight', 'Highlight')}
-                  active={isMarkActive('highlight')}
-                  onTrigger={() => commands?.toggleHighlight?.()}
-                />
+                <Toolbar.Group aria-label={t('tasks.body.format.marks', 'Marks')}>
+                  <FormatToggle
+                    icon={Bold}
+                    label={t('tasks.body.format.bold', 'Bold')}
+                    active={isMarkActive('strong')}
+                    onTrigger={() => commands?.toggleStrong?.()}
+                  />
+                  <FormatToggle
+                    icon={Italic}
+                    label={t('tasks.body.format.italic', 'Italic')}
+                    active={isMarkActive('em')}
+                    onTrigger={() => commands?.toggleEm?.()}
+                  />
+                  <FormatToggle
+                    icon={Strikethrough}
+                    label={t('tasks.body.format.strike', 'Strikethrough')}
+                    active={isMarkActive('del')}
+                    onTrigger={() => commands?.toggleDel?.()}
+                  />
+                  <FormatToggle
+                    icon={Code}
+                    label={t('tasks.body.format.code', 'Code')}
+                    active={isMarkActive('code')}
+                    onTrigger={() => commands?.toggleCode?.()}
+                  />
+                  <FormatToggle
+                    icon={Highlighter}
+                    label={t('tasks.body.format.highlight', 'Highlight')}
+                    active={isMarkActive('highlight')}
+                    onTrigger={() => commands?.toggleHighlight?.()}
+                  />
+                </Toolbar.Group>
 
-                <span aria-hidden className="mx-0.5 h-4 w-px bg-border" />
+                <Toolbar.Separator />
 
-                <ToolbarButton
-                  icon={LinkIcon}
-                  label={t('tasks.body.format.link', 'Link')}
-                  onTrigger={() => setLinkOpen(true)}
-                />
-                <ToolbarButton
-                  icon={SquareCheck}
-                  label={t('tasks.body.format.task', 'Turn into task item')}
-                  onTrigger={() => commands?.wrapInSquareTask?.()}
-                />
-
-                <ToolbarButton
-                  icon={RemoveFormatting}
-                  label={t('tasks.body.format.clear', 'Clear formatting')}
-                  onTrigger={() => commands?.setParagraph?.()}
-                />
+                <Toolbar.Group aria-label={t('tasks.body.format.blocks', 'Blocks')}>
+                  <FormatAction
+                    icon={LinkIcon}
+                    label={t('tasks.body.format.link', 'Link')}
+                    onTrigger={() => setLinkOpen(true)}
+                  />
+                  <FormatAction
+                    icon={SquareCheck}
+                    label={t('tasks.body.format.task', 'Turn into task item')}
+                    onTrigger={() => commands?.wrapInSquareTask?.()}
+                  />
+                  <FormatAction
+                    icon={RemoveFormatting}
+                    label={t('tasks.body.format.clear', 'Clear formatting')}
+                    onTrigger={() => commands?.setParagraph?.()}
+                  />
+                </Toolbar.Group>
 
                 {onQuote ? (
                   <>
-                    <span aria-hidden className="mx-0.5 h-4 w-px bg-border" />
-                    <ToolbarButton
+                    <Toolbar.Separator />
+                    <FormatAction
                       icon={Quote}
                       label={t('tasks.body.quote', 'Quote selection')}
                       onTrigger={onQuote}
@@ -260,7 +308,7 @@ export function TaskBodySelectionToolbar({ onQuote }: TaskBodySelectionToolbarPr
                 ) : null}
               </>
             )}
-          </div>
+          </Toolbar.Root>
         </InlinePopoverPopup>
       </InlinePopoverPositioner>
     </InlinePopoverRoot>

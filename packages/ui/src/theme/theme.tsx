@@ -11,6 +11,7 @@ import { fieldPaletteTheme } from '../field/field.tokens.stylex';
 import { kbdPaletteTheme } from '../kbd/kbd.tokens.stylex';
 import { popupPaletteTheme } from '../popup/popup.tokens.stylex';
 import { tablePaletteTheme } from '../table/table.tokens.stylex';
+import { togglePaletteTheme } from '../toggle/toggle.tokens.stylex';
 import { tooltipPaletteTheme } from '../tooltip/tooltip.tokens.stylex';
 import { darkShadowTheme, darkTheme, lightShadowTheme, lightTheme } from '../tokens/colors.stylex';
 
@@ -33,6 +34,7 @@ const componentPaletteThemes = [
   kbdPaletteTheme,
   popupPaletteTheme,
   tablePaletteTheme,
+  togglePaletteTheme,
   tooltipPaletteTheme,
 ];
 

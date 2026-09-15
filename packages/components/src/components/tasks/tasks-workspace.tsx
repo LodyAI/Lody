@@ -31,6 +31,8 @@ import { useOrganization } from '@/hooks/useOrganization';
 import { useTaskActions } from '@/hooks/use-task-actions';
 import { useTaskSessionRollups } from '@/hooks/use-task-session-rollup';
 import { Button } from '@lody/ui/button';
+import { Toggle } from '@lody/ui/toggle';
+import { ToggleGroup } from '@lody/ui/toggle-group';
 import { ScrollArea } from '@/ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
 import {
@@ -120,15 +122,11 @@ function DesktopTasksWorkspace({ activeTaskId }: { activeTaskId: TaskId | null }
   const layout = useAtomValue(tasksLayoutAtom);
   const [visibleByView, setVisibleByView] = useAtom(taskVisiblePropertiesAtom);
   const visibleProperties = visibleByView[layout] ?? [];
-  const toggleProperty = useCallback(
-    (property: TaskCardProperty) => {
-      setVisibleByView((previous: TaskVisibleProperties) => {
-        const current = previous[layout] ?? [];
-        const next = current.includes(property)
-          ? current.filter((item: TaskCardProperty) => item !== property)
-          : [...current, property];
-        return { ...previous, [layout]: next };
-      });
+  // The set reports every pressed member rather than the one that changed, so
+  // this stores the list it was handed instead of adding and removing from it.
+  const setVisibleProperties = useCallback(
+    (next: TaskCardProperty[]) => {
+      setVisibleByView((previous: TaskVisibleProperties) => ({ ...previous, [layout]: next }));
     },
     [layout, setVisibleByView]
   );
@@ -230,30 +228,23 @@ function DesktopTasksWorkspace({ activeTaskId }: { activeTaskId: TaskId | null }
               <p className="mb-1.5 text-[11px] font-medium text-muted-foreground">
                 {t('tasks.show.title', 'Show')}
               </p>
-              <div className="flex flex-wrap gap-1">
-                {TASK_CARD_PROPERTIES.map((property) => {
-                  const active = visibleProperties.includes(property);
-                  return (
-                    <button
-                      key={property}
-                      type="button"
-                      aria-pressed={active}
-                      onClick={() => toggleProperty(property)}
-                      className={cn(
-                        'rounded-md border px-2 py-1 text-[11px] transition-colors',
-                        active
-                          ? 'border-transparent bg-muted-foreground/20 text-foreground'
-                          : 'border-border/70 text-muted-foreground hover:bg-muted-foreground/10 hover:text-foreground'
-                      )}
-                    >
-                      {t(
-                        TASK_CARD_PROPERTY_LABELS[property].key,
-                        TASK_CARD_PROPERTY_LABELS[property].fallback
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+              <ToggleGroup
+                multiple
+                wrap
+                size="mini"
+                aria-label={t('tasks.show.title', 'Show')}
+                value={visibleProperties}
+                onValueChange={setVisibleProperties}
+              >
+                {TASK_CARD_PROPERTIES.map((property) => (
+                  <Toggle key={property} value={property}>
+                    {t(
+                      TASK_CARD_PROPERTY_LABELS[property].key,
+                      TASK_CARD_PROPERTY_LABELS[property].fallback
+                    )}
+                  </Toggle>
+                ))}
+              </ToggleGroup>
             </div>
           </DropdownMenuContent>
         </DropdownMenu>

@@ -10,7 +10,12 @@ export interface SeparatorProps extends Omit<BaseProps, 'className'> {
   className?: string;
 }
 
-const styles = stylex.create({
+/**
+ * The line itself, exported because `Toolbar.Separator` draws the same one: a
+ * second `stylex.create` for a hairline is a second place for the one edge this
+ * system allows to drift.
+ */
+export const separatorStyles = stylex.create({
   /**
    * The one line this system allows, and it has no token group of its own.
    *
@@ -60,8 +65,8 @@ export const Separator = forwardRef<HTMLDivElement, SeparatorProps>(function Sep
   ref
 ) {
   const sx = stylex.props(
-    styles.base,
-    orientation === 'vertical' ? styles.vertical : styles.horizontal
+    separatorStyles.base,
+    orientation === 'vertical' ? separatorStyles.vertical : separatorStyles.horizontal
   );
   return (
     <BaseSeparator

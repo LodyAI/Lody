@@ -132,6 +132,44 @@ is opened by whatever the surface already had there. What opens is animated from
 its own measured height, so what it holds keeps its spacing on something inside
 it rather than on the part being measured.
 
+A person may also leave a control pressed. That is not the control that stores a
+value in a form — the one with a name, a place in a field and the ability to be
+wrong — but a statement that an option is on at this moment: the words in front
+of them are bold, the long lines are wrapped, this filter is being applied. It
+is a button in every other way, so the keyboard reaches it and a person who
+cannot see it is told both what kind of control it is and whether it is on.
+
+What it looks like when it is on follows from where it rests. The system fills a
+control with ink when what it holds is stored, and that is right for the ones
+whose resting appearance already occupies the sunken place this system gives to
+anything you may put something into: on has to be somewhere else, so it is ink.
+A control that rests on nothing has that place free, so it goes down into it and
+stays there — which is also what keeps a row of eight of them from reading as
+eight of the most important thing on the screen. It goes down and stays rather
+than dipping and coming back, which is what this system's raised controls do
+when they are pressed.
+
+Several of them may answer to one value, and that is a different thing from the
+strip of choices above, not an arrangement of it. The strip picks what a person
+sees, so it can be a single control with one mark moving across it; a set of
+these stores what is on, and two of its members can be on at once, which no
+single moving mark can say. So the set has no track under it and each member
+goes down on its own — including when the surface asks for one choice out of
+several, because the same set with several allowed has to look like itself. How
+tall the members are and what shape they take is stated once, on the set.
+
+A row of controls is itself something the system names, and what it is for is
+the keyboard rather than the eye: it draws nothing at all — not even the line a
+table is allowed — because it is a row of controls on whatever the surface
+already was. A row of eight things a person can press is eight stops on the way
+past it unless something says otherwise, so the row is one stop and the arrow
+keys walk it, stepping over what cannot be used rather than stopping there. Two
+distances say what belongs with what: one between the controls of a cluster, a
+wider one between clusters and either side of the line that divides them. That
+line is the one line this system allows, turned across the row, and the row
+states that rather than the surface — a row laid out one way cannot then be
+divided the other.
+
 The system also speaks back. What it says is either what happened or that it is
 still working, and those are one family rather than five components. A message
 is the same block wherever it appears — a mark that names what kind of message
@@ -362,3 +400,7 @@ The avatar whose rung picks its own letters, the key cap, and the component
 token group that carries a surface's inversion into what is standing on it are
 recorded in the
 [UI avatar and kbd note](../.agents/notes/implemented/feature/2026-09-13-ui-avatar-kbd.md).
+The sunken place a pressed control goes into rather than filling with ink, the
+set of them that is not the strip of choices, and the row that draws nothing and
+exists for the keyboard are recorded in the
+[UI toggle and toolbar note](../.agents/notes/implemented/feature/2026-09-15-ui-toggle-toolbar.md).
