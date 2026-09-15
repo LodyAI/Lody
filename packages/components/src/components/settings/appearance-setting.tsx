@@ -24,7 +24,7 @@ import { LanguageSelector } from '../../i18n';
 import { useTheme, type Theme } from '../../theme-provider';
 import { settingContainerClass } from '.';
 import { CompactRow, CompactSection } from './compact-layout';
-import { buildConversationFontSizeChoices } from './conversation-font-size-options';
+import { ConversationFontSizeSlider } from './conversation-font-size-slider';
 import { PreviewSelect, type PreviewSelectOption } from './preview-select';
 
 export type SystemFontLoadState = 'idle' | 'loading' | 'loaded' | 'error';
@@ -117,19 +117,6 @@ export function AppearanceSettingsView({
       ),
     },
   ];
-
-  // Hovering a size previews it in the sample below without touching the saved setting;
-  // closing the menu without a choice drops back to the saved size.
-  const [previewFontSize, setPreviewFontSize] = useState<number | null>(null);
-  const sampleFontSize = previewFontSize ?? conversationFontSize;
-
-  const conversationFontSizeOptions = useMemo<PreviewSelectOption<string>[]>(
-    () =>
-      buildConversationFontSizeChoices(t('settings.conversationFontSize.default', 'Default')).map(
-        ({ value, label }) => ({ value, label })
-      ),
-    [t]
-  );
 
   const defaultFontLabel = t('settings.terminal.fontFamily.placeholder', 'Default');
   const interfaceFontOptions = useMemo(
@@ -242,27 +229,20 @@ export function AppearanceSettingsView({
             'Adjusts message body text in conversations.'
           )}
         >
-          <PreviewSelect
-            value={String(conversationFontSize)}
-            options={conversationFontSizeOptions}
-            onPreview={(value) => setPreviewFontSize(Number(value))}
-            onCommit={(value) => {
-              setPreviewFontSize(null);
-              onConversationFontSizeChange(Number(value));
-            }}
-            onCancel={() => setPreviewFontSize(null)}
-            triggerClassName="w-full sm:w-[220px]"
-          />
+          <div className="w-full sm:w-[220px]">
+            <ConversationFontSizeSlider
+              value={conversationFontSize}
+              onChange={onConversationFontSizeChange}
+            />
+          </div>
         </CompactRow>
-        {/* The sample stays clear of the open size menu on the right, so hovering a size
-            shows the whole sentence rather than half of it. */}
         <div
           aria-label={t('settings.conversationFontSize.preview', 'Conversation preview')}
           className="border-t border-border/60 bg-muted/20 px-3 py-3"
         >
           <p
             className="max-w-[520px] leading-relaxed text-foreground"
-            style={conversationTextFontSizeStyle(sampleFontSize)}
+            style={conversationTextFontSizeStyle(conversationFontSize)}
           >
             {t(
               'settings.conversationFontSize.previewText',

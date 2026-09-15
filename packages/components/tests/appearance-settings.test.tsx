@@ -3,7 +3,9 @@
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createStore, Provider } from 'jotai';
 
+import { conversationFontSizeAtom } from '../src/atoms/settings';
 import { MobileAppearanceSettings } from '../src/components/mobile/mobile-appearance-settings';
 import { AppearanceSettingsView } from '../src/components/settings/appearance-setting';
 import type { Theme } from '../src/theme-provider';
@@ -116,78 +118,56 @@ describe('AppearanceSettingsView', () => {
     expect(container?.textContent).not.toContain('Terminal');
   });
 
-  it('lets the user pick a conversation font size from the offered scale', async () => {
+  it('updates the conversation font size readout while sliding', async () => {
     await act(async () => root?.render(<AppearanceHarness isElectron={false} />));
 
-    const sizeTrigger = Array.from(container?.querySelectorAll('button') ?? []).find((node) =>
-      node.textContent?.includes('14 px')
+    const sizeInput = container?.querySelector<HTMLInputElement>(
+      'input[type="range"][aria-label="Conversation font size"]'
     );
-    expect(sizeTrigger?.textContent).toContain('Default');
+    expect(sizeInput?.value).toBe('2');
 
     await act(async () => {
-      sizeTrigger?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      setInputValue(sizeInput!, '5');
     });
 
-    const offered = Array.from(document.body.querySelectorAll('[data-preview-item]')).map((node) =>
-      node.textContent?.trim()
-    );
-    expect(offered).toEqual([
-      '8 px',
-      '12 px',
-      '14 px · Default',
-      '16 px',
-      '20 px',
-      '24 px',
-      '28 px',
-      '32 px',
-    ]);
-
-    const sample = container?.querySelector<HTMLElement>('[aria-label="Conversation preview"] p');
-    expect(sample?.style.fontSize).toBe('14px');
-
-    // Hovering a size shows it in the sample without changing the saved setting.
-    const largeOption = Array.from(document.body.querySelectorAll('[data-preview-item]')).find(
-      (node) => node.textContent?.trim() === '24 px'
-    );
-    await act(async () => {
-      largeOption?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-    });
-    expect(sample?.style.fontSize).toBe('24px');
-    expect(sizeTrigger?.textContent).toContain('14 px');
-
-    await act(async () => {
-      largeOption?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
-
-    expect(sizeTrigger?.textContent).toContain('24 px');
-    expect(sample?.style.fontSize).toBe('24px');
+    expect(sizeInput?.value).toBe('5');
+    expect(container?.querySelector('output')?.textContent).toBe('24 px');
+    expect(
+      container?.querySelector<HTMLElement>('[aria-label="Conversation preview"] p')?.style.fontSize
+    ).toBe('24px');
   });
 
-  it('drops the hovered size preview when the menu closes without a choice', async () => {
-    await act(async () => root?.render(<AppearanceHarness isElectron={false} />));
-
-    const sizeTrigger = Array.from(container?.querySelectorAll('button') ?? []).find((node) =>
-      node.textContent?.includes('14 px')
+  it('persists mobile slider changes, including both limits, across remounts', async () => {
+    const store = createStore();
+    store.set(conversationFontSizeAtom, 14);
+    const renderMobile = (settingsStore: ReturnType<typeof createStore>) => (
+      <Provider store={settingsStore}>
+        <MobileAppearanceSettings />
+      </Provider>
     );
-    await act(async () => {
-      sizeTrigger?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    });
+    await act(async () => root?.render(renderMobile(store)));
 
-    const sample = container?.querySelector<HTMLElement>('[aria-label="Conversation preview"] p');
-    const hugeOption = Array.from(document.body.querySelectorAll('[data-preview-item]')).find(
-      (node) => node.textContent?.trim() === '32 px'
-    );
-    await act(async () => {
-      hugeOption?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-    });
-    expect(sample?.style.fontSize).toBe('32px');
+    const slider = container?.querySelector<HTMLInputElement>('input[type="range"]');
+    expect(slider).toBeTruthy();
+    for (const [index, size] of [
+      [0, 8],
+      [7, 32],
+      [4, 20],
+    ]) {
+      await act(async () => setInputValue(slider!, String(index)));
+      expect(store.get(conversationFontSizeAtom)).toBe(size);
+      expect(
+        container?.querySelector<HTMLElement>('[aria-label="Conversation preview"] p')?.style
+          .fontSize
+      ).toBe(`${size}px`);
+      expect(container?.querySelector('output')?.textContent).toBe(`${size} px`);
+      expect(JSON.parse(localStorage.getItem('lody-conversation-font-size')!)).toBe(size);
+    }
 
-    await act(async () => {
-      document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-    });
-
-    expect(sample?.style.fontSize).toBe('14px');
-    expect(sizeTrigger?.textContent).toContain('14 px');
+    await act(async () => root?.render(null));
+    await act(async () => root?.render(renderMobile(createStore())));
+    expect(container?.querySelector<HTMLInputElement>('input[type="range"]')?.value).toBe('4');
+    localStorage.removeItem('lody-conversation-font-size');
   });
 
   it('shows theme and language in mobile appearance settings without terminal settings', async () => {
@@ -196,12 +176,6 @@ describe('AppearanceSettingsView', () => {
     expect(container?.textContent).toContain('Theme');
     expect(container?.textContent).toContain('Language');
     expect(container?.textContent).toContain('Conversation font size');
-    // The size is picked from the same scale as desktop, not typed into a field.
-    expect(container?.querySelector('input[type="number"]')).toBeNull();
-    expect(container?.textContent).toContain('14 px · Default');
-    expect(
-      container?.querySelector<HTMLElement>('[aria-label="Conversation preview"] p')?.style.fontSize
-    ).toBe('14px');
     expect(container?.textContent).not.toContain('Interface font');
     expect(container?.textContent).not.toContain('Terminal');
   });

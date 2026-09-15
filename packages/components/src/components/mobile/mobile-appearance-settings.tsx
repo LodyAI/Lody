@@ -15,10 +15,7 @@ import {
 import { MobileSettingsPickerTrigger } from '@/components/mobile/mobile-settings-picker-trigger';
 import { conversationTextFontSizeStyle } from '@/components/ai-gui/conversation-font-size-classes';
 import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
-import {
-  buildConversationFontSizeChoices,
-  formatConversationFontSize,
-} from '@/components/settings/conversation-font-size-options';
+import { ConversationFontSizeSlider } from '@/components/settings/conversation-font-size-slider';
 import { currentSupportedLanguages, languageCodeToName } from '../../i18n';
 import { cn } from '@/lib/utils';
 import { withOneSignal } from '@/lib/onesignal';
@@ -66,22 +63,6 @@ export function MobileAppearanceSettings() {
     [i18n, setLanguage]
   );
 
-  const defaultFontSizeLabel = String(t('settings.conversationFontSize.default', 'Default'));
-  const fontSizeOptions: MobileInlinePickerOption<string>[] = buildConversationFontSizeChoices(
-    defaultFontSizeLabel
-  ).map(({ value, label }) => ({ value, label, searchText: label }));
-  // The atom snaps its value onto the scale, so the selected size always has an option.
-  const selectedFontSizeLabel = formatConversationFontSize(
-    conversationFontSize,
-    defaultFontSizeLabel
-  );
-  const handleConversationFontSizeChange = useCallback(
-    (next: string) => {
-      setConversationFontSize(Number(next));
-    },
-    [setConversationFontSize]
-  );
-
   return (
     <MobileInlinePickerCoordinator>
       <MobileSettingsSection>
@@ -110,24 +91,19 @@ export function MobileAppearanceSettings() {
       </MobileSettingsSection>
 
       <MobileSettingsSection>
-        <MobileInlinePickerRowSlot>
-          <MobileSettingsRow
-            label={t('settings.conversationFontSize.label', 'Conversation font size')}
-            helper={t(
-              'settings.conversationFontSize.helper',
-              'Adjusts message body text in conversations.'
-            )}
-          >
-            <MobileSettingsPickerTrigger
-              id="settings-conversation-font-size"
-              ariaLabel={String(t('settings.conversationFontSize.label', 'Conversation font size'))}
-              value={String(conversationFontSize)}
-              options={fontSizeOptions}
-              onChange={handleConversationFontSizeChange}
-              triggerLabel={selectedFontSizeLabel}
-            />
-          </MobileSettingsRow>
-        </MobileInlinePickerRowSlot>
+        <MobileSettingsRow
+          stack
+          label={t('settings.conversationFontSize.label', 'Conversation font size')}
+          helper={t(
+            'settings.conversationFontSize.helper',
+            'Adjusts message body text in conversations.'
+          )}
+        >
+          <ConversationFontSizeSlider
+            value={conversationFontSize}
+            onChange={setConversationFontSize}
+          />
+        </MobileSettingsRow>
         <div
           aria-label={String(t('settings.conversationFontSize.preview', 'Conversation preview'))}
           className="border-t border-border px-4 py-3"
