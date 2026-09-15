@@ -15,6 +15,10 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   Draft uploads are not published shares. Reuse `useSessionShareLinkActions` for
   copy/reset/revoke; settings must never reconstruct a credential from cloud data.
   Key state by user/workspace and gate the whole surface with `teamSharing`.
+  A share outlives its source, so both "View conversation" and "Update deployment"
+  require the session in the local metadata cache; opening it closes the desktop
+  settings overlay. Rationale:
+  [share inventory jump](../../../../../.agents/notes/implemented/feature/2026-09-15-share-inventory-session-jump.md).
 
 - A settings row (`compact-layout.tsx`) is one grid: the label column takes the
   remaining space and the control column hugs its content. Never size either column

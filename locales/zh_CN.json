@@ -40,6 +40,7 @@
   "settings.shares.conversations": "{{count}} 个对话",
   "settings.shares.secretMissing": "此设备未保存该链接的访问凭据。",
   "settings.shares.otherPublisher": "由工作区其他成员发布，链接访问凭据仅由发布者持有。",
+  "settings.shares.viewConversation": "查看对话",
   "settings.shares.copy": "复制链接",
   "settings.shares.copied": "已复制分享链接",
   "settings.shares.previous": "上一页",

@@ -40,6 +40,7 @@
   "settings.shares.conversations": "{{count}} conversations",
   "settings.shares.secretMissing": "The link credential is not saved on this device.",
   "settings.shares.otherPublisher": "Published by another workspace member. Link credentials are private to the publisher.",
+  "settings.shares.viewConversation": "View conversation",
   "settings.shares.copy": "Copy link",
   "settings.shares.copied": "Share link copied",
   "settings.shares.previous": "Previous",
