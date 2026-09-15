@@ -7,7 +7,9 @@ import {
   type SessionInputBlock,
   type WorkspaceId,
 } from '@lody/shared';
-import { useAtom } from 'jotai';
+import { useAtom, useAtomValue } from 'jotai';
+import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
+import { isUploadAbortedError } from '@/lib/session-file-upload';
 import { toast } from 'sonner';
 import { useTranslation } from 'react-i18next';
 import { usePostHog } from '@posthog/react';
@@ -62,6 +64,7 @@ export function useChatLandingImageDraft(args: {
     ensureSessionId,
   } = args;
   const postHog = usePostHog();
+  const workspaceRuntime = useAtomValue(activeWorkspaceRuntimeAtom);
   const [pendingImages, setPendingImages] = useAtom(chatLandingPendingImagesAtomFamily(draftKey));
   const imageUploadFailedLabel = t('sessions.imageUploadFailed', 'Image upload failed');
   const imageUploadMissingAuthLabel = t(
@@ -103,6 +106,7 @@ export function useChatLandingImageDraft(args: {
   const clearPendingImages = useCallback(() => {
     setPendingImages((prev) => {
       for (const image of prev) {
+        image.abort?.abort();
         URL.revokeObjectURL(image.previewUrl);
       }
       return [];
@@ -125,7 +129,12 @@ export function useChatLandingImageDraft(args: {
 
   const startUpload = useCallback(
     async (localId: string, file: File, sessionId: SessionId) => {
-      if (!workspaceId || !authToken) {
+      if (
+        !workspaceId ||
+        !authToken ||
+        !workspaceRuntime ||
+        workspaceRuntime.workspaceId !== workspaceId
+      ) {
         capturePostHogEvent(postHog, 'session/image_upload_failed', {
           channel: 'web',
           entrypoint: 'chat_landing',
@@ -146,9 +155,11 @@ export function useChatLandingImageDraft(args: {
         return;
       }
 
+      const abort = new AbortController();
       updatePendingImage(localId, (image) => ({
         ...image,
         status: 'uploading',
+        abort,
         progress: 0,
         error: undefined,
       }));
@@ -164,20 +175,26 @@ export function useChatLandingImageDraft(args: {
       });
 
       try {
-        const uploaded = await uploadSessionImage({
-          workspaceId,
-          sessionId,
-          token: authToken,
-          file,
-          onProgress: (progress) => {
-            updatePendingImage(localId, (image) => ({ ...image, progress }));
-          },
-        });
+        const uploaded = await workspaceRuntime.sendResources.run(
+          (signal) =>
+            uploadSessionImage({
+              signal,
+              workspaceId,
+              sessionId,
+              token: authToken,
+              file,
+              onProgress: (progress) => {
+                updatePendingImage(localId, (image) => ({ ...image, progress }));
+              },
+            }),
+          abort.signal
+        );
         updatePendingImage(localId, (image) => ({
           ...image,
           status: 'uploaded',
           progress: 100,
           uploaded,
+          abort: undefined,
           error: undefined,
         }));
         capturePostHogEvent(postHog, 'session/image_upload_succeeded', {
@@ -192,6 +209,15 @@ export function useChatLandingImageDraft(args: {
           mime_type: uploaded.mimeType,
         });
       } catch (error) {
+        if (isUploadAbortedError(error)) {
+          updatePendingImage(localId, (image) => ({
+            ...image,
+            status: 'failed',
+            error: t('sessions.attachmentTransferInterrupted'),
+            abort: undefined,
+          }));
+          return;
+        }
         const errorMessage = error instanceof Error ? error.message : imageUploadFailedLabel;
         updatePendingImage(localId, (image) => ({
           ...image,
@@ -221,6 +247,8 @@ export function useChatLandingImageDraft(args: {
       projectKind,
       updatePendingImage,
       workspaceId,
+      workspaceRuntime,
+      t,
     ]
   );
 
@@ -307,6 +335,7 @@ export function useChatLandingImageDraft(args: {
       setPendingImages((prev) => {
         const target = prev.find((item) => item.localId === localId);
         if (target) {
+          target.abort?.abort();
           URL.revokeObjectURL(target.previewUrl);
         }
         return prev.filter((item) => item.localId !== localId);

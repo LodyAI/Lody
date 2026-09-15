@@ -1,3 +1,4 @@
+import type { SessionSendResources } from '@/lib/session-send-resources';
 import type { LocalFilePreviewResource } from '@lody/shared/local-file-preview';
 import type { SessionData } from '@lody/shared/session-data';
 import { atom } from 'jotai';
@@ -171,6 +172,7 @@ export type WorkspaceRuntime = {
    * The workspace id used for IndexedDB/WebSocket connections.
    */
   readonly workspaceId: WorkspaceId;
+  readonly sendResources: SessionSendResources;
   readonly repo: LoroRepo;
   /** Workspace-owned, scoped LRU for owner-session file-index Flock resources. */
   readonly codeCollabFileIndexCache: CodeCollabFileIndexCache;

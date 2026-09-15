@@ -63,13 +63,12 @@
   "agents.authentication.authorizeAndOpen": "授权并打开页面",
   "agents.authentication.browserOpenFailed": "无法打开授权页面，请检查浏览器设置后重试。",
   "agents.authentication.browserOpened": "请在浏览器窗口中完成授权，然后返回 Lody。",
-  "agents.authentication.chooseMethod": "选择登录 {{provider}} 的方式",
+  "agents.authentication.chooseMethod": "选择登录方式",
   "agents.authentication.codeCopied": "已复制",
   "agents.authentication.codeSubmitFailed": "无法提交授权码，请重试。",
   "agents.authentication.codeSubmitted": "已提交",
   "agents.authentication.copyCode": "复制代码",
   "agents.authentication.copyCodeFailed": "无法复制代码。",
-  "agents.authentication.chooseMethod": "选择登录方式",
   "agents.authentication.enterCode": "请在授权页面输入此代码。",
   "agents.authentication.enterCodeWithExpiry": "请在授权页面输入此代码，代码将在 {{minutes}} 分钟后过期。",
   "agents.authentication.finishInBrowser": "完成 {{provider}} 登录",
@@ -4146,5 +4145,6 @@
   "promptShortcut.bodyOffline": "离线时无法读取正文，请联网后重新选择。",
   "promptShortcut.loadFailed": "无法加载快捷方式，请重新选择以重试。",
   "settings.beta.promptShortcutsHelper": "创建可复用的提示词，通过 / 插入。功能开发中，体验可能不完善。",
-  "settings.promptShortcuts.disabled": "请在设置 → 关于的开发者模式下开启 Prompt Shortcuts。"
+  "settings.promptShortcuts.disabled": "请在设置 → 关于的开发者模式下开启 Prompt Shortcuts。",
+  "sessions.attachmentTransferInterrupted": "传输已中断，返回后可重试。"
 }
