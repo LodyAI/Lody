@@ -11,8 +11,10 @@ Codex 的 thread 总量此前没有模型归属，因此用量界面只能显示
 `codex:unattributed` 桶。锁定 runtime 还会发送精确的单次 completion 用量事件；
 适配器现在会把这些事件归到已解析的模型，只把未覆盖的余量保留为未归属，并在
 resume 时恢复一个小的累计 sidecar。审查后的修复为新 thread 开启 raw 事件，
-在付费请求前捕获 fork 历史，并持久化 native reset 游标。冷 resume/fork 以及
-模型不明确的压缩/reroute 响应保持未归属，因为锁定协议无法确认其实际模型。
+在付费请求前捕获 fork 历史，并持久化 native reset 游标。resume 时若 sidecar
+缺失，则以捕获到的 native 基线开启新的计量生命周期，避免已持久化历史被重新
+记到新 key 下。冷 resume/fork 以及模型不明确的压缩/reroute 响应保持未归属，
+因为锁定协议无法确认其实际模型。
 
 ## 背景
 
@@ -36,15 +38,17 @@ listener 没有相应开关，使用未归属的累计用量。压缩可能使�
 适配器在 `$CODEX_HOME` 下保留小的累计 sidecar，恢复模型账本时一同恢复 native
 total、reset offset 和 reset 标记。fork 等待 native `thread/started`，该信号
 位于历史 usage 通知之后；接收 prompt 前持久化准确的源基线。空历史为零，
-绝不用首次付费响应推测源历史。
+绝不用首次付费响应推测源历史。resume 时若 sidecar 缺失，则用捕获到的 native
+基线作为新生命周期的起点，只报告之后的增量。
 sidecar 不是投递账本；CLI 仍会重试自己的累计快照。CLI 不再为 legacy adapter
 从当前 UI 选中模型合成 `modelUsage`；缺失归因时直接跳过。
 
 ## 限制
 
-- sidecar 是机器本地的。恢复一个 exact-attribution thread 时如果 sidecar 丢失，
-  新进程可能把历史 token 当作未归属。长期方案仍然是消费者侧持久的 accounting
-  identity。
+- sidecar 是机器本地的。若恢复 exact-attribution thread 时 sidecar 丢失，适配器会
+  以捕获到的 native 基线开启新的计量生命周期，只报告之后的增量，因此历史 token
+  既不会被重新归属，也不会在新的 key 下重复计费。但此时无法恢复分模型历史；
+  长期方案仍然是消费者侧持久的 accounting identity。
 - `rawResponse/completed` 在锁定 runtime 中是内部 app-server 事件，需要像生成的
   客户端类型一样遵守版本/能力约束。
 - Subagent thread 有 `thread/settings/updated` 时使用自己的模型；否则其精确响应
@@ -88,12 +92,14 @@ subagent 模型、native reset、返回值修改隔离、fork/resume。完整检
 已尝试，但缺失 workspace 依赖，无法完成；未运行真实 Codex 会话、Windows
 文件系统或进程崩溃注入。仓库文档检查还报告现有 CLI agent AGENTS.md 超限。
 
-修复验证使用隔离依赖、Codex 0.153.4 和 Vitest 4.1.11：639 个测试通过，
+修复验证使用隔离依赖、Codex 0.153.4 和 Vitest 4.1.11：641 个测试通过，
 27 个 E2E 测试跳过；adapter、examples 类型检查与正式 build 通过。覆盖旧 sidecar
-两种迁移、fork 回放、reset/pending-response 重启组合、child 游标隔离及原子替换
-失败。独立复审未发现修复中残留的 P0/P1。未执行付费模型 completion 或真实进程
-崩溃注入。外层完整检查和格式化仍受其他缺失依赖阻塞；docs check 仍报告 CLI
-agent AGENTS.md 超限。两个 gitlink 均不提交。
+两种迁移、fork 回放、reset/pending-response 重启组合、child 游标隔离、原子替换
+失败以及 sidecar 缺失时的 resume 基线。独立复审发现一个残留 P1：sidecar 缺失时
+历史总量可能被重新发到 `codex:unattributed`，而消费端按模型 key 合并会重复计量。
+修复后，无 sidecar 的 resume 会以捕获到的 native 基线开启新的计量生命周期，只
+报告之后的增量。未执行付费模型 completion 或真实进程崩溃注入。外层完整检查仍待
+执行；两个 gitlink 均不提交。
 
 - `src/CodexUsageAccounting.ts`
 - `src/CodexUsageBaselineStore.ts`

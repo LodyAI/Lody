@@ -23,8 +23,6 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   to the requested value, updating both replacement startup state and `currentValue`.
 - Convert Core `_meta.lody.goal` epoch seconds to durable milliseconds here, and normalize
   `limited` to the durable `blocked` status.
-- Never synthesize `modelUsage` from `currentModel`. A legacy adapter that omits model
-  attribution stays skipped/unattributed rather than being credited to the UI selection.
 - Keep both built-in `lody` MCP transports. INVARIANT: MCP tools must not run inside the
   daemon process.
 - MCP HTTP: loopback bind plus bearer token; on Linux prove the peer socket's uid via

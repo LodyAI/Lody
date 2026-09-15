@@ -13,6 +13,8 @@ per-response usage events; the adapter now attributes those to the resolved
 model, keeps only the unaccounted remainder unattributed, and restores a small
 cumulative sidecar on resume. Review corrections enable raw on new threads,
 capture fork history before paid work, and persist the native reset cursor.
+A resumed thread without that sidecar starts a fresh accounting lifetime at the
+captured native baseline, so persisted history is not re-booked under a new key.
 Cold resume/fork and ambiguous compaction/reroute responses remain unattributed
 because the pinned protocol cannot identify their producing model.
 
@@ -42,15 +44,19 @@ The adapter keeps a small cumulative sidecar under `$CODEX_HOME` and restores
 the native total, reset offset and reset flag with the model ledger. Fork waits
 for native `thread/started`, after the restored usage notification, and persists
 that exact source baseline before accepting a prompt. Empty history means zero;
-the first paid response is never used to infer source history. The sidecar is not a
+the first paid response is never used to infer source history. If the sidecar is
+missing on resume, the captured native baseline becomes the start of a fresh
+accounting lifetime and only later increments are reported. The sidecar is not a
 delivery ledger; the CLI still retries its own cumulative snapshot. The CLI no
 longer synthesizes `modelUsage` from the selected UI model for legacy adapters;
 missing attribution is skipped instead.
 
 ## Limits
 
-- The sidecar is machine-local. Losing it on a resumed exact-attribution thread
-  can make the new process treat historical tokens as unattributed. A durable
+- The sidecar is machine-local. If it is missing on a resumed exact-attribution
+  thread, the adapter starts a fresh lifetime at the captured native baseline and
+  reports only later increments, so historical tokens are neither re-attributed
+  nor re-billed under a new key. Per-model history is then unrecoverable; a durable
   consumer accounting identity remains the long-term fix.
 - `rawResponse/completed` is an internal app-server event in the pinned runtime.
   It needs the same version/capability discipline as the generated client types.
@@ -105,13 +111,16 @@ session, Windows filesystem or process-crash injection was run. Repository docs
 checks also report the existing oversized CLI agent AGENTS.md.
 
 Repair validation used isolated dependencies with Codex 0.153.4 and Vitest 4.1.11:
-639 tests passed, 27 E2E tests skipped; adapter and examples typechecks and the
+641 tests passed, 27 E2E tests skipped; adapter and examples typechecks and the
 official build passed. Tests cover both old-sidecar migrations, fork replay,
-reset/pending-response restart combinations, child counter isolation and failed
-atomic replacement. Independent re-review found no remaining P0/P1 in the repair.
-No paid model completion or real process-crash injection was run. Outer workspace
-checks/format remain blocked by missing unrelated dependencies; docs check still
-reports the oversized CLI agent AGENTS.md. Both gitlinks remain uncommitted.
+reset/pending-response restart combinations, child counter isolation, failed
+atomic replacement and the missing-sidecar resume baseline. Independent re-review
+found one remaining P1: a missing sidecar could re-emit historical totals under
+`codex:unattributed`, and the consumer's per-key merge would then double count
+them. The repair now starts a fresh accounting lifetime at the captured native
+baseline when no sidecar exists, so only later increments are reported. No paid
+model completion or real process-crash injection was run. Outer workspace checks
+remain pending; both gitlinks remain uncommitted.
 
 - `src/CodexUsageAccounting.ts`
 - `src/CodexUsageBaselineStore.ts`
