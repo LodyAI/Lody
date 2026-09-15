@@ -4520,17 +4520,18 @@ const UserChatBubble = ({
     if (group.kind === 'images') {
       const hasSingleImage = group.images.length === 1;
       return (
-        <div key={group.key} className="flex w-full justify-end px-2 pt-1">
+        <div key={group.key} className={cn(IMAGE_ATTACHMENT_ROW_CLASS, 'justify-end px-2 pt-1')}>
           {hasSingleImage ? (
             <UserImageBlock entry={group.images[0]!.entry} variant="full" />
           ) : (
-            <div className="grid max-w-[32rem] grid-cols-2 gap-2">
-              {group.images.map(({ entry }, index) => (
-                <div key={`image-${entry.imageId}-${index}`} className="shrink-0">
-                  <UserImageBlock entry={entry} variant="thumbnail" thumbnailSize="large" />
-                </div>
-              ))}
-            </div>
+            group.images.map(({ entry }, index) => (
+              <UserImageBlock
+                key={`image-${entry.imageId}-${index}`}
+                entry={entry}
+                variant="thumbnail"
+                thumbnailSize="large"
+              />
+            ))
           )}
         </div>
       );
@@ -4728,6 +4729,16 @@ const IMAGE_INLINE_PREVIEW_MAX_WIDTH = 768;
 
 export type ImageBubbleAlign = 'start' | 'end';
 type ImageThumbnailSize = 'compact' | 'large';
+
+/**
+ * A group of image attachments is ONE wrapping row, never a fixed column count.
+ * The thumbnails are fixed squares, so a `grid-cols-2` parked thirteen of them
+ * in a two-wide tower that used a quarter of the conversation column and scrolled
+ * for screens; wrapping lays them along the width the column actually has and
+ * keeps the turn readable. The row fills its parent and the tiles hug the side
+ * the speaker is on, so a short group still reads as that speaker's attachment.
+ */
+const IMAGE_ATTACHMENT_ROW_CLASS = 'flex w-full flex-wrap gap-2';
 
 /**
  * Hook to manage blob URLs for image gallery entries.
@@ -4967,7 +4978,10 @@ const WorkspaceUserImageBlock = ({
            card, proposed plan, permission record). An 8px frame beside them
            read as a different family of object. */
         'overflow-hidden rounded-xl border border-border/70 bg-muted/20',
-        isThumbnail ? thumbnailFrameClass : 'inline-flex max-w-full flex-col'
+        /* `shrink-0`: a thumbnail is a fixed square inside the wrapping
+           attachment row (`IMAGE_ATTACHMENT_ROW_CLASS`). Without it the last
+           tile of an over-long line squeezes instead of wrapping. */
+        isThumbnail ? `${thumbnailFrameClass} shrink-0` : 'inline-flex max-w-full flex-col'
       )}
     >
       {isThumbnailLoading && (
@@ -5055,7 +5069,6 @@ export const ImageGroupBubble = ({
      and no top pad (the row gap belongs to `cardSiblingGap`). The user's own
      attachments keep hugging the right edge exactly as they did. */
   const rowClass = align === 'end' ? 'justify-end px-2 pt-1' : 'justify-start';
-  const gridMaxWidthClass = thumbnailSize === 'large' ? 'max-w-[32rem]' : 'max-w-[26rem]';
   const entries = useMemo(
     () =>
       content.images.map((image, imageIndex) =>
@@ -5108,18 +5121,16 @@ export const ImageGroupBubble = ({
 
   return (
     <>
-      <div ref={previewPortalAnchorRef} className={cn('flex w-full', rowClass)}>
-        <div className={cn('grid grid-cols-2 gap-2', gridMaxWidthClass)}>
-          {entries.map((entry, index) => (
-            <UserImageBlock
-              key={`${entry.imageId}-${index}`}
-              entry={entry}
-              onPreviewRequest={handlePreviewRequest}
-              variant="thumbnail"
-              thumbnailSize={thumbnailSize}
-            />
-          ))}
-        </div>
+      <div ref={previewPortalAnchorRef} className={cn(IMAGE_ATTACHMENT_ROW_CLASS, rowClass)}>
+        {entries.map((entry, index) => (
+          <UserImageBlock
+            key={`${entry.imageId}-${index}`}
+            entry={entry}
+            onPreviewRequest={handlePreviewRequest}
+            variant="thumbnail"
+            thumbnailSize={thumbnailSize}
+          />
+        ))}
       </div>
       {!sessionImagePreview ? (
         <ImagePreviewDialog
