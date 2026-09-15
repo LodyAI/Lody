@@ -41,8 +41,9 @@ reasoning behind those rules.
   renders the first message immediately, without waiting for room sync.
 - **Workspace-scoped drafts.** The workspace slug scopes every part of a new-chat
   draft before the workspace id resolves. Every peer workspace window uses the
-  same durable localStorage contract; its launch relationship does not change
-  draft ownership or lifetime.
+  same durable localStorage contract; its launch relationship and the selected
+  project do not change draft ownership or lifetime. New-chat navigation selects
+  a target but does not clear the draft; an accepted submit does.
 - **Menu focus returning to the prompt.** Leaving focus on the model/agent trigger
   after Esc or an outside dismiss makes Enter re-open that menu.
 - **The drop target living in `chat-landing-view.tsx`.** A session dragged from the
