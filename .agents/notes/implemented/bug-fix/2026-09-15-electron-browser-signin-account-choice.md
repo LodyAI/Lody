@@ -51,6 +51,12 @@ The page now renders a handoff panel in the ordinary login card:
   the switch makes a transfer that resolves afterwards discard its code instead of
   producing a handoff, and the short-lived `better-auth.electron` cookie is cleared
   around each transfer so a stale code cannot be read back as this attempt's.
+- Only a *confirmed* sign-out releases the handoff. `signOutWithoutRedirect` used to
+  swallow both failure shapes — Better Auth throws on transport failures and reports
+  API failures in `response.error` — so a failed sign-out was indistinguishable from
+  a successful one while this browser's cookie, the very thing a transfer hands over,
+  still authenticated the previous account. It now returns a `SignOutOutcome`, and a
+  failed switch says so and blocks the transfer until a retry succeeds.
 - Once a code exists, the `lody://auth/callback#token=…` URL is built once and used
   both by the automatic navigation and by a visible link. The navigation moved into
   an effect so the link is painted before the attempt: a browser that declines a
@@ -84,6 +90,10 @@ an intended build difference, not part of this defect.
   the next provider sign-in; and a failed transfer leaving an enabled retry.
 - That suite found the switch button disabled while a transfer was in flight, which
   is the state the escape hatch exists for; the gate was removed.
+- The failed-sign-out cases (a rejected request and an `error` response) assert the
+  blocked handoff and its release on a successful retry. Restoring the old
+  swallow-the-failure behavior in `signOutWithoutRedirect` makes exactly those three
+  cases fail, so the guard is load-bearing rather than decorative.
 - jsdom cannot navigate a custom scheme and `window.location.replace` is
   unforgeable, so the test replaces exactly one navigation primitive and asserts the
   URL handed to it equals the rendered link's `href`.
