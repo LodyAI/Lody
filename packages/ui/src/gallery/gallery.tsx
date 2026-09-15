@@ -54,6 +54,10 @@ import { Select } from '../field/select';
 import { Separator } from '../separator/separator';
 import { Switch } from '../field/switch';
 import { Textarea } from '../field/textarea';
+import { Toggle, type ToggleSize } from '../toggle/toggle';
+import { ToggleGroup } from '../toggle/toggle-group';
+import { toggle as toggleTokens } from '../toggle/toggle.tokens.stylex';
+import { Toolbar } from '../toggle/toolbar';
 import { Pagination } from '../table/pagination';
 import { Popover } from '../popover/popover';
 import { popup } from '../popup/popup.tokens.stylex';
@@ -3194,6 +3198,291 @@ function KbdDimensions() {
   );
 }
 
+const TOGGLE_SIZES: { name: string; size: ToggleSize }[] = [
+  { name: 'mini · 24', size: 'mini' },
+  { name: 'small · 28', size: 'small' },
+  { name: 'medium · 32', size: 'medium' },
+  { name: 'large · 36', size: 'large' },
+];
+
+const TOGGLE_COLORS = [
+  {
+    name: 'toggle.label',
+    value: toggleTokens.label,
+    note: 'off: about the thing it acts on',
+  },
+  { name: 'toggle.hover', value: toggleTokens.hover, note: 'the pointer, on an off toggle' },
+  { name: 'toggle.activeLabel', value: toggleTokens.activeLabel, note: 'on: it is the thing' },
+  {
+    name: 'toggle.pressedBackground',
+    value: toggleTokens.pressedBackground,
+    note: 'on: the well, not ink',
+  },
+  { name: 'toggle.ring', value: toggleTokens.ring, note: 'where the keyboard is' },
+];
+
+/** A mark for the board's toggles, sized by the box the control gives it. */
+function BoldGlyph() {
+  return (
+    <svg
+      width="100%"
+      height="100%"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M5 3h4a2.5 2.5 0 0 1 0 5H5zM5 8h4.6a2.5 2.5 0 0 1 0 5H5z" />
+    </svg>
+  );
+}
+
+function WrapGlyph() {
+  return (
+    <svg
+      width="100%"
+      height="100%"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M2.5 4h11M2.5 12h4M2.5 8h8.5a2.25 2.25 0 0 1 0 4.5H9.5M11 11l-1.5 1.5L11 14" />
+    </svg>
+  );
+}
+
+/**
+ * The two states, side by side, and the edge the pressed one carries.
+ *
+ * This is the one row that has to be read rather than described: off is a ghost
+ * Button and on is the well rung, which is the decision the whole family rests
+ * on. Ink would have been the other answer — the rules give a stored state ink
+ * — and ink is what a control that already sits in a well becomes when it is
+ * on. A toggle rests on nothing, so the well is still free.
+ */
+function ToggleStateRow() {
+  const { ref, value } = useMeasured<HTMLButtonElement>('box-shadow');
+  return (
+    <Row>
+      <LegendKey>off and on</LegendKey>
+      <Cluster>
+        <Toggle size="small">Wrap lines</Toggle>
+        <Toggle ref={ref} size="small" defaultPressed>
+          Wrap lines
+        </Toggle>
+        <Toggle size="small" icon aria-label="Bold">
+          <BoldGlyph />
+        </Toggle>
+        <Toggle size="small" icon defaultPressed aria-label="Wrap lines">
+          <WrapGlyph />
+        </Toggle>
+      </Cluster>
+      <span {...stylex.props(styles.readout)}>toggle.pressedWell {value}</span>
+    </Row>
+  );
+}
+
+/** One rung of the ladder, pressed so the row reads as a row. */
+function ToggleSizeRow({ name, size }: { name: string; size: ToggleSize }) {
+  const { ref, value } = useMeasured<HTMLButtonElement>('height');
+  return (
+    <Row>
+      <LegendKey>{name}</LegendKey>
+      <Cluster>
+        <Toggle ref={ref} size={size} defaultPressed>
+          Running
+        </Toggle>
+        <Toggle size={size}>Archived</Toggle>
+        <Toggle size={size} icon aria-label="Bold">
+          <BoldGlyph />
+        </Toggle>
+      </Cluster>
+      <span {...stylex.props(styles.readout)}>{value}</span>
+    </Row>
+  );
+}
+
+/** The second shape: a filter a person scans a row of rather than a control. */
+function TogglePillRow() {
+  return (
+    <Row>
+      <LegendKey>pill</LegendKey>
+      <Cluster>
+        <Toggle size="small" shape="pill" defaultPressed>
+          Running
+        </Toggle>
+        <Toggle size="small" shape="pill">
+          Needs review
+        </Toggle>
+        <Toggle size="small" shape="pill">
+          Archived
+        </Toggle>
+      </Cluster>
+      <Note>
+        A pill takes `corner.round`, because a squircle at `radius.full` is a superellipse rather
+        than the stadium the shape is named for.
+      </Note>
+    </Row>
+  );
+}
+
+/** A toggle nobody can press, reporting the one opacity the family dims with. */
+function ToggleDisabledRow() {
+  const { ref, value } = useMeasured<HTMLButtonElement>('opacity');
+  return (
+    <Row>
+      <LegendKey>disabled</LegendKey>
+      <Cluster>
+        <Toggle size="small" disabled>
+          Wrap lines
+        </Toggle>
+        <Toggle ref={ref} size="small" defaultPressed disabled>
+          Wrap lines
+        </Toggle>
+      </Cluster>
+      <span {...stylex.props(styles.readout)}>toggle.disabledOpacity {value}</span>
+    </Row>
+  );
+}
+
+/**
+ * The same three choices as a strip and as a set, which is the comparison this
+ * section exists to make.
+ *
+ * A `Tabs` strip picks what a person *sees*: one control, so a sunken track
+ * with one thing raised out of it and a pill that slides. A `ToggleGroup`
+ * stores what is *on*: no track, and each member sinking on its own — because
+ * two of them can be pressed at once, and a sliding pill cannot say that.
+ */
+function ToggleSetRow() {
+  return (
+    <Row>
+      <LegendKey>set, and a strip</LegendKey>
+      <Cluster>
+        <ToggleGroup size="small" defaultValue={['board']}>
+          <Toggle value="board">Board</Toggle>
+          <Toggle value="list">List</Toggle>
+          <Toggle value="timeline">Timeline</Toggle>
+        </ToggleGroup>
+        <Tabs.Root defaultValue="board">
+          <Tabs.List size="small">
+            <Tabs.Tab value="board">Board</Tabs.Tab>
+            <Tabs.Tab value="list">List</Tabs.Tab>
+            <Tabs.Tab value="timeline">Timeline</Tabs.Tab>
+          </Tabs.List>
+        </Tabs.Root>
+      </Cluster>
+      <Note>
+        The set on the left and the strip on the right hold the same three words and are not the
+        same part. Only the strip is one control, so only the strip has a track.
+      </Note>
+    </Row>
+  );
+}
+
+/** Several at once, wrapping — the state no strip can describe. */
+function ToggleMultipleRow() {
+  return (
+    <Row>
+      <LegendKey>several at once</LegendKey>
+      <div {...stylex.props(styles.disclosureBlock)}>
+        <ToggleGroup multiple wrap size="mini" defaultValue={['status', 'assignee']}>
+          <Toggle value="status">Status</Toggle>
+          <Toggle value="assignee">Assignee</Toggle>
+          <Toggle value="labels">Labels</Toggle>
+          <Toggle value="due">Due date</Toggle>
+          <Toggle value="project">Project</Toggle>
+        </ToggleGroup>
+      </div>
+    </Row>
+  );
+}
+
+/**
+ * The bar, with two clusters and the one line between them.
+ *
+ * It draws nothing: what is under it here is the board's own panel. The gap
+ * between the clusters is wider than the gap inside one, which is the only
+ * thing the bar says about what belongs with what — beyond the line, and beyond
+ * making the whole row a single tab stop.
+ */
+function ToolbarRow() {
+  return (
+    <Row>
+      <LegendKey>bar</LegendKey>
+      <Cluster>
+        <Toolbar.Root aria-label="Format selection">
+          <Toolbar.Group aria-label="Marks">
+            <Toolbar.Button render={<Toggle size="small" icon aria-label="Bold" />}>
+              <BoldGlyph />
+            </Toolbar.Button>
+            <Toolbar.Button
+              render={<Toggle size="small" icon defaultPressed aria-label="Wrap lines" />}
+            >
+              <WrapGlyph />
+            </Toolbar.Button>
+          </Toolbar.Group>
+          <Toolbar.Separator />
+          <Toolbar.Group aria-label="Actions">
+            <Toolbar.Button
+              render={<Button variant="ghost" size="small" icon aria-label="Add a link" />}
+            >
+              <PlusGlyph />
+            </Toolbar.Button>
+            <Toolbar.Button render={<Button variant="ghost" size="small" />}>Quote</Toolbar.Button>
+          </Toolbar.Group>
+        </Toolbar.Root>
+      </Cluster>
+      <Note>
+        A bar is one tab stop and the arrow keys walk it, which is why it is a part rather than a
+        row with a gap: eight icon buttons are otherwise eight stops on the way past them.
+      </Note>
+    </Row>
+  );
+}
+
+function ToggleDimensions() {
+  const dimensions = [
+    { name: 'toggle.heightMini', value: toggleTokens.heightMini },
+    { name: 'toggle.heightSmall', value: toggleTokens.heightSmall },
+    { name: 'toggle.heightMedium', value: toggleTokens.heightMedium },
+    { name: 'toggle.heightLarge', value: toggleTokens.heightLarge },
+    { name: 'toggle.paddingXMini', value: toggleTokens.paddingXMini },
+    { name: 'toggle.paddingXSmall', value: toggleTokens.paddingXSmall },
+    { name: 'toggle.paddingXMedium', value: toggleTokens.paddingXMedium },
+    { name: 'toggle.paddingXLarge', value: toggleTokens.paddingXLarge },
+    { name: 'toggle.radiusMini', value: toggleTokens.radiusMini },
+    { name: 'toggle.radiusSmall', value: toggleTokens.radiusSmall },
+    { name: 'toggle.radiusMedium', value: toggleTokens.radiusMedium },
+    { name: 'toggle.textMini', value: toggleTokens.textMini },
+    { name: 'toggle.text', value: toggleTokens.text },
+    { name: 'toggle.gap', value: toggleTokens.gap },
+    { name: 'toggle.iconSize', value: toggleTokens.iconSize },
+    { name: 'toggle.groupGap', value: toggleTokens.groupGap },
+    { name: 'toggle.barGap', value: toggleTokens.barGap },
+    { name: 'toggle.ringWidth', value: toggleTokens.ringWidth },
+  ];
+  return (
+    <Row>
+      <LegendKey>dimensions</LegendKey>
+      <div {...stylex.props(styles.replicaCaption)}>
+        <dl {...stylex.props(styles.constList)}>
+          {dimensions.map((entry) => (
+            <WidthProbeRow key={entry.name} {...entry} />
+          ))}
+        </dl>
+      </div>
+    </Row>
+  );
+}
+
 function ButtonFocusRow() {
   const { ref, value } = useMeasured<HTMLDivElement>('box-shadow');
   return (
@@ -4197,6 +4486,31 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
           </Rows>
           <Grid>
             {KBD_COLORS.map((token) => (
+              <Swatch key={token.name} {...token} />
+            ))}
+          </Grid>
+        </PaletteSplit>
+      </Section>
+
+      <Section
+        title="Toggle, ToggleGroup and Toolbar · a control that stays pressed"
+        rule="A Toggle is not a Switch, and the difference is what each is for. A Switch stores a value in a form: it takes a name, answers to a Field.Root, can be invalid, and is read as a setting. A Toggle says an option is on right now — bold, wrapped lines, this filter — so it has no name, no validity and no message under it. Off it is a ghost Button, because that is what it is; on it sinks into the well. The rules give a stored state ink, and this is where that rule is read carefully rather than literally: ink is what a control that already sits in a well becomes when it is on — a Switch's off state occupies the well, so on has to leave it — and a toggle rests on nothing at all, so the well is still free and sinking is the plainest thing this system can say about a button that went down and stayed. It also keeps a bar of eight from reading as eight primary buttons. A set of them is not a Tabs strip: a strip picks what you see, so it can be one control with one pill sliding across it, while a set stores what is on and two of its members can be pressed at once. And a bar draws nothing at all — no fill, no shadow, no radius, not even the line a table draws — because what it is for is the keyboard: it makes a row of eight controls one tab stop and gives the arrow keys the walking."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <ToggleStateRow />
+            {TOGGLE_SIZES.map((entry) => (
+              <ToggleSizeRow key={entry.name} {...entry} />
+            ))}
+            <TogglePillRow />
+            <ToggleDisabledRow />
+            <ToggleSetRow />
+            <ToggleMultipleRow />
+            <ToolbarRow />
+            <ToggleDimensions />
+          </Rows>
+          <Grid>
+            {TOGGLE_COLORS.map((token) => (
               <Swatch key={token.name} {...token} />
             ))}
           </Grid>
