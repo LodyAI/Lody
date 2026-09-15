@@ -354,4 +354,45 @@ describe('LoroConnectionRecoveryController watchdog room sweep', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(metaSynced).toHaveBeenCalledTimes(1);
   });
+
+  it('does not tear down a connected transport while the meta room join is in flight', async () => {
+    // #399: a slow meta-room join (~900ms in the field) keeps aggregate health
+    // at `recovering`. The watchdog then called repo.reconnect() against a
+    // transport that was already `connected`, which restarted the join and
+    // prevented it from ever completing.
+    const reconnect = vi.fn(async () => {});
+    const metaSub = createMetaSub('joined');
+    const instance = createController(
+      { reconnect, joinMetaRoom: vi.fn(), transportRooms: () => [] },
+      metaSub
+    );
+
+    metaSub.emitStatus('reconnecting');
+    expect(instance.getStreamsHealth()).toBe('recovering');
+    expect(instance.isRecovering()).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(reconnect).not.toHaveBeenCalled();
+    expect(metaSub.rejoin).not.toHaveBeenCalled();
+
+    // The post-watchdog backoff used to fire again at ~2s and tear the
+    // transport down. A join still in flight must not schedule that.
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(reconnect).not.toHaveBeenCalled();
+
+    metaSub.emitStatus('joined');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(instance.getStreamsHealth()).toBe('connected');
+    expect(instance.isRecovering()).toBe(false);
+  });
+
+  it('still reconnects the transport when the meta room has actually failed', async () => {
+    const reconnect = vi.fn(async () => {});
+    const metaSub = createMetaSub('joined');
+    createController({ reconnect, joinMetaRoom: vi.fn(), transportRooms: () => [] }, metaSub);
+
+    metaSub.emitStatus('disconnected');
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(reconnect).toHaveBeenCalled();
+  });
 });
