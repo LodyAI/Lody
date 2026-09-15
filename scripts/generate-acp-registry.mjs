@@ -14,8 +14,11 @@ const EXCLUDED_REMOTE_REGISTRY_AGENT_IDS = new Set([
 const OFFICIAL_NPM_REGISTRY = 'https://registry.npmjs.org/';
 const MAX_REGISTRY_ICON_BYTES = 256 * 1024;
 const EXTRA_REMOTE_REGISTRY_ICON_IDS = ['grok-build'];
-const LOCAL_ONLY_REGISTRY_ICON_IDS = ['reasonix'];
+const LOCAL_ONLY_REGISTRY_ICON_IDS = ['reasonix', 'zcode-acp'];
 const INTERACTIVE_CLAUDE_ACP_VERSION = '0.1.5';
+// First release with the native ACP `authenticate` handler and spec-shaped
+// `session/fork` response. Keep in sync when the adapter is released.
+const ZCODE_ACP_VERSION = '0.38.1';
 const INTERACTIVE_CLAUDE_REGISTRY_AGENT = {
   id: 'claude-p',
   name: 'Interactive Claude',
@@ -99,6 +102,15 @@ const LOCAL_REGISTRY_AGENTS = {
       args: ['acp'],
     },
   },
+  // Lody-maintained registry entry for the community ZCode ACP bridge. The
+  // adapter auto-discovers the ZCode CLI from a `zcode` on PATH or the desktop
+  // app bundle, so a machine with the ZCode app installed can start sessions
+  // without a separate bridge install.
+  'zcode-acp': {
+    npx: {
+      package: `acp-extension-zcode@${ZCODE_ACP_VERSION}`,
+    },
+  },
 };
 const LOCAL_REGISTRY_AGENT_IDS = new Set(Object.keys(LOCAL_REGISTRY_AGENTS));
 const LOCAL_REGISTRY_AGENT_FALLBACKS = {
@@ -120,6 +132,12 @@ const LOCAL_REGISTRY_AGENT_FALLBACKS = {
     version: '1.7.0-rc.1',
     description:
       'DeepSeek-native coding agent: cache-first loop, flash-first cost control, tool-call repair.',
+  },
+  'zcode-acp': {
+    name: 'ZCode ACP',
+    version: ZCODE_ACP_VERSION,
+    description:
+      'Community ACP bridge that drives the real ZCode app-server — native ZCode tools, modes, MCP and sessions, with credentials read from the installed ZCode app.',
   },
 };
 
