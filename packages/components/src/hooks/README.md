@@ -4,6 +4,15 @@ Binding rules for this directory live in [AGENTS.md](AGENTS.md); this file keeps
 the reasoning behind them so the rules can stay short. It explains only the hooks
 that carry an invariant — the directory itself is the list of hooks.
 
+## Session submission
+
+`use-session-actions.ts` binds admission, analytics, and Jotai observations to
+`lib/session-submission.ts`. The latter owns the ordinary Promise entry points
+for creation, initial history, continuation, dispatch, and guide. It has no React
+lifetime or second writer. This extraction preserves existing upload/acceptance
+behavior; persistent delivery and deferred attachment transfer are later layers
+of the [attachment draft plan](../../../../specs/session-files.md).
+
 ## Horizontal wheel scrolling
 
 `use-horizontal-wheel-scroll.ts` is the one owner for converting a plain vertical

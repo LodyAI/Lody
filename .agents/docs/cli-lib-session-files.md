@@ -1,7 +1,12 @@
 # Session file attachments in the CLI
 
 How a file or image travels from a client into an agent prompt and, eventually, into
-cloud storage. Normative intent: `specs/session-files.md`.
+cloud storage. The [attachment draft Spec](../../specs/session-files.md) proposes
+delaying existing transfers until Send; it retains the lifecycle below.
+[Permanent local references](../../specs/local-attachment-references.md) belong to
+a separate follow-up PR. Both are drafts, not implementation claims. The client lifecycle proposal
+separates upload preparation from durable message delivery; CLI materialization,
+Agent execution, and backfill retain their existing owners.
 [`apps/cli/src/lib/AGENTS.md`](../../apps/cli/src/lib/AGENTS.md) requires this page to
 be read before session file upload, dispatch materialization, or backfill is changed,
 because the statements below bind those paths.
