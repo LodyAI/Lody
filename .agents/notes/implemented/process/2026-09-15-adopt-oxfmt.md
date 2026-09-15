@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: [#737](https://github.com/LodyAI/Lody/pull/737)
+
 [中文](2026-09-15-adopt-oxfmt.zh.md)
 
 ## Abstract
