@@ -1,17 +1,59 @@
+import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterEach } from 'vitest';
 import { startDemoHost, type RunningDemoHost } from '../src/host';
 import { DemoSession } from '../src/session';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const tsxLoader = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
+const children: ChildProcess[] = [];
 
 const dirs: string[] = [];
 const hosts: RunningDemoHost[] = [];
 
 afterEach(async () => {
   while (hosts.length > 0) await hosts.pop()!.close();
+  for (const child of children.splice(0)) {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
+  }
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
+
+export async function spawnCli(dataDir: string): Promise<{ baseUrl: string; child: ChildProcess }> {
+  const child = spawn(
+    process.execPath,
+    [
+      '--import',
+      tsxLoader,
+      join(here, '../src/cli.ts'),
+      '--data-dir',
+      dataDir,
+      '--port',
+      '0',
+      '--test',
+    ],
+    { cwd: join(here, '..'), stdio: ['ignore', 'pipe', 'pipe'] }
+  );
+  children.push(child);
+  const output = await new Promise<string>((resolve, reject) => {
+    let text = '';
+    child.stdout?.on('data', (chunk) => {
+      text += String(chunk);
+      if (text.includes('listening')) resolve(text);
+    });
+    child.on('error', reject);
+    child.on('exit', (code) => {
+      if (!text.includes('listening')) reject(new Error(`cli-exit-${code}:${text}`));
+    });
+  });
+  const match = output.match(/e2ee-demo listening (http:\/\/127\.0\.0\.1:\d+)/);
+  if (!match?.[1]) throw new Error(`cli-url-missing:${output}`);
+  return { baseUrl: match[1], child };
+}
 
 export function tempDir(prefix = 'e2ee-demo-'): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));

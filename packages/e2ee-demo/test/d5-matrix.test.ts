@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { encodeSignedRecord, signingBytesForBody } from '@lody/e2ee-core/ledger';
 import { generateDevice } from '../src/device';
 import { CONTROL_STREAM, DEVICE_HEADER } from '../src/protocol';
-import { launchHost, session } from './helpers';
+import { launchHost, session, spawnCli, tempDir } from './helpers';
+import { DemoSession } from '../src/session';
 
 describe('D5 fault matrix', () => {
   it('CAS conflict does not re-sign or change the losing record bytes', async () => {
@@ -137,5 +138,40 @@ describe('D5 fault matrix', () => {
       body: new Uint8Array([1, 2, 3]),
     });
     expect(response.status === 401 || response.status === 403).toBe(true);
+  });
+
+  it('killing Node after a committed CAS recovers the same head from disk', async () => {
+    const dir = tempDir('e2ee-demo-kill-');
+    const first = await spawnCli(dir);
+    const alice = new DemoSession({
+      baseUrl: first.baseUrl,
+      clientDir: tempDir('e2ee-demo-kill-alice-'),
+      account: 'alice',
+      testMode: true,
+    });
+    await alice.start();
+    await alice.createSpace();
+    await fetch(`${first.baseUrl}/v1/failpoints`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'kill-after-commit' }),
+    });
+    const extra = await generateDevice();
+    await alice.admitDevice(extra, 'personal', false).catch(() => undefined);
+    await new Promise<void>((resolve) => {
+      if (first.child.exitCode !== null) resolve();
+      else first.child.on('exit', () => resolve());
+    });
+    const second = await spawnCli(dir);
+    const alice2 = new DemoSession({
+      baseUrl: second.baseUrl,
+      clientDir: alice.clientDir,
+      account: 'alice',
+      testMode: true,
+      device: alice.device,
+    });
+    await alice2.start();
+    await alice2.adoptGenesis(alice.genesisHex!);
+    expect((await alice2.readLedger()).length).toBe(2);
   });
 });
