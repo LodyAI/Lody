@@ -25,6 +25,7 @@ Replay 不新增用量，模型切换与压缩不清零。新计量生命周期�
 
 CLI 合并待发累计快照，包括 Grok。失败 payload 保留原归属直至确认，
 并发 flush 共用发送过程。delta 不再加到总量，也不传给旧持久化端点。
+持久化仅投影 Token/费用字段及顶层 contextWindow；不转发搜索请求次数或模型级 contextWindow。
 Codex 旧压缩偏移在同一进程内跨成功 flush 保留；带 delta 的 adapter 自有累计值不走
 该兼容路径。没有模型归属的 Codex thread 总量使用明确的未归属桶，不能使用当前 UI
 模型或其价格。Claude query 和 Kimi activation 快照可提供 delta，而不改变累计范围。

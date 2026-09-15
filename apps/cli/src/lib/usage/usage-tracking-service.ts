@@ -66,6 +66,19 @@ const cloneUsageUpdate = (update: SessionUsageUpdate): SessionUsageUpdate => ({
     : {}),
 });
 
+// Core can carry fields the legacy persistence endpoint does not accept.
+const persistedCounters = (usage: SessionUsageUpdate['usage']) => {
+  const counters: SessionUsageUpdate['usage'] = {
+    inputTokens: usage.inputTokens,
+    outputTokens: usage.outputTokens,
+    cacheReadInputTokens: usage.cacheReadInputTokens,
+  };
+  for (const key of ['cacheCreationInputTokens', 'reasoningOutputTokens', 'costUSD'] as const) {
+    if (usage[key] !== undefined) counters[key] = usage[key];
+  }
+  return counters;
+};
+
 const mergeModelUsage = (
   base: SessionUsageUpdate['modelUsage'],
   delta: SessionUsageUpdate['modelUsage']
@@ -90,7 +103,6 @@ const mergeModelUsage = (
         (prev?.cacheCreationInputTokens ?? 0) + (usage.cacheCreationInputTokens ?? 0),
       reasoningOutputTokens:
         (prev?.reasoningOutputTokens ?? 0) + (usage.reasoningOutputTokens ?? 0),
-      webSearchRequests: (prev?.webSearchRequests ?? 0) + (usage.webSearchRequests ?? 0),
       ...((!prev || prev.costUSD !== undefined) && usage.costUSD !== undefined
         ? { costUSD: (prev?.costUSD ?? 0) + usage.costUSD }
         : {}),
@@ -114,7 +126,6 @@ const mergeUsageUpdate = (
       (base.usage.cacheCreationInputTokens ?? 0) + (delta.usage.cacheCreationInputTokens ?? 0),
     reasoningOutputTokens:
       (base.usage.reasoningOutputTokens ?? 0) + (delta.usage.reasoningOutputTokens ?? 0),
-    webSearchRequests: (base.usage.webSearchRequests ?? 0) + (delta.usage.webSearchRequests ?? 0),
     ...(base.usage.costUSD !== undefined && delta.usage.costUSD !== undefined
       ? { costUSD: base.usage.costUSD + delta.usage.costUSD }
       : {}),
@@ -211,8 +222,18 @@ export class UsageTrackingService {
         const result = await this.client.mutation(api.usage.upsertSessionUsageFromCli, {
           cliToken: this.cliToken,
           ...meta,
-          usage: update.usage,
-          modelUsage: update.modelUsage,
+          usage: {
+            ...persistedCounters(update.usage),
+            ...(update.usage.contextWindow !== undefined
+              ? { contextWindow: update.usage.contextWindow }
+              : {}),
+          },
+          modelUsage: Object.fromEntries(
+            Object.entries(update.modelUsage).map(([model, usage]) => [
+              model,
+              persistedCounters(usage),
+            ])
+          ),
         });
         if (!result.success) throw new Error('Usage persistence was not acknowledged');
         state.unacknowledged = null;

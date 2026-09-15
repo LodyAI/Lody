@@ -116,6 +116,14 @@ target is absent here; the receiver edit is limited to provider eligibility.
 
 ## Review follow-up: scoped repairs
 
+2026-09-15 endpoint-field correction: legacy persistence rejects aggregate
+webSearchRequests and model-level contextWindow. Project token/cost fields at the
+delivery boundary, keeping contextWindow only at aggregate scope. Search counts
+are intentionally omitted at both scopes per product direction; Core remains
+unchanged. A strict synthetic transport field validator exposed three failures
+before the fix (including both legacy compaction tests); all 16 delivery tests
+pass after projection, preserving all token buckets and known/unknown cost.
+
 ### Delivery ablation (2026-09-15)
 
 The real delivery service ran in the existing isolated test harness (only transport

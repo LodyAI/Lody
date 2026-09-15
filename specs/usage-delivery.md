@@ -31,6 +31,8 @@ actual request route, not the currently selected UI model.
 The CLI coalesces cumulative snapshots, including Grok. Failed payloads retain
 their attribution until acknowledged; concurrent flushes share one drain. Delta
 is neither added to totals nor forwarded to the legacy persistence endpoint.
+Persistence projects only token/cost fields and aggregate contextWindow; search
+request counts and model-level contextWindow are not forwarded.
 Codex's legacy compaction offsets survive successful flushes in the same process;
 adapter-owned cumulative updates carrying delta bypass that compatibility path.
 Codex thread totals without model attribution use an explicit unattributed bucket,

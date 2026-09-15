@@ -50,6 +50,25 @@ describe('usage delivery', () => {
   beforeEach(() => {
     persisted = [];
     deliver = async (payload) => {
+      // Mirror the legacy endpoint's strict field sets, including the different
+      // aggregate/model scopes. Extra fields reject the whole mutation.
+      const counters = [
+        'inputTokens',
+        'outputTokens',
+        'cacheReadInputTokens',
+        'cacheCreationInputTokens',
+        'reasoningOutputTokens',
+        'costUSD',
+      ];
+      const assertFields = (row: object, allowed: string[]) => {
+        if (Object.keys(row).some((key) => !allowed.includes(key))) {
+          throw new Error('Unexpected usage field');
+        }
+      };
+      assertFields(payload.usage, [...counters, 'contextWindow']);
+      for (const row of Object.values(payload.modelUsage ?? {})) {
+        assertFields(row, [...counters, 'webSearchRequests']);
+      }
       persisted.push(structuredClone(payload));
       return { success: true };
     };
@@ -63,6 +82,29 @@ describe('usage delivery', () => {
     });
   });
   afterEach(() => vi.restoreAllMocks());
+
+  it('projects provider fields without losing token buckets, known costs or unknown costs', async () => {
+    const report = input(100);
+    report.update.usage.webSearchRequests = 2;
+    report.update.usage.contextWindow = 128000;
+    report.update.usage.costUSD = 0.25;
+    report.update.modelUsage = {
+      synthetic: { ...report.update.usage },
+      unknown: { ...input(50).update.usage, contextWindow: 64000 },
+    };
+    service.recordSessionUsageUpdate(report);
+    await service.flushSessionUsage('s');
+    expect(persisted).toHaveLength(1);
+    expect(persisted[0]?.usage).toEqual({
+      ...input(100).update.usage,
+      contextWindow: 128000,
+      costUSD: 0.25,
+    });
+    expect(persisted[0]?.modelUsage).toEqual({
+      synthetic: { ...input(100).update.usage, costUSD: 0.25 },
+      unknown: input(50).update.usage,
+    });
+  });
 
   it.each(['claude', 'codex', 'kimi', 'grok', 'deepseek'] as const)(
     'delivers %s cumulative snapshots without adding optional delta',

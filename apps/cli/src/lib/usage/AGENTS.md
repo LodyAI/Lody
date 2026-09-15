@@ -4,6 +4,8 @@
 
 - Accounting uses Core cumulative `modelUsage`; optional `delta` is already included.
   Coalesce pending snapshots, including Grok; never add delta to cumulative totals.
+- Project persistence payloads to token/cost fields; only aggregate usage retains
+  contextWindow. Do not forward webSearchRequests or other provider-only fields.
 - Usage eligibility follows the builtin catalog, including `deepseek`, not the
   managed-runtime download catalog. Local composition still has no cloud service.
 - Failed delivery retains the exact payload ahead of newer updates. Concurrent flushes
