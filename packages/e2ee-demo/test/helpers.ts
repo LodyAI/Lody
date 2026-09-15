@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -22,6 +22,16 @@ afterEach(async () => {
   }
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
+
+export function buildUi(): void {
+  const result = spawnSync('pnpm', ['exec', 'vite', 'build'], {
+    cwd: join(here, '..'),
+    encoding: 'utf8',
+  });
+  if (result.status !== 0) {
+    throw new Error(`vite-build-failed:${result.stdout}${result.stderr}`);
+  }
+}
 
 export async function spawnCli(dataDir: string): Promise<{ baseUrl: string; child: ChildProcess }> {
   const child = spawn(

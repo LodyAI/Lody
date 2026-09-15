@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createRecoveryDeviceSecret, importRecoveryDevice } from '@lody/e2ee-core';
 import { exportBackup, restoreBackup } from '../src/backup';
-import { readLoro, writeLoro } from '../src/content-session';
+import { readLoro, uploadLoroSnapshot, writeLoro } from '../src/content-session';
 import { generateDevice } from '../src/device';
 import { launchHost, session } from './helpers';
 
@@ -73,5 +73,24 @@ describe('D4 revoke, rotation, history, file restore', () => {
     await expect(writeLoro(bob, 'after-revoke')).rejects.toThrow();
     await alice.readLedger();
     expect(await readLoro(alice)).toContain('bob-history');
+  });
+
+  it('keeps an admitted content snapshot readable after the author is removed', async () => {
+    const host = await launchHost();
+    const alice = await session(host, 'alice');
+    const bob = await session(host, 'bob');
+    await alice.createSpace();
+    const join = await bob.requestJoin(alice.genesisHex!);
+    const approved = await alice.approveJoin(join);
+    await alice.deliverEpochKey(bob.device, 0);
+    const frames = await bob.readKeyFrames();
+    await bob.receiveEpochKey(alice.device, 0, frames[0]!);
+    await bob.readLedger();
+    await uploadLoroSnapshot(bob, 'snapshot-from-bob');
+    expect((await alice.removeMember(approved.membershipId)).status).toBe('committed');
+    await bob.readLedger();
+    await expect(uploadLoroSnapshot(bob, 'new-after-revoke')).rejects.toThrow();
+    await alice.readLedger();
+    expect(await readLoro(alice)).toContain('snapshot-from-bob');
   });
 });

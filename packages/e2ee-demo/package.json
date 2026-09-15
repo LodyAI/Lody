@@ -8,7 +8,7 @@
     "./host": "./src/host.ts"
   },
   "scripts": {
-    "start": "tsx src/cli.ts",
+    "start": "vite build && tsx src/cli.ts",
     "typecheck": "tsgo --noEmit",
     "test": "vitest run",
     "test:browser": "LODY_E2EE_DEMO_BROWSER=1 vitest run test/d2-browser.test.ts",

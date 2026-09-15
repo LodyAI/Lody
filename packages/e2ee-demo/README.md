@@ -25,9 +25,16 @@ pnpm demo:e2ee
 
 Equivalent: `pnpm --filter @lody/e2ee-demo start`.
 
+`start` builds the React UI then serves it from the same loopback host as the
+API. Two browser origins/contexts keep separate device keys.
+
 Defaults: loopback `http://127.0.0.1:8788`, data directory `./.e2ee-demo-data`
 (created next to the current working directory). SIGINT/SIGTERM close the host
 and the Riverrun process this command started.
+
+Flow: Connect (demo account picker) → Create space or paste genesis and Request
+join → Approve → Publish digest note → Compare (label is `checked` only on
+`agree`; mismatch is `inconsistent`, never `checked`).
 
 ```sh
 pnpm --filter @lody/e2ee-demo start -- --data-dir /abs/path --port 8788

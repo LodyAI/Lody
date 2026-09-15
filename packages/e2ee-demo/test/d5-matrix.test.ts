@@ -1,9 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { encodeSignedRecord, signingBytesForBody } from '@lody/e2ee-core/ledger';
+import { exportBackup, restoreBackup } from '../src/backup';
+import {
+  loroTailOffset,
+  putLoroSnapshot,
+  sealLoroSnapshot,
+  writeLoro,
+} from '../src/content-session';
 import { generateDevice } from '../src/device';
 import { CONTROL_STREAM, DEVICE_HEADER } from '../src/protocol';
 import { launchHost, session, spawnCli, tempDir } from './helpers';
 import { DemoSession } from '../src/session';
+import { createRecoveryDeviceSecret } from '@lody/e2ee-core';
 
 describe('D5 fault matrix', () => {
   it('CAS conflict does not re-sign or change the losing record bytes', async () => {
@@ -203,5 +211,40 @@ describe('D5 fault matrix', () => {
     await alice2.start();
     await alice2.adoptGenesis(alice.genesisHex!);
     expect((await alice2.readLedger()).length).toBe(2);
+  });
+
+  it('rejects a different ciphertext at an already-admitted snapshot offset', async () => {
+    const host = await launchHost();
+    const alice = await session(host, 'alice');
+    await alice.createSpace();
+    await alice.readLedger();
+    await writeLoro(alice, 'snap-base');
+    const offset = await loroTailOffset(alice);
+    const first = await sealLoroSnapshot(alice, offset, 'cipher-a');
+    const second = await sealLoroSnapshot(alice, offset, 'cipher-b');
+    expect(first).not.toEqual(second);
+    const accepted = await putLoroSnapshot(alice, offset, first);
+    expect(accepted.ok).toBe(true);
+    const conflict = await putLoroSnapshot(alice, offset, second);
+    expect(conflict.ok).toBe(false);
+    expect(await conflict.text()).toContain('snapshot-identity-conflict');
+    const retry = await putLoroSnapshot(alice, offset, first);
+    expect(retry.ok).toBe(true);
+  });
+
+  it('fails closed on a corrupted recovery backup', async () => {
+    const host = await launchHost();
+    const alice = await session(host, 'alice');
+    await alice.createSpace();
+    const recovery = await createRecoveryDeviceSecret();
+    const file = await exportBackup(alice, {
+      secret: recovery.secret,
+      publicKey: recovery.publicKey,
+    });
+    const tampered = file.slice();
+    const last = tampered.length - 8;
+    tampered[last] = (tampered[last] ?? 0) ^ 0xff;
+    const victim = await session(host, 'alice-restored');
+    await expect(restoreBackup(victim, tampered)).rejects.toThrow();
   });
 });

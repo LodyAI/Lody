@@ -4,6 +4,7 @@ import {
   InMemoryRemoteCursorStore,
   StreamsCrdt,
   createLoroDocAdapter,
+  type PayloadProtectionContext,
 } from '@loro-dev/streams-crdt/loro';
 import {
   StreamsCrdt as FlockStreamsCrdt,
@@ -137,4 +138,83 @@ export async function readFlock(session: DemoSession): Promise<string> {
   );
   await crdt.close();
   return value;
+}
+
+function wrapSnapshotEnvelope(header: Uint8Array, sealed: Uint8Array): Uint8Array {
+  const prefix = new Uint8Array(10 + header.byteLength);
+  prefix.set([0x4c, 0x53, 0x43, 0x45, 2, 2]);
+  new DataView(prefix.buffer).setUint16(6, header.byteLength);
+  prefix.set(header, 10);
+  const body = new Uint8Array(prefix.byteLength + sealed.byteLength);
+  body.set(prefix);
+  body.set(sealed, prefix.byteLength);
+  return body;
+}
+
+export async function sealLoroSnapshot(
+  session: DemoSession,
+  offset: string,
+  plaintext: string
+): Promise<Uint8Array> {
+  const sealed = await provider(session, 'loro', 'loro').seal({
+    plaintext: new TextEncoder().encode(plaintext),
+    context: {
+      protocol: 'loro-streams-crdt-payload-protection',
+      version: 2,
+      kind: 'snapshot',
+      continuationOffset: offset,
+    } as PayloadProtectionContext,
+    additionalData: () => new Uint8Array([1, 2, 3]),
+  });
+  return wrapSnapshotEnvelope(sealed.header, sealed.sealed);
+}
+
+export async function putLoroSnapshot(
+  session: DemoSession,
+  offset: string,
+  body: Uint8Array
+): Promise<Response> {
+  return session.fetch(
+    `/ds/${session.genesisHex}/${LORO_STREAM}/snapshot/${encodeURIComponent(offset)}`,
+    {
+      method: 'PUT',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: Buffer.from(body),
+    }
+  );
+}
+
+export async function loroTailOffset(session: DemoSession): Promise<string> {
+  const response = await session.fetch(`/ds/${session.genesisHex}/${LORO_STREAM}`, {
+    method: 'HEAD',
+  });
+  return response.headers.get('Stream-Next-Offset') ?? '00000000000000000000';
+}
+
+export async function uploadLoroSnapshot(session: DemoSession, text: string): Promise<void> {
+  const doc = new LoroDoc();
+  const crdt = new StreamsCrdt({
+    streamUrl: `${session.baseUrl}/ds/${session.genesisHex}/${LORO_STREAM}`,
+    adapter: createLoroDocAdapter(doc),
+    payloadProtectionRequired: true,
+    snapshotUpload: { canUpload: async () => true },
+    e2ee: {
+      provider: provider(session, 'loro', 'loro'),
+      readPolicy: 'encrypted-only',
+      writePolicy: 'encrypt',
+    },
+    fetch: (input, init) => session.fetch(input, init),
+  });
+  const created = await crdt.createStream();
+  if (!created.ok) {
+    /* already exists */
+  }
+  doc.getText('text').insert(0, text);
+  doc.commit();
+  const appended = await crdt.appendWriteOnly();
+  if (!appended.ok) throw new Error(`loro-append-failed:${JSON.stringify(appended)}`);
+  const uploaded = await crdt.uploadSnapshotForTesting();
+  if (!uploaded.ok) throw new Error(`loro-snapshot-failed:${JSON.stringify(uploaded)}`);
+  await crdt.close();
+  doc.free();
 }

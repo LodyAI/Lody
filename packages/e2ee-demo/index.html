@@ -19,38 +19,16 @@
       }
       output,
       pre {
+        display: block;
         white-space: pre-wrap;
         background: #f4f4f4;
         padding: 0.75rem;
+        margin: 0.4rem 0;
       }
     </style>
   </head>
   <body>
-    <h1>Independent E2EE demo</h1>
-    <p>
-      Local-only. The account picker is not a product login. Device keys, signatures, invite
-      approval and authorization are real. Isolated browser contexts must not share keys.
-    </p>
-    <label
-      >Account
-      <select id="account">
-        <option>alice</option>
-        <option>bob</option>
-        <option>carol</option>
-      </select>
-    </label>
-    <button id="health">Check host</button>
-    <output id="status">disconnected</output>
-    <pre id="log"></pre>
-    <script>
-      const status = document.getElementById('status');
-      const log = document.getElementById('log');
-      document.getElementById('health').onclick = async () => {
-        const ready = await fetch('/readyz');
-        const body = await ready.json();
-        status.textContent = ready.ok ? 'connected' : 'failed';
-        log.textContent = JSON.stringify(body, null, 2);
-      };
-    </script>
+    <div id="root"></div>
+    <script type="module" src="/src/ui/main.tsx"></script>
   </body>
 </html>
