@@ -256,6 +256,16 @@ export function setupApplicationMenu(options: SetupApplicationMenuOptions): void
   buildAndSetMenu()
 }
 
+/**
+ * Translate into the product language the menus are currently drawn in. Exposed
+ * so the window context menu (`context-menu.ts`) speaks that same language
+ * without owning a second copy of the locale state.
+ */
+export function translateMenu(key: string, fallback: string): string {
+  const resources = localeResources[currentLocale] ?? localeResources.en
+  return resources[key] ?? localeResources.en[key] ?? fallback
+}
+
 export function setMenuLanguage(locale: string): void {
   if (locale === 'en' || locale === 'zh_CN') {
     currentLocale = locale

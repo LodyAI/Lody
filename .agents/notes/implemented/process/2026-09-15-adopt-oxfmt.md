@@ -20,12 +20,15 @@ The root Oxfmt configuration preserves the previous general style and Electron's
 semicolon-free override. CLI, Electron, and cloud-api formatting commands use it.
 Components run `tsr generate && oxfmt src/routeTree.gen.ts` and declare Oxfmt directly
 so the command does not depend on installation of the public root package when
-embedded in a parent workspace. That parent must refresh its dependency lockfile
+embedded in a parent workspace. CLI, Electron, and cloud-api likewise declare
+Oxfmt locally instead of depending on an absent parent binary. That parent must refresh its dependency lockfile
 when adopting this revision.
 
 A Prettier-only route normalization fix was possible, but would retain a second
 formatter after adopting the community change. Electron's Prettier dependency is
 retained for its existing ESLint compatibility config, not for its format command.
+The toolkit enables `prettier/prettier` by default; explicitly disable that rule so
+editor ESLint fixes cannot reformat Oxfmt output with a second formatter.
 Source reformatting is mechanical; runtime behavior and ACP submodule pointers are
 unchanged. The original community commits remain in the branch history.
 

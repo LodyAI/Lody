@@ -100,7 +100,8 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
   menu, clipboard, and save dialog here because the renderer holds the only copy
   of the image (a `blob:` URL main cannot download). Bytes cross once, after the
   menu selection. Naming/filter logic stays in `image-export-core.ts` so it runs
-  under `node --test` without the `electron` runtime.
+  under `node --test` without the `electron` runtime. `context-menu.ts` draws every
+  other right-click and yields to it on images.
 
 ## Local file resources
 

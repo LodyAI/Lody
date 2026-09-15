@@ -17,10 +17,13 @@ ACP 子模块仍独立管理工具；本次不做全仓格式重排，也不恢�
 根 Oxfmt 配置保留原有通用风格，以及 Electron 不使用分号的覆盖规则。
 CLI、Electron 和 cloud-api 的格式化命令使用该配置。
 组件包执行 `tsr generate && oxfmt src/routeTree.gen.ts`，并直接声明 Oxfmt 依赖，
-确保嵌入父工作区时不依赖公共根包被安装。父工作区采用此版本时须同步依赖锁文件。
+确保嵌入父工作区时不依赖公共根包被安装。CLI、Electron 和 cloud-api 同样直接
+声明 Oxfmt，不能依赖不存在的父级命令。父工作区采用此版本时须同步依赖锁文件。
 
 也可以仅用 Prettier 规范化路由树，但采用社区改动后会继续保留第二套格式化工具。
 Electron 暂时保留 Prettier 依赖以兼容现有 ESLint 配置，不再用于格式化命令。
+工具包默认启用 `prettier/prettier`，因此显式关闭该规则，避免编辑器的 ESLint
+自动修复再次使用另一套格式化工具改写 Oxfmt 输出。
 源码改动仅为机械格式化，不改变运行时行为或 ACP 子模块指针。
 分支历史保留了原始社区提交。
 
