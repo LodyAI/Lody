@@ -89,6 +89,180 @@ const ACP_NOTIFICATION_FIXTURES = [
 ] as const;
 
 describe('acp history apply', () => {
+  const taskUpdate = (
+    sessionUpdate: 'tool_call' | 'tool_call_update',
+    status: 'in_progress' | 'completed' | 'failed',
+    task: Record<string, unknown>
+  ) =>
+    makeNotification({
+      sessionUpdate,
+      toolCallId: 'task:t1',
+      title: 'task',
+      kind: 'think',
+      status,
+      _meta: { lody: { task: { version: 1, taskId: 't1', status, ...task } } },
+    });
+
+  it('preserves task identity, purpose, and background state across activity updates', () => {
+    const history = applyNotificationOnHistory(
+      [],
+      [
+        taskUpdate('tool_call', 'in_progress', {
+          kind: 'background',
+          actor: 'my-workflow',
+          description: 'Audit history writes',
+        }),
+        taskUpdate('tool_call_update', 'in_progress', {
+          kind: 'subagent',
+          actor: 'Claude task',
+          description: 'Check: checker',
+          lastToolName: 'checker',
+          usage: { totalTokens: 26781, toolUses: 2 },
+        }),
+        taskUpdate('tool_call_update', 'completed', {
+          kind: 'subagent',
+          actor: 'Claude task',
+          summary: 'done',
+        }),
+      ]
+    );
+    const task = history[0]?.items?.find((item) => item.type === 'subagent_task');
+
+    expect(task).toMatchObject({
+      taskId: 't1',
+      status: 'completed',
+      taskKind: 'background',
+      isBackgrounded: true,
+      actor: 'my-workflow',
+      description: 'Audit history writes',
+      lastToolName: 'checker',
+      usage: { totalTokens: 26781, toolUses: 2 },
+      summary: 'done',
+    });
+  });
+
+  it.each(['completed', 'failed'] as const)(
+    'ignores late progress after a %s task settled',
+    (settledStatus) => {
+      const history = applyNotificationOnHistory(
+        [],
+        [
+          taskUpdate('tool_call', 'in_progress', {
+            kind: 'subagent',
+            actor: 'Explore',
+            description: 'Trace persistence',
+          }),
+          taskUpdate('tool_call_update', settledStatus, {
+            kind: 'subagent',
+            summary: 'settled',
+          }),
+          taskUpdate('tool_call_update', 'in_progress', {
+            kind: 'background',
+            actor: 'Claude task',
+            description: 'running Grep',
+            lastToolName: 'Grep',
+          }),
+        ]
+      );
+      const task = history[0]?.items?.find((item) => item.type === 'subagent_task');
+
+      expect(task).toMatchObject({
+        taskId: 't1',
+        status: settledStatus,
+        taskKind: 'subagent',
+        actor: 'Explore',
+        description: 'Trace persistence',
+        summary: 'settled',
+      });
+      expect(task).not.toHaveProperty('lastToolName');
+    }
+  );
+
+  it.each(['task_started', 'task_updated'] as const)(
+    'allows an explicit Lody %s event to reopen a settled task',
+    (event) => {
+      const settled = applyNotificationOnHistory(
+        [],
+        [
+          taskUpdate('tool_call', 'in_progress', {
+            kind: 'subagent',
+            event: 'task_started',
+            actor: 'Explore',
+            description: 'Trace persistence',
+          }),
+          taskUpdate('tool_call_update', 'completed', {
+            kind: 'subagent',
+            event: 'task_notification',
+            summary: 'done',
+          }),
+        ]
+      );
+      const resumed = applyNotificationOnHistory(settled, [
+        taskUpdate(event === 'task_started' ? 'tool_call' : 'tool_call_update', 'in_progress', {
+          kind: 'subagent',
+          event,
+          actor: 'placeholder',
+          description: 'activity label',
+          lastToolName: 'Read',
+        }),
+      ]);
+      const task = resumed[0]?.items?.find((item) => item.type === 'subagent_task');
+
+      expect(task).toMatchObject({
+        taskId: 't1',
+        status: 'in_progress',
+        event,
+        actor: 'Explore',
+        description: 'Trace persistence',
+        lastToolName: 'Read',
+      });
+    }
+  );
+
+  it('allows an explicit Codex resumeAgent update to reopen a settled task', () => {
+    const settled = applyNotificationOnHistory(
+      [],
+      [
+        makeNotification({
+          sessionUpdate: 'tool_call',
+          toolCallId: 'spawn-agent-1',
+          title: 'spawnAgent',
+          status: 'completed',
+          rawInput: {
+            prompt: 'Trace persistence',
+            senderThreadId: 'root',
+            receiverThreadIds: ['agent-1'],
+            agentsStates: { 'agent-1': { status: 'completed', message: 'done' } },
+            status: 'completed',
+          },
+        }),
+      ]
+    );
+    const resumed = applyNotificationOnHistory(settled, [
+      makeNotification({
+        sessionUpdate: 'tool_call',
+        toolCallId: 'resume-agent-1',
+        title: 'resumeAgent',
+        status: 'completed',
+        rawInput: {
+          prompt: null,
+          senderThreadId: 'root',
+          receiverThreadIds: ['agent-1'],
+          agentsStates: { 'agent-1': { status: 'running', message: null } },
+          status: 'completed',
+        },
+      }),
+    ]);
+    const task = resumed[0]?.items?.find((item) => item.type === 'subagent_task');
+
+    expect(task).toMatchObject({
+      taskId: 'agent-1',
+      status: 'in_progress',
+      event: 'task_updated',
+      description: 'Trace persistence',
+    });
+  });
+
   it('persists the provider turn id on the assistant entry', () => {
     const history = applyNotificationOnHistory(
       [],
