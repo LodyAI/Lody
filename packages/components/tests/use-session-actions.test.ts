@@ -1,3 +1,4 @@
+import { createSessionSendResources, type SessionSendResources } from '../src/lib/session-send-resources';
 import { applyHistoryAction } from '../../shared/src/session-data/history-actions';
 import type { HistoryAction, SessionEntry } from '@lody/shared/session-data';
 // @vitest-environment jsdom
@@ -139,6 +140,8 @@ const sessionDataOver = (history: unknown[]) => ({
   },
 });
 
+const sendResourceOwners = new Set<SessionSendResources>();
+
 const createRuntime = (
   overrides: Partial<
     Pick<WorkspaceRuntime, 'ensureDocStream' | 'repo' | 'workspaceId' | 'workspaceSlug' | 'writer'>
@@ -198,7 +201,7 @@ const createRuntime = (
       reorderSessionMessages: vi.fn(async () => undefined),
     } as unknown as WorkspaceRuntime['writer']);
 
-  return {
+  const runtime = {
     workspaceSlug: overrides.workspaceSlug ?? 'workspace-slug',
     workspaceId: overrides.workspaceId ?? ('workspace-1' as WorkspaceId),
     repo,
@@ -216,6 +219,13 @@ const createRuntime = (
       })
     ),
   } as unknown as WorkspaceRuntime;
+  const resources = createSessionSendResources({
+    acquire: (sessionId) => runtime.withSessionStore(sessionId, (store) => store),
+    releaseRef: () => {},
+  });
+  sendResourceOwners.add(resources);
+  Object.defineProperty(runtime, 'sendResources', { value: resources });
+  return runtime;
 };
 
 const createSessionPayload = (sessionId: SessionId): SessionToCreate =>
@@ -315,6 +325,8 @@ describe('useSessionActions', () => {
   });
 
   afterEach(async () => {
+    await Promise.all([...sendResourceOwners].map((resources) => resources.dispose()));
+    sendResourceOwners.clear();
     if (root) {
       await act(async () => {
         root?.unmount();
