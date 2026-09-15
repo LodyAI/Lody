@@ -17,6 +17,19 @@ mobile surfaces. Background for the rules below:
 - Prefer shared primitives from `src/components/ui` over private replacements. Editable
   controls fill with `bg-input-field`, never `bg-input`; gray means disabled
   (`disabled:bg-muted`). Primitive rules: [src/ui/AGENTS.md](src/ui/AGENTS.md).
+- Collapsed local-project and GitHub-repository rows count fresh Session/child-Tab
+  activity (including pinned Sessions) at the row end, before actions. Choose the
+  project primary by permission > unread > active, except that when every unread
+  Session is also active, active is the single-session primary. Preserve overlapping
+  status dimensions when a higher-priority project state is present so a mixed
+  remainder remains distinguishable.
+  Exclude the primary Session ids before choosing the secondary: one remaining type
+  uses its icon; multiple types use `+N` with their unique Session count (`+1` is
+  valid). Require ids for nested/duplicate inputs.
+  Omit single counts unless the second item is mixed `+N`; initializing uses running. Expanded/removing groups hide the
+  aggregate. Preserve disclosure and Session end-slot status.
+  Reserve two fixed activity slots; icons/plus signs and counts align in separate
+  columns even when single counts or the secondary item are hidden.
 - `PlatformContext` intentionally has no default. Cloud-shaped component tests use
   `tests/test-platform.tsx`'s `TestCloudPlatformProvider`; plain-module tests install
   and remove the exact platform port they need.

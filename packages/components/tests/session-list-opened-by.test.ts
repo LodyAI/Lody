@@ -160,7 +160,11 @@ describe('SessionList opened-by rendering', () => {
     vi.restoreAllMocks();
   });
 
-  function renderList(sessions: SessionListRow[], collapsed: Record<string, boolean> = {}) {
+  function renderList(
+    sessions: SessionListRow[],
+    collapsed: Record<string, boolean> = {},
+    repoCollapsed = false
+  ) {
     const store = createStore();
     store.set(sidebarCollapsedOpenedBySessionsAtom, collapsed);
     const onSelectSession = vi.fn();
@@ -175,7 +179,7 @@ describe('SessionList opened-by rendering', () => {
           { store },
           React.createElement(SessionList, {
             sessions,
-            repos: [{ repoFullName: REPO, collapsed: false }],
+            repos: [{ repoFullName: REPO, collapsed: repoCollapsed }],
             onSelectSession,
           })
         )
@@ -184,6 +188,17 @@ describe('SessionList opened-by rendering', () => {
 
     return { onSelectSession, store };
   }
+
+  it('hides repository aggregation while the individual Session rows are expanded', () => {
+    renderList([
+      makeRow({ sessionId: 'running', isWorking: true }),
+      makeRow({ sessionId: 'unread', hasUnreadMessages: true }),
+    ]);
+
+    expect(container?.querySelector('[data-sidebar-repo-activity]')).toBeNull();
+    expect(container?.querySelector('[data-sidebar-session-id="running"]')).not.toBeNull();
+    expect(container?.querySelector('[data-sidebar-session-id="unread"]')).not.toBeNull();
+  });
 
   function depthOf(sessionId: string): string | null | undefined {
     const row = container?.querySelector(`[data-sidebar-session-id="${sessionId}"]`);
