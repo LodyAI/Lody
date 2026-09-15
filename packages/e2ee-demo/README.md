@@ -33,8 +33,10 @@ Defaults: loopback `http://127.0.0.1:8788`, data directory `./.e2ee-demo-data`
 and the Riverrun process this command started.
 
 Flow: Connect (demo account picker) → Create space or paste genesis and Request
-join → Approve → Publish digest note → Compare (label is `checked` only on
-`agree`; mismatch is `inconsistent`, never `checked`).
+join → Approve → Deliver / receive epoch key → Write/read Loro and Flock →
+Upload or bootstrap snapshot → Publish digest note → Compare (label is
+`checked` only on `agree`; mismatch is `inconsistent`, never `checked`) →
+Revoke / rotate → Export backup file and restore it in a new isolated context.
 
 ```sh
 pnpm --filter @lody/e2ee-demo start -- --data-dir /abs/path --port 8788

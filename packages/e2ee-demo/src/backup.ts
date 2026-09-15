@@ -1,63 +1,111 @@
 import {
-  createRecoveryDeviceSecret,
   createRecoveryFile,
-  createUserIdentity,
   importRecoveryDevice,
   openRecoveryBackup,
-  restoreUserIdentity,
   sealRecoveryBackup,
 } from '@lody/e2ee-core';
-import { fromHex, toHex } from './bytes';
-import type { DemoSession } from './session';
+import { asArrayBuffer, fromHex, toHex } from './bytes';
+import type { DemoDevice } from './device';
 
-const DEMO_BACKUP = 'e2ee-demo-backup/v1';
+export interface BackupSession {
+  genesisHex: string | null;
+  epochKeys: Map<number, Uint8Array>;
+  account: string;
+  adoptGenesis(genesisHex: string): Promise<void>;
+}
+
+const DEMO_BACKUP = 'e2ee-demo-backup/v2';
+const DEMO_MATERIAL = 'e2ee-demo-material/v1';
+
+export async function backupFingerprint(recoveryPublicKey: Uint8Array): Promise<string> {
+  return toHex(
+    new Uint8Array(await crypto.subtle.digest('SHA-256', asArrayBuffer(recoveryPublicKey)))
+  );
+}
+
+function encodeMaterial(
+  recoverySecret: Uint8Array,
+  epochs: Map<number, Uint8Array>,
+  genesisHex: string,
+  account: string
+): Uint8Array {
+  const rows = [...epochs.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([epoch, key]) => [epoch, toHex(key)]);
+  return new TextEncoder().encode(
+    JSON.stringify([DEMO_MATERIAL, toHex(recoverySecret), rows, genesisHex, account])
+  );
+}
+
+function decodeMaterial(material: Uint8Array): {
+  recoverySecret: Uint8Array;
+  epochs: Map<number, Uint8Array>;
+  genesisHex: string;
+  account: string;
+} {
+  const fields = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(material)) as unknown;
+  if (!Array.isArray(fields) || fields[0] !== DEMO_MATERIAL)
+    throw new Error('invalid-demo-material');
+  const rows = fields[2] as Array<[number, string]>;
+  const epochs = new Map(rows.map(([epoch, key]) => [epoch, fromHex(key)]));
+  return {
+    recoverySecret: fromHex(String(fields[1])),
+    epochs,
+    genesisHex: String(fields[3]),
+    account: String(fields[4]),
+  };
+}
 
 export async function exportBackup(
-  session: DemoSession,
-  recovery: {
-    secret: Uint8Array;
-    publicKey: Uint8Array;
-  }
+  session: BackupSession,
+  recovery: { secret: Uint8Array; publicKey: Uint8Array }
 ): Promise<Uint8Array> {
-  const created = await createUserIdentity();
+  if (!session.genesisHex) throw new Error('no-space');
   const file = createRecoveryFile();
-  const sealedUser = sealRecoveryBackup(
-    file,
-    { identity: created.identity.fingerprint, revision: 0 },
-    created.privateMaterial
-  );
-  created.privateMaterial.fill(0);
-  const payload = JSON.stringify([
-    DEMO_BACKUP,
-    toHex(file),
-    created.identity.fingerprint,
-    toHex(sealedUser),
-    toHex(recovery.secret),
-    toHex(recovery.publicKey),
+  const fingerprint = await backupFingerprint(recovery.publicKey);
+  const material = encodeMaterial(
+    recovery.secret,
+    session.epochKeys,
     session.genesisHex,
-    session.account,
-  ]);
-  return new TextEncoder().encode(payload);
+    session.account
+  );
+  const sealed = sealRecoveryBackup(file, { identity: fingerprint, revision: 0 }, material);
+  material.fill(0);
+  return new TextEncoder().encode(
+    JSON.stringify([DEMO_BACKUP, toHex(file), fingerprint, toHex(sealed)])
+  );
 }
 
 export async function restoreBackup(
-  session: DemoSession,
+  session: BackupSession,
   backup: Uint8Array
 ): Promise<{
   fingerprint: string;
-  recovery: ReturnType<typeof importRecoveryDevice> extends Promise<infer T> ? T : never;
+  recovery: Awaited<ReturnType<typeof importRecoveryDevice>>;
 }> {
   const fields = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(backup)) as unknown;
   if (!Array.isArray(fields) || fields[0] !== DEMO_BACKUP) throw new Error('invalid-demo-backup');
   const file = fromHex(String(fields[1]));
   const fingerprint = String(fields[2]);
-  const sealedUser = fromHex(String(fields[3]));
-  const recoverySecret = fromHex(String(fields[4]));
-  const material = openRecoveryBackup(file, { identity: fingerprint, revision: 0 }, sealedUser);
-  await restoreUserIdentity(material, fingerprint);
-  const recovery = await importRecoveryDevice(recoverySecret);
-  if (typeof fields[6] === 'string' && fields[6].length > 0) await session.adoptGenesis(fields[6]);
+  const sealed = fromHex(String(fields[3]));
+  const material = openRecoveryBackup(file, { identity: fingerprint, revision: 0 }, sealed);
+  const parsed = decodeMaterial(material);
+  material.fill(0);
+  const recovery = await importRecoveryDevice(parsed.recoverySecret);
+  parsed.recoverySecret.fill(0);
+  session.epochKeys = parsed.epochs;
+  await session.adoptGenesis(parsed.genesisHex);
   return { fingerprint, recovery };
 }
 
-export { createRecoveryDeviceSecret, createRecoveryFile };
+export function recoveryAsDevice(
+  recovery: Awaited<ReturnType<typeof importRecoveryDevice>>
+): DemoDevice {
+  return {
+    publicKey: recovery.publicKey,
+    enc: recovery.enc,
+    signing: recovery.recipientKeyPair,
+    encryption: recovery.recipientKeyPair,
+    sign: (bytes) => recovery.sign(bytes),
+  };
+}

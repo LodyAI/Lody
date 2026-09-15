@@ -1,17 +1,35 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { encodeSignedRecord, signingBytesForBody } from '@lody/e2ee-core/ledger';
+import { createRecoveryDeviceSecret } from '@lody/e2ee-core';
+import {
+  encodeSignedRecord,
+  headAttestationSigningBytes,
+  Ledger,
+  possessionSigningBytes,
+  signingBytesForBody,
+} from '@lody/e2ee-core/ledger';
 import { exportBackup, restoreBackup } from '../src/backup';
 import {
+  assertLiveCiphertext,
+  assertSnapshotCiphertext,
+  bootstrapLoroFromSnapshot,
+  editLoro,
   loroTailOffset,
+  loroWriter,
   putLoroSnapshot,
+  readFlock,
+  readLoro,
   sealLoroSnapshot,
+  syncLoro,
+  uploadLoroSnapshot,
+  writeFlock,
   writeLoro,
 } from '../src/content-session';
-import { generateDevice } from '../src/device';
+import { deviceHex, generateDevice } from '../src/device';
 import { CONTROL_STREAM, DEVICE_HEADER } from '../src/protocol';
-import { launchHost, session, spawnCli, tempDir } from './helpers';
+import { fromHex } from '../src/bytes';
+import { findSubarray, frameRecord, launchHost, session, spawnCli, tempDir } from './helpers';
 import { DemoSession } from '../src/session';
-import { createRecoveryDeviceSecret } from '@lody/e2ee-core';
 
 describe('D5 fault matrix', () => {
   it('CAS conflict does not re-sign or change the losing record bytes', async () => {
@@ -246,5 +264,282 @@ describe('D5 fault matrix', () => {
     tampered[last] = (tampered[last] ?? 0) ^ 0xff;
     const victim = await session(host, 'alice-restored');
     await expect(restoreBackup(victim, tampered)).rejects.toThrow();
+  });
+
+  it('rejects a wrong-parent control record without advancing the cursor', async () => {
+    const host = await launchHost();
+    const alice = await session(host, 'alice');
+    await alice.createSpace();
+    const ledger = await alice.readLedger();
+    const extra = await generateDevice();
+    const proposal = ledger.prepare(
+      {
+        type: 'admitDevice',
+        kind: 'personal',
+        signingPublicKey: extra.publicKey,
+        encryptionPublicKey: extra.enc,
+        canManage: false,
+        possessionSignature: await extra.sign(
+          possessionSigningBytes({
+            genesis: fromHex(alice.genesisHex!),
+            signingPublicKey: extra.publicKey,
+            encryptionPublicKey: extra.enc,
+            kind: 'personal',
+            canManage: false,
+          })
+        ),
+      },
+      alice.device.publicKey
+    );
+    const parentAt = findSubarray(proposal.bodyBytes, ledger.head);
+    expect(parentAt).toBeGreaterThanOrEqual(0);
+    const tamperedBody = proposal.bodyBytes.slice();
+    tamperedBody[parentAt] = (tamperedBody[parentAt] ?? 0) ^ 0xff;
+    const record = encodeSignedRecord(
+      tamperedBody,
+      await alice.device.sign(signingBytesForBody(tamperedBody))
+    );
+    const response = await fetch(
+      `${host.baseUrl}/ds/${alice.genesisHex}/${CONTROL_STREAM}/append-cas`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${alice.credential!.token}`,
+          [DEVICE_HEADER]: deviceHex(alice.device),
+          'content-type': 'application/octet-stream',
+          'stream-expected-offset': '-1',
+        },
+        body: Buffer.from(frameRecord(record)),
+      }
+    );
+    expect(response.ok).toBe(false);
+    expect((await alice.readLedger()).length).toBe(1);
+    expect((await alice.readLedger()).state.devices.size).toBe(1);
+  });
+
+  it('rejects a nested possession proof under a valid outer signature', async () => {
+    const host = await launchHost();
+    const alice = await session(host, 'alice');
+    await alice.createSpace();
+    const ledger = await alice.readLedger();
+    const extra = await generateDevice();
+    const possessionSignature = await extra.sign(
+      possessionSigningBytes({
+        genesis: fromHex(alice.genesisHex!),
+        signingPublicKey: extra.publicKey,
+        encryptionPublicKey: extra.enc,
+        kind: 'personal',
+        canManage: false,
+      })
+    );
+    possessionSignature[0] = (possessionSignature[0] ?? 0) ^ 0xff;
+    const proposal = ledger.prepare(
+      {
+        type: 'admitDevice',
+        kind: 'personal',
+        signingPublicKey: extra.publicKey,
+        encryptionPublicKey: extra.enc,
+        canManage: false,
+        possessionSignature,
+      },
+      alice.device.publicKey
+    );
+    const record = encodeSignedRecord(
+      proposal.bodyBytes,
+      await alice.device.sign(proposal.signingBytes)
+    );
+    const response = await fetch(
+      `${host.baseUrl}/ds/${alice.genesisHex}/${CONTROL_STREAM}/append-cas`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${alice.credential!.token}`,
+          [DEVICE_HEADER]: deviceHex(alice.device),
+          'content-type': 'application/octet-stream',
+          'stream-expected-offset': '-1',
+        },
+        body: Buffer.from(frameRecord(record)),
+      }
+    );
+    expect(response.ok).toBe(false);
+    expect((await alice.readLedger()).length).toBe(1);
+    expect((await alice.readLedger()).state.devices.has(deviceHex(extra))).toBe(false);
+  });
+
+  it('rejects tampered imported ledger snapshot state and tampered CRDT snapshot bytes', async () => {
+    const host = await launchHost();
+    const alice = await session(host, 'alice');
+    await alice.createSpace();
+    const extra = await generateDevice();
+    expect((await alice.admitDevice(extra, 'personal', false)).status).toBe('committed');
+    const ledger = await alice.readLedger();
+    const proposal = ledger.prepareSnapshot(alice.device.publicKey);
+    const snapshot = await Ledger.finalizeSnapshot(
+      proposal,
+      await alice.device.sign(proposal.signingBytes)
+    );
+    const trust = {
+      genesis: fromHex(alice.genesisHex!),
+      endorser: alice.device.publicKey,
+      head: ledger.head,
+      headSignature: await alice.device.sign(
+        headAttestationSigningBytes(fromHex(alice.genesisHex!), ledger.head)
+      ),
+    };
+    const tampered = snapshot.slice();
+    tampered[16] = (tampered[16] ?? 0) ^ 0xff;
+    await expect(Ledger.verifySnapshot({ trust, snapshot: tampered })).rejects.toThrow();
+    expect((await alice.readLedger()).length).toBe(2);
+
+    await alice.readLedger();
+    await uploadLoroSnapshot(alice, 'imported-secret');
+    const wrapped = {
+      get baseUrl() {
+        return alice.baseUrl;
+      },
+      get genesisHex() {
+        return alice.genesisHex;
+      },
+      get device() {
+        return alice.device;
+      },
+      get account() {
+        return alice.account;
+      },
+      get membershipId() {
+        return alice.membershipId;
+      },
+      get epochKeys() {
+        return alice.epochKeys;
+      },
+      get canWriteDocument() {
+        return alice.canWriteDocument;
+      },
+      currentEpoch: () => alice.currentEpoch(),
+      fetch: async (input: RequestInfo | URL, init?: RequestInit) => {
+        const response = await alice.fetch(input, init);
+        const url =
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.href
+              : input instanceof Request
+                ? input.url
+                : String(input);
+        if (!url.includes('/snapshot/') && !url.includes('/bootstrap')) return response;
+        const body = new Uint8Array(await response.arrayBuffer());
+        if (body.byteLength > 20) body[20] = (body[20] ?? 0) ^ 0xff;
+        return new Response(body, { status: response.status, headers: response.headers });
+      },
+    };
+    await expect(bootstrapLoroFromSnapshot(wrapped, 'imported-secret')).rejects.toThrow();
+    const honest = await bootstrapLoroFromSnapshot(alice, 'imported-secret');
+    expect(honest.text).toContain('imported-secret');
+  });
+
+  it('converges Loro and Flock after concurrent writes and an offline reconnect', async () => {
+    const host = await launchHost();
+    const alice = await session(host, 'alice');
+    const bob = await session(host, 'bob');
+    await alice.createSpace();
+    const join = await bob.requestJoin(alice.genesisHex!);
+    await alice.approveJoin(join);
+    await alice.deliverEpochKey(bob.device, 0);
+    const frames = await bob.readKeyFrames();
+    await bob.receiveEpochKey(alice.device, 0, frames[0]!);
+    await alice.readLedger();
+    await bob.readLedger();
+    await writeLoro(alice, 'alice-online');
+    const bobDoc = await syncLoro(bob);
+    expect(bobDoc.getText('text').toString()).toContain('alice-online');
+    const bobWriter = loroWriter(bob, bobDoc);
+    const created = await bobWriter.createStream();
+    if (!created.ok) {
+      /* already exists */
+    }
+    await editLoro(alice, 'alice-more');
+    const current = bobDoc.getText('text').toString();
+    bobDoc.getText('text').insert(current.length, 'bob-offline');
+    bobDoc.commit();
+    const appended = await bobWriter.appendWriteOnly();
+    if (!appended.ok) throw new Error(`bob-offline-append:${JSON.stringify(appended)}`);
+    await bobWriter.close();
+    bobDoc.free();
+    const aliceText = await readLoro(alice);
+    const bobText = await readLoro(bob);
+    expect(aliceText).toBe(bobText);
+    expect(aliceText).toContain('alice-online');
+    expect(aliceText).toContain('alice-more');
+    expect(aliceText).toContain('bob-offline');
+
+    await writeFlock(alice, 'flock-a', ['private', 'a']);
+    await writeFlock(bob, 'flock-b', ['private', 'b']);
+    expect(await readFlock(alice, ['private', 'a'])).toContain('flock-a');
+    expect(await readFlock(bob, ['private', 'b'])).toContain('flock-b');
+    expect(await readFlock(alice, ['private', 'b'])).toContain('flock-b');
+    expect(await readFlock(bob, ['private', 'a'])).toContain('flock-a');
+  });
+
+  it('keeps plaintext out of riverrun bytes and the live content stream', async () => {
+    const host = await launchHost();
+    const alice = await session(host, 'alice');
+    await alice.createSpace();
+    await alice.readLedger();
+    const secret = 'plaintext-secret-xyz';
+    await writeLoro(alice, secret);
+    await writeFlock(alice, secret);
+    await assertLiveCiphertext(alice, 'loro', secret);
+    await assertLiveCiphertext(alice, 'flock', secret);
+    await uploadLoroSnapshot(alice, secret);
+    await assertSnapshotCiphertext(alice, secret);
+    const disk = readFileSync(host.riverrunDbPath);
+    expect(disk.includes(secret)).toBe(false);
+  });
+
+  it('lets a new member recover mixed epochs from the current key and rejects a wrong latest key', async () => {
+    const host = await launchHost();
+    const alice = await session(host, 'alice');
+    const bob = await session(host, 'bob');
+    await alice.createSpace();
+    await alice.readLedger();
+    await writeLoro(alice, 'epoch-zero-secret');
+    expect((await alice.publishEpoch()).status).toBe('committed');
+    const join = await bob.requestJoin(alice.genesisHex!);
+    await alice.approveJoin(join);
+    await alice.deliverEpochKey(bob.device, 1);
+    const frames = await bob.readKeyFrames();
+    await bob.receiveEpochKey(alice.device, 1, frames[0]!);
+    expect(bob.epochKeys.has(0)).toBe(false);
+    bob.epochKeys.set(0, crypto.getRandomValues(new Uint8Array(32)));
+    await expect(
+      (async () => {
+        const wrong = await session(host, 'carol');
+        await wrong.adoptGenesis(alice.genesisHex!);
+        wrong.epochKeys.set(1, alice.epochKeys.get(0)!);
+        await wrong.recoverEpochHistory();
+      })()
+    ).rejects.toThrow();
+    await bob.recoverEpochHistory();
+    expect(bob.epochKeys.has(0)).toBe(true);
+    expect(Buffer.from(bob.epochKeys.get(0)!).equals(Buffer.from(alice.epochKeys.get(0)!))).toBe(
+      true
+    );
+    await bob.readLedger();
+    expect(await readLoro(bob)).toContain('epoch-zero-secret');
+  });
+
+  it('rejects machine-device management writes on the server', async () => {
+    const host = await launchHost();
+    const alice = await session(host, 'alice');
+    await alice.createSpace();
+    const machine = await generateDevice();
+    expect((await alice.admitDevice(machine, 'machine', false)).status).toBe('committed');
+    const bot = await session(host, 'alice-machine');
+    bot.device = machine;
+    await bot.reauth();
+    await bot.adoptGenesis(alice.genesisHex!);
+    await expect(bot.publishEpoch()).rejects.toThrow();
+    await expect(bot.admitDevice(await generateDevice(), 'personal', false)).rejects.toThrow();
+    expect((await alice.readLedger()).state.epoch.number).toBe(0);
   });
 });

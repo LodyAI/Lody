@@ -24,8 +24,14 @@ npm `streams-crdt@0.15.1` 缺少快照 `continuationOffset`，因此 demo 固定
 - HTTP 凭证保存原始 `expiresAt`。缓存、排队、重启不得续命。`now == expires`
   视为过期。
 - 历史已接纳快照在作者后撤后仍可读。撤权不擦除对方已获得的 epoch 密钥。
+- 恢复备份 v2 用 `sealRecoveryBackup` 封装 R 私钥与 epoch 密钥表。恢复必须
+  `committed` 接纳新设备并解密历史密文，不得伪造身份或明文存放 R。
+- 摘要不一致是 `conflict` / `inconsistent`，绝不是 `checked`。
+  `pending-sync` 不是核对成功。
 
 ## 限制
 
 生产 JWT 网关提交 `60610126` 在另一棵树；demo 在自有 Node 路径执行截止。
-Demo 完成不等于产品启用。
+Demo 完成不等于产品启用。npm `streams-crdt@0.15.1` 仍缺 `continuationOffset`，
+继续使用固定 tarball。同一 `StreamsCrdt` 实例在 `sync()` 之后不能再
+`appendWriteOnly`。

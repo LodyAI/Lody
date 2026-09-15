@@ -16,7 +16,13 @@ const dirs: string[] = [];
 const hosts: RunningDemoHost[] = [];
 
 afterEach(async () => {
-  while (hosts.length > 0) await hosts.pop()!.close();
+  while (hosts.length > 0) {
+    try {
+      await hosts.pop()!.close();
+    } catch {
+      /* already closed for restart tests */
+    }
+  }
   for (const child of children.splice(0)) {
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGTERM');
   }
@@ -71,9 +77,12 @@ export function tempDir(prefix = 'e2ee-demo-'): string {
   return dir;
 }
 
-export async function launchHost(options?: { now?: () => number }): Promise<RunningDemoHost> {
+export async function launchHost(options?: {
+  now?: () => number;
+  dataDir?: string;
+}): Promise<RunningDemoHost> {
   const host = await startDemoHost({
-    dataDir: tempDir('e2ee-demo-host-'),
+    dataDir: options?.dataDir ?? tempDir('e2ee-demo-host-'),
     host: '127.0.0.1',
     port: 0,
     testMode: true,
@@ -101,4 +110,21 @@ export async function session(
 
 export async function json(response: Response): Promise<Record<string, unknown>> {
   return (await response.json()) as Record<string, unknown>;
+}
+
+export function frameRecord(record: Uint8Array): Uint8Array {
+  const framed = new Uint8Array(4 + record.length);
+  new DataView(framed.buffer).setUint32(0, record.length, false);
+  framed.set(record, 4);
+  return framed;
+}
+
+export function findSubarray(haystack: Uint8Array, needle: Uint8Array): number {
+  outer: for (let i = 0; i <= haystack.length - needle.length; i++) {
+    for (let j = 0; j < needle.length; j++) {
+      if (haystack[i + j] !== needle[j]) continue outer;
+    }
+    return i;
+  }
+  return -1;
 }

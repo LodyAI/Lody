@@ -28,8 +28,16 @@ recorded local tarball instead of a sibling source alias.
   must not extend it. `now == expires` is expired.
 - Historical admitted snapshots remain readable after later revoke. Revoke does
   not erase epoch keys already delivered.
+- Recovery backup v2 seals the R secret and epoch key map with
+  `sealRecoveryBackup`. Restore admits a new device as `committed` and decrypts
+  prior ciphertext. Do not invent a dummy identity or store R as plaintext.
+- Digest mismatch is `conflict` / `inconsistent`, never `checked`.
+  `pending-sync` is not agreement.
 
 ## Limits
 
 Production JWT/gateway `60610126` lives in another tree; the demo enforces the
 deadline on its own Node path. Demo completion is not product enablement.
+Registry `streams-crdt@0.15.1` still lacks `continuationOffset`; the demo keeps
+the pinned tarball. `appendWriteOnly` cannot run on a StreamsCrdt instance that
+already called `sync()`.

@@ -1,10 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { Ledger } from '@lody/e2ee-core';
-import { decodeRecord } from '@lody/e2ee-core/ledger';
-import { fromHex } from '../src/bytes';
-import { generateDevice } from '../src/device';
+import { generateDevice, deviceHex } from '../src/device';
+import { compareLabel } from '../src/ui/browser-session';
 import { launchHost, session } from './helpers';
-import type { ComparisonWire } from '../src/protocol';
 
 describe('D2 invite, admin offline owner, digest compare', () => {
   it('lets B request join and A approve; both independently verify the same ledger', async () => {
@@ -51,36 +48,23 @@ describe('D2 invite, admin offline owner, digest compare', () => {
     const bob = await session(host, 'bob');
     await alice.createSpace();
     await bob.adoptGenesis(alice.genesisHex!);
-    await bob.publishNote();
-    const extra = await (await import('../src/device')).generateDevice();
-    expect((await alice.admitDevice(extra, 'personal', false)).status).toBe('committed');
-    await alice.publishNote();
-    const response = await alice.fetch(`/v1/spaces/${alice.genesisHex}/notes`);
-    const payload = (await response.json()) as {
-      notes: Array<{ deviceHex: string; body: string }>;
+    const honest = await alice.publishNote();
+    const forged = {
+      genesis: honest.genesis,
+      length: honest.length,
+      head: 'aa'.repeat(32),
+      stateDigest: 'bb'.repeat(32),
+      noteSigner: deviceHex(bob.device),
     };
-    expect(payload.notes).toHaveLength(2);
-    const notes = payload.notes.map((row) => JSON.parse(row.body) as ComparisonWire);
-    const decoded = decodeRecord(alice.genesis!);
-    if (decoded.body.type !== 'genesis') throw new Error('not-genesis');
-    const comparison = Ledger.compareNotes(
-      {
-        genesis: fromHex(notes[0]!.genesis),
-        length: notes[0]!.length,
-        head: fromHex(notes[0]!.head),
-        stateDigest: fromHex(notes[0]!.stateDigest),
-        noteSigner: fromHex(notes[0]!.noteSigner),
-      },
-      {
-        genesis: fromHex(notes[1]!.genesis),
-        length: notes[1]!.length,
-        head: fromHex(notes[1]!.head),
-        stateDigest: fromHex(notes[1]!.stateDigest),
-        noteSigner: fromHex(notes[1]!.noteSigner),
-      },
-      { originalEndorser: decoded.body.fields.signer }
-    );
-    expect(comparison.kind).toBe('pending-sync');
-    expect(comparison.kind).not.toBe('agree');
+    const posted = await bob.fetch(`/v1/spaces/${alice.genesisHex}/notes`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(forged),
+    });
+    expect(posted.ok).toBe(true);
+    const compared = await alice.compareRemote();
+    expect(compared.kind).toBe('conflict');
+    expect(compareLabel(compared.kind)).toBe('inconsistent');
+    expect(compareLabel(compared.kind)).not.toBe('checked');
   });
 });
