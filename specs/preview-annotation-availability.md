@@ -11,7 +11,9 @@ must not cover the content, report that page loading failed, or prevent reload.
 Actual network, authorization, and proxy failures remain failures.
 
 The iframe owns document loading. Runtime messages enable annotation and report
-navigation information; they do not determine whether the document has loaded.
+navigation information, including best-effort toolbar loading hints for in-frame
+navigation. Native iframe load independently clears loading; runtime hints never
+gate document readiness or content visibility.
 A late valid handshake may enable annotation without reloading the page.
 
 The runtime accepts control only from its actual parent window and locks the

@@ -8,7 +8,9 @@ pointer to this page live in
 this page is the full text of the rules summarised there.
 
 - [Preview annotation availability](../../specs/preview-annotation-availability.md) separates
-  page loading from optional annotation. Only iframe navigation controls page loading;
+  page loading from optional annotation. Runtime loading reports are optional toolbar
+  hints for in-frame navigation; native iframe load clears them independently. They
+  never gate frame readiness or content visibility;
   missing runtime messages leave annotation unavailable without a timeout error or content
   cover. Reload can navigate the frame directly. Runtime control binds the first valid
   message from `window.parent`, never `document.referrer` (which changes after navigation).

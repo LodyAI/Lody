@@ -541,6 +541,10 @@ export function ManagedPreviewSurface({
         }
         onAnnotationAvailabilityChange(true);
         onRuntimeError(null);
+        // In-frame navigation does not change the parent's iframe src. Use the
+        // runtime as an optional toolbar hint, never as frame/content readiness.
+        // The native load handler clears this even if the runtime disappears.
+        onLoadingChange(event.data.payload.loading);
         onBrowserStateChange({
           ...event.data.payload,
           url: mappedUrl,

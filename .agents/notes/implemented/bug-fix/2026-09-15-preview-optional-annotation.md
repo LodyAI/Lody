@@ -23,6 +23,12 @@ accepts late handshakes, instead of extending the old three-second timeout.
 The loading indicator no longer covers the page. The existing parent-driven
 reload remains available without an injected receiver.
 
+PR review corrected an over-broad removal of runtime loading reports: same-origin
+in-frame navigation does not change the parent's iframe src. Retain those reports
+as optional toolbar hints so Stop remains available, without changing frame
+readiness or covering content. Native load clears the hint even without a runtime
+completion message; the surface test exercises this fallback.
+
 Adversarial review found that pre-load redirects could be cancelled before the new
 origin binding existed. A data-free ready signal now requests an early handshake;
 the latest pending navigation waits for parent binding instead of bypassing policy.

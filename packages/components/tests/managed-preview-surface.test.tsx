@@ -512,8 +512,12 @@ describe('ManagedPreviewSurface', () => {
           })
         )
       );
-      expect(container.querySelector('output')?.textContent).toBe('loaded;annotatable;no error');
+      expect(container.querySelector('output')?.textContent).toBe('loading;annotatable;no error');
       expect(container.querySelector('iframe')).toBe(iframe);
+      // A page-initiated navigation has no parent src change. Its runtime can
+      // report loading, but native load must finish it without a runtime reply.
+      await act(async () => iframe.dispatchEvent(new Event('load')));
+      expect(container.querySelector('output')?.textContent).toBe('loaded;unavailable;no error');
       // A previously healthy runtime can disappear too. Reload must still be
       // performed by the parent rather than sent to the missing receiver.
       iframe.src = 'http://127.0.0.1:61234/error';
