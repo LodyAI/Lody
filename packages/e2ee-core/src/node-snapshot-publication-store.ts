@@ -55,6 +55,12 @@ export class SqliteSnapshotPublicationStore implements SnapshotPublicationStore 
           COMMIT;`);
       }
       this.checkFormat(db);
+    } catch (error) {
+      // Format reads can contend with another process's commit too. Preserve
+      // the same retryable result as transaction(), never treat busy as damage.
+      if (error instanceof Error && 'errcode' in error && error.errcode === 5)
+        throw new ControlLogError('snapshot-store-busy');
+      throw error;
     } finally {
       db.close();
     }

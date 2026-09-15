@@ -1,12 +1,14 @@
 import { spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, unlinkSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createRecoveryDeviceSecret, importRecoveryDevice } from '../src/recovery-device';
 
 const here = dirname(fileURLToPath(import.meta.url));
+const tsxLoader = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
 const dirs: string[] = [];
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -19,8 +21,8 @@ function run(
 ): Promise<{ status: number; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(
-      'pnpm',
-      ['exec', 'tsx', join(here, 'ledger-recovery-child.ts'), mode, dir, variant],
+      process.execPath,
+      ['--import', tsxLoader, join(here, 'ledger-recovery-child.ts'), mode, dir, variant],
       { cwd: join(here, '..'), stdio: ['ignore', 'ignore', 'pipe'] }
     );
     let stderr = '';

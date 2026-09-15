@@ -86,6 +86,25 @@ plaintext only when `epoch` matches the current ledger epoch and
 unilateral (D1 A).
 
 Commands: `pnpm --filter @lody/e2ee-core check`. New ledger tests: `test/ledger*.ts`.
+
+Packed acceptance (no sibling source aliases): build core with `pnpm pack`, then
+run the following with independently recorded SHA-256 values and explicit paths.
+The Streams tarball must include the continuation-offset change; registry 0.15.1
+does not. Supply trusted tarballs: checksums identify bytes, not trustworthiness;
+their tests execute locally, not in a security sandbox.
+The command creates and retains a fresh temporary consumer, verifies both
+checksums before installation, runs all packaged core tests and the public README
+example, and saves the lockfile, logs, Vitest JSON and `receipt.json`. It does not
+publish anything. Electron-owned integration tests run separately in Electron.
+An acceptance pass is not production authorization or a published dependency.
+For an exact dependency replay, append the saved lockfile path and its SHA-256;
+installation then uses `--frozen-lockfile` and rejects any lockfile change.
+Without that pair, the command creates a new dependency baseline.
+
+```sh
+node packages/e2ee-core/bench/check-packed-consumer.mjs /path/core.tgz CORE_SHA256 /path/streams.tgz STREAMS_SHA256
+```
+
 Public-package consumer loop (no `src/` imports): `test/ledger-consumer.test.ts`.
 Confirmed-rule keys/recovery/content loop: `test/ledger-krc-loop.test.ts`.
 C1 real Loro/Flock + streams-crdt over a local Durable Streams peer:

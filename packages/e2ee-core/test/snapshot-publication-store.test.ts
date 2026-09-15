@@ -289,24 +289,50 @@ it('process death before commit rolls back identity and pointer; after commit su
   expect(recovered.current('room')).toEqual({ offset: '30', body: third.body });
 });
 
-it('two processes publish one identity; the losing request cannot replace it on retry', async () => {
+it('busy open is retryable without resetting committed identity or pointer', async () => {
+  const path = location();
+  const store = initialize(path),
+    f = await fixture(),
+    first = await f.input('10');
+  await f.host(store).admit(first);
+  const lock = spawnFixture(path, 'exclusive-lock', first);
+  expect(await lock.line()).toBe('locked');
+  try {
+    expect(() => new SqliteSnapshotPublicationStore(path)).toThrow('snapshot-store-busy');
+    let invoked = false;
+    expect(() =>
+      store.transaction('room', () => {
+        invoked = true;
+      })
+    ).toThrow('snapshot-store-busy');
+    expect(invoked).toBe(false);
+  } finally {
+    lock.proc.send('release');
+    await lock.exited;
+  }
+  const reopened = f.host(new SqliteSnapshotPublicationStore(path));
+  expect(reopened.current('room')).toEqual({ offset: '10', body: first.body });
+  expect((await reopened.admit(first)).status).toBe('idempotent');
+});
+
+it('two processes publish one identity; the busy request cannot replace the winner on retry', async () => {
   const path = location();
   initialize(path);
   const f = await fixture(),
     a = await f.input('10', 'a'),
     b = await f.input('10', 'b');
-  const results = await Promise.all([
-    spawnFixture(path, 'admit', a).exited,
-    spawnFixture(path, 'admit', b).exited,
-  ]);
-  expect(results.filter((x) => x === 'accepted')).toHaveLength(1);
-  expect(
-    results.every((x) =>
-      ['accepted', 'snapshot-identity-conflict', 'snapshot-store-busy'].includes(x)
-    )
-  ).toBe(true);
-  const loser = results[0] === 'accepted' ? b : a;
-  await expect(f.host(new SqliteSnapshotPublicationStore(path)).admit(loser)).rejects.toThrow(
-    'snapshot-identity-conflict'
-  );
+  const lock = spawnFixture(path, 'exclusive-lock', a);
+  expect(await lock.line()).toBe('locked');
+  try {
+    expect(await spawnFixture(path, 'admit', b).exited).toBe('snapshot-store-busy');
+  } finally {
+    lock.proc.send('release');
+    await lock.exited;
+  }
+  expect(await spawnFixture(path, 'admit', a).exited).toBe('accepted');
+  expect(await spawnFixture(path, 'admit', b).exited).toBe('snapshot-identity-conflict');
+  expect(f.host(new SqliteSnapshotPublicationStore(path)).current('room')).toEqual({
+    offset: '10',
+    body: a.body,
+  });
 });
