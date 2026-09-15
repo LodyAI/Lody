@@ -1,7 +1,7 @@
 # Attachment draft lifetimes and PR boundaries
 
 Status: proposed
-Translation: current
+Translation: pending
 
 [中文](2026-09-14-deferred-attachment-send.zh.md)
 
@@ -123,3 +123,73 @@ Pending presentation belongs in the conversation stream, not a separate recovery
 Validation: final full `TMPDIR=/private/tmp NODE_ENV=test pnpm check` passes (480 component files / 3,677 tests). Targeted resource/warmup checks pass 9 tests, including the later idle-warmup exit refinement; component typecheck also passes. After restacking and the concurrent-admission refinement, 60 targeted tests and component typechecking pass. Root format, targeted component Prettier, and docs check completed with zero documentation errors. Packaged-device, real-network multi-window, and native mobile-shell acceptance remain outstanding. Status stays proposed; no human approval is inferred.
 
 Cross-window takeover records the replica that actually prepared the operations. The admitting window is not necessarily the source baseline owner. A deterministic journal test covers this recovery boundary.
+
+## Pending failure hierarchy
+
+The first pending row rendered the same failure three times — a message-level
+"Not sent · Attachment upload failed", the record's `error` string, and each
+failed attachment's own reason — so a partly failed message read as a diagnostic
+dump rather than a message. Rendering now assigns one owner per fact:
+
+- The message level keeps ONE short status (`sessions.pendingMessageUploadFailed`
+  is now just "Not sent"), rendered in `text-muted-foreground`. The icon and the
+  word already carry the meaning; colouring this line as well is what stacked
+  three red things down a single message.
+- The reason belongs to the attachment that failed. The record-level reason
+  renders only when no attachment carries one, so a journal-level failure with
+  every attachment ready still explains itself without ever duplicating a reason.
+- `FAILED_FRAME_CLASS` (`border-destructive/30 bg-destructive/[0.04]`) is the
+  whole red budget for a failure, and only the failed card takes it. The icon
+  tile, the filename, and the message status all stay neutral; the frame, one
+  `AlertCircle`, and the single reason line are the only red in the row. The
+  image card's failure uses a neutral `bg-background/55` scrim rather than a red
+  wash — it only has to make the glyph legible over an arbitrary photo.
+- A reason with no card to live on renders through `PendingFailureNotice`, the
+  same frame at notice scale, instead of loose red text under the bubble. That
+  shape was the one thing in the row that did not read as a contained object.
+  The retry/cancel action failure uses it too.
+- Finished attachments keep the ordinary Ready card, so partial success stays
+  legible. File cards share `getSessionFileIcon` with the delivered
+  `SessionFileCard`, so a draft and its delivered form read as one object.
+- Uploading / ready / failed share one card skeleton (icon slot, name plus one
+  status line, trailing state glyph). The progress bar is a full-width strip
+  flush on the card's bottom edge, ALWAYS in the flow and always the same height,
+  empty when the attachment is not transferring; reserving that row is what keeps
+  one card height across all three states. Absolute positioning inside the card's
+  padding was tried first and was wrong: at `bottom-2` the bar overlapped the 40px
+  content row by 2px and left an unrelated 8px gap under it, so its spacing
+  matched nothing else in the card. The image card puts the same strip between
+  thumbnail and caption instead of floating it over the photo. Measured: the image
+  card is 198px and the file card 66px in uploading, failed and prepared alike.
+  All three trailing
+  glyphs stay mounted and cross-fade on opacity/scale/blur (0→1, 0.25→1, 4px→0)
+  over 300ms, so an attachment settling reads as one object changing state. The
+  transition names its exact properties and uses CSS rather than framer-motion:
+  nothing else under `chat/` or `ai-gui/` pulls that dependency into the
+  conversation's module graph.
+- Image previews carry a 1px `outline-black/10 dark:outline-white/10` edge. A
+  tinted neutral there picks up the surface beneath and reads as dirt.
+- Press-scale feedback was deliberately NOT added to the two actions: the shared
+  `Button` primitive has none, and the surrounding conversation controls
+  (edit / pin / copy) have none either.
+- "Continue sending" is the primary action and "Cancel send" the ghost secondary,
+  in one row tight under the message rather than a detached control strip.
+
+This is a rendering change only: journal stages, Effect lifetimes, retry/cancel
+semantics, ordering, and persistence are untouched. `PendingMessageRow` is
+exported as a pure component so Storybook and
+`tests/session-pending-message-row.test.tsx` drive the states without a workspace
+runtime. Both regressions above were ablated to confirm the tests fail when the
+duplicate reason or the blanket destructive styling returns; the ready-file
+fixture exists because a ready IMAGE alone cannot observe a file-card regression.
+Verified by component typecheck, `lint:i18n`, oxlint, the full 481-file /
+3,684-test component suite, and rendered Storybook screenshots at 720px and
+380px in both light and dark. The cross-fade's computed `opacity` / `scale` /
+`filter` and its `transition-property` were read from the live DOM rather than
+assumed. Two ablations initially passed silently and each earned a new
+assertion: recolouring the message status, and dropping the reserved progress
+row. The reserved row is asserted through a `data-attachment-progress` hook
+because `Progress` merges to the same `h-1 w-full` and is indistinguishable by
+styling alone; jsdom has no layout, so the equal-height property is guarded
+structurally there and measured in the browser. The Chinese translation of this
+section is still outstanding.
