@@ -61,7 +61,7 @@ export function SessionShareDialogFrame({
         }}
       >
         <DialogHeader className="shrink-0 gap-0.5 px-5 pb-3 pt-4 text-left">
-          <DialogTitle className="pr-7 text-[0.9375rem] font-semibold leading-6">
+          <DialogTitle className="pr-7 text-base font-semibold leading-6 text-foreground">
             {t('sharing.manager.title', 'Share conversation')}
           </DialogTitle>
           <DialogDescription className="truncate text-xs text-muted-foreground">
