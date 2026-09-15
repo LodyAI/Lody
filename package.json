@@ -45,6 +45,8 @@
     "generate:acp-registry": "node scripts/generate-acp-registry.mjs",
     "generate:open-source-attributions": "node scripts/generate-open-source-attributions.mjs",
     "package:kimi-runtime": "node scripts/package-kimi-runtime.mjs",
+    "demo:e2ee": "corepack pnpm --filter @lody/e2ee-demo start",
+    "test:e2ee-demo": "corepack pnpm --filter @lody/e2ee-demo test",
     "check": "corepack pnpm typecheck && corepack pnpm lint && corepack pnpm test:ci && corepack pnpm lint:i18n && corepack pnpm check:code-collab-imports && corepack pnpm check:platform-boundaries && corepack pnpm check:public-boundary",
     "install:all": "corepack pnpm install",
     "build:electron": "corepack pnpm --dir apps/electron build",

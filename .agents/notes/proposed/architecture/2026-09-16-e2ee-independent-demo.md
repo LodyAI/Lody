@@ -1,0 +1,35 @@
+# Independent E2EE demo package
+
+Status: proposed
+Translation: current
+
+[中文](./2026-09-16-e2ee-independent-demo.zh.md)
+
+## Abstract
+
+Product E2EE wiring is paused. The next executable proof is a local-only demo:
+`packages/e2ee-demo` on the current `feat-e2ee-core` branch, with a loopback Node
+host, official SQLite Riverrun on an explicit data directory, and isolated
+browser clients that consume public `@lody/e2ee-core` and streams-crdt APIs.
+This is not Lody integration, V4, or production enablement. Registry
+`streams-crdt@0.15.1` lacks snapshot `continuationOffset`, so the demo pins a
+recorded local tarball instead of a sibling source alias.
+
+## Decision and scope
+
+- Develop in this workspace and branch. Do not create `codex/e2ee-demo`,
+  `examples/e2ee-demo/`, or a long-lived `/tmp` tree.
+- Core does not depend on the demo. The demo does not import Electron, Convex,
+  or Cloudflare.
+- Control writes verify signatures and current permission, then CAS. Exact
+  pending bytes persist before CAS; dropped ACK confirms by read-back without
+  re-signing. Pending is not committed authority.
+- HTTP credentials store the original `expiresAt`. Cache, queue, and restart
+  must not extend it. `now == expires` is expired.
+- Historical admitted snapshots remain readable after later revoke. Revoke does
+  not erase epoch keys already delivered.
+
+## Limits
+
+Production JWT/gateway `60610126` lives in another tree; the demo enforces the
+deadline on its own Node path. Demo completion is not product enablement.

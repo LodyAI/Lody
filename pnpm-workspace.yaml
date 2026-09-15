@@ -87,6 +87,9 @@ onlyBuiltDependencies:
   - workerd
 
 overrides:
+  # sqlite-riverrun@0.2.0 asks for better-sqlite3 ^12, which has no Node 24
+  # prebuild here; catalog 13 ships N-API binaries and is already the workspace SQLite.
+  '@loro-dev/sqlite-riverrun>better-sqlite3': ^13.0.2
   acp-extension-core: workspace:*
   electron-builder-squirrel-windows: ^26.15.3
   tsx@4.21.0>esbuild: 0.27.0
