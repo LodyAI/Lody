@@ -107,7 +107,6 @@ export const ICON_FAMILIES = {
     'commit',
     'merge',
     'pull-request',
-    'pull-request-closed',
     'diff',
     'issue',
     'code',
@@ -524,20 +523,6 @@ export const ICONS: Record<IconName, IconDefinition> = {
       { circle: [17, 5, 2] },
       { circle: [12, 19, 2] },
       { path: 'M17 7v1.5a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2V7M12 10.5v6.5' },
-    ],
-  },
-  'pull-request-closed': {
-    // `pull-request` with its arrow struck out: the same three nodes and the
-    // same trunk, and the branch it would have landed on stops at a cross. The
-    // cross is a node's width, not an arrowhead's, and the branch runs up to
-    // meet it — drawn larger, with the branch stopping short, the two read as
-    // two drawings that happen to share a column.
-    marks: [
-      { circle: [7, 5, 2] },
-      { circle: [7, 19, 2] },
-      { circle: [17, 19, 2] },
-      { path: 'M7 7v10M17 17v-8' },
-      { path: 'M15.4 5.4l3.2 3.2M18.6 5.4l-3.2 3.2' },
     ],
   },
   'check-circle': {
