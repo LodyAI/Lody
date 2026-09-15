@@ -1107,6 +1107,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   // Canonical form of the parsed command; probe effect keys on this so edits
   // that don't change the parsed argv (extra whitespace) don't re-probe.
   const customAcpKey = parsedCustomAcp ? formatCustomAcpCommandLine(parsedCustomAcp) : '';
+  const nameMissing = !formData.name.trim();
 
   const cacheKey = getAcpCapabilityCacheKey(agentConfigId);
   const cachedCapabilityAuthority = getAcpCapabilityCacheEntryAuthority(
@@ -1361,6 +1362,10 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     if (probeTick === 0) return undefined;
     // Don't launch a binary-distribution agent to probe it until it's installed.
     if (binaryRequired && !binaryReady) return undefined;
+    // A probe launches from the daemon-authoritative persisted config. Do not
+    // publish an invalid draft that the daemon must reject while the required
+    // display name is still empty.
+    if (nameMissing) return undefined;
     if (!formData.agentType.trim()) return undefined;
     let cancelled = false;
     setProbing(true);
@@ -1420,6 +1425,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     isCustom,
     binaryRequired,
     binaryReady,
+    nameMissing,
     requiresBuiltinCreationVerification,
     builtinVerificationContext,
     persistConfigBeforeMachineLaunch,
@@ -1429,7 +1435,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   // Manual capability probe for custom providers, triggered by the "Test"
   // button. Records the exact command tested so readiness tracks edits.
   const runCustomProbe = async () => {
-    if (!parsedCustomAcp || probing) return;
+    if (!parsedCustomAcp || probing || nameMissing) return;
     const probedKey = customAcpKey;
     setProbing(true);
     setProbeError(null);
@@ -2026,6 +2032,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           probeError={probeError}
           ready={capabilitiesReady && !builtinNeedsCredentialCheck && !authRequired}
           showIdleAction={!isCustom && !(mode.kind === 'create' && isBubBuiltin)}
+          idleActionDisabled={nameMissing}
           onRetry={() => {
             setProbeError(null);
             if (isCustom) {
@@ -2056,7 +2063,15 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
               placeholder={t('agents.configNamePlaceholder', 'Enter configuration name')}
               className="h-9"
               autoComplete="off"
+              required
+              aria-invalid={nameMissing || undefined}
+              aria-describedby={nameMissing ? 'agent-config-name-error' : undefined}
             />
+            {nameMissing ? (
+              <p id="agent-config-name-error" role="alert" className="text-xs text-destructive">
+                {t('agents.disableReason.missingName', 'Please enter a name')}
+              </p>
+            ) : null}
           </Field>
 
           {activePreset ? (
@@ -2123,7 +2138,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   type="button"
                   size="sm"
                   variant="secondary"
-                  disabled={!parsedCustomAcp || probing}
+                  disabled={!parsedCustomAcp || probing || nameMissing}
                   onClick={() => void runCustomProbe()}
                 >
                   {probing ? (
@@ -2197,7 +2212,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   type="button"
                   size="sm"
                   variant="secondary"
-                  disabled={!hasBuiltinRuntimeOverride || probing}
+                  disabled={!hasBuiltinRuntimeOverride || probing || nameMissing}
                   onClick={() => {
                     setProbeError(null);
                     setManuallyTested(false);
@@ -2710,6 +2725,7 @@ function ProbeStatus({
   probeError,
   ready,
   showIdleAction,
+  idleActionDisabled,
   onRetry,
 }: {
   isPreset: boolean;
@@ -2717,6 +2733,7 @@ function ProbeStatus({
   probeError: string | null;
   ready: boolean;
   showIdleAction: boolean;
+  idleActionDisabled?: boolean;
   onRetry: () => void;
 }) {
   const { t } = useTranslation();
@@ -2792,6 +2809,7 @@ function ProbeStatus({
       size="sm"
       className="h-7 gap-1 px-2 text-xs"
       onClick={onRetry}
+      disabled={idleActionDisabled}
       aria-label={t('settings.agent.dialog.testCapabilities', 'Test agent capabilities')}
     >
       <FlaskConical className="h-3 w-3" />

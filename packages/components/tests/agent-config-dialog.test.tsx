@@ -301,6 +301,45 @@ describe('AgentConfigDialog', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it('shows the required name inline and does not probe an invalid draft', async () => {
+    const onSubmit = vi.fn(async () => {});
+    const onRefreshCapabilities = vi.fn<RefreshCapabilities>();
+    await renderDialog(
+      { kind: 'create' },
+      createMachine('Workstation'),
+      onSubmit,
+      vi.fn(async () => ({ status: 'installed' as const })),
+      onRefreshCapabilities
+    );
+
+    const nameInput = document.body.querySelector<HTMLInputElement>('#agent-config-name');
+    expect(nameInput?.required).toBe(true);
+    expect(nameInput?.getAttribute('aria-invalid')).toBe('true');
+    expect(document.body.querySelector('#agent-config-name-error')?.textContent).toBe(
+      'Please enter a name'
+    );
+
+    const testButton = await vi.waitFor(() => {
+      const button = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button')).find(
+        (candidate) => candidate.textContent?.trim() === 'Test'
+      );
+      expect(button).toBeDefined();
+      return button!;
+    });
+    expect(testButton.disabled).toBe(true);
+    await act(async () => {
+      testButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onRefreshCapabilities).not.toHaveBeenCalled();
+
+    await act(async () => {
+      setNativeInputValue(nameInput!, 'Kimi Code');
+    });
+    expect(nameInput?.getAttribute('aria-invalid')).toBeNull();
+    expect(document.body.querySelector('#agent-config-name-error')).toBeNull();
+  });
+
   it('reports the selected managed runtime so onboarding can prioritize it', async () => {
     const onManagedRuntimeSelected = vi.fn();
     await renderDialog(

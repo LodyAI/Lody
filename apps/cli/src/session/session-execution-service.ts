@@ -5677,10 +5677,28 @@ export class SessionExecutionService {
       };
     }
 
-    const config = await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
+    let config = await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
       message.configId,
       this.deps.machineId
     );
+    if (!config) {
+      // Provider creation is local-first: the renderer commits the Machine Flock
+      // row before it asks this daemon to probe, but the two processes observe
+      // that row through separate replicas. Pull once on a miss before treating
+      // it as durable absence, so a just-created provider cannot surface a
+      // misleading not-found error.
+      options.signal?.throwIfAborted();
+      await this.deps.workspaceDocument.syncMachineFlockDoc(this.deps.machineId, {
+        reason: 'acp-capabilities-config-resolve',
+        timeoutMs: readTimeoutEnv('LODY_PROVIDER_CONFIG_RESOLVE_SYNC_TIMEOUT_MS', 1_500),
+        scheduleRetry: false,
+      });
+      options.signal?.throwIfAborted();
+      config = await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
+        message.configId,
+        this.deps.machineId
+      );
+    }
     if (!config) {
       return {
         type: 'machine/acp-capabilities-refresh_response',
