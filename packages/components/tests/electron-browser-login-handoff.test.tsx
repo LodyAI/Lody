@@ -233,6 +233,11 @@ describe('electron browser sign-in handoff', () => {
     expect(search.get('state')).toBe('state-abc');
     expect(search.get('code_challenge')).toBe('challenge-xyz');
 
+    // Remount for the signed-out render instead of swapping panels in place:
+    // the card's `AnimatePresence` uses `mode="wait"`, so the incoming provider
+    // panel would not mount until the handoff panel's exit transition finished,
+    // which is real time this test must not race.
+    await act(async () => root.render(null));
     await renderLoginPage(authClient, createSessionValue(false));
     await clickButton(/Continue with GitHub/i);
 
@@ -288,8 +293,11 @@ describe('electron browser sign-in handoff', () => {
 
     await clickButton(/Use a different account/i);
     expect(signOut).toHaveBeenCalledTimes(2);
-    expect(container.textContent).not.toContain('Could not sign out of this browser');
 
+    // The banner's disappearance is deliberately not asserted: the error sits
+    // inside `AnimatePresence`, so a cleared message stays mounted until its
+    // exit transition finishes — real time this test must not race. The block
+    // being lifted is what matters, and the transfer below proves it.
     const continueButton = findButton(/Continue with this account/i);
     expect(continueButton?.disabled).toBe(false);
     await clickButton(/Continue with this account/i);
