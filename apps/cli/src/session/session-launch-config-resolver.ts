@@ -50,6 +50,26 @@ export type MachineSessionLaunchSnapshot = {
   resolution: SessionLaunchConfigResolution;
 };
 
+function resolveImportedCustomAgentConfig(
+  sessionMeta: SessionMeta | undefined,
+  agentConfigs: Record<AgentConfigId, AgentConfigMeta>
+): AgentConfigMeta | null {
+  if (
+    sessionMeta?.agentConfigId ||
+    sessionMeta?.origin !== 'external-acp' ||
+    sessionMeta.cliType !== 'custom'
+  ) {
+    return null;
+  }
+  const matches = Object.values(agentConfigs).filter(
+    (config) =>
+      config.machineId === sessionMeta.machineId &&
+      config.cliType === sessionMeta.cliType &&
+      config.agentType === sessionMeta.agentType
+  );
+  return matches.length === 1 ? (matches[0] ?? null) : null;
+}
+
 function resolveSessionLaunchConfigFromSources(input: {
   legacy: SessionLaunchConfig | undefined;
   agentConfig: AgentConfigLaunchFields | null | undefined;
@@ -84,14 +104,20 @@ export function readMachineSessionLaunchSnapshotFromFlock(input: {
       machineFlockKeys.sessionLaunchConfig(input.sessionId),
       ...(agentConfigId ? [machineFlockKeys.agentConfig(agentConfigId)] : []),
     ],
+    ...(!agentConfigId &&
+    input.sessionMeta?.origin === 'external-acp' &&
+    input.sessionMeta.cliType === 'custom'
+      ? { families: ['agentConfig'] as const }
+      : {}),
   });
   const legacy = mergeSessionLaunchConfig(
     getMachineFlockSessionLaunchConfig(rows, input.sessionId),
     metaLegacy
   );
+  const agentConfigs = getMachineFlockAgentConfigs(rows);
   const agentConfig = agentConfigId
-    ? (getMachineFlockAgentConfigs(rows)[agentConfigId] ?? null)
-    : null;
+    ? (agentConfigs[agentConfigId] ?? null)
+    : resolveImportedCustomAgentConfig(input.sessionMeta, agentConfigs);
   return {
     legacy,
     agentConfig,
@@ -177,11 +203,7 @@ export async function resolveSessionLaunchConfig(input: {
     };
   }
 
-  if (!input.sessionMeta?.agentConfigId) {
-    return snapshot.resolution;
-  }
-
-  if (snapshot.agentConfig) {
+  if (!input.sessionMeta?.agentConfigId || snapshot.agentConfig) {
     return snapshot.resolution;
   }
 
