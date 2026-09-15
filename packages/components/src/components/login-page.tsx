@@ -581,6 +581,12 @@ export function LoginPage({
   const [electronHandoffUrl, setElectronHandoffUrl] = useState<string | null>(null);
   const [isPreparingElectronHandoff, setIsPreparingElectronHandoff] = useState(false);
   const [isSwitchingElectronAccount, setIsSwitchingElectronAccount] = useState(false);
+  // A sign-out that did not reach the server leaves this browser authenticated
+  // as the account the user asked to leave, and the session cookie is exactly
+  // what the next transfer would hand to the desktop app. Block the handoff
+  // until a switch succeeds (or the session goes away on its own) rather than
+  // silently offering the old account again.
+  const [hasFailedElectronAccountSwitch, setHasFailedElectronAccountSwitch] = useState(false);
   // Bumped when the user chooses another account. A transfer started for the
   // previous account can still be in flight (or its `better-auth.electron`
   // cookie still set), and must not produce a handoff link afterwards.
@@ -1195,6 +1201,11 @@ export function LoginPage({
     if (!electronOAuthQuery) {
       return;
     }
+    if (hasFailedElectronAccountSwitch) {
+      // The last switch did not sign this browser out, so a transfer here would
+      // hand over the account the user tried to leave.
+      return;
+    }
 
     const transferUser = (authClient as AuthClientWithElectronTransfer).electron?.transferUser;
     if (typeof transferUser !== 'function') {
@@ -1274,7 +1285,15 @@ export function LoginPage({
         setIsPreparingElectronHandoff(false);
       }
     }
-  }, [authClient, electronOAuthQuery, isElectronRenderer, loginSurface, postHog, t]);
+  }, [
+    authClient,
+    electronOAuthQuery,
+    hasFailedElectronAccountSwitch,
+    isElectronRenderer,
+    loginSurface,
+    postHog,
+    t,
+  ]);
 
   // Signing out here is the only way to hand the desktop app a different
   // account, and runs only on this explicit choice. The URL keeps this attempt's
@@ -1286,6 +1305,7 @@ export function LoginPage({
     setElectronHandoffUrl(null);
     setIsPreparingElectronHandoff(false);
     setError('');
+    setHasFailedElectronAccountSwitch(false);
     clearElectronAuthorizationCode();
     setIsSwitchingElectronAccount(true);
     capturePostHogEvent(postHog, 'auth/electron_switch_account_started', {
@@ -1293,10 +1313,34 @@ export function LoginPage({
       launch_mode: detectAppLaunchMode(isElectronRenderer),
     });
 
+    // Only a confirmed sign-out releases the handoff: on failure this browser is
+    // still authenticated as the previous account, so say so and keep the
+    // transfer blocked until a retry succeeds.
+    const reportSwitchFailure = (reason: string, message?: string) => {
+      setHasFailedElectronAccountSwitch(true);
+      setError(
+        t(
+          'login.desktopHandoff.switchFailed',
+          'Could not sign out of this browser. It is still signed in as the account above — try again.'
+        )
+      );
+      capturePostHogEvent(postHog, 'auth/electron_switch_account_failed', {
+        login_surface: loginSurface,
+        launch_mode: detectAppLaunchMode(isElectronRenderer),
+        failure_reason: reason,
+        error_message: message,
+      });
+    };
+
     try {
-      await signOutWithoutRedirect(authClient);
+      const outcome = await signOutWithoutRedirect(authClient);
+      if (!outcome.ok) {
+        reportSwitchFailure('sign_out_rejected', outcome.error.message);
+      }
     } catch (err) {
-      setError(t('login.loginFailed', 'Login failed. Please try again.'));
+      // `signOutWithoutRedirect` reports failures rather than throwing; this
+      // covers a local-state clear that threw before the request was made.
+      reportSwitchFailure('sign_out_threw', err instanceof Error ? err.message : String(err));
       console.error('Electron handoff account switch error:', err);
     } finally {
       setIsSwitchingElectronAccount(false);
@@ -1759,7 +1803,7 @@ export function LoginPage({
           type="button"
           onClick={() => void handleElectronSessionTransfer()}
           className="h-10 w-full"
-          disabled={isButtonsDisabled}
+          disabled={isButtonsDisabled || hasFailedElectronAccountSwitch}
         >
           {isPreparingElectronHandoff ? (
             <>

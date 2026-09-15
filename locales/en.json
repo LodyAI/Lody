@@ -827,6 +827,7 @@
   "login.desktopHandoff.preparing": "Preparing desktop sign-in...",
   "login.desktopHandoff.signedInAs": "This browser is signed in as",
   "login.desktopHandoff.switchAccount": "Use a different account",
+  "login.desktopHandoff.switchFailed": "Could not sign out of this browser. It is still signed in as the account above — try again.",
   "login.desktopHandoff.switching": "Signing out of this browser...",
   "login.desktopHandoff.title": "Continue to Lody Desktop",
   "login.desktopRedirect.browser.description": "Completing sign-in and opening Lody desktop.",

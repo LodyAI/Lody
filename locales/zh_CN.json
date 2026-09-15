@@ -827,6 +827,7 @@
   "login.desktopHandoff.preparing": "正在准备桌面端登录…",
   "login.desktopHandoff.signedInAs": "当前浏览器已登录",
   "login.desktopHandoff.switchAccount": "换个账号登录",
+  "login.desktopHandoff.switchFailed": "无法退出当前浏览器账号，它仍以上方账号登录，请重试。",
   "login.desktopHandoff.switching": "正在退出当前浏览器账号…",
   "login.desktopHandoff.title": "继续登录 Lody 桌面版",
   "login.desktopRedirect.browser.description": "正在完成登录并打开 Lody 桌面应用...",

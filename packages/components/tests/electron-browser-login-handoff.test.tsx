@@ -242,6 +242,61 @@ describe('electron browser sign-in handoff', () => {
     expect(callbackURL).toContain('code_challenge=challenge-xyz');
   });
 
+  // Better Auth reports a refused sign-out in `response.error` and a transport
+  // failure by throwing; neither may leave the handoff offering the account the
+  // user asked to leave, because this browser's cookie is what a transfer hands
+  // over.
+  const signOutFailures: [label: string, signOut: () => Promise<unknown>][] = [
+    ['a rejected request', () => Promise.reject(new Error('network down'))],
+    ['an error response', async () => ({ data: null, error: { message: 'sign out failed' } })],
+  ];
+  it.each(signOutFailures)(
+    'blocks the handoff when the account switch fails with %s',
+    async (_label, signOut) => {
+      const transferUser = vi.fn<TransferUser>(async () => ({
+        data: { electron_authorization_code: 'code-123' },
+      }));
+      await renderLoginPage(createAuthClient({ transferUser, signOut }));
+
+      await clickButton(/Use a different account/i);
+
+      expect(container.textContent).toContain('Could not sign out of this browser');
+      // The old account is still the one this browser would hand over.
+      expect(container.textContent).toContain('old-account@lody.ai');
+      const continueButton = findButton(/Continue with this account/i);
+      expect(continueButton?.disabled).toBe(true);
+
+      await clickButton(/Continue with this account/i);
+      expect(transferUser).not.toHaveBeenCalled();
+      expect(handoffLink()).toBeNull();
+      expect(deepLinkNavigations).toEqual([]);
+    }
+  );
+
+  it('releases the handoff again once a retried account switch succeeds', async () => {
+    const transferUser = vi.fn<TransferUser>(async () => ({
+      data: { electron_authorization_code: 'code-123' },
+    }));
+    const signOut = vi
+      .fn<() => Promise<unknown>>()
+      .mockRejectedValueOnce(new Error('network down'))
+      .mockResolvedValue({ data: { success: true }, error: null });
+    await renderLoginPage(createAuthClient({ transferUser, signOut }));
+
+    await clickButton(/Use a different account/i);
+    expect(findButton(/Continue with this account/i)?.disabled).toBe(true);
+
+    await clickButton(/Use a different account/i);
+    expect(signOut).toHaveBeenCalledTimes(2);
+    expect(container.textContent).not.toContain('Could not sign out of this browser');
+
+    const continueButton = findButton(/Continue with this account/i);
+    expect(continueButton?.disabled).toBe(false);
+    await clickButton(/Continue with this account/i);
+    expect(transferUser).toHaveBeenCalledTimes(1);
+    expect(handoffLink()).not.toBeNull();
+  });
+
   it('keeps a retry entry point when the transfer fails', async () => {
     const transferUser = vi.fn<TransferUser>(async () => {
       throw new Error('transfer failed');
