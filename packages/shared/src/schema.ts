@@ -920,6 +920,12 @@ export type SessionMeta = {
   latestUserMsgId?: string;
   /** Assistant turn id the client wants to stop; cancel is ignored unless it matches the machine's in-memory active turn. */
   lastCanceledTurn?: string;
+  /**
+   * Assistant turn whose successful Stop paused automatic Operation completion
+   * delivery. A later user-authored turn clears this marker when it acquires
+   * execution ownership; system-caused turns must not clear it.
+   */
+  operationDeliveryPausedAtTurnId?: string;
   /** Latest user history entry id that the machine has fully handled. */
   lastHandledUserMsgId?: string;
   /** User history entry id currently being processed by the machine. */

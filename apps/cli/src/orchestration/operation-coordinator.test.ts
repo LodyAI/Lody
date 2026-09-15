@@ -38,6 +38,9 @@ const makeHarness = async (options?: {
   deadlineAt?: string;
   requesterArchived?: boolean;
   pendingUser?: boolean;
+  deliveryPausedAtTurnId?: string;
+  lastCanceledTurn?: string;
+  localDeliveryPaused?: boolean;
   busy?: boolean;
   activeTurnId?: string;
   agentConfigId?: string;
@@ -113,6 +116,10 @@ const makeHarness = async (options?: {
         cliType: 'builtin',
         agentType: 'codex',
         isArchived: options?.requesterArchived ?? false,
+        ...(options?.deliveryPausedAtTurnId
+          ? { operationDeliveryPausedAtTurnId: options.deliveryPausedAtTurnId }
+          : {}),
+        ...(options?.lastCanceledTurn ? { lastCanceledTurn: options.lastCanceledTurn } : {}),
       } as SessionMeta,
     ],
     ...(targetInputDurable ? ([[targetSessionId, targetMeta]] as const) : []),
@@ -314,6 +321,7 @@ const makeHarness = async (options?: {
         hasActiveTurn: busy,
         ...(busy && options?.activeTurnId ? { activeTurnId: options.activeTurnId } : {}),
       }),
+      isOperationDeliveryPaused: () => options?.localDeliveryPaused ?? false,
       continueSession,
     } as never,
     dispatchWatcher: { hasPendingDispatch: () => pendingUser } as never,
@@ -862,6 +870,77 @@ describe('LodyOperationCoordinator', () => {
     await harness.coordinator.idle();
     harness.coordinator.stop();
     expect(harness.continueSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps Delivery pending after Stop until a user turn explicitly resumes the session', async () => {
+    const harness = await makeHarness({ deliveryPausedAtTurnId: 'assistant:stopped-turn' });
+    const targetHistory = harness.histories.get(harness.targetSessionId)!;
+    targetHistory[0] = { ...targetHistory[0]!, status: 'handled' };
+    targetHistory.push({
+      id: 'assistant:turn-1',
+      role: 'assistant',
+      userTurnId: 'turn-1',
+      timestamp: '2026-07-20T00:00:00.500Z',
+      items: [{ type: 'text', text: 'done' }],
+      fileDiff: [],
+      finished: true,
+    });
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    expect(harness.continueSession).not.toHaveBeenCalled();
+
+    harness.metas.set(harness.requesterSessionId, {
+      ...harness.metas.get(harness.requesterSessionId)!,
+      operationDeliveryPausedAtTurnId: undefined,
+    });
+    await harness.coordinator.wake('user-resumed');
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+
+    expect(harness.continueSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps Delivery pending behind the process-local Stop barrier when metadata replication fails', async () => {
+    const harness = await makeHarness({ localDeliveryPaused: true });
+    const targetHistory = harness.histories.get(harness.targetSessionId)!;
+    targetHistory[0] = { ...targetHistory[0]!, status: 'handled' };
+    targetHistory.push({
+      id: 'assistant:turn-1',
+      role: 'assistant',
+      userTurnId: 'turn-1',
+      timestamp: '2026-07-20T00:00:00.500Z',
+      items: [{ type: 'text', text: 'done' }],
+      fileDiff: [],
+      finished: true,
+    });
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+
+    expect(harness.continueSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps Delivery pending across restart while an unconsumed durable Stop request remains', async () => {
+    const harness = await makeHarness({ lastCanceledTurn: 'assistant:stopped-turn' });
+    const targetHistory = harness.histories.get(harness.targetSessionId)!;
+    targetHistory[0] = { ...targetHistory[0]!, status: 'handled' };
+    targetHistory.push({
+      id: 'assistant:turn-1',
+      role: 'assistant',
+      userTurnId: 'turn-1',
+      timestamp: '2026-07-20T00:00:00.500Z',
+      items: [{ type: 'text', text: 'done' }],
+      fileDiff: [],
+      finished: true,
+    });
+
+    harness.coordinator.start();
+    await harness.coordinator.idle();
+    harness.coordinator.stop();
+
+    expect(harness.continueSession).not.toHaveBeenCalled();
   });
 
   it('turns an unterminal target into TARGET_TIMEOUT without cancelling it', async () => {
