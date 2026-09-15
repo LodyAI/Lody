@@ -49,6 +49,22 @@ The CLI now reports `promotion-failed`; it must not reclassify that storage fail
 provider delivery. Clients repair ordinary dispatch for pending/seen as well as pending_apply,
 including the older no-active-turn response, while preserving active/terminal/removed turns.
 
+### Correction: Codex ambiguous-response reconciliation
+
+Adapter #43 corrected its outer catch, but the inner submission catch still treated a turn
+ending as proof of non-delivery and removed the steer identity before draining notifications.
+The [adapter follow-up #44](https://github.com/LodyAI/acp-extension-codex/pull/44) retains
+in-flight identity through prompt cleanup and reconciles failed responses
+against received notifications and one `thread/read(includeTurns: true)`. Only a user item in
+the original thread and turn with the same `clientId` proves application; live and historical
+evidence share one acknowledgement before the steering response settles. An explicit refusal
+remains replay-safe. An absent item, failed/unsupported read, timeout, or Stop remains unknown.
+
+The lookup has a five-second budget and never resends, resumes, or starts a turn. This narrows
+ambiguous delivery using positive evidence; it does not promise idempotency, negative-proof
+history, cross-restart recovery, or recovery of every lost live notification after a successful
+response. The normal successful-response path is unchanged.
+
 ## Evidence and limits
 
 Behavioral coverage exercises Codex `not-applied` promotion, a late `applied` outcome, internal
@@ -60,3 +76,8 @@ ownership, cleared clients, and replacement use in the original process, both fo
 just-restored sessions. Fault injection covers
 history promotion followed by activation-write failure and renderer dispatch repair. This is
 deterministic lifecycle coverage, not a live-provider end-to-end run.
+
+Adapter regressions exercise the real notification routing and prompt cleanup with controlled
+app-server responses: lost ACK after prompt completion, queued/late notifications, exact identity
+matching, unavailable/late history, and Stop during reconciliation. Timers are fake and lifecycle
+ordering uses explicit signals. History-read success is delivery evidence, not execution completion.

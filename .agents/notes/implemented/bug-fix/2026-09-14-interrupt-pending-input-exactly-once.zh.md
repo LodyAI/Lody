@@ -44,6 +44,20 @@ promotion 原先在历史已变成 pending 后吞掉 activation 写入失败。C
 pending_apply 都可修复普通 dispatch，也支持旧的 no-active-turn 响应；active、terminal
 及已删除的轮次保持不变。
 
+### 修正：Codex 模糊响应补查
+
+adapter #43 修正了外层 catch，但内层提交 catch 仍把 turn 结束当作未投递证明，并在 drain
+通知前删除 steer 身份。[adapter 后续修复 #44](https://github.com/LodyAI/acp-extension-codex/pull/44)
+让 in-flight 身份保留到 prompt cleanup 之后，对失败响应
+使用已收到的通知及一次 `thread/read(includeTurns: true)` 补查。只有原 thread、原 turn
+中带同一 `clientId` 的 user item 才能证明 applied；实时和历史证据共用一次 acknowledgement，
+并在 steer 响应结束前发送。明确拒绝仍可安全重放；未找到、读取失败或不支持、超时及 Stop
+本身都不能证明未投递，仍保留 unknown。
+
+补查限时五秒，不重发、不 resume、不启动 turn。这只是用正面证据缩小模糊投递范围，
+不承诺幂等、历史负面证明、跨重启恢复，也不保证恢复成功响应之后丢失的每一条实时通知。
+正常成功响应路径保持不变。
+
 ## 证据与边界
 
 行为测试覆盖 Codex `not-applied` 提升、晚到 `applied`、内部取消保持，以及两次配置 mutation
@@ -54,3 +68,7 @@ Resume。
 内使用，同时覆盖 resident 与刚 restore 完的 session。故障注入覆盖历史 promotion 成功后
 activation 写入失败，以及客户端 dispatch 修复。
 这是确定性的生命周期测试，并非连接真实 provider 的端到端运行。
+
+adapter 回归测试使用真实通知路由及 prompt cleanup，只控制 app-server 响应：覆盖 prompt
+结束后 ACK 丢失、排队及晚到通知、精确身份匹配、不可用或晚到历史，以及补查中的 Stop。
+计时使用 fake timers，生命周期顺序使用显式信号。历史命中证明投递，不代表执行完成。
