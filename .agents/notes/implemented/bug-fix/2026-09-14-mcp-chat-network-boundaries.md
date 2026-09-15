@@ -34,4 +34,16 @@ After acceptance, return or recover the stored fixed target. A failure to read t
 
 ## Validation and limits
 
+Review follow-up found that the initial cancellation test asserted persistence but not the first
+response: materialization completed, yet interruption escaped as `INTERNAL_ERROR,false`.
+`Effect.either` unwraps typed failures, not interruption Causes, and catchAllCause inside the
+already interrupted fiber does not guarantee a successful final Exit. The entrypoint now awaits
+`runPromiseExit` (including joined writes and cleanup), then performs a fresh read-only receipt
+Effect when acceptance is possible. It never reruns the command or forwards the aborted signal
+to that recovery read. Tests assert the first receipt or retryable uncertainty both at the
+post-SQLite/pre-materialization boundary and during gated materialization, including receipt-read
+failure. This establishes handler outcomes, not delivery over an already disconnected transport.
+Convex documents HTTP 560 as `STATUS_CODE_UDF_FAILED` in `src/browser/http_client.ts`; it is excluded
+from transient gateway failures intentionally, not as a guessed network classification.
+
 The refactor starts from `99e63b0694d5f67eab62bd1dc7df7d548f074b27`. `workspace.test.ts` exercises real Convex parsing, transport/body faults, definitive denial, attempt and total deadlines, and concurrent cancellation. `session-chat-network-boundary.test.ts` exercises the actual MCP handler and SQLite Operation store with injected fetch failures, explicit Promise gates and fake time, including cancellation during acquisition/materialization, lost receipts and same-ID retries. It replaces the mock-call-only chat-sync suite while retaining its single/batch sync and inactive-runtime coverage. The target materializer is a synthetic SQLite sink, not a real target daemon or HistoryWriter; it proves behavior at that port only. Existing coordinator, store and access suites supply adjacent coverage. These tests do not identify the historical DNS/proxy/TLS failure or prove whole-device offline behavior. The [Spec](../../../../specs/session-access-verification.md) remains draft.

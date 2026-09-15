@@ -39,6 +39,10 @@ A missing receipt after acceptance may have happened returns `OPERATION_RESULT_U
 query the original Operation ID, never allocate a new ID to compensate. Same-ID chat replay still
 requires the same command, requester and source Turn. Best-effort synchronization cannot invert
 a durable success. Request cancellation does not revoke an already accepted Operation.
+If cancellation overlaps possible acceptance, the first handler result must be the stored receipt
+or retryable `OPERATION_RESULT_UNAVAILABLE`, never a generic non-retryable internal error.
+Before acceptance starts, cancellation does not require an Operation receipt. A disconnected
+transport may not deliver any handler result; callers still recover using the original ID.
 
 The manager is released after its outstanding non-cancelable legacy calls settle, including if
 cancellation occurs during acquisition. This is not a whole-command timeout. Failure diagnostics

@@ -34,4 +34,13 @@ workspace 读取 [Effect 重试 + 超时 + AbortSignal]
 
 ## 验证与限制
 
+Review 发现初版取消测试只断言持久状态，未检查第一次响应：物化已完成，中断却仍成为
+`INTERNAL_ERROR,false`。`Effect.either` 只展开类型错误，不展开中断 Cause；在已中断 fiber
+内部使用 catchAllCause 也不能保证最终 Exit 成功。入口现在等待 `runPromiseExit` 完成
+（包括进行中的写入与资源释放），若可能已接受，再用新的只读 Effect 获取回执。不会重跑命令，
+也不会将已经 abort 的 signal 传给恢复读取。测试在 SQLite 已提交/物化前，以及 gate 控制的
+物化期间取消，直接断言第一次回执或可重试的不确定结果，并覆盖回执读取失败。这证明 handler
+结果，不保证已断开的传输还能交付响应。Convex 在 `src/browser/http_client.ts` 中明确定义
+HTTP 560 为 `STATUS_CODE_UDF_FAILED`；排除它是为了区分用户函数错误与暂时网关故障，不是猜测。
+
 重构基于 `99e63b0694d5f67eab62bd1dc7df7d548f074b27`。`workspace.test.ts` 覆盖真实 Convex 解析、连接/正文故障、明确拒绝、单次与总超时、并发取消。`session-chat-network-boundary.test.ts` 用注入 fetch 失败、显式 Promise gate 和 fake clock 测试真实 MCP handler 与 SQLite Operation store，包括获取/物化期间取消、回执丢失与同 ID 重试。它替换只断言 mock 调用的 chat-sync 套件，保留单项/批量同步失败和 inactive runtime 的覆盖。目标物化端口使用合成 SQLite sink，不是真实目标 daemon 或 HistoryWriter；它只证明该端口的行为。现有 coordinator、store 和 access 套件提供邻近覆盖。测试不能确定历史 DNS/代理/TLS 根因，也不证明整机离线行为。[Spec](../../../../specs/session-access-verification.zh.md) 仍为 draft。

@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import path from 'path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { Cause, Data, Effect, Option } from 'effect';
+import { Cause, Data, Effect, Exit, Option } from 'effect';
 import { commandPromise, runCommandEffect } from '@/lib/command-effect';
 import { WorkspaceAccessError } from '@/lib/workspace';
 import { safeAccessQueryErrorDetails } from '@/utils/access-query-error';
@@ -2757,14 +2757,23 @@ class OperationReceiptUnavailableError extends Data.TaggedError(
   }
 }
 
-const startSessionChatOperationEffect = (args: SessionChatToolInput) => {
+type SessionChatAcceptance = { phase: 'no' | 'unknown' | 'yes' };
+
+const readSessionChatReceipt = (ctx: ReturnType<typeof getSessionContext>, operationId: string) =>
+  commandPromise(() =>
+    runWithMcpSessionContext(ctx, () => snapshotOperation(ctx.sessionId as SessionId, operationId))
+  ).pipe(Effect.mapError((cause) => new OperationReceiptUnavailableError({ operationId, cause })));
+
+const startSessionChatOperationEffect = (
+  args: SessionChatToolInput,
+  acceptance: SessionChatAcceptance
+) => {
   const ctx = getSessionContext();
   return Effect.gen(function* () {
     if (!args.operationId) {
       return yield* Effect.fail(new Error('operationId is required'));
     }
     const operationId = args.operationId;
-    let acceptance: 'no' | 'unknown' | 'yes' = 'no';
     const stageEffect = <A, E>(stage: string, effect: Effect.Effect<A, E>) =>
       effect.pipe(
         Effect.withSpan(`mcp.session_chat.${stage}`),
@@ -2776,7 +2785,7 @@ const startSessionChatOperationEffect = (args: SessionChatToolInput) => {
                 ...(stage === 'workspace.resolve' ? { endpoint: 'auth.workspace-list' } : {}),
                 operationId,
                 requesterSessionId: ctx.sessionId,
-                accepted: acceptance,
+                accepted: acceptance.phase,
                 ...safeAccessQueryErrorDetails(Option.getOrUndefined(Cause.failureOption(cause))),
                 interrupted: Cause.isInterrupted(cause),
               })
@@ -2838,15 +2847,12 @@ const startSessionChatOperationEffect = (args: SessionChatToolInput) => {
             )
           );
           const receipt = () =>
-            stage('receipt.read', () =>
-              snapshotOperation(ctx.sessionId as SessionId, operationId)
-            ).pipe(
-              Effect.mapError(
-                (cause) => new OperationReceiptUnavailableError({ operationId, cause })
-              )
+            stageEffect(
+              'receipt.read',
+              readSessionChatReceipt(ctx, operationId).pipe(Effect.uninterruptible)
             );
           if (retry) {
-            acceptance = 'yes';
+            acceptance.phase = 'yes';
             return yield* receipt();
           }
           const targetSession = yield* stage('target.read', () =>
@@ -2896,7 +2902,7 @@ const startSessionChatOperationEffect = (args: SessionChatToolInput) => {
           const preallocatedUserTurnId = randomUUID();
           const materializationClaimToken = randomUUID();
           const timing = operationDeadline(args.deadlineSeconds);
-          acceptance = 'unknown';
+          acceptance.phase = 'unknown';
           const accepted = yield* stage('operation.accept', () =>
             withOperationStore((store) =>
               store.accept(
@@ -2929,7 +2935,7 @@ const startSessionChatOperationEffect = (args: SessionChatToolInput) => {
                 : new OperationReceiptUnavailableError({ operationId, cause })
             )
           );
-          acceptance = 'yes';
+          acceptance.phase = 'yes';
           if (accepted.operation.state === 'finished') {
             return yield* receipt();
           }
@@ -2978,10 +2984,47 @@ const startSessionChatOperationEffect = (args: SessionChatToolInput) => {
   });
 };
 
-const startSessionChatOperation = (
+const startSessionChatOperation = async (
   args: SessionChatToolInput,
   options?: { signal?: AbortSignal }
-): Promise<unknown> => runCommandEffect(startSessionChatOperationEffect(args), options);
+): Promise<unknown> => {
+  const ctx = getSessionContext();
+  const acceptance: SessionChatAcceptance = { phase: 'no' };
+  const exit = await Effect.runPromiseExit(
+    startSessionChatOperationEffect(args, acceptance),
+    options
+  );
+  if (
+    Exit.isFailure(exit) &&
+    Cause.isInterrupted(exit.cause) &&
+    acceptance.phase !== 'no' &&
+    args.operationId
+  ) {
+    // The canceled fiber has exited, including joined writes and manager cleanup.
+    // Reading in that same interrupted fiber can still yield an Interrupt Exit even
+    // after catchAllCause. Recover in a fresh read-only run, without the aborted signal;
+    // never restart the command or materializer. Uncertain acceptance also uses this path.
+    const operationId = args.operationId;
+    return runCommandEffect(
+      readSessionChatReceipt(ctx, operationId).pipe(
+        Effect.tapError((error) =>
+          Effect.sync(() =>
+            getLogger('mcp').debug(
+              JSON.stringify({
+                stage: 'receipt.recover',
+                operationId,
+                requesterSessionId: ctx.sessionId,
+                accepted: acceptance.phase,
+                ...safeAccessQueryErrorDetails(error),
+              })
+            )
+          )
+        )
+      )
+    );
+  }
+  return runCommandEffect(exit);
+};
 
 const mapWithConcurrency = async <T, R>(
   values: readonly T[],
@@ -4079,7 +4122,6 @@ export const __lodyMcpServerInternals = {
   readSessionExecutionSnapshot,
   makeMachineOnlineLookupForMcp,
   startSessionChatOperation,
-  startSessionChatOperationEffect,
   startSessionChatManyOperation,
   getSessionContext,
   resolveOperationStorePathForContext,

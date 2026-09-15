@@ -265,34 +265,95 @@ describe('real MCP acceptance + Convex fetch + SQLite boundary', () => {
     expect(active()).toEqual([]);
     expect(rows()).toEqual([]);
   });
-  it('joins in-flight materialization before cleanup on cancellation, without duplicate append', async () => {
-    const entered = gate();
-    const release = gate();
-    let cleaned = false;
-    boundary.manager.cleanUp = async () => {
-      cleaned = true;
-    };
-    boundary.send.mockImplementation(async (...args: unknown[]) => {
-      const input = args[8] as { userTurnId: string };
-      entered.resolve();
-      await release.promise;
+  it.each([false, true])(
+    'joins materialization on cancellation and preserves the first response (receipt unavailable=%s)',
+    async (receiptUnavailable) => {
+      const entered = gate();
+      const release = gate();
+      let cleaned = false;
+      boundary.manager.cleanUp = async () => {
+        cleaned = true;
+      };
+      boundary.send.mockImplementation(async (...args: unknown[]) => {
+        const input = args[8] as { userTurnId: string };
+        entered.resolve();
+        await release.promise;
+        expect(cleaned).toBe(false);
+        sink.prepare('INSERT INTO target_inputs VALUES (?, ?)').run(input.userTurnId, args[4]);
+        return { userTurnId: input.userTurnId };
+      });
+      const controller = new AbortController();
+      const result = invoke({ signal: controller.signal });
+      await entered.promise;
+      controller.abort();
       expect(cleaned).toBe(false);
-      sink.prepare('INSERT INTO target_inputs VALUES (?, ?)').run(input.userTurnId, args[4]);
-      return { userTurnId: input.userTurnId };
-    });
-    const controller = new AbortController();
-    const result = invoke({ signal: controller.signal });
-    await entered.promise;
-    controller.abort();
-    expect(cleaned).toBe(false);
-    expect(rows()).toEqual([]);
-    release.resolve();
-    await result;
-    expect(cleaned).toBe(true);
-    expect(required(active()[0]).items[0]).toMatchObject({ inputDurable: true });
-    expect(await invoke()).toMatchObject({ id: command.operationId });
-    expect(rows()).toHaveLength(1);
-  });
+      expect(rows()).toEqual([]);
+      const snapshot = receiptUnavailable
+        ? vi.spyOn(LodyOperationStore.prototype, 'snapshot').mockImplementation(() => {
+            throw new Error('synthetic receipt unavailable');
+          })
+        : undefined;
+      release.resolve();
+      if (receiptUnavailable) {
+        expect(await result).toMatchObject({
+          ok: false,
+          error: { code: 'OPERATION_RESULT_UNAVAILABLE', retryable: true },
+        });
+        snapshot?.mockRestore();
+      } else {
+        expect(await result).toEqual(
+          store.snapshot(store.get('requester' as SessionId, command.operationId))
+        );
+      }
+      expect(cleaned).toBe(true);
+      expect(required(active()[0]).items[0]).toMatchObject({ inputDurable: true });
+      expect(await invoke()).toMatchObject({ id: command.operationId });
+      expect(rows()).toHaveLength(1);
+    }
+  );
+  it.each([false, true])(
+    'cancellation after SQLite accept but before materialization preserves the first response (receipt unavailable=%s)',
+    async (receiptUnavailable) => {
+      const controller = new AbortController();
+      let cleaned = false;
+      boundary.manager.cleanUp = async () => {
+        cleaned = true;
+      };
+      const accept = LodyOperationStore.prototype.accept;
+      vi.spyOn(LodyOperationStore.prototype, 'accept').mockImplementation(function (
+        this: LodyOperationStore,
+        ...args
+      ) {
+        const persisted = accept.apply(this, args);
+        // Explicit synchronous handoff: the real transaction has returned, but the
+        // Effect continuation and materializer have not started. No scheduler race.
+        controller.abort();
+        return persisted;
+      });
+      const snapshot = receiptUnavailable
+        ? vi.spyOn(LodyOperationStore.prototype, 'snapshot').mockImplementation(() => {
+            throw new Error('synthetic receipt unavailable');
+          })
+        : undefined;
+      const first = await invoke({ signal: controller.signal });
+      if (receiptUnavailable) {
+        expect(first).toMatchObject({
+          ok: false,
+          error: { code: 'OPERATION_RESULT_UNAVAILABLE', retryable: true },
+        });
+        snapshot?.mockRestore();
+      } else {
+        expect(first).toEqual(
+          store.snapshot(store.get('requester' as SessionId, command.operationId))
+        );
+      }
+      expect(cleaned).toBe(true);
+      expect(required(active()[0]).items[0]).toMatchObject({ inputDurable: false });
+      expect(rows()).toEqual([]);
+      expect(await invoke()).toMatchObject({ id: command.operationId, state: 'active' });
+      expect(rows()).toEqual([]);
+    }
+  );
   it('receipt read failure reports uncertainty and same-ID recovery returns the persisted input', async () => {
     const snapshot = vi.spyOn(LodyOperationStore.prototype, 'snapshot').mockImplementation(() => {
       throw new Error('synthetic disk read failure');

@@ -30,6 +30,9 @@ Cloud 命令可能先用 CLI 凭证枚举 workspace，即使目标就在同机�
 可能已接受但回执不可读时返回 `OPERATION_RESULT_UNAVAILABLE`：查询原 Operation ID，不分配
 新 ID 补偿。同 ID chat 重放仍要求命令、请求者和源 Turn 一致。尽力同步不能倒置持久成功。
 取消请求不会撤销已经接受的 Operation。
+取消与可能已接受的阶段重叠时，第一次 handler 结果必须是已存回执，或可重试的
+`OPERATION_RESULT_UNAVAILABLE`，不能是通用不可重试内部错误。接受尚未开始时取消无需
+返回 Operation 回执。已断开的传输可能无法送达 handler 结果；调用方仍须用原 ID 恢复。
 
 manager 在不支持取消的旧调用结束后才释放，包括获取期间取消的情况。这不是整个命令的超时。
 失败诊断记录 stage、接受状态、Operation ID、安全 endpoint 标签以及有界白名单 cause code/status，

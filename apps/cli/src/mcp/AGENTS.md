@@ -53,6 +53,7 @@ Parent instructions apply.
   acceptance, materialization failure returns the stored fixed Operation for recovery; an unreadable
   receipt means uncertainty and requires the original ID. Cancellation must join non-cancelable
   writes before manager release. Preserve MCP requester context across Effect/Promise boundaries.
+  After possible acceptance, an interrupted Exit must recover the original receipt or typed uncertainty.
   Failure diagnostics use safe stage/ID/endpoint/cause-code fields, never raw prompts or credentials.
 
 - MCP session tools use stable machine/session/agent-config ids and strict, narrow input schemas.

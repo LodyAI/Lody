@@ -1,6 +1,10 @@
 import { Effect, Either } from 'effect';
 
-/** Keep domain errors intact at Promise entrypoints instead of exposing FiberFailure. */
+/**
+ * Keep domain errors intact at Promise entrypoints instead of exposing FiberFailure.
+ * Interruption/defects are Causes, not Either.Left: callers with durable writes must
+ * inspect the completed Exit and recover according to their own acceptance boundary.
+ */
 export async function runCommandEffect<A, E>(
   effect: Effect.Effect<A, E>,
   options?: { signal?: AbortSignal }

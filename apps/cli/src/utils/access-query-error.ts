@@ -63,6 +63,8 @@ export function safeAccessQueryErrorDetails(error: unknown): {
 /** Only for idempotent access queries; a definitive HTTP rejection wins over text. */
 export function isTransientAccessQueryError(error: unknown): boolean {
   const details = safeAccessQueryErrorDetails(error);
+  // Convex src/browser/http_client.ts defines 560 as STATUS_CODE_UDF_FAILED:
+  // the user function returned an error, not a generic gateway availability failure.
   if (
     details.httpStatuses.some(
       (status) =>
