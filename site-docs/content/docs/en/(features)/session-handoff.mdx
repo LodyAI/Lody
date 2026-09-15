@@ -9,7 +9,7 @@ A **coding agent session handoff** in Lody means a teammate opens the **same** s
 
 That is the difference from most “share my Claude Code session” workflows: those usually publish a transcript. Lody invites someone into the existing session so they can keep chatting and steering the agent.
 
-See also [Sessions](/docs/session), [Team Features](/docs/team), and [Agent Config](/docs/agents).
+See also [Sessions](/docs/session), [Team Features](/docs/team), [Agent Config](/docs/agents), and the definition contrast in [Share Link vs Live Handoff](/docs/compare/share-link-vs-live-handoff).
 
 <Callout title="What “continue” means">
 Workspace members who can open the session can keep the conversation going from the same context. Lody does not turn the session into a read-only replay. Sharing still follows machine and project visibility — see [permissions](#permissions) below.
@@ -28,7 +28,7 @@ People already share agent work in several ways. Most of them stop at “look at
 | [SpecStory](https://docs.specstory.com/cloud/session-sharing) | Saved history or a public viewer link | No — viewers do not join your running session | History / export, not the session worktree |
 | **Lody** | The existing workspace [session](/docs/session) | **Yes** — open it and continue | **Yes** — live [diffs](/docs/diff-viewer) and the session worktree |
 
-Lody can still export a conversation as Markdown when you only need a record. That is a different action: [Copy Conversations](/docs/copy-md). Copying a session URL without sharing the session also does not grant team access — the link still works for the owner.
+The share-link vs live-handoff definition is in [Share Link vs Live Handoff](/docs/compare/share-link-vs-live-handoff). Lody can still export a conversation as Markdown when you only need a record. That is a different action: [Copy Conversations](/docs/copy-md). Copying a session URL without sharing the session also does not grant team access — the link still works for the owner.
 
 ## How to hand off a session
 
@@ -102,7 +102,7 @@ Yes, if the session runs in a Lody workspace. Invite them, share the session (an
 
 ### Is this the same as a ChatGPT share link, Lore, or SpecStory?
 
-No. Those tools are built around a **viewable record** — a snapshot, rendered thread, or exported history. Some of them can seed a *new* agent run. Lody hands off the **existing coding agent session** in the team workspace: same conversation, diffs, and worktree.
+No. Those tools are built around a **viewable record** — a snapshot, rendered thread, or exported history. Some of them can seed a *new* agent run. Lody hands off the **existing coding agent session** in the team workspace: same conversation, diffs, and worktree. See [Share Link vs Live Handoff](/docs/compare/share-link-vs-live-handoff).
 
 ### What if my teammate cannot see the session?
 
