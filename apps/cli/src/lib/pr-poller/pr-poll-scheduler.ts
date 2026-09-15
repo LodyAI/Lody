@@ -466,7 +466,10 @@ export class PrPollScheduler {
               lane,
               desiredIntervalMs:
                 lane === 'high' ? config.highIntervalMs : config.lowStatusIntervalMs,
-              qualifier: String(statusTarget.prNumber),
+              // A lifecycle transition is a new scheduling generation and is
+              // due immediately. Unlike the old terminal fingerprint, this
+              // key only controls cadence; it never certifies correctness.
+              qualifier: `${statusTarget.prNumber}|${statusTarget.status}`,
               status: statusTarget,
             })
           );
@@ -838,7 +841,7 @@ export class PrPollScheduler {
         );
         if (fingerprintChanged) {
           // A discovery-only success updates no metadata, so no meta event
-          // re-derives the entries — refresh them here so a terminal owner
+          // re-derives the entries — refresh them here so an idle discovery owner
           // whose context is now fingerprinted goes idle immediately.
           this.refreshRuntimeFingerprintProjection(runtime);
         }
@@ -888,7 +891,7 @@ export class PrPollScheduler {
    * target-local failure, never a confirmed empty), and (c) every effect the
    * owner's round required (association, metadata write-back) succeeded.
    * A discovery success also records the owner's context fingerprint
-   * (idle-terminal). Returns whether any fingerprint changed.
+   * (discovery-idle). Returns whether any fingerprint changed.
    */
   private markRefreshedTargets(
     batch: PrPollBatchPlan,

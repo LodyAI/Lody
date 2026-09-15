@@ -16,7 +16,8 @@ export type PrPollTargetKind = 'status' | 'discovery';
 export type SchedulableTarget = {
   /**
    * Stable key for last-success persistence:
-   * `ws|owner|repo|status|<prNumber>` or `ws|owner|repo|discovery|<branch>`.
+   * `ws|owner|repo|status|<prNumber>|<lifecycle>` or
+   * `ws|owner|repo|discovery|<branch>`.
    * The qualifier identifies the ACTUAL target, so a newly associated PR or a
    * switched branch starts as never-refreshed (immediately due) instead of
    * inheriting a stale success stamp. Only the FIRST segment is ever parsed
@@ -120,7 +121,10 @@ export function pickNextBatch(
     (a.workspaceId + a.repoFullName < b.workspaceId + b.repoFullName ? -1 : 1);
   const highs = batches.filter((batch) => batch.lane === 'high').sort(byOldest);
   const lows = batches.filter((batch) => batch.lane === 'low').sort(byOldest);
-  if (lows.length > 0 && (highs.length === 0 || consecutiveHighDispatches >= lowEveryNBatches - 1)) {
+  if (
+    lows.length > 0 &&
+    (highs.length === 0 || consecutiveHighDispatches >= lowEveryNBatches - 1)
+  ) {
     return lows[0] ?? null;
   }
   return highs[0] ?? lows[0] ?? null;

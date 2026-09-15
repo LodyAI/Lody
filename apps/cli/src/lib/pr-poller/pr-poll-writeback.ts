@@ -19,11 +19,11 @@ import type { PrObservation } from './github-graphql-client';
  * - `pullRequests` last item is the current PR; entries are `{url, status}`
  *   only (legacy detail fields are stripped on rewrite — ordering bootstrap);
  * - `pullRequestState` entries stay ≤50B: `{s?, m?, t}`; legacy `r` is never
- *   written and is deleted on first touch; terminal/no-signal PRs get their
+ *   written and is deleted on first touch; inactive/no-signal PRs get their
  *   record deleted; entries for non-associated URLs are pruned.
  */
 
-const isTerminal = (status: PrStatus): boolean => status === 'merged' || status === 'closed';
+const isInactive = (status: PrStatus): boolean => status === 'merged' || status === 'closed';
 
 /**
  * Deterministic current-PR selection over associated entries (fresh meta
@@ -51,8 +51,8 @@ export function selectCurrentPullRequestUrl(args: {
     const status = observation?.status ?? pr.status;
     const branchMatch =
       observation && runtimeBranch && observation.headRefName === runtimeBranch ? 1 : 0;
-    const open = isTerminal(status) ? 0 : 1;
-    const updatedAtMs = observation ? (Date.parse(observation.updatedAt) || 0) : -1;
+    const open = isInactive(status) ? 0 : 1;
+    const updatedAtMs = observation ? Date.parse(observation.updatedAt) || 0 : -1;
     const prNumber = observation?.number ?? parseGitHubPullRequestUrl(pr.url)?.prNumber ?? -1;
     const rank: [number, number, number, number, number] = [
       branchMatch,
@@ -96,7 +96,7 @@ export type PrAssociationPlan = {
  *
  * `observations` must include EVERY observation of this round (status and
  * discovery alike): an already-associated PR needs its own branch/updatedAt
- * evidence in the ranking, or an older terminal candidate on the same branch
+ * evidence in the ranking, or an older inactive candidate on the same branch
  * could outrank it and trigger a pointless association.
  */
 export function planAssociation(args: {
@@ -150,7 +150,7 @@ export type PrMetaWritePlan = {
   changedStatusUrls: string[];
   /** URLs whose state record was written (new or s/m changed, or legacy r dropped). */
   changedStateUrls: string[];
-  /** URLs whose state record was deleted (terminal PR, or no signals left). */
+  /** URLs whose state record was deleted (inactive PR, or no signals left). */
   removedStateUrls: string[];
   /** State entries pruned because the URL is no longer an associated PR. */
   prunedStateUrls: string[];
@@ -185,8 +185,11 @@ export function planPullRequestMetaWrite(args: {
     }
     seenUrls.add(pr.url);
     const observation = observationByUrl.get(pr.url);
-    const status = observation?.status ?? pr.status;
-    if (observation && observation.status !== pr.status) {
+    // A merged PR cannot become closed/open/draft. This also makes a fresh
+    // merged metadata write win over an older GitHub response that completed
+    // while the request was in flight.
+    const status = pr.status === 'merged' ? 'merged' : (observation?.status ?? pr.status);
+    if (status !== pr.status) {
       changedStatusUrls.push(pr.url);
     }
     nextPrs.push({ url: pr.url, status });
@@ -222,7 +225,7 @@ export function planPullRequestMetaWrite(args: {
   const pullRequests = pullRequestsChanged(originalPrs, nextPrs) ? nextPrs : null;
 
   // 4. Live state per associated URL: `s`/`m` on change, delete on
-  //    terminal/no-signal, prune non-associated, drop legacy `r`.
+  //    inactive/no-signal, prune non-associated, drop legacy `r`.
   let pullRequestState: Record<string, SessionPullRequestStateMeta> | null = null;
   const changedStateUrls: string[] = [];
   const removedStateUrls: string[] = [];
@@ -233,7 +236,7 @@ export function planPullRequestMetaWrite(args: {
       continue;
     }
     const existing = nextState[url];
-    const desired = isTerminal(observation.status)
+    const desired = isInactive(observation.status)
       ? null
       : buildStateEntry(observation, existing, nowSec);
     if (desired === null) {
@@ -305,7 +308,7 @@ function pullRequestsChanged(
 }
 
 /**
- * Desired state record for a non-terminal PR, preserving `t` when no signal
+ * Desired state record for an active PR, preserving `t` when no signal
  * changed (so `t` always marks the last real state change, not the last
  * poll). Returns null when all signals are absent. Never emits legacy `r`.
  */

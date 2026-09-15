@@ -14,21 +14,23 @@ import {
  */
 
 /**
- * An associated PR whose last known status is open/draft: refresh lifecycle,
- * CI rollup, and merge/conflict state. Keyed by the canonical PR URL exactly
- * as stored in session meta (also the write-back upsert key).
+ * An associated PR whose last known status is not `merged`: refresh lifecycle,
+ * CI rollup, and merge/conflict state. `closed` remains eligible because it can
+ * mean either a genuinely closed PR or a merge projection that lost the
+ * provider's `merged` bit. Keyed by the canonical PR URL exactly as stored in
+ * session meta (also the write-back upsert key).
  */
 export type PrPollStatusTarget = {
   url: string;
   repoFullName: string;
   prNumber: number;
-  status: 'open' | 'draft';
+  status: 'open' | 'draft' | 'closed';
 };
 
 /**
  * A `(repository, runtime head branch)` query for the newest PR on that
  * branch. Exists whenever the repository context is resolvable, the branch is
- * Session-owned, and the owner is not idle-terminal — including when an
+ * Session-owned, and the owner is not idle-for-discovery — including when an
  * open/draft PR is already associated (a newer PR on the same branch must
  * still be discovered).
  */
@@ -73,10 +75,10 @@ export function resolveDiscoveryBranch(meta: SessionMeta): string | undefined {
 }
 
 /**
- * The idle-terminal fingerprint: "this exact `(repository, branch)` context
- * has already had a successful discovery". Stored per owner in the local
- * scheduling state; a branch switch changes the fingerprint and re-enables
- * discovery automatically.
+ * The idle discovery fingerprint: "this exact `(repository,
+ * branch)` context has already had a successful discovery". Stored per owner
+ * in local scheduling state; a branch switch changes the fingerprint and
+ * re-enables discovery automatically.
  */
 export function computeDiscoveryFingerprint(repoFullName: string, branch: string): string {
   return `${repoFullName}|${branch}`;
@@ -112,7 +114,7 @@ export function getCurrentPullRequest(
  * alive set is skipped — there is no owner doc to poll or write back to.
  *
  * `discoveryFingerprints` is the persisted per-owner fingerprint map (see
- * `computeDiscoveryFingerprint`); it drives the idle-terminal rule.
+ * `computeDiscoveryFingerprint`); it drives the discovery-idle rule only.
  */
 export function enumeratePrPollTargets(
   sessions: readonly AliveSessionMeta[],
@@ -172,8 +174,15 @@ function maxNullable(a: number | null, b: number | null): number | null {
 function collectStatusTargets(ownerMeta: SessionMeta): PrPollStatusTarget[] {
   const targets: PrPollStatusTarget[] = [];
   const seen = new Set<string>();
+  const current = getCurrentPullRequest(ownerMeta);
   for (const pr of ownerMeta.pullRequests ?? []) {
-    if (pr.status !== 'open' && pr.status !== 'draft') {
+    // `closed` is reversible (and is also the REST/webhook state of a merged
+    // PR), so it must remain an exact recurring target. Only `merged` is final.
+    if (pr.status === 'merged') {
+      continue;
+    }
+    // The last entry owns lifecycle when duplicate URLs exist.
+    if (current?.url === pr.url && current !== pr) {
       continue;
     }
     const parsed = parseGitHubPullRequestUrl(pr.url);
@@ -203,10 +212,9 @@ function collectDiscoveryTarget(
     // Unresolvable repository context: explicit skip, no guessing.
     return null;
   }
-  // Idle-terminal: the current PR (last array item) is terminal AND this exact
-  // (repo, branch) context has already had a successful discovery. Only a
-  // context change (fingerprint mismatch) re-enables discovery.
-  const current = (ownerMeta.pullRequests ?? []).at(-1);
+  // Branch discovery keeps its original identity. A known closed PR has its
+  // own recurring exact status target, independent of this idle optimization.
+  const current = getCurrentPullRequest(ownerMeta);
   if (
     current &&
     (current.status === 'merged' || current.status === 'closed') &&

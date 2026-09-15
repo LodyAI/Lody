@@ -51,7 +51,7 @@ describe('enumeratePrPollTargets', () => {
     ]);
   });
 
-  it('excludes terminal PRs (merged/closed) from status targets', () => {
+  it('keeps closed PRs as exact targets but excludes merged PRs', () => {
     const [entry] = enumeratePrPollTargets([
       alive(
         's1',
@@ -64,7 +64,14 @@ describe('enumeratePrPollTargets', () => {
       ),
     ]);
 
-    expect(entry?.statusTargets).toEqual([]);
+    expect(entry?.statusTargets).toEqual([
+      {
+        url: 'https://github.com/owner/repo/pull/2',
+        repoFullName: 'owner/repo',
+        prNumber: 2,
+        status: 'closed',
+      },
+    ]);
   });
 
   it('skips PR entries whose url does not parse as a GitHub PR url', () => {
@@ -176,11 +183,57 @@ describe('enumeratePrPollTargets', () => {
     const [resumed] = enumeratePrPollTargets([alive('s1', { ...meta, branchName: 'feat/next' })], {
       s1: fingerprint,
     });
-    expect(resumed?.discoveryTarget).toEqual({ repoFullName: 'owner/repo', branch: 'feat/next' });
+    expect(resumed?.discoveryTarget).toEqual({
+      repoFullName: 'owner/repo',
+      branch: 'feat/next',
+    });
 
     // No recorded fingerprint (fresh daemon) → one discovery is still allowed.
     const [fresh] = enumeratePrPollTargets([alive('s1', meta)]);
-    expect(fresh?.discoveryTarget).toEqual({ repoFullName: 'owner/repo', branch: 'feat/x' });
+    expect(fresh?.discoveryTarget).toEqual({
+      repoFullName: 'owner/repo',
+      branch: 'feat/x',
+    });
+  });
+
+  it('keeps a closed PR as an exact recurring target when branch discovery is idle', () => {
+    const branchFingerprint = computeDiscoveryFingerprint('owner/repo', 'feat/x');
+    const [entry] = enumeratePrPollTargets(
+      [
+        alive(
+          's1',
+          makeMeta({
+            project: githubProject,
+            branchName: 'feat/x',
+            pullRequests: [{ url: 'https://github.com/owner/repo/pull/649', status: 'closed' }],
+          })
+        ),
+      ],
+      { s1: branchFingerprint }
+    );
+
+    expect(entry?.discoveryTarget).toBeNull();
+    expect(entry?.statusTargets).toEqual([
+      {
+        repoFullName: 'owner/repo',
+        prNumber: 649,
+        status: 'closed',
+        url: 'https://github.com/owner/repo/pull/649',
+      },
+    ]);
+  });
+
+  it('stops exact lifecycle polling only after the PR is known merged', () => {
+    const url = 'https://github.com/owner/repo/pull/649';
+    const [closed] = enumeratePrPollTargets([
+      alive('s1', makeMeta({ pullRequests: [{ url, status: 'closed' }] })),
+    ]);
+    expect(closed?.statusTargets[0]?.status).toBe('closed');
+
+    const [merged] = enumeratePrPollTargets([
+      alive('s1', makeMeta({ pullRequests: [{ url, status: 'merged' }] })),
+    ]);
+    expect(merged?.statusTargets).toEqual([]);
   });
 
   it('does NOT fall back to baseBranch when branchName is missing', () => {

@@ -16,8 +16,8 @@ logic to the scheduler, the GraphQL client, or the workspace adapter.
 Pure modules (deterministic, unit-tested without IO):
 
 - `pr-poll-targets.ts` — metadata replica → status/discovery targets; owner
-  normalization (`parentSessionId ?? sessionId`); idle-terminal fingerprint
-  rule; archived/deleted exclusion; current PR = LAST `pullRequests` item.
+  normalization (`parentSessionId ?? sessionId`); exact known-PR targets;
+  archived/deleted exclusion; current PR = LAST `pullRequests` item.
 - `pr-poll-priority.ts` — viewing presence + `lastMessageAt` → high/low lane
   (top-100 cap). Priority only shortens intervals; never a precondition.
 - `pr-poll-quota.ts` — per-scope token bucket, provider safety-floor freeze,
@@ -25,9 +25,9 @@ Pure modules (deterministic, unit-tested without IO):
 - `pr-poll-select.ts` — dueness (`max(lastSuccess + interval, lastAttempt +
 floor)`, never a stored next-poll time), `(workspace, repo)` batching, lane
   fairness (≥1 of every N dispatches is low under contention), next wake.
-- `graphql-batch-builder.ts` — batched query: status aliases + two bounded
-  discovery aliases per branch (newest open + newest merged/closed) +
-  `rateLimit`. No review decision/threads/check-run details.
+- `graphql-batch-builder.ts` — batched query: exact status aliases +
+  two bounded discovery aliases per branch (newest open + newest
+  merged/closed) + `rateLimit`. No review decision/threads/check-run details.
 - `github-graphql-client.ts` — pure parsing/mapping exports (CI, merge state,
   error taxonomy) + a thin fetch transport class.
 - `pr-poll-writeback.ts` — deterministic current-PR selection (branch match →
@@ -55,17 +55,15 @@ Effect adapters: `pr-poller-workspace.ts` (Loro repo + presence + credentials
   revalidates `machineId` (migrated owners are not this daemon's to write)
   and, for discovery results, the repo/branch context — a mid-flight branch
   switch invalidates the old branch's candidates.
-- **Success stamps commit AFTER effects.** `lastSuccessAt` (and the discovery
-  fingerprint) are recorded only when the alias was actually queried, the
-  provider result was valid (a malformed alias is never a confirmed empty),
-  and the owner's association + write-back effects succeeded. Failed rounds
-  keep the target due and retry — GitHub query included — at the attempt
-  floor. Committing the fingerprint before effects loses newly discovered
-  PRs forever on terminal owners (review finding; regression-tested).
-- **Target keys identify the actual target.** Status keys carry the PR
-  number, discovery keys the branch — a new PR / switched branch is
-  never-refreshed and immediately due. Truncated (over-alias-budget) targets
-  are NOT stamped as attempted; they stay due and form the next batch.
+- **Success stamps commit AFTER effects.** `lastSuccessAt` and discovery fingerprints
+  are recorded only when the alias was queried, its result was valid, and the
+  owner's association + write-back effects succeeded. Failed rounds retry the
+  GitHub query at the attempt floor.
+- **Target keys identify the actual target.** Recurring status keys carry the
+  PR number and lifecycle; discovery keys carry branch. New generations are
+  immediately due. These keys control cadence only and never certify provider
+  truth. Truncated targets are not stamped as attempted and stay due for the
+  next batch.
 - **Current PR is the LAST `pullRequests` item; the reconciler is the
   ordering authority.** The hosted webhook fan-out is a blind single-PR
   overwrite and must not load Loro Streams;
@@ -84,8 +82,15 @@ Effect adapters: `pr-poller-workspace.ts` (Loro repo + presence + credentials
   replacement scope's own gates before the second call.
 - **Discovery requires `branchName`.** Never query by `baseBranch` (the
   starting ref — would associate unrelated PRs). Discovery continues while an
-  open/draft PR exists (newer-PR detection); only idle-terminal owners
-  (terminal current PR + unchanged `repo|branch` fingerprint) stop entirely.
+  open/draft PR exists (newer-PR detection); its fingerprint remains only
+  `repo|branch`. Known `draft`, `open`, and `closed` PRs are recurring exact
+  `pullRequest(number:)` targets because `closed` can reopen and is also the
+  REST/webhook state accompanying a merge. Only `merged` is final and idle.
+  Repeated `closed` observations must never create terminal verification state.
+- **Merged is absorbing.** Write-back planned against fresh metadata must never
+  replace a stored `merged` lifecycle with `closed`, `open`, or `draft`. This
+  prevents an older in-flight provider response from rolling back a merge;
+  reversible states continue polling and recover on later observations.
 - **GitHub-capable direct local projects are tracked.** A local project using
   its original directory gets the same PR discovery and status targets when
   `githubRepoFullName` and runtime `branchName` are present. Its branch is shared

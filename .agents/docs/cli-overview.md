@@ -54,11 +54,16 @@ the scheduler is a thin orchestrator. Priority comes from `session-viewing` pres
 turn-end hook. Requests batch GraphQL per `(workspace, repo)` under a per-credential-scope point
 bucket, with a provider safety-floor freeze and 15min→2h repo cooldowns.
 
+Known open, draft, and closed PRs are refreshed by exact PR number on their lane cadence; only
+merged is final. Lifecycle is part of the disposable cadence key so a transition is immediately
+due, but no query count or fingerprint certifies `closed` as terminal. Write-back never downgrades
+a freshly stored merged PR, and repeated closed observations remain eligible for later correction.
+
 Write-back plans against freshly read owner meta: `pullRequests` upserts by URL with the current
 PR as the LAST item (legacy fields stripped once), while CI and merge state live in
 `SessionMeta.pullRequestState` (`{s,m,t}`, ≤50B per entry; legacy `r` readiness is no longer
 written and is deleted on touch). Scheduling state — never PR status — is in
-`~/.lody/pr-poller-state.json`. `LODY_PR_POLL_DISABLED=1` is the kill switch and `LODY_PR_POLL_*`
+`~/.lody/pr-poller-state.sqlite3`. `LODY_PR_POLL_DISABLED=1` is the kill switch and `LODY_PR_POLL_*`
 overrides live in `pr-poller-config.ts`. Module invariants: `src/lib/pr-poller/AGENTS.md`.
 
 ## Builtin agents and adapter provenance

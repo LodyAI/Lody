@@ -52,7 +52,7 @@ export type PrPollerState = {
   targets: Record<string, PrPollTargetState>;
   /**
    * Keyed by `${workspaceId}:${ownerSessionId}`; value is the `repo|branch`
-   * fingerprint of the owner's last successful discovery (idle-terminal).
+   * fingerprint of the owner's last successful discovery (discovery-idle).
    */
   discoveryFingerprints: Record<string, string>;
 };
@@ -127,9 +127,10 @@ export class PrPollerStateStore {
           lastErrorKind: row.last_error_kind,
         };
       }
-      for (const row of db
-        .prepare('SELECT key, last_success_at_ms FROM targets')
-        .all() as Array<{ key: string; last_success_at_ms: number }>) {
+      for (const row of db.prepare('SELECT key, last_success_at_ms FROM targets').all() as Array<{
+        key: string;
+        last_success_at_ms: number;
+      }>) {
         state.targets[row.key] = { lastSuccessAtMs: row.last_success_at_ms };
       }
       for (const row of db
