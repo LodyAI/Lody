@@ -29,7 +29,10 @@ CLI 合并待发累计快照，包括 Grok。失败 payload 保留原归属直�
 Codex 旧压缩偏移在同一进程内跨成功 flush 保留；带 delta 的 adapter 自有累计值不走
 该兼容路径。Codex 的精确单次 response 事件会归属到实际产生它的模型；thread 总量中未被
 覆盖的余量保留在明确的未归属桶，不能使用当前 UI 模型或其价格。进程持久 sidecar 会恢复
-Codex 的累计模型账本，fork 会话排除源历史。Claude query 和 Kimi activation 快照可提供
+Codex 的累计模型账本及 native reset 游标；fork 用首轮开始前捕获的 native 历史回放
+排除源历史。锁定 Codex 0.153.4 仅允许新 thread 开启 raw 事件，冷 resume/fork
+的新用量保持未归属。压缩及一次性 reroute 证据之后的响应，在无法确认实际模型时
+也保持未归属。Claude query 和 Kimi activation 快照可提供
 delta，而不改变累计范围。Kimi 源码变更需新 managed artifact 才会影响实际运行版本。
 保留 provider 费用；缺失 cache-write 费率不能用 cache-read 价格替代。空聚合不代表已知
 零费用。

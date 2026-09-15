@@ -39,7 +39,11 @@ Codex exact per-response events are attributed to the model that produced them;
 any thread-total remainder stays in an explicit unattributed bucket, never the
 currently selected UI model or its price. A process-persistent sidecar restores
 Codex's cumulative model ledger across restarts, and fork sessions exclude source
-history. Claude query and Kimi activation snapshots can provide delta without
+history using the native replay captured before their first turn. The sidecar
+preserves the native reset cursor alongside the ledger. Pinned Codex 0.153.4 only
+allows raw-event opt-in on new threads; cold resume/fork usage remains unattributed.
+Compaction and responses after one-shot reroute evidence likewise stay unattributed
+when the producing model cannot be established. Claude query and Kimi activation snapshots can provide delta without
 changing their cumulative scope. Kimi source changes require a new managed artifact
 before they affect the consuming runtime.
 Provider costs are preserved; missing cache-write tariffs cannot be replaced with
