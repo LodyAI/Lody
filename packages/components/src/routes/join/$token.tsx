@@ -22,8 +22,7 @@ export function WorkspaceJoinRequestRoute() {
       onSignInRequested={goToLogin}
       onEmailVerificationRequested={() => {
         void (async () => {
-          await signOutWithoutRedirect(authClient);
-          goToLogin();
+          if (await signOutWithoutRedirect(authClient)) goToLogin();
         })();
       }}
       onWorkspaceRequested={(workspaceSlug) => {

@@ -176,6 +176,9 @@ export interface SessionHistoryCommands {
   applyHistoryAction(action: HistoryAction): Promise<SessionActionResult>;
   /** Append a new turn. Rejects invalid input before touching storage. */
   appendTurn(turn: SessionTurn): Promise<void>;
+  /** Prepare validated operations without publishing; the caller persists before replay. */
+  prepareAppendTurn(turn: SessionTurn): Promise<Uint8Array>;
+  applyPreparedTurn(update: Uint8Array): Promise<void>;
   /** Replace an existing turn by business id. */
   replaceTurn(turnId: string, turn: SessionTurn): Promise<void>;
   /**

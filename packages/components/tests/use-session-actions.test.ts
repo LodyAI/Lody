@@ -1,3 +1,6 @@
+import { LoroDoc } from 'loro-crdt';
+import { createHistoryWriter } from '@lody/shared';
+import { createSessionSendJournal, type SessionSendRecord } from '../src/lib/session-send-journal';
 import { createSessionSendResources, type SessionSendResources } from '../src/lib/session-send-resources';
 import { applyHistoryAction } from '../../shared/src/session-data/history-actions';
 import type { HistoryAction, SessionEntry } from '@lody/shared/session-data';
@@ -202,6 +205,8 @@ const createRuntime = (
     } as unknown as WorkspaceRuntime['writer']);
 
   const runtime = {
+    accountId: 'user-1',
+    sourceReplica: 'synthetic-replica',
     workspaceSlug: overrides.workspaceSlug ?? 'workspace-slug',
     workspaceId: overrides.workspaceId ?? ('workspace-1' as WorkspaceId),
     repo,
@@ -225,6 +230,27 @@ const createRuntime = (
   });
   sendResourceOwners.add(resources);
   Object.defineProperty(runtime, 'sendResources', { value: resources });
+  const records = new Map<string, SessionSendRecord>();
+  const historyDoc = new LoroDoc();
+  const historyWriter = createHistoryWriter(historyDoc);
+  const journal = createSessionSendJournal({
+    resources,
+    storage: {
+      list: async () => structuredClone([...records.values()]),
+      insert: async (input) => { const saved = { ...input, sequence: records.size + 1 }; records.set(saved.id, saved); return saved; },
+      put: async (value) => { records.set(value.id, value); },
+      remove: async (id) => { records.delete(id); },
+      close: async () => {},
+    },
+    lock: async (_key, _signal, execute) => execute(),
+    prepare: async (value) => historyWriter.prepareAppend(value.entry),
+    commit: async (value) => {
+      historyWriter.applyPrepared(value.update!);
+      sessionHistory.splice(0, sessionHistory.length, ...historyWriter.readStored());
+    },
+    deliver: async () => {},
+  });
+  Object.defineProperty(runtime, 'sendJournal', { value: journal });
   return runtime;
 };
 
@@ -837,11 +863,8 @@ describe('useSessionActions', () => {
 
     // A resend rides the ordinary send path: identical content, brand-new id.
     expect(second.id).not.toBe(first.id);
-    expect(appendSessionTurn).toHaveBeenCalledTimes(2);
-    const resentEntry = appendSessionTurn.mock.calls[1]?.[1] as {
-      inputConfig?: { inputBlocks?: unknown };
-    };
-    expect(resentEntry.inputConfig?.inputBlocks).toEqual(inputBlocks);
+    const resent = await runtime.withSessionStore(sessionId, (store) => store.sessionData.history.readTurn(second.id));
+    expect(resent).toMatchObject({ state: 'ready', turn: { inputConfig: { inputBlocks } } });
   });
 
   it('preserves the initial history and activity through the extracted submission service', async () => {
@@ -913,7 +936,8 @@ describe('useSessionActions', () => {
       } as unknown as Parameters<SessionActions['startSession']>[1]
     );
 
-    const meta = startSession.mock.calls[0]![1];
+    const saved = runtime.sendJournal!.getSnapshot().find((record) => record.sessionId === sessionId);
+    const meta = saved!.creation!;
     expect(meta).not.toHaveProperty('baseBranch');
     expect(meta.project).toMatchObject({ branch: selector });
   });
@@ -1110,7 +1134,7 @@ describe('useSessionActions', () => {
 
     await expect(
       actions.requestSessionSteer(sessionId, 'assistant:user-1', userTurnId, { machineId })
-    ).resolves.toBe(false);
+    ).rejects.toThrow('Guide outcome is uncertain');
 
     expect(history[0]).toMatchObject({ status: 'pending_apply' });
     expect(setState).not.toHaveBeenCalled();

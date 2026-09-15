@@ -4142,5 +4142,22 @@
   "promptShortcut.loadFailed": "Could not load Shortcut. Select it again to retry.",
   "settings.beta.promptShortcutsHelper": "Create reusable prompts and insert them with /. In development — expect rough edges.",
   "settings.promptShortcuts.disabled": "Enable Prompt Shortcuts under Developer mode in Settings → About to use this feature.",
-  "sessions.attachmentTransferInterrupted": "Transfer interrupted. Retry when you return."
+  "sessions.attachmentTransferInterrupted": "Transfer interrupted. Retry when you return.",
+  "sessions.pendingSends": "Pending messages ({{count}})",
+  "sessions.sendRecoveryUnavailable": "Could not read pending messages. Your saved content has been retained.",
+  "sessions.attachmentMessage": "Message with attachments",
+  "sessions.sendWaitingForSync": "Saved to history · Waiting for sync",
+  "sessions.sendConfirmingResult": "Confirming send result",
+  "sessions.sendSavedLocally": "Saved locally · Not submitted",
+  "sessions.retryPendingSend": "Continue sending",
+  "sessions.cancelPendingSend": "Cancel send",
+  "sessions.pendingSendExitTitle": "Some messages are still pending",
+  "sessions.pendingSendDestructiveExit": "Finish or cancel pending messages before signing out or clearing caches. Some messages may already have been sent; keep their recovery data until the result is confirmed.",
+  "sessions.pendingSendRetainedExit": "Pending messages will stay saved on this device. Some may already have been sent. Return to this workspace to confirm the result or continue sending.",
+  "sessions.stayWithPendingSends": "Stay",
+  "sessions.leaveWithPendingSends": "Leave and keep messages",
+  "sessions.pendingSendExitUnavailable": "Could not confirm pending messages. Keep Lody open and try again.",
+  "sessions.pendingSendQuit": "Quit and keep messages",
+  "sessions.pendingSendReload": "Reload and keep messages",
+  "sessions.pendingSendClose": "Close and keep messages"
 }

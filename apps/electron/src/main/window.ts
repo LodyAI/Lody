@@ -1,3 +1,4 @@
+import { prepareRendererSendsForExit } from './services/renderer-send-lifecycle'
 import { app, BrowserWindow, dialog, nativeTheme, shell } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { join } from 'node:path'
@@ -382,6 +383,25 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
     pendingInitialMaximize.add(window)
   }
   productWindows.add(window)
+  let closingAfterSendCleanup = false
+  window.on('close', (event) => {
+    if (isAppQuitting()) return
+    const hidesInsteadOfClosing =
+      !options.auxiliary &&
+      (process.platform === 'darwin' || (process.platform === 'win32' && isWindowsTrayAvailable()))
+    if (hidesInsteadOfClosing) return
+    event.preventDefault()
+    if (closingAfterSendCleanup) return
+    closingAfterSendCleanup = true
+    void prepareRendererSendsForExit('close', window)
+      .then((allowed) => {
+        if (allowed && !window.isDestroyed()) window.destroy()
+      })
+      .catch((error: unknown) => console.error('[Electron] Window close cleanup failed', error))
+      .finally(() => {
+        closingAfterSendCleanup = false
+      })
+  })
   window.once('closed', () => {
     productWindows.delete(window)
     if (getMainWindow() === window) {
