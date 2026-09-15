@@ -42,8 +42,6 @@ describe('prepareExportOutputDir', () => {
     const target = await createTempDir();
     await fs.writeFile(path.join(target, 'notes.txt'), 'keep out', 'utf8');
 
-    await expect(prepareExportOutputDir(target)).rejects.toThrow(
-      /Output directory is not empty/
-    );
+    await expect(prepareExportOutputDir(target)).rejects.toThrow(/Output directory is not empty/);
   });
 });

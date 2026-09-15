@@ -123,8 +123,7 @@ const isTerminalPlanState = (state: ReviewRunState): boolean =>
 const isHumanOnlyBlocker = (blocker: AutoMergeBlocker): boolean =>
   blocker === 'protected_path' || blocker === 'human_review_pending' || blocker === 'disputed';
 
-const describeBlockers = (blockers: readonly AutoMergeBlocker[]): string =>
-  blockers.join(', ');
+const describeBlockers = (blockers: readonly AutoMergeBlocker[]): string => blockers.join(', ');
 
 export const planReviewStep = (facts: ReviewPlanFacts): ReviewAction => {
   // A human taking the wheel outranks every other consideration, including a

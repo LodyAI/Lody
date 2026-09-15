@@ -103,7 +103,11 @@ export function loadPrPollerConfig(env: NodeJS.ProcessEnv = process.env): PrPoll
       'LODY_PR_POLL_ACTIVITY_WINDOW_MS',
       PR_POLLER_DEFAULTS.activityWindowMs
     ),
-    highOwnerCap: readEnvNumber(env, 'LODY_PR_POLL_HIGH_OWNER_CAP', PR_POLLER_DEFAULTS.highOwnerCap),
+    highOwnerCap: readEnvNumber(
+      env,
+      'LODY_PR_POLL_HIGH_OWNER_CAP',
+      PR_POLLER_DEFAULTS.highOwnerCap
+    ),
     lowLaneEveryNBatches: readEnvNumber(
       env,
       'LODY_PR_POLL_LOW_LANE_EVERY_N',

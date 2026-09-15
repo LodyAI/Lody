@@ -1,0 +1,46 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "semi": true,
+  "trailingComma": "es5",
+  "singleQuote": true,
+  "printWidth": 100,
+  "sortPackageJson": false,
+  "ignorePatterns": [
+    "node_modules/",
+    "dist/",
+    "build/",
+    ".next/",
+    ".nuxt/",
+    ".vscode/",
+    ".idea/",
+    "*.log",
+    "*.tgz",
+    "*.tar.gz",
+    "package-lock.json",
+    "yarn.lock",
+    ".DS_Store",
+    "coverage/",
+    "packages/acp-extension-claude/",
+    "packages/acp-extension-codex/",
+    "packages/acp-extension-core/",
+    "packages/acp-extension-dsh/",
+    "packages/acp-extension-grok/",
+    "packages/acp-extension-kimi/",
+    "apps/electron/out/",
+    "apps/electron/dist/",
+    "apps/electron/.vscode/",
+    "apps/electron/pnpm-lock.yaml",
+    "apps/electron/LICENSE.md",
+    "apps/electron/tsconfig.json",
+    "apps/electron/tsconfig.*.json"
+  ],
+  "overrides": [
+    {
+      "files": ["apps/electron/**"],
+      "options": {
+        "semi": false,
+        "trailingComma": "none"
+      }
+    }
+  ]
+}

@@ -64,7 +64,7 @@
     }
   },
   "scripts": {
-    "dev": "tsr generate",
+    "dev": "tsr generate && oxfmt src/routeTree.gen.ts",
     "typecheck": "tsgo --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -221,6 +221,7 @@
     "@types/validator": "^13.15.10",
     "@vitejs/plugin-react": "catalog:",
     "jsdom": "^26.1.0",
+    "oxfmt": "^0.65.0",
     "postcss": "^8.5.4",
     "react-router-dom": "^7.10.1",
     "storybook": "^10.6.0",

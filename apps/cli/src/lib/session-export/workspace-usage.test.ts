@@ -13,7 +13,8 @@ vi.mock('convex/browser', () => ({
 vi.mock('@lody/cloud-api', () => ({
   api: {
     usage: {
-      getWorkspaceUsageSummaryBundleFromCliToken: 'usage.getWorkspaceUsageSummaryBundleFromCliToken',
+      getWorkspaceUsageSummaryBundleFromCliToken:
+        'usage.getWorkspaceUsageSummaryBundleFromCliToken',
       getWorkspaceUsageTimelineFromCliToken: 'usage.getWorkspaceUsageTimelineFromCliToken',
     },
   },
