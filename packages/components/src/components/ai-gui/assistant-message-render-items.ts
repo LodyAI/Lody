@@ -74,8 +74,13 @@ export const buildAssistantMessageRenderItems = (
      in a separate `proposed_plan` item and puts nothing readable in the card, so
      unmoved the two halves of one question sat a whole implementation apart.
      Without an approval card (the plan is still being drafted) the plan stays at
-     the end, which is where a growing plan belongs. */
-  const planExitIndex = rest.findIndex(isPlanExitSeed);
+     the end, which is where a growing plan belongs.
+
+     The LAST card, not the first: a revised plan (Cursor's "No, keep planning"
+     round-trip) replaces the single plan item in place while the settled
+     rejection cards keep their positions, so the first card may be an old
+     decision. The plan belongs beside the card still asking — the last one. */
+  const planExitIndex = rest.findLastIndex(isPlanExitSeed);
   const ordered =
     planExitIndex === -1
       ? [...rest, ...plans]

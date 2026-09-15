@@ -168,4 +168,41 @@ describe('buildAssistantMessageRenderItems', () => {
       'text',
     ]);
   });
+
+  it('keeps a revised plan beside its current approval, after the settled rejection card', () => {
+    // Cursor's "No, keep planning" round-trip: the revised plan REPLACES the
+    // single plan item (stable per-session plan id) while a fresh approval card
+    // appends, leaving one plan and two switch_mode cards. Anchoring the plan
+    // to the FIRST card would strand it above the old rejection; it belongs
+    // with the card still asking for the decision — the last one.
+    const items = [
+      {
+        type: 'proposed_plan',
+        turnId: 'cursor-plan:session-1',
+        markdown: '# Revised plan',
+        status: 'completed',
+        isLatest: true,
+      },
+      {
+        type: 'tool_call',
+        toolCallId: 'tc-cursor-1',
+        kind: 'switch_mode',
+        title: 'Ready to code?',
+        status: 'completed',
+      },
+      {
+        type: 'tool_call',
+        toolCallId: 'tc-cursor-2',
+        kind: 'switch_mode',
+        title: 'Ready to code?',
+        status: 'pending',
+      },
+    ] as unknown as MessageContent[];
+
+    expect(
+      buildAssistantMessageRenderItems(items).map((item) =>
+        item.content.type === 'tool_call' ? item.content.toolCallId : item.content.type
+      )
+    ).toEqual(['tc-cursor-1', 'proposed_plan', 'tc-cursor-2']);
+  });
 });
