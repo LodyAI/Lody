@@ -34,6 +34,9 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
 ## Session, auth, and app shell
 
 - History uses SessionData commands.
+- A proven-undelivered steer (`no-active-turn` or `promotion-failed`) repairs ordinary
+  dispatch for pending/seen entries even if CLI already changed their status. Never
+  repair active, terminal, removed, or delivery-unknown turns.
 
 - `useStableSession` treats an HTTP 401 from `authClient.useSession()` as potentially
   stale and verifies it once with the current credential. Only a second 401 for the

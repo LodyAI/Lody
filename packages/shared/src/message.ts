@@ -162,7 +162,16 @@ export interface SessionSteerResponse {
   userTurnId: string;
   /** True only after adapter activation and CLI turn-ownership commit. */
   applied: boolean;
-  disposition: 'applied' | 'unsupported' | 'no-active-turn' | 'stale-turn' | 'busy' | 'error';
+  disposition:
+    | 'applied'
+    | 'unsupported'
+    | 'no-active-turn'
+    | 'stale-turn'
+    | 'busy'
+    | 'delivery-unknown'
+    /** Proven undelivered, but durable promotion failed; clients may repair dispatch. */
+    | 'promotion-failed'
+    | 'error';
   error?: string;
 }
 

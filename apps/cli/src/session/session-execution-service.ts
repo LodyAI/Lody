@@ -91,7 +91,7 @@ import {
   type ManagedRuntimeName,
 } from '@/agent/managed-agent-runtime';
 import type { FetchAcpCapabilitiesOptions } from '@/agent/acp-capabilities';
-import { AcpAuthenticationRequiredError, AgentSteerNotDeliveredError } from '@/agent/agent-client';
+import { AcpAuthenticationRequiredError } from '@/agent/agent-client';
 import type { GoalPromptControl } from '@/agent/goal-control';
 import {
   AcpAuthenticationManager,
@@ -268,6 +268,7 @@ type TurnRuntimeState = {
   workspaceGitStateSynced: boolean;
   prePromptFailureRecorded: boolean;
   cancelRequested: boolean;
+  pendingInputOnCancel: PendingInputCancellationPolicy;
   cancelFinalized: boolean;
   /** One drain deadline shared by Stop and the cancellation finalizer. */
   cancellationDrain?: Promise<void>;
@@ -285,6 +286,8 @@ type TurnRuntimeState = {
   pendingSession?: Promise<ISession>;
   fiber?: Fiber.RuntimeFiber<unknown, unknown>;
 };
+
+export type PendingInputCancellationPolicy = 'promote' | 'preserve';
 
 export type SessionExecutionSnapshot = {
   /** Assistant turn currently owned by this service, if any. */
@@ -535,6 +538,7 @@ export type SessionExecutionServiceDeps = {
     context: {
       sessionDoc: SessionDocument;
       basedOnUserTurnId?: string;
+      signal?: AbortSignal;
     }
   ) => Promise<void>;
   createAssistantEntryForTurn: (
@@ -1366,12 +1370,9 @@ export class SessionExecutionService {
     return await this.steerMutationQueue.enqueue(options.sessionId, async () => {
       const releaseConflict = this.tryAcquireSessionRewriteConflictLease(options.sessionId);
       if (!releaseConflict) {
-        // Nothing was submitted, so this guide is still ours to run. Only the
-        // dispatch pointer is written: the history flip needs the lease we just
-        // failed to take, and dispatch honors the pointer on its own.
-        await this.requeueUndeliveredSteer(options.sessionId, options.userTurnId, {
-          canWriteHistory: false,
-        });
+        // A rewrite (not user Stop) owns the session. Keep the steer in
+        // pending_apply; promoting it here would turn Edit & Resend or cleanup
+        // cancellation into a fresh user send.
         return {
           type: 'session/steer_response',
           sessionId: options.sessionId,
@@ -1414,24 +1415,35 @@ export class SessionExecutionService {
      * submission — after submission the provider may already have committed the
      * steer, and re-sending would duplicate it.
      */
-    const rejectUndelivered = async (
+    const rejectAndPromote = async (
       disposition: Exclude<SessionSteerResponse['disposition'], 'applied'>,
       error?: string
     ): Promise<SessionSteerResponse> => {
-      await this.requeueUndeliveredSteer(options.sessionId, options.userTurnId, {
-        canWriteHistory: true,
-      });
+      try {
+        await this.requeueUndeliveredSteer(options.sessionId, options.userTurnId, {
+          canWriteHistory: true,
+        });
+      } catch (promotionError) {
+        // Delivery is known even when its recovery write fails. Do not let the
+        // provider-submission catch below reclassify it as delivery-unknown.
+        return reject('promotion-failed', formatErrorMessage(promotionError));
+      }
       return reject(disposition, error);
     };
     const runtime = this.turnRuntimeBySession.get(options.sessionId);
     if (!runtime || !runtime.session) {
-      return await rejectUndelivered('no-active-turn');
+      return await rejectAndPromote('no-active-turn');
     }
     if (runtime.turnId !== options.expectedTurnId) {
-      return await rejectUndelivered('stale-turn');
+      return await rejectAndPromote('stale-turn');
     }
-    if (!runtime.promptInFlight || runtime.cancelRequested) {
-      return await rejectUndelivered('no-active-turn');
+    if (runtime.cancelRequested) {
+      return runtime.pendingInputOnCancel === 'promote'
+        ? await rejectAndPromote('no-active-turn')
+        : reject('stale-turn', 'The target turn was cancelled without promoting pending input');
+    }
+    if (!runtime.promptInFlight) {
+      return await rejectAndPromote('no-active-turn');
     }
     if (runtime.userTurnId === options.userTurnId) {
       return {
@@ -1445,12 +1457,12 @@ export class SessionExecutionService {
     const { agentClient, acpSessionId } = runtime.session;
     const steerCapability = agentClient?.getAcknowledgedSteerCapability();
     if (!agentClient || !acpSessionId || !steerCapability) {
-      return await rejectUndelivered('unsupported');
+      return await rejectAndPromote('unsupported');
     }
     if (steerCapability.configPolicy === 'active') {
       const mismatch = agentClient.findSteerConfigMismatch(options.inputConfig);
       if (mismatch) {
-        return await rejectUndelivered(
+        return await rejectAndPromote(
           'unsupported',
           `Active turn configuration differs: ${mismatch}`
         );
@@ -1461,19 +1473,24 @@ export class SessionExecutionService {
         this.turnRuntimeBySession.get(options.sessionId) !== runtime ||
         runtime.turnId !== options.expectedTurnId
       ) {
-        return await rejectUndelivered('stale-turn');
+        return await rejectAndPromote('stale-turn');
+      }
+      if (runtime.cancelRequested) {
+        return runtime.pendingInputOnCancel === 'promote'
+          ? await rejectAndPromote('no-active-turn')
+          : reject('stale-turn', 'The target turn was cancelled without promoting pending input');
       }
       // No provider request has been submitted yet, so this guide is still
       // ours to run as an ordinary follow-up turn.
-      if (!runtime.promptInFlight || runtime.cancelRequested) {
-        return await rejectUndelivered('no-active-turn');
+      if (!runtime.promptInFlight) {
+        return await rejectAndPromote('no-active-turn');
       }
       return null;
     };
 
     // Everything up to `steerPrompt` returning is provably undelivered; after
     // that only the agent's own inject-or-refuse verdict can say so.
-    let submittedToAgent = false;
+    let providerSubmissionStarted = false;
     try {
       const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(options.sessionId);
       const inputBlocks = normalizeSessionInputBlocks(
@@ -1502,18 +1519,39 @@ export class SessionExecutionService {
         return preSubmitRejection;
       }
       const ownedPromptRun = runtime.activePromptRun;
-      if (runtime.cancelRequested || !ownedPromptRun || ownedPromptRun.turnId !== runtime.turnId) {
-        return await rejectUndelivered(
+      if (!ownedPromptRun || ownedPromptRun.turnId !== runtime.turnId) {
+        return await rejectAndPromote(
           'busy',
-          'Prompt owner is cancelling or transitioning between logical turns'
+          'Prompt owner is transitioning between logical turns'
         );
+      }
+      if (runtime.cancelRequested) {
+        return runtime.pendingInputOnCancel === 'promote'
+          ? await rejectAndPromote(
+              'busy',
+              'Prompt owner is cancelling or transitioning between logical turns'
+            )
+          : reject('stale-turn', 'Prompt owner is cancelling without promoting pending input');
       }
 
       const previousTurnId = runtime.turnId;
       const previousUserTurnId = runtime.userTurnId;
       const steerRun = agentClient.steerPrompt(acpSessionId, promptBlocks);
-      submittedToAgent = true;
-      const application = await steerRun.applied;
+      providerSubmissionStarted = true;
+      const steerOutcome = await steerRun.outcome;
+      if (steerOutcome.outcome === 'not-applied') {
+        if (!runtime.cancelRequested || runtime.pendingInputOnCancel === 'promote') {
+          return await rejectAndPromote('no-active-turn', formatErrorMessage(steerOutcome.error));
+        }
+        return reject(
+          'stale-turn',
+          'The provider declined the steer after an internal cancellation'
+        );
+      }
+      if (steerOutcome.outcome === 'unknown') {
+        return reject('delivery-unknown', formatErrorMessage(steerOutcome.error));
+      }
+      const { application } = steerOutcome;
       try {
         if (
           runtime.cancelRequested ||
@@ -1613,17 +1651,13 @@ export class SessionExecutionService {
         application.release();
       }
     } catch (error) {
-      const notDelivered = !submittedToAgent || error instanceof AgentSteerNotDeliveredError;
-      if (!notDelivered) {
-        return reject('error', formatErrorMessage(error));
+      if (providerSubmissionStarted) {
+        return reject('delivery-unknown', formatErrorMessage(error));
       }
-      // `no-active-turn` for the agent's own refusal: it is the disposition
-      // steer-aware clients already treat as "re-send this turn normally", so
-      // an older client recovers the message too.
-      return await rejectUndelivered(
-        error instanceof AgentSteerNotDeliveredError ? 'no-active-turn' : 'error',
-        formatErrorMessage(error)
-      );
+      // Failures before `steerPrompt` returns are local and therefore
+      // provably unsubmitted. Provider-side ambiguity is represented only by
+      // `SteerOutcome` above.
+      return await rejectAndPromote('error', formatErrorMessage(error));
     }
   }
 
@@ -1678,6 +1712,7 @@ export class SessionExecutionService {
           error
         )}`
       );
+      throw error;
     }
   }
 
@@ -1818,6 +1853,7 @@ export class SessionExecutionService {
       workspaceGitStateSynced: false,
       prePromptFailureRecorded: false,
       cancelRequested: false,
+      pendingInputOnCancel: 'preserve',
       cancelFinalized: false,
       interruptRequested: false,
       terminateSessionOnCancel: false,
@@ -3036,6 +3072,11 @@ export class SessionExecutionService {
                   !self.isTurnCancelled(sessionId, runtime.turnId) &&
                   !userTurnWasCancelled
                 ) {
+                  // A completed create/restore fence must not override a later
+                  // keep cancellation after a replacement has been prepared.
+                  if (cancelOptions?.terminateSession) {
+                    runtime.terminateSessionOnCancel = false;
+                  }
                   return undefined;
                 }
                 yield* self.finalizeCancelledTurnEffect({
@@ -4282,7 +4323,7 @@ export class SessionExecutionService {
           targetSession: ISession,
           triggerReason: 'initial' | 'stale_acp_recovery'
         ): Effect.Effect<void, unknown, never> =>
-          self.tryPromise(() =>
+          self.tryPromise((signal) =>
             traceAsync(
               self.deps.logger,
               'execution.apply_acp_mode_model',
@@ -4297,6 +4338,7 @@ export class SessionExecutionService {
                   {
                     sessionDoc,
                     basedOnUserTurnId: executionUserTurnId,
+                    signal,
                   }
                 )
             )
@@ -5064,7 +5106,7 @@ export class SessionExecutionService {
           self.deps.logger.debug(
             `[${sessionId}] session ready (workdir=${session.getWorkdir()} acpSessionId=${session.acpSessionId ?? 'null'})`
           );
-          yield* self.tryPromise(() =>
+          yield* self.tryPromise((signal) =>
             traceAsync(
               self.deps.logger,
               'execution.apply_acp_mode_model',
@@ -5079,6 +5121,7 @@ export class SessionExecutionService {
                   {
                     sessionDoc,
                     basedOnUserTurnId: userTurnId,
+                    signal,
                   }
                 )
             )
@@ -5220,11 +5263,18 @@ export class SessionExecutionService {
     };
   }
 
-  async cancelSession(message: SessionCancelRequestValidated): Promise<{
+  async cancelSession(
+    message: SessionCancelRequestValidated,
+    options: {
+      pendingInput?: PendingInputCancellationPolicy;
+      prePromptSession?: 'discard' | 'keep';
+    } = {}
+  ): Promise<{
     success: boolean;
     error?: string;
   }> {
     const { sessionId, turnId } = message;
+    const pendingInput = options.pendingInput ?? 'preserve';
     if (message.subagentTaskId) {
       // This control never writes lastCanceledTurn or interrupts the parent runtime.
       if (
@@ -5320,6 +5370,15 @@ export class SessionExecutionService {
     this.markTurnCancelled(sessionId, turnId);
     const runtime = this.getTurnRuntime(sessionId, turnId);
     if (runtime) {
+      if (!runtime.cancelRequested) {
+        runtime.pendingInputOnCancel = pendingInput;
+        // Config calls already sent to ACP can outlive the owner interruption.
+        // Stop discards that process; Edit & Resend keeps its prepared replacement.
+        // Creation/restoration retain their independent terminate-on-cancel fence.
+        if (!runtime.promptStarted && options.prePromptSession !== 'keep') {
+          runtime.terminateSessionOnCancel = true;
+        }
+      }
       runtime.cancelRequested = true;
       if (runtime.finalizeStarted) {
         this.deps.logger.debug(
