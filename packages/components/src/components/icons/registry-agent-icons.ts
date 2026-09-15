@@ -28,6 +28,7 @@ import junieSvg from './registry-assets/junie.svg?raw';
 import kiloSvg from './registry-assets/kilo.svg?raw';
 import kimchiSvg from './registry-assets/kimchi.svg?raw';
 import kimiSvg from './registry-assets/kimi.svg?raw';
+import minimaxCodeSvg from './registry-assets/minimax-code.svg?raw';
 import minionCodeSvg from './registry-assets/minion-code.svg?raw';
 import mistralVibeSvg from './registry-assets/mistral-vibe.svg?raw';
 import novaSvg from './registry-assets/nova.svg?raw';
@@ -40,6 +41,7 @@ import reasonixSvg from './registry-assets/reasonix.svg?raw';
 import sigitSvg from './registry-assets/sigit.svg?raw';
 import stakpakSvg from './registry-assets/stakpak.svg?raw';
 import vtcodeSvg from './registry-assets/vtcode.svg?raw';
+import zcodeAcpSvg from './registry-assets/zcode-acp.svg?raw';
 
 export const REGISTRY_AGENT_ICON_SVGS: Partial<Record<string, string>> = {
   'agoragentic-acp': agoragenticAcpSvg,
@@ -70,6 +72,7 @@ export const REGISTRY_AGENT_ICON_SVGS: Partial<Record<string, string>> = {
   kimchi: kimchiSvg,
   kimi: kimiSvg,
   'kimi-code': kimiSvg,
+  'minimax-code': minimaxCodeSvg,
   'minion-code': minionCodeSvg,
   'mistral-vibe': mistralVibeSvg,
   nova: novaSvg,
@@ -82,4 +85,5 @@ export const REGISTRY_AGENT_ICON_SVGS: Partial<Record<string, string>> = {
   sigit: sigitSvg,
   stakpak: stakpakSvg,
   vtcode: vtcodeSvg,
+  'zcode-acp': zcodeAcpSvg,
 };
