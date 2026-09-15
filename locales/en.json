@@ -3648,6 +3648,8 @@
   "tasks.body.linkPlaceholder": "Paste or type a link",
   "tasks.body.format.link": "Link",
   "tasks.body.format.removeLink": "Remove link",
+  "tasks.body.format.marks": "Marks",
+  "tasks.body.format.blocks": "Blocks",
   "tasks.body.format.more": "More…",
   "tasks.actions.more": "More actions",
   "tasks.actions.copyUrl": "Copy task URL",

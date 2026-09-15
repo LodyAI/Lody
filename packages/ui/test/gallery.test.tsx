@@ -11,6 +11,7 @@ import { kbd } from '../src/kbd/kbd.tokens.stylex';
 import { UiGallery } from '../src/gallery/gallery';
 import { popup } from '../src/popup/popup.tokens.stylex';
 import { table } from '../src/table/table.tokens.stylex';
+import { toggle } from '../src/toggle/toggle.tokens.stylex';
 import { tooltip } from '../src/tooltip/tooltip.tokens.stylex';
 import { surface } from '../src/popup/surface';
 import { forcedThemeClassNames } from '../src/theme/theme';
@@ -323,6 +324,26 @@ describe('UiGallery', () => {
     expect(board).toMatch(/<kbd[^>]*>\s*<kbd/);
     for (const name of tokenNames(kbd)) {
       expect(board, `kbd.${name} is missing from the board`).toContain(`kbd.${name}`);
+    }
+  });
+
+  test('shows a control that stays pressed, a set of them, and the bar holding them', () => {
+    // Nothing here is a stand-in. None of the three is portalled, so the board
+    // holds a real toggle in both of its states, a set in each of its two
+    // kinds, and a bar with the one line between its clusters.
+    expect(board).toContain('aria-pressed="true"');
+    expect(board).toContain('aria-pressed="false"');
+    expect(board).toContain('role="toolbar"');
+    // The 24px rung is this family's own: the ladder a Button is on starts at
+    // 28, and a toggle in a file viewer's strip of actions is smaller than that.
+    expect(board, "the toggle's 24px rung is missing from the board").toContain('mini \u00b7 24');
+    // The comparison the section exists to make, on one row: the same three
+    // choices as a set and as a Tabs strip, so a reader can see that only the
+    // strip — which is one control — has a track under it.
+    expect(board).toContain('Timeline');
+    expect(board).toContain('role="tablist"');
+    for (const name of tokenNames(toggle)) {
+      expect(board, `toggle.${name} is missing from the board`).toContain(`toggle.${name}`);
     }
   });
 
