@@ -27,10 +27,16 @@ CLI 合并待发累计快照，包括 Grok。失败 payload 保留原归属直�
 并发 flush 共用发送过程。delta 不再加到总量，也不传给旧持久化端点。
 持久化仅投影 Token/费用字段及顶层 contextWindow；不转发搜索请求次数或模型级 contextWindow。
 Codex 旧压缩偏移在同一进程内跨成功 flush 保留；带 delta 的 adapter 自有累计值不走
-该兼容路径。没有模型归属的 Codex thread 总量使用明确的未归属桶，不能使用当前 UI
-模型或其价格。Claude query 和 Kimi activation 快照可提供 delta，而不改变累计范围。
-Kimi 源码变更需新 managed artifact 才会影响实际运行版本。保留 provider 费用；
-缺失 cache-write 费率不能用 cache-read 价格替代。空聚合不代表已知零费用。
+该兼容路径。Codex 的精确单次 response 事件会归属到实际产生它的模型；thread 总量中未被
+覆盖的余量保留在明确的未归属桶，不能使用当前 UI 模型或其价格。进程持久 sidecar 会恢复
+Codex 的累计模型账本及 native reset 游标；fork 用首轮开始前捕获的 native 历史回放
+排除源历史。resume 时若 sidecar 缺失，则以捕获到的 native 基线开启新的计量生命周期，
+只报告之后的增量，不把已持久化历史重新记到新模型 key 下。锁定 Codex 0.153.4 仅允许
+新 thread 开启 raw 事件，冷 resume/fork 的新用量保持未归属。压缩及一次性 reroute
+证据之后的响应，在无法确认实际模型时也保持未归属。Claude query 和 Kimi activation 快照可提供
+delta，而不改变累计范围。Kimi 源码变更需新 managed artifact 才会影响实际运行版本。
+保留 provider 费用；缺失 cache-write 费率不能用 cache-read 价格替代。空聚合不代表已知
+零费用。
 
 是否接收用量取决于 builtin agent catalog（包含 DeepSeek Harness），而非 managed
 下载列表。收到 provider 的 delta 不证明其累计值已符合生命周期契约；

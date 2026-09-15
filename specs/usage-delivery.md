@@ -35,10 +35,20 @@ Persistence projects only token/cost fields and aggregate contextWindow; search
 request counts and model-level contextWindow are not forwarded.
 Codex's legacy compaction offsets survive successful flushes in the same process;
 adapter-owned cumulative updates carrying delta bypass that compatibility path.
-Codex thread totals without model attribution use an explicit unattributed bucket,
-never the currently selected UI model or its price. Claude query and Kimi activation
-snapshots can provide delta without changing their cumulative scope. Kimi source
-changes require a new managed artifact before they affect the consuming runtime.
+Codex exact per-response events are attributed to the model that produced them;
+any thread-total remainder stays in an explicit unattributed bucket, never the
+currently selected UI model or its price. A process-persistent sidecar restores
+Codex's cumulative model ledger across restarts, and fork sessions exclude source
+history using the native replay captured before their first turn. If that sidecar
+is missing for a resumed thread, a fresh accounting lifetime starts at the captured
+native baseline and only later increments are reported, so persisted history is not
+re-booked under a new key. The sidecar preserves the native reset cursor alongside
+the ledger. Pinned Codex 0.153.4 only allows raw-event opt-in on new threads; cold
+resume/fork usage remains unattributed.
+Compaction and responses after one-shot reroute evidence likewise stay unattributed
+when the producing model cannot be established. Claude query and Kimi activation snapshots can provide delta without
+changing their cumulative scope. Kimi source changes require a new managed artifact
+before they affect the consuming runtime.
 Provider costs are preserved; missing cache-write tariffs cannot be replaced with
 cache-read prices. An empty aggregate does not imply a known zero cost.
 
