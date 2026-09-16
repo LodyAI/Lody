@@ -2581,6 +2581,7 @@
   "settings.agent.dialog.ready": "Ready",
   "settings.agent.dialog.refreshCapabilities": "Refresh agent capabilities",
   "settings.agent.dialog.refreshCapabilitiesHint": "Re-probe modes, models, and config options",
+  "settings.agent.dialog.testToRefreshCapabilities": "Click Test to refresh available options.",
   "settings.agent.dialog.registryNote": "Experimental — uses ACP Providers.",
   "settings.agent.dialog.required": "(required)",
   "settings.agent.dialog.retryProbe": "Retry capability probe",

@@ -1100,6 +1100,78 @@ describe('AgentConfigDialog', () => {
     }
   );
 
+  it('shows a test hint while idle and updates title options in the open dialog after testing', async () => {
+    const mode: AgentConfigDialogMode = { kind: 'edit', config: createBuiltinConfig() };
+    const onSubmit = vi.fn(async () => {});
+    let finishProbe!: (response: Awaited<ReturnType<RefreshCapabilities>>) => void;
+    const onRefreshCapabilities: RefreshCapabilities = () =>
+      new Promise((resolve) => {
+        finishProbe = resolve;
+      });
+    const onCheckBinaryStatus = vi.fn(async () => ({ status: 'installed' as const }));
+    const renderMachine = (machine: MachineViewMeta) =>
+      renderDialog(mode, machine, onSubmit, onCheckBinaryStatus, onRefreshCapabilities);
+
+    await renderMachine(createMachine('Workstation'));
+    expect(document.body.textContent).toContain('Click Test to refresh available options.');
+    expect(document.body.textContent).not.toContain('Probing capabilities…');
+
+    await act(async () => {
+      document.body
+        .querySelector<HTMLButtonElement>('button[aria-label="Test agent capabilities"]')!
+        .click();
+    });
+    expect(document.body.textContent).toContain('Probing capabilities…');
+    expect(document.body.textContent).not.toContain('Click Test to refresh available options.');
+
+    // The settings owner supplies a fresh Machine row without replacing dialog mode.
+    await renderMachine(createTitleConfigMachine());
+    await act(async () => {
+      finishProbe({
+        type: 'machine/acp-capabilities-refresh_response',
+        machineId,
+        configId: kimiConfigId,
+        cliType: 'builtin',
+        agentType: 'kimi',
+        success: true,
+      });
+    });
+    expect(document.body.textContent).toContain('Kimi K2');
+    expect(document.body.textContent).not.toContain('Probing capabilities…');
+    await act(async () => {
+      Array.from(document.body.querySelectorAll('button'))
+        .find((button) => button.textContent?.trim() === 'Save')!
+        .click();
+    });
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        titleGeneration: expect.objectContaining({
+          configOptionValues: expect.objectContaining({ model: expect.any(String) }),
+        }),
+      })
+    );
+  });
+
+  it('returns to the test hint after a failed capability probe', async () => {
+    await renderDialog(
+      { kind: 'edit', config: createBuiltinConfig() },
+      createMachine('Workstation'),
+      undefined,
+      undefined,
+      async () => {
+        throw new Error('Agent unavailable');
+      }
+    );
+    await act(async () => {
+      document.body
+        .querySelector<HTMLButtonElement>('button[aria-label="Test agent capabilities"]')!
+        .click();
+    });
+    expect(document.body.textContent).toContain('Agent unavailable');
+    expect(document.body.textContent).toContain('Click Test to refresh available options.');
+    expect(document.body.textContent).not.toContain('Probing capabilities…');
+  });
+
   it('saves a normalized title reasoning effort after the title model changes', async () => {
     const onSubmit = vi.fn(async () => {});
     const config = createBuiltinConfig({

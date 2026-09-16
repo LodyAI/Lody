@@ -2581,6 +2581,7 @@
   "settings.agent.dialog.ready": "就绪",
   "settings.agent.dialog.refreshCapabilities": "刷新代理能力",
   "settings.agent.dialog.refreshCapabilitiesHint": "重新检测模式、模型和配置选项",
+  "settings.agent.dialog.testToRefreshCapabilities": "点击测试按钮刷新可用选项。",
   "settings.agent.dialog.registryNote": "实验性功能 — 使用 ACP Provider。",
   "settings.agent.dialog.required": "（必填）",
   "settings.agent.dialog.retryProbe": "重试能力检测",

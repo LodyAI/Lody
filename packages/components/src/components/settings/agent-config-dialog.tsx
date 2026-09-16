@@ -2360,7 +2360,14 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 title={t('settings.agent.dialog.section.titleGen', 'Title generation')}
                 defaultOpen
                 disabled={!capabilitiesReady}
-                disabledHint={t('settings.agent.dialog.probing', 'Loading available options…')}
+                disabledHint={
+                  probing
+                    ? t('settings.agent.dialog.probing', 'Probing…')
+                    : t(
+                        'settings.agent.dialog.testToRefreshCapabilities',
+                        'Click Test to refresh available options.'
+                      )
+                }
               >
                 <TitleGenerationFields
                   selectors={titleSelectors}
