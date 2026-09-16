@@ -192,8 +192,32 @@ export function createConversationViewFromReader(
     // Send-critical metadata comes from the directory row itself, before any
     // body hydration; the shared projection already kept explicit empty
     // selections intact.
-    if (row.role === 'user' && entry.inputConfig !== undefined) {
-      row.inputConfig = pickIndexInputConfig(entry.inputConfig);
+    //
+    // Projecting it costs a schema parse per user turn, and the only consumer
+    // resolves sticky configuration from the newest turn or two — so the parse
+    // is deferred to first read and memoized on the row. `'inputConfig' in
+    // entry` is used instead of a value test because the directory row defers
+    // its own projection the same way. Opening a 4,000-turn conversation read
+    // the whole directory eagerly, and those two parses were most of it.
+    if (row.role === 'user' && 'inputConfig' in entry) {
+      let projected: TurnIndexRow['inputConfig'];
+      let done = false;
+      Object.defineProperty(row, 'inputConfig', {
+        enumerable: true,
+        configurable: true,
+        get: () => {
+          if (!done) {
+            done = true;
+            const source = entry.inputConfig;
+            projected = source === undefined ? undefined : pickIndexInputConfig(source);
+          }
+          return projected;
+        },
+        set: (value: TurnIndexRow['inputConfig']) => {
+          done = true;
+          projected = value;
+        },
+      });
     }
     if (entry.itemCount !== undefined) row.itemCount = entry.itemCount;
     if (entry.planCount !== undefined) row.planCount = entry.planCount;
@@ -208,8 +232,10 @@ export function createConversationViewFromReader(
       planCount: Array.isArray(turn.plan) ? turn.plan.length : 0,
       summary: summarizeTurn(turn),
     };
-    if (row.inputConfig !== undefined) next.inputConfig = row.inputConfig;
+    // A user turn's body carries the authoritative configuration, so the
+    // directory row's deferred projection is never forced here.
     if (next.role === 'user') next.inputConfig = pickIndexInputConfig(turn.inputConfig);
+    else if (row.inputConfig !== undefined) next.inputConfig = row.inputConfig;
     return next;
   };
 

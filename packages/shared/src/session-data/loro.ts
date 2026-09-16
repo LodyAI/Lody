@@ -111,10 +111,13 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
   const list = doc.getList(HISTORY_ROOT_KEY);
 
   const issuesOf = (error: HistoryWriteError) => error.issues;
-  /** Shallow send config for a user turn: small collections only, never the body. */
-  const shallowInputConfig = (map: LoroMap): unknown => {
+  /**
+   * Shallow send config source for a user turn: small collections only, never
+   * the body. The container crossings here are cheap; the projection is not.
+   */
+  const shallowInputConfigSource = (map: LoroMap): unknown => {
     const config = map.get('inputConfig');
-    if (!isContainer(config)) return pickDirectoryInputConfig(config);
+    if (!isContainer(config)) return config;
     if (config.kind() !== 'Map') return undefined;
     const configMap = config as LoroMap;
     const value = { ...configMap.getShallowValue() } as Record<string, unknown>;
@@ -123,7 +126,32 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
       const field = configMap.get(key);
       value[key] = isContainer(field) ? (field as LoroList).toJSON() : field;
     }
-    return pickDirectoryInputConfig(value);
+    return value;
+  };
+
+  /**
+   * Attach the row's send configuration as a deferred, memoized projection.
+   *
+   * `pickDirectoryInputConfig` runs a schema parse. A directory read covers
+   * every user turn in the conversation, while its consumers resolve sticky
+   * configuration from the newest turn or two — so opening a long session paid
+   * thousands of parses to answer a question about its tail.
+   */
+  const withDeferredInputConfig = <T extends object>(row: T, source: unknown): T => {
+    let projected: unknown;
+    let done = false;
+    Object.defineProperty(row, 'inputConfig', {
+      enumerable: true,
+      configurable: true,
+      get: () => {
+        if (!done) {
+          done = true;
+          projected = pickDirectoryInputConfig(source);
+        }
+        return projected;
+      },
+    });
+    return row;
   };
 
   const readDirectoryRow = (position: number): SessionDirectoryRow => {
@@ -133,16 +161,13 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
       const map = value as LoroMap;
       const scalars = pickDirectoryScalars(map.getShallowValue());
       if (!scalars) return { position, state: 'invalid' };
-      return {
-        position,
-        state: 'ready',
-        turnId: scalars.id,
-        scalars,
-        // Send config is eager for user turns; counts are deliberately omitted
-        // here (one container crossing each) and arrive with a summary or a
-        // hydration read.
-        ...(scalars.role === 'user' ? { inputConfig: shallowInputConfig(map) } : {}),
-      };
+      const row: SessionDirectoryRow = { position, state: 'ready', turnId: scalars.id, scalars };
+      // Send config is present for user turns but projected on first read;
+      // counts are deliberately omitted here (one container crossing each) and
+      // arrive with a summary or a hydration read.
+      return scalars.role === 'user'
+        ? withDeferredInputConfig(row, shallowInputConfigSource(map))
+        : row;
     }
     if (value && typeof value === 'object' && !Array.isArray(value)) {
       const record = value as Record<string, unknown>;
@@ -150,17 +175,15 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
       if (!scalars) return { position, state: 'invalid' };
       const itemCount = Array.isArray(record.items) ? record.items.length : undefined;
       const planCount = Array.isArray(record.plan) ? record.plan.length : undefined;
-      return {
+      const row: SessionDirectoryRow = {
         position,
         state: 'ready',
         turnId: scalars.id,
         scalars,
-        ...(scalars.role === 'user'
-          ? { inputConfig: pickDirectoryInputConfig(record.inputConfig) }
-          : {}),
         ...(itemCount !== undefined ? { itemCount } : {}),
         ...(planCount !== undefined ? { planCount } : {}),
       };
+      return scalars.role === 'user' ? withDeferredInputConfig(row, record.inputConfig) : row;
     }
     return { position, state: 'invalid' };
   };

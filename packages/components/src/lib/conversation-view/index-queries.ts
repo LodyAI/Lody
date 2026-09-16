@@ -116,7 +116,17 @@ export function collectConversationConfigSources(
   for (let i = 0; i < tailFrom; i += 1) {
     const row = view.index(i);
     if (!row || row.role !== 'user') continue;
-    sources.push({ id: row.id, role: row.role, inputConfig: row.inputConfig });
+    // Read on demand: an index row parses its send configuration on first
+    // access, and the resolver inspects the newest source plus however few
+    // older ones it takes to find an explicit Role. Reading every row here
+    // would parse the whole conversation on every streamed delta.
+    sources.push({
+      id: row.id,
+      role: row.role,
+      get inputConfig() {
+        return row.inputConfig;
+      },
+    });
   }
   for (let i = tailFrom; i < view.turnCount; i += 1) {
     const turn = view.turn(i) ?? view.index(i);
