@@ -40,3 +40,7 @@ macOS 真实探针使用已安装的 Lody Helper（Node 22.22.0）、缓存的�
 0.1.5-rc.2 闭包和生成的 Lody profile，成功返回 ACP `initialize` 响应并声明
 `acp-extension-dsh` 0.2.0。Windows 与 Linux 原生打包探针仍待执行；bootstrap 使用 Node 的
 跨平台路径分隔符和包路径，不依赖 shell launcher 解析。
+
+## 集成
+
+- [Lody PR #747](https://github.com/LodyAI/Lody/pull/747)

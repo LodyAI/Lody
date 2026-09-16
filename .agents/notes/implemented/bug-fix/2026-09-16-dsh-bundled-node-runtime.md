@@ -48,3 +48,7 @@ A real macOS probe used the installed Lody Helper (Node 22.22.0), the cached pin
 response advertising `acp-extension-dsh` 0.2.0. Native Windows and Linux packaged probes
 remain to be run; the bootstrap uses Node's platform path delimiter and package paths rather
 than shell launcher parsing.
+
+## Integration
+
+- [Lody PR #747](https://github.com/LodyAI/Lody/pull/747)
