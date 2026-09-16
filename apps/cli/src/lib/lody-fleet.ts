@@ -126,6 +126,7 @@ type WorkspaceRuntimeState = {
   workspace: WorkspaceListItem;
   lody: Lody;
   unsubscribeTerminalCleanup: () => void;
+  detachStreamsOnline: (() => void) | null;
   prPollerWorkspace: PrPollerWorkspaceHandle | null;
   taskAutomation: TaskAutomationWorkspaceHandle | null;
   reviewAutomation: ReviewAutomationWorkspaceHandle | null;
@@ -147,6 +148,7 @@ export class LodyFleet {
   private readonly terminalPtyService: TerminalPtyServiceApi;
   private readonly memoryPressure: MemoryPressureSampler;
   private readonly onFatalAuthFailure?: (error: Error) => void;
+  private readonly onStreamsOnline?: (reason: string) => void;
   private readonly localPlatform: boolean;
   private readonly localFirstBootstrap: boolean;
   private readonly onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
@@ -195,6 +197,13 @@ export class LodyFleet {
     startupTimeSync?: Promise<void>;
     machineLifecycleCapability: MachineLifecycleCapability;
     onFatalAuthFailure?: (error: Error) => void;
+    /**
+     * The Streams data plane reaching health proves the network (and any proxy)
+     * is usable again. The cloud control plane's socket backs off to minutes
+     * during a long outage, so it needs this edge to come back at once instead
+     * of waiting out its ceiling; see `cloud-sync-reconnect.ts`.
+     */
+    onStreamsOnline?: (reason: string) => void;
     onProcessLifecycleAction?: (action: MachineProcessLifecycleAction) => void;
   }) {
     this.logger = options.logger;
@@ -213,6 +222,7 @@ export class LodyFleet {
     this.runtimeStateReporter = options.runtimeStateReporter;
     this.machineLifecycleCapability = options.machineLifecycleCapability;
     this.onFatalAuthFailure = options.onFatalAuthFailure;
+    this.onStreamsOnline = options.onStreamsOnline;
     this.localWorkspaceCatalog = options.localWorkspaceCatalog ?? makeLocalWorkspaceCatalog();
     this.memoryPressure = new MemoryPressureSampler(this.logger);
     this.remoteBridge = this.cloudPort.streamsTokens
@@ -562,6 +572,7 @@ export class LodyFleet {
     const runtimes = Array.from(this.runtimes.values());
     this.runtimes.clear();
     for (const runtime of runtimes) {
+      runtime.detachStreamsOnline?.();
       try {
         await runtime.lody.cleanup();
         runtime.unsubscribeTerminalCleanup();
@@ -905,10 +916,19 @@ export class LodyFleet {
               },
             })
           : null;
+        // Subscribed last, so a runtime that fails to finish starting leaves no
+        // listener behind: teardown for it runs only through `runtimes`.
+        const onStreamsOnline = this.onStreamsOnline;
+        const detachStreamsOnline = onStreamsOnline
+          ? startedLody.documentManager.onStreamsOnline((reason) => {
+              onStreamsOnline(`streams-online:${reason}`);
+            })
+          : null;
         this.runtimes.set(workspace.id, {
           workspace,
           lody: startedLody,
           unsubscribeTerminalCleanup,
+          detachStreamsOnline,
           prPollerWorkspace,
           taskAutomation,
           reviewAutomation,
@@ -995,6 +1015,7 @@ export class LodyFleet {
     this.reviewCredentialResolvers.delete(workspaceId);
     this.prStatusPoller?.unregisterWorkspace(workspaceId);
 
+    state.detachStreamsOnline?.();
     try {
       await state.lody.cleanup();
       state.unsubscribeTerminalCleanup();

@@ -30,6 +30,7 @@ import { NotificationService } from './notifications';
 import { UsageTrackingService, type RecordSessionUsageInput } from './usage/usage-tracking-service';
 import { GitHubTokenManager } from './github-token-manager';
 import { submitBugReportFromMachine } from './bug-report';
+import type { CloudSyncReconnectGate } from './cloud-sync-reconnect';
 
 type WorkspaceListResult =
   | { valid: false; userId: null; workspaces: WorkspaceSummary[] }
@@ -44,6 +45,12 @@ export interface CloudCliPortOptions {
   previewGatewayUrl?: string;
   /** Optional operator mirror; the public artifact channel is the default. */
   runtimeArtifactsBaseUrl?: string;
+  /**
+   * Paces the subscription socket's reconnects during a sustained outage; see
+   * `cloud-sync-reconnect.ts`. Its online signal is wired by the caller, which
+   * is the only place that also sees the data plane's health.
+   */
+  syncReconnectGate?: CloudSyncReconnectGate;
   logger: Logger;
 }
 
@@ -109,7 +116,12 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
     options.authSiteUrl?.trim() || deriveConvexSiteUrl(authBaseUrl)
   );
   const serverBaseUrl = normalizeBaseUrl(options.serverBaseUrl);
-  const subscriptionClient = new ConvexClient(authBaseUrl);
+  const subscriptionClient = new ConvexClient(
+    authBaseUrl,
+    options.syncReconnectGate
+      ? { webSocketConstructor: options.syncReconnectGate.createWebSocketConstructor() }
+      : {}
+  );
   const notificationService = new NotificationService({
     convexUrl: authBaseUrl,
     cliToken: options.token,
@@ -265,6 +277,9 @@ export function createCloudCliPort(options: CloudCliPortOptions): CloudPort {
     dispose: async () => {
       await Promise.allSettled([...tokenManagers].map(async (manager) => await manager.shutdown()));
       tokenManagers.clear();
+      // Before closing the client: a held connection must be released first, or
+      // `close()` would wait on a socket that has not started connecting yet.
+      options.syncReconnectGate?.dispose();
       await subscriptionClient.close();
     },
   };
