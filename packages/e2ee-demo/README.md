@@ -4,6 +4,13 @@ Local-only E2EE reference app: two isolated browser clients, a loopback Node hos
 and official `@loro-dev/sqlite-riverrun` on disk. Not product E2EE and not Lody
 integration.
 
+## Planned playable tutorial
+
+The one-week, four-level pixel-stage redesign is a draft, not shipped UI:
+[中文完整设计](../../specs/e2ee-playable-tutorial.zh.md) ·
+[English design](../../specs/e2ee-playable-tutorial.md).
+It owns the story, technical lens, evidence boundaries, and acceptance plan.
+
 ## Pinned inputs
 
 | Input                       | Pin                                                                                                                                             |
