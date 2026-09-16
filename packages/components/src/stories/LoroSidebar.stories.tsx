@@ -1380,20 +1380,12 @@ function projectActivityFixture(
 }
 
 const activityCases: Array<[string, ActivityCounts, boolean?, boolean?]> = [
-  ['Idle', [0, 0, 0]],
   ['Permission', [1, 0, 0]],
   ['Permission x2', [2, 0, 0]],
-  ['Unread', [0, 1, 0]],
-  ['Unread x3', [0, 3, 0]],
-  ['Running', [0, 0, 1]],
-  ['Active x2', [0, 0, 2]],
   ['Initializing', [0, 0, 1], true],
-  ['Permission and unread', [1, 3, 0]],
-  ['Permission and active', [1, 0, 2]],
   ['Permission and overlap', [1, 1, 0], false, true],
-  ['Running + unread Session', [0, 1, 0], false, true],
-  ['Unread and active', [0, 3, 2]],
-  ['Mixed remainder', [1, 2, 3]],
+  ['Unread and active', [0, 1, 1]],
+  ['Mixed remainder', [1, 1, 1]],
 ];
 const activityFixtures = activityCases.map(([name, counts, initializing, overlapUnreadActive], i) =>
   projectActivityFixture(counts, {
@@ -1404,10 +1396,8 @@ const activityFixtures = activityCases.map(([name, counts, initializing, overlap
     overlapUnreadActive,
   })
 );
-const githubActivityFixtures = activityFixtures.filter(({ project }) =>
-  ['Permission', 'Unread and active', 'Running + unread Session', 'Mixed remainder'].includes(
-    project.name
-  )
+const githubActivityFixtures = activityFixtures.filter(
+  ({ project }) => project.name === 'Permission and overlap'
 );
 
 /** The collapsed project rows use the real sidebar layout across all project types. */
