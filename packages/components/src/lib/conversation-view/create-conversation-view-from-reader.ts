@@ -146,8 +146,17 @@ export function createConversationViewFromReader(
   // it, so the gap-free initial + the queued events stay ordered.
   let initialApplied = false;
   const pendingChanges: SessionDataChange[] = [];
+  /** Structural refresh range: every position after an insert/delete shifted. */
   let dirtyFrom = Infinity;
   let dirtyTo = -1;
+  /**
+   * Content refresh targets, as the ids the reader named. A content
+   * notification carries exact ids, so the refresh reads exactly those rows.
+   * Merging them into one `[min, max)` span meant one early status write landing
+   * in the same batch as a streaming delta re-read the whole directory and
+   * re-materialized every hydrated body between the two.
+   */
+  const dirtyIds = new Set<string>();
   let flushRunning = false;
 
   const tailStart = () => conversationTailStart(ids.length, tailKeep);
@@ -183,8 +192,32 @@ export function createConversationViewFromReader(
     // Send-critical metadata comes from the directory row itself, before any
     // body hydration; the shared projection already kept explicit empty
     // selections intact.
-    if (row.role === 'user' && entry.inputConfig !== undefined) {
-      row.inputConfig = pickIndexInputConfig(entry.inputConfig);
+    //
+    // Projecting it costs a schema parse per user turn, and the only consumer
+    // resolves sticky configuration from the newest turn or two — so the parse
+    // is deferred to first read and memoized on the row. `'inputConfig' in
+    // entry` is used instead of a value test because the directory row defers
+    // its own projection the same way. Opening a 4,000-turn conversation read
+    // the whole directory eagerly, and those two parses were most of it.
+    if (row.role === 'user' && 'inputConfig' in entry) {
+      let projected: TurnIndexRow['inputConfig'];
+      let done = false;
+      Object.defineProperty(row, 'inputConfig', {
+        enumerable: true,
+        configurable: true,
+        get: () => {
+          if (!done) {
+            done = true;
+            const source = entry.inputConfig;
+            projected = source === undefined ? undefined : pickIndexInputConfig(source);
+          }
+          return projected;
+        },
+        set: (value: TurnIndexRow['inputConfig']) => {
+          done = true;
+          projected = value;
+        },
+      });
     }
     if (entry.itemCount !== undefined) row.itemCount = entry.itemCount;
     if (entry.planCount !== undefined) row.planCount = entry.planCount;
@@ -199,8 +232,10 @@ export function createConversationViewFromReader(
       planCount: Array.isArray(turn.plan) ? turn.plan.length : 0,
       summary: summarizeTurn(turn),
     };
-    if (row.inputConfig !== undefined) next.inputConfig = row.inputConfig;
+    // A user turn's body carries the authoritative configuration, so the
+    // directory row's deferred projection is never forced here.
     if (next.role === 'user') next.inputConfig = pickIndexInputConfig(turn.inputConfig);
+    else if (row.inputConfig !== undefined) next.inputConfig = row.inputConfig;
     return next;
   };
 
@@ -215,7 +250,30 @@ export function createConversationViewFromReader(
     }
   };
 
-  /** Whether a directory refresh actually changed the turn's index facts. */
+  /**
+   * Carry the body-derived facts a directory refresh cannot supply.
+   *
+   * A container-backed directory row omits `itemCount`/`planCount` (the adapter
+   * reads them only when they are free), so a refresh of an already-hydrated
+   * row would otherwise drop the real counts. Placeholder heights and the
+   * empty-assistant test read them long after the body is evicted, and
+   * `rowChanged` compares them.
+   */
+  const carryBodyFacts = (old: TurnIndexRow | undefined, next: TurnIndexRow): TurnIndexRow => {
+    if (!old) return next;
+    if (next.itemCount === undefined && old.itemCount !== undefined) next.itemCount = old.itemCount;
+    if (next.planCount === undefined && old.planCount !== undefined) next.planCount = old.planCount;
+    return next;
+  };
+
+  /**
+   * Whether a directory refresh actually changed the turn's index facts.
+   *
+   * Counts are compared only once `carryBodyFacts` has filled the ones the
+   * refresh did not carry: comparing a hydrated row's real count against the
+   * directory's `undefined` reported a change on every refresh, which bumped
+   * every hydrated turn's content epoch and re-read its body.
+   */
   const rowChanged = (old: TurnIndexRow | undefined, next: TurnIndexRow): boolean => {
     if (!old) return true;
     return (
@@ -416,7 +474,15 @@ export function createConversationViewFromReader(
   const applyChange = async (
     from: number,
     entries: readonly SessionDirectoryRow[],
-    authoritativeCount: number
+    authoritativeCount: number,
+    /**
+     * The turn ids the reader reported as changed, when the flush came from a
+     * content notification. A directory row cannot tell whether a body changed
+     * — a grown text item moves no scalar — so this is the only authority for
+     * invalidating a body. `undefined` means "assume every entry changed",
+     * which is what a structural refresh needs.
+     */
+    reportedIds?: ReadonlySet<string>
   ): Promise<void> => {
     let structuralFrom = Infinity;
     for (const entry of entries) {
@@ -440,30 +506,42 @@ export function createConversationViewFromReader(
     if (!structural) {
       const toReRead: string[] = [];
       const evictedChanges: number[] = [];
-      let lo = Infinity;
-      let hi = -1;
+      let touched = false;
       for (const entry of entries) {
         const pos = entry.position;
-        const row = rowFromDirectory(entry);
+        const row = carryBodyFacts(rows[pos], rowFromDirectory(entry));
         const old = rows[pos];
-        if (old && !hydrated.has(old.id)) {
+        // A turn the notification did not name kept its body: re-reading it
+        // would cost a full materialization and hand the renderer a new object
+        // for a turn nothing changed.
+        const bodyChanged = reportedIds === undefined || reportedIds.has(row.id);
+        const indexChanged = rowChanged(old, row);
+        if (!bodyChanged && !indexChanged) continue;
+        if (bodyChanged && old && !hydrated.has(old.id) && old.summary !== undefined) {
           // Drop stale previews; the next explicit read will recompute them.
-          if (old.summary !== undefined) {
-            row.summary = undefined;
-          }
+          row.summary = undefined;
         }
-        // Invalidate only the turn(s) whose facts actually changed, so an
-        // unrelated turn's in-flight body read is not cancelled.
-        if (rowChanged(old, row)) bumpTurn(row.id);
-        rows[pos] = row;
-        if (row.id !== old?.id) rebuildLookups(pos);
-        if (hydrated.has(row.id)) toReRead.push(row.id);
-        else evictedChanges.push(pos);
-        lo = Math.min(lo, pos);
-        hi = Math.max(hi, pos);
+        if (bodyChanged || indexChanged) {
+          // A reported turn always takes the fresh row: `rowChanged` compares
+          // only the facts it can compare, and a user turn's send configuration
+          // is a deferred projection that cannot be diffed without forcing it.
+          // A turn nothing reported keeps its object — placeholder items and
+          // Virtua rows are keyed by that identity.
+          rows[pos] = row;
+          if (row.id !== old?.id) rebuildLookups(pos);
+        }
+        if (bodyChanged) {
+          // Invalidate only the turn(s) the reader named, so an unrelated
+          // turn's in-flight body read is not cancelled.
+          bumpTurn(row.id);
+          if (hydrated.has(row.id)) toReRead.push(row.id);
+          else evictedChanges.push(pos);
+        }
+        touched = true;
       }
+      if (!touched) return;
       bump();
-      if (hi >= 0) emit({ kind: 'changed', ids: [] });
+      emit({ kind: 'changed', ids: [] });
       // Index notifications also occur for summary maintenance. A storage
       // content edit must separately invalidate body-derived facts even when
       // this view no longer holds the body. Otherwise an old goal/file diff
@@ -522,35 +600,108 @@ export function createConversationViewFromReader(
     dirtyTo = Math.max(dirtyTo, to);
   };
 
+  /**
+   * Contiguous `[lo, hi)` runs covering `positions`, so scattered targets still
+   * read in as few directory calls as they have runs — and never read the rows
+   * between two distant runs.
+   */
+  const runsOf = (positions: readonly number[]): [number, number][] => {
+    const sorted = [...new Set(positions)].sort((a, b) => a - b);
+    const runs: [number, number][] = [];
+    for (const position of sorted) {
+      const last = runs[runs.length - 1];
+      if (last && position === last[1]) last[1] = position + 1;
+      else runs.push([position, position + 1]);
+    }
+    return runs;
+  };
+
+  const flushStructural = async (from: number, to: number): Promise<void> => {
+    // A structural refresh re-reads and re-keys the whole range, which subsumes
+    // any content target inside it.
+    for (const id of [...dirtyIds]) {
+      const position = indexById.get(id);
+      if (position !== undefined && position >= from && position < to) dirtyIds.delete(id);
+    }
+    // Read the directory and the count as ONE observation: capture the
+    // membership epoch first, and if a structural change lands before the
+    // pair is ready, re-dirty the window so the next iteration re-reads a
+    // coherent pair instead of pairing old rows with a newer length.
+    const structureBefore = structureEpoch;
+    let entries: readonly SessionDirectoryRow[];
+    let count: number;
+    try {
+      entries = await reader.readDirectory(from, to);
+      count = await reader.count();
+    } catch {
+      return;
+    }
+    if (disposed) return;
+    if (structureEpoch !== structureBefore) {
+      mergeDirty(from, to);
+      return;
+    }
+    await applyChange(from, entries, count);
+  };
+
+  const flushContent = async (): Promise<void> => {
+    const reported = new Set(dirtyIds);
+    dirtyIds.clear();
+    const positions: number[] = [];
+    let lowest = ids.length;
+    for (const id of reported) {
+      const position = indexById.get(id);
+      if (position === undefined) continue;
+      positions.push(position);
+      if (position < lowest) lowest = position;
+    }
+    if (positions.length === 0) return;
+    const structureBefore = structureEpoch;
+    let count: number;
+    try {
+      count = await reader.count();
+    } catch {
+      return;
+    }
+    if (disposed) return;
+    // A content notification must not move membership. If the length changed
+    // anyway, re-key structurally rather than splicing rows from a sparse read.
+    if (count !== ids.length) {
+      mergeDirty(lowest, Math.max(count, ids.length));
+      return;
+    }
+    for (const [lo, hi] of runsOf(positions)) {
+      if (disposed) return;
+      let entries: readonly SessionDirectoryRow[];
+      try {
+        entries = await reader.readDirectory(lo, hi);
+      } catch {
+        continue;
+      }
+      if (disposed) return;
+      if (structureEpoch !== structureBefore) {
+        mergeDirty(lo, ids.length);
+        return;
+      }
+      await applyChange(lo, entries, count, reported);
+    }
+  };
+
   const flushDirty = async () => {
     if (flushRunning) return;
     flushRunning = true;
     try {
-      while (dirtyFrom <= dirtyTo) {
+      while (dirtyFrom <= dirtyTo || dirtyIds.size > 0) {
         if (disposed) break;
-        const from = dirtyFrom;
-        const to = dirtyTo;
-        dirtyFrom = Infinity;
-        dirtyTo = -1;
-        // Read the directory and the count as ONE observation: capture the
-        // membership epoch first, and if a structural change lands before the
-        // pair is ready, re-dirty the window so the next iteration re-reads a
-        // coherent pair instead of pairing old rows with a newer length.
-        const structureBefore = structureEpoch;
-        let entries: readonly SessionDirectoryRow[];
-        let count: number;
-        try {
-          entries = await reader.readDirectory(from, to);
-          count = await reader.count();
-        } catch {
+        if (dirtyFrom <= dirtyTo) {
+          const from = dirtyFrom;
+          const to = dirtyTo;
+          dirtyFrom = Infinity;
+          dirtyTo = -1;
+          await flushStructural(from, to);
           continue;
         }
-        if (disposed) break;
-        if (structureEpoch !== structureBefore) {
-          mergeDirty(from, to);
-          continue;
-        }
-        await applyChange(from, entries, count);
+        await flushContent();
       }
     } finally {
       flushRunning = false;
@@ -568,10 +719,11 @@ export function createConversationViewFromReader(
       structureEpoch++;
       mergeDirty(change.from, change.to);
     } else {
+      // Positions are resolved at flush time, not here: an id's position can
+      // move between the notification and the refresh.
       for (const id of change.ids) {
         bumpTurn(id);
-        const position = indexById.get(id);
-        if (position !== undefined) mergeDirty(position, position + 1);
+        dirtyIds.add(id);
       }
     }
     void flushDirty();
@@ -630,6 +782,9 @@ export function createConversationViewFromReader(
     },
     get version() {
       return version;
+    },
+    get structureVersion() {
+      return structureEpoch;
     },
     ready,
     index: (i) => rows[i],

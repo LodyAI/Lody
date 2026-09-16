@@ -19,7 +19,16 @@ export const HistoryEntryWriteSchema = z.object({
   endedAt: z.number().optional(),
   permissionWaitMs: z.number().optional(),
   status: z
-    .enum(['pending', 'pending_apply', 'seen', 'processing', 'handled', 'failed', 'canceled'])
+    .enum([
+      'pending',
+      'pending_apply',
+      'delivery_unknown',
+      'seen',
+      'processing',
+      'handled',
+      'failed',
+      'canceled',
+    ])
     .optional(),
   inputConfig: z
     .preprocess(normalizeLegacyAcpSessionConfig, SessionHistoryInputConfigSchema)

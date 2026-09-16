@@ -201,6 +201,14 @@ change, package publication, historical data repair, or Kimi artifact rollout is
 authorized/performed by these scoped fixes. Model-unattributed Codex USD remains
 unknown; do not restore guessed UI-model pricing just to fill the field.
 
+2026-09-15 correction: the pinned Codex runtime emits exact
+`rawResponse/completed` usage with a `responseId`. The adapter now attributes
+those events to the resolved thread/turn model and keeps only the thread-total
+remainder in `codex:unattributed`; a `$CODEX_HOME` sidecar restores the ledger on
+resume and fork source history is excluded. See
+[Codex per-model usage attribution](2026-09-15-codex-per-model-attribution.md).
+The durable consumer accounting identity remains unresolved.
+
 ## Alternatives and limits
 
 - Rejected: queue per-prompt deltas into a cumulative consumer; still undercounts.

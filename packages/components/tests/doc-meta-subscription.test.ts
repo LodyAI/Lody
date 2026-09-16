@@ -25,6 +25,7 @@ import {
   sessionMetaCacheAtom,
 } from '../src/atoms/doc-meta';
 import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
+import { createDirectWorkspaceWriter } from '../src/providers/workspace-writer-impl';
 
 type RepoWithSyncRunner = LoroRepo & {
   syncRunner: {
@@ -191,6 +192,54 @@ describe('docMetaSubscriptionAtom', () => {
       expect(store.get(archivedSessionListAtom).map((session) => session.id)).toContain(sessionId);
     } finally {
       unmount();
+    }
+  });
+
+  it('converges shared tab closure across offline replicas without losing lifecycle or concurrent title updates', async () => {
+    const left = (await LoroRepo.create({})) as RepoWithSyncRunner;
+    const right = (await LoroRepo.create({})) as RepoWithSyncRunner;
+    const room = getSessionRoomId('shared-tab' as SessionId);
+    const sync = async (from: LoroRepo, to: RepoWithSyncRunner) => {
+      to.getMeta().importJson(from.getMeta().exportJson());
+      await to.syncRunner.metaHydrationQueue;
+    };
+    try {
+      const writer = createDirectWorkspaceWriter({ repo: left } as never);
+      await left.upsertDocMeta(room, {
+        id: 'shared-tab',
+        title: 'Original',
+        isArchived: false,
+        latestUserMsgId: 'pending',
+      });
+      await sync(left, right);
+      await writer.upsertDocMeta(room, { isTabClosed: true });
+      await right.upsertDocMeta(room, { title: 'Renamed offline' });
+      await sync(left, right);
+      await sync(right, left);
+      expect((await left.getDocMeta(room))?.meta).toMatchObject({
+        isTabClosed: true,
+        title: 'Renamed offline',
+        isArchived: false,
+        latestUserMsgId: 'pending',
+      });
+      expect((await right.getDocMeta(room))?.meta).toEqual((await left.getDocMeta(room))?.meta);
+      // Concurrent explicit close/open writes settle through the existing CRDT,
+      // without choosing a wall-clock winner in the UI.
+      await left.upsertDocMeta(room, { isTabClosed: false });
+      await right.upsertDocMeta(room, { isTabClosed: true });
+      await sync(left, right);
+      await sync(right, left);
+      expect((await right.getDocMeta(room))?.meta).toEqual((await left.getDocMeta(room))?.meta);
+      await writer.upsertDocMeta(room, { isTabClosed: false });
+      await sync(left, right);
+      expect((await right.getDocMeta(room))?.meta).toMatchObject({
+        isTabClosed: false,
+        isArchived: false,
+        latestUserMsgId: 'pending',
+      });
+    } finally {
+      await left.destroy();
+      await right.destroy();
     }
   });
 

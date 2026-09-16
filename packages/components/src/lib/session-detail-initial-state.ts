@@ -47,7 +47,10 @@ export const getSessionDetailInitialTabState = (
     options.readPersistedState?.(parentSessionId) ?? readStoredLastActiveTabState(parentSessionId);
   const viewerTab = persistedState?.viewerTab ?? null;
   const parsedUrlTab = parseSessionTabSearch(urlTab);
-  const urlNamesConversationTab = parsedUrlTab.kind === 'session' || parsedUrlTab.kind === 'draft';
+  const urlNamesConversationTab =
+    parsedUrlTab.kind === 'session' ||
+    parsedUrlTab.kind === 'draft' ||
+    parsedUrlTab.kind === 'empty';
 
   return {
     viewerTabs: viewerTab ? [viewerTab] : [],

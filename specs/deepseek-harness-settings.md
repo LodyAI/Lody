@@ -1,7 +1,9 @@
 # DeepSeek Harness user settings
 
 Status: draft
-Translation: pending
+Translation: current
+
+[中文](deepseek-harness-settings.zh.md)
 
 ## Behavior
 
@@ -10,6 +12,15 @@ Users can configure settings-aware Harness plugins in `settings.yaml` under
 mount the upstream file settings provider and preserve the user's document.
 Absent settings retain composition defaults. Malformed documents fail startup with
 an error; the host must not silently overwrite or discard them.
+
+An unavailable `agent-presets.default` must not strand a session when the standard
+preset is usable. At ACP session creation, preserve a usable default, including
+custom presets; otherwise select the usable `standard` preset and log a warning.
+Persist and return the actual selection without rewriting user settings. This
+also applies when the host creates a replacement connection for an existing
+conversation. Explicit preset switches remain strict. If neither the configured
+default nor `standard` is usable, fail with repair guidance before creating an
+Agent; do not choose an arbitrary composition or change permission settings.
 
 The upstream plugin owns configuration schemas and override semantics. In
 particular, `llm-deepseek.models` replaces the local catalog array in full.

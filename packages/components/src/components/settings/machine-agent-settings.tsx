@@ -588,7 +588,8 @@ export function MachineAgentSettings({
   const [dialogMode, setDialogMode] = useState<AgentConfigDialogMode | null>(null);
   // The provider dialog targets whichever machine's accordion row opened it,
   // decoupled from any single "selected machine" now that desktop lists them all.
-  const [dialogMachine, setDialogMachine] = useState<MachineViewMeta | null>(null);
+  const [dialogMachineId, setDialogMachineId] = useState<MachineId | null>(null);
+  const dialogMachine = dialogMachineId ? machines.get(dialogMachineId) : undefined;
   const dialogOpen = dialogMode !== null;
   const [latestCliVersion, setLatestCliVersion] = useState<string | null>(null);
 
@@ -880,18 +881,18 @@ export function MachineAgentSettings({
   const { checkBinaryStatus, installBinary } = useMachineAcpBinaryActions(runtime, workspaceId);
 
   const openCreateDialog = useCallback((machine: MachineViewMeta) => {
-    setDialogMachine(machine);
+    setDialogMachineId(machine.id);
     setDialogMode({ kind: 'create' });
   }, []);
 
   const openEditDialog = useCallback((machine: MachineViewMeta, config: AgentConfigMeta) => {
-    setDialogMachine(machine);
+    setDialogMachineId(machine.id);
     setDialogMode({ kind: 'edit', config });
   }, []);
 
   const handleDialogSubmit = useCallback(
     async (payload: AgentConfigSubmitPayload) => {
-      if (!dialogMachine || !dialogMode) return;
+      if (!dialogMachineId || !dialogMode) return;
       try {
         if (dialogMode.kind === 'create') {
           const config: AgentConfigMeta = {
@@ -906,7 +907,7 @@ export function MachineAgentSettings({
             prompt: payload.prompt,
             titleGeneration: payload.titleGeneration,
             brandId: payload.brandId,
-            machineId: dialogMachine.id,
+            machineId: dialogMachineId,
           };
           if (payload.backgroundSetup) {
             await createSetup(config);
@@ -939,7 +940,7 @@ export function MachineAgentSettings({
         throw error;
       }
     },
-    [dialogMachine, dialogMode, createConfig, createSetup, updateConfig, t]
+    [dialogMachineId, dialogMode, createConfig, createSetup, updateConfig, t]
   );
 
   const handleRetrySetup = useCallback(

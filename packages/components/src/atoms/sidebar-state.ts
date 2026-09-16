@@ -268,5 +268,8 @@ export type ArchiveScopeValue = 'my' | 'team';
  * Archive scope filter - persisted to localStorage
  * 'my' = Show only current user's archived sessions
  * 'team' = Show all team archived sessions
+ *
+ * Default to the team view so a participant who has not chosen a scope sees
+ * the complete workspace archive. An explicit choice remains persisted below.
  */
-export const archiveScopeAtom = atomWithStorage<ArchiveScopeValue>('lody-archive-scope', 'my');
+export const archiveScopeAtom = atomWithStorage<ArchiveScopeValue>('lody-archive-scope', 'team');

@@ -164,6 +164,13 @@ Prettier。定向格式化、文档检查、公共/平台边界检查通过。
 这些范围内修复未授权/实施私有 backend 改动、包发布、历史数据修复或 Kimi artifact
 上线。Codex 未归属模型的 USD 仍未知，不能为了填值恢复按 UI 模型猜价。
 
+2026-09-15 更正：锁定 Codex runtime 会发送带 `responseId` 的精确
+`rawResponse/completed` 用量。适配器现在把这些事件归到已解析的 thread/turn 模型，
+只把 thread 总量中未被覆盖的余量留在 `codex:unattributed`；`$CODEX_HOME` sidecar
+会在 resume 时恢复模型账本，fork 会话排除源历史。详见
+[Codex 分模型用量归因](2026-09-15-codex-per-model-attribution.zh.md)。
+消费端持久 accounting identity 仍未解决。
+
 ## 取舍与限制
 
 - 否决：向累计消费端排队发送本轮增量，仍会偏低。

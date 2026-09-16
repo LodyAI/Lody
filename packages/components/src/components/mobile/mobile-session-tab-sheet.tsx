@@ -9,6 +9,7 @@ import {
   MonitorPlay,
   Plus,
   Undo2,
+  X,
 } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
@@ -59,6 +60,9 @@ export type ArchivedConversationEntry = {
   id: string;
   title: string;
   lastActivityAt: number | null;
+  running?: boolean;
+  waitingPermission?: boolean;
+  unread?: boolean;
 };
 
 export type ViewerTabEntry = {
@@ -80,6 +84,7 @@ export type MobileSessionTabSheetProps = {
   onSelectViewer: (id: string) => void;
   /** Tapping an archived row restores it (and switches to it). */
   onRestoreConversation?: (id: string) => void;
+  onCloseConversation?: (id: string) => void;
 };
 
 /** Relative "Xm ago" of the last activity, task-list style; '' when unknown. */
@@ -126,6 +131,7 @@ export function MobileSessionTabSheet({
   onNewConversation,
   onSelectViewer,
   onRestoreConversation,
+  onCloseConversation,
 }: MobileSessionTabSheetProps) {
   const { t } = useTranslation();
   const title = t('sessions.tabs.sheetTitle', 'Tabs');
@@ -147,19 +153,35 @@ export function MobileSessionTabSheet({
           <GroupLabel>{t('sessions.tabs.conversationsGroup', 'Conversations')}</GroupLabel>
           <GroupCard>
             {conversations.map((c) => (
-              <ConversationRow
-                key={c.id}
-                active={c.active}
-                running={c.running}
-                waitingPermission={c.waitingPermission === true}
-                unread={c.unread}
-                label={c.title || t('sessions.untitled', 'Untitled')}
-                mainChip={c.main ? t('sessions.tabs.mainTab', 'Main') : null}
-                elapsed={formatRelativeTime(c.lastActivityAt, t)}
-                unreadLabel={t('sessions.unreadMessages', 'Unread messages')}
-                waitingPermissionLabel={t('sessions.waitingPermission', 'Waiting for permission')}
-                onSelect={() => select(() => onSelectConversation(c.id))}
-              />
+              <div key={c.id} className="flex items-center">
+                <div className="min-w-0 flex-1">
+                  <ConversationRow
+                    active={c.active}
+                    running={c.running}
+                    waitingPermission={c.waitingPermission === true}
+                    unread={c.unread}
+                    label={c.title || t('sessions.untitled', 'Untitled')}
+                    mainChip={c.main ? t('sessions.tabs.mainTab', 'Main') : null}
+                    elapsed={formatRelativeTime(c.lastActivityAt, t)}
+                    unreadLabel={t('sessions.unreadMessages', 'Unread messages')}
+                    waitingPermissionLabel={t(
+                      'sessions.waitingPermission',
+                      'Waiting for permission'
+                    )}
+                    onSelect={() => select(() => onSelectConversation(c.id))}
+                  />
+                </div>
+                {onCloseConversation && (
+                  <button
+                    type="button"
+                    className="shrink-0 p-3 text-muted-foreground"
+                    aria-label={t('sessions.tabs.closeTab', 'Close tab')}
+                    onClick={() => onCloseConversation(c.id)}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
             ))}
             <button
               type="button"
@@ -193,7 +215,7 @@ export function MobileSessionTabSheet({
                     />
                   </span>
                   <span className="min-w-0 flex-1 truncate">
-                    {t('sessions.tabs.archivedCount', 'Archived ({{count}})', {
+                    {t('sessions.tabs.closedCount', 'Closed ({{count}})', {
                       count: archivedConversations.length,
                     })}
                   </span>
@@ -204,13 +226,27 @@ export function MobileSessionTabSheet({
                         key={a.id}
                         type="button"
                         onClick={() => select(() => onRestoreConversation(a.id))}
-                        aria-label={t('sessions.tabs.restoreTab', 'Restore tab')}
+                        aria-label={t('sessions.tabs.reopenTab', 'Reopen conversation')}
                         className={cn(
                           rowClassName,
                           'transition-colors hover:bg-muted-foreground/5'
                         )}
                       >
-                        <span className="h-4 w-4 shrink-0" />
+                        <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+                          {a.waitingPermission ? (
+                            <Hand
+                              className="h-4 w-4 text-status-warning"
+                              aria-label={t('sessions.waitingPermission', 'Waiting for permission')}
+                            />
+                          ) : a.running ? (
+                            <Spinner className="h-4 w-4" />
+                          ) : a.unread ? (
+                            <span
+                              className="h-2 w-2 rounded-full bg-primary"
+                              aria-label={t('sessions.unreadMessages', 'Unread messages')}
+                            />
+                          ) : null}
+                        </span>
                         <span className="min-w-0 flex-1 truncate text-muted-foreground">
                           {a.title || t('sessions.untitled', 'Untitled')}
                         </span>

@@ -321,6 +321,8 @@ export type SessionActions = {
   /** Delete exactly the supplied Sessions without discovering related Sessions. */
   deleteSessions: (sessionIds: SessionId[]) => Promise<void>;
   archiveSession: (sessionId: SessionId) => Promise<void>;
+  setSessionTabClosed: (sessionId: SessionId, closed: boolean) => Promise<void>;
+  reopenSessionTab: (sessionId: SessionId) => Promise<void>;
   restoreSession: (sessionId: SessionId) => Promise<void>;
   deleteArchivedSession: (sessionId: SessionId) => Promise<void>;
   setSessionPinned: (sessionId: SessionId, isPinned: boolean) => Promise<void>;
@@ -890,30 +892,45 @@ export function useSessionActions(): SessionActions {
       if (!entry || !inputConfig || !userId || !machineId) {
         return false;
       }
-      const response = await runtime.requestSessionSteer(machineId, {
+      const steerRequest = {
         sessionId,
         expectedTurnId,
         userTurnId,
         userId,
         timestamp: entry.timestamp,
         inputConfig,
-      });
+      };
+      let response = await runtime.requestSessionSteer(machineId, steerRequest);
+      if (response?.recoveryOwned && response.disposition === 'promotion-failed') {
+        // This verdict proves non-delivery. Repair through the same owner once;
+        // a renderer pointer write could erase a newer producer activation.
+        response = await runtime.requestSessionSteer(machineId, steerRequest);
+        if (
+          !response ||
+          response.disposition === 'promotion-failed' ||
+          response.disposition === 'error'
+        ) {
+          throw new Error(response?.error ?? 'Could not recover the undelivered guidance');
+        }
+      }
       if (response?.applied) {
         store.set(rpcDeliveredTurnsAtom, (previous) =>
           addRpcDeliveredTurn(previous, getRpcDeliveredTurnKey(sessionId, userTurnId))
         );
         return true;
       }
-      if (response?.disposition === 'no-active-turn') {
-        // The target prompt ended before the CLI submitted the steer. Reuse
-        // the same user turn as a normal follow-up instead of leaving it stuck
-        // in pending_apply. Other failures must not fall back because the
-        // provider may already have committed the steer.
+      if (
+        !response?.recoveryOwned &&
+        (response?.disposition === 'no-active-turn' || response?.disposition === 'promotion-failed')
+      ) {
+        // The CLI proved the steer was not applied, either before submission
+        // or from the adapter's final verdict. Reuse the same user turn as an
+        // ordinary follow-up. Ambiguous legacy results must not be promoted:
+        // replay could deliver the input twice.
         // Re-acquire the store for the write: the steer RPC above can run long,
         // and we must not hold a store ref across it.
-        const promoted = await runtime.withSessionStore(
-          sessionId,
-          async (sessionStore) =>
+        const promoted = await runtime.withSessionStore(sessionId, async (sessionStore) => {
+          const changed =
             (
               await sessionStore.sessionData.commands.applyHistoryAction({
                 kind: 'user-status',
@@ -921,10 +938,18 @@ export function useSessionActions(): SessionActions {
                 status: 'pending',
                 onlyPendingApply: true,
               })
-            ).matched ?? false
-        );
-        // A duplicate response must not reset a turn that another request has
-        // already promoted, started, or completed.
+            ).matched ?? false;
+          if (changed) return true;
+          // CLI promotion can write history before its activation pointer
+          // fails. Auto-seen may also have observed that pending entry.
+          const read = await sessionStore.sessionData.history.readTurn(userTurnId);
+          return (
+            read.state === 'ready' &&
+            read.turn.role === 'user' &&
+            (read.turn.status === 'pending' || read.turn.status === 'seen')
+          );
+        });
+        // Pending promotion is repairable; a started, terminal, or removed turn is not.
         if (!promoted) {
           return false;
         }
@@ -1217,6 +1242,7 @@ export function useSessionActions(): SessionActions {
       for (const session of archiveTargets) {
         await runtime.writer.upsertDocMeta(getSessionRoomId(session.id), {
           isArchived: false,
+          ...(session.id === sessionId ? { isTabClosed: false } : {}),
         } as Partial<SessionMeta>);
       }
       log('[session-restore] restored', {
@@ -1225,6 +1251,37 @@ export function useSessionActions(): SessionActions {
       });
     },
     [runtime, store]
+  );
+
+  const setSessionTabClosed = useCallback(
+    async (sessionId: SessionId, closed: boolean) => {
+      if (!runtime) throw new Error('Runtime not ready');
+      const roomId = getSessionRoomId(sessionId);
+      const entry = await runtime.repo.getDocMeta(roomId);
+      if (isLoroRepoDocDeleted(entry)) throw new Error('Session was deleted');
+      const meta = entry?.meta ?? store.get(sessionMetaCacheAtom)[roomId];
+      if (!meta) throw new Error('Session metadata is still loading');
+      await runtime.writer.upsertDocMeta(roomId, { isTabClosed: closed });
+    },
+    [runtime, store]
+  );
+
+  const reopenSessionTab = useCallback(
+    async (sessionId: SessionId) => {
+      if (!runtime) throw new Error('Runtime not ready');
+      const entry = await runtime.repo.getDocMeta(getSessionRoomId(sessionId));
+      if (!entry?.meta || isLoroRepoDocDeleted(entry)) {
+        throw new Error('Session metadata unavailable');
+      }
+      if ((entry.meta as SessionMeta).isArchived) {
+        // Legacy tab closes archived the session. Retain restoration checks and
+        // containment semantics rather than clearing the lifecycle bit directly.
+        if (!store.get(docMetaCacheReadyAtom)) throw new Error('Session metadata is still loading');
+        await restoreSession(sessionId);
+      }
+      await setSessionTabClosed(sessionId, false);
+    },
+    [runtime, restoreSession, setSessionTabClosed, store]
   );
 
   const deleteArchivedSessionMeta = useCallback(
@@ -1291,6 +1348,8 @@ export function useSessionActions(): SessionActions {
     touchSessionActivity,
     updateSessionStatus,
     updateSessionTitle,
+    setSessionTabClosed,
+    reopenSessionTab,
     transferSessionOwner,
     markSessionRead,
     markSessionUnread,

@@ -19,9 +19,9 @@ Contract: specs/session-orchestration.md.
   exists; retries and recovery never reread mutable history.
 - Machine and Provider credentials stay execution-host scoped; attribution, authorization,
   GitHub, and Git identity use the frozen identity, never the Session owner.
-- Git identity: owner prefers machine then requester; others never read machine config.
-  Never restart ACP/sandbox for identity, even in preparations.
-  Use `CloudPort`; reject placeholders.
+- Git: owner uses local config, no profile query; others never read it.
+  `CloudPort` profiles: 60s deadline, retry failures, reject placeholders.
+  Identity never restarts ACP/sandbox, even in prep.
 
 ## Dispatch
 
@@ -44,21 +44,22 @@ Contract: specs/session-orchestration.md.
 
 ## Turn execution
 
-- Gate turn-scoped history LIST writes on user-entry sync (`turn-history-gate.ts`, 20s);
-  never gate status or meta writes.
+- Gate turn-scoped LIST writes on user-entry sync (`turn-history-gate.ts`, 20s), never status/meta.
 - Goals obey [this contract](../../../../specs/session-goal-control.md).
-- In-flight Stop cancels ACP, never its owner fiber. Keep `TurnRuntimeState` until raw ACP
-  completion or confirmed termination; no second turn. Assistant ids use `userTurnId`.
+- Stop ends local steer waits, not the owner fiber. Drain raw prompt/steer/config work before
+  reuse, or confirm termination. Assistant ids use `userTurnId`.
   `invocation` owns source Turn, requester and config atomically; steer replaces it before tools.
 - Publish `latestUserMsgId` in the SAME write as the history append (`appendUserTurn`). Only
   dispatch producers publish it. Renderer sends and queue promotion retain the missing-history
   tombstone; CLI dispatch producers keep their own marker policy.
 - Ordinary turn execution writes only `processingUserMsgId` and `lastHandledUserMsgId`; no start
   or terminal path may read-await-rewrite the other slots.
-- Never submit steer after Stop. A late accepted ACK cancels that exact steer entry without
-  transferring ownership, changing dispatch pointers or requeueing it.
-  Requeue unaccepted steer via its pointer, not entry status, only before submission or on
-  `AgentSteerNotDeliveredError`; skip active or handled entries.
+- Never steer after cancellation or infer delivery from it. Stop uses
+  `pendingInput: promote` / `prePromptSession: discard`; Edit & Resend uses preserve/keep,
+  access revocation preserve/discard. Limit create/restore fences to initialization.
+- Promote only proven non-delivery via `steerTurnStatuses`, never producer pointers.
+  Unknown never replays; RPC ACKs never revive history. Surface recovery errors.
+- Foreground/steer config uses its owner signal; fence mutations after interrupt.
 - Resume must REOPEN the in-progress assistant entry, clearing
   `finished`/`endedAt`/`permissionWaitMs` there only; never write `finished=false` from teardown.
 - Keep JSON-RPC/transport matching in `acp-error-classification.ts`: disposed/stale `-32603` is
@@ -104,11 +105,10 @@ Contract: specs/session-orchestration.md.
 - Fork recovery fail-closes interrupted operations and finds them ONLY in the machine-local marker
   store under `withForkOperationLock`. Never enumerate rooms or open docs to find candidates, and
   never `cleanSessionDoc` a doc you do not own.
-- Edit-and-resend prepares provider `forkAtTurn` (`session/new` for the first User), cancels the
-  exact active turn, waits for ownership release, then one durable history/meta commit.
-  Its rewrite barrier excludes queue promotion and blocks dispatch and steer; the queue is never
-  rewritten. Keep the original User attribution, config, and attachments, use new turn ids and ACP
-  identity, and never replay transcript or roll back files.
+- Edit-and-resend prepares `forkAtTurn` (`session/new` for the first User), cancels the exact
+  turn, waits for release, then commits history/meta. Its barrier excludes queue promotion,
+  dispatch and steer. Keep the queue, User attribution/config/attachments; use new turn/ACP ids.
+  Never replay transcript or roll back files.
 
 ## Access
 

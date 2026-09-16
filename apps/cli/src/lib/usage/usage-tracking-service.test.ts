@@ -2,6 +2,8 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { ConvexHttpClient } from 'convex/browser';
 import type { Logger } from '@/utils/logger';
 import { UsageTrackingService, type RecordSessionUsageInput } from './usage-tracking-service';
+import { parseLodyExtensionMessage } from '@/agent/lody-acp-extension';
+import { LODY_EXTENSION_METHODS } from 'acp-extension-core';
 
 type Payload = Omit<RecordSessionUsageInput, 'update'> & RecordSessionUsageInput['update'];
 const logger: Logger = {
@@ -82,6 +84,56 @@ describe('usage delivery', () => {
     });
   });
   afterEach(() => vi.restoreAllMocks());
+
+  it('persists turn snapshots independently across model switches, retries and adapter restarts', async () => {
+    const report = (turnId: string, model: string, tokens: number) => {
+      const usage = { inputTokens: tokens, outputTokens: 0, cacheReadInputTokens: 0 };
+      const event = parseLodyExtensionMessage({
+        method: LODY_EXTENSION_METHODS.sessionUsageUpdate,
+        sessionId: 'native',
+        provider: 'codex',
+        params: {
+          sessionId: 'native',
+          usage,
+          modelUsage: { [model]: usage },
+          _meta: { codex: { usageTurnId: turnId } },
+        },
+      });
+      if (event?.type !== 'usage' || !event.accountingId)
+        throw new Error('Missing accounting scope');
+      service.recordSessionUsageUpdate({
+        ...input(0, 'codex'),
+        acpSessionId: event.accountingId,
+        update: event.update,
+      });
+    };
+    report('a', 'model-a', 10000);
+    report('b', 'model-b', 1000);
+    report('b', 'model-b', 2000);
+    await service.flushSessionUsage('s');
+    report('b', 'model-b', 2000); // Replay uses the same hosted idempotency key.
+    await service.flushSessionUsage('s');
+    service = new UsageTrackingService({
+      convexUrl: 'https://synthetic.convex.cloud',
+      cliToken: 'synthetic',
+      logger,
+    });
+    report('c', 'model-b', 500);
+    await service.flushSessionUsage('s');
+    const stored = new Map<string, number>();
+    for (const payload of persisted) {
+      for (const [model, usage] of Object.entries(payload.modelUsage ?? {})) {
+        const key = `${payload.acpSessionId}:${model}`;
+        stored.set(key, Math.max(stored.get(key) ?? 0, usage.inputTokens));
+      }
+    }
+    expect([...stored.entries()]).toEqual([
+      ['native:turn:a:model-a', 10000],
+      ['native:turn:b:model-b', 2000],
+      ['native:turn:c:model-b', 500],
+    ]);
+    expect([...stored.values()].reduce((a, b) => a + b, 0)).toBe(12500);
+  });
 
   it('projects provider fields without losing token buckets, known costs or unknown costs', async () => {
     const report = input(100);
@@ -214,7 +266,7 @@ describe('usage delivery', () => {
     expect(persisted.map((p) => p.usage.inputTokens)).toEqual([100, 200]);
   });
 
-  it('retains cumulative-provider coalescing and Codex compaction', async () => {
+  it('coalesces the latest snapshot without compensating Codex resets', async () => {
     service.recordSessionUsageUpdate(input(100, 'claude'));
     service.recordSessionUsageUpdate(input(200, 'claude'));
     await service.flushSessionUsage('s');
@@ -227,10 +279,10 @@ describe('usage delivery', () => {
     service.recordSessionUsageUpdate(reset);
     service.recordSessionUsageUpdate(input(20, 'codex'));
     await service.flushSessionUsage('s');
-    expect(persisted.map((p) => p.usage.inputTokens)).toEqual([120]);
+    expect(persisted.map((p) => p.usage.inputTokens)).toEqual([20]);
   });
 
-  it('keeps legacy Codex compaction offsets after acknowledgement without inventing cost', async () => {
+  it('forwards native Codex resets after acknowledgement without inventing history or cost', async () => {
     service.recordSessionUsageUpdate(input(1000, 'codex'));
     await service.flushSessionUsage('s');
     const reset = input(0, 'codex');
@@ -241,11 +293,11 @@ describe('usage delivery', () => {
     service.recordSessionUsageUpdate(input(50, 'codex'));
     await service.flushSessionUsage('s');
     await service.flushSessionUsage('s');
-    expect(persisted.map((p) => p.modelUsage?.synthetic.inputTokens)).toEqual([1000, 1000, 1050]);
+    expect(persisted.map((p) => p.modelUsage?.synthetic.inputTokens)).toEqual([1000, 0, 50]);
     expect(persisted[2]?.modelUsage?.synthetic.costUSD).toBeUndefined();
   });
 
-  it('does not apply legacy compaction to adapter-owned cumulative accounting', async () => {
+  it('preserves cumulative model snapshots independently of aggregate usage', async () => {
     const update = input(1000, 'codex');
     update.update.delta = {
       usage: update.update.usage,

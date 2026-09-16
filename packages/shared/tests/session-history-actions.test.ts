@@ -214,6 +214,36 @@ it('business full reads preserve normalization without rewriting opaque stored h
   expect(doc.version().toJSON()).toEqual(version);
 });
 
+it.each(['handled', 'failed', 'canceled', 'delivery_unknown'] as const)(
+  'late steer projection cannot resurrect %s across peer import',
+  async (status) => {
+    const doc = new LoroDoc();
+    const data = createLoroSessionData({ sessionId: sid, doc });
+    await data.commands.appendTurn({ ...row('guide', 'user'), status: 'pending_apply' });
+    await data.commands.applyHistoryAction({
+      kind: 'user-status',
+      turnId: 'guide',
+      status,
+      steerProjection: true,
+    });
+    const peer = new LoroDoc();
+    peer.import(doc.export({ mode: 'snapshot' }));
+    const imported = createLoroSessionData({ sessionId: sid, doc: peer });
+    const result = await imported.commands.applyHistoryAction({
+      kind: 'user-status',
+      turnId: 'guide',
+      status: 'processing',
+      steerProjection: true,
+      deliveredSteer: true,
+    });
+    expect(result.matched).toBe(false);
+    expect(await imported.history.readTurn('guide')).toMatchObject({
+      state: 'ready',
+      turn: { status },
+    });
+  }
+);
+
 it('Loro structural actions report membership changes even without a target hint', async () => {
   const data = createLoroSessionData({ sessionId: sid, doc: new LoroDoc() });
   const changes: unknown[] = [];

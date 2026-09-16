@@ -995,82 +995,129 @@ describe('useSessionActions', () => {
     );
   });
 
-  it('dispatches a guide as a normal follow-up when its target turn already ended', async () => {
-    const sessionId = 'session-steer-fallback' as SessionId;
-    const userTurnId = 'user-turn-steer-fallback';
-    const machineId = 'machine-1' as MachineId;
-    const history = [
-      {
-        id: userTurnId,
-        role: 'user',
-        userId: 'user-1',
-        timestamp: '2026-07-17T00:00:00.000Z',
-        status: 'pending_apply',
-        read: false,
-        inputConfig: {
-          prompt: 'continue as a new turn',
-          inputBlocks: [{ type: 'text', text: 'continue as a new turn' }],
-          cliType: 'builtin',
-          agentType: 'codex',
+  it.each([
+    ['no-active-turn', 'pending_apply', true],
+    ['no-active-turn', 'pending', true],
+    ['no-active-turn', 'seen', true],
+    ['promotion-failed', 'pending_apply', true],
+    ['promotion-failed', 'pending', true],
+    ['promotion-failed', 'seen', true],
+    ['no-active-turn', 'processing', false],
+    ['promotion-failed', 'handled', false],
+    ['promotion-failed', 'canceled', false],
+    ['promotion-failed', 'failed', false],
+    ['promotion-failed', 'removed', false],
+    ['delivery-unknown', 'pending_apply', false],
+    ['no-active-turn', 'pending_apply', false, true],
+    ['no-active-turn', 'pending', false, true],
+    ['applied', 'canceled', false, true],
+    ['applied', 'handled', false, true],
+    ['promotion-failed', 'pending', false, true],
+  ] as const)(
+    'repairs steer dispatch for %s with history %s: %s',
+    async (disposition, statusAfterRpc, repair, recoveryOwned?: boolean) => {
+      const sessionId = 'session-steer-fallback' as SessionId;
+      const userTurnId = 'user-turn-steer-fallback';
+      const machineId = 'machine-1' as MachineId;
+      const history = [
+        {
+          id: userTurnId,
+          role: 'user',
+          userId: 'user-1',
+          timestamp: '2026-07-17T00:00:00.000Z',
+          status: 'pending_apply',
+          read: false,
+          inputConfig: {
+            prompt: 'continue as a new turn',
+            inputBlocks: [{ type: 'text', text: 'continue as a new turn' }],
+            cliType: 'builtin',
+            agentType: 'codex',
+          },
         },
-      },
-    ];
-    const state = { history };
-    const setState = vi.fn((updater: (draft: typeof state) => void) => updater(state));
-    const waitUntilSynced = vi.fn(async () => undefined);
-    const upsertDocMeta = vi.fn(async () => undefined);
-    const requestSessionSteer = vi.fn(async () => ({
-      type: 'session/steer_response' as const,
-      sessionId,
-      userTurnId,
-      applied: false,
-      disposition: 'no-active-turn' as const,
-    }));
-    const requestSessionDispatchTurn = vi.fn(async () => ({
-      type: 'session/dispatch-turn_response' as const,
-      sessionId,
-      userTurnId,
-      accepted: true,
-      disposition: 'accepted' as const,
-    }));
-    const runtime = createRuntime({
-      repo: {
-        getDocMeta: vi.fn(async () => ({ meta: { machineId } })),
-        upsertDocMeta,
-      } as unknown as WorkspaceRuntime['repo'],
-    }) as WorkspaceRuntime & {
-      withSessionStore: WorkspaceRuntime['withSessionStore'];
-      requestSessionSteer: WorkspaceRuntime['requestSessionSteer'];
-      requestSessionDispatchTurn: WorkspaceRuntime['requestSessionDispatchTurn'];
-    };
-    runtime.withSessionStore = vi.fn(async (_sessionId: unknown, fn: (store: unknown) => unknown) =>
-      fn({
-        getState: vi.fn(() => state),
-        sessionData: sessionDataOver(state.history),
-        setState,
-        waitUntilSynced,
-      })
-    ) as unknown as WorkspaceRuntime['withSessionStore'];
-    runtime.requestSessionSteer = requestSessionSteer as WorkspaceRuntime['requestSessionSteer'];
-    runtime.requestSessionDispatchTurn =
-      requestSessionDispatchTurn as WorkspaceRuntime['requestSessionDispatchTurn'];
-    const actions = await renderActions(runtime);
+      ];
+      const state = { history };
+      const setState = vi.fn((updater: (draft: typeof state) => void) => updater(state));
+      const waitUntilSynced = vi.fn(async () => undefined);
+      let meta = { machineId, latestUserMsgId: 'user-1' };
+      const upsertDocMeta = vi.fn(async (_roomId, patch) => {
+        meta = { ...meta, ...patch };
+      });
+      const requestSessionSteer = vi.fn(async () => {
+        // History and activation travel independently: the CLI's status write
+        // can reach the renderer while its metadata write failed.
+        if (statusAfterRpc === 'removed') history.splice(0);
+        else history[0].status = statusAfterRpc;
+        return {
+          type: 'session/steer_response' as const,
+          sessionId,
+          userTurnId,
+          applied: disposition === 'applied',
+          ...(recoveryOwned ? { recoveryOwned } : {}),
+          disposition,
+          ...(disposition === 'promotion-failed'
+            ? { error: 'Injected activation write failure' }
+            : {}),
+        };
+      });
+      const requestSessionDispatchTurn = vi.fn(async () => ({
+        type: 'session/dispatch-turn_response' as const,
+        sessionId,
+        userTurnId,
+        accepted: true,
+        disposition: 'accepted' as const,
+      }));
+      const runtime = createRuntime({
+        repo: {
+          getDocMeta: vi.fn(async () => ({ meta })),
+          upsertDocMeta,
+        } as unknown as WorkspaceRuntime['repo'],
+      }) as WorkspaceRuntime & {
+        withSessionStore: WorkspaceRuntime['withSessionStore'];
+        requestSessionSteer: WorkspaceRuntime['requestSessionSteer'];
+        requestSessionDispatchTurn: WorkspaceRuntime['requestSessionDispatchTurn'];
+      };
+      runtime.withSessionStore = vi.fn(
+        async (_sessionId: unknown, fn: (store: unknown) => unknown) =>
+          fn({
+            getState: vi.fn(() => state),
+            sessionData: sessionDataOver(state.history),
+            setState,
+            waitUntilSynced,
+          })
+      ) as unknown as WorkspaceRuntime['withSessionStore'];
+      runtime.requestSessionSteer = requestSessionSteer as WorkspaceRuntime['requestSessionSteer'];
+      runtime.requestSessionDispatchTurn =
+        requestSessionDispatchTurn as WorkspaceRuntime['requestSessionDispatchTurn'];
+      const actions = await renderActions(runtime);
 
-    await expect(
-      actions.requestSessionSteer(sessionId, 'assistant:user-1', userTurnId, { machineId })
-    ).resolves.toBe(false);
+      const result = actions.requestSessionSteer(sessionId, 'assistant:user-1', userTurnId, {
+        machineId,
+      });
+      if (recoveryOwned && disposition === 'promotion-failed') {
+        await expect(result).rejects.toThrow('Injected activation write failure');
+      } else {
+        await expect(result).resolves.toBe(disposition === 'applied');
+      }
 
-    expect(history[0]).toMatchObject({ status: 'pending', read: false });
-    expect(requestSessionDispatchTurn).toHaveBeenCalledWith(
-      machineId,
-      expect.objectContaining({ sessionId, userTurnId })
-    );
-    expect(upsertDocMeta).toHaveBeenCalledWith(
-      getSessionRoomId(sessionId),
-      expect.objectContaining({ latestUserMsgId: userTurnId })
-    );
-    expect(waitUntilSynced).toHaveBeenCalledOnce();
-  });
+      if (!repair) {
+        expect(history[0]?.status).toBe(statusAfterRpc === 'removed' ? undefined : statusAfterRpc);
+        expect(meta.latestUserMsgId).toBe('user-1');
+        expect(requestSessionDispatchTurn).not.toHaveBeenCalled();
+        return;
+      }
+      expect(history[0]).toMatchObject({ status: statusAfterRpc === 'seen' ? 'seen' : 'pending' });
+      expect(meta.latestUserMsgId).toBe(userTurnId);
+      expect(requestSessionDispatchTurn).toHaveBeenCalledWith(
+        machineId,
+        expect.objectContaining({ sessionId, userTurnId })
+      );
+      expect(upsertDocMeta).toHaveBeenCalledWith(
+        getSessionRoomId(sessionId),
+        expect.objectContaining({ latestUserMsgId: userTurnId })
+      );
+      expect(waitUntilSynced).toHaveBeenCalledOnce();
+    }
+  );
 
   it('does not redispatch a steer rejected for a reason other than an ended turn', async () => {
     const sessionId = 'session-steer-stale' as SessionId;
@@ -1125,6 +1172,72 @@ describe('useSessionActions', () => {
     expect(history[0]).toMatchObject({ status: 'pending_apply' });
     expect(setState).not.toHaveBeenCalled();
     expect(requestSessionDispatchTurn).not.toHaveBeenCalled();
+  });
+
+  it('closes only the selected tab while retaining all lifecycle and dispatch state', async () => {
+    const tree = createContainmentSessions('close', false);
+    const rootSession = {
+      ...tree.rootSession,
+      latestUserMsgId: 'turn-pending',
+      status: { type: 'running' },
+    } as SessionMeta;
+    const metaRepo = createSessionMetaRepo([rootSession, ...tree.sessions.slice(1)]);
+    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }));
+    await actions.setSessionTabClosed(rootSession.id, true);
+    expect(metaRepo.getSession(rootSession.id)).toEqual({ ...rootSession, isTabClosed: true });
+    expect(metaRepo.getSession(tree.tabSession.id)).toEqual(tree.tabSession);
+    expect(metaRepo.getSession(tree.openedSession.id)).toEqual(tree.openedSession);
+    await actions.reopenSessionTab(rootSession.id);
+    expect(metaRepo.getSession(rootSession.id)).toEqual({ ...rootSession, isTabClosed: false });
+  });
+
+  it('reopens a historical archived child without restoring the root or opened sessions', async () => {
+    const tree = createContainmentSessions('legacy-close', true);
+    const child = { ...tree.tabSession, isTabClosed: true };
+    const metaRepo = createSessionMetaRepo([tree.rootSession, child, tree.openedSession]);
+    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }), {
+      sessionMetaCache: tree.sessionMetaCache,
+    });
+    await actions.reopenSessionTab(child.id);
+    expect(metaRepo.getSession(child.id)).toEqual({
+      ...child,
+      isArchived: false,
+      isTabClosed: false,
+    });
+    expect(metaRepo.getSession(tree.rootSession.id)).toEqual(tree.rootSession);
+    expect(metaRepo.getSession(tree.openedSession.id)).toEqual(tree.openedSession);
+  });
+
+  it('restores root containment but retains independent child close flags', async () => {
+    const tree = createContainmentSessions('root-reopen', true);
+    const child = { ...tree.tabSession, isTabClosed: true };
+    const metaRepo = createSessionMetaRepo([tree.rootSession, child, tree.openedSession]);
+    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }), {
+      sessionMetaCache: tree.sessionMetaCache,
+    });
+    await actions.reopenSessionTab(tree.rootSession.id);
+    expect(metaRepo.getSession(tree.rootSession.id)).toMatchObject({
+      isArchived: false,
+      isTabClosed: false,
+    });
+    expect(metaRepo.getSession(child.id)).toEqual({ ...child, isArchived: false });
+    expect(metaRepo.getSession(tree.openedSession.id)).toEqual(tree.openedSession);
+  });
+
+  it('preserves state when closing fails and refuses incomplete archive restoration', async () => {
+    const tree = createContainmentSessions('failed-close', true);
+    const metaRepo = createSessionMetaRepo(tree.sessions);
+    metaRepo.repo.upsertDocMeta = async () => {
+      throw new Error('disk full');
+    };
+    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }), {
+      docMetaCacheReady: false,
+    });
+    await expect(actions.setSessionTabClosed(tree.rootSession.id, true)).rejects.toThrow(
+      'disk full'
+    );
+    await expect(actions.reopenSessionTab(tree.rootSession.id)).rejects.toThrow('still loading');
+    expect(metaRepo.getSession(tree.rootSession.id)).toEqual(tree.rootSession);
   });
 
   it('archives by writing the archived state only, never a machine command or queue', async () => {

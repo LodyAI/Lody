@@ -19,14 +19,20 @@ export function createProjectedConversationView(
 ): ConversationView {
   if (projections.length === 0) return base;
 
-  let slotsVersion = -1;
+  let slotsStructure = -1;
+  let slotsCount = -1;
   let slots: Slot[] = [];
   let baseToSlot: number[] = [];
   let slotById = new Map<string, number>();
 
   const rebuild = () => {
-    if (slotsVersion === base.version) return;
-    slotsVersion = base.version;
+    // Slots follow membership, never content: a streamed delta leaves every
+    // turn where it was. Keying this on `version` rebuilt an array of the whole
+    // conversation on every token for as long as an unconfirmed entry existed —
+    // which is exactly while a turn streams.
+    if (slotsStructure === base.structureVersion && slotsCount === base.turnCount) return;
+    slotsStructure = base.structureVersion;
+    slotsCount = base.turnCount;
     const list: Slot[] = Array.from({ length: base.turnCount }, (_, i) => ({ base: i }));
     const idOfSlot = (slot: Slot) => ('base' in slot ? base.index(slot.base)?.id : slot.entry.id);
     const seen = new Set<string>();
@@ -91,6 +97,13 @@ export function createProjectedConversationView(
     get version() {
       return base.version;
     },
+    get structureVersion() {
+      return base.structureVersion;
+    },
+    // Fact tables belong to the conversation, not to this wrapper: wrappers are
+    // rebuilt as optimistic entries appear and resolve, and a table acquired on
+    // one would be pinned by the base view's listener set forever.
+    factSource: base.factSource ?? base,
     ready: base.ready,
     index: (i) => {
       rebuild();

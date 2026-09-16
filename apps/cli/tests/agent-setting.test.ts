@@ -128,10 +128,11 @@ describe('resolveBuiltinACPSetting', () => {
           `@deepseek-ai/dsh-agent-presets@${DEEPSEEK_HARNESS_VERSION}`,
           '--package',
           `@deepseek-ai/dsh-mcp-client@${DEEPSEEK_HARNESS_VERSION}`,
-          'dsh',
-          '--profile',
+          'node',
+          '-e',
         ])
       );
+      expect(launch.env?.LODY_DSH_NODE_EXECUTABLE).toBe(process.execPath);
       expect(parseNpxPackageSpecFromArgs(launch.args)).toEqual({
         name: '@deepseek-ai/dsh',
         version: DEEPSEEK_HARNESS_VERSION,
@@ -143,8 +144,13 @@ describe('resolveBuiltinACPSetting', () => {
       );
       expect(launch.env?.[DEEPSEEK_HARNESS_HOME_ENV]).toBe(dshHome);
 
-      const profileFlag = launch.args.indexOf('--profile');
-      const profileName = launch.args[profileFlag + 1];
+      const runtimeArgs: unknown = JSON.parse(
+        Buffer.from(launch.env?.LODY_DSH_NODE_ARGS ?? '', 'base64').toString()
+      );
+      expect(runtimeArgs).toEqual(expect.arrayContaining(['--profile']));
+      if (!Array.isArray(runtimeArgs)) throw new Error('Missing DSH runtime arguments');
+      const profileFlag = runtimeArgs.indexOf('--profile');
+      const profileName = runtimeArgs[profileFlag + 1];
       expect(profileName).toBeTruthy();
       const profileDir = join(dshHome, 'profiles', profileName!);
       const packageJson = await readFile(join(profileDir, 'package.json'), 'utf8');

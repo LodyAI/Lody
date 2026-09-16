@@ -5,7 +5,6 @@ import type {
   MachineBugReportResponse,
   PermissionRequestKind,
   SessionPullRequestMeta,
-  ACPSessionId,
   BillingPlanTier,
   MachineId,
   SessionId,
@@ -190,7 +189,8 @@ export interface CloudNotificationsPort {
 export interface CloudUsageUpdateInput {
   workspaceId: WorkspaceId;
   sessionId: SessionId;
-  acpSessionId: ACPSessionId;
+  /** Accounting scope; may be a native session ID or a provider turn key. */
+  acpSessionId: string;
   userId: string;
   machineId: MachineId;
   cliType: string;

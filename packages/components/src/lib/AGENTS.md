@@ -22,10 +22,8 @@ Rationale: [components](../../../../.agents/docs/components-package.md) and
 - `ErrorBoundary`'s `error-boundary-fallback.tsx` displays the real error and one-click
   full-report copy on every build. Details default visible (`showErrorDetails` opts out);
   `lib/error-boundary-report.ts` is the pure copy builder.
-- Crash screens never reload/restart/reset by themselves. `resetKeys` recovery stops at
-  `MAX_AUTOMATIC_RESETS` per repeating error; the fallback reports that retrying stopped,
-  stays visible, and waits for a button press. "Repeating" ignores ids and digit runs, so
-  a per-request id cannot fork one error into many and spend that budget forever.
+- Crash screens never reload/restart/reset themselves. `resetKeys` must not clear a captured
+  error; the copyable fallback stays visible until the user presses a recovery button.
 - A cloud query throws into render and keeps throwing. An optional surface inside a larger
   boundary owns an inline `ErrorBoundary`, so a backend failure degrades locally instead of
   replacing the host subtree.

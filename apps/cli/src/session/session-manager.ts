@@ -389,7 +389,7 @@ export interface CreateAgentConfig {
     requestId: string,
     request: RequestPermissionRequest
   ) => Promise<RequestPermissionResponse>;
-  onUsageUpdate: (usage: SessionUsageUpdate) => void;
+  onUsageUpdate: (usage: SessionUsageUpdate, accountingId?: string) => void;
   onContextWindowUsageUpdate: (usage: SessionContextWindowUsage) => void;
   onRateLimitUpdate: (limits: RateLimit) => void;
   onThreadGoalUpdated: (goal: Extract<MessageContent, { type: 'goal' }>) => void;
@@ -433,6 +433,7 @@ interface SessionManagerEvents {
     sessionId: SessionId;
     acpSessionId: ACPSessionId;
     usage: SessionUsageUpdate;
+    accountingId?: string;
   }) => void;
   onContextWindowUsageUpdate: (sessionId: SessionId, usage: SessionContextWindowUsage) => void;
   onRateLimitUpdate: (machineId: MachineId, cliType: CliType, limits: RateLimit) => void;
@@ -511,7 +512,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         await this.cloudPort.access.resolveWorkspaceUser({
           workspaceId: this.workspaceId,
           userId,
-        })
+        }),
+      this.cloudPort.identity.userId
     );
     this.preparationService = new SessionPreparationService(this.logger, {
       hardTtlMs: SESSION_PREPARATION_HARD_TTL_MS,
@@ -1273,7 +1275,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         }
         return this.requestPermissionHandler(sessionId, requestId, request, session.agentClient!);
       },
-      onUsageUpdate: (usage: SessionUsageUpdate) => {
+      onUsageUpdate: (usage: SessionUsageUpdate, accountingId?: string) => {
         dispatchEvent(() => {
           const currentAcpSessionId = session.acpSessionId;
           if (!currentAcpSessionId) {
@@ -1282,7 +1284,12 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
             );
             return;
           }
-          this.emit('onUsageUpdate', { sessionId, acpSessionId: currentAcpSessionId, usage });
+          this.emit('onUsageUpdate', {
+            sessionId,
+            acpSessionId: currentAcpSessionId,
+            usage,
+            accountingId,
+          });
         });
       },
       onContextWindowUsageUpdate: (usage: SessionContextWindowUsage) => {

@@ -17,6 +17,7 @@ export type SessionTurnRole = 'user' | 'assistant' | 'system';
 export type SessionTurnStatus =
   | 'pending'
   | 'pending_apply'
+  | 'delivery_unknown'
   | 'seen'
   | 'processing'
   | 'handled'

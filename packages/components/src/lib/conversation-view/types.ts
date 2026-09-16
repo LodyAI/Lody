@@ -110,6 +110,23 @@ export interface ConversationView {
   readonly turnCount: number;
   /** Bumps on any structural, index, or hydrated-content change. */
   readonly version: number;
+  /**
+   * Bumps only when membership or order moves. A consumer whose work depends
+   * on the turn LIST rather than its contents keys on this: `version` bumps at
+   * token rate, and rebuilding a per-turn layout that often is pure waste.
+   */
+  readonly structureVersion: number;
+  /**
+   * The view that owns this conversation's shared per-turn fact tables. A
+   * projection wrapper points at the view it wraps; everything else leaves it
+   * unset and owns its own.
+   *
+   * A wrapper is rebuilt whenever an optimistic entry appears or resolves. A
+   * table acquired on one would subscribe through it, so the underlying view's
+   * listener set would keep every released wrapper — and its table — alive and
+   * deriving.
+   */
+  readonly factSource?: ConversationView;
   /** Resolves once the initial directory and retained tail are ready; offscreen summaries stay lazy. */
   readonly ready: Promise<void>;
   index(i: number): TurnIndexRow | undefined;

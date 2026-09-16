@@ -76,3 +76,8 @@ this page is the full text of the rules summarised there.
   with production. Its outer Virtua `VList` is vertical-only (`overflow-x-hidden`):
   wide markdown, tool output, and user content own their nested horizontal scrollers
   and must never make the whole conversation pane pan sideways.
+- Pending share requests sit below the message viewport in a bounded scroll area,
+  above the composer. Their canonical query and editor are not virtual rows:
+  restoring the conversation to its tail must not unsubscribe before a query
+  result arrives or discard an open editor. Workspace, user and surface visibility
+  still gate the requests. Conversation provenance remains `leadingContent`.

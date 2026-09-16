@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import {
   isAskUserQuestionPermissionMeta,
   resolveLatestSessionGoalFromHistory,
@@ -145,14 +145,27 @@ export function useSessionTurnFacts(
 ): SessionTurnFactsResult {
   const rows = useConversationIndexRows(view);
   const { facts, complete, version } = useConversationDerivation(view, deriveSessionTurnFacts);
+  const previousOrderedRef = useRef<readonly SessionTurnFacts[]>(EMPTY_ORDERED);
   const ordered = useMemo(() => {
-    if (facts.size === 0) return EMPTY_ORDERED;
+    if (facts.size === 0) {
+      previousOrderedRef.current = EMPTY_ORDERED;
+      return EMPTY_ORDERED;
+    }
     const list: SessionTurnFacts[] = [];
     for (const row of rows as readonly TurnIndexRow[]) {
       const fact = facts.get(row.id);
       if (fact) list.push(fact);
     }
-    return list;
+    // A fact is replaced only when its turn changed, so a table version that
+    // moved for an unrelated reason — a chunk of the background pass landing,
+    // a turn re-derived to the same value — must not hand every reader below
+    // a new array to scan.
+    const previous = previousOrderedRef.current;
+    const reusable =
+      previous.length === list.length && previous.every((fact, index) => fact === list[index]);
+    const result = reusable ? previous : list;
+    previousOrderedRef.current = result;
+    return result;
     // `version` is the change signal for the fact table.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [facts, rows, version]);

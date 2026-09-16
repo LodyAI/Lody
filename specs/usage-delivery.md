@@ -19,7 +19,7 @@ previous emitted update, already included in `modelUsage`: never add both.
 Delta delivery is not an exactly-once ledger. Cache reads/writes, ordinary input/
 output and reasoning are disjoint. Unknown costs are omitted, not zero.
 
-Replay adds nothing; model changes and compaction preserve counters. A new
+For adapter-owned ledgers, replay adds nothing; model changes and compaction preserve counters. A new
 accounting lifetime requires a fresh consumer accounting identity or a restored
 baseline. Process-local state does not guarantee restart continuity.
 Grok deduplicates prompt contributions across both completion channels and permits
@@ -33,12 +33,24 @@ their attribution until acknowledged; concurrent flushes share one drain. Delta
 is neither added to totals nor forwarded to the legacy persistence endpoint.
 Persistence projects only token/cost fields and aggregate contextWindow; search
 request counts and model-level contextWindow are not forwarded.
-Codex's legacy compaction offsets survive successful flushes in the same process;
-adapter-owned cumulative updates carrying delta bypass that compatibility path.
-Codex thread totals without model attribution use an explicit unattributed bucket,
-never the currently selected UI model or its price. Claude query and Kimi activation
-snapshots can provide delta without changing their cumulative scope. Kimi source
-changes require a new managed artifact before they affect the consuming runtime.
+Codex attributes native root-thread counter increments to the model frozen from
+the submitted turn parameters. A native turn is one accounting lifetime.
+Its cumulative turn snapshot carries notification-local `_meta.codex.usageTurnId`;
+the CLI uses `nativeSessionId:turn:encodedTurnId` as the existing usage endpoint's
+accounting identity. The actual ACP session ID and session metadata stay unchanged.
+This keeps A's earlier tokens out of B's new turn and makes repeat delivery
+idempotent without modifying hosted persistence.
+
+Only the previous native snapshot and current turn are kept in memory. Restored
+snapshots are comparison points; if missing, the first notification is skipped
+rather than billing historical usage. There is no sidecar, persisted baseline,
+historical model ledger or raw-response bookkeeping. Child usage is not added.
+Resets, reroutes and crashes remain best effort, not an exact billing guarantee.
+Unmarked adapters keep their old scope; the new adapter requires the matching CLI.
+
+Claude query and Kimi activation snapshots can provide delta without
+changing their cumulative scope. Kimi source changes require a new managed artifact
+before they affect the consuming runtime.
 Provider costs are preserved; missing cache-write tariffs cannot be replaced with
 cache-read prices. An empty aggregate does not imply a known zero cost.
 
@@ -65,3 +77,4 @@ pricing boundary may differ from billing. Unreported runtime activity cannot be 
 Publish Core 0.1.5 before adapters requiring its accumulator, then rebuild/release
 adapters before updating consuming gitlinks/artifacts. Local changes do not
 publish packages, repair historical data, or prove deployed hosted behavior.
+Old experimental accounting rows and sidecar files are not automatically migrated.

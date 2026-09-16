@@ -248,13 +248,16 @@ export class SessionEditAndResendService {
               'Another logical turn owns the active ACP session.'
             );
           }
-          const cancelled = await this.deps.executionService.cancelSession({
-            type: 'session/cancel',
-            sessionId: spec.sessionId,
-            machineId: commitMeta.machineId,
-            workspaceId: this.deps.workspaceId as never,
-            turnId: activeTurnId,
-          });
+          const cancelled = await this.deps.executionService.cancelSession(
+            {
+              type: 'session/cancel',
+              sessionId: spec.sessionId,
+              machineId: commitMeta.machineId,
+              workspaceId: this.deps.workspaceId as never,
+              turnId: activeTurnId,
+            },
+            { pendingInput: 'preserve', prePromptSession: 'keep' }
+          );
           if (!cancelled.success) {
             await this.closePrepared(runtime, preparedSessionId);
             preparedSessionId = null;

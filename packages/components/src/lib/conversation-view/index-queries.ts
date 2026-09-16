@@ -103,6 +103,12 @@ export function collectHydratedRange(
   return turns;
 }
 
+/** Last result per view, so an unchanged conversation reuses its array. */
+const previousConfigSources = new WeakMap<
+  object,
+  { id: string; role: unknown; inputConfig?: unknown }[]
+>();
+
 /**
  * Source rows for `resolveSessionConversationConfig` and the source fence: the
  * hydrated tail (full input config) followed by every older user turn as an
@@ -116,11 +122,27 @@ export function collectConversationConfigSources(
   for (let i = 0; i < tailFrom; i += 1) {
     const row = view.index(i);
     if (!row || row.role !== 'user') continue;
-    sources.push({ id: row.id, role: row.role, inputConfig: row.inputConfig });
+    // The index row already IS a source: same id and role, and an
+    // `inputConfig` that projects itself on first read. Wrapping it would
+    // allocate one object per historical user turn on every streamed delta,
+    // and reading its config here would parse the whole conversation to
+    // resolve a question about its tail.
+    sources.push(row);
   }
   for (let i = tailFrom; i < view.turnCount; i += 1) {
     const turn = view.turn(i) ?? view.index(i);
     if (turn) sources.push(turn as { id: string; role: unknown; inputConfig?: unknown });
   }
+  // Callers memoize the resolved configuration on this array's identity, so an
+  // unchanged conversation must hand back the same array.
+  const previous = previousConfigSources.get(view);
+  if (
+    previous &&
+    previous.length === sources.length &&
+    previous.every((source, index) => source === sources[index])
+  ) {
+    return previous;
+  }
+  previousConfigSources.set(view, sources);
   return sources;
 }

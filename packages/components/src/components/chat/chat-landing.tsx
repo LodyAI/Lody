@@ -3711,11 +3711,19 @@ function WorkspaceChatLanding({
       name="ChatLandingTopSelector"
       variant="inline"
       resetKeys={[workspaceId, selectedRepo, selectedLocalProject, selectedMachineId, contextType]}
-      fallback={
-        <div className={cn(selectorTagClassName, 'text-xs leading-tight')}>
-          {t('common.unavailable', 'Unavailable')}
-        </div>
-      }
+      fallbackRender={({ resetErrorBoundary }) => (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className={cn(selectorTagClassName, 'text-xs leading-tight')}
+          onClick={resetErrorBoundary}
+          aria-label={t('chat.retryTargetSelector', 'Retry target selector')}
+        >
+          <RefreshCw aria-hidden="true" className="size-3" />
+          {t('common.retry', 'Retry')}
+        </Button>
+      )}
     >
       <div className="flex w-full min-w-0 items-center gap-2">
         <DesktopMachineMenu

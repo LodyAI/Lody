@@ -13,8 +13,11 @@ import { createLoroSessionData, type LoroSessionData } from '@lody/shared/sessio
 import {
   createConversationDerivation,
   createConversationViewFromReader,
+  createProjectedConversationView,
   type ConversationView,
 } from '../src/lib/conversation-view';
+import type { AcceptedSessionHistoryProjection } from '../src/atoms/session-history-projection';
+import type { SessionHistory, SessionId, WorkspaceId } from '@lody/shared';
 import {
   buildFixtureHistory,
   buildSessionDoc,
@@ -65,7 +68,7 @@ const deriveDiffCount = (turn: { fileDiff?: unknown }) => ({
 });
 
 describe('createConversationDerivation', () => {
-  it('shares goal and diff facts until the last consumer releases the view', async () => {
+  it('shares goal and diff facts and holds the table after the last consumer releases', async () => {
     const { view, doc } = await openView(2, { tailKeep: 4, maxHydrated: 4 });
     const goalReader = acquireConversationDerivation(view, deriveSessionTurnFacts);
     const diffReader = acquireConversationDerivation(view, deriveSessionTurnFacts);
@@ -77,8 +80,83 @@ describe('createConversationDerivation', () => {
     await flushReaderChanges();
     await drain(() => diffReader.table.facts.get('a-0')?.fileDiff?.length === 0);
     expect(diffReader.table.facts.get('a-0')?.fileDiff).toEqual([]);
+    const held = diffReader.table;
     diffReader.release();
-    expect(diffReader.table.facts.size).toBe(0);
+    // Deriving a fact needs the turn's body, so discarding the table on the
+    // last release re-materialized the whole conversation the next time the
+    // session was opened. Facts survive the release instead.
+    expect(held.facts.get('a-0')?.fileDiff).toEqual([]);
+    expect(held.facts.size).toBeGreaterThan(0);
+
+    // ...and the background pass is held while nothing is reading. Turns that
+    // land inside the retained tail are still derived for free; one that falls
+    // outside it needs the pass, and stays underived until someone re-acquires.
+    const peer = reimport(doc);
+    const appended = buildFixtureHistory(12).slice(4);
+    const peerWriter = createHistoryWriter(peer);
+    for (const entry of appended) peerWriter.append(entry);
+    doc.import(peer.export({ mode: 'update', from: doc.version() }));
+    await flushReaderChanges();
+    const appendedId = appended[0]!.id;
+    expect(view.isHydrated(view.indexOf(appendedId))).toBe(false);
+    expect(held.facts.has(appendedId)).toBe(false);
+
+    const reopened = acquireConversationDerivation(view, deriveSessionTurnFacts);
+    expect(reopened.table).toBe(held);
+    await drain(() => reopened.table.facts.has(appendedId));
+    expect(reopened.table.facts.has(appendedId)).toBe(true);
+    reopened.release();
+    data.dispose();
+    view.dispose();
+  });
+
+  it('shares one table across projection wrappers and stops deriving for released ones', async () => {
+    const { doc, view } = await openView(3, { tailKeep: 4, maxHydrated: 8 });
+    const data = createLoroSessionData({ doc, sessionId: FIXTURE_SESSION_ID });
+    // An optimistic entry appears and then resolves, so `useSessionDoc` builds a
+    // NEW projection wrapper each time. A wrapper must not own a fact table:
+    // the table would subscribe through it, the base view's listener set would
+    // keep the released wrapper alive, and every later token would derive once
+    // per wrapper ever created.
+    const projection = (id: string): AcceptedSessionHistoryProjection => ({
+      workspaceId: 'workspace-fixture' as WorkspaceId,
+      sessionId: FIXTURE_SESSION_ID as SessionId,
+      entry: {
+        id,
+        role: 'user',
+        timestamp: '2026-01-01T00:01:00.000Z',
+        items: [{ type: 'text', text: id }],
+        fileDiff: [],
+      } as unknown as SessionHistory,
+    });
+
+    let derived = 0;
+    const countingDerive = (turn: { items?: unknown }) => {
+      derived += 1;
+      return { items: Array.isArray(turn.items) ? turn.items.length : 0 };
+    };
+
+    const first = createProjectedConversationView(view, [projection('optimistic-1')]);
+    const second = createProjectedConversationView(view, [projection('optimistic-2')]);
+    expect(first).not.toBe(second);
+
+    const firstLease = acquireConversationDerivation(first, countingDerive);
+    await drain(() => firstLease.table.complete);
+    firstLease.release();
+
+    const secondLease = acquireConversationDerivation(second, countingDerive);
+    await drain(() => secondLease.table.complete);
+    // One table for the conversation, not one per wrapper.
+    expect(secondLease.table).toBe(firstLease.table);
+
+    const before = derived;
+    data.writer.setField('a-0', 'finished', false as never);
+    await flushReaderChanges();
+    await drain(() => derived > before);
+    // Exactly one derivation of the changed turn, not one per released wrapper.
+    expect(derived - before).toBe(1);
+
+    secondLease.release();
     data.dispose();
     view.dispose();
   });

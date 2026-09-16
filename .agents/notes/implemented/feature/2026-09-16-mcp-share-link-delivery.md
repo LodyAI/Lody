@@ -46,3 +46,7 @@ Behavioral tests cover recipient/request/origin binding, history projection, one
 publication, retry credentials, server membership/result gates, independent shares and
 approval across the expiry boundary. No hosted deployment or real-user conversation
 publication is part of this change. Public and hosting changes require coordinated PRs.
+
+Implementation: [PR #762](https://github.com/LodyAI/Lody/pull/762).
+Integration retains the non-virtualized card boundary; explicit upload signals verify
+that scrolling and confirmation updates cannot interrupt automatic publication.

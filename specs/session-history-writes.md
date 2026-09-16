@@ -61,7 +61,8 @@ That tolerance must not authorize creating new malformed items locally.
   or the provider connection closes. For an in-flight prompt with a ready ACP session,
   Lody records cancellation and sends provider cancel without interrupting its owner
   fiber. The owner and unfinished history remain until ACP returns; new dispatch and
-  undelivered steer stay pending. If the raw prompt remains pending five seconds after
+  undelivered steer stay pending. Raw steer submissions and in-flight steer configuration
+  participate in the same drain. If any remain pending five seconds after
   Stop, Lody terminates the old session so connection closure can end the prompt.
   This deadline does not wait for cancel acknowledgement or restart on repeated Stop.
   Failed termination retains ownership until ACP ends. Start and interrupt
@@ -69,12 +70,42 @@ That tolerance must not authorize creating new malformed items locally.
   The CLI persists unresolved compaction as failed after confirmed cancellation,
   before accepting another turn.
   Opening a Session does not trigger a history-repair RPC or rewrite old outcomes.
-- If Stop wins while a submitted steer awaits acceptance, a later successful ACK must
-  not transfer ownership, change the source invocation or settle the source as handled.
-  Mark that exact steer user turn `canceled` before returning `stale-turn`, without
-  changing dispatch pointers. Keep the current cancellation owner until provider completion.
-  Do not requeue the accepted steer: rejection of the local ownership transfer is not
-  proof of non-delivery.
+- A steer adapter reports one final delivery outcome: `applied`, `not-applied`, or
+  `unknown`. Only `not-applied` may return the same user turn to ordinary dispatch;
+  `applied` is already consumed, while `unknown` becomes `delivery_unknown` in history
+  with a `delivery-unknown` response. It never dispatches automatically. Explicit resend
+  creates a new user turn after warning that the original may already have executed;
+  it does not change the original outcome. Session execution does not infer delivery
+  from Stop, transport failure, or local ownership state.
+- Stop and target-prompt completion end local document/preparation/configuration/verdict
+  waits, releasing the steer queue and rewrite lease. This does not cancel the raw request
+  or discard its verdict. Already-applied ownership transfer finishes atomically; queued
+  steers must not begin preparation for a stopped target. Failed outcome persistence must
+  still release the application lease and permit cancellation cleanup.
+- Execution owns steer status and exact-id recovery activations in `steerTurnStatuses`.
+  A refusal never rewinds producer-owned `latestUserMsgId` or clears another input's
+  missing-history marker. The watcher projects results when history arrives and clears
+  recovery entries on ordinary claim, terminal projection, or missing-history failure.
+  RPC application acknowledgements are presentation hints, not renderer history writes;
+  a delayed acknowledgement cannot resurrect a terminal entry. Applied steer provenance
+  excludes the entry from ordinary restart dispatch.
+- Cancelling a turn carries an explicit pending-input policy. User Stop promotes a
+  provably `not-applied` steer; Edit & Resend, access revocation, and cleanup preserve it.
+  If Stop wins while an `applied` result is pending, the late result must not transfer
+  ownership or replay that user turn. The first cancellation policy wins repeated races.
+- Pre-prompt ACP lifetime is independent of pending input: Stop uses promote/discard,
+  Edit & Resend preserve/keep, and access revocation preserve/discard. Edit & Resend must
+  retain the process that owns its prepared replacement. Create/restore fences remain.
+- Proven non-delivery survives a promotion write failure. The CLI returns `promotion-failed`
+  with the error instead of implying successful recovery or unknown delivery. A daemon's
+  `recoveryOwned` response keeps recovery with that daemon: the renderer retries a proven
+  promotion failure once through the same RPC and surfaces persistent failure. Legacy
+  responses retain the pending_apply/pending/seen dispatch repair. Active, terminal, and
+  removed turns cannot be revived. Timeout or unknown delivery never authorizes retry.
+- Foreground run configuration belongs to its turn's Effect signal. Once that turn is
+  interrupted, an in-flight configuration request may finish, but it must not issue a
+  later configuration mutation or persist the interrupted turn's runtime patch.
+  Steer configuration obeys the target's local-wait signal and the same mutation fence.
 - Accepted steer provenance survives both writing and read normalization. Editing and
   resending must not reinterpret a steer as an independently replayable user turn.
 - External imports retain their source hashes and derived ids. A separate versioned
@@ -128,6 +159,10 @@ sealed turn from looking like a hash conflict once such skeletons exist.
   `history-storage-policy.test.ts` and `session-history-import-port.test.ts`
 - `apps/cli/tests/local-project-history-sync-service.test.ts` and `local-project-history-sync-writer.test.ts`
 - [Decision](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.md)
+- [Business-field repair and pending hash decision](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.md)
+- [Imported-history baseline repair](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.md)
+- [Interrupt pending input exactly once](../.agents/notes/implemented/bug-fix/2026-09-14-interrupt-pending-input-exactly-once.md)
+- [Steer Stop and recovery ownership](../.agents/notes/implemented/bug-fix/2026-09-16-steer-stop-recovery-ownership.md)
 - [Versioned turn hashes and primitive metadata insertion](../.agents/notes/implemented/architecture/2026-09-14-versioned-history-hashes-and-primitive-metadata.md)
 
 Draft for human review; implementation and passing tests do not grant Spec approval.

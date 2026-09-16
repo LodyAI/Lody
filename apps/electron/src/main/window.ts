@@ -23,6 +23,8 @@ import {
 } from './window-theme'
 import { formatUnknownError, normalizeExternalHttpUrl } from './utils'
 import { describeDeepLinkForAuthDebug } from './auth-debug'
+import { captureElectronMainException } from './posthog-error-reporting'
+import { createRendererProcessGoneHandling } from './renderer-process-gone'
 import { resolveMainWindowRuntimePolicy } from './window-runtime-policy'
 import { serializePreferredSystemLanguagesArgument } from '../system-language-argument'
 import {
@@ -312,14 +314,18 @@ function attachMainWindowDiagnostics(window: BrowserWindow, recoveryTarget: Relo
       reason: details.reason,
       exitCode: details.exitCode
     })
-    // 'clean-exit' is normal shutdown — don't surface it.
-    if (details.reason === 'clean-exit') return
     if (isInRecovery(window)) return
-    showRecovery({
-      message: 'The Lody window crashed.',
-      details: `Reason: ${details.reason}\nExit code: ${details.exitCode}`,
-      source: 'render-process-gone'
+    const handling = createRendererProcessGoneHandling(details)
+    if (!handling) return
+
+    // This executes in main because the crashing renderer cannot finish its own
+    // telemetry request. The recovery page stays open afterwards, so this
+    // best-effort flush is never raced by an automatic product reload.
+    void captureElectronMainException(handling.report.error, {
+      component: handling.report.component,
+      extra: handling.report.extra
     })
+    showRecovery(handling.recovery)
   })
 
   webContents.on('devtools-opened', () => {

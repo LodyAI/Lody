@@ -37,10 +37,9 @@ type Story = StoryObj<typeof ErrorBoundaryFallback>;
 /** Full-page crash: the whole route failed to render. */
 export const Page: Story = {};
 
-/** The boundary gave up on recovering by itself and says so. */
-export const PageAfterAutomaticRetriesStopped: Story = {
+/** Recovery controls are always user initiated. */
+export const PageWithManualRecovery: Story = {
   args: {
-    automaticRetriesStopped: true,
   },
 };
 

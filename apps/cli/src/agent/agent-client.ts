@@ -302,23 +302,6 @@ function withAbort<T>(promise: Promise<T>, abortPromise?: Promise<never>): Promi
   return Promise.race([promise, abortPromise]);
 }
 
-type SessionModelUsage = NonNullable<SessionUsageUpdate['modelUsage']>[string];
-
-const toModelUsageFromUsage = (usage: SessionUsageUpdate['usage']): SessionModelUsage => {
-  const rawCostUSD = (usage as { costUSD?: unknown }).costUSD;
-  const costUSD =
-    typeof rawCostUSD === 'number' && Number.isFinite(rawCostUSD) ? rawCostUSD : undefined;
-
-  return {
-    inputTokens: usage.inputTokens,
-    outputTokens: usage.outputTokens,
-    cacheReadInputTokens: usage.cacheReadInputTokens,
-    cacheCreationInputTokens: usage.cacheCreationInputTokens,
-    reasoningOutputTokens: usage.reasoningOutputTokens,
-    costUSD,
-  };
-};
-
 const sanitizeModelUsage = (
   modelUsage: SessionUsageUpdate['modelUsage']
 ): SessionUsageUpdate['modelUsage'] => {
@@ -432,9 +415,16 @@ export type SteerApplicationLease = {
   release: () => void;
 };
 
+export type SteerOutcome = 'applied' | 'not-applied' | 'unknown';
+
+export type SteerOutcomeResult =
+  | { outcome: 'applied'; application: SteerApplicationLease }
+  | { outcome: 'not-applied'; error: unknown }
+  | { outcome: 'unknown'; error: unknown };
+
 export type SteerPromptRun = {
   completion: Promise<acp.PromptResponse | undefined>;
-  applied: Promise<SteerApplicationLease>;
+  outcome: Promise<SteerOutcomeResult>;
 };
 
 type SteerApplicationWaiter = {
@@ -598,7 +588,7 @@ export interface AgentClientOptions {
     requestId: string,
     request: acp.RequestPermissionRequest
   ): Promise<acp.RequestPermissionResponse>;
-  onUsageUpdate?(usage: SessionUsageUpdate): void;
+  onUsageUpdate?(usage: SessionUsageUpdate, accountingId?: string): void;
   onContextWindowUsageUpdate?(usage: SessionContextWindowUsage): void;
   onRateLimitUpdate?(limits: RateLimit): void;
   onThreadGoalUpdated?(goal: SessionGoalContent): void;
@@ -643,7 +633,7 @@ export class AgentClient implements acp.Client {
   private readonly steerApplicationWaiters = new Map<string, SteerApplicationWaiter>();
   private steerApplicationBarrier: Promise<void> | null = null;
   private activePromptCompletion: ActivePromptCompletion | null = null;
-  private readonly pendingPrompts = new Set<Promise<acp.PromptResponse>>();
+  private readonly pendingPrompts = new Set<Promise<unknown>>();
   private sessionWorkdir: string | null = null;
   private agentMcpCapabilities: acp.McpCapabilities | undefined;
   /** Session config options returned by the agent; the source of model/mode choices and names. */
@@ -1472,11 +1462,15 @@ export class AgentClient implements acp.Client {
     }
     switch (event.type) {
       case 'usage': {
-        const modelUsage =
-          event.update.modelUsage == null && this.currentModel
-            ? { [this.currentModel.modelId]: toModelUsageFromUsage(event.update.usage) }
-            : sanitizeModelUsage(event.update.modelUsage);
-        this.options.onUsageUpdate?.({ ...event.update, modelUsage });
+        // Never invent a model from the UI selection. Legacy adapters without
+        // modelUsage stay unattributed/skipped instead of being misattributed.
+        this.options.onUsageUpdate?.(
+          {
+            ...event.update,
+            modelUsage: sanitizeModelUsage(event.update.modelUsage),
+          },
+          event.accountingId
+        );
         return;
       }
       case 'rateLimits':
@@ -2370,7 +2364,14 @@ export class AgentClient implements acp.Client {
           : new Error(`Steer ${steerId} completed before application`)
       );
     });
-    return { completion, applied };
+    const outcome: Promise<SteerOutcomeResult> = applied.then(
+      (application) => ({ outcome: 'applied', application }),
+      (error: unknown) => ({
+        outcome: error instanceof AgentSteerNotDeliveredError ? 'not-applied' : 'unknown',
+        error,
+      })
+    );
+    return { completion, outcome };
   }
 
   private async requestSteeringExtension(
@@ -2398,6 +2399,7 @@ export class AgentClient implements acp.Client {
           steerId: string;
         }
       >(method, { sessionId, prompt, steerId });
+      this.trackPendingExecution(request);
     } catch (error) {
       // Nothing was written to the agent, so the prompt is provably still ours.
       throw new AgentSteerNotDeliveredError(
@@ -2426,9 +2428,14 @@ export class AgentClient implements acp.Client {
             )
           : error;
       });
-      const parsed = z.object({ outcome: z.literal('injected') }).safeParse(response);
+      const parsed = z.object({ outcome: z.enum(['injected', 'failed']) }).safeParse(response);
       if (!parsed.success) {
         throw new Error(`Agent returned an invalid acknowledged steer response for ${method}`);
+      }
+      if (parsed.data.outcome === 'failed') {
+        throw new AgentSteerNotDeliveredError(
+          `Agent reported that acknowledged steer ${steerId} was not applied`
+        );
       }
     } finally {
       if (signal && abortListener) {
@@ -2437,11 +2444,19 @@ export class AgentClient implements acp.Client {
     }
   }
 
-  /** Includes raw ACP requests whose local caller has already been cancelled. */
+  /** Raw prompts and steer submissions remain owned after their local waits end. */
   get pendingPromptCompletion(): Promise<void> | null {
     return this.pendingPrompts.size > 0
       ? Promise.allSettled([...this.pendingPrompts]).then(() => undefined)
       : null;
+  }
+
+  private trackPendingExecution(request: Promise<unknown>): void {
+    this.pendingPrompts.add(request);
+    const release = () => {
+      this.pendingPrompts.delete(request);
+    };
+    void request.then(release, release);
   }
 
   async prompt(
@@ -2498,11 +2513,7 @@ export class AgentClient implements acp.Client {
 
       // A local abort does not finish the remote request. Track every raw
       // request, including overlapping prompts used by acknowledged handoff.
-      this.pendingPrompts.add(promptPromise);
-      const releasePrompt = () => {
-        this.pendingPrompts.delete(promptPromise);
-      };
-      void promptPromise.then(releasePrompt, releasePrompt);
+      this.trackPendingExecution(promptPromise);
 
       let abortListener: (() => void) | undefined;
       let trackedPromptCompletion: ActivePromptCompletion | undefined;
