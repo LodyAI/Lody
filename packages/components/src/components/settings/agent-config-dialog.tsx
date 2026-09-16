@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
+import { toast } from 'sonner';
 import {
   computeTitleGenerationDefaults,
   DEEPSEEK_HARNESS_API_KEY_ENV,
@@ -76,6 +77,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/tabs';
 import { EnvVarsTextarea, envVarsToText } from './env-vars-textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { AcpAuthenticationPanel } from './acp-authentication-panel';
+import { BubInstallGuide } from './bub-install-guide';
+import { ProviderSetupRow } from './provider-setup-row';
+import {
+  getAgentMetaByIdAtomFamily,
+  getProviderSetupsByMachineAtomFamily,
+  cmdRetryProviderSetupAtom,
+  deleteProviderSetupAtom,
+} from '@/atoms/agents';
 
 type Translate = ReturnType<typeof useTranslation>['t'];
 
@@ -919,6 +928,20 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     mode.kind === 'edit'
       ? mode.config.id
       : (draftConfigIdRef.current ??= uuidv4() as AgentConfigId);
+  const publishedConfig = useAtomValue(getAgentMetaByIdAtomFamily(agentConfigId));
+  const setups = useAtomValue(getProviderSetupsByMachineAtomFamily(machine.id));
+  const retrySetup = useSetAtom(cmdRetryProviderSetupAtom);
+  const deleteSetup = useSetAtom(deleteProviderSetupAtom);
+  // Creation observes the daemon-owned setup instead of launching a competing
+  // capability probe. Once published, this draft edits the same provider id.
+  const [testingBubSetup, setTestingBubSetup] = useState(false);
+  const publishedBub =
+    testingBubSetup &&
+    publishedConfig?.machineId === machine.id &&
+    publishedConfig.cliType === 'builtin' &&
+    publishedConfig.agentType === 'bub';
+  const bubSetup = testingBubSetup ? setups.find((setup) => setup.id === agentConfigId) : undefined;
+  const waitingForBubSetup = testingBubSetup && !publishedBub;
 
   const initialForm = useMemo<AgentConfigFormData>(() => {
     if (mode.kind === 'edit') {
@@ -1001,6 +1024,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
 
   useEffect(() => {
     if (open) {
+      setTestingBubSetup(false);
       setFormData(initialForm);
       setManuallyTested(false);
       setAuthRequired(false);
@@ -1020,7 +1044,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
       // doesn't force a re-test. Any other case starts un-tested.
       setTestedCustomKey(resolveInitialTestedCustomKey(mode, machineRef.current));
     }
-  }, [open, initialForm, mode]);
+  }, [open, initialForm, mode, machine.id]);
 
   const activePreset = formData.presetId ? PRESETS_BY_ID[formData.presetId] : undefined;
   const isPreset = !!activePreset;
@@ -1051,7 +1075,10 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     formData.cliType === 'builtin' && isManagedBuiltinAgentType(formData.agentType);
   const builtinVerificationContext = `${machine.id}:${builtinVerificationRevision}`;
   const requiresBuiltinCreationVerification =
-    mode.kind === 'create' && !isPreset && (isManagedBuiltin || isDeepSeekBuiltin || isBubBuiltin);
+    mode.kind === 'create' &&
+    !publishedBub &&
+    !isPreset &&
+    (isManagedBuiltin || isDeepSeekBuiltin || isBubBuiltin);
   const builtinCreationVerified =
     !requiresBuiltinCreationVerification || verifiedBuiltinContext === builtinVerificationContext;
   const builtinCreationPending =
@@ -1228,6 +1255,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const rawCapabilitiesReady = isCustom
     ? customReady
     : manuallyTested ||
+      publishedBub ||
       hasCachedCaps ||
       (hasStaticBuiltinCaps && !(formData.cliType === 'builtin' && formData.agentType === 'kimi'));
   const capabilitiesReady = rawCapabilitiesReady && !binaryStatusBlocksReady;
@@ -1566,6 +1594,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   };
 
   const selectOption = (opt: AgentTypeOption) => {
+    if (testingBubSetup) return;
     titleDefaultsAppliedRef.current = false;
     setManuallyTested(false);
     setAuthRequired(false);
@@ -1783,7 +1812,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   }, [onOpenChange, persistConfigBeforeMachineLaunch]);
 
   const submit = async () => {
-    if (disableReason || submitting) return;
+    if (disableReason || submitting || waitingForBubSetup) return;
     if (
       requiresBuiltinCreationVerification &&
       !backgroundBuiltinSetup &&
@@ -1924,7 +1953,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
               key={opt.value}
               option={opt}
               selected={selectedOption?.value === opt.value}
-              disabled={mode.kind === 'edit'}
+              disabled={mode.kind === 'edit' || testingBubSetup}
               chevron={isNarrowLayout}
               onSelect={() => selectOption(opt)}
             />
@@ -1937,7 +1966,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 key={opt.value}
                 option={opt}
                 selected={selectedOption?.value === opt.value}
-                disabled={mode.kind === 'edit'}
+                disabled={mode.kind === 'edit' || testingBubSetup}
                 chevron={isNarrowLayout}
                 onSelect={() => selectOption(opt)}
               />
@@ -1951,7 +1980,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 key={opt.value}
                 option={opt}
                 selected={selectedOption?.value === opt.value}
-                disabled={mode.kind === 'edit'}
+                disabled={mode.kind === 'edit' || testingBubSetup}
                 chevron={isNarrowLayout}
                 onSelect={() => selectOption(opt)}
               />
@@ -1965,7 +1994,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 key={opt.value}
                 option={opt}
                 selected={selectedOption?.value === opt.value}
-                disabled={mode.kind === 'edit'}
+                disabled={mode.kind === 'edit' || testingBubSetup}
                 chevron={isNarrowLayout}
                 onSelect={() => selectOption(opt)}
               />
@@ -2020,27 +2049,73 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
             )}
           </div>
         </div>
-        <ProbeStatus
-          isPreset={isPreset}
-          probing={probing}
-          probeError={probeError}
-          ready={capabilitiesReady && !builtinNeedsCredentialCheck && !authRequired}
-          showIdleAction={!isCustom && !(mode.kind === 'create' && isBubBuiltin)}
-          onRetry={() => {
-            setProbeError(null);
-            if (isCustom) {
-              void runCustomProbe();
-              return;
-            }
-            setManuallyTested(false);
-            setVerifiedBuiltinContext(null);
-            setProbeTick((n) => n + 1);
-          }}
-        />
+        {!waitingForBubSetup && (
+          <ProbeStatus
+            isPreset={isPreset}
+            probing={probing}
+            probeError={probeError}
+            ready={capabilitiesReady && !builtinNeedsCredentialCheck && !authRequired}
+            showIdleAction={!isCustom}
+            disabled={isBubBuiltin && (!!disableReason || submitting)}
+            onRetry={() => {
+              setProbeError(null);
+              if (isBubBuiltin && backgroundBuiltinSetup) {
+                if (disableReason || submitting) return;
+                setTestingBubSetup(true);
+                void persistConfigBeforeMachineLaunch().catch((error) => {
+                  setTestingBubSetup(false);
+                  setProbeError(error instanceof Error ? error.message : String(error));
+                });
+                return;
+              }
+              if (isCustom) {
+                void runCustomProbe();
+                return;
+              }
+              setManuallyTested(false);
+              setVerifiedBuiltinContext(null);
+              setProbeTick((n) => n + 1);
+            }}
+          />
+        )}
       </header>
 
       <div ref={formScrollRef} className="scrollbar-pro min-h-0 flex-1 overflow-y-auto px-5 py-5">
-        <div className="space-y-5">
+        {waitingForBubSetup &&
+          (bubSetup ? (
+            <ProviderSetupRow
+              setup={bubSetup}
+              machine={machine}
+              onRetry={async (setup) => {
+                try {
+                  await retrySetup(setup.id);
+                } catch (error) {
+                  toast.error(
+                    t('settings.agent.setup.retryFailed', 'Could not retry provider setup')
+                  );
+                  throw error;
+                }
+              }}
+              onDelete={async (setup) => {
+                try {
+                  await deleteSetup(setup.id);
+                  // Cancellation is durable for this id. A new test must be a
+                  // new setup, or the daemon would cancel it again.
+                  draftConfigIdRef.current = uuidv4() as AgentConfigId;
+                  lastPersistedPayloadKeyRef.current = null;
+                  setTestingBubSetup(false);
+                } catch (error) {
+                  toast.error(
+                    t('settings.agent.setup.deleteFailed', 'Could not delete provider setup')
+                  );
+                  throw error;
+                }
+              }}
+            />
+          ) : (
+            <Spinner className="h-4 w-4" />
+          ))}
+        <div className="space-y-5" hidden={waitingForBubSetup}>
           <Field
             htmlFor="agent-config-name"
             label={t('agents.configName', 'Name')}
@@ -2229,6 +2304,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
               {probeError}
             </div>
           )}
+          {probeError && isBubBuiltin && <BubInstallGuide />}
 
           {showAuthenticationPanel ? (
             <div className="rounded-xl border border-border/60 bg-muted/20 p-4">
@@ -2480,14 +2556,19 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 <Button
                   onClick={() => void submit()}
                   disabled={
-                    !!disableReason || submitting || (builtinCreationPending && !probeError)
+                    !!disableReason ||
+                    submitting ||
+                    waitingForBubSetup ||
+                    (builtinCreationPending && !probeError)
                   }
                   size="sm"
                 >
                   {(submitting || (builtinCreationPending && !authRequired && !probeError)) && (
                     <Spinner className="mr-2 h-4 w-4" />
                   )}
-                  {mode.kind === 'edit' ? t('common.save', 'Save') : t('common.create', 'Create')}
+                  {mode.kind === 'edit' || publishedBub
+                    ? t('common.save', 'Save')
+                    : t('common.create', 'Create')}
                 </Button>
               </span>
             </TooltipTrigger>
@@ -2710,6 +2791,7 @@ function ProbeStatus({
   probeError,
   ready,
   showIdleAction,
+  disabled = false,
   onRetry,
 }: {
   isPreset: boolean;
@@ -2717,6 +2799,7 @@ function ProbeStatus({
   probeError: string | null;
   ready: boolean;
   showIdleAction: boolean;
+  disabled?: boolean;
   onRetry: () => void;
 }) {
   const { t } = useTranslation();
@@ -2744,6 +2827,7 @@ function ProbeStatus({
         size="sm"
         className="h-7 gap-1 px-2 text-xs text-status-warning"
         onClick={onRetry}
+        disabled={disabled}
         aria-label={t('settings.agent.dialog.retryProbe', 'Retry capability probe')}
       >
         <RefreshCw className="h-3 w-3" />
@@ -2759,6 +2843,7 @@ function ProbeStatus({
             <button
               type="button"
               onClick={onRetry}
+              disabled={disabled}
               aria-label={t(
                 'settings.agent.dialog.refreshCapabilities',
                 'Refresh agent capabilities'
@@ -2792,6 +2877,7 @@ function ProbeStatus({
       size="sm"
       className="h-7 gap-1 px-2 text-xs"
       onClick={onRetry}
+      disabled={disabled}
       aria-label={t('settings.agent.dialog.testCapabilities', 'Test agent capabilities')}
     >
       <FlaskConical className="h-3 w-3" />

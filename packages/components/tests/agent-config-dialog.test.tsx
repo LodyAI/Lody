@@ -3,15 +3,29 @@
 import { act, type ComponentProps } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRoot, type Root } from 'react-dom/client';
+import { createStore, Provider } from 'jotai';
 import {
   ACP_CAPABILITY_CACHE_VERSION,
   PROVIDER_SETUP_PROTOCOL_VERSION,
   getAcpCapabilityCacheKey,
+  machineFlockKeys,
+  serializeMachineFlockKey,
   type AgentConfigId,
   type AgentConfigMeta,
   type MachineId,
   type MachineViewMeta,
+  type MachineFlockScanRow,
+  type WorkspaceId,
 } from '@lody/shared';
+import {
+  cmdCreateProviderSetupAtom,
+  cmdCreateAgentConfigAtom,
+  getAllProviderSetupsAtom,
+  getAllAgentConfigAtom,
+} from '../src/atoms/agents';
+import { setMachineFlockRowsForMachineAtom } from '../src/atoms/machine-flock';
+import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
+import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '../src/atoms/workspace-context';
 import {
   AgentConfigDialog,
   type AgentConfigDialogMode,
@@ -151,8 +165,10 @@ const setNativeInputValue = (element: HTMLInputElement, value: string): void => 
 describe('AgentConfigDialog', () => {
   let root: Root | undefined;
   let container: HTMLDivElement | undefined;
+  let store: ReturnType<typeof createStore>;
 
   beforeEach(async () => {
+    store = createStore();
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     await initI18n('en');
     Object.defineProperty(window, 'matchMedia', {
@@ -203,18 +219,20 @@ describe('AgentConfigDialog', () => {
   ) => {
     await act(async () => {
       root?.render(
-        <TooltipProvider>
-          <AgentConfigDialog
-            open
-            onOpenChange={vi.fn()}
-            mode={mode}
-            machine={machine}
-            onSubmit={onSubmit}
-            onRefreshCapabilities={onRefreshCapabilities}
-            onCheckBinaryStatus={onCheckBinaryStatus}
-            onManagedRuntimeSelected={onManagedRuntimeSelected}
-          />
-        </TooltipProvider>
+        <Provider store={store}>
+          <TooltipProvider>
+            <AgentConfigDialog
+              open
+              onOpenChange={vi.fn()}
+              mode={mode}
+              machine={machine}
+              onSubmit={onSubmit}
+              onRefreshCapabilities={onRefreshCapabilities}
+              onCheckBinaryStatus={onCheckBinaryStatus}
+              onManagedRuntimeSelected={onManagedRuntimeSelected}
+            />
+          </TooltipProvider>
+        </Provider>
       );
     });
   };
@@ -298,7 +316,169 @@ describe('AgentConfigDialog', () => {
     });
 
     expect(getPrimaryAction('Create').disabled).toBe(true);
+    expect(
+      document.body.querySelector<HTMLButtonElement>('button[aria-label="Test agent capabilities"]')
+        ?.disabled
+    ).toBe(true);
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it('tests Bub through durable setup, shows installation recovery, then refreshes the published provider', async () => {
+    const workspaceId = 'workspace-bub-test' as WorkspaceId;
+    const workspaceSlug = 'workspace-bub-test';
+    const mirrorRows = new Map<string, MachineFlockScanRow>();
+    store.set(runtimeAtom, {
+      workspaceId,
+      workspaceSlug,
+      repo: { openFlockDoc: async () => ({ flock: { scan: () => mirrorRows.values() } }) },
+      writer: {
+        flockRowPut: async (_docId: string, key: MachineFlockScanRow['key'], value: unknown) => {
+          mirrorRows.set(serializeMachineFlockKey(key), { key, value } as MachineFlockScanRow);
+        },
+        flockRowDelete: async (_docId: string, key: MachineFlockScanRow['key']) => {
+          mirrorRows.delete(serializeMachineFlockKey(key));
+        },
+      },
+      getMachineAcpBinaryProgress: () => null,
+      subscribeMachineAcpBinaryProgress: () => () => {},
+    } as unknown as WorkspaceRuntime);
+    store.set(currentWorkspaceIdAtom, workspaceId);
+    store.set(currentWorkspaceSlugAtom, workspaceSlug);
+    const publishRows = () =>
+      store.set(setMachineFlockRowsForMachineAtom, {
+        workspaceId,
+        machineId,
+        rows: Object.fromEntries(mirrorRows),
+      });
+    const onSubmit = async (payload: AgentConfigSubmitPayload) => {
+      const { backgroundSetup, ...fields } = payload;
+      const config = { ...fields, machineId };
+      await store.set(
+        backgroundSetup ? cmdCreateProviderSetupAtom : cmdCreateAgentConfigAtom,
+        config
+      );
+    };
+    const refresh: RefreshCapabilities = vi.fn(async (args) => ({
+      type: 'machine/acp-capabilities-refresh_response',
+      ...args,
+      cliType: 'builtin',
+      agentType: 'bub',
+      success: true,
+    }));
+    await renderDialog(
+      { kind: 'create', initialForm: { agentType: 'bub', cliType: 'builtin', name: 'Bub' } },
+      createMachine('Workstation', { providerSetup: PROVIDER_SETUP_PROTOCOL_VERSION }),
+      onSubmit,
+      vi.fn(async () => ({ status: 'installed' as const })),
+      refresh
+    );
+    await act(async () => {
+      document.body
+        .querySelector<HTMLButtonElement>('button[aria-label="Test agent capabilities"]')!
+        .click();
+    });
+    let setup = store.get(getAllProviderSetupsAtom)[0]!;
+    expect(setup.config.agentType).toBe('bub');
+    expect(store.get(getAllAgentConfigAtom)).toEqual([]);
+    expect(getPrimaryAction('Create').disabled).toBe(true);
+    expect(getOptionByText('Claude').disabled).toBe(true);
+    expect(refresh).not.toHaveBeenCalled();
+
+    const cancelledId = setup.id;
+    await act(async () => {
+      document.body.querySelector<HTMLButtonElement>('button[aria-label="Delete"]')!.click();
+    });
+    expect(store.get(getAllProviderSetupsAtom)).toEqual([]);
+    expect(
+      mirrorRows.has(
+        serializeMachineFlockKey(machineFlockKeys.providerSetupCancellation(cancelledId))
+      )
+    ).toBe(true);
+    expect(getOptionByText('Claude').disabled).toBe(false);
+    await act(async () => {
+      document.body
+        .querySelector<HTMLButtonElement>('button[aria-label="Test agent capabilities"]')!
+        .click();
+    });
+    setup = store.get(getAllProviderSetupsAtom)[0]!;
+    expect(setup.id).not.toBe(cancelledId);
+
+    await act(async () => {
+      const key = machineFlockKeys.providerSetup(setup.id);
+      mirrorRows.set(serializeMachineFlockKey(key), {
+        key,
+        value: {
+          ...setup,
+          status: 'failed',
+          failureCode: 'runtime-unavailable',
+        },
+      });
+      publishRows();
+    });
+    expect(document.body.textContent).toContain('Bub or its ACP server is not installed');
+    expect(document.body.textContent).toContain(
+      'curl -fsSL https://bub.build/install.sh | bash -- --preset acp'
+    );
+    expect(document.body.textContent).toContain('Open install guide');
+    await act(async () => {
+      getPrimaryAction('Retry').click();
+    });
+    expect(store.get(getAllProviderSetupsAtom)[0]).toMatchObject({ status: 'queued', attempt: 2 });
+    expect(document.body.textContent).not.toContain('Install it in one step:');
+
+    await act(async () => {
+      mirrorRows.delete(serializeMachineFlockKey(machineFlockKeys.providerSetup(setup.id)));
+      const key = machineFlockKeys.agentConfig(setup.id);
+      mirrorRows.set(serializeMachineFlockKey(key), { key, value: setup.config });
+      publishRows();
+    });
+    expect(getPrimaryAction('Save').disabled).toBe(false);
+    expect(document.body.querySelector('#agent-config-name')?.closest('[hidden]')).toBeNull();
+    await act(async () => {
+      document.body
+        .querySelector<HTMLButtonElement>('button[aria-label="Refresh agent capabilities"]')!
+        .click();
+    });
+    expect(document.body.textContent).toContain('Ready');
+    expect(store.get(getAllProviderSetupsAtom)).toEqual([]);
+    expect(store.get(getAllAgentConfigAtom).map((config) => config.id)).toEqual([setup.id]);
+    expect(refresh).toHaveBeenCalledWith({ machineId, configId: setup.id });
+  });
+
+  it('offers installation guidance after an existing Bub refresh fails and allows retry', async () => {
+    let installed = false;
+    const refresh: RefreshCapabilities = async (args) => ({
+      type: 'machine/acp-capabilities-refresh_response',
+      ...args,
+      cliType: 'builtin',
+      agentType: 'bub',
+      success: installed,
+      ...(installed ? {} : { error: 'spawn bub ENOENT' }),
+    });
+    await renderDialog(
+      { kind: 'edit', config: createBuiltinConfig({ agentType: 'bub', name: 'Bub' }) },
+      createMachine('Workstation'),
+      vi.fn(async () => {}),
+      vi.fn(async () => ({ status: 'installed' as const })),
+      refresh
+    );
+    await act(async () => {
+      document.body
+        .querySelector<HTMLButtonElement>('button[aria-label="Test agent capabilities"]')!
+        .click();
+    });
+    expect(document.body.textContent).toContain('spawn bub ENOENT');
+    expect(document.body.textContent).toContain('Install it in one step:');
+    installed = true;
+    await act(async () => {
+      document.body
+        .querySelector<HTMLButtonElement>('button[aria-label="Retry capability probe"]')!
+        .click();
+    });
+    expect(document.body.textContent).not.toContain('Install it in one step:');
+    expect(
+      document.body.querySelector('button[aria-label="Refresh agent capabilities"]')
+    ).not.toBeNull();
   });
 
   it('reports the selected managed runtime so onboarding can prioritize it', async () => {
@@ -353,7 +533,7 @@ describe('AgentConfigDialog', () => {
     return input;
   };
 
-  const getPrimaryAction = (label: 'Create' | 'Save'): HTMLButtonElement => {
+  function getPrimaryAction(label: 'Create' | 'Save' | 'Retry'): HTMLButtonElement {
     const button = Array.from(document.body.querySelectorAll('button')).find(
       (candidate) => candidate.textContent?.trim() === label
     );
@@ -361,7 +541,7 @@ describe('AgentConfigDialog', () => {
       throw new Error(`Expected ${label} button`);
     }
     return button;
-  };
+  }
 
   const openAdditionalEnvSection = async (): Promise<HTMLTextAreaElement> => {
     const environmentSection = Array.from(document.body.querySelectorAll('button')).find((button) =>
