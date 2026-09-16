@@ -780,6 +780,9 @@ export function createConversationViewFromReader(
     get version() {
       return version;
     },
+    get structureVersion() {
+      return structureEpoch;
+    },
     ready,
     index: (i) => rows[i],
     indexOf: (turnId) => indexById.get(turnId) ?? -1,

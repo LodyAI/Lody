@@ -217,6 +217,11 @@ const slashRunLength = (value: string, start: number): number => {
  * stay valid.
  */
 export const normalizeTexMathDelimiters = (value: string): string => {
+  // Only an opening `\[` can produce a replacement, so text without one is
+  // returned unchanged. The scanner below walks the string character by
+  // character and a streaming turn re-runs it over the whole accumulated
+  // answer on every delta, which is quadratic in the answer's length.
+  if (!value.includes('\\[')) return value;
   const replacements: number[] = [];
   let opening: TexMathDelimiter | null = null;
   let cursor = 0;

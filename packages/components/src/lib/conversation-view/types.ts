@@ -110,6 +110,12 @@ export interface ConversationView {
   readonly turnCount: number;
   /** Bumps on any structural, index, or hydrated-content change. */
   readonly version: number;
+  /**
+   * Bumps only when membership or order moves. A consumer whose work depends
+   * on the turn LIST rather than its contents keys on this: `version` bumps at
+   * token rate, and rebuilding a per-turn layout that often is pure waste.
+   */
+  readonly structureVersion: number;
   /** Resolves once the initial directory and retained tail are ready; offscreen summaries stay lazy. */
   readonly ready: Promise<void>;
   index(i: number): TurnIndexRow | undefined;

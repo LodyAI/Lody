@@ -470,10 +470,30 @@ const PR_SIDEBAR_MIN_WIDTH_PX = 500;
 
 const selectSessionDetailMeta = (meta: SessionMeta | undefined): SessionMeta | undefined => meta;
 
+/**
+ * Serialized meta, memoized on the object.
+ *
+ * This equality gate runs on every session-meta emission, and the retained
+ * previous value was re-serialized each time even though only the incoming
+ * one is new.
+ */
+const sessionDetailMetaFingerprints = new WeakMap<SessionMeta, string>();
+const sessionDetailMetaFingerprint = (meta: SessionMeta): string => {
+  const cached = sessionDetailMetaFingerprints.get(meta);
+  if (cached !== undefined) return cached;
+  const computed = JSON.stringify(meta);
+  sessionDetailMetaFingerprints.set(meta, computed);
+  return computed;
+};
+
 const sessionDetailMetaEqual = (
   left: SessionMeta | undefined,
   right: SessionMeta | undefined
-): boolean => left === right || JSON.stringify(left) === JSON.stringify(right);
+): boolean =>
+  left === right ||
+  (left !== undefined &&
+    right !== undefined &&
+    sessionDetailMetaFingerprint(left) === sessionDetailMetaFingerprint(right));
 
 function PendingWorktreeForkObserver({
   targetSessionId,
@@ -3232,12 +3252,10 @@ const SessionDetail = ({
         const resolution = await resolveSessionFileProviderOpenPath(
           activeSessionFileProvider,
           target.filePath
-        ).catch(
-          (): SessionFileProviderOpenPathResolution => ({
-            path: target.filePath,
-            redirected: false,
-          })
-        );
+        ).catch((): SessionFileProviderOpenPathResolution => ({
+          path: target.filePath,
+          redirected: false,
+        }));
         const resolvedFilePath = resolution.path;
 
         const requestSeq = nextFocusRequestSeq();
@@ -3314,12 +3332,10 @@ const SessionDetail = ({
           const resolution = await resolveSessionFileProviderOpenPath(
             activeSessionFileProvider,
             tab.filePath
-          ).catch(
-            (): SessionFileProviderOpenPathResolution => ({
-              path: tab.filePath,
-              redirected: false,
-            })
-          );
+          ).catch((): SessionFileProviderOpenPathResolution => ({
+            path: tab.filePath,
+            redirected: false,
+          }));
           if (!resolution.redirected || resolution.path === tab.filePath) {
             return { tab, next: tab };
           }
@@ -3630,22 +3646,18 @@ const SessionDetail = ({
     });
     return [
       ...fixedTabs,
-      ...visibleSideSessions.map(
-        (sideSession): SessionSidePanelTabItem => ({
-          id: getSideSessionPanelTabId(sideSession.id),
-          label: sideSession.title?.trim() || t('sessions.detailTabs.sideSession', 'Side Chat'),
-          kind: 'session',
-          closeable: true,
-          pending: closingSideSessionIds.has(sideSession.id),
-        })
-      ),
-      ...viewerTabItems.map(
-        (tab): SessionSidePanelTabItem => ({
-          ...tab,
-          kind: tab.type,
-          closeable: true,
-        })
-      ),
+      ...visibleSideSessions.map((sideSession): SessionSidePanelTabItem => ({
+        id: getSideSessionPanelTabId(sideSession.id),
+        label: sideSession.title?.trim() || t('sessions.detailTabs.sideSession', 'Side Chat'),
+        kind: 'session',
+        closeable: true,
+        pending: closingSideSessionIds.has(sideSession.id),
+      })),
+      ...viewerTabItems.map((tab): SessionSidePanelTabItem => ({
+        ...tab,
+        kind: tab.type,
+        closeable: true,
+      })),
     ];
   }, [
     closingSideSessionIds,

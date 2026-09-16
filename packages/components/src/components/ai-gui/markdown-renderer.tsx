@@ -1160,6 +1160,8 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   const resolvedTheme = useResolvedTheme();
   const readonly = useContext(SessionReadonlyContext);
   const containerRef = useRef<HTMLDivElement>(null);
+  /** Whether this block currently holds search marks that need unwrapping. */
+  const markedRef = useRef(false);
   const search = useSessionSearch();
   const searchMatch = useSessionSearchBlock(searchBlockId ?? '');
   const copyCodeLabel = t('common.copyCode', 'Copy code');
@@ -1167,7 +1169,13 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   const openAgentFileLabel = t('sessions.openAgentFile', 'Open agent file');
   const canvasLabel = t('sessions.diagram.canvas', 'Zoom and pan diagram');
   const openDiagramLabel = t('sessions.diagramViewer.open', 'Open diagram');
-  const hasMermaidBlock = useMemo(() => MERMAID_FENCE_PATTERN.test(text), [text]);
+  // Both scans below re-run over the whole accumulated answer on every streamed
+  // delta. A substring test settles the common case before the line-anchored
+  // pattern runs.
+  const hasMermaidBlock = useMemo(
+    () => text.includes('mermaid') && MERMAID_FENCE_PATTERN.test(text),
+    [text]
+  );
   const normalizedText = useMemo(() => normalizeTexMathDelimiters(text), [text]);
   const {
     blocks: mermaidBlocks,
@@ -1223,6 +1231,11 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       .forEach((button) => button.setAttribute('aria-label', copyCodeLabel));
 
     const clearSearchHighlights = () => {
+      // Nothing was ever marked in this block, so there is nothing to unwrap.
+      // This effect re-runs on every streamed delta, and the query below walks
+      // the rendered subtree.
+      if (!markedRef.current) return;
+      markedRef.current = false;
       const existingMarks = root.querySelectorAll('mark[data-session-search-mark="true"]');
       existingMarks.forEach((mark) => {
         const parent = mark.parentNode;
@@ -1336,6 +1349,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
       if (!parent) {
         return;
       }
+      markedRef.current = true;
       parent.insertBefore(fragment, node);
       parent.removeChild(node);
     });
