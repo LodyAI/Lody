@@ -5958,18 +5958,7 @@ export const SessionChatInterface = memo(
                             sessionCreatedAt={session?.createdAt}
                             dividerLabel={sessionDividerLabel}
                             className="h-full"
-                            leadingContent={
-                              <>
-                                {openedByConversationStart}
-                                {workspaceId && (
-                                  <SessionShareRequestCards
-                                    workspaceId={workspaceId}
-                                    session={session}
-                                    isVisible={isVisible}
-                                  />
-                                )}
-                              </>
-                            }
+                            leadingContent={openedByConversationStart}
                             emptyState={chatStreamEmptyState}
                             agentActivityLabel={agentActivityLabel}
                             agentActivityTone={agentActivityTone}
@@ -6006,6 +5995,19 @@ export const SessionChatInterface = memo(
                       </MessageSendStatusContext.Provider>
                     </ErrorBoundary>
                   </div>
+
+                  {/* Requests and their editor must survive virtual row eviction. */}
+                  {workspaceId && (
+                    <div className="max-h-[35vh] shrink-0 overflow-y-auto">
+                      <ConversationColumn className="px-3">
+                        <SessionShareRequestCards
+                          workspaceId={workspaceId}
+                          session={session}
+                          isVisible={isVisible}
+                        />
+                      </ConversationColumn>
+                    </div>
+                  )}
 
                   {/* Floating permission request - shown when session is waiting for permission */}
                   <FloatingPermissionRequest

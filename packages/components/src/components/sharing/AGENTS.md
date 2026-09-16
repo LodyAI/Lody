@@ -36,10 +36,10 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
 - `hooks/use-session-share-management.ts` owns prepare/confirm/upload/publish.
   Settings reuses `useSessionShareLinkActions` for copy/reset/revoke. Keep retry
   credentials and request identity stable; publish only after sealing.
-- `session-share-request-cards.tsx` reads canonical pending requests, not history flags.
-  Review locks the explicit target set; confirmation is app-only. Keep its editor
-  mounted when begin consumes the request. Confirmed half-deployments stay visible
-  and can be abandoned; cancelling a published request cannot revoke its share.
+- `session-share-request-cards.tsx` reads canonical requests outside virtual rows.
+  Scrolling must not unmount its query/editor. Review locks targets; approval is app-only.
+  Keep the editor through confirmation; unfinished deployments remain abandonable.
+  Cancelling a published request cannot revoke its share.
 - `lib/session-share-publisher.ts` is app-only: hydrate all sources before
   synchronous capture, copy attachments under app authority, and release every
   source lease. Never import it from the anonymous entry. Workspace E2EE will
