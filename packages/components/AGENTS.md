@@ -24,7 +24,9 @@ mobile surfaces. Background for the rules below:
   dimensions are retained, but the secondary item excludes primary Session ids and
   counts unique remaining Sessions.
   One remaining type uses its icon; multiple types use `+N`; single counts are omitted
-  except for a primary paired with mixed `+N`. Initializing uses active visuals.
+  except for a primary paired with mixed `+N`. `+N` puts `+` in the icon column and `N`
+  in the digit column so marks and digits each form one column. Initializing uses
+  active visuals.
   Expanded/removing groups hide the aggregate; reserve two fixed, aligned activity slots.
 - `PlatformContext` intentionally has no default. Cloud-shaped component tests use
   `tests/test-platform.tsx`'s `TestCloudPlatformProvider`; plain-module tests install

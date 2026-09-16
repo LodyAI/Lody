@@ -36,7 +36,9 @@ export function ProjectActivityIndicator({ counts }: { counts: ProjectActivityCo
           }`}
         >
           {status === 'more' ? (
-            <span className="col-span-2 flex h-3.5 w-7 items-center justify-center">+{count}</span>
+            // "+" takes the status-icon column and N the count column, so
+            // marks and digits each keep one column across every row.
+            <span className="text-center">+</span>
           ) : (
             <SessionRowStatusIndicator
               isWaitingPermission={status === 'permission'}
@@ -44,16 +46,16 @@ export function ProjectActivityIndicator({ counts }: { counts: ProjectActivityCo
               isWorking={status === 'active'}
             />
           )}
-          {status !== 'more' ? (
-            <span
-              // Left-aligned so the digit hugs the indicator box: a centered
-              // digit floats on its single-count slack and the pair loosens.
-              className="text-left"
-              style={count > 999 ? { fontSize: `${30 / String(count).length}px` } : undefined}
-            >
-              {count > 1 || (index === 0 && items[1]?.status === 'more') ? count : null}
-            </span>
-          ) : null}
+          <span
+            // Left-aligned so the digit hugs the indicator box: a centered
+            // digit floats on its single-count slack and the pair loosens.
+            className="text-left"
+            style={count > 999 ? { fontSize: `${30 / String(count).length}px` } : undefined}
+          >
+            {status === 'more' || count > 1 || (index === 0 && items[1]?.status === 'more')
+              ? count
+              : null}
+          </span>
         </span>
       ))}
     </span>
