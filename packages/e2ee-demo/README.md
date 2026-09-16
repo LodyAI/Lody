@@ -34,9 +34,12 @@ and the Riverrun process this command started.
 
 Flow: Connect (demo account picker) → Create space or paste genesis and Request
 join → Approve → Deliver / receive epoch key → Write/read Loro and Flock →
-Upload or bootstrap snapshot → Publish digest note → Compare (label is
-`checked` only on `agree`; mismatch is `inconsistent`, never `checked`) →
-Revoke / rotate → Export backup file and restore it in a new isolated context.
+Upload or bootstrap snapshot → Export a digest note and paste it into the
+other client (QR/text). Label is `checked` only for an independently imported
+note that agrees; server-hosted notes are `untrusted`, never `checked`.
+Mismatch is `inconsistent`. → Revoke / rotate → Export backup file and restore
+it in a new isolated context. Refreshing the same origin/account restores the
+device keys, genesis, epoch keys, and any pending CAS bytes.
 
 ```sh
 pnpm --filter @lody/e2ee-demo start -- --data-dir /abs/path --port 8788

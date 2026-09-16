@@ -10,6 +10,10 @@ export function App() {
   const [length, setLength] = useState(0);
   const [epoch, setEpoch] = useState(0);
   const [compareKind, setCompareKind] = useState('');
+  const [compareSource, setCompareSource] = useState<'server' | 'independent'>('server');
+  const [compareIndependentFlag, setCompareIndependentFlag] = useState(false);
+  const [noteExport, setNoteExport] = useState('');
+  const [noteImport, setNoteImport] = useState('');
   const [log, setLog] = useState('');
   const [loroInput, setLoroInput] = useState('hello-e2ee');
   const [loroValue, setLoroValue] = useState('');
@@ -35,8 +39,8 @@ export function App() {
       const next = new BrowserSession(window.location.origin, account);
       await next.start();
       setSession(next);
-      setStatus('connected');
-      setLog(`device ${account}`);
+      if (next.genesisHex) setGenesis(next.genesisHex);
+      refresh(next, next.genesisHex ? `restored ${next.genesisHex}` : `device ${account}`);
     } catch (error) {
       fail(error);
     }
@@ -76,6 +80,8 @@ export function App() {
   async function note() {
     if (!session) return fail(new Error('not-connected'));
     try {
+      const exported = await session.exportNote();
+      setNoteExport(JSON.stringify(exported));
       await session.publishNote();
       refresh(session, 'note published');
     } catch (error) {
@@ -86,9 +92,24 @@ export function App() {
   async function compare() {
     if (!session) return fail(new Error('not-connected'));
     try {
-      const kind = await session.compare();
-      setCompareKind(kind);
-      refresh(session, `compare ${kind}`);
+      const result = await session.compareRemote();
+      setCompareKind(result.kind);
+      setCompareSource('server');
+      setCompareIndependentFlag(false);
+      refresh(session, `compare ${result.kind}`);
+    } catch (error) {
+      fail(error);
+    }
+  }
+
+  async function compareImported() {
+    if (!session) return fail(new Error('not-connected'));
+    try {
+      const result = await session.compareIndependent(JSON.parse(noteImport) as never);
+      setCompareKind(result.kind);
+      setCompareSource('independent');
+      setCompareIndependentFlag(result.independent === true);
+      refresh(session, `independent ${result.kind}`);
     } catch (error) {
       fail(error);
     }
@@ -235,7 +256,7 @@ export function App() {
     }
   }
 
-  const label = compareLabel(compareKind);
+  const label = compareLabel(compareKind, compareSource, compareIndependentFlag);
 
   return (
     <div>
@@ -277,8 +298,28 @@ export function App() {
         Publish digest note
       </button>
       <button id="compare" onClick={() => void compare()}>
-        Compare notes
+        Compare server notes (untrusted)
       </button>
+      <label>
+        Exported note
+        <textarea id="note-export" rows={3} value={noteExport} readOnly />
+      </label>
+      <label>
+        Import note (paste / QR text)
+        <textarea
+          id="note-import"
+          rows={3}
+          value={noteImport}
+          onChange={(event) => setNoteImport(event.target.value)}
+        />
+      </label>
+      <button id="compare-independent" onClick={() => void compareImported()}>
+        Compare imported note
+      </button>
+      <p>
+        checked only after pasting another member's note (not the original space creator, not a
+        server copy). Server compare is untrusted.
+      </p>
       <h2>Keys and devices</h2>
       <button id="deliver-key" onClick={() => void deliverKey()}>
         Deliver epoch key

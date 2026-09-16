@@ -32,7 +32,13 @@ recorded local tarball instead of a sibling source alias.
   `sealRecoveryBackup`. Restore admits a new device as `committed` and decrypts
   prior ciphertext. Do not invent a dummy identity or store R as plaintext.
 - Digest mismatch is `conflict` / `inconsistent`, never `checked`.
-  `pending-sync` is not agreement.
+  `pending-sync` is not agreement. Server-hosted notes are `untrusted`.
+  `checked` only comes from independently imported notes (paste/QR), and not
+  from the original space creator's note.
+- `/ds` writes use an explicit allowlist. Ordinary POST/DELETE on control or
+  keys is rejected. Unjoined devices cannot append garbage to the ledger.
+- Browser sessions persist device keys, genesis, epoch keys, and pending CAS
+  bytes in origin storage (localStorage) or a process map in Node.
 
 ## Limits
 

@@ -19,8 +19,18 @@ describe('D2 invite, admin offline owner, digest compare', () => {
     expect(Buffer.from(aliceView.head).equals(Buffer.from(bobView.head))).toBe(true);
     await alice.publishNote();
     await bob.publishNote();
-    const compared = await bob.compareRemote();
-    expect(compared.kind).toBe('agree');
+    const server = await bob.compareRemote();
+    expect(server.kind).toBe('agree');
+    expect(compareLabel(server.kind, 'server')).toBe('untrusted');
+    expect(compareLabel(server.kind, 'server')).not.toBe('checked');
+    const imported = await alice.compareIndependent(await bob.exportNote());
+    expect(imported.kind).toBe('agree');
+    expect(imported.independent).toBe(true);
+    expect(compareLabel(imported.kind, 'independent', true)).toBe('checked');
+    const fromOwner = await bob.compareIndependent(await alice.exportNote());
+    expect(fromOwner.kind).toBe('agree');
+    expect(fromOwner.independent).toBeFalsy();
+    expect(compareLabel(fromOwner.kind, 'independent', false)).toBe('untrusted');
   });
 
   it('allows Admin to invite while Owner is unused', async () => {
@@ -42,29 +52,41 @@ describe('D2 invite, admin offline owner, digest compare', () => {
     expect((await owner.readLedger()).state.members.size).toBe(3);
   });
 
-  it('shows inconsistent rather than checked when notes disagree', async () => {
+  it('shows inconsistent rather than checked when independently imported notes disagree', async () => {
     const host = await launchHost();
     const alice = await session(host, 'alice');
     const bob = await session(host, 'bob');
     await alice.createSpace();
-    await bob.adoptGenesis(alice.genesisHex!);
-    const honest = await alice.publishNote();
+    const join = await bob.requestJoin(alice.genesisHex!);
+    await alice.approveJoin(join);
+    const honest = await alice.exportNote();
     const forged = {
-      genesis: honest.genesis,
-      length: honest.length,
+      ...honest,
       head: 'aa'.repeat(32),
       stateDigest: 'bb'.repeat(32),
       noteSigner: deviceHex(bob.device),
     };
-    const posted = await bob.fetch(`/v1/spaces/${alice.genesisHex}/notes`, {
+    const compared = await alice.compareIndependent(forged);
+    expect(compared.kind).toBe('conflict');
+    expect(compareLabel(compared.kind, 'independent')).toBe('inconsistent');
+    expect(compareLabel(compared.kind, 'independent')).not.toBe('checked');
+  });
+
+  it('rejects an outsider posting a copied digest and never labels server notes checked', async () => {
+    const host = await launchHost();
+    const alice = await session(host, 'alice');
+    const outsider = await session(host, 'outsider');
+    await alice.createSpace();
+    const honest = await alice.exportNote();
+    const posted = await outsider.fetch(`/v1/spaces/${alice.genesisHex}/notes`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(forged),
+      body: JSON.stringify(honest),
     });
-    expect(posted.ok).toBe(true);
+    expect(posted.ok).toBe(false);
     const compared = await alice.compareRemote();
-    expect(compared.kind).toBe('conflict');
-    expect(compareLabel(compared.kind)).toBe('inconsistent');
-    expect(compareLabel(compared.kind)).not.toBe('checked');
+    expect(compared.kind).toBe('pending-sync');
+    expect(compareLabel(compared.kind, 'server')).not.toBe('checked');
+    expect(compareLabel('agree', 'server')).toBe('untrusted');
   });
 });

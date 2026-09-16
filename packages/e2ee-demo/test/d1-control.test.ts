@@ -18,6 +18,26 @@ describe('D1 signed HTTP control path', () => {
     expect(anonymous.status === 401 || anonymous.status === 403).toBe(true);
   });
 
+  it('rejects an unjoined ordinary POST to the control stream without advancing offset', async () => {
+    const host = await launchHost();
+    const alice = await session(host, 'alice');
+    const outsider = await session(host, 'outsider');
+    const { genesisHex } = await alice.createSpace();
+    const path = `/ds/${genesisHex}/control`;
+    const before = await alice.fetch(path, { method: 'HEAD' });
+    const injected = await outsider.fetch(path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: Buffer.from([0, 0, 0, 1, 255]),
+    });
+    const deleted = await outsider.fetch(path, { method: 'DELETE' });
+    const after = await alice.fetch(path, { method: 'HEAD' });
+    expect(injected.status === 401 || injected.status === 403).toBe(true);
+    expect(deleted.status === 401 || deleted.status === 403).toBe(true);
+    expect(before.headers.get('stream-next-offset')).toBe(after.headers.get('stream-next-offset'));
+    expect((await alice.readLedger()).length).toBe(1);
+  });
+
   it('rejects a stranger control write on the server', async () => {
     const host = await launchHost();
     const alice = await session(host, 'alice');

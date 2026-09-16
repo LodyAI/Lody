@@ -26,6 +26,7 @@ import {
   KEYS_STREAM,
   LORO_STREAM,
   NOW_HEADER,
+  type ComparisonWire,
   type Failpoint,
   type IssuedCredential,
   type JoinRequestWire,
@@ -421,8 +422,18 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
           parts[3] === 'notes'
         ) {
           const credential = requireCredential(req, now);
-          const body = new TextDecoder().decode(await readBody(req));
-          meta.putNote(parts[2]!, credential.deviceHex, body);
+          const genesisHex = parts[2]!;
+          const note = JSON.parse(new TextDecoder().decode(await readBody(req))) as ComparisonWire;
+          if (!note || note.noteSigner !== credential.deviceHex || note.genesis !== genesisHex) {
+            json(res, 403, { error: 'note-signer-mismatch' });
+            return;
+          }
+          const ledger = await loadLedger(genesisHex);
+          if (!ledger.state.devices.has(credential.deviceHex)) {
+            json(res, 403, { error: 'unauthorized' });
+            return;
+          }
+          meta.putNote(genesisHex, credential.deviceHex, JSON.stringify(note));
           json(res, 200, { ok: true });
           return;
         }
@@ -430,9 +441,27 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
         if (parts[0] === 'ds' && parts[1] && parts[2]) {
           const genesisHex = parts[1];
           const stream = parts[2];
+          const sub = parts[3];
+          const known =
+            stream === CONTROL_STREAM ||
+            stream === KEYS_STREAM ||
+            stream === LORO_STREAM ||
+            stream === FLOCK_STREAM;
+          if (!known || !meta.space(genesisHex)) {
+            json(res, 404, { error: 'unknown-stream' });
+            return;
+          }
           const credential = requireCredential(req, now);
           if (credential.genesisHex && credential.genesisHex !== genesisHex) {
             json(res, 403, { error: 'unauthorized' });
+            return;
+          }
+          const isRead = req.method === 'GET' || req.method === 'HEAD';
+          const isSnapshotGet = isRead && sub === 'snapshot';
+          const isBootstrapGet = isRead && sub === 'bootstrap';
+          const isStreamRead = isRead && sub === undefined;
+          if (isStreamRead || isSnapshotGet || isBootstrapGet) {
+            await proxy(req, res, url);
             return;
           }
 
@@ -556,17 +585,21 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
             return;
           }
 
-          if (req.method === 'POST' && parts[3] === undefined) {
-            if (stream === LORO_STREAM || stream === FLOCK_STREAM) {
-              const ledger = await loadLedger(genesisHex);
-              if (!deviceMayWriteDocument(ledger.state, credential.deviceHex)) {
-                json(res, 403, { error: 'unauthorized' });
-                return;
-              }
+          if (
+            req.method === 'POST' &&
+            (sub === undefined || sub === 'append-cas') &&
+            (stream === LORO_STREAM || stream === FLOCK_STREAM)
+          ) {
+            const ledger = await loadLedger(genesisHex);
+            if (!deviceMayWriteDocument(ledger.state, credential.deviceHex)) {
+              json(res, 403, { error: 'unauthorized' });
+              return;
             }
+            await proxy(req, res, url);
+            return;
           }
 
-          await proxy(req, res, url);
+          json(res, 403, { error: 'method-not-allowed' });
           return;
         }
 

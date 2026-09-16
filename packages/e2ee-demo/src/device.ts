@@ -1,4 +1,4 @@
-import { toHex } from './bytes';
+import { asArrayBuffer, fromHex, toHex } from './bytes';
 
 export interface DemoDevice {
   readonly publicKey: Uint8Array;
@@ -33,6 +33,85 @@ export async function generateDevice(): Promise<DemoDevice> {
 
 export function deviceHex(device: DemoDevice): string {
   return toHex(device.publicKey);
+}
+
+function fromKey(device: {
+  publicKey: Uint8Array;
+  enc: Uint8Array;
+  signing: CryptoKeyPair;
+  encryption: CryptoKeyPair;
+}): DemoDevice {
+  return {
+    publicKey: device.publicKey,
+    enc: device.enc,
+    signing: device.signing,
+    encryption: device.encryption,
+    async sign(bytes: Uint8Array) {
+      const message = new Uint8Array(bytes.byteLength);
+      message.set(bytes);
+      return new Uint8Array(
+        await crypto.subtle.sign('Ed25519', device.signing.privateKey, message)
+      );
+    },
+  };
+}
+
+export async function exportDevice(device: DemoDevice): Promise<string> {
+  const signing = new Uint8Array(await crypto.subtle.exportKey('pkcs8', device.signing.privateKey));
+  const encryption = new Uint8Array(
+    await crypto.subtle.exportKey('pkcs8', device.encryption.privateKey)
+  );
+  return JSON.stringify({
+    publicKey: toHex(device.publicKey),
+    enc: toHex(device.enc),
+    signing: toHex(signing),
+    encryption: toHex(encryption),
+  });
+}
+
+export async function importDevice(raw: string): Promise<DemoDevice> {
+  const fields = JSON.parse(raw) as {
+    publicKey: string;
+    enc: string;
+    signing: string;
+    encryption: string;
+  };
+  const publicKey = fromHex(fields.publicKey);
+  const enc = fromHex(fields.enc);
+  const signingPrivate = await crypto.subtle.importKey(
+    'pkcs8',
+    asArrayBuffer(fromHex(fields.signing)),
+    'Ed25519',
+    true,
+    ['sign']
+  );
+  const signingPublic = await crypto.subtle.importKey(
+    'raw',
+    asArrayBuffer(publicKey),
+    'Ed25519',
+    true,
+    ['verify']
+  );
+  const encryptionPrivate = await crypto.subtle.importKey(
+    'pkcs8',
+    asArrayBuffer(fromHex(fields.encryption)),
+    'X25519',
+    true,
+    ['deriveBits']
+  );
+  const encryptionPublic = await crypto.subtle.importKey(
+    'raw',
+    asArrayBuffer(enc),
+    'X25519',
+    true,
+    []
+  );
+  return fromKey({
+    publicKey,
+    enc,
+    signing: { privateKey: signingPrivate, publicKey: signingPublic },
+    encryption: { privateKey: encryptionPrivate, publicKey: encryptionPublic },
+  });
 }
 
 export async function possessionProof(account: string, device: DemoDevice): Promise<Uint8Array> {

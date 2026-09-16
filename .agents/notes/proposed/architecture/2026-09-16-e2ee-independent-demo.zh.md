@@ -27,7 +27,12 @@ npm `streams-crdt@0.15.1` 缺少快照 `continuationOffset`，因此 demo 固定
 - 恢复备份 v2 用 `sealRecoveryBackup` 封装 R 私钥与 epoch 密钥表。恢复必须
   `committed` 接纳新设备并解密历史密文，不得伪造身份或明文存放 R。
 - 摘要不一致是 `conflict` / `inconsistent`，绝不是 `checked`。
-  `pending-sync` 不是核对成功。
+  `pending-sync` 不是核对成功。服务端托管的摘要只标 `untrusted`。
+  `checked` 只来自独立粘贴/扫码导入，且不是创始人自己的摘要。
+- `/ds` 写入口是明确允许列表。控制流/密钥流的普通 POST/DELETE 拒绝。
+  未入群设备不能向账本追加垃圾字节。
+- 浏览器会话在同源存储（localStorage；Node 用进程内 map）持久化设备密钥、
+  genesis、epoch 密钥和 pending CAS 字节。
 
 ## 限制
 

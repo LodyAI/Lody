@@ -455,9 +455,13 @@ export class DemoSession {
     return records;
   }
 
-  async publishNote(): Promise<ComparisonWire> {
+  async exportNote(): Promise<ComparisonWire> {
     const ledger = await this.readLedger();
-    const note = wireNote(ledger.comparisonNote(this.device.publicKey));
+    return wireNote(ledger.comparisonNote(this.device.publicKey));
+  }
+
+  async publishNote(): Promise<ComparisonWire> {
+    const note = await this.exportNote();
     const response = await this.fetch(`/v1/spaces/${this.genesisHex}/notes`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -467,7 +471,7 @@ export class DemoSession {
     return note;
   }
 
-  async compareRemote(): Promise<{ kind: string; independent?: boolean }> {
+  async compareRemote(): Promise<{ kind: string; independent?: boolean; source: 'server' }> {
     if (!this.genesisHex || !this.device) throw new Error('no-space');
     const ledger = await this.readLedger();
     const local = ledger.comparisonNote(this.device.publicKey);
@@ -477,8 +481,22 @@ export class DemoSession {
       notes: Array<{ deviceHex: string; body: string }>;
     };
     const other = payload.notes.find((row) => row.deviceHex !== deviceHex(this.device));
-    if (!other) return { kind: 'pending-sync' };
-    const remote = parseNote(JSON.parse(other.body) as ComparisonWire);
+    if (!other) return { kind: 'pending-sync', source: 'server' };
+    return {
+      ...this.finishCompare(local, parseNote(JSON.parse(other.body) as ComparisonWire)),
+      source: 'server',
+    };
+  }
+
+  async compareIndependent(
+    remote: ComparisonWire
+  ): Promise<{ kind: string; independent?: boolean; source: 'independent' }> {
+    const ledger = await this.readLedger();
+    const local = ledger.comparisonNote(this.device.publicKey);
+    return { ...this.finishCompare(local, parseNote(remote)), source: 'independent' };
+  }
+
+  private finishCompare(local: ComparisonNote, remote: ComparisonNote) {
     if (!this.genesis) throw new Error('no-space');
     const decoded = decodeRecord(this.genesis);
     if (decoded.body.type !== 'genesis') throw new Error('not-genesis');

@@ -9,7 +9,6 @@ import {
   hashRecord,
   joinRequestSigningBytes,
   LedgerClient,
-  MemoryLedgerStore,
   openEpochEnvelope,
   possessionSigningBytes,
   recoverHistory,
@@ -24,7 +23,15 @@ import { StreamsLedgerStream } from '@lody/e2ee-core/streams';
 import { exportBackup, recoveryAsDevice, restoreBackup } from '../backup';
 import { fromHex, randomBytes, toHex } from '../bytes';
 import type { ContentClient } from '../content-session';
-import { type DemoDevice, deviceHex, generateDevice, possessionProof } from '../device';
+import {
+  type DemoDevice,
+  deviceHex,
+  exportDevice,
+  generateDevice,
+  importDevice,
+  possessionProof,
+} from '../device';
+import { accountKv, type DemoKv, PersistingLedgerStore } from '../persist';
 import {
   CONTROL_STREAM,
   DEVICE_HEADER,
@@ -61,6 +68,8 @@ export class BrowserSession implements ContentClient {
   genesisHex: string | null = null;
   length = 0;
   compareKind = '';
+  compareSource: 'server' | 'independent' = 'server';
+  compareIndependentFlag = false;
   epochKeys = new Map<number, Uint8Array>();
   membershipId: Uint8Array | null = null;
   userId: Uint8Array | null = null;
@@ -70,12 +79,17 @@ export class BrowserSession implements ContentClient {
   flockText = '';
   keysReceived = 0;
   private ledgerClient: LedgerClient | null = null;
-  private readonly store = new MemoryLedgerStore();
+  private readonly kv: DemoKv;
+  private readonly store: PersistingLedgerStore;
 
   constructor(
     readonly baseUrl: string,
-    readonly account: string
-  ) {}
+    readonly account: string,
+    kv?: DemoKv
+  ) {
+    this.kv = accountKv(account, kv);
+    this.store = new PersistingLedgerStore(this.kv);
+  }
 
   currentEpoch(): number {
     return Math.max(0, ...this.epochKeys.keys());
@@ -98,8 +112,44 @@ export class BrowserSession implements ContentClient {
   }
 
   async start(): Promise<void> {
-    this.device = await generateDevice();
+    const savedDevice = this.kv.getItem('device');
+    this.device = savedDevice ? await importDevice(savedDevice) : await generateDevice();
+    if (!savedDevice) this.kv.setItem('device', await exportDevice(this.device));
+    this.loadState();
     await this.issueCredential();
+  }
+
+  private loadState(): void {
+    const raw = this.kv.getItem('state');
+    if (!raw) return;
+    const fields = JSON.parse(raw) as {
+      genesisHex?: string | null;
+      genesis?: string | null;
+      userId?: string | null;
+      membershipId?: string | null;
+      epochs?: Array<[number, string]>;
+    };
+    if (fields.genesis && fields.genesisHex) {
+      this.genesis = fromHex(fields.genesis);
+      this.genesisHex = fields.genesisHex;
+    }
+    if (fields.userId) this.userId = fromHex(fields.userId);
+    if (fields.membershipId) this.membershipId = fromHex(fields.membershipId);
+    this.epochKeys = new Map((fields.epochs ?? []).map(([epoch, key]) => [epoch, fromHex(key)]));
+    this.keysReceived = this.epochKeys.size;
+  }
+
+  private persistState(): void {
+    this.kv.setItem(
+      'state',
+      JSON.stringify({
+        genesisHex: this.genesisHex,
+        genesis: this.genesis ? toHex(this.genesis) : null,
+        userId: this.userId ? toHex(this.userId) : null,
+        membershipId: this.membershipId ? toHex(this.membershipId) : null,
+        epochs: [...this.epochKeys.entries()].map(([epoch, key]) => [epoch, toHex(key)]),
+      })
+    );
   }
 
   private async issueCredential(): Promise<void> {
@@ -177,6 +227,7 @@ export class BrowserSession implements ContentClient {
     });
     if (!response.ok) throw new Error(`create-space-${response.status}`);
     this.ledgerClient = null;
+    this.persistState();
     await this.readLedger();
     return this.genesisHex;
   }
@@ -188,6 +239,7 @@ export class BrowserSession implements ContentClient {
     this.genesis = fromHex(payload.genesis);
     this.genesisHex = genesisHex;
     this.ledgerClient = null;
+    this.persistState();
     await this.readLedger();
   }
 
@@ -249,21 +301,42 @@ export class BrowserSession implements ContentClient {
     );
     const result = await client.submit(record);
     this.length = result.ledger.length;
+    this.persistState();
     return { status: result.status, ledger: result.ledger };
   }
 
-  async publishNote(): Promise<void> {
+  async resume(): Promise<{ status: string; ledger: Awaited<ReturnType<LedgerClient['read']>> }> {
+    const result = await (await this.openLedger()).resume();
+    this.length = result.ledger.length;
+    this.persistState();
+    return { status: result.status, ledger: result.ledger };
+  }
+
+  async exportNote(): Promise<ComparisonWire> {
     const ledger = await this.readLedger();
-    const note = wireNote(ledger.comparisonNote(this.device.publicKey));
+    return wireNote(ledger.comparisonNote(this.device.publicKey));
+  }
+
+  async publishNote(): Promise<ComparisonWire> {
+    const note = await this.exportNote();
     const response = await this.fetch(`/v1/spaces/${this.genesisHex}/notes`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(note),
     });
     if (!response.ok) throw new Error(`note-${response.status}`);
+    return note;
   }
 
   async compare(): Promise<string> {
+    return (await this.compareRemote()).kind;
+  }
+
+  async compareRemote(): Promise<{
+    kind: string;
+    independent?: boolean;
+    source: 'server';
+  }> {
     if (!this.genesis || !this.device) throw new Error('no-space');
     const ledger = await this.readLedger();
     const local = ledger.comparisonNote(this.device.publicKey);
@@ -274,16 +347,39 @@ export class BrowserSession implements ContentClient {
     const other = payload.notes.find((row) => row.deviceHex !== deviceHex(this.device));
     if (!other) {
       this.compareKind = 'pending-sync';
-      return this.compareKind;
+      this.compareSource = 'server';
+      this.compareIndependentFlag = false;
+      return { kind: this.compareKind, source: 'server' };
     }
-    const remote = parseNote(JSON.parse(other.body) as ComparisonWire);
+    return this.finishCompare(local, parseNote(JSON.parse(other.body) as ComparisonWire), 'server');
+  }
+
+  async compareIndependent(remote: ComparisonWire): Promise<{
+    kind: string;
+    independent?: boolean;
+    source: 'independent';
+  }> {
+    if (!this.genesis || !this.device) throw new Error('no-space');
+    const ledger = await this.readLedger();
+    const local = ledger.comparisonNote(this.device.publicKey);
+    return this.finishCompare(local, parseNote(remote), 'independent');
+  }
+
+  private finishCompare<S extends 'server' | 'independent'>(
+    local: ComparisonNote,
+    remote: ComparisonNote,
+    source: S
+  ): { kind: string; independent?: boolean; source: S } {
+    if (!this.genesis) throw new Error('no-space');
     const decoded = decodeRecord(this.genesis);
     if (decoded.body.type !== 'genesis') throw new Error('not-genesis');
     const comparison = Ledger.compareNotes(local, remote, {
       originalEndorser: decoded.body.fields.signer,
     });
     this.compareKind = comparison.kind;
-    return comparison.kind;
+    this.compareSource = source;
+    this.compareIndependentFlag = comparison.kind === 'agree' && comparison.independent === true;
+    return { ...comparison, source };
   }
 
   async deliverEpochKey(recipient: DemoDevice, epoch = this.currentEpoch()): Promise<void> {
@@ -378,6 +474,7 @@ export class BrowserSession implements ContentClient {
       }
     }
     this.keysReceived = this.epochKeys.size;
+    this.persistState();
     return opened;
   }
 
@@ -398,6 +495,7 @@ export class BrowserSession implements ContentClient {
     if (submitted.status !== 'committed') throw new Error(`rotate-${submitted.status}`);
     this.epochKeys.set(epoch, next);
     this.epoch = epoch;
+    this.persistState();
   }
 
   async revokeFirstOtherMember(): Promise<void> {
@@ -452,6 +550,7 @@ export class BrowserSession implements ContentClient {
       packets: collectEpochPackets(records, decoded.body.fields.epochCommitment),
     });
     this.keysReceived = this.epochKeys.size;
+    this.persistState();
   }
 
   private async suffixRecords(): Promise<Uint8Array[]> {
@@ -496,13 +595,20 @@ export class BrowserSession implements ContentClient {
     const added = await this.admitDevice(phone, 'personal', false);
     if (added.status !== 'committed') throw new Error(`restore-admit-${added.status}`);
     this.device = phone;
+    this.kv.setItem('device', await exportDevice(this.device));
     await this.reauth();
     await this.readLedger();
+    this.persistState();
   }
 }
 
-export function compareLabel(kind: string): string {
-  if (kind === 'agree') return 'checked';
+export function compareLabel(
+  kind: string,
+  source: 'server' | 'independent' = 'server',
+  independent = false
+): string {
+  if (kind === 'agree' && source === 'independent' && independent) return 'checked';
+  if (kind === 'agree') return 'untrusted';
   if (kind === 'conflict' || kind === 'different-org') return 'inconsistent';
   if (kind === 'pending-sync') return 'pending';
   return kind || 'none';

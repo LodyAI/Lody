@@ -57,22 +57,34 @@ describe.skipIf(process.env.LODY_E2EE_DEMO_BROWSER !== '1')('D2 isolated browser
       await pageB.waitForFunction(() =>
         (document.getElementById('log')?.textContent ?? '').includes('note published')
       );
-      await pageA.click('#compare');
-      await pageB.click('#compare');
+      const noteA = await pageA.locator('#note-export').inputValue();
+      const noteB = await pageB.locator('#note-export').inputValue();
+      expect(noteA.length).toBeGreaterThan(10);
+      await pageA.fill('#note-import', noteB);
+      await pageA.click('#compare-independent');
       await pageA.waitForFunction(
-        () => (document.getElementById('compare-kind')?.textContent ?? '').length > 0
+        () => (document.getElementById('compare-label')?.textContent ?? '') === 'checked'
       );
+      await pageB.fill('#note-import', noteA);
+      await pageB.click('#compare-independent');
       await pageB.waitForFunction(
-        () => (document.getElementById('compare-kind')?.textContent ?? '').length > 0
+        () => (document.getElementById('compare-label')?.textContent ?? '') === 'untrusted'
       );
-      const kindA = await pageA.locator('#compare-kind').textContent();
-      const kindB = await pageB.locator('#compare-kind').textContent();
-      const labelA = await pageA.locator('#compare-label').textContent();
-      const labelB = await pageB.locator('#compare-label').textContent();
-      expect(kindA).toBe('agree');
-      expect(kindB).toBe('agree');
-      expect(labelA).toBe('checked');
-      expect(labelB).toBe('checked');
+      await pageA.click('#compare');
+      await pageA.waitForFunction(
+        () =>
+          (document.getElementById('log')?.textContent ?? '').includes('compare agree') ||
+          (document.getElementById('log')?.textContent ?? '').includes('compare pending-sync')
+      );
+      expect(await pageA.locator('#compare-label').textContent()).not.toBe('checked');
+      const genesisBefore = await pageA.locator('#genesis').inputValue();
+      await pageA.reload();
+      await pageA.selectOption('#account', 'alice');
+      await pageA.click('#connect');
+      await pageA.waitForFunction(
+        () => (document.getElementById('genesis') as HTMLInputElement)?.value.length === 64
+      );
+      expect(await pageA.locator('#genesis').inputValue()).toBe(genesisBefore);
     } finally {
       await browser.close();
     }
