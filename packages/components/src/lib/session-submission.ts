@@ -1,3 +1,4 @@
+import type { SessionAttachmentDraft } from '@/lib/session-attachment-draft';
 import { acceptSessionUserTurn } from './session-send-admission';
 import type {
   SessionHistory,
@@ -206,7 +207,8 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
 
   const startSession = async (
     payload: SessionToCreate,
-    history: Omit<SessionHistoryInput, 'id'>
+    history: Omit<SessionHistoryInput, 'id'>,
+    attachments?: SessionAttachmentDraft[]
   ): Promise<StartSessionResult> => {
     if (!runtime) {
       throw new Error('Runtime not ready');
@@ -232,8 +234,16 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     void runtime.ensureDocStream(sessionRoomId).catch((error: unknown) => {
       console.warn('Failed to pre-create session doc stream', { sessionId, error });
     });
-    await acceptSessionUserTurn(runtime, sessionId, historyEntry, { kind: 'dispatch' }, sessionMeta);
-    publishSessionMeta(sessionRoomId, sessionMeta);
+    await acceptSessionUserTurn(
+      runtime,
+      sessionId,
+      historyEntry,
+      { kind: 'dispatch' },
+      sessionMeta,
+      undefined,
+      attachments
+    );
+    if (!attachments?.length) publishSessionMeta(sessionRoomId, sessionMeta);
     recordChat(sessionMeta, sessionId, true, history.items);
     return { sessionId, sessionMeta, historyEntry };
   };
@@ -241,7 +251,11 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
   const addSessionHistory = async (
     sessionId: SessionId,
     history: Omit<SessionHistoryInput, 'id'>,
-    options?: { dispatch?: boolean; guideExpectedTurnId?: string }
+    options?: {
+      dispatch?: boolean;
+      guideExpectedTurnId?: string;
+      attachments?: SessionAttachmentDraft[];
+    }
   ) => {
     if (!runtime) {
       throw new Error('Runtime not ready');
@@ -280,8 +294,17 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
       };
     }
     if (entry.role === 'user') {
-      await acceptSessionUserTurn(runtime, sessionId, entry,
-        options?.guideExpectedTurnId ? { kind: 'guide', expectedTurnId: options.guideExpectedTurnId } : { kind: options?.dispatch ? 'dispatch' : 'queue' });
+      await acceptSessionUserTurn(
+        runtime,
+        sessionId,
+        entry,
+        options?.guideExpectedTurnId
+          ? { kind: 'guide', expectedTurnId: options.guideExpectedTurnId }
+          : { kind: options?.dispatch ? 'dispatch' : 'queue' },
+        undefined,
+        undefined,
+        options?.attachments
+      );
     } else {
       await runtime.writer.appendSessionTurn(sessionId, entry, dispatch);
     }
@@ -385,7 +408,10 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     }
     const saved = await runtime.sendJournal?.read(userTurnId);
     if (saved) {
-      const active = await runtime.sendJournal!.activate(userTurnId, { kind: 'guide', expectedTurnId });
+      const active = await runtime.sendJournal!.activate(userTurnId, {
+        kind: 'guide',
+        expectedTurnId,
+      });
       await runtime.sendJournal!.submit(sessionId);
       if (active) await runtime.sendJournal!.deliver(active);
       const completed = await runtime.sendJournal!.read(userTurnId);

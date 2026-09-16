@@ -1,7 +1,10 @@
 import { LoroDoc } from 'loro-crdt';
 import { createHistoryWriter } from '@lody/shared';
 import { createSessionSendJournal, type SessionSendRecord } from '../src/lib/session-send-journal';
-import { createSessionSendResources, type SessionSendResources } from '../src/lib/session-send-resources';
+import {
+  createSessionSendResources,
+  type SessionSendResources,
+} from '../src/lib/session-send-resources';
 import { applyHistoryAction } from '../../shared/src/session-data/history-actions';
 import type { HistoryAction, SessionEntry } from '@lody/shared/session-data';
 // @vitest-environment jsdom
@@ -12,6 +15,7 @@ import { Provider, createStore } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   FREE_SESSION_LIMIT_PER_WORKSPACE,
+  SESSION_DOC_PREFIX,
   getMachineRoomId,
   getSessionRoomId,
   machineFlockKeys,
@@ -154,6 +158,9 @@ const createRuntime = (
     overrides.repo ??
     ({
       upsertDocMeta: vi.fn(async () => undefined),
+      getDocMeta: vi.fn(async (roomId: string) => ({
+        meta: { id: roomId.slice(SESSION_DOC_PREFIX.length), machineId: 'machine-1' },
+      })),
     } as unknown as WorkspaceRuntime['repo']);
 
   const sessionHistory: unknown[] = [];
@@ -237,9 +244,17 @@ const createRuntime = (
     resources,
     storage: {
       list: async () => structuredClone([...records.values()]),
-      insert: async (input) => { const saved = { ...input, sequence: records.size + 1 }; records.set(saved.id, saved); return saved; },
-      put: async (value) => { records.set(value.id, value); },
-      remove: async (id) => { records.delete(id); },
+      insert: async (input) => {
+        const saved = { ...input, sequence: records.size + 1 };
+        records.set(saved.id, saved);
+        return saved;
+      },
+      put: async (value) => {
+        records.set(value.id, value);
+      },
+      remove: async (id) => {
+        records.delete(id);
+      },
       close: async () => {},
     },
     lock: async (_key, _signal, execute) => execute(),
@@ -863,7 +878,9 @@ describe('useSessionActions', () => {
 
     // A resend rides the ordinary send path: identical content, brand-new id.
     expect(second.id).not.toBe(first.id);
-    const resent = await runtime.withSessionStore(sessionId, (store) => store.sessionData.history.readTurn(second.id));
+    const resent = await runtime.withSessionStore(sessionId, (store) =>
+      store.sessionData.history.readTurn(second.id)
+    );
     expect(resent).toMatchObject({ state: 'ready', turn: { inputConfig: { inputBlocks } } });
   });
 
@@ -936,7 +953,9 @@ describe('useSessionActions', () => {
       } as unknown as Parameters<SessionActions['startSession']>[1]
     );
 
-    const saved = runtime.sendJournal!.getSnapshot().find((record) => record.sessionId === sessionId);
+    const saved = runtime
+      .sendJournal!.getSnapshot()
+      .find((record) => record.sessionId === sessionId);
     const meta = saved!.creation!;
     expect(meta).not.toHaveProperty('baseBranch');
     expect(meta.project).toMatchObject({ branch: selector });

@@ -1,6 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ArrowUp, Bot, Github } from 'lucide-react';
+import { createLocalPlatformProvider, createStaticStore } from '@lody/platform';
+import { PlatformContext } from '@lody/platform/react';
 
 import {
   ChatComposer,
@@ -37,6 +39,15 @@ registerBuiltInCommands();
  */
 const noop = () => undefined;
 
+const storyPlatform = createLocalPlatformProvider({
+  session: createStaticStore({ status: 'unauthenticated' }),
+  workspaces: createStaticStore({ status: 'ready', workspaces: [], activeWorkspaceId: null }),
+});
+
+function StoryPlatform({ children }: { children: ReactNode }) {
+  return <PlatformContext.Provider value={storyPlatform}>{children}</PlatformContext.Provider>;
+}
+
 const meta = {
   title: 'Chat/Landing Attachments',
   component: ChatLandingView,
@@ -62,26 +73,18 @@ const imagePreviewDataUri = (label: string, color: string): string =>
 
 const sampleImageItems: ChatComposerImageItem[] = [
   {
-    id: 'img-uploaded',
+    id: 'img-draft',
     name: 'mockup.png',
     previewUrl: imagePreviewDataUri('PNG', '#2563eb'),
-    status: 'uploaded',
-    progress: 100,
-  },
-  {
-    id: 'img-uploading',
-    name: 'screenshot.png',
-    previewUrl: imagePreviewDataUri('45%', '#7c3aed'),
-    status: 'uploading',
-    progress: 45,
-  },
-  {
-    id: 'img-failed',
-    name: 'too-big.heic',
-    previewUrl: imagePreviewDataUri('ERR', '#475569'),
-    status: 'failed',
+    status: 'draft',
     progress: 0,
-    error: 'Upload failed: file exceeds the 5 MB image limit',
+  },
+  {
+    id: 'img-draft-second',
+    name: 'screenshot.png',
+    previewUrl: imagePreviewDataUri('PNG', '#7c3aed'),
+    status: 'draft',
+    progress: 0,
   },
 ];
 
@@ -90,18 +93,16 @@ const sampleFileItems: ChatComposerFileItem[] = [
     id: 'f-epub',
     name: '哥德尔、艾舍尔、巴赫——集异璧之大成.epub',
     sizeLabel: '4.1 MB',
-    status: 'uploaded',
-    progress: 100,
+    status: 'draft',
+    progress: 0,
   },
-  { id: 'f-uploaded', name: 'build.log', sizeLabel: '2.3 MB', status: 'uploaded', progress: 100 },
-  { id: 'f-uploading', name: 'data.csv', sizeLabel: '11.0 MB', status: 'uploading', progress: 62 },
+  { id: 'f-draft', name: 'build.log', sizeLabel: '2.3 MB', status: 'draft', progress: 0 },
   {
-    id: 'f-failed',
+    id: 'f-draft-second',
     name: 'archive.zip',
     sizeLabel: '48.0 MB',
-    status: 'failed',
+    status: 'draft',
     progress: 0,
-    error: 'Network error while uploading — tap to retry',
   },
 ];
 
@@ -126,26 +127,28 @@ function SelectorPill({ icon: Icon, label }: { icon: typeof Bot; label: string }
 function DesktopLandingDemo() {
   const [prompt, setPrompt] = useState('Review the attached spec and screenshots.');
   return (
-    <div className="min-h-screen bg-background">
-      <ChatLandingView
-        tone="light"
-        isMobile={false}
-        title="Let's ship something"
-        promptValue={prompt}
-        onPromptChange={setPrompt}
-        promptPlaceholder="Describe the task, attach files or images…"
-        onSubmit={noop}
-        submitLabel="Send"
-        submittingLabel="Sending…"
-        imageItems={sampleImageItems}
-        onAttachmentAddClick={noop}
-        onImageRemove={noop}
-        onImageRetry={noop}
-        fileItems={sampleFileItems}
-        onFileRemove={noop}
-        onFileRetry={noop}
-      />
-    </div>
+    <StoryPlatform>
+      <div className="min-h-screen bg-background">
+        <ChatLandingView
+          tone="light"
+          isMobile={false}
+          title="Let's ship something"
+          promptValue={prompt}
+          onPromptChange={setPrompt}
+          promptPlaceholder="Describe the task, attach files or images…"
+          onSubmit={noop}
+          submitLabel="Send"
+          submittingLabel="Sending…"
+          imageItems={sampleImageItems}
+          onAttachmentAddClick={noop}
+          onImageRemove={noop}
+          onImageRetry={noop}
+          fileItems={sampleFileItems}
+          onFileRemove={noop}
+          onFileRetry={noop}
+        />
+      </div>
+    </StoryPlatform>
   );
 }
 
@@ -219,11 +222,13 @@ function MobileNewChatDemo() {
   return (
     // Phone-width frame so the sheet reads like the real mobile drawer even on
     // a wide Storybook canvas. Mobile card sizing still keys off window width.
-    <div className="flex min-h-screen justify-center bg-muted/40 py-6">
-      <div className="h-[720px] w-[390px] overflow-hidden rounded-3xl border bg-background shadow-xl">
-        <MobileNewChatSheetContent {...contentProps} />
+    <StoryPlatform>
+      <div className="flex min-h-screen justify-center bg-muted/40 py-6">
+        <div className="h-[720px] w-[390px] overflow-hidden rounded-3xl border bg-background shadow-xl">
+          <MobileNewChatSheetContent {...contentProps} />
+        </div>
       </div>
-    </div>
+    </StoryPlatform>
   );
 }
 
