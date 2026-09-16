@@ -398,21 +398,35 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     if (!entry || !inputConfig || !userId || !machineId) {
       return false;
     }
-    const response = await runtime.requestSessionSteer(machineId, {
+    const steerRequest = {
       sessionId,
       expectedTurnId,
       userTurnId,
       userId,
       timestamp: entry.timestamp,
       inputConfig,
-    });
+    };
+    let response = await runtime.requestSessionSteer(machineId, steerRequest);
+    if (response?.recoveryOwned && response.disposition === 'promotion-failed') {
+      // The CLI owns recovery for this verdict. Retry through that same owner;
+      // a renderer-side promotion could overwrite a newer activation pointer.
+      response = await runtime.requestSessionSteer(machineId, steerRequest);
+      if (
+        !response ||
+        response.disposition === 'promotion-failed' ||
+        response.disposition === 'error'
+      ) {
+        throw new Error(response?.error ?? 'Could not recover the undelivered guidance');
+      }
+    }
     if (response?.applied) {
       onRpcDelivered(sessionId, userTurnId);
       return true;
     }
     if (
-      response?.disposition === 'no-active-turn' ||
-      response?.disposition === 'promotion-failed'
+      !response?.recoveryOwned &&
+      (response?.disposition === 'no-active-turn' ||
+        response?.disposition === 'promotion-failed')
     ) {
       // The CLI proved the steer was not applied, either before submission
       // or from the adapter's final verdict. Reuse the same user turn as an
