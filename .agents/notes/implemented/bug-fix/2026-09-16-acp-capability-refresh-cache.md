@@ -17,9 +17,11 @@ when the entry came from a real probe, its source version is exactly what the cu
 inputs would produce, and it is younger than 24 hours; startup discovery now records completion
 per config, so restarting an interrupted pass re-probes nothing that already answered. Explicit
 probes — Settings refresh, post-authentication verification, onboarding's provider test, provider
-setup — set a new `force` flag and are unaffected. The residual uncertainty is named below: why
-the renderer's boolean never latched could not be established from the machine's logs, so the fix
-was chosen to hold under either candidate mechanism rather than to depend on knowing.
+setup — set a new `force` flag, negotiated through `MachineMeta.protocolCapabilities` because a
+daemon that predates the flag parses the request strictly and drops it. The residual uncertainty is
+named below: why the renderer's boolean never latched could not be established from the machine's
+logs, so the fix was chosen to hold under either candidate mechanism rather than to depend on
+knowing.
 
 ## What the logs actually showed
 
@@ -108,6 +110,60 @@ probes/day on this machine, a day costs ~6, and both are far below the measured 
 future-dated `fetchedAt` counts as fresh rather than as a reason to re-probe, because writer and
 reader stamp it from the same server clock, so a negative age means a clock adjustment.
 
+## `force` has to be negotiated, and omission is the mechanism
+
+The first revision of this change sent `force: true` unconditionally, which review caught. Both
+transports parse the request with a strict schema, so a daemon built before the field exists does
+not ignore it:
+
+- **Machine RPC:** `LoroStreamsRpcRequestSchema.safeParse` fails in `handleRawRequest`, which logs
+  a warning and **returns without appending any response**. The caller sees no error, only the
+  client backstop timeout — strictly worse than a rejection.
+- **Local control:** `LocalSessionControlRequestSchema` is a discriminated union over the same
+  strict `MachineAcpCapabilitiesRefreshRequestSchema`, so the daemon answers HTTP 400
+  `invalid_request`. This path matters as much as the remote one, because the desktop app and the
+  CLI daemon are upgraded separately and either can be the newer side.
+
+Verified against the pre-change files at `4de83a57`: both schemas were `.strict()` and neither
+declared `force`. Verified in zod 4.3.6 that `.strict()` rejects an unrecognized key **even when
+its value is `undefined`** — which is why `negotiatedAcpCapabilitiesRefreshForce` returns `{}` to
+spread rather than `{ force: undefined }`. A "falsy force" spelling would have shipped the same
+bug in a form that reads as fixed.
+
+The capability is `acpCapabilityRefreshCache` at version 1, declared in
+`machine-protocol-capabilities.ts` alongside its version and its check, as
+`packages/shared/AGENTS.md` requires. One key covers both facts on purpose: a daemon that never
+caches is exactly a daemon that rejects `force`, so splitting them could only produce an
+unrepresentable state. Degradation is a no-op for every caller — such a daemon always probes,
+which is what a forced caller wanted, and an unforced caller gets the pre-change behavior.
+
+Negotiation happens at exactly two places, and the distinction is which requests cross a version
+boundary:
+
+- `create-workspace-runtime.ts`'s `requestMachineAcpCapabilitiesRefresh`, the single choke point
+  both planes flow through, so the renderer's callers keep passing plain `force: true`.
+- `apps/cli/src/commands/agent-config.ts`, where the CLI binary can be newer than the daemon it
+  dispatches to.
+
+The CLI's in-process callers — post-authentication verification in `session-execution-service.ts`
+and `provider-setup-manager.ts` — are deliberately **not** negotiated: the message never leaves the
+build that created it, so a capability check there would only be able to disagree with itself.
+
+## Every caller, and whether it forces
+
+| Caller | Forces | Why |
+| --- | --- | --- |
+| `create-workspace-runtime.ts` startup pass | no | wants the cache; this is the cost being removed |
+| `use-agent-role-schema-reconciliation.ts` | no | reconciles against the current entry, whatever produced it |
+| `machine-agent-settings.tsx` Settings refresh | yes | a person changed something outside the launch inputs |
+| `providers-screen.tsx` onboarding provider test | yes | exists to prove the agent starts |
+| `commands/agent-config.ts` `refresh-capabilities` | yes | same intent as Settings; was missed in the first revision |
+| `session-execution-service.ts` post-authentication | yes | new credentials change entitlements |
+| `provider-setup-manager.ts` verification | yes | proves the runtime it just installed starts |
+
+That is the complete set of request construction sites; the sweep is reproducible with
+`grep -rn "'machine/acp-capabilities-refresh'"` filtered to request literals.
+
 ## Builtin agents cannot use the static table
 
 `STATIC_BUILTIN_ACP_CAPABILITIES` was evaluated for item 4 and deliberately not used. Its own
@@ -135,8 +191,16 @@ inventing data, which is why this note takes that route instead.
 
 Behavior is covered by the tests listed in [the Spec](../../../../specs/acp-capability-refresh-cache.md);
 the machine-side tests assert that no probe is started, not that a mock was called a certain number
-of times. Not verified: the end-to-end effect on a running desktop build, because reproducing the
-300 s presence lease requires the hosted presence room. The expected steady-state effect on the
+of times. The negotiation tests validate the payload a client actually emits against a
+previous-generation schema **derived from the current one** (`.omit({ force: true })`), so the
+reconstruction cannot drift away from what shipped, on both transports.
+
+Not verified: the end-to-end effect on a running desktop build, because reproducing the 300 s
+presence lease requires the hosted presence room. Also not under test: that the
+`refresh-capabilities` command's own call site passes `force` — driving that Commander action would
+need `getAuthContextOrThrow`, `withWorkspaceManager`, `listMachineMetasForWorkspace` and
+`dispatchLocalControl` all replaced, and the resulting assertions would be about those mocks rather
+than about behavior. What it spreads is covered where it is real, in the negotiation tests. The expected steady-state effect on the
 measured machine is six probes per day instead of ~1,700, but that is a projection from the cache
 predicate, not a measurement.
 

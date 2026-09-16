@@ -15,8 +15,9 @@ Translation: current
 version 恰等于当前启动输入会产生的版本、且未超过 24 小时时，直接用该条目回答；启动期发现改为
 按 config 记录完成情况，因此被打断的一遍重启后不会重复探测任何已回答的 config。显式探测——
 设置页刷新、认证后校验、引导流程的 Provider 测试、provider setup——都设置新增的 `force` 标志，
-行为不变。剩余的不确定性在下文点明：渲染端那个布尔值为何始终没有 latch，无法仅凭机器侧日志
-确定，因此修法选择在两种候选机制下都成立，而不依赖于知道答案。
+并通过 `MachineMeta.protocolCapabilities` 协商，因为早于该字段的 daemon 会严格解析请求并把它
+丢弃。剩余的不确定性在下文点明：渲染端那个布尔值为何始终没有 latch，无法仅凭机器侧日志确定，
+因此修法选择在两种候选机制下都成立，而不依赖于知道答案。
 
 ## 日志实测
 
@@ -93,6 +94,55 @@ Agent 自己的配置里改动的斜杠命令、子 Agent 或模型权限。有�
 约 1700 次。`fetchedAt` 落在未来算作新鲜而不是重探的理由，因为写方与读方用的是同一个服务器时钟，
 负年龄意味着时钟调整。
 
+## `force` 必须协商，而"省略"就是机制本身
+
+本改动的第一版无条件发送 `force: true`，被评审抓到了。两条传输在机器侧都用严格 schema 解析，
+因此早于该字段的 daemon 不会忽略它：
+
+- **Machine RPC：** `handleRawRequest` 里 `LoroStreamsRpcRequestSchema.safeParse` 失败，只打一条
+  warning 然后 **直接返回，不追加任何响应**。调用方看不到错误，只能等到客户端兜底超时——比被
+  拒绝还糟。
+- **本地 local control：** `LocalSessionControlRequestSchema` 是基于同一个严格的
+  `MachineAcpCapabilitiesRefreshRequestSchema` 的判别联合，daemon 直接回 HTTP 400
+  `invalid_request`。这条路径和远程一样重要，因为桌面应用与 CLI daemon 各自独立升级，任何一侧
+  都可能是较新的那一侧。
+
+对照 `4de83a57` 的改动前文件已确认：两个 schema 都是 `.strict()`，且都未声明 `force`。并在
+zod 4.3.6 上实测确认：`.strict()` **即使该键的值是 `undefined` 也会拒绝**——这正是
+`negotiatedAcpCapabilitiesRefreshForce` 返回可展开的 `{}` 而不是 `{ force: undefined }` 的原因。
+"falsy force" 那种写法会以一种看起来已修好的形式把同一个 bug 发出去。
+
+能力键是 `acpCapabilityRefreshCache`，版本 1，按 `packages/shared/AGENTS.md` 的要求与它的版本
+常量和检查函数一起声明在 `machine-protocol-capabilities.ts`。有意用一个键覆盖两件事：不做缓存
+的 daemon 恰好就是拒绝 `force` 的 daemon，拆成两个键只能造出一个不可能存在的状态。对所有调用方
+而言退化都是空操作——这样的 daemon 本来总是探测，正是强制刷新想要的；而非强制的调用方拿到的就是
+改动前的行为。
+
+协商只发生在两处，区别在于哪些请求会跨越版本边界：
+
+- `create-workspace-runtime.ts` 的 `requestMachineAcpCapabilitiesRefresh`，两条 plane 都经过的
+  单一收窄点，因此渲染端各调用方继续照常传 `force: true`。
+- `apps/cli/src/commands/agent-config.ts`，因为 CLI 二进制可能比它所派发的 daemon 更新。
+
+CLI 的进程内调用方——`session-execution-service.ts` 里认证后的校验与
+`provider-setup-manager.ts`——有意**不**协商：消息从未离开创建它的那个构建，在那里做能力检查
+只可能与自己意见不一致。
+
+## 全部调用方，以及各自是否 force
+
+| 调用方 | 是否 force | 原因 |
+| --- | --- | --- |
+| `create-workspace-runtime.ts` 启动扫描 | 否 | 它要的就是缓存；被消除的正是这项开销 |
+| `use-agent-role-schema-reconciliation.ts` | 否 | 它对照的是当前条目，不关心是谁产生的 |
+| `machine-agent-settings.tsx` 设置页刷新 | 是 | 有人改了启动输入之外的东西 |
+| `providers-screen.tsx` 引导 Provider 测试 | 是 | 它存在就是为了证明 Agent 能启动 |
+| `commands/agent-config.ts` `refresh-capabilities` | 是 | 与设置页同一意图；第一版漏掉了 |
+| `session-execution-service.ts` 认证后 | 是 | 新凭据会改变权限授予 |
+| `provider-setup-manager.ts` 校验 | 是 | 证明刚安装的 runtime 能启动 |
+
+这是请求构造点的完整集合；该清查可用 `grep -rn "'machine/acp-capabilities-refresh'"` 过滤出
+请求字面量来复现。
+
 ## builtin Agent 不能改用静态表
 
 `STATIC_BUILTIN_ACP_CAPABILITIES` 针对第 4 项做过评估，并有意未采用。它自己的契约就这么写着——
@@ -115,8 +165,15 @@ Agent 自己的配置里改动的斜杠命令、子 Agent 或模型权限。有�
 ## 验证与界限
 
 行为覆盖见 [Spec](../../../../specs/acp-capability-refresh-cache.md) 中列出的测试；机器侧测试
-断言的是"没有启动探测"，而不是某个 mock 被调用了几次。未验证：在运行中的桌面构建上的端到端
-效果，因为复现 300 秒 presence 租约需要托管 presence 房间。对实测那台机器的稳态预期是每天六次
+断言的是"没有启动探测"，而不是某个 mock 被调用了几次。协商测试把客户端实际发出的 payload 对照
+一份**由当前 schema 派生**的上一代 schema（`.omit({ force: true })`）校验，因此该重建不会与实际
+发布过的形态漂移，两条传输都覆盖。
+
+未验证：在运行中的桌面构建上的端到端效果，因为复现 300 秒 presence 租约需要托管 presence 房间。
+同样未被测试覆盖的是：`refresh-capabilities` 命令自身的调用点确实传了 `force`——驱动那个
+Commander action 需要替换掉 `getAuthContextOrThrow`、`withWorkspaceManager`、
+`listMachineMetasForWorkspace` 与 `dispatchLocalControl`，得到的断言会是关于这些 mock 而不是关于
+行为。它所展开的那部分在协商测试里已按真实形态覆盖。对实测那台机器的稳态预期是每天六次
 探测而非约 1700 次，但这是从缓存判定推出的预测，不是测量结果。
 
 相关：[ACP capability cache compatibility](../../../../specs/acp-capability-cache-compatibility.md)

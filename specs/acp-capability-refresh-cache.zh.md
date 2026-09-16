@@ -27,15 +27,23 @@ commands 与能力条目，客户端按同样的方式写入自己的 Machine Fl
 
 ## 哪些路径仍必须启动 Agent
 
-缓存是默认路径，不是唯一路径。请求可以设置 `force` 来要求一次真实探测，以下路径都这样做：
+缓存是默认路径，不是唯一路径。请求可以设置 `force` 来要求一次真实探测，凡是由人或安装流程
+发起的请求都这样做：
 
 - 设置页里由人按下的刷新——它存在的前提正是此人改了 Lody 在启动输入里看不到的东西。
+- `refresh-capabilities` CLI 命令——理由相同。
 - 认证成功后的能力校验——此时要回答的是新凭据到底能不能用、账号现在授予了什么。
 - 引导流程的 Provider 测试与 provider setup 的校验——它们存在就是为了证明 Lody 刚安装的
   runtime 真的能启动。
 
-`force` 在线路上默认缺席；机器把缺席当作"你可以用缓存回答"。不认识该字段的旧机器仍会探测，
-对每一个强制刷新的调用方来说这是安全方向。
+会用缓存回答的机器与认识 `force` 的机器是同一台机器，因此一个协商能力同时覆盖两者：客户端
+只向声明了 `acpCapabilityRefreshCache` 的机器发送 `force`，其余情况完全省略该字段。省略本身
+就是全部机制，而不是形式——不具备该能力的机器会严格解析这个请求，收到未声明字段会把它丢弃或
+拒绝，强制刷新的调用方只会等到一个超时而不是一次刷新。而从未声明该能力的机器也本就没有缓存
+可供退出，所以省略字段照样给了该调用方它要的那次探测。
+
+在确实支持该字段的机器上，`force` 同样默认缺席，此时缺席意味着"你可以用缓存回答"。两条传输
+以同样方式携带该字段，因为桌面应用与机器 daemon 各自独立升级，任何一侧都可能是较新的那一侧。
 
 ## 刷新不是定时任务
 
@@ -48,6 +56,9 @@ commands 与能力条目，客户端按同样的方式写入自己的 Machine Fl
 `packages/shared/tests/ai-capability-cache.test.ts`（复用、过期、版本不可知、provenance）、
 `packages/shared/tests/local-session-control.test.ts` 与
 `packages/loro-streams-rpc/tests/machine-rpc-server.test.ts`（两条传输上的 `force` 字段）、
+`packages/shared/tests/machine-protocol-capabilities.test.ts` 与
+`packages/loro-streams-rpc/tests/loro-streams-rpc.test.ts`（协商：把实际发出的 payload 对照
+一份由当前 schema 派生出的上一代 schema 校验，两条传输都覆盖）、
 `apps/cli/tests/session-execution-service.test.ts`（命中缓存不启动 Agent；override 变化、
 过期与 `force` 都会启动）、`apps/cli/tests/agent-setting.test.ts`（期望版本等于启动会打上的
 版本，且 managed runtime 缺失时不可得）、

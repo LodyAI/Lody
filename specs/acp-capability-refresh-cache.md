@@ -32,18 +32,27 @@ Flock rows the same way.
 ## What must still start the agent
 
 Caching is the default path, not the only one. A request may set `force` to require a real probe,
-and these do:
+and every request a person or a setup workflow asked for does:
 
 - The Settings refresh a person pressed, which exists because they changed something Lody cannot
   see in the launch inputs.
+- The `refresh-capabilities` CLI command, for the same reason.
 - Capability verification after authentication succeeds, where the question is whether the new
   credentials actually work and what the account now entitles.
 - Onboarding's provider test and provider setup's verification, which exist to prove the runtime
   Lody just installed really starts.
 
-`force` is absent on the wire by default; a machine treats absence as "you may answer from the
-cache". An older machine that does not understand the flag still probes, which is the safe
-direction for every forced caller.
+A machine that answers from a cache and a machine that understands `force` are the same machine,
+so one negotiated capability covers both: a client sends `force` only to a machine that advertised
+`acpCapabilityRefreshCache`, and omits the field entirely otherwise. Omission is the whole
+mechanism, not a formality — a machine without the capability parses this request strictly and
+would drop or reject one carrying an undeclared field, leaving a forced caller with a timeout
+instead of a refresh. A machine that never advertised the capability also has no cache to opt out
+of, so omitting the field still gives that caller the probe it asked for.
+
+`force` is likewise absent by default on a machine that does support it, and absence there means
+"you may answer from the cache". Both transports carry the field the same way, because the desktop
+app and the machine daemon are upgraded separately and either can be the newer one.
 
 ## Refreshing is not a schedule
 
@@ -57,9 +66,12 @@ recurring probe cycle; nothing in this protocol offers a refresh interval.
 `packages/shared/tests/ai-capability-cache.test.ts` (reuse, expiry, unresolved version,
 provenance), `packages/shared/tests/local-session-control.test.ts` and
 `packages/loro-streams-rpc/tests/machine-rpc-server.test.ts` (the `force` flag on both
-transports), `apps/cli/tests/session-execution-service.test.ts` (cache hit starts no agent;
-override change, expiry, and `force` all do), `apps/cli/tests/agent-setting.test.ts` (the expected
-version equals what a launch stamps, and is unavailable while a managed runtime is missing),
+transports), `packages/shared/tests/machine-protocol-capabilities.test.ts` and
+`packages/loro-streams-rpc/tests/loro-streams-rpc.test.ts` (negotiation: the emitted payload is
+validated against a previous-generation schema derived from the current one, on both transports),
+`apps/cli/tests/session-execution-service.test.ts` (cache hit starts no agent; override change,
+expiry, and `force` all do), `apps/cli/tests/agent-setting.test.ts` (the expected version equals
+what a launch stamps, and is unavailable while a managed runtime is missing),
 `packages/components/tests/startup-acp-capabilities-refresh.test.ts` (an aborted pass does not
 re-probe what already answered). Measured behavior before the change is recorded in
 `.agents/notes/implemented/bug-fix/2026-09-16-acp-capability-refresh-cache.md`. Draft for human
