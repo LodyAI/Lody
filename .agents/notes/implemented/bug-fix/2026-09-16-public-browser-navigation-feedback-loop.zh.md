@@ -29,7 +29,7 @@ Translation: current
 
 ## 已实现方向
 
-renderer 现在把显式公共导航保存为 `{ id, url }`，并将这个 request 传给 `PublicBrowserSurface`。native URL 观察仍然会更新地址和历史，但不能替换待执行的显式 request，因此重定向、同文档导航和历史移动不会重新进入 `loadURL`。surface 同时 memoize Electron bridge，避免普通状态 render 反复 teardown/rebuild native view 的 visibility/layout effect。页面打开的目标继续由 native 所有，不会被重新归类为地址栏请求。
+renderer 现在把显式公共导航保存为 `{ id, url }`，并将这个 request 传给 `PublicBrowserSurface`。native URL 观察仍然会更新地址和历史，但不能替换待执行的显式 request，因此重定向、同文档导航和历史移动不会重新进入 `loadURL`。surface 只有在已经 ready、即将派发 request 时才报告它已消费；controller 随后清除匹配的 request。这样 surface 在 ready 前重挂载时会保留真实的未派发意图，而已经派发的 request 不会被新的 surface 实例重放。surface 同时 memoize Electron bridge，避免普通状态 render 反复 teardown/rebuild native view 的 visibility/layout effect。页面打开的目标继续由 native 所有，不会被重新归类为地址栏请求。
 
 ## 外部研究
 

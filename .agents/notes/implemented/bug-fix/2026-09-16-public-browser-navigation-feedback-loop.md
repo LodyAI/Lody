@@ -64,10 +64,13 @@ The renderer now stores an explicit public navigation request as `{ id, url }`
 and passes that request to `PublicBrowserSurface`. Native URL observations still
 update the address and history, but cannot replace the pending explicit request,
 so redirects, same-document navigation, and history movement do not re-enter
-`loadURL`. The surface also memoizes the Electron bridge, preventing ordinary
-state renders from repeatedly tearing down and rebuilding the native view's
-visibility/layout effects. Page-opened destinations remain native-owned and are
-not reclassified as address-bar requests.
+`loadURL`. The surface reports a matching request as consumed only when it is
+ready to dispatch it; the controller then clears that request. An undispatched
+request therefore survives a surface remount, while a dispatched request cannot
+be replayed by a fresh surface instance. The surface also memoizes the Electron
+bridge, preventing ordinary state renders from repeatedly tearing down and
+rebuilding the native view's visibility/layout effects. Page-opened destinations
+remain native-owned and are not reclassified as address-bar requests.
 
 ## External research
 

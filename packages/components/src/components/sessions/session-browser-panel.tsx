@@ -939,6 +939,15 @@ function SessionBrowserPanelController({
     [commitHistory]
   );
 
+  const handlePublicNavigationRequestConsumed = useCallback(
+    (request: PublicBrowserNavigationRequest) => {
+      setPublicNavigationRequest((current) =>
+        current?.id === request.id && current.url === request.url ? null : current
+      );
+    },
+    []
+  );
+
   const handleManagedState = useCallback(
     (state: ManagedBrowserStateMessage['payload']) => {
       setManagedState(state);
@@ -1051,6 +1060,7 @@ function SessionBrowserPanelController({
           navigationRequest={publicNavigationRequest}
           active={active && !error && pendingAction === null}
           onStateChange={handlePublicState}
+          onNavigationRequestConsumed={handlePublicNavigationRequestConsumed}
         />
       ) : currentAddress?.engine === 'managed-preview' && viewerUrl ? (
         <ManagedPreviewSurface

@@ -36,6 +36,7 @@ vi.mock('../src/components/sessions/public-browser-surface', () => ({
   PublicBrowserSurface: (props: {
     navigationRequest: { id: number; url: string } | null;
     onStateChange: (state: ElectronPublicBrowserState) => void;
+    onNavigationRequestConsumed: (request: { id: number; url: string }) => void;
   }) => {
     publicBrowserSurfaceRender(props);
     return createElement('div', {
@@ -378,6 +379,33 @@ describe('SessionBrowserPanel controller', () => {
     expect((rendered.querySelector('input[aria-label="Address"]') as HTMLInputElement).value).toBe(
       'https://example.com/redirected'
     );
+  });
+
+  it('clears only a public navigation request that the surface has dispatched', async () => {
+    const testRuntime = createRuntime();
+    const rendered = await renderPanel(testRuntime.runtime);
+
+    await enterAddress(rendered, 'example.com/docs');
+
+    const firstProps = publicBrowserSurfaceRender.mock.calls.at(-1)?.[0] as {
+      navigationRequest: { id: number; url: string } | null;
+      onNavigationRequestConsumed: (request: { id: number; url: string }) => void;
+    };
+    expect(firstProps.navigationRequest).toEqual({ id: 1, url: 'https://example.com/docs' });
+
+    await act(async () => {
+      firstProps.onNavigationRequestConsumed({ id: 999, url: 'https://example.com/other' });
+      await flushMicrotasks();
+    });
+    expect(publicBrowserSurfaceRender.mock.calls.at(-1)?.[0].navigationRequest).toBe(
+      firstProps.navigationRequest
+    );
+
+    await act(async () => {
+      firstProps.onNavigationRequestConsumed(firstProps.navigationRequest!);
+      await flushMicrotasks();
+    });
+    expect(publicBrowserSurfaceRender.mock.calls.at(-1)?.[0].navigationRequest).toBeNull();
   });
 
   it('reattaches a public browser without navigating again after remount', async () => {

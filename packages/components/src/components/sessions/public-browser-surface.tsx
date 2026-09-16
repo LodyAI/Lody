@@ -15,6 +15,7 @@ type PublicBrowserSurfaceProps = {
   active: boolean;
   className?: string;
   onStateChange: (state: ElectronPublicBrowserState) => void;
+  onNavigationRequestConsumed: (request: { id: number; url: string }) => void;
 };
 
 const readBounds = (element: HTMLElement): ElectronPublicBrowserBounds | null => {
@@ -37,6 +38,7 @@ export function PublicBrowserSurface({
   active,
   className,
   onStateChange,
+  onNavigationRequestConsumed,
 }: PublicBrowserSurfaceProps) {
   const { t } = useTranslation();
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -189,6 +191,7 @@ export function PublicBrowserSurface({
     navigationRef.current = { requestId, url };
     setPhase('loading');
     setLocalError(null);
+    onNavigationRequestConsumed({ id: requestId, url });
     void bridge.navigate(browserId, url).then(
       (result) => {
         if (!result.ok) {
@@ -201,7 +204,7 @@ export function PublicBrowserSurface({
         setLocalError(formatBridgeError(error));
       }
     );
-  }, [bridge, browserId, electron, navigationRequest, surfaceReady]);
+  }, [bridge, browserId, electron, navigationRequest, onNavigationRequestConsumed, surfaceReady]);
 
   if (!electron) {
     return (
