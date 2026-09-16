@@ -273,6 +273,7 @@ export const LoroMachineAcpCapabilitiesRefreshRpcRequestSchema = BaseRpcRequestS
   params: z
     .object({
       configId: AgentConfigIdSchema,
+      force: z.boolean().optional(),
     })
     .strict(),
 }).strict();
@@ -2444,6 +2445,7 @@ export class LoroStreamsMachineRpcClient {
 
   async requestMachineAcpCapabilitiesRefresh(options: {
     configId: AgentConfigId;
+    force?: boolean;
     onProgress?: (message: MachineAcpBinaryProgressMessage) => void;
     signal?: AbortSignal;
     timeoutMs?: number;
@@ -2455,6 +2457,7 @@ export class LoroStreamsMachineRpcClient {
       signal: options.signal,
       params: {
         configId: options.configId,
+        ...(options.force ? { force: true } : {}),
       },
     })) as MachineAcpCapabilitiesRefreshResponse | null;
   }

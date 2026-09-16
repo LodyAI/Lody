@@ -1861,6 +1861,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       const client = await getMachineRpcClient(message.machineId);
       const response = await client.requestMachineAcpCapabilitiesRefresh({
         configId: message.configId,
+        force: message.force,
         onProgress: (progress) => {
           if (!options.signal?.aborted) {
             handleMachineAcpBinaryProgress(progress);
@@ -2457,6 +2458,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
   let workspaceMetaFirstSynced = false;
   let startupAcpCapabilitiesRefreshCompleted = false;
+  // Which configs this runtime has already refreshed. The boolean above only
+  // latches when a whole pass survives to its end, and presence leaving 'synced'
+  // aborts the pass and re-arms it, so without this set every presence reconnect
+  // re-probed every agent config — a real ACP process per config, forever.
+  const startupAcpCapabilitiesRefreshedConfigKeys = new Set<string>();
   let startupAcpCapabilitiesRefreshAbortController: AbortController | null = null;
   let cancelDelayedStartupAcpCapabilitiesRefresh: (() => void) | null = null;
   const startStartupAcpCapabilitiesRefresh = (): void => {
@@ -2539,6 +2545,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         },
       },
       {
+        refreshedConfigKeys: startupAcpCapabilitiesRefreshedConfigKeys,
         machineConcurrency: ACP_CAPABILITIES_STARTUP_MACHINE_CONCURRENCY,
         signal: abortController.signal,
       }

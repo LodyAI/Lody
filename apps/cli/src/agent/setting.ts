@@ -12,8 +12,10 @@ import {
   type CustomAcpLaunchSpec,
   getBuiltinRuntimeOverrideSourceVersionSuffix,
   getRegistryAcpLaunchKind,
+  getManagedBuiltinRuntimeByAgentType,
   isBuiltinAgentType,
   isManagedBuiltinAgentType,
+  type ManagedBuiltinAgentType,
   REGISTRY_ACP_AGENTS,
   type RegistryAcpAgent,
   type RegistryNpxDistribution,
@@ -249,6 +251,57 @@ export function getAcpCapabilitySourceVersion(
   }
 
   return `${agent.id}@${agent.version}`;
+}
+
+/**
+ * Runtime-override field that replaces each managed builtin runtime. Declared
+ * exhaustively so a new managed builtin fails to compile until its override is
+ * named here, because an unnamed override would silently keep answering
+ * capability refreshes from the managed runtime's cached entry.
+ */
+const MANAGED_BUILTIN_RUNTIME_OVERRIDE_KEYS = {
+  kimi: 'kimiPath',
+  grok: 'grokPath',
+  claude: 'claudeCodeExecutable',
+  codex: 'codexPath',
+} as const satisfies Record<ManagedBuiltinAgentType, keyof BuiltinRuntimeOverrides>;
+
+/**
+ * The `capabilitySourceVersion` a real probe would stamp, resolved without
+ * starting an agent, downloading a runtime, or touching the network.
+ *
+ * `undefined` means the version cannot be named without doing that work — a
+ * managed runtime that is not installed yet has no version to key on, and
+ * substituting the bundled target version would let a cached entry outlive an
+ * install that never happened. Callers must treat `undefined` as "probe".
+ */
+export async function resolveExpectedAcpCapabilitySourceVersion(
+  input: ResolveACPSettingInput
+): Promise<string | undefined> {
+  if (input.cliType !== 'builtin' || !isManagedBuiltinAgentType(input.agentType)) {
+    return getAcpCapabilitySourceVersion(input);
+  }
+  const overrideKey = MANAGED_BUILTIN_RUNTIME_OVERRIDE_KEYS[input.agentType];
+  if (trimRuntimeOverride(input.runtimeOverrides?.[overrideKey])) {
+    // An override launches the user's own binary; the launcher stamps the static
+    // adapter version plus the override suffix, never a managed runtime version.
+    return getAcpCapabilitySourceVersion(input);
+  }
+  const runtime = getManagedBuiltinRuntimeByAgentType(input.agentType);
+  if (!runtime) {
+    return undefined;
+  }
+  const status = await getManagedAgentRuntimeManager().getRuntimeStatus(runtime.runtimeName);
+  if (status.kind !== 'installed') {
+    return undefined;
+  }
+  if (status.updateAvailable) {
+    // Mirror resolveManagedRuntimeForLaunch: discovering a newer runtime is the
+    // launch path's job today, and answering from the cache must not be the
+    // reason a managed runtime stops updating on an otherwise idle machine.
+    getManagedRuntimeUpdateCoordinator().enqueue(runtime.runtimeName);
+  }
+  return getAcpCapabilitySourceVersion(input, status.version);
 }
 
 export function resolveRegistryAgentACPSetting(agent: RegistryAcpAgent): ResolvedACPSetting {

@@ -728,6 +728,9 @@ export function MachineAgentSettings({
         machineId: args.machineId,
         workspaceId,
         configId: args.configId,
+        // A person pressed refresh because they changed something Lody cannot
+        // see in the launch inputs, so this path always starts the agent.
+        force: true,
       });
       if (!response) {
         throw new Error(

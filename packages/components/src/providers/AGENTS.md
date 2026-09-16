@@ -25,6 +25,12 @@ and update only decision fields through HistoryWriter; never replace a rendered 
   live Streams connections.
 - Release any one-shot document handle or subscription that is not already owned by the
   workspace runtime.
+- Startup capability discovery is once per agent config per runtime, recorded in the
+  runtime-owned `refreshedConfigKeys` set. A pass aborted by presence leaving `synced` is
+  re-armed, so a pass-level flag is not the gate: reconnecting must never re-probe a config that
+  already answered, because each probe starts and kills a real agent process. Refresh requests
+  default to the machine's cache; only a user action or a setup/authentication workflow sets
+  `force`. Intent: [capability refresh cache](../../../../specs/acp-capability-refresh-cache.md).
 
 ## Workspace switching
 

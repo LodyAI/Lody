@@ -1993,6 +1993,8 @@ describe('LoroStreamsMachineRpcServer', () => {
     expect(refreshMachineAcpCapabilities).toHaveBeenCalledWith(
       expect.objectContaining({
         configId,
+        // Absent on the wire means "the machine may answer from its cache".
+        force: false,
         onAcpBinaryProgress: expect.any(Function),
       })
     );
@@ -2006,6 +2008,63 @@ describe('LoroStreamsMachineRpcServer', () => {
           success: true,
         }),
       })
+    );
+
+    server.stop();
+  });
+
+  it('forwards a forced capability refresh so the machine cannot answer from its cache', async () => {
+    const workspaceId = 'workspace-1' as WorkspaceId;
+    const machineId = 'machine-1' as MachineId;
+    const fake = createFakeStreamClient();
+    const refreshMachineAcpCapabilities = vi.fn(
+      async (): Promise<MachineAcpCapabilitiesRefreshResponse> => ({
+        type: 'machine/acp-capabilities-refresh_response' as const,
+        machineId,
+        configId,
+        cliType: 'custom' as const,
+        agentType: 'custom-agent' as const,
+        success: true,
+      })
+    );
+
+    const server = new LoroStreamsMachineRpcServer({
+      logger: createSilentLogger(),
+      workspaceId,
+      machineId,
+      streamClient: fake.streamClient,
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities,
+    });
+
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id: 'req-forced',
+          method: 'machine/acp-capabilities-refresh',
+          rpcVersion: '1',
+          machineId: 'machine-1',
+          workspaceId: 'workspace-1',
+          replyTo: 'workspace-1:rpc:res:machine-1',
+          sentAt: Date.now(),
+          expiresAt: Date.now() + 5000,
+          params: { configId, force: true },
+        },
+      ],
+      nextOffset: '4',
+      cursor: 'cursor-4',
+      upToDate: true,
+    });
+
+    await server.start();
+
+    await vi.waitFor(() => {
+      expect(fake.appended).toHaveLength(1);
+    });
+
+    expect(refreshMachineAcpCapabilities).toHaveBeenCalledWith(
+      expect.objectContaining({ configId, force: true })
     );
 
     server.stop();
