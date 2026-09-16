@@ -182,17 +182,27 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
     Object.hasOwn(event.diff.updated, 'id');
 
   /**
-   * The raw positions a batch touched, for a consumer that re-reads only the
-   * affected window. Structural list edits report `[structuralFrom, length)`
-   * because later positions shifted. In-place turn ID edits also need positions:
-   * a consumer still keyed by the old ID cannot resolve the new (or missing) ID.
-   * Other child edits report their own turn.
+   * What a batch touched, for a consumer that re-reads only the affected turns.
+   *
+   * Structural list edits report `[structuralFrom, length)` because later
+   * positions shifted. In-place turn ID edits are structural for the same
+   * reason: a consumer still keyed by the old ID cannot resolve the new (or
+   * missing) one.
+   *
+   * A content batch reports the EXACT positions it touched, never the span
+   * between the lowest and highest of them. One synced batch routinely carries
+   * an early turn's status write alongside the streaming tail; reporting the
+   * span made the display cache re-read every row and re-materialize every
+   * hydrated body between the two.
    */
-  const changeRangeOf = (
+  const changeScopeOf = (
     batch: LoroEventBatch
-  ): { from: number; to: number; structural: boolean } | undefined => {
-    let from = Number.POSITIVE_INFINITY;
-    let to = -1;
+  ):
+    | { structural: true; from: number; to: number }
+    | { structural: false; positions: readonly number[] }
+    | undefined => {
+    const positions = new Set<number>();
+    let wholeDirectory = false;
     let structuralFrom = Number.POSITIVE_INFINITY;
     let structural = false;
     for (const event of batch.events) {
@@ -218,29 +228,36 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
           structural = true;
           structuralFrom = Math.min(structuralFrom, index);
         }
-        from = Math.min(from, index);
-        to = Math.max(to, index + 1);
+        positions.add(index);
       } else {
-        from = 0;
-        to = list.length;
+        // An edit that does not resolve to a slot: the whole directory is the
+        // only safe answer.
+        wholeDirectory = true;
       }
     }
     if (structural) {
       // A mixed batch can carry an earlier child edit (a content change) plus a
       // list insert/delete. Keep the earlier content position too, so the
       // consumer re-reads every affected identity, not just the shifted suffix.
-      const contentFrom = Number.isFinite(from) ? from : structuralFrom;
+      let contentFrom = wholeDirectory ? 0 : Number.POSITIVE_INFINITY;
+      for (const position of positions) contentFrom = Math.min(contentFrom, position);
+      if (!Number.isFinite(contentFrom)) contentFrom = structuralFrom;
       const lo = Number.isFinite(structuralFrom)
         ? Math.min(structuralFrom, contentFrom)
         : contentFrom;
-      return { from: Math.max(0, Math.min(lo, list.length)), to: list.length, structural: true };
+      return { structural: true, from: Math.max(0, Math.min(lo, list.length)), to: list.length };
     }
-    if (to < 0) return undefined;
-    return {
-      from: Math.max(0, Math.min(from, list.length)),
-      to: Math.max(0, Math.min(to, list.length)),
-      structural: false,
-    };
+    if (wholeDirectory) {
+      return {
+        structural: false,
+        positions: Array.from({ length: list.length }, (_, index) => index),
+      };
+    }
+    if (positions.size === 0) return undefined;
+    const inRange = [...positions]
+      .filter((position) => position >= 0 && position < list.length)
+      .sort((left, right) => left - right);
+    return inRange.length > 0 ? { structural: false, positions: inRange } : undefined;
   };
 
   // One shallow identity scan per structural/identity change, never per body.
@@ -325,16 +342,16 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
       // Subscribe first, then snapshot in the same synchronous block: a change
       // can neither be missed between the two nor delivered before `initial`.
       const unsubscribeDoc = doc.subscribe((batch) => {
-        const range = changeRangeOf(batch);
+        const scope = changeScopeOf(batch);
         // A batch that does not touch `history` (e.g. a control root) is not a
         // history change; unrelated roots never invalidate the display cache.
-        if (!range) return;
-        if (range.structural) {
-          listener({ kind: 'structure', from: range.from, to: range.to });
+        if (!scope) return;
+        if (scope.structural) {
+          listener({ kind: 'structure', from: scope.from, to: scope.to });
         } else {
           const ids: string[] = [];
-          for (let i = range.from; i < range.to; i++) {
-            const id = readIdentity(list.get(i))?.turnId;
+          for (const position of scope.positions) {
+            const id = readIdentity(list.get(position))?.turnId;
             if (id !== undefined) ids.push(id);
           }
           listener({ kind: 'changed', ids });
