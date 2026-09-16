@@ -1,4 +1,5 @@
-import { isAuxiliaryWindow } from '@/lib/desktop-window';
+import { SessionEmptySurface } from './session-empty-surface';
+import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import {
   Archive,
   ArchiveRestore,
@@ -233,6 +234,9 @@ import {
   resolveSessionWorkspacePath,
 } from '@/lib/session-workspace-path';
 import {
+  EMPTY_SESSION_TAB_ID,
+  getSessionTabFallback,
+  isSessionTabClosed,
   formatExplicitSessionTabSearch,
   formatSessionTabSearch,
   parseSessionTabSearch,
@@ -941,6 +945,19 @@ const SessionDetail = ({
     [sessionId]
   );
   const archivedChildSessions = useAtomValue(archivedChildSessionsAtom);
+  const closedConversations = useMemo(
+    () =>
+      [
+        ...(activeSession ? [activeSession] : []),
+        ...childSessions,
+        ...archivedChildSessions,
+      ].filter(isSessionTabClosed),
+    [activeSession, childSessions, archivedChildSessions]
+  );
+  const closedConversationIds = useMemo(
+    () => new Set<string>(closedConversations.map((s) => s.id)),
+    [closedConversations]
+  );
   const [draftTabs, setDraftTabsState] = useState<DraftSessionTab[]>(() =>
     readPersistedDraftTabs(sessionId)
   );
@@ -1070,10 +1087,11 @@ const SessionDetail = ({
       return changed ? next : prev;
     });
   }, [viewerTabs]);
-  const orderedSessionTabIds = useMemo(() => {
+  const allOrderedSessionTabIds = useMemo(() => {
     const orderedIds: string[] = [sessionId];
     const knownTabIds = new Set<string>([
       ...visibleChildSessions.map((childSession) => childSession.id),
+      ...archivedChildSessions.map((childSession) => childSession.id),
       ...draftTabs.map((draft) => draft.id),
     ]);
     const seen = new Set<string>(orderedIds);
@@ -1086,7 +1104,7 @@ const SessionDetail = ({
       seen.add(tabId);
     }
 
-    for (const childSession of visibleChildSessions) {
+    for (const childSession of [...visibleChildSessions, ...archivedChildSessions]) {
       if (!seen.has(childSession.id)) {
         orderedIds.push(childSession.id);
         seen.add(childSession.id);
@@ -1099,7 +1117,11 @@ const SessionDetail = ({
     }
 
     return orderedIds;
-  }, [draftTabs, sessionId, sessionTabOrder, visibleChildSessions]);
+  }, [draftTabs, sessionId, sessionTabOrder, visibleChildSessions, archivedChildSessions]);
+  const orderedSessionTabIds = useMemo(
+    () => allOrderedSessionTabIds.filter((id) => !closedConversationIds.has(id)),
+    [allOrderedSessionTabIds, closedConversationIds]
+  );
 
   const handleSessionTabReorder = useCallback(
     (orderedTabIds: string[]) => {
@@ -1127,31 +1149,26 @@ const SessionDetail = ({
   // taken at its word, so a named child whose meta has not reached the local
   // replica yet stays active (a pending surface renders below) instead of
   // bouncing the user back to the parent conversation.
-  const activeTabSessionId = useMemo(
+  const requestedTabSessionId = useMemo(
     () =>
       resolveActiveSessionTab(parsedUrlTab, {
         parentSessionId: sessionId,
         // Side chats never own a top tab, so a URL addressing one (an
         // opened-by link to a side-chat session) renders the parent.
-        childSessionIdsResolvedToParent: [
-          ...archivedChildSessions.map((s) => s.id),
-          ...sideSessions.map((s) => s.id),
-        ],
+        childSessionIdsResolvedToParent: [...sideSessions.map((s) => s.id)],
         draftTabIds: draftTabs.map((draft) => draft.id),
         promotedChildSessionIdsByDraftId: pendingDraftChildSessionIds,
       }),
-    [
-      parsedUrlTab,
-      archivedChildSessions,
-      draftTabs,
-      pendingDraftChildSessionIds,
-      sessionId,
-      sideSessions,
-    ]
+    [parsedUrlTab, draftTabs, pendingDraftChildSessionIds, sessionId, sideSessions]
   );
+  const activeTabSessionId = closedConversationIds.has(requestedTabSessionId)
+    ? getSessionTabFallback(requestedTabSessionId, allOrderedSessionTabIds, orderedSessionTabIds)
+    : requestedTabSessionId;
+  const isEmptyConversation = activeTabSessionId === EMPTY_SESSION_TAB_ID;
   // A URL-named child the meta replica has not delivered yet: keep it active
   // and render a pending surface instead of silently showing the parent.
   const activeTabIsPendingChild =
+    !isEmptyConversation &&
     activeTabSessionId !== sessionId &&
     !isDraftSessionTabId(activeTabSessionId) &&
     !visibleChildSessions.some((s) => s.id === activeTabSessionId);
@@ -1164,6 +1181,7 @@ const SessionDetail = ({
   }, [activeTabSessionId, sessionId, visibleChildSessions]);
   // The session meta for the currently active tab (may be parent or a child)
   const activeTabSession = useMemo(() => {
+    if (activeTabSessionId === EMPTY_SESSION_TAB_ID) return null;
     if (activeTabSessionId === sessionId) return activeSession;
     return visibleChildSessions.find((s) => s.id === activeTabSessionId) ?? activeSession;
   }, [activeTabSessionId, sessionId, activeSession, visibleChildSessions]);
@@ -1437,7 +1455,7 @@ const SessionDetail = ({
       fileDiffsByTurn,
     },
   } = useSessionDiffSummary(activeSessionTabId ?? sessionId, {
-    enabled: activeSessionTabId !== null,
+    enabled: activeSessionTabId !== null || isEmptyConversation,
     fileProvider: activeSessionFileProvider,
     fileProviderPending: activeSessionFileProviderPending,
   });
@@ -1450,10 +1468,11 @@ const SessionDetail = ({
   // use the same durable session-meta snapshot instead of independently
   // totaling provider entries that can resolve at different times.
   const changesDiffStat = activeSession?.diffStats?.allChange ?? null;
-  const activeBrowserSession = activeDraftTab ? null : activeTabSession;
-  const workspaceOwnerSession = activeTabSession?.parentSessionId
-    ? activeSession
-    : activeTabSession;
+  // Closing the conversation does not close workspace tools. Keep their owner
+  // explicit without making the parent an active conversation again.
+  const activeBrowserSession = activeDraftTab ? null : (activeTabSession ?? activeSession);
+  const workspaceOwnerSession =
+    activeTabSession?.parentSessionId || isEmptyConversation ? activeSession : activeTabSession;
   const activeSessionProject = activeSession?.project;
   const activeSessionProjectKind = activeSessionProject?.kind ?? null;
   const activeSessionProjectRepoFullName =
@@ -1686,6 +1705,30 @@ const SessionDetail = ({
     [writeSessionUrlTab]
   );
 
+  // A confirmed shared close invalidates this URL choice. Replace only that
+  // exact choice, never a newer navigation, and never infer closure from a
+  // missing replica row. This is not URL/local-selection mirroring.
+  const previousSelectedTab = useRef({ sessionId, tabId: activeTabSessionId });
+  useEffect(() => {
+    const previous = previousSelectedTab.current;
+    previousSelectedTab.current = { sessionId, tabId: activeTabSessionId };
+    if (!closedConversationIds.has(requestedTabSessionId)) return;
+    if (router.state.location.search.tab !== urlTab) return;
+    if (previous.sessionId === sessionId && previous.tabId === requestedTabSessionId) {
+      toast.info(t('sessions.tabs.remotelyClosed', 'This conversation tab was closed'));
+    }
+    navigateToSessionTab(activeTabSessionId);
+  }, [
+    closedConversationIds,
+    requestedTabSessionId,
+    activeTabSessionId,
+    urlTab,
+    router,
+    navigateToSessionTab,
+    sessionId,
+    t,
+  ]);
+
   const replaceSessionUrlPr = useCallback(
     (nextPrNumber: number | undefined, { push = false }: { push?: boolean } = {}) => {
       if (!workspaceSlug) {
@@ -1751,7 +1794,8 @@ const SessionDetail = ({
     touchSessionActivity,
     updateSessionTitle,
     archiveSession,
-    restoreSession,
+    setSessionTabClosed,
+    reopenSessionTab,
     deleteSessions,
     deleteArchivedSession,
     setSessionPinned,
@@ -1903,25 +1947,33 @@ const SessionDetail = ({
   const handleTogglePreviewAnnotationInChat = useCallback(
     (targetSessionId: SessionId, reference: VisualAnnotationReferencePayload) => {
       const chatRef = chatRefsMap.current.get(targetSessionId);
-      if (chatRef && 'toggleVisualAnnotationReference' in chatRef) {
+      if (
+        !closedConversationIds.has(targetSessionId) &&
+        chatRef &&
+        'toggleVisualAnnotationReference' in chatRef
+      ) {
         return chatRef.toggleVisualAnnotationReference(reference);
       }
       toast.error(t('sessions.preview.annotation.chatUnavailable', 'Open the session chat first'));
       return false;
     },
-    [t]
+    [closedConversationIds, t]
   );
 
   const handleAddPreviewAnnotationToChat = useCallback(
     (targetSessionId: SessionId, reference: VisualAnnotationReferencePayload) => {
       const chatRef = chatRefsMap.current.get(targetSessionId);
-      if (chatRef && 'addVisualAnnotationReference' in chatRef) {
+      if (
+        !closedConversationIds.has(targetSessionId) &&
+        chatRef &&
+        'addVisualAnnotationReference' in chatRef
+      ) {
         return chatRef.addVisualAnnotationReference(reference);
       }
       toast.error(t('sessions.preview.annotation.chatUnavailable', 'Open the session chat first'));
       return false;
     },
-    [t]
+    [closedConversationIds, t]
   );
 
   const handleNewTab = useCallback(() => {
@@ -1966,14 +2018,27 @@ const SessionDetail = ({
       setDraftTabs((prev) => prev.filter((draft) => draft.id !== draftId));
       setTabOrderState((prev) => removeTabOrderId(prev, draftId));
       if (activeTabSessionId === draftId) {
-        // Explicit parent, replacing the dead draft URL in place.
-        navigateToSessionTab(sessionId);
+        // Replace the dead draft URL with an open neighbour or empty surface.
+        navigateToSessionTab(
+          getSessionTabFallback(
+            draftId,
+            allOrderedSessionTabIds,
+            orderedSessionTabIds.filter((id) => id !== draftId)
+          )
+        );
       }
       captureSessionDetailEvent('session/tab_draft_closed', {
         draft_tab_id: draftId,
       });
     },
-    [activeTabSessionId, captureSessionDetailEvent, navigateToSessionTab, sessionId, setDraftTabs]
+    [
+      activeTabSessionId,
+      captureSessionDetailEvent,
+      navigateToSessionTab,
+      allOrderedSessionTabIds,
+      orderedSessionTabIds,
+      setDraftTabs,
+    ]
   );
 
   const handleSendDraft = useCallback(
@@ -2237,25 +2302,16 @@ const SessionDetail = ({
         tab_session_id: tabSessionId,
         is_active_tab: tabSessionId === activeTabSessionId,
       });
-      // If the tab has never had a message, just delete it instead of archiving
-      const tabMeta = childSessions.find((s) => s.id === tabSessionId);
       try {
-        if (tabMeta && !tabMeta.lastMessageAt) {
-          await deleteSessions([tabSessionId]);
-          captureSessionDetailEvent('session/tab_deleted_empty', {
-            tab_session_id: tabSessionId,
-          });
-        } else {
-          await archiveSession(tabSessionId);
-          captureSessionDetailEvent('session/tab_archived', {
-            tab_session_id: tabSessionId,
-          });
-        }
-        // Switch to the parent tab only once the close is durable; a failed
-        // close keeps the tab selected instead of yanking the user off it.
-        // Explicit parent, replacing the closed tab's URL in place.
-        if (tabSessionId === activeTabSessionId) {
-          navigateToSessionTab(sessionId);
+        await setSessionTabClosed(tabSessionId, true);
+        if (tabSessionId === activeTabSessionId && router.state.location.search.tab === urlTab) {
+          navigateToSessionTab(
+            getSessionTabFallback(
+              tabSessionId,
+              allOrderedSessionTabIds,
+              orderedSessionTabIds.filter((id) => id !== tabSessionId)
+            )
+          );
         }
       } catch (error) {
         // A silent failure reads as "the close button does nothing" — surface
@@ -2271,13 +2327,14 @@ const SessionDetail = ({
     },
     [
       activeTabSessionId,
-      archiveSession,
+      setSessionTabClosed,
       captureSessionDetailEvent,
-      childSessions,
       closeDraftTab,
-      deleteSessions,
       navigateToSessionTab,
-      sessionId,
+      allOrderedSessionTabIds,
+      orderedSessionTabIds,
+      router,
+      urlTab,
       t,
     ]
   );
@@ -2287,12 +2344,16 @@ const SessionDetail = ({
       captureSessionDetailEvent('session/tab_restore_requested', {
         tab_session_id: tabSessionId,
       });
-      await restoreSession(tabSessionId);
-      captureSessionDetailEvent('session/tab_restored', {
-        tab_session_id: tabSessionId,
-      });
+      try {
+        await reopenSessionTab(tabSessionId);
+        if (router.state.location.search.tab === urlTab)
+          navigateToSessionTab(tabSessionId, { push: true });
+      } catch (error) {
+        console.error('Failed to reopen session tab', error);
+        toast.error(t('sessions.tabReopenFailed', 'Could not reopen this tab'));
+      }
     },
-    [captureSessionDetailEvent, restoreSession]
+    [captureSessionDetailEvent, reopenSessionTab, navigateToSessionTab, router, urlTab, t]
   );
 
   // Navigate back to session list.
@@ -2334,14 +2395,13 @@ const SessionDetail = ({
 
   // Archive the active tab (mobile more menu) — archives child if child is active, parent otherwise
   const handleArchiveActiveTab = useCallback(async () => {
-    if (!activeSession) return;
+    if (!activeSession || isEmptyConversation) return;
     if (activeDraftTab) {
       closeDraftTab(activeDraftTab.id);
       return;
     }
     if (activeTabSessionId && activeTabSessionId !== sessionId) {
-      // Archiving a child tab — delegate to tab close logic
-      await handleTabClose(activeTabSessionId);
+      await archiveSession(activeTabSessionId as SessionId);
     } else {
       // Archiving the parent
       await archiveSession(activeSession.id);
@@ -2354,15 +2414,15 @@ const SessionDetail = ({
     archiveSession,
     closeDraftTab,
     handleBackToList,
-    handleTabClose,
+    isEmptyConversation,
     sessionId,
   ]);
 
   // Restore the current archived session from the header menu
   const handleRestoreCurrentSession = useCallback(async () => {
     if (!activeSession) return;
-    await restoreSession(activeSession.id);
-  }, [activeSession, restoreSession]);
+    await handleTabRestore(activeSession.id);
+  }, [activeSession, handleTabRestore]);
 
   // Confirmation state for permanently deleting the current archived session
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
@@ -3232,12 +3292,10 @@ const SessionDetail = ({
         const resolution = await resolveSessionFileProviderOpenPath(
           activeSessionFileProvider,
           target.filePath
-        ).catch(
-          (): SessionFileProviderOpenPathResolution => ({
-            path: target.filePath,
-            redirected: false,
-          })
-        );
+        ).catch((): SessionFileProviderOpenPathResolution => ({
+          path: target.filePath,
+          redirected: false,
+        }));
         const resolvedFilePath = resolution.path;
 
         const requestSeq = nextFocusRequestSeq();
@@ -3314,12 +3372,10 @@ const SessionDetail = ({
           const resolution = await resolveSessionFileProviderOpenPath(
             activeSessionFileProvider,
             tab.filePath
-          ).catch(
-            (): SessionFileProviderOpenPathResolution => ({
-              path: tab.filePath,
-              redirected: false,
-            })
-          );
+          ).catch((): SessionFileProviderOpenPathResolution => ({
+            path: tab.filePath,
+            redirected: false,
+          }));
           if (!resolution.redirected || resolution.path === tab.filePath) {
             return { tab, next: tab };
           }
@@ -3630,22 +3686,18 @@ const SessionDetail = ({
     });
     return [
       ...fixedTabs,
-      ...visibleSideSessions.map(
-        (sideSession): SessionSidePanelTabItem => ({
-          id: getSideSessionPanelTabId(sideSession.id),
-          label: sideSession.title?.trim() || t('sessions.detailTabs.sideSession', 'Side Chat'),
-          kind: 'session',
-          closeable: true,
-          pending: closingSideSessionIds.has(sideSession.id),
-        })
-      ),
-      ...viewerTabItems.map(
-        (tab): SessionSidePanelTabItem => ({
-          ...tab,
-          kind: tab.type,
-          closeable: true,
-        })
-      ),
+      ...visibleSideSessions.map((sideSession): SessionSidePanelTabItem => ({
+        id: getSideSessionPanelTabId(sideSession.id),
+        label: sideSession.title?.trim() || t('sessions.detailTabs.sideSession', 'Side Chat'),
+        kind: 'session',
+        closeable: true,
+        pending: closingSideSessionIds.has(sideSession.id),
+      })),
+      ...viewerTabItems.map((tab): SessionSidePanelTabItem => ({
+        ...tab,
+        kind: tab.type,
+        closeable: true,
+      })),
     ];
   }, [
     closingSideSessionIds,
@@ -3919,7 +3971,8 @@ const SessionDetail = ({
     title: t('commands.session.archiveCurrent', 'Archive Current Chat'),
     category: 'Session',
     keybindings: getCommandKeybindings('session.archiveCurrent'),
-    when: () => Boolean(activeSession) && activeSession?.isArchived !== true,
+    when: () =>
+      Boolean(activeTabSession) && !isEmptyConversation && activeSession?.isArchived !== true,
     run: () => {
       setArchiveConfirmOpen(true);
     },
@@ -4237,9 +4290,7 @@ const SessionDetail = ({
       const target = resolveFocusedTabCloseTarget();
       if (!target) return 'handled';
       if (target.kind === 'landing') {
-        if (isAuxiliaryWindow()) return 'unhandled';
-        handleBackToList();
-        return 'handled';
+        return 'unhandled';
       }
       if (target.kind === 'side-panel') {
         handleSidePanelTabClose(target.tabId);
@@ -4292,8 +4343,8 @@ const SessionDetail = ({
   // The sheet needs the status TYPE, not just presence: a tab blocked on a
   // permission request must read as "needs you", not as one more spinner.
   const conversationSessionIds = useMemo(
-    () => orderedSessionTabIds.filter((id) => !isDraftSessionTabId(id)),
-    [orderedSessionTabIds]
+    () => allOrderedSessionTabIds.filter((id) => !isDraftSessionTabId(id)),
+    [allOrderedSessionTabIds]
   );
   const conversationLiveStatusAtom = useMemo(
     () =>
@@ -4402,11 +4453,10 @@ const SessionDetail = ({
     t,
   ]);
 
-  // Archived child conversations for the tab sheet's collapsed Archived group
-  // (most recent activity first, mirroring the desktop archived-tabs popover).
+  // Shared closed conversations include legacy archives and the main tab.
   const mobileArchivedConversations = useMemo(
     () =>
-      archivedChildSessions
+      closedConversations
         .map((archivedSession) => {
           const lastMessageAt =
             typeof archivedSession.lastMessageAt === 'number'
@@ -4416,22 +4466,23 @@ const SessionDetail = ({
           return {
             id: archivedSession.id as string,
             title: archivedSession.title ?? '',
+            running: conversationLiveStatusMap[archivedSession.id] != null,
+            waitingPermission:
+              conversationLiveStatusMap[archivedSession.id]?.type === 'requestPermission',
+            unread: sessionHasUnreadMessages(archivedSession),
             lastActivityAt: lastMessageAt ?? (Number.isFinite(createdAtMs) ? createdAtMs : null),
           };
         })
         .sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0)),
-    [archivedChildSessions]
+    [closedConversations, conversationLiveStatusMap]
   );
 
-  // Restore an archived conversation from the tab sheet and switch to it.
+  // Reopen through the same lifecycle-aware action used by the desktop list.
   const handleMobileRestoreConversation = useCallback(
     (id: string) => {
-      void (async () => {
-        await handleTabRestore(id as SessionId);
-        handleSessionTabSelect(id as SessionId);
-      })();
+      void handleTabRestore(id as SessionId);
     },
-    [handleTabRestore, handleSessionTabSelect]
+    [handleTabRestore]
   );
 
   const handleMobileViewerSelect = useCallback(
@@ -4587,6 +4638,14 @@ const SessionDetail = ({
   if (activeSession.parentSessionId && activeSession.parentSessionId !== sessionId) {
     return null;
   }
+
+  const emptyConversationSurface = isEmptyConversation ? (
+    <SessionEmptySurface
+      closedSessions={closedConversations}
+      onNew={handleNewTab}
+      onReopen={handleTabRestore}
+    />
+  ) : null;
 
   /* The URL names a child tab whose meta has not reached this replica yet
      (a just-promoted draft, or a tab still syncing from another device).
@@ -5133,6 +5192,9 @@ const SessionDetail = ({
           onNewConversation={handleNewTab}
           onSelectViewer={handleMobileViewerSelect}
           onRestoreConversation={handleMobileRestoreConversation}
+          onCloseConversation={(id) => {
+            void handleTabClose(id);
+          }}
         />
         <SessionShareMobileMenu
           key={`${currentWorkspaceId}:${activeTabSessionId}`}
@@ -5160,6 +5222,7 @@ const SessionDetail = ({
           tabIndex={-1}
           className="flex-1 overflow-hidden relative"
         >
+          {emptyConversationSurface}
           {/* Keep inactive tabs mounted for fast switching; only the active tab holds room sync. */}
           {[activeSession, ...visibleChildSessions].map((tabSession) => {
             const isActive = !hasActiveViewerTab && tabSession.id === activeTabSessionId;
@@ -5782,7 +5845,7 @@ const SessionDetail = ({
       onNewTab={handleNewTab}
       onTabRename={handleTabRename}
       onTabClose={handleTabClose}
-      archivedChildSessions={archivedChildSessions}
+      archivedChildSessions={closedConversations}
       onTabRestore={handleTabRestore}
       onTabReorder={handleSessionTabReorder}
       onMentionSession={handleInsertDroppedSessionMention}
@@ -5852,10 +5915,11 @@ const SessionDetail = ({
 
   const desktopChatSurfaces = (
     <SessionMentionDropLayer
-      enabled
+      enabled={!isEmptyConversation}
       excludeSessionId={sessionMentionExcludeId}
       onDropSessionId={handleInsertDroppedSessionMention}
     >
+      {emptyConversationSurface}
       {[activeSession, ...visibleChildSessions].map((tabSession) => {
         const isActive = tabSession.id === activeTabSessionId;
         const externalHistoryRefresh = externalHistoryRefreshBySessionId[tabSession.id];

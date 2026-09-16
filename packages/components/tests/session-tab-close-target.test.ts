@@ -47,22 +47,41 @@ describe('getSessionTabCloseTarget', () => {
     ).toBeNull();
   });
 
-  it('does not close the parent conversation tab', () => {
+  it('closes the parent conversation tab even with siblings', () => {
     expect(
       getSessionTabCloseTarget({
         ...BASE_INPUT,
         activeConversationTabId: 'parent-session',
       })
-    ).toBeNull();
+    ).toEqual({ kind: 'conversation', tabId: 'parent-session' });
   });
 
-  it('returns to the chat landing when the parent is the only conversation tab', () => {
+  it('closes the last parent tab before closing the window', () => {
     expect(
       getSessionTabCloseTarget({
         ...BASE_INPUT,
         activeConversationTabId: 'parent-session',
         conversationTabCount: 1,
       })
+    ).toEqual({ kind: 'conversation', tabId: 'parent-session' });
+  });
+  it('yields the window close accelerator on the empty surface', () => {
+    expect(
+      getSessionTabCloseTarget({
+        ...BASE_INPUT,
+        activeConversationTabId: 'empty',
+        sidePanelOpen: false,
+        conversationTabCount: 0,
+      })
     ).toEqual({ kind: 'landing' });
+  });
+  it('closes an available side-panel tab before yielding window close on the empty surface', () => {
+    expect(
+      getSessionTabCloseTarget({
+        ...BASE_INPUT,
+        activeConversationTabId: 'empty',
+        conversationTabCount: 0,
+      })
+    ).toEqual({ kind: 'side-panel', tabId: 'changes' });
   });
 });

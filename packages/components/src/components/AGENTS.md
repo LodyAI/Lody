@@ -67,8 +67,8 @@ Ownership and explanations: [README.md](README.md).
   reintroduce a create-then-hand-off flow (pending-turn refs, post-mount ref flushes): a
   promoted tab must not exist before its first message is locally durable, and preserved
   composer text crosses the promotion via the input draft cache, not a component ref.
-  After global metadata readiness, `archiveSession` falls back to the rendered meta
-  cache when an individual repo read lags; close failures must surface to the user.
+  Tab close persists `isTabClosed`; legacy archives share the closed list and reopen
+  through lifecycle restoration. Failed writes remain visible to the user.
 - Desktop handoff: confirm the account, keep PKCE query on switch, render the `lody://` link.
 - Desktop changelogs open in-app as sanitized Markdown with raw HTML off. Only
   missing notes fall back to the website, via `getChangelogUrl` and

@@ -12,6 +12,7 @@ What each file in this directory is responsible for. Binding rules live in
 | `desktop-session-detail-layout.tsx`          | Desktop two-column layout and the side-panel expand/collapse animation      |
 | `session-conversation-page.tsx`              | Shared full-page composition used by `SessionConversationPage.stories.tsx`  |
 | `session-tab-bar.tsx`                        | Desktop merged top row: session tab pills, status slot, drag sources        |
+| `session-empty-surface.tsx`                  | Empty conversation surface with new/reopen actions                          |
 | `adaptive-tab-strip.tsx`                     | Width sharing for the tab pills                                             |
 | `session-side-panel-tab-bar.tsx`             | Right-panel tab strip (fixed panels, side chats, viewers)                   |
 | `session-tab-close-target.ts`                | Registration for the Cmd/Ctrl+W close target                                |

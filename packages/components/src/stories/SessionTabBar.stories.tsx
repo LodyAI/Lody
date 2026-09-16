@@ -546,6 +546,32 @@ export const ViewerGroupOnly: Story = {
   },
 };
 
+export const ClosedMainTab: Story = {
+  args: {
+    parentSession: { ...screenshotParentSession, isTabClosed: true },
+    childSessions,
+    draftTabs: [],
+    archivedChildSessions: [
+      { ...screenshotParentSession, isTabClosed: true },
+      ...archivedChildSessions,
+    ],
+    activeTabSessionId: childSessions[0]!.id,
+  },
+};
+
+export const AllConversationsClosed: Story = {
+  args: {
+    parentSession: { ...screenshotParentSession, isTabClosed: true },
+    childSessions: [],
+    draftTabs: [],
+    archivedChildSessions: [
+      { ...screenshotParentSession, isTabClosed: true },
+      ...archivedChildSessions,
+    ],
+    activeTabSessionId: 'empty',
+  },
+};
+
 export const UnreadChildTabs: Story = {
   name: 'Unread sub-session tabs',
   args: {

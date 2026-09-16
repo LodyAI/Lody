@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 
 import { Provider, createStore } from 'jotai';
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { MachineId, SessionId, SessionMeta } from '@lody/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SessionTabBar } from '../src/components/sessions/session-tab-bar';
+import { SessionEmptySurface } from '../src/components/sessions/session-empty-surface';
 import { TooltipProvider } from '../src/ui/tooltip';
 import { FocusScope } from '../src/ui/focus-scope';
 import { WORKSPACE_FOCUS_SCOPES } from '../src/atoms/focus-layer';
@@ -56,7 +57,11 @@ describe('SessionTabBar drag sources', () => {
     vi.restoreAllMocks();
   });
 
-  async function renderTabBar(childSessions: SessionMeta[]) {
+  async function renderTabBar(
+    childSessions: SessionMeta[],
+    parent = parentSession,
+    onTabClose = vi.fn()
+  ) {
     await act(async () => {
       root.render(
         <Provider store={createStore()}>
@@ -64,13 +69,14 @@ describe('SessionTabBar drag sources', () => {
             <FocusScope id={WORKSPACE_FOCUS_SCOPES.sessionConversation}>
               <SessionTabBar
                 variant="session"
-                parentSession={parentSession}
+                parentSession={parent}
                 childSessions={childSessions}
                 draftTabs={[]}
                 archivedChildSessions={[]}
                 activeTabSessionId={parentSession.id}
                 onTabSelect={vi.fn()}
                 onNewTab={vi.fn()}
+                onTabClose={onTabClose}
               />
             </FocusScope>
           </TooltipProvider>
@@ -78,6 +84,69 @@ describe('SessionTabBar drag sources', () => {
       );
     });
   }
+
+  it('closes the last main tab to an empty surface and reopens it from the closed list', async () => {
+    function Harness() {
+      const [parent, setParent] = useState(parentSession);
+      const closed = parent.isTabClosed === true;
+      const reopen = (id: SessionId) => {
+        if (id === parent.id) setParent({ ...parent, isTabClosed: false });
+      };
+      return (
+        <>
+          <SessionTabBar
+            parentSession={parent}
+            childSessions={[]}
+            draftTabs={[]}
+            archivedChildSessions={closed ? [parent] : []}
+            activeTabSessionId={closed ? 'empty' : parent.id}
+            onTabSelect={() => {}}
+            onNewTab={() => {}}
+            onTabClose={(id) => {
+              if (id === parent.id) setParent({ ...parent, isTabClosed: true });
+            }}
+            onTabRestore={reopen}
+          />
+          {closed && (
+            <SessionEmptySurface closedSessions={[parent]} onNew={() => {}} onReopen={reopen} />
+          )}
+        </>
+      );
+    }
+    await act(async () =>
+      root.render(
+        <Provider store={createStore()}>
+          <TooltipProvider>
+            <Harness />
+          </TooltipProvider>
+        </Provider>
+      )
+    );
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('#session-tab-session-parent button')!.click()
+    );
+    expect(container.querySelectorAll('[role="tab"]')).toHaveLength(0);
+    expect(container.querySelector('[aria-label="No conversation open"]')).not.toBeNull();
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('[aria-label="Closed conversations"]')!.click()
+    );
+    await act(async () =>
+      document
+        .querySelector<HTMLButtonElement>('[aria-label="Reopen conversation: Main session"]')!
+        .click()
+    );
+    expect(container.querySelector('#session-tab-session-parent')).not.toBeNull();
+    expect(container.querySelector('[aria-label="No conversation open"]')).toBeNull();
+  });
+
+  it('removes closed and archived conversations from the visible strip', async () => {
+    await renderTabBar([{ ...childSession, isArchived: true }], {
+      ...parentSession,
+      isTabClosed: true,
+    });
+    expect(container.querySelectorAll('[role="tab"]')).toHaveLength(0);
+    expect(container.querySelector('[aria-label="New tab"]')).not.toBeNull();
+  });
 
   it('does not mark a solo tab title as a window-drag hole', async () => {
     await renderTabBar([]);

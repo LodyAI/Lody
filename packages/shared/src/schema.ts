@@ -868,6 +868,8 @@ export type SessionMeta = {
   userId: string;
   status?: SessionStatus;
   isArchived?: boolean;
+  /** Shared tab visibility only; closing never changes the session lifecycle. */
+  isTabClosed?: boolean;
   origin?: 'lody' | 'external-acp';
   /** When true, this session is pinned to the top of the sidebar list. */
   isPinned?: boolean;
@@ -1258,7 +1260,7 @@ export type SessionDocMeta = Omit<SessionDoc, '$cid' | 'history'> & {
 export type Session = SessionMeta & SessionDocMeta;
 export type SessionToCreate = Omit<
   SessionMeta,
-  'id' | 'createdAt' | 'chatId' | 'status' | 'isArchived' | 'diffStats'
+  'id' | 'createdAt' | 'chatId' | 'status' | 'isArchived' | 'isTabClosed' | 'diffStats'
 > &
   SessionLaunchConfig & {
     sessionId?: SessionId;

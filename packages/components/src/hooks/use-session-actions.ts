@@ -321,6 +321,8 @@ export type SessionActions = {
   /** Delete exactly the supplied Sessions without discovering related Sessions. */
   deleteSessions: (sessionIds: SessionId[]) => Promise<void>;
   archiveSession: (sessionId: SessionId) => Promise<void>;
+  setSessionTabClosed: (sessionId: SessionId, closed: boolean) => Promise<void>;
+  reopenSessionTab: (sessionId: SessionId) => Promise<void>;
   restoreSession: (sessionId: SessionId) => Promise<void>;
   deleteArchivedSession: (sessionId: SessionId) => Promise<void>;
   setSessionPinned: (sessionId: SessionId, isPinned: boolean) => Promise<void>;
@@ -1227,6 +1229,7 @@ export function useSessionActions(): SessionActions {
       for (const session of archiveTargets) {
         await runtime.writer.upsertDocMeta(getSessionRoomId(session.id), {
           isArchived: false,
+          ...(session.id === sessionId ? { isTabClosed: false } : {}),
         } as Partial<SessionMeta>);
       }
       log('[session-restore] restored', {
@@ -1235,6 +1238,37 @@ export function useSessionActions(): SessionActions {
       });
     },
     [runtime, store]
+  );
+
+  const setSessionTabClosed = useCallback(
+    async (sessionId: SessionId, closed: boolean) => {
+      if (!runtime) throw new Error('Runtime not ready');
+      const roomId = getSessionRoomId(sessionId);
+      const entry = await runtime.repo.getDocMeta(roomId);
+      if (isLoroRepoDocDeleted(entry)) throw new Error('Session was deleted');
+      const meta = entry?.meta ?? store.get(sessionMetaCacheAtom)[roomId];
+      if (!meta) throw new Error('Session metadata is still loading');
+      await runtime.writer.upsertDocMeta(roomId, { isTabClosed: closed });
+    },
+    [runtime, store]
+  );
+
+  const reopenSessionTab = useCallback(
+    async (sessionId: SessionId) => {
+      if (!runtime) throw new Error('Runtime not ready');
+      const entry = await runtime.repo.getDocMeta(getSessionRoomId(sessionId));
+      if (!entry?.meta || isLoroRepoDocDeleted(entry)) {
+        throw new Error('Session metadata unavailable');
+      }
+      if ((entry.meta as SessionMeta).isArchived) {
+        // Legacy tab closes archived the session. Retain restoration checks and
+        // containment semantics rather than clearing the lifecycle bit directly.
+        if (!store.get(docMetaCacheReadyAtom)) throw new Error('Session metadata is still loading');
+        await restoreSession(sessionId);
+      }
+      await setSessionTabClosed(sessionId, false);
+    },
+    [runtime, restoreSession, setSessionTabClosed, store]
   );
 
   const deleteArchivedSessionMeta = useCallback(
@@ -1301,6 +1335,8 @@ export function useSessionActions(): SessionActions {
     touchSessionActivity,
     updateSessionStatus,
     updateSessionTitle,
+    setSessionTabClosed,
+    reopenSessionTab,
     transferSessionOwner,
     markSessionRead,
     markSessionUnread,

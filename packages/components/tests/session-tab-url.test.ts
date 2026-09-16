@@ -4,11 +4,35 @@ import {
   formatSessionTabSearch,
   parseSessionTabSearch,
   resolveActiveSessionTab,
+  getSessionTabFallback,
+  isSessionTabClosed,
 } from '../src/lib/session-tab-url';
 
 const parentSessionId = 'parent-session-id';
 
+describe('shared tab closure', () => {
+  it('combines legacy archives with independent close flags', () => {
+    expect(isSessionTabClosed({})).toBe(false);
+    expect(isSessionTabClosed({ isTabClosed: true })).toBe(true);
+    expect(isSessionTabClosed({ isArchived: true, isTabClosed: false })).toBe(true);
+    expect(isSessionTabClosed({ isArchived: false, isTabClosed: false })).toBe(false);
+  });
+  it('chooses the right open neighbour, then the left, then empty', () => {
+    const order = ['parent', 'a', 'b', 'c'];
+    expect(getSessionTabFallback('a', order, ['parent', 'c'])).toBe('c');
+    expect(getSessionTabFallback('c', order, ['parent', 'a'])).toBe('a');
+    expect(getSessionTabFallback('parent', order, [])).toBe('empty');
+    expect(getSessionTabFallback('absent', order, ['a'])).toBe('a');
+  });
+});
+
 describe('parseSessionTabSearch', () => {
+  it('round trips the empty surface without restoring the parent', () => {
+    expect(parseSessionTabSearch(formatExplicitSessionTabSearch('empty'))).toEqual({
+      kind: 'empty',
+    });
+    expect(formatSessionTabSearch('empty', parentSessionId)).toBe('empty');
+  });
   it('returns missing when tab is absent', () => {
     expect(parseSessionTabSearch(undefined)).toEqual({ kind: 'missing' });
   });
@@ -90,6 +114,9 @@ describe('resolveActiveSessionTab', () => {
     draftTabIds: ['draft:d1'],
     promotedChildSessionIdsByDraftId: {},
   };
+  it('keeps an explicitly empty surface empty when new tabs arrive', () => {
+    expect(resolveActiveSessionTab({ kind: 'empty' }, context)).toBe('empty');
+  });
 
   it('resolves a missing tab to the parent (external navigation stripping ?tab converges)', () => {
     // #193: navigation that removes `?tab` while a child was active must

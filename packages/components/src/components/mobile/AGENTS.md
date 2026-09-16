@@ -74,7 +74,7 @@ before touching gestures.
   live status via ONE derived atom over `sessionLiveStatusAtomFamily` (never a
   loop of `useAtomValue`) and unread via `lastMessageAt > lastReadAt`.
 - Conversation rows follow the shared tab order (main first, NOT time) with no
-  close/check affordance; `requestPermission` is the warning-tone hand
+  check affordance; close buttons use the shared tab-close action. `requestPermission` is the warning-tone hand
   outranking the spinner; the header tab badge stays two-state; `Files` leads
   the Viewers card unconditionally. The menu sheet stays flat, and its Owner row
   (multi-member only, writes `SessionMeta.userId`) is a DISCLOSURE, not a list.
