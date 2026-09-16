@@ -17,9 +17,9 @@ import type { EagerSyncPolicy } from './eager-sync-policy';
  * - Sync is always ONE-SHOT catch-up: the runtime prefetcher uses a disposable
  *   worker and a raw-document snapshot cache, never a UI store or Mirror.
  *   It releases the document and room after catch-up.
- * - Candidate scope depends on the surface: native/electron can eventually
- *   warm all candidates, while web stays bounded to the highest-priority set.
- *   All surfaces use bounded concurrency plus batch cooldowns.
+ * - Every surface bounds automatic prefetch to the highest-priority recent
+ *   candidates. Less-active sessions sync on demand when opened.
+ * - All surfaces use bounded concurrency plus batch cooldowns.
  */
 
 /** Minimal view of a session's metadata the coordinator reasons about. */
@@ -91,6 +91,8 @@ export interface BackgroundSyncCoordinatorDeps {
 export type { EagerSyncPolicy, EagerSyncSurface } from './eager-sync-policy';
 export {
   DEFAULT_EAGER_SYNC_POLICY,
+  DESKTOP_EAGER_SYNC_POLICY,
+  EAGER_SYNC_CANDIDATE_WINDOW,
   FULL_EAGER_SYNC_CANDIDATE_WINDOW,
   FULL_EAGER_SYNC_POLICY,
   MOBILE_EAGER_SYNC_POLICY,

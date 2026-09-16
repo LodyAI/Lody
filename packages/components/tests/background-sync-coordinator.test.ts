@@ -5,6 +5,7 @@ import {
   type BackgroundSyncCoordinatorDeps,
   type EagerSyncHighWaterStore,
   type EagerSyncPolicy,
+  type EagerSyncSurface,
   type PrefetchOutcome,
   type SessionActivitySnapshot,
 } from '../src/providers/background-sync-coordinator';
@@ -225,7 +226,7 @@ function setup(
 }
 
 describe('createBackgroundSyncCoordinator', () => {
-  it('uses a bounded web policy, full desktop policy, and paced mobile policy', () => {
+  it('uses a 20-session candidate window on every surface and paces mobile more slowly', () => {
     expect(resolveEagerSyncPolicy('web')).toMatchObject({
       concurrency: 1,
       batchSize: 1,
@@ -236,15 +237,40 @@ describe('createBackgroundSyncCoordinator', () => {
       concurrency: 1,
       batchSize: 1,
       batchCooldownMs: 1_500,
-      candidateWindow: Number.POSITIVE_INFINITY,
+      candidateWindow: 20,
     });
     expect(resolveEagerSyncPolicy('mobile')).toMatchObject({
       concurrency: 1,
       batchSize: 1,
       batchCooldownMs: 3_000,
-      candidateWindow: Number.POSITIVE_INFINITY,
+      candidateWindow: 20,
     });
   });
+
+  it.each<EagerSyncSurface>(['web', 'desktop', 'mobile'])(
+    'queues at most the 20 highest-priority sessions on %s',
+    async (surface) => {
+      const activity = Array.from({ length: 1_000 }, (_, index) => ({
+        sessionId: sid(`session-${index}`),
+        lastMessageAt: index + 1,
+      }));
+      const { coordinator } = setup({
+        activity,
+        policy: resolveEagerSyncPolicy(surface),
+      });
+
+      coordinator.start();
+      await tick();
+
+      const state = coordinator.getState();
+      expect(state.inFlight).toEqual([sid('session-999')]);
+      expect(state.queued).toHaveLength(19);
+      expect(new Set([...state.inFlight, ...state.queued])).toEqual(
+        new Set(Array.from({ length: 20 }, (_, index) => sid(`session-${999 - index}`)))
+      );
+      coordinator.stop();
+    }
+  );
 
   it('prefetches a recently-active session on start', async () => {
     const { coordinator, prefetcher } = setup({
