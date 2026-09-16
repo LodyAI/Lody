@@ -4170,6 +4170,6 @@
   "sessions.attachmentUploading": "Uploading · {{progress}}%",
   "sessions.pendingMessageUploading": "Waiting to send · Uploading attachments",
   "sessions.pendingMessageWaiting": "Waiting to send",
-  "sessions.pendingMessageUploadFailed": "Not sent · Attachment upload failed",
+  "sessions.pendingMessageUploadFailed": "Not sent",
   "sessions.attachmentPreparingNotSent": "Preparing attachments · not sent yet"
 }
