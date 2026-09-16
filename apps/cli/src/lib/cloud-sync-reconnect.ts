@@ -61,10 +61,11 @@ const DEFAULT_STABILITY_WINDOW_MS = 5_000;
  *
  * The online signal is deliberately cheap and unthrottled at its source, so a
  * flapping transport could otherwise re-create the storm through this door. The
- * floor counts forced releases only, never ordinary attempts: the first signal
- * of an outage — the one that actually carries the recovery — is always honored
- * immediately, and pathological flapping degrades to one extra attempt per
- * minute instead of one per second.
+ * floor counts forced releases only, never ordinary attempts, and it is charged
+ * when a signal actually releases a connection — a signal it turns away stays
+ * latched for the next connect request. So the first signal of an outage, the
+ * one that carries the recovery, is never the one that gets dropped, while
+ * pathological flapping degrades to one extra attempt per minute.
  */
 const DEFAULT_FORCED_RECONNECT_MIN_INTERVAL_MS = 60_000;
 
@@ -142,6 +143,19 @@ export class CloudSyncReconnectGate {
   private lastForcedReleaseAtMs = Number.NEGATIVE_INFINITY;
   private stabilityTimer: ReturnType<typeof setTimeout> | null = null;
   /**
+   * An online signal that could not start a connection yet.
+   *
+   * Most signals arrive when there is nothing to release: the Convex client is
+   * asleep in its own backoff, or an attempt is already in flight. Spending the
+   * signal there would lose it — the in-flight attempt fails, a fresh hold of up
+   * to the ceiling is installed, and the online edge does not fire again while
+   * the transport stays healthy. So the signal is LATCHED until the next connect
+   * request can act on it, and cleared once any real attempt has started (an
+   * attempt that has already run is the signal's answer, whether it needed the
+   * shortcut or not).
+   */
+  private onlineSignal: { reason: string } | null = null;
+  /**
    * At most one deferred connection exists at a time. The Convex client keeps a
    * single socket and abandons the previous one (without closing it) before
    * constructing the next, so a superseded deferral must never be allowed to
@@ -184,38 +198,42 @@ export class CloudSyncReconnectGate {
   }
 
   /**
-   * Something else proved the network is usable again: drop the remaining wait
-   * and connect now. The failure streak is deliberately NOT cleared — if this
-   * attempt fails too, backoff resumes where it left off instead of restarting
-   * the storm from the base delay.
+   * Something else proved the network is usable again: connect now instead of
+   * serving out the remaining wait. The failure streak is deliberately NOT
+   * cleared — if this attempt fails too, backoff resumes where it left off
+   * instead of restarting the storm from the base delay.
    *
-   * @returns whether the signal was acted on.
+   * @returns whether a held connection started right away. `false` also covers
+   * the common case where the signal was latched for the next connect request
+   * (nothing was waiting yet, or the forced-reconnect floor has not passed);
+   * a latched signal is not lost.
    */
   notifyOnline(reason: string): boolean {
     if (this.disposed) {
       return false;
     }
-    if (this.consecutiveFailures === 0 && this.nextAllowedConnectAtMs === 0) {
+    if (this.consecutiveFailures === 0 && this.nextAllowedConnectAtMs === 0 && !this.pending) {
       return false;
     }
-    const now = Date.now();
-    if (now - this.lastForcedReleaseAtMs < this.forcedReconnectMinIntervalMs) {
+    this.onlineSignal = { reason };
+    const pending = this.pending;
+    if (!pending) {
       this.logger?.debug(
-        `[cloud-sync-reconnect] Online signal ignored (forced reconnect ${Math.round(
-          (now - this.lastForcedReleaseAtMs) / 1000
-        )}s ago): reason=${reason}`
+        `[cloud-sync-reconnect] Online signal held for the next connect: reason=${reason}`
       );
       return false;
     }
-    this.lastForcedReleaseAtMs = now;
-    this.nextAllowedConnectAtMs = 0;
-    this.logger?.debug(`[cloud-sync-reconnect] Online signal, reconnecting now: reason=${reason}`);
-    const pending = this.pending;
-    if (pending) {
-      this.clearPendingTimer(pending);
-      this.pending = null;
-      pending.start();
+    const consumed = this.tryConsumeOnlineSignal();
+    if (!consumed) {
+      return false;
     }
+    this.logger?.debug(
+      `[cloud-sync-reconnect] Online signal, reconnecting now: reason=${consumed}`
+    );
+    this.nextAllowedConnectAtMs = 0;
+    this.clearPendingTimer(pending);
+    this.pending = null;
+    pending.start();
     return true;
   }
 
@@ -355,6 +373,7 @@ export class CloudSyncReconnectGate {
 
   dispose(): void {
     this.disposed = true;
+    this.onlineSignal = null;
     this.cancelPending({ emitClose: true });
     this.clearStabilityTimer();
   }
@@ -372,7 +391,18 @@ export class CloudSyncReconnectGate {
     if (this.disposed) {
       return;
     }
-    const waitMs = Math.max(0, this.nextAllowedConnectAtMs - Date.now());
+    let waitMs = Math.max(0, this.nextAllowedConnectAtMs - Date.now());
+    if (waitMs > 0) {
+      const consumed = this.tryConsumeOnlineSignal();
+      if (consumed) {
+        this.logger?.debug(
+          `[cloud-sync-reconnect] Online signal released a ${Math.round(waitMs / 1000)}s hold: ` +
+            `reason=${consumed}`
+        );
+        this.nextAllowedConnectAtMs = 0;
+        waitMs = 0;
+      }
+    }
     if (waitMs === 0) {
       handlers.start();
       return;
@@ -416,11 +446,39 @@ export class CloudSyncReconnectGate {
   }
 
   /**
+   * Takes the latched online signal if the forced-reconnect floor allows it.
+   * A throttled signal STAYS latched: the next connect request retries it, so
+   * flapping is bounded to one forced attempt per minute without any single
+   * genuine recovery being thrown away.
+   */
+  private tryConsumeOnlineSignal(): string | null {
+    const signal = this.onlineSignal;
+    if (!signal) {
+      return null;
+    }
+    const now = Date.now();
+    if (now - this.lastForcedReleaseAtMs < this.forcedReconnectMinIntervalMs) {
+      this.logger?.debug(
+        `[cloud-sync-reconnect] Online signal still held (forced reconnect ${Math.round(
+          (now - this.lastForcedReleaseAtMs) / 1000
+        )}s ago): reason=${signal.reason}`
+      );
+      return null;
+    }
+    this.onlineSignal = null;
+    this.lastForcedReleaseAtMs = now;
+    return signal.reason;
+  }
+
+  /**
    * A new attempt supersedes the previous connection's stability window, which
-   * would otherwise reset the streak on behalf of a connection that is gone.
+   * would otherwise reset the streak on behalf of a connection that is gone. It
+   * also answers any latched online signal: the attempt this signal was waiting
+   * for has now run.
    */
   private reportAttemptStarted(): void {
     this.clearStabilityTimer();
+    this.onlineSignal = null;
   }
 
   private reportAttemptOpened(): void {
@@ -436,6 +494,9 @@ export class CloudSyncReconnectGate {
       );
       this.consecutiveFailures = 0;
       this.nextAllowedConnectAtMs = 0;
+      // A connection that holds ends the outage: the next one starts from a
+      // clean slate, including the forced-reconnect floor.
+      this.lastForcedReleaseAtMs = Number.NEGATIVE_INFINITY;
     }, this.stabilityWindowMs);
     timer.unref?.();
     this.stabilityTimer = timer;

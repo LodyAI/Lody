@@ -30,6 +30,14 @@ transport is unstable, so it forces at most one extra attempt per minute; the
 first signal of an outage, the one that actually carries the recovery, is never
 the one that gets dropped.
 
+A recovery signal usually arrives when there is nothing to release yet: the
+client may be asleep between its own retries, or an attempt may still be in
+flight and about to fail. Such a signal is remembered rather than spent — the
+next connection attempt starts without waiting out the delay that the failure
+installs in the meantime — and only an attempt that actually ran answers it.
+Otherwise a machine whose network returns at the wrong moment would keep waiting
+for a second signal that a healthy transport never sends.
+
 A connection that opens is not yet a recovery. One that opens and dies seconds
 later is a failed attempt and keeps the backoff growing; only a connection that
 holds resets it. The control plane and the content-sync plane back off

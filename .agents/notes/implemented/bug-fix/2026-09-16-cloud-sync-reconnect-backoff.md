@@ -72,6 +72,22 @@ the first genuine recovery signal when it arrived less than a minute after the
 failure that started the hold. The failure streak is deliberately not cleared by
 a signal — if the forced attempt fails too, backoff resumes where it left off.
 
+**A signal is latched, never spent on nothing** (correction after review of
+[PR #757](https://github.com/LodyAI/Lody/pull/757)). Most signals arrive when
+there is nothing to release. The first shipped version still consumed the floor
+token and cleared the hold in that case, which splits into two outcomes: when the
+Convex client was merely asleep in its own backoff, clearing the hold did work —
+its next socket connected at once — but when an attempt was already in flight,
+nothing happened, and the failure of that attempt then installed a fresh
+ceiling-sized hold over the cleared one. Streams stays healthy afterwards, so no
+second rising edge arrives and the recovery is lost for up to five minutes,
+exactly on the risk this note claims to cover. A signal that cannot act now is
+therefore held in `onlineSignal` until the next connect request, which also makes
+the floor honest: it is charged when a signal actually releases a connection, and
+a signal the floor turns away stays latched instead of disappearing. Any real
+attempt clears the latch — an attempt that has already run is the signal's
+answer — so the latch can never accumulate into a way to reset the storm.
+
 **Accounting.** A connection resets the streak only after it holds for 5s, the
 flap-aware rule `loro/connection-recovery.ts` already uses; an open that dies
 inside the window charges the attempt instead. At most one deferred connection
@@ -85,8 +101,10 @@ the close event the client is waiting for.
 ## Alternatives considered
 
 - **Reach into `client.webSocketManager` and raise `maxBackoff`.** One line, but
-  it depends on a private field of a vendored client and would silently stop
-  working on upgrade, with a reconnect storm as the failure mode.
+  it depends on an unexported instance property inside a published dependency —
+  `convex` is an ordinary npm dependency of `apps/cli`, consumed through
+  `convex/browser`, with no source copy in this repository — so it would silently
+  stop working on upgrade, with a reconnect storm as the failure mode.
 - **Probe the network from the gate** (periodic HTTP to the cloud host) instead
   of consuming a signal. It replaces WebSocket attempts with HTTP attempts at
   the same cadence and proves less: the Streams edge already means real traffic
@@ -115,10 +133,18 @@ Convex client drives it (one socket at a time, a new one only after the previous
 closed, failures reported a second after the attempt reaches the network) under
 fake timers: a simulated two-hour outage stays under 45 attempts with every
 post-grace gap above a minute, an online signal mid-hold connects in the same
-tick, 300 flapping signals force at most five extra attempts, a 1s-lived
-connection charges the streak while a 5s-lived one clears it, abandoned
-deferrals never reach the network, and both `close()` and `dispose()` settle a
-held socket.
+tick, a signal that lands while an attempt is in flight still reconnects within
+the client's own backoff after that attempt fails (instead of waiting out the
+ceiling), a signal during the client's retry sleep still connects at once, five
+minutes of once-a-second flapping against a reconnecting client costs at most six
+attempts, a 1s-lived connection charges the streak while a 5s-lived one clears
+it, abandoned deferrals never reach the network, and both `close()` and
+`dispose()` settle a held socket.
+
+Each mechanism was ablated to confirm the tests can see it: removing the latch
+fails the in-flight-signal test, never consuming the latch in `requestConnect`
+fails both signal tests, and dropping the forced-reconnect floor to zero fails
+the flapping test.
 
 Not verified: no end-to-end run against a real outage, and the Convex client's
 own loop is exercised only through the model of it encoded in the test harness.

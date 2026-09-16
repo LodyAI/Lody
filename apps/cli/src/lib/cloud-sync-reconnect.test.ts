@@ -186,27 +186,86 @@ describe('CloudSyncReconnectGate', () => {
 
   it('caps a flapping online signal at one forced reconnect per minute', async () => {
     const harness = createHarness();
-    for (let cycle = 0; cycle < 9; cycle += 1) {
+    for (let cycle = 0; cycle < 12; cycle += 1) {
       await runFailedCycle(harness);
     }
-    harness.behavior.autoFail = false;
-    const attemptsBeforeHold = harness.attempts.length;
-    const held = new harness.Ctor('wss://convex.example/api/sync');
-    expect(held.readyState).toBe(0);
+    const attemptsBeforeFlapping = harness.attempts.length;
 
-    // The first signal carries the actual recovery and is honoured at once.
-    expect(harness.gate.notifyOnline('streams-online')).toBe(true);
-    expect(harness.attempts.length).toBe(attemptsBeforeHold + 1);
-
-    // A transport that then flaps once a second must not become the new storm.
-    let honoured = 0;
-    for (let signal = 0; signal < 300; signal += 1) {
-      if (harness.gate.notifyOnline('flapping')) {
-        honoured += 1;
+    // A transport that flaps once a second, with the client reconnecting after
+    // each failure as it always does. Without a floor every flap would force an
+    // attempt, which is the storm this whole gate exists to prevent.
+    let current: GatedSocket | null = null;
+    let clientReconnectAtMs = Date.now();
+    for (let tick = 0; tick < 300; tick += 1) {
+      harness.gate.notifyOnline('flapping');
+      if (!current && Date.now() >= clientReconnectAtMs) {
+        current = new harness.Ctor('wss://convex.example/api/sync');
+        current.onclose = () => {
+          current = null;
+          clientReconnectAtMs = Date.now() + 16_000;
+        };
       }
       await vi.advanceTimersByTimeAsync(1_000);
     }
-    expect(honoured).toBeLessThanOrEqual(5);
+
+    // Five minutes of flapping: at most one forced attempt per minute.
+    expect(harness.attempts.length - attemptsBeforeFlapping).toBeLessThanOrEqual(6);
+    harness.gate.dispose();
+  });
+
+  it('remembers an online signal that arrives while a real attempt is in flight', async () => {
+    const harness = createHarness();
+    for (let cycle = 0; cycle < 12; cycle += 1) {
+      await runFailedCycle(harness);
+    }
+    // The hold is now at the ceiling, which is what the signal has to beat.
+    expect(harness.gate.state.nextAllowedConnectAtMs - Date.now()).toBeGreaterThan(200_000);
+
+    // Let one held connection through and leave it connecting.
+    harness.behavior.autoFail = false;
+    const attemptsBeforeInFlight = harness.attempts.length;
+    const inFlight = new harness.Ctor('wss://convex.example/api/sync');
+    await advanceUntil(() => harness.attempts.length > attemptsBeforeInFlight, 10 * 60_000);
+    expect(inFlight.readyState).toBe(0);
+
+    // Streams recovers while that attempt is still connecting: there is nothing
+    // to release yet, so the signal must be kept rather than spent.
+    harness.gate.notifyOnline('streams-online');
+
+    // The in-flight attempt then fails and installs a fresh ceiling-sized hold.
+    harness.sockets.at(-1)?.fail();
+    const failedAtMs = Date.now();
+    expect(harness.gate.state.nextAllowedConnectAtMs - failedAtMs).toBeGreaterThan(200_000);
+
+    // The client reconnects after its own backoff; the remembered signal must
+    // release that attempt instead of making it wait out the ceiling. Streams
+    // stays healthy, so there is no second rising edge to rescue it.
+    const attemptsBeforeRetry = harness.attempts.length;
+    await vi.advanceTimersByTimeAsync(16_000);
+    const retry = new harness.Ctor('wss://convex.example/api/sync');
+    expect(harness.attempts.length).toBe(attemptsBeforeRetry + 1);
+    expect(Date.now() - failedAtMs).toBeLessThan(30_000);
+    expect(retry.readyState).toBe(0);
+    harness.gate.dispose();
+  });
+
+  it('still connects at once when the signal lands during the client retry sleep', async () => {
+    const harness = createHarness();
+    for (let cycle = 0; cycle < 12; cycle += 1) {
+      await runFailedCycle(harness);
+    }
+    // No socket exists right now: the client is asleep in its own backoff and a
+    // ceiling-sized hold is armed for whenever it wakes up.
+    const holdRemainingMs = harness.gate.state.nextAllowedConnectAtMs - Date.now();
+    expect(holdRemainingMs).toBeGreaterThan(200_000);
+
+    harness.gate.notifyOnline('streams-online');
+
+    harness.behavior.autoFail = false;
+    const attemptsBeforeConnect = harness.attempts.length;
+    const socket = new harness.Ctor('wss://convex.example/api/sync');
+    expect(harness.attempts.length).toBe(attemptsBeforeConnect + 1);
+    expect(socket.readyState).toBe(0);
     harness.gate.dispose();
   });
 
