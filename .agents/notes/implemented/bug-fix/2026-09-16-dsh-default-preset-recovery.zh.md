@@ -37,6 +37,7 @@ Harness 用户设置中的默认 preset 可能不在 Lody 随包提供的目录�
 宿主固定 DSH 提交 `feb3afe`，已发布于
 [DSH PR #20](https://github.com/LodyAI/acp-extension-dsh/pull/20)。应先合并适配器变更，
 再合并宿主集成；两个 PR 都不会直接部署到运行中的客户端。
+宿主集成：[Lody PR #748](https://github.com/LodyAI/Lody/pull/748)。
 根检出缺少工作区依赖及其他子模块，根检查受限；未构建或安装桌面发布版。
 根 `pnpm check` 因缺少 `tsgo` 停止，`pnpm format` 因缺少 `oxfmt` 停止，文档
 检查报告指向未初始化子模块的断链。子模块默认 Prettier 检查同样不接受未修改

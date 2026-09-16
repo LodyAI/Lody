@@ -44,6 +44,7 @@ The [settings Spec](../../../../specs/deepseek-harness-settings.md) remains draf
 The host pins DSH commit `feb3afe`, published in
 [DSH PR #20](https://github.com/LodyAI/acp-extension-dsh/pull/20).
 Merge that adapter change before the host integration; neither PR deploys a running client.
+Host integration: [Lody PR #748](https://github.com/LodyAI/Lody/pull/748).
 The root checkout lacks workspace dependencies and other submodules, limiting
 root checks; no desktop release has been built or installed.
 Root `pnpm check` stops at missing `tsgo`, `pnpm format` at missing `oxfmt`,
