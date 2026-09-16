@@ -7,7 +7,7 @@ import {
   type MachineViewMeta,
   type ProviderSetupTask,
 } from '@lody/shared';
-import { RotateCcw, Trash2, XCircle } from 'lucide-react';
+import { RotateCcw, Trash2 } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 
 import { AgentReadinessMark, type AgentReadiness } from '@/components/shared/agent-readiness-mark';
@@ -165,16 +165,9 @@ export function ProviderSetupRow({
             {labelForAgent(config.cliType, config.agentType)}
           </div>
         </div>
-        {/* Status column, then action column, then delete — the same three
-            slots an AgentConfig row uses, in the same order, so a pending setup
-            above a published agent lines up with it instead of ragging the
-            list. The middle slot is empty here because a setup has nothing to
-            edit; the width stays reserved, which is what holds the column. */}
-        <div className="flex min-w-20 shrink-0 justify-end">
-          {setup.status === 'failed' ? (
-            <XCircle className="h-4 w-4 shrink-0 text-status-error" />
-          ) : null}
-        </div>
+        {/* Reserve the provider row's status and edit columns so setup actions
+            stay aligned with published providers. Failures are explained below. */}
+        <div className="min-w-20 shrink-0" aria-hidden="true" />
         <div className="flex shrink-0 items-center gap-1 pr-3">
           <div className="w-12 shrink-0" />
           <div className="flex w-20 shrink-0 items-center justify-end">
