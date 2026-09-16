@@ -107,6 +107,6 @@ public-boundary 检查及文档检查分别通过。已运行 `pnpm format` 并�
 
 第三层正在实现。为关闭“已追加历史但磁盘确认丢失”的窗口，在同一个 HistoryWriter 抽象内先在临时 fork 准备操作，保存原副本名称及原始操作字节，然后才导入当前文档。重启重放相同操作，不重新 append。先 flush 原副本以保留操作依赖；跨窗口恢复先读取原副本，缺失时保留记录并停止，不以新窗口的空历史推断未发送。真实 Loro 测试已覆盖两副本重复重放、缺失依赖与校验失败；运行时、退出、UI 以及完整 IndexedDB 验证仍未接完，不能发布这一层。
 
-Layer 3 validation: full `TMPDIR=/private/tmp NODE_ENV=test pnpm check` passes, including 479 component files / 3,670 tests. Queue preparation uses the existing WorkspaceWriter and retains queue format. `pnpm format` and docs check completed; docs report zero errors. No packaged-device acceptance is claimed.
+Layer 3 validation: full `TMPDIR=/private/tmp NODE_ENV=test pnpm check` passes, including 479 component files / 3,670 tests. Queue preparation uses the existing WorkspaceWriter and retains queue format. 原生 queue-steer 复用已有的 queued journal 条目，不会再添加冲突的 `pending_apply` 副本；guide/delivery 改写该已有条目并保留其恢复身份。`pnpm format` and docs check completed; docs report zero errors. No packaged-device acceptance is claimed.
 
 跨窗口接管时记录实际准备操作的副本；接管输入的窗口不一定拥有原操作基线。确定性 journal 测试覆盖此恢复边界。

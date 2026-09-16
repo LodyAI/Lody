@@ -1107,8 +1107,15 @@ describe('useSessionActions', () => {
       const result = actions.requestSessionSteer(sessionId, 'assistant:user-1', userTurnId, {
         machineId,
       });
-      if (recoveryOwned && disposition === 'promotion-failed') {
-        await expect(result).rejects.toThrow('Injected activation write failure');
+      if (
+        (recoveryOwned && disposition === 'promotion-failed') ||
+        disposition === 'delivery-unknown'
+      ) {
+        await expect(result).rejects.toThrow(
+          disposition === 'delivery-unknown'
+            ? 'Guide outcome is uncertain'
+            : 'Injected activation write failure'
+        );
       } else {
         await expect(result).resolves.toBe(disposition === 'applied');
       }

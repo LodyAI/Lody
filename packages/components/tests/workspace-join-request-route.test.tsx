@@ -13,7 +13,7 @@ const mocks = vi.hoisted(() => ({
     user: { email: string };
   },
   authClient: { id: 'auth-client' },
-  signOutWithoutRedirect: vi.fn().mockResolvedValue(true),
+  signOutWithoutRedirect: vi.fn().mockResolvedValue({ ok: true }),
 }));
 
 vi.mock('@tanstack/react-router', () => ({

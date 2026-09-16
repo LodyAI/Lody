@@ -488,6 +488,9 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
       );
       return false;
     }
+    if (response?.recoveryOwned && response.disposition === 'no-active-turn') {
+      return false;
+    }
     log(
       'session steer not applied for %s/%s: %s',
       sessionId,
