@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/742
 
 [English](2026-09-16-renderer-crash-manual-recovery.md)
 
