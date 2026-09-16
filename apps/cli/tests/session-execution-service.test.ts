@@ -31,8 +31,13 @@ import {
   type SessionId,
   type SessionMeta,
   type SessionInputBlock,
+  type SessionStatus,
   type WorkspaceId,
 } from '@lody/shared';
+import {
+  SessionActivePresenceController,
+  type SessionActivePresencePhase,
+} from '../src/lib/loro/session-active-presence';
 import type { SessionManager } from '../src/session/session-manager';
 import { SessionDocument, type LoroDocumentManager } from '../src/lib/loro/doc';
 import { composeTestSessionDoc } from './session-doc-fixture';
@@ -8452,5 +8457,244 @@ describe('SessionExecutionService goal control', () => {
     const released = service.waitForTurnRelease(goalSessionId, 'turn-1');
     completion.resolve();
     await released;
+  });
+});
+
+describe('SessionExecutionService initialization deadline', () => {
+  type PresenceEvent =
+    | { kind: 'publish'; sessionId: string; status: SessionStatus }
+    | { kind: 'clear'; sessionId: string };
+
+  /**
+   * Wires the REAL `SessionActivePresenceController` into the execution service
+   * so presence is an observable output rather than a mock: the fake document
+   * manager records every publish/clear exactly as production would drive it.
+   *
+   * Only `setInterval` is faked. Effect's scheduler and promise microtasks stay
+   * real, so the turn fiber makes normal progress while the heartbeat clock is
+   * fully under the test's control, and `now` is injected so elapsed time never
+   * depends on wall-clock.
+   */
+  const createDeadlineHarness = (options: {
+    sessionId: string;
+    /** Resolves/rejects the session creation the turn is blocked on. */
+    onCreateSession?: (config: {
+      onPresencePhase?: (phase: SessionActivePresencePhase, detail?: string) => void;
+    }) => Promise<unknown>;
+    stallBudgetsMs?: Record<string, number>;
+  }) => {
+    const presenceEvents: PresenceEvent[] = [];
+    let nowMs = 1_000_000;
+    // Only `setInterval` is faked, so a real `setTimeout(0)` still yields to
+    // Effect's scheduler: advancing the heartbeat clock and then letting the
+    // turn fiber run keeps every step ordered without a real sleep.
+    const settle = async () => {
+      for (let i = 0; i < 5; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    };
+    const advance = async (ms: number) => {
+      nowMs += ms;
+      vi.advanceTimersByTime(ms);
+      await settle();
+    };
+
+    let history: Array<Record<string, unknown>> = [
+      { id: 'turn-user-1', role: 'user', status: 'pending', read: false },
+    ];
+    const sessionDoc = withHistoryPort({
+      getMetaState: vi.fn(async () => ({ isArchived: false })),
+      setStatus: vi.fn(async () => {}),
+      setProject: vi.fn(async () => {}),
+      setBaseBranch: vi.fn(async () => {}),
+      getHistory: vi.fn(() => history),
+      updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
+        history = updater(history);
+      }),
+      roomId: `session-${options.sessionId}`,
+    });
+
+    const workspaceDocument = {
+      repo: {
+        upsertDocMeta: vi.fn(async () => {}),
+        getDocMeta: vi.fn(async () => undefined),
+      },
+      getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+      updateAcpCapabilities: vi.fn(async () => {}),
+      // The presence sink the controller writes through.
+      publishSessionPresence: (sessionId: string, _machineId: MachineId, status: SessionStatus) => {
+        presenceEvents.push({ kind: 'publish', sessionId, status });
+      },
+      clearSessionPresence: (sessionId: string) => {
+        presenceEvents.push({ kind: 'clear', sessionId });
+      },
+    } as unknown as LoroDocumentManager;
+
+    let service!: SessionExecutionService;
+    const presence = new SessionActivePresenceController(
+      workspaceDocument,
+      'machine-1' as MachineId,
+      { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} } as unknown as Logger,
+      {
+        intervalMs: 10_000,
+        now: () => nowMs,
+        ...(options.stallBudgetsMs ? { stallBudgetsMs: options.stallBudgetsMs } : {}),
+        onInitializationStalled: (sessionId, stall) =>
+          service.notifyInitializationStalled(sessionId, stall),
+      }
+    );
+
+    const deps = createBaseDeps({
+      sessionManager: {
+        getSession: vi.fn(() => null),
+        getPendingSession: vi.fn(() => null),
+        createSession: vi.fn(
+          async (config: {
+            onPresencePhase?: (phase: SessionActivePresencePhase, detail?: string) => void;
+          }) =>
+            options.onCreateSession
+              ? await options.onCreateSession(config)
+              : await new Promise(() => {})
+        ),
+        setSessionError: vi.fn(),
+        terminateSession: vi.fn(),
+        refreshGhTokenForSession: vi.fn(async () => {}),
+      } as unknown as SessionManager,
+      workspaceDocument,
+      startSessionActivePresence: (sessionId: SessionId, phase?: SessionActivePresencePhase | null) =>
+        presence.start(sessionId, phase),
+      setSessionActivePresencePhase: (
+        sessionId: SessionId,
+        phase: SessionActivePresencePhase | null,
+        detail?: string
+      ) => presence.setPhase(sessionId, phase, detail),
+      clearSessionActivePresence: (sessionId: SessionId) => presence.clear(sessionId),
+    });
+    service = new SessionExecutionService(deps);
+
+    const start = () =>
+      service.startSession({
+        type: 'session/create',
+        sessionId: options.sessionId as SessionId,
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        project: undefined,
+        acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
+        userTurnId: 'turn-user-1',
+        userId: 'user-1',
+        userName: 'User',
+        userEmail: 'user@example.com',
+      });
+
+    return {
+      advance,
+      settle,
+      deps,
+      presenceEvents,
+      service,
+      sessionDoc,
+      start,
+      getHistory: () => history,
+      heartbeatsFor: (sessionId: string) =>
+        presenceEvents.filter((e) => e.kind === 'publish' && e.sessionId === sessionId),
+    };
+  };
+
+  it('fails a turn whose initialization dependency never returns, and stops its presence', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      const harness = createDeadlineHarness({
+        sessionId: 'session-stalled-init',
+        // The observed production failure: a cloud identity lookup that never
+        // settled, leaving createSession pending forever.
+        onCreateSession: () => new Promise(() => {}),
+      });
+      const turn = harness.start();
+      await harness.settle();
+
+      // Well inside the 180s budget the turn is still initializing and still
+      // heartbeating — the watchdog must not fire early.
+      await harness.advance(170_000);
+      expect(harness.getHistory()[0]?.status).toBe('processing');
+      const heartbeatsBeforeStall = harness.heartbeatsFor('session-stalled-init').length;
+      expect(heartbeatsBeforeStall).toBeGreaterThan(1);
+
+      await harness.advance(20_000);
+      await turn;
+
+      // The user sees an explicit failure naming the stalled stage, not silence.
+      expect(harness.deps.recordChatFailure).toHaveBeenCalledWith(
+        harness.sessionDoc,
+        'session_init_failed',
+        expect.stringContaining('stopped making progress')
+      );
+      expect(harness.getHistory()[0]?.status).toBe('failed');
+      expect(harness.sessionDoc.setStatus.mock.calls.at(-1)?.[0]).toEqual(
+        SessionStatusFactory.idle()
+      );
+
+      // Presence is gone, and the 10s heartbeat that woke every subscriber for
+      // 1h51m in production has stopped for good.
+      expect(harness.presenceEvents.at(-1)).toEqual({
+        kind: 'clear',
+        sessionId: 'session-stalled-init',
+      });
+      const heartbeatsAtFailure = harness.heartbeatsFor('session-stalled-init').length;
+      await harness.advance(600_000);
+      expect(harness.heartbeatsFor('session-stalled-init').length).toBe(heartbeatsAtFailure);
+
+      // The turn runtime is released, so the session stops counting as active
+      // and becomes collectable again.
+      expect(harness.service.getExecutionSnapshot('session-stalled-init' as SessionId).hasActiveTurn).toBe(
+        false
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a stage that reports progress alive past its budget, and fails it once it goes silent', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      let reportProgress!: (detail: string) => void;
+      const harness = createDeadlineHarness({
+        sessionId: 'session-runtime-download',
+        // A managed-runtime download: the real SessionManager reports percent
+        // through `onPresencePhase`, which is this stage's only progress signal.
+        onCreateSession: (config) =>
+          new Promise(() => {
+            config.onPresencePhase?.('managed-runtime', 'Downloading Kimi runtime 1%');
+            reportProgress = (detail) => config.onPresencePhase?.('managed-runtime', detail);
+          }),
+        stallBudgetsMs: { 'managed-runtime': 60_000 },
+      });
+      const turn = harness.start();
+      await harness.settle();
+
+      // A slow but healthy download: far past the 60s budget in wall-clock, yet
+      // never silent for a whole budget, so it must survive.
+      for (let percent = 2; percent <= 10; percent += 1) {
+        await harness.advance(50_000);
+        reportProgress(`Downloading Kimi runtime ${percent}%`);
+      }
+      expect(harness.getHistory()[0]?.status).toBe('processing');
+
+      // Now the transfer wedges: no further progress for a full budget.
+      await harness.advance(70_000);
+      await turn;
+
+      expect(harness.deps.recordChatFailure).toHaveBeenCalledWith(
+        harness.sessionDoc,
+        'session_init_failed',
+        expect.stringContaining('Downloading Kimi runtime 10%')
+      );
+      expect(harness.getHistory()[0]?.status).toBe('failed');
+      expect(harness.presenceEvents.at(-1)).toEqual({
+        kind: 'clear',
+        sessionId: 'session-runtime-download',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
