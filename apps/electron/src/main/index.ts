@@ -22,7 +22,11 @@ import { AuthService } from './services/auth-service'
 import { authClient } from './auth'
 import { AppUpdaterService } from './services/app-updater-service'
 import { shouldConstructUpdaterEnabled } from './services/app-updater-sparkle-policy'
-import { configureDevbarDiagnostics } from './services/devbar-service'
+import {
+  configureDevbarDiagnostics,
+  startDevbarDevframeService,
+  stopDevbarDevframeService
+} from './services/devbar-service'
 import { GlobalShortcutsService } from './services/global-shortcuts-service'
 import { WindowsTrayService } from './services/windows-tray-service'
 import {
@@ -192,6 +196,7 @@ if (hasSingleInstanceLock) {
     // `lody app reset-cache` is the way back for a user whose renderer is wedged,
     // so it has to run while nothing holds that storage open.
     await applyPendingDesktopLocalReset()
+    await startDevbarDevframeService()
     recordE2EBootDiagnostic('initializing-services')
     if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(macIcon)
 
@@ -333,7 +338,8 @@ if (hasSingleInstanceLock) {
       event.preventDefault()
       void Promise.allSettled([
         cliService.shutdownForQuit(),
-        flushElectronMainErrorReporting()
+        flushElectronMainErrorReporting(),
+        stopDevbarDevframeService()
       ]).finally(() => {
         cliShutdownComplete = true
         app.quit()

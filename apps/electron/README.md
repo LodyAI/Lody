@@ -48,7 +48,8 @@ Fully quit the existing app first. Unset the variable or set it to `false` to
 disable the bar. This switch does not select a deployment; the public build
 remains local-only. The same packaged artifact can be inspected without rebuilding.
 
-The right side shows renderer animation-callback FPS, session-window CLS,
+The right side shows renderer animation-callback FPS, Long Task duration for the
+latest interval, session-window CLS,
 aggregate Electron RSS/CPU, current renderer `Heap xxxM`, and GPU-process CPU/RSS
 in one `GPU xx% xxxM` field
 (M = MiB, explained on hover). GPU CPU is **not** hardware
@@ -59,6 +60,32 @@ while the window is hidden. Values stay in memory and are never uploaded.
 Heap uses Chromium's JS heap estimate for the current renderer, not other
 worker/renderer heaps or total app memory. Enabling devbar at launch also enables
 precise Chromium memory readings; unavailable readings display `Heap —`.
+
+Select `DEVBAR` to activate Main Thread in Devframe's official floating Hub UI.
+The same Hub is available from its loopback URL as a standalone viewer. It also
+includes the Devframe Inspector, Accessibility Inspector, and Terminals panels;
+the latter provides an interactive local shell. The performance view shows live
+metric cards, 60-sample sparklines for FPS/CPU/memory/blocking, and a bounded
+recent Long Task list. Chromium reports the blocking
+interval but not a JavaScript stack, so exact function attribution still needs a
+CPU profile. The
+installation-profile deep link `<protocol>://devbar?view=main-thread` opens the
+same view (`lody://...` in the public build).
+
+While enabled, Desktop starts a loopback-only Devframe Hub on the first free port
+from 9765 through 9785. It serves the official viewer and dock, live RPC streams,
+shared state, and one aggregate HTTP MCP endpoint. Coding agents can read the
+performance snapshot and Inspector resources and can use the Terminals tools to
+start local subprocesses. Arbitrary command requests are disabled, but the
+interactive shell remains a privileged process-control capability. The Hub is
+unavailable when `LODY_DEVBAR` is off; startup failure leaves the local metrics
+bar running. See the [current behavior and security boundary](../../specs/desktop-devbar.md#devframe-hub).
+
+Configure a coding-agent host once with the stdio command
+`apps/electron/node_modules/.bin/devframe connect`. The connector discovers the
+runtime-selected port and supplies the endpoint's loopback Origin header; a direct
+generic HTTP entry usually does neither. In Lody, review and select the resulting
+MCP catalog entry in trusted UI/CLI before starting a later agent session.
 
 ### Build
 

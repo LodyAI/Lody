@@ -1,0 +1,80 @@
+# Desktop 性能栏
+
+Status: draft
+Translation: current
+
+[English](desktop-devbar.md)
+
+## 场景
+
+开发者排查 Desktop 响应问题时，可以在窗口底部持续查看性能指标，包括打包版本。
+他们可以打开 Devframe 官方 Hub 浮层来排查主线程卡顿，使用检查、无障碍和终端工具，
+让编码 Agent 读取相同诊断信息，或通过深链接打开性能视图。内容区域会为底栏预留高度，
+避免遮挡输入框。
+
+## 行为
+
+`LODY_DEVBAR=true` 在 Dev、Staging 和 Prod 构建中启用性能栏；未设置或其他值均禁用。
+该开关不选择云部署，也不改变平台组合。
+
+右侧显示 renderer 动画回调 FPS、排除近期输入的 CLS 最大会话窗口、最近采样区间的
+Long Task 时长，以及 Electron 进程汇总 CPU 与常驻内存。`Heap xxxM` 是 Chromium
+当前 renderer 的 JS heap 估算值，不包括其他 worker/renderer。Devbar 启动时启用精确
+内存读数。`GPU xx% xxxM` 表示 GPU 进程 CPU 和常驻内存，不表示 GPU 硬件利用率或
+VRAM。Electron 汇总不包括外部 CLI/Agent 进程，并可能重复计算共享内存页。
+
+选择 `DEVBAR` 会在用户应用内加载的 Devframe 官方 Hub UI 中激活 Main Thread。
+Hub 的 loopback 根地址也提供相同的独立 viewer，并包含 Main Thread、Devframe
+Inspector、Accessibility Inspector、Terminals、命令面板、设置和 dock 控件。
+Main Thread 使用 Devframe 官方 JSON-render renderer 和 `@antfu/design` 组件；Lody
+不维护另一套详细界面样式。
+
+性能视图首先展示当前 FPS、CPU、heap 和阻塞时间卡片，再以紧凑 Unicode sparkline
+显示最近 60 个样本的趋势、当前值与范围，之后是可折叠的当前指标、阻塞汇总和 Chromium
+Performance Timeline 报告的有界近期 Long Tasks。Devframe 1.0 官方 JSON-render catalog
+没有 chart primitive，因此 sparkline 使用其标准 `DataTable` 和文本渲染，而不增加自定义
+浏览器组件或样式表。Long Task 证明 renderer 主线程至少阻塞 50 ms，但不包含 JavaScript 调用栈；
+函数归因仍需后续 CPU profile。`lody://devbar?view=main-thread`（或安装配置对应协议）
+会聚焦 Desktop 并打开该视图。
+
+指标在窗口可见时约每秒刷新一次。禁用时不采样也不监听网络；窗口隐藏时暂停动画回调
+和进程轮询。不可用指标和 CPU 预热显示破折号。测量仅保存在内存，不产生遥测或持久化。
+
+## Devframe Hub
+
+启用性能栏时，Desktop 在 `127.0.0.1` 启动一个 Devframe Hub，从 9765 到 9785
+选择首个可用端口。Hub 将 `lody-devbar` definition 与官方 Inspector、Accessibility
+Inspector 和 Terminals add-on 组合。React 性能栏通过类型安全 RPC 发送校验后的样本，
+发布最多 120 个样本的可重放 stream，并更新共享快照和 JSON-render view。node 端最多
+保留 120 个样本和 100 个 Long Tasks，同时在当前进程生命周期保留 Long Task 汇总。
+
+聚合 HTTP MCP endpoint 暴露只读性能查询、共享状态、Markdown resource、Inspector
+工具和 Terminals 工具。浏览器样本写入不会暴露给 Agent。Terminals 支持交互式本地 shell
+和子进程会话；任意 command 请求保持禁用，但 shell 本身仍是高权限能力。该能力只在
+显式 `LODY_DEVBAR=true` 开发者开关、loopback 绑定和 file/loopback 浏览器 Origin gate
+内接受。此本地模式关闭 Devframe 浏览器信任提示。文件管理、code-server、非 loopback
+绑定和远程访问均不在范围内，需要独立的 capability 决策与认证方案。
+
+普通 renderer 入口保留原 CSP。仅 Devbar renderer 入口允许 loopback Hub script、frame、
+connection，以及官方 UI 使用的 Iconify endpoint。由于 Electron host page 使用 `file://`，
+Hub iframe dock URL 会发布成完整 loopback URL，而不是根相对路径。
+
+编码 Agent host 应配置一次 stdio `devframe connect` connector，而不是固定 HTTP 端口。
+connector 会发现运行实例、补充 loopback Origin header，并代理 Hub 聚合工具。Lody 中由
+Agent 写入的 MCP entry 在受信 UI 或 CLI 审核选择前保持禁用。
+
+Hub 启动或连接失败不会移除本地性能栏。官方 Hub UI 和内置插件资源以锁定版本的 package
+assets 随应用提供，可嵌入也可独立打开。可移植静态快照仍需 build adapter；live Terminals
+不能进入静态构建。CPU profile 捕获仍属于独立的高权限阶段。
+
+## 证据
+
+- [Renderer](../apps/electron/src/renderer/src/desktop-devbar.tsx)
+- [Devframe definition](../apps/electron/src/main/services/devbar-devframe.ts)
+- [Main service](../apps/electron/src/main/services/devbar-service.ts)
+- [共享诊断契约](../packages/shared/src/devbar.ts)
+- [确定性测试](../apps/electron/src/devbar.test.mjs)
+- [Devframe bridge 决策](../.agents/notes/implemented/architecture/2026-09-16-devbar-devframe-bridge.zh.md)
+- [Devframe Hub UI 决策](../.agents/notes/implemented/feature/2026-09-16-devbar-hub-ui.zh.md)
+- [Electron metrics](https://www.electronjs.org/docs/latest/api/structures/process-metric)
+- [CLS 定义](https://web.dev/articles/cls)

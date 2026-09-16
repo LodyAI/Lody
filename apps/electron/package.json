@@ -35,6 +35,17 @@
   "dependencies": {
     "@better-auth/electron": "catalog:",
     "@convex-dev/better-auth": "catalog:",
+    "@devframes/agentic": "catalog:",
+    "@devframes/hub": "catalog:",
+    "@devframes/hub-ui": "catalog:",
+    "@devframes/json-render": "catalog:",
+    "@devframes/json-render-ui": "catalog:",
+    "@devframes/plugin-a11y": "catalog:",
+    "@devframes/plugin-a11y--assets": "catalog:",
+    "@devframes/plugin-inspect": "catalog:",
+    "@devframes/plugin-inspect--assets": "catalog:",
+    "@devframes/plugin-terminals": "catalog:",
+    "@devframes/plugin-terminals--assets": "catalog:",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@lody/cli-supervisor": "workspace:*",
@@ -44,6 +55,7 @@
     "better-auth": "catalog:",
     "conf": "^15.1.0",
     "convex": "catalog:",
+    "devframe": "catalog:",
     "effect": "catalog:",
     "electron-ipc-decorator": "^1.0.2",
     "electron-sparkle-updater": "0.3.0",
@@ -52,7 +64,8 @@
     "jotai": "catalog:",
     "posthog-node": "^5.38.8",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",

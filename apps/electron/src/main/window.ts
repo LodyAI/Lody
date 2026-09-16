@@ -137,15 +137,19 @@ function formatLoadFailure(details: LoadFailureDetails): string {
 }
 
 function resolveMainRendererTarget(initialPath = '/'): ReloadTarget {
+  const rendererEntry = process.env.LODY_DEVBAR === 'true' ? 'devbar.html' : 'index.html'
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     return {
       type: 'url',
-      url: new URL(initialPath, process.env['ELECTRON_RENDERER_URL']).toString()
+      url: new URL(
+        initialPath === '/' ? rendererEntry : `${rendererEntry}#${initialPath}`,
+        process.env['ELECTRON_RENDERER_URL']
+      ).toString()
     }
   }
   return {
     type: 'file',
-    filePath: join(__dirname, '../renderer/index.html'),
+    filePath: join(__dirname, `../renderer/${rendererEntry}`),
     ...(initialPath === '/' ? {} : { hash: initialPath })
   }
 }

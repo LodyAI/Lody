@@ -140,7 +140,8 @@ try {
     jotaiStore.set(languageAtom, detectedLanguage)
   }
 
-  const isFileProtocol = window.location.protocol === 'file:'
+  const usesHashHistory =
+    window.location.protocol === 'file:' || window.location.pathname.endsWith('/devbar.html')
   const devbar = await getIpcServices()
     ?.app.getDevbarConfig()
     .catch(() => null)
@@ -151,7 +152,7 @@ try {
       completeCallback: completeElectronAuthCallback,
       isCallbackActive: isElectronAuthCallbackActive
     },
-    history: isFileProtocol ? createHashHistory() : undefined
+    history: usesHashHistory ? createHashHistory() : undefined
   })
   if (isSessionWindow() && !sessionStorage.getItem('lody:windowFocusConsumed')) {
     const sessionId = router.history.location.pathname.split('/sessions/')[1]?.split('/')[0]

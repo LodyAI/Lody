@@ -27,12 +27,26 @@ html[data-desktop-devbar] #root :is(.min-h-screen, .min-h-\[100dvh\]) {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
   -webkit-app-region: no-drag;
+  z-index: 10000;
 }
 
 .desktop-devbar-label {
+  appearance: none;
+  border: 0;
+  padding: 2px 4px;
+  background: transparent;
   color: var(--foreground);
+  font: inherit;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+  cursor: pointer;
+}
+
+.desktop-devbar-label:hover,
+.desktop-devbar-label:focus-visible {
+  border-radius: 3px;
+  background: var(--muted);
+  outline: none;
 }
 
 .desktop-devbar-metrics {
@@ -48,7 +62,7 @@ html[data-desktop-devbar] #root :is(.min-h-screen, .min-h-\[100dvh\]) {
   width: 13ch;
 }
 
-.desktop-devbar-metrics > span:nth-child(-n + 2) {
+.desktop-devbar-metrics > span:nth-child(-n + 3) {
   width: 9ch;
 }
 
