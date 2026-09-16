@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#756](https://github.com/LodyAI/Lody/pull/756)
 
 [English](2026-09-16-daemon-log-volume.md)
 
