@@ -46,7 +46,9 @@ export function ProjectActivityIndicator({ counts }: { counts: ProjectActivityCo
           )}
           {status !== 'more' ? (
             <span
-              className="text-center"
+              // Left-aligned so the digit hugs the indicator box: a centered
+              // digit floats on its single-count slack and the pair loosens.
+              className="text-left"
               style={count > 999 ? { fontSize: `${30 / String(count).length}px` } : undefined}
             >
               {count > 1 || (index === 0 && items[1]?.status === 'more') ? count : null}
