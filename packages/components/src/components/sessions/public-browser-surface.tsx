@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Globe2, ShieldAlert } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
@@ -11,8 +11,7 @@ import { cn } from '@/lib/utils';
 
 type PublicBrowserSurfaceProps = {
   browserId: string;
-  url: string;
-  navigationRequestId: number | null;
+  navigationRequest: { id: number; url: string } | null;
   active: boolean;
   className?: string;
   onStateChange: (state: ElectronPublicBrowserState) => void;
@@ -34,8 +33,7 @@ const formatBridgeError = (error: unknown): string =>
 
 export function PublicBrowserSurface({
   browserId,
-  url,
-  navigationRequestId,
+  navigationRequest,
   active,
   className,
   onStateChange,
@@ -49,8 +47,10 @@ export function PublicBrowserSurface({
   const [phase, setPhase] = useState<ElectronPublicBrowserState['phase']>('idle');
   const [surfaceReady, setSurfaceReady] = useState(false);
   const [blockingOverlayOpen, setBlockingOverlayOpen] = useState(false);
-  const bridge =
-    typeof window === 'undefined' ? undefined : (getPublicBrowserBridge() ?? undefined);
+  const bridge = useMemo(
+    () => (typeof window === 'undefined' ? undefined : (getPublicBrowserBridge() ?? undefined)),
+    []
+  );
   const electron = isElectronRenderer();
   const nativeViewVisible = active && !blockingOverlayOpen;
 
@@ -180,14 +180,13 @@ export function PublicBrowserSurface({
   }, [bridge, browserId, electron, localError, nativeViewVisible]);
 
   useEffect(() => {
-    if (!electron || !bridge || !surfaceReady || !url || navigationRequestId === null) return;
-    if (
-      navigationRef.current?.requestId === navigationRequestId &&
-      navigationRef.current.url === url
-    ) {
+    const requestId = navigationRequest?.id ?? null;
+    const url = navigationRequest?.url;
+    if (!electron || !bridge || !surfaceReady || !url || requestId === null) return;
+    if (navigationRef.current?.requestId === requestId && navigationRef.current.url === url) {
       return;
     }
-    navigationRef.current = { requestId: navigationRequestId, url };
+    navigationRef.current = { requestId, url };
     setPhase('loading');
     setLocalError(null);
     void bridge.navigate(browserId, url).then(
@@ -202,7 +201,7 @@ export function PublicBrowserSurface({
         setLocalError(formatBridgeError(error));
       }
     );
-  }, [bridge, browserId, electron, navigationRequestId, surfaceReady, url]);
+  }, [bridge, browserId, electron, navigationRequest, surfaceReady]);
 
   if (!electron) {
     return (
