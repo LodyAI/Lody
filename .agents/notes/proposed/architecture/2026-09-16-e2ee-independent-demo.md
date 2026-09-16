@@ -39,6 +39,9 @@ recorded local tarball instead of a sibling source alias.
   keys is rejected. Unjoined devices cannot append garbage to the ledger.
 - Browser sessions persist device keys, genesis, epoch keys, and pending CAS
   bytes in origin storage (localStorage) or a process map in Node.
+  `transaction.save()` writes the journal before it returns; a persist failure
+  blocks CAS. Closing during an in-flight append recovers the exact pending
+  bytes without re-signing.
 
 ## Limits
 

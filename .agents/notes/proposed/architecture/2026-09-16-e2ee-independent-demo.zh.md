@@ -32,7 +32,9 @@ npm `streams-crdt@0.15.1` 缺少快照 `continuationOffset`，因此 demo 固定
 - `/ds` 写入口是明确允许列表。控制流/密钥流的普通 POST/DELETE 拒绝。
   未入群设备不能向账本追加垃圾字节。
 - 浏览器会话在同源存储（localStorage；Node 用进程内 map）持久化设备密钥、
-  genesis、epoch 密钥和 pending CAS 字节。
+  genesis、epoch 密钥和 pending CAS 字节。`transaction.save()` 返回前必须写
+  完 journal；持久化失败则禁止发 CAS。CAS 进行中关闭后按精确 pending 恢复，
+  不重签。
 
 ## 限制
 

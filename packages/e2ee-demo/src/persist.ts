@@ -78,11 +78,19 @@ export class PersistingLedgerStore implements LedgerStore {
     if (raw) this.inner.journal = decodeJournal(raw);
   }
 
+  private persist(journal: LedgerJournal): void {
+    this.kv.setItem('journal', encodeJournal(journal));
+  }
+
   async exclusive<T>(work: (transaction: LedgerTransaction) => Promise<T>): Promise<T> {
-    try {
-      return await this.inner.exclusive(work);
-    } finally {
-      if (this.inner.journal) this.kv.setItem('journal', encodeJournal(this.inner.journal));
-    }
+    return this.inner.exclusive(async (tx) =>
+      work({
+        load: () => tx.load(),
+        save: async (journal) => {
+          this.persist(journal);
+          await tx.save(journal);
+        },
+      })
+    );
   }
 }
