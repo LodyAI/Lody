@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-09-16-devin-local-runtime.md)
 
+PR: https://github.com/LodyAI/Lody/pull/763
+
 ## 摘要
 
 Devin 此前以 `binary` 分发的 registry agent 形式接入：Lody 会把固定版本的

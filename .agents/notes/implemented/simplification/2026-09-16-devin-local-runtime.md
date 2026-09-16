@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-09-16-devin-local-runtime.zh.md)
 
+PR: https://github.com/LodyAI/Lody/pull/763
+
 ## Abstract
 
 Devin previously shipped as a `binary`-distribution registry agent: Lody
