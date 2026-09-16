@@ -65,7 +65,6 @@ function ProjectRow({ state }: { state?: LocalProjectRemovalState }) {
       machineName={state === 'removing' ? 'Mac Studio' : 'MacBook Pro'}
       project={project}
       canRemoveProject
-      canNavigateProject
       removalState={state ?? null}
       collapsed={false}
       isSelected={false}
@@ -141,7 +140,6 @@ function DesktopSidebar({
               createdAtMs: now - 172_800_000,
             }}
             canRemoveProject
-            canNavigateProject
             collapsed
             isSelected={!state}
             sessionsForProject={[]}

@@ -1930,7 +1930,8 @@ describe('SessionDispatchWatcher', () => {
         type: 'session/cancel',
         sessionId,
         turnId: 'assistant-turn-2',
-      })
+      }),
+      { pendingInput: 'promote', prePromptSession: 'discard' }
     );
   });
 
@@ -2023,7 +2024,8 @@ describe('SessionDispatchWatcher', () => {
         type: 'session/cancel',
         sessionId,
         turnId: 'assistant-turn-2b',
-      })
+      }),
+      { pendingInput: 'promote', prePromptSession: 'discard' }
     );
 
     resolveContinue?.();

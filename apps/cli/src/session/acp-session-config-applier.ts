@@ -92,8 +92,15 @@ export async function applyAcpSessionRunConfig(args: {
   session: AcpSessionConfigTarget;
   config: AcpSessionRunConfig;
   logger: Logger;
+  signal?: AbortSignal;
 }): Promise<AcpSessionRunConfigApplyResult> {
-  const { session, config, logger } = args;
+  const { session, config, logger, signal } = args;
+  const assertNotAborted = (): void => {
+    if (!signal?.aborted) return;
+    throw signal.reason instanceof Error
+      ? signal.reason
+      : new Error('ACP run configuration was aborted');
+  };
   const { sessionId, acpSessionId, agentClient } = session;
   const configOptionValues = config.configOptionValues;
   const configOptionEntries = configOptionValues ? Object.entries(configOptionValues) : [];
@@ -136,10 +143,12 @@ export async function applyAcpSessionRunConfig(args: {
     config.modelId ?? (typeof configOptionModelId === 'string' ? configOptionModelId : undefined);
 
   if (config.modeId) {
+    assertNotAborted();
     try {
       await agentClient.setSessionMode?.(acpSessionId, config.modeId);
       confirmedLegacyModeId = config.modeId;
     } catch (error) {
+      assertNotAborted();
       recordRejection(
         `mode=${JSON.stringify(config.modeId)}`,
         suppressKnownRunConfigWarnings && config.modeId === ACP_PLAN_PERMISSION_MODE_ID
@@ -148,26 +157,32 @@ export async function applyAcpSessionRunConfig(args: {
         `[${sessionId}] Failed to set ACP mode ${JSON.stringify(config.modeId)}: ${String(error)}`
       );
     }
+    assertNotAborted();
   }
   if (config.modelId) {
+    assertNotAborted();
     try {
       await agentClient.unstable_setSessionModel?.(acpSessionId, config.modelId);
       confirmedLegacyModelId = config.modelId;
     } catch (error) {
+      assertNotAborted();
       recordRejection(`model=${JSON.stringify(config.modelId)}`, suppressKnownRunConfigWarnings);
       logger.debug(
         `[${sessionId}] Failed to set ACP model ${JSON.stringify(config.modelId)}: ${String(error)}`
       );
     }
+    assertNotAborted();
   }
 
   for (const [configId, value] of configOptionEntries) {
+    assertNotAborted();
     if (configId === modeConfigId) {
       if (!config.modeId && typeof value === 'string') {
         try {
           await agentClient.setSessionMode?.(acpSessionId, value);
           confirmedLegacyModeId = value;
         } catch (error) {
+          assertNotAborted();
           logger.debug(
             `[${sessionId}] Failed to set ACP mode option ${configId}=${formatAcpConfigValueForLog(
               configId,
@@ -175,6 +190,7 @@ export async function applyAcpSessionRunConfig(args: {
             )}: ${String(error)}`
           );
         }
+        assertNotAborted();
       }
       continue;
     }
@@ -184,6 +200,7 @@ export async function applyAcpSessionRunConfig(args: {
           await agentClient.unstable_setSessionModel?.(acpSessionId, value);
           confirmedLegacyModelId = value;
         } catch (error) {
+          assertNotAborted();
           logger.debug(
             `[${sessionId}] Failed to set ACP model option ${configId}=${formatAcpConfigValueForLog(
               configId,
@@ -191,6 +208,7 @@ export async function applyAcpSessionRunConfig(args: {
             )}: ${String(error)}`
           );
         }
+        assertNotAborted();
       }
       continue;
     }
@@ -200,14 +218,17 @@ export async function applyAcpSessionRunConfig(args: {
     try {
       await agentClient.setSessionConfigOption(acpSessionId, configId, value);
     } catch (error) {
+      assertNotAborted();
       recordRejection(
         `${configId}=${formatAcpConfigValueForLog(configId, value)}`,
         suppressKnownRunConfigWarnings && isKnownRunConfigOption(configId, agentConfigOptions)
       );
       logger.debug(`[${sessionId}] Failed to set ACP config option ${configId}: ${String(error)}`);
     }
+    assertNotAborted();
   }
 
+  assertNotAborted();
   logger.debug(`[${sessionId}] applyAcpSessionRunConfig completed`);
   const runtimeConfigPatch = getAcpRuntimeConfigPatchFromOptions(
     acpSessionId,

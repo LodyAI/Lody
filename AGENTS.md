@@ -59,8 +59,11 @@ Repository map and entry points: [README.md](README.md#repository).
   [runtime-floor decision](.agents/notes/implemented/bug-fix/2026-09-09-node-api-runtime-floor.md).
   `pnpm install` (nested checkouts skip it); standalone work uses a separate clone.
   `pnpm start:local` starts the desktop; root `pnpm build` uses the same local composition.
-- Before commit: `pnpm check` and `pnpm format`. If tests are skipped, report
+- Before commit: `pnpm check` and `pnpm format`. Root packages share `.oxfmtrc.json`;
+  ACP submodules stay independently formatted. If tests are skipped, report
   type/build/static checks. Manifest changes update `pnpm-lock.yaml`.
+- Packages invoking Oxfmt declare it in their own devDependencies: an embedded
+  parent workspace does not install this repository's root package.
 - Conventional Commits: `feat:`, `fix:`, `docs:`, `chore:`, `test:`. AI commits
   end with `Model: <runtime-model-id>`.
 - Tests use explicit signals, injected clocks, fake timers, and deterministic

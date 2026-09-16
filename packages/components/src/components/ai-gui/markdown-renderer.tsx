@@ -40,10 +40,7 @@ import {
   parseMarkdownAgentFileHref,
 } from '@/lib/markdown-agent-file-link';
 import { matchWholeFilePath, splitTextIntoFilePathSegments } from '@/lib/linkify-file-paths';
-import {
-  normalizeTexMathDelimiters,
-  remarkSingleDollarTextMath,
-} from '@/lib/markdown-single-dollar-math';
+import { normalizeTexMathDelimiters } from '@/lib/markdown-single-dollar-math';
 import { cn } from '@/lib/utils';
 import { usePrLinkInterceptor } from './pr-link-context';
 import {
@@ -648,7 +645,6 @@ const MARKDOWN_REMARK_PLUGINS = [
   remarkRepairMalformedGfmAutolinks,
   remarkLinkifyPlainUrls,
   remarkLinkifyFilePaths,
-  remarkSingleDollarTextMath,
 ];
 
 const MARKDOWN_MATH_PLUGIN = createMathPlugin();

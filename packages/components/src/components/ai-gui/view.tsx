@@ -129,6 +129,7 @@ import { Spinner } from '@/ui/spinner';
 import { MarkdownRenderer } from './markdown-renderer';
 import { CarbonInProgress } from '@/components/icons/carbon-in-progress';
 import { getGoalStatusPresentation } from '@/lib/session-goal-status';
+import { detectToolCallJsonText } from '@/lib/tool-call-json-text';
 import { FileIcon } from '@/components/icons/file-icons';
 import { AnthropicIcon } from '@/components/icons/anthropic-icon';
 import { OpenAIIcon } from '@/components/icons/openai-icon';
@@ -6537,10 +6538,24 @@ const StandardToolContentBlock = ({
 }) => {
   const readonly = useContext(SessionReadonlyContext);
   switch (content.type) {
-    case 'text':
+    case 'text': {
+      // Raw tool input arrives as serialized JSON text; keep it out of the
+      // Markdown pipeline so single-`$` math cannot eat fragments like `$(...)`.
+      const jsonText = detectToolCallJsonText(content.text);
+      if (jsonText !== null) {
+        return (
+          <pre
+            className={cn(CONVERSATION_PANEL_BODY_CLASS, 'max-h-60 overflow-auto')}
+            style={conversationMonoFontSizeStyle(fontSize)}
+          >
+            {jsonText}
+          </pre>
+        );
+      }
       return (
         <MarkdownBlock text={content.text} size={fontSize} onFilePathClick={onFilePathClick} />
       );
+    }
     case 'image': {
       const src =
         content.uri && !readonly

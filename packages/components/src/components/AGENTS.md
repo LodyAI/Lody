@@ -96,21 +96,22 @@ Ownership and explanations: [README.md](README.md).
 
 ## Local projects
 
+- Project rows follow visibility, not machine ownership: a teammate's shared project
+  navigates and offers New chat; only removal is owner-only.
 - Adding a folder is a workspace action, not a this-machine action: the picker chooses
-  the machine, so every entry point says "Add folder" rather than "Add a local project".
-  Settings > Projects therefore pills EVERY machine the user may add to, including ones
-  with no project yet, and its add action passes that machine as `initialMachineId`.
-  Whoever needs the addable set reads `useAddLocalProjectMachines` — the ownership rule
-  (`canAddProjects`) has one home and must not be re-derived per surface. Onboarding is
-  the deliberate exception: it drives the desktop native picker and really is
-  this-machine only.
+  the machine, so every entry point says "Add folder", not "Add a local project".
+  Settings > Projects pills EVERY machine the user may add to, even ones with no project
+  yet, and passes it as `initialMachineId`. The addable set comes from
+  `useAddLocalProjectMachines`; the ownership rule (`canAddProjects`) has one home and
+  must not be re-derived per surface. Onboarding is the deliberate exception: its
+  desktop native picker really is this-machine only.
 - A pending local-project removal is a visible lifecycle state, not an absent project:
-  keep the project and its existing Sessions discoverable while the owning machine is
-  offline or retrying, but exclude it from new-Session selectors. Once the catalog row
-  is gone, archived Sessions remain readable and deletable; Restore stays unavailable
-  until the same local project is added again.
+  keep the project and its Sessions discoverable while the owning machine is offline or
+  retrying, but exclude it from new-Session selectors. Once the catalog row is gone,
+  archived Sessions stay readable and deletable; Restore waits until the same local
+  project is added again.
 - Local-project removal may optionally clean Lody-created Session worktrees, but the
-  option defaults off and is available only after the owning machine preflights every
-  worktree. Always state that the original project directory is never deleted; list
-  dirty worktrees and keep them by default. A completed cleanup result is not pending
-  removal and must be acknowledged visibly even when some worktrees were kept or failed.
+  option defaults off and appears only after the owning machine preflights every
+  worktree. Always state the original project directory is never deleted; list dirty
+  worktrees and keep them by default. A completed cleanup is not pending removal and
+  must be visibly acknowledged even when worktrees were kept or failed.

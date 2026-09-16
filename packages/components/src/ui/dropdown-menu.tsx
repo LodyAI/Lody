@@ -4,7 +4,7 @@ import { Check, ChevronRight, Circle, Search } from 'lucide-react';
 
 import { handleMenuCloseAutoFocus } from '@/lib/menu-focus';
 import { cn } from '@/lib/utils';
-import { useSafeAreaInsets } from '@/hooks/use-safe-area-insets';
+import { useSafeAreaCollisionPadding } from '@/hooks/use-safe-area-insets';
 import {
   menuGroupLabelClassName,
   menuItemClassName,
@@ -266,53 +266,46 @@ const DropdownMenuSubTrigger = React.forwardRef<
 });
 DropdownMenuSubTrigger.displayName = DropdownMenuPrimitive.SubTrigger.displayName;
 
+/**
+ * A submenu is offset from its TRIGGER ROW, not from the parent menu's edge, so
+ * the offset has to clear everything between the two: the parent surface's `p-1`
+ * (4px) and the 1px hairline ring each surface paints OUTSIDE its border box
+ * (`menuSurfaceStyle`). At the old `6` those ate all but 0px of it and the two
+ * surfaces rendered as one welded slab; `10` leaves a 4px gap between the rings.
+ */
+const SUB_CONTENT_SIDE_OFFSET = 10;
+
 const DropdownMenuSubContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.SubContent>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubContent>
->(({ className, sideOffset = 6, style, ...props }, ref) => (
-  <DropdownMenuPrimitive.SubContent
-    ref={ref}
-    sideOffset={sideOffset}
-    style={{ ...menuSurfaceStyle, ...style }}
-    className={cn(
-      'scroll-pro scrollbar-pro [scrollbar-gutter:auto] z-[var(--z-popover)] max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto overflow-x-hidden',
-      menuSurfaceClassName,
-      className
-    )}
-    {...props}
-  />
-));
+>(({ className, sideOffset = SUB_CONTENT_SIDE_OFFSET, collisionPadding, style, ...props }, ref) => {
+  // Without this a submenu that is taller than the room below its trigger sits
+  // flush against the viewport edge — and sizes its scroll cap to that same
+  // edge, because Radix derives `--radix-*-available-height` from this padding.
+  const mergedCollisionPadding = useSafeAreaCollisionPadding(collisionPadding);
+  return (
+    <DropdownMenuPrimitive.SubContent
+      ref={ref}
+      sideOffset={sideOffset}
+      collisionPadding={mergedCollisionPadding}
+      style={{ ...menuSurfaceStyle, ...style }}
+      className={cn(
+        'scroll-pro scrollbar-pro [scrollbar-gutter:auto] z-[var(--z-popover)] max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto overflow-x-hidden',
+        menuSurfaceClassName,
+        className
+      )}
+      {...props}
+    />
+  );
+});
 DropdownMenuSubContent.displayName = DropdownMenuPrimitive.SubContent.displayName;
 
 const DropdownMenuContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content>
 >(({ className, sideOffset = 8, collisionPadding, style, onCloseAutoFocus, ...props }, ref) => {
-  const safeArea = useSafeAreaInsets();
   const selectionContext = React.useContext(DropdownMenuSelectionContext);
-  const baseCollisionPadding = { top: 8, right: 8, bottom: 8, left: 8 };
-  const safeAreaPadding = {
-    top: baseCollisionPadding.top + safeArea.top,
-    right: baseCollisionPadding.right + safeArea.right,
-    bottom: baseCollisionPadding.bottom + safeArea.bottom,
-    left: baseCollisionPadding.left + safeArea.left,
-  };
-  const mergedCollisionPadding =
-    typeof collisionPadding === 'number'
-      ? {
-          top: Math.max(safeAreaPadding.top, collisionPadding),
-          right: Math.max(safeAreaPadding.right, collisionPadding),
-          bottom: Math.max(safeAreaPadding.bottom, collisionPadding),
-          left: Math.max(safeAreaPadding.left, collisionPadding),
-        }
-      : collisionPadding
-        ? {
-            top: Math.max(safeAreaPadding.top, collisionPadding.top ?? 0),
-            right: Math.max(safeAreaPadding.right, collisionPadding.right ?? 0),
-            bottom: Math.max(safeAreaPadding.bottom, collisionPadding.bottom ?? 0),
-            left: Math.max(safeAreaPadding.left, collisionPadding.left ?? 0),
-          }
-        : safeAreaPadding;
+  const mergedCollisionPadding = useSafeAreaCollisionPadding(collisionPadding);
   return (
     <DropdownMenuPrimitive.Portal>
       <DropdownMenuPrimitive.Content

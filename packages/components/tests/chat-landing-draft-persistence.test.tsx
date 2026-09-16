@@ -126,7 +126,7 @@ function DraftHarness({ draftKey }: { draftKey: string }) {
     addImages: imageDraft.addFiles,
     addFiles: fileDraft.addFiles,
     removeImage: imageDraft.handleRemoveImage,
-    // What submit-accepted and `resetDraftKey` call in `chat-landing.tsx`.
+    // What submit acceptance calls in `chat-landing.tsx`.
     clearDraft: () => {
       imageDraft.clearPendingImages();
       fileDraft.clearPendingFiles();
@@ -337,7 +337,7 @@ describe('chat landing draft persistence', () => {
     expect(restored[0]!.status).toBe('uploaded');
   });
 
-  it('clears the draft for good once submit or a draft reset releases it', async () => {
+  it('clears the draft for good once an accepted submit releases it', async () => {
     mountLanding(WORKSPACE_A_KEY);
     act(() => {
       readHarness().addImages([pngFile('shot.png')]);

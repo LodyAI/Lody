@@ -1897,13 +1897,16 @@ export class SessionDispatchWatcher {
       return;
     }
     this.cancelSeenTurn.set(sessionId, action.turnId);
-    await this.deps.executionService.cancelSession({
-      type: 'session/cancel',
-      sessionId,
-      machineId: this.deps.machineId,
-      workspaceId: this.deps.workspaceId,
-      turnId: action.turnId,
-    });
+    await this.deps.executionService.cancelSession(
+      {
+        type: 'session/cancel',
+        sessionId,
+        machineId: this.deps.machineId,
+        workspaceId: this.deps.workspaceId,
+        turnId: action.turnId,
+      },
+      { pendingInput: 'promote', prePromptSession: 'discard' }
+    );
     if (!isActive()) {
       return;
     }

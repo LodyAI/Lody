@@ -675,6 +675,8 @@ export const SessionSteerResponseSchema = z
       'no-active-turn',
       'stale-turn',
       'busy',
+      'delivery-unknown',
+      'promotion-failed',
       'error',
     ]),
     error: z.string().optional(),

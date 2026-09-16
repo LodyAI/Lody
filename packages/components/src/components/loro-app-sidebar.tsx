@@ -947,7 +947,6 @@ export type LocalProjectItemProps = {
    * dispatched to the owning machine via the local-project control channel).
    */
   canRemoveProject: boolean;
-  canNavigateProject: boolean;
   removalState?: LocalProjectRemovalState | null;
   collapsed: boolean;
   isSelected: boolean;
@@ -1035,7 +1034,6 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   machineName,
   project,
   canRemoveProject,
-  canNavigateProject,
   removalState = null,
   collapsed,
   isSelected,
@@ -1110,10 +1108,12 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   const ariaLabel = removalStateLabel ? `${baseAriaLabel} · ${removalStateLabel}` : baseAriaLabel;
   const showSelectedState = isSelected && !isMobile;
   const handleNavigate = useCallback(() => {
-    if (!canNavigateProject || removalState) return;
+    if (removalState) return;
     onNavigateProject(machineId, project.id);
-  }, [canNavigateProject, machineId, onNavigateProject, project.id, removalState]);
-  const projectCanNavigate = canNavigateProject && removalState === null;
+  }, [machineId, onNavigateProject, project.id, removalState]);
+  // A project being removed is inert; every other project row navigates,
+  // including projects on a teammate's shared machine.
+  const projectCanNavigate = removalState === null;
   // Mobile has no hover, so both row controls stay desktop-only, exactly like
   // the ⋯ on session rows.
   const [projectMenuOpen, setProjectMenuOpen] = useState(false);
@@ -1857,26 +1857,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     [closeMobileDrawer, router, workspaceSlug]
   );
 
-  // Unlike the row click, which keeps whatever draft the landing already holds,
-  // this starts the project's chat from scratch via the landing's reset lever.
-  const handleNewChatInProject = useCallback(
-    (machineId: MachineId, localProjectId: string) => {
-      if (!workspaceSlug) return;
-      closeMobileDrawer();
-      void router.navigate({
-        to: '/$workspaceName/chat',
-        params: { workspaceName: workspaceSlug },
-        search: {
-          context: 'local' as const,
-          machine: machineId,
-          project: localProjectId,
-          resetDraftKey: Date.now().toString(36),
-        },
-      });
-    },
-    [closeMobileDrawer, router, workspaceSlug]
-  );
-
   const handleOpenProjectSettings = useCallback(
     (machineId: MachineId, localProjectId: string) => {
       closeMobileDrawer();
@@ -2139,7 +2119,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
                 ? localMachineMeta.name.trim()
                 : null,
             canImport: isElectron,
-            canNavigateProject: true,
             canRemoveProject: machineSupportsLocalProjectRemovalProtocol(localMachineMeta),
             projects: localProjects.map((entry) => entry.project),
           }
@@ -2161,7 +2140,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
           machineDisplayName:
             typeof machine.name === 'string' && machine.name.trim() ? machine.name.trim() : null,
           canImport: false,
-          canNavigateProject: isOwnMachine,
           // Only the machine owner can remove a remote device's projects; the
           // request is queued on that device's machine Flock doc.
           canRemoveProject: isOwnMachine && machineSupportsLocalProjectRemovalProtocol(machine),
@@ -2456,7 +2434,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
                         machineName={section.machineDisplayName}
                         project={project}
                         canRemoveProject={section.canRemoveProject}
-                        canNavigateProject={section.canNavigateProject}
                         removalState={
                           pendingLocalProjectRemovals.has(projectKey)
                             ? onlineMachineIds.has(machineId)
@@ -2481,7 +2458,9 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
                         isMobile={isMobile}
                         toggleLabel={toggleLabel}
                         onNavigateProject={handleNavigateToProject}
-                        onNewChatInProject={handleNewChatInProject}
+                        // New Chat selects a target; it must not fork or clear
+                        // the workspace-owned Chat Landing draft.
+                        onNewChatInProject={handleNavigateToProject}
                         onOpenProjectSettings={handleOpenProjectSettings}
                         onRevealProject={
                           isElectron && machineId === localMachineId

@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, nativeTheme, shell } from 'electron'
 import { is } from '@electron-toolkit/utils'
+import { installContextMenu } from './context-menu'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
@@ -392,6 +393,7 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
   const mainTarget = resolveMainRendererTarget(options.initialPath)
   const recoveryTarget = resolveRecoveryTarget()
   installNavigationGuard(window, [mainTarget, recoveryTarget])
+  installContextMenu(window)
   setReloadTarget(window, mainTarget)
   attachMainWindowDiagnostics(window, recoveryTarget)
 

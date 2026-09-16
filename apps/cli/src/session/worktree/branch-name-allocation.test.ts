@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  hasLocalBranchNameConflict,
-  resolveAvailableBranchName,
-} from './branch-name-allocation';
+import { hasLocalBranchNameConflict, resolveAvailableBranchName } from './branch-name-allocation';
 
 describe('resolveAvailableBranchName', () => {
   it('adds increasing suffixes without reusing an existing branch', () => {

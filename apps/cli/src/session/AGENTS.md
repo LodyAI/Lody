@@ -44,8 +44,7 @@ Contract: specs/session-orchestration.md.
 
 ## Turn execution
 
-- Gate turn-scoped history LIST writes on user-entry sync (`turn-history-gate.ts`, 20s);
-  never gate status or meta writes.
+- Gate turn-scoped LIST writes on user-entry sync (`turn-history-gate.ts`, 20s), never status/meta.
 - Goals obey [this contract](../../../../specs/session-goal-control.md).
 - In-flight Stop cancels ACP, never its owner fiber. Keep `TurnRuntimeState` until raw ACP
   completion or confirmed termination; no second turn. Assistant ids use `userTurnId`.
@@ -55,10 +54,12 @@ Contract: specs/session-orchestration.md.
   tombstone; CLI dispatch producers keep their own marker policy.
 - Ordinary turn execution writes only `processingUserMsgId` and `lastHandledUserMsgId`; no start
   or terminal path may read-await-rewrite the other slots.
-- Never submit steer after Stop. A late accepted ACK cancels that exact steer entry without
-  transferring ownership, changing dispatch pointers or requeueing it.
-  Requeue unaccepted steer via its pointer, not entry status, only before submission or on
-  `AgentSteerNotDeliveredError`; skip active or handled entries.
+- Never steer after cancellation or infer delivery from it. Stop uses
+  `pendingInput: promote` / `prePromptSession: discard`; Edit & Resend uses preserve/keep,
+  access revocation preserve/discard. Limit create/restore fences to initialization.
+- Promote only proven non-delivery. Return `promotion-failed` on write failure;
+  repair pending/seen pointers, never replay active/terminal turns.
+- Foreground config uses its owner Effect signal; fence mutations after interrupt.
 - Resume must REOPEN the in-progress assistant entry, clearing
   `finished`/`endedAt`/`permissionWaitMs` there only; never write `finished=false` from teardown.
 - Keep JSON-RPC/transport matching in `acp-error-classification.ts`: disposed/stale `-32603` is
@@ -104,11 +105,10 @@ Contract: specs/session-orchestration.md.
 - Fork recovery fail-closes interrupted operations and finds them ONLY in the machine-local marker
   store under `withForkOperationLock`. Never enumerate rooms or open docs to find candidates, and
   never `cleanSessionDoc` a doc you do not own.
-- Edit-and-resend prepares provider `forkAtTurn` (`session/new` for the first User), cancels the
-  exact active turn, waits for ownership release, then one durable history/meta commit.
-  Its rewrite barrier excludes queue promotion and blocks dispatch and steer; the queue is never
-  rewritten. Keep the original User attribution, config, and attachments, use new turn ids and ACP
-  identity, and never replay transcript or roll back files.
+- Edit-and-resend prepares `forkAtTurn` (`session/new` for the first User), cancels the exact
+  turn, waits for release, then commits history/meta. Its barrier excludes queue promotion,
+  dispatch and steer. Keep the queue, User attribution/config/attachments; use new turn/ACP ids.
+  Never replay transcript or roll back files.
 
 ## Access
 

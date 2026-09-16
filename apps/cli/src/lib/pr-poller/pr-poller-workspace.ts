@@ -173,9 +173,7 @@ export function createLodyPrPollerWorkspace(options: {
           }),
         ]);
         if (!associated) {
-          logger.debug(
-            `[pr-poller] PR association was rejected for ${args.prUrl}`
-          );
+          logger.debug(`[pr-poller] PR association was rejected for ${args.prUrl}`);
           return false;
         }
         return true;

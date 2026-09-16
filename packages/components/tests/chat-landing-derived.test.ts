@@ -1071,7 +1071,7 @@ describe('buildChatLandingPreSelectionKey', () => {
 });
 
 describe('parseChatLandingSearch', () => {
-  it('keeps the string search params the chat route understands', () => {
+  it('keeps selection params without reviving the removed draft-reset command', () => {
     expect(
       parseChatLandingSearch({
         context: 'local',
@@ -1085,7 +1085,6 @@ describe('parseChatLandingSearch', () => {
       machine: 'machine-1',
       project: 'local-project-1',
       repo: 'owner/repo',
-      resetDraftKey: 'r1',
     });
   });
 
@@ -1102,7 +1101,6 @@ describe('parseChatLandingSearch', () => {
       machine: undefined,
       project: undefined,
       repo: undefined,
-      resetDraftKey: undefined,
     });
   });
 });

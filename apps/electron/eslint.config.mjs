@@ -28,5 +28,9 @@ export default defineConfig(
       ...eslintPluginReactRefresh.configs.vite.rules
     }
   },
-  eslintConfigPrettier
+  eslintConfigPrettier,
+  {
+    // Oxfmt owns formatting; keep only the toolkit's conflicting-rule disables.
+    rules: { 'prettier/prettier': 'off' }
+  }
 )

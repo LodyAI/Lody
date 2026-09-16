@@ -31,32 +31,32 @@ export const parseRepoFromPrUrl = (url: string): string | null => {
  * it never reaches a process listing. A repository with no resolvable
  * credential fails closed: no token means no merge.
  */
-export const createGhRunner = (
-  resolveToken: (repoFullName: string | null) => Promise<string | null>
-): GhRunner => async (args, repoFullName) => {
-  const token = await resolveToken(repoFullName);
-  if (!token) {
-    return { stdout: 'no GitHub credential available', exitCode: 1 };
-  }
-  return await new Promise((resolve) => {
-    execFile(
-      'gh',
-      [...args],
-      {
-        timeout: GH_TIMEOUT_MS,
-        env: { ...process.env, GH_TOKEN: token, GH_PROMPT: 'disabled' },
-        maxBuffer: 8 * 1024 * 1024,
-      },
-      (error, stdout, stderr) => {
-        if (error) {
-          resolve({ stdout: `${stdout}${stderr}`.trim(), exitCode: 1 });
-          return;
+export const createGhRunner =
+  (resolveToken: (repoFullName: string | null) => Promise<string | null>): GhRunner =>
+  async (args, repoFullName) => {
+    const token = await resolveToken(repoFullName);
+    if (!token) {
+      return { stdout: 'no GitHub credential available', exitCode: 1 };
+    }
+    return await new Promise((resolve) => {
+      execFile(
+        'gh',
+        [...args],
+        {
+          timeout: GH_TIMEOUT_MS,
+          env: { ...process.env, GH_TOKEN: token, GH_PROMPT: 'disabled' },
+          maxBuffer: 8 * 1024 * 1024,
+        },
+        (error, stdout, stderr) => {
+          if (error) {
+            resolve({ stdout: `${stdout}${stderr}`.trim(), exitCode: 1 });
+            return;
+          }
+          resolve({ stdout, exitCode: 0 });
         }
-        resolve({ stdout, exitCode: 0 });
-      }
-    );
-  });
-};
+      );
+    });
+  };
 
 const PullRequestFactsSchema = z.object({
   headRefOid: z.string().optional(),
