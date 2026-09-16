@@ -1,3 +1,4 @@
+import { prepareRendererSendsForExit } from './services/renderer-send-lifecycle'
 import { app, BrowserWindow, type WebContents } from 'electron'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
@@ -111,6 +112,15 @@ function loadTarget(window: BrowserWindow, target: ReloadTarget): Promise<void> 
 }
 
 export function requestRendererReload(window: BrowserWindow): void {
+  if (window.isDestroyed()) return
+  void prepareRendererSendsForExit('reload', window)
+    .then((allowed) => {
+      if (allowed && !window.isDestroyed()) reloadRendererAfterCleanup(window)
+    })
+    .catch((error: unknown) => console.error('[Electron] Reload cleanup failed', error))
+}
+
+function reloadRendererAfterCleanup(window: BrowserWindow): void {
   if (window.isDestroyed()) return
   const state = getState(window)
   state.hasNotifiedMounted = false

@@ -95,3 +95,5 @@ These rules also bind attachment helpers and UI callers.
   Noncancelable IPC must settle before release; only the cache disposes stores.
 - Cancellation reaches underlying I/O and fences late completion; it never
   authorizes a fallback upload. Await multipart cleanup before returning failure.
+
+- User-message admission uses the account/workspace send journal and one HistoryWriter. Save exact prepared operations before live import; recovery must not re-append. Serialize submission and delivery separately per session, and explicitly synchronize imported operations before retiring recovery records.

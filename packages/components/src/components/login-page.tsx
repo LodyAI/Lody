@@ -1335,7 +1335,10 @@ export function LoginPage({
     try {
       const outcome = await signOutWithoutRedirect(authClient);
       if (!outcome.ok) {
-        reportSwitchFailure('sign_out_rejected', outcome.error.message);
+        reportSwitchFailure(
+          outcome.cancelled ? 'sign_out_cancelled' : 'sign_out_rejected',
+          outcome.error?.message ?? 'Sign out cancelled'
+        );
       }
     } catch (err) {
       // `signOutWithoutRedirect` reports failures rather than throwing; this

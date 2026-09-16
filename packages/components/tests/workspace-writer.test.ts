@@ -366,3 +366,23 @@ describe('createDirectWorkspaceWriter', () => {
     ).rejects.toThrow('store unavailable');
   });
 });
+
+it('prepares queue operations without publishing and replays one stable queue item', async () => {
+  const { createConversationSession } = await import('../src/lib/conversation-view');
+  const doc = new LoroDoc();
+  const session = createConversationSession(doc, { sessionId: 'queue-session' as never });
+  const writer = createDirectWorkspaceWriter({
+    acquireSessionStore: async () => ({ doc }),
+    releaseSessionStoreRef: () => {},
+  } as never);
+  try {
+    const update = await writer.prepareSessionMessage('queue-session', {
+      userTurnId: 'fixed-turn', task: 'queued text', userId: 'account',
+      timestamp: '2026-01-01T00:00:00Z', isEditing: false,
+    });
+    expect(session.mirror.getState().mq ?? []).toEqual([]);
+    await session.sessionData.commands.applyPreparedTurn(update);
+    await session.sessionData.commands.applyPreparedTurn(update);
+    expect(session.mirror.getState().mq?.map((item) => item.userTurnId)).toEqual(['fixed-turn']);
+  } finally { session.dispose(); doc.free(); }
+});

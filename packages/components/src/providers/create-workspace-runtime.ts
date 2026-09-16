@@ -1,3 +1,5 @@
+import { createWorkspaceSessionSendJournal } from './workspace-session-send-journal';
+import { throwIfSendAborted } from '../lib/session-send-resources';
 import { createSessionSendResources } from '@/lib/session-send-resources';
 import { jotaiStore } from '@/lib/utils';
 import { desktopWindowId } from '@/lib/desktop-window';
@@ -166,6 +168,7 @@ export function resolveWorkspaceRuntimeCacheIdentity(
 }
 
 type RuntimeDeps = {
+  accountId?: string | null;
   /**
    * Used for caching the (slug, id) mapping in localStorage.
    */
@@ -4433,6 +4436,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     disposePromise = (async () => {
       // Cancel and join send I/O while its cache, transport and repo still exist.
       await sendResources.dispose();
+      await sendJournal?.close();
       cancelDelayedBackgroundSyncStart?.();
       cancelDelayedBackgroundSyncStart = null;
       cancelDelayedStartupAcpCapabilitiesRefresh?.();
@@ -4618,10 +4622,36 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     acquire: sessionStoreCache.acquire,
     releaseRef: sessionStoreCache.releaseRef,
   });
+  const sendJournal = deps.accountId ? createWorkspaceSessionSendJournal({
+    accountId: deps.accountId,
+    sourceReplica: cacheIdentity.repoDbName,
+    runtime: { workspaceId, repo, writer: workspaceWriter, sendResources, requestSessionDispatchTurn, requestSessionSteer },
+    waitForTargetSync: async (sessionId, signal) => {
+      await waitForPromiseOrAbort(transportReady.promise, signal);
+      throwIfSendAborted(signal);
+      await targetRouter.prepareSessionTarget(sessionId);
+      throwIfSendAborted(signal);
+      const roomId = getSessionRoomId(sessionId);
+      const plane = targetRouter.getReadinessTransportForRoom({ kind: 'doc', id: roomId });
+      // Imported prepared operations do not emit subscribeLocalUpdates. Explicit
+      // sync exports the missing operations and reuses the transport's room.
+      // Upstream sync races its AbortSignal without joining raw stream.sync();
+      // omit that signal here so our owner retains dependencies until it settles.
+      const report = await repo.sync({ scope: 'full', docIds: [roomId], flockDocIds: [], requireTransports: [plane] });
+      throwIfSendAborted(signal);
+      if (!report.transports.some((transport) => transport.transportId === plane && transport.ok) ||
+          targetRouter.getReadinessTransportForRoom({ kind: 'doc', id: roomId }) !== plane) {
+        throw new Error('Target synchronization is not confirmed');
+      }
+    },
+  }) : null;
   return {
     workspaceSlug: deps.workspaceSlug,
     workspaceId,
     repo,
+    sourceReplica: cacheIdentity.repoDbName,
+    accountId: deps.accountId ?? null,
+    sendJournal,
     codeCollabFileIndexCache,
     sendResources,
     writer: workspaceWriter,

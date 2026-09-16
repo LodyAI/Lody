@@ -224,7 +224,7 @@ export type SessionActions = {
   addSessionHistory: (
     sessionId: SessionId,
     history: Omit<SessionHistoryInput, 'id'>,
-    options?: { dispatch?: boolean }
+    options?: { dispatch?: boolean; guideExpectedTurnId?: string }
   ) => Promise<SessionHistory>;
   requestSessionDispatch: (
     sessionId: SessionId,
