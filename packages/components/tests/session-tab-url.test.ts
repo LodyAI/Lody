@@ -11,6 +11,12 @@ import {
 const parentSessionId = 'parent-session-id';
 
 describe('shared tab closure', () => {
+  it('retains the requested tab until the replica can establish its open neighbour', () => {
+    expect(getSessionTabFallback('parent', ['parent'], [], false)).toBe('parent');
+    expect(getSessionTabFallback('parent', ['parent', 'child'], ['child'], false)).toBe('parent');
+    expect(getSessionTabFallback('parent', ['parent', 'child'], ['child'], true)).toBe('child');
+    expect(getSessionTabFallback('parent', ['parent'], [], true)).toBe('empty');
+  });
   it('combines legacy archives with independent close flags', () => {
     expect(isSessionTabClosed({})).toBe(false);
     expect(isSessionTabClosed({ isTabClosed: true })).toBe(true);

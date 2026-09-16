@@ -148,6 +148,31 @@ describe('SessionTabBar drag sources', () => {
     expect(container.querySelector('[aria-label="New tab"]')).not.toBeNull();
   });
 
+  it('removes the empty surface from layout while a mobile viewer is active', async () => {
+    const renderSurface = async (viewerActive: boolean) => {
+      await act(async () =>
+        root.render(
+          <>
+            <SessionEmptySurface
+              visible={!viewerActive}
+              closedSessions={[]}
+              onNew={() => {}}
+              onReopen={() => {}}
+            />
+            {viewerActive && <div aria-label="Diff viewer">Changes</div>}
+          </>
+        )
+      );
+    };
+    await renderSurface(false);
+    expect(container.querySelector('[aria-label="No conversation open"]')).not.toBeNull();
+    await renderSurface(true);
+    expect(container.querySelector('[aria-label="No conversation open"]')).toBeNull();
+    expect(container.firstElementChild?.getAttribute('aria-label')).toBe('Diff viewer');
+    await renderSurface(false);
+    expect(container.querySelector('[aria-label="No conversation open"]')).not.toBeNull();
+  });
+
   it('does not mark a solo tab title as a window-drag hole', async () => {
     await renderTabBar([]);
     const tab = container.querySelector<HTMLElement>('#session-tab-session-parent')!;

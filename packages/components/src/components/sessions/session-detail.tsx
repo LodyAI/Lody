@@ -1162,7 +1162,12 @@ const SessionDetail = ({
     [parsedUrlTab, draftTabs, pendingDraftChildSessionIds, sessionId, sideSessions]
   );
   const activeTabSessionId = closedConversationIds.has(requestedTabSessionId)
-    ? getSessionTabFallback(requestedTabSessionId, allOrderedSessionTabIds, orderedSessionTabIds)
+    ? getSessionTabFallback(
+        requestedTabSessionId,
+        allOrderedSessionTabIds,
+        orderedSessionTabIds,
+        docMetaCacheReady
+      )
     : requestedTabSessionId;
   const isEmptyConversation = activeTabSessionId === EMPTY_SESSION_TAB_ID;
   // A URL-named child the meta replica has not delivered yet: keep it active
@@ -1710,6 +1715,7 @@ const SessionDetail = ({
   // missing replica row. This is not URL/local-selection mirroring.
   const previousSelectedTab = useRef({ sessionId, tabId: activeTabSessionId });
   useEffect(() => {
+    if (!docMetaCacheReady) return;
     const previous = previousSelectedTab.current;
     previousSelectedTab.current = { sessionId, tabId: activeTabSessionId };
     if (!closedConversationIds.has(requestedTabSessionId)) return;
@@ -1719,6 +1725,7 @@ const SessionDetail = ({
     }
     navigateToSessionTab(activeTabSessionId);
   }, [
+    docMetaCacheReady,
     closedConversationIds,
     requestedTabSessionId,
     activeTabSessionId,
@@ -4119,9 +4126,10 @@ const SessionDetail = ({
        never resolve. Panel and viewer changes made while it loads are still
        the user's, so the write happens regardless — the conversation slot
        just keeps its previously stored value until the child resolves. */
-    const persistedSessionTabId = activeTabIsPendingChild
-      ? (readStoredLastActiveTabState(sessionId)?.sessionTabId ?? sessionId)
-      : activeTabSessionId;
+    const persistedSessionTabId =
+      !docMetaCacheReady || activeTabIsPendingChild
+        ? (readStoredLastActiveTabState(sessionId)?.sessionTabId ?? sessionId)
+        : activeTabSessionId;
     writeStoredLastActiveTabState(sessionId, {
       sessionTabId: persistedSessionTabId,
       viewerTab: activeViewerTab,
@@ -4136,6 +4144,7 @@ const SessionDetail = ({
     activeSidebarTab,
     activeSideSessionId,
     activeTabIsPendingChild,
+    docMetaCacheReady,
     activeTabSessionId,
     activeViewerTab,
     isSidebarOpen,
@@ -4641,6 +4650,7 @@ const SessionDetail = ({
 
   const emptyConversationSurface = isEmptyConversation ? (
     <SessionEmptySurface
+      visible={!isMobile || !hasActiveViewerTab}
       closedSessions={closedConversations}
       onNew={handleNewTab}
       onReopen={handleTabRestore}

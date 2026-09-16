@@ -30,3 +30,9 @@ and mobile tests plus components typechecking validate the implementation; repli
 tests exercise the real LoroRepo metadata boundary. Mixed old/new clients cannot
 provide uniform tab behavior. Private-host allowlists and end-to-end native app
 behavior are not established by unit tests.
+
+Review corrections in [PR #746](https://github.com/LodyAI/Lody/pull/746): shared-close
+fallback, URL replacement, and selection persistence wait for metadata hydration so
+a partial scan cannot persist a false empty state. On mobile the empty surface
+unmounts while a viewer is active, preserving the single-surface layout. Regression
+tests cover partial-to-complete fallback and empty-surface visibility transitions.

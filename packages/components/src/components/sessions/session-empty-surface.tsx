@@ -8,12 +8,15 @@ export function SessionEmptySurface({
   closedSessions,
   onNew,
   onReopen,
+  visible = true,
 }: {
+  visible?: boolean;
   closedSessions: SessionMeta[];
   onNew: () => void;
   onReopen: (id: SessionId) => void | Promise<void>;
 }) {
   const { t } = useTranslation();
+  if (!visible) return null;
   return (
     <div
       className="flex h-full flex-col items-center justify-center gap-4 p-6"

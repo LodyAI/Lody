@@ -13,8 +13,11 @@ export const isSessionTabClosed = (meta: {
 export function getSessionTabFallback(
   tabId: string,
   orderedIds: readonly string[],
-  openIds: readonly string[]
+  openIds: readonly string[],
+  metadataReady = true
 ): string {
+  // Partial replica scans cannot establish the next open neighbour (or emptiness).
+  if (!metadataReady) return tabId;
   const open = new Set(openIds);
   const index = orderedIds.indexOf(tabId);
   return (
