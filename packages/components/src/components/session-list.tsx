@@ -1,5 +1,9 @@
 import { getProjectActivityCounts, type ProjectActivityCounts } from './project-activity';
-import { getProjectActivityLabel, ProjectActivityIndicator } from './project-activity-indicator';
+import {
+  getProjectActivityLabel,
+  ProjectActivityIndicator,
+  PROJECT_ACTIVITY_TRAILING_PX,
+} from './project-activity-indicator';
 import { isElectronRenderer } from '@/lib/electron';
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
 import { SessionWindowMenuItem } from './session-window-menu-item';
@@ -644,6 +648,17 @@ const SessionGroupSection = memo(function SessionGroupSection({
     ? t('sessions.showLess', 'Show less')
     : t('sessions.showAll', 'Show all ({{count}})', { count: group.sessions.length });
   const resolvedTrailingContent = trailingContent ?? (group.collapsed ? null : dragHandle);
+  // Collapsed repo headers share the project-row activity anchor. The row's
+  // own px-2 (8px) and the 24px hover buttons that follow the header row (repo
+  // drag handle, new-session) already sit inside the shared trailing zone, so
+  // the indicator reserves only the remainder; the largest button pair (48px)
+  // always fits inside the zone minus the padding (54px).
+  const activityTrailingPadPx = groupIndicatorLabel
+    ? PROJECT_ACTIVITY_TRAILING_PX -
+      8 -
+      (resolvedTrailingContent ? 24 : 0) -
+      (canCreateNew ? 24 : 0)
+    : 0;
   // Repo group labels (e.g. "loro-dev/loro") name concrete content, but dark-mode
   // resting chrome should still recede behind the conversation. Hover and active
   // states restore full contrast. "Chats" uses the full muted token (same as
@@ -774,6 +789,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
                 <span
                   data-sidebar-repo-activity=""
                   className="shrink-0"
+                  style={activityTrailingPadPx ? { paddingRight: activityTrailingPadPx } : undefined}
                   role="img"
                   aria-label={groupIndicatorLabel}
                 >

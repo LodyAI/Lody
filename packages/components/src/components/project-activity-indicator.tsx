@@ -2,6 +2,13 @@ import type { TFunction } from 'i18next';
 import { SessionRowStatusIndicator } from './sidebar-row-shared';
 import { getProjectActivityItems, type ProjectActivityCounts } from './project-activity';
 
+// Desktop project rows anchor the indicator's right edge this far from the
+// row's right edge: LocalProjectItem reserves pr-3 (12px), the row's gap-2
+// between the indicator and the actions cluster (8px), and two 20px hover
+// actions with a 2px gap (42px). Other collapsed row kinds reserve the
+// remainder of this zone so their slots land on the same x.
+export const PROJECT_ACTIVITY_TRAILING_PX = 62;
+
 export function getProjectActivityLabel(counts: ProjectActivityCounts, t: TFunction) {
   return [
     [counts.permission, t('sessions.status.requestPermission', 'Request Permission')],
