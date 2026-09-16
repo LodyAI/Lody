@@ -512,7 +512,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         await this.cloudPort.access.resolveWorkspaceUser({
           workspaceId: this.workspaceId,
           userId,
-        })
+        }),
+      this.cloudPort.identity.userId
     );
     this.preparationService = new SessionPreparationService(this.logger, {
       hardTtlMs: SESSION_PREPARATION_HARD_TTL_MS,

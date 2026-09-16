@@ -233,8 +233,9 @@ fetching/caching is in `../lib/github-token-manager.ts`; git HTTPS auth uses
 
 The effective identity becomes `GIT_AUTHOR_*`/`GIT_COMMITTER_*` in the session env (`session.ts`
 `updateGitIdentity`, re-applied per turn via the execution service's `bindReadySession`). When
-the turn requester is the machine owner, the repository/machine Git identity wins and the
-resolved Lody/GitHub identity is its fallback. A non-owner requester always uses their resolved
+the turn requester is the machine owner, the repository/machine Git identity is used without a cloud profile lookup; missing local
+identity uses neutral LodyAI. Non-owner profile queries have a 60-second deadline; failed or
+timed-out entries are evicted so later turns can retry. A non-owner requester always uses their resolved
 Lody/GitHub identity and can never inherit the machine owner's Git config; if no usable requester
 identity exists, the neutral LodyAI identity is used. The cloud composition root owns hosted
 user resolution because the daemon does not own an end-user browser session; the local access

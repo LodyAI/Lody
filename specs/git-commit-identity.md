@@ -10,10 +10,15 @@ rather than workspace size or sharing state. The rules below govern identity res
 live ACP propagation has the limitation described below.
 
 For a turn requested by the machine owner, Lody first uses the Git identity effective in the
-session worktree. If the machine has no usable Git email, Lody uses the owner's resolved
-Lody/GitHub identity. For a turn requested by any other workspace member, Lody uses only that
+session worktree and skips the cloud user-profile query, including local Electron turns.
+If the machine has no usable Git email, Lody uses the neutral LodyAI identity. For a turn requested by any other workspace member, Lody uses only that
 requester's resolved Lody/GitHub identity and never reads or falls back to the machine Git
 identity.
+
+Cloud user-profile queries wait at most 60 seconds. Failure or timeout uses a placeholder
+for the current turn, which resolves to the neutral Git identity; the next query may retry.
+Late results must not replace a newer cached profile. Machine authorization and GitHub
+credentials remain separate checks and are never bypassed by this profile fallback.
 
 A missing-email placeholder is not usable. When neither an allowed machine identity nor the
 requester's resolved identity is usable, Lody uses the neutral `LodyAI <agent@lody.ai>` identity.
@@ -33,5 +38,6 @@ Identity selection is implemented in `apps/cli/src/session/git-identity.ts`. Ini
 creation applies the ownership policy in `apps/cli/src/session/session-manager.ts`; continued
 turns reapply it in `apps/cli/src/session/session-execution-service.ts`.
 
-This draft records the requester-approved policy. The focused identity tests and CLI typecheck
-pass in the inspected worktree; deployed-client acceptance remains unverified.
+This draft records the requester-approved policy. Validation for the bounded profile lookup is recorded in the
+[implementation note](../.agents/notes/implemented/bug-fix/2026-09-16-bounded-session-user-identity.md);
+deployed-client acceptance remains unverified.

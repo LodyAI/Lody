@@ -3367,8 +3367,8 @@ export class MessageHandler {
       this.logger.debug('Streams RPC disabled: cloud Streams port unavailable');
     }
     // One resolver instance (and one profile cache) for both the dispatch
-    // watcher and the Operation coordinator: both need the requesting user's
-    // real commit identity, and both must go through the CLI-token query.
+    // watcher and the Operation coordinator. Owner turns use local Git identity;
+    // other requesters resolve their own profile through the CLI-token query.
     this.sessionUserResolver = new SessionUserResolver(
       this.logger,
       this.workspaceId,
@@ -3376,7 +3376,8 @@ export class MessageHandler {
         await this.cloudPort.access.resolveWorkspaceUser({
           workspaceId: this.workspaceId,
           userId,
-        })
+        }),
+      this.userId
     );
     this.sessionDispatchWatcher = new SessionDispatchWatcher({
       logger: this.logger,

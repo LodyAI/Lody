@@ -19,9 +19,9 @@ Contract: specs/session-orchestration.md.
   exists; retries and recovery never reread mutable history.
 - Machine and Provider credentials stay execution-host scoped; attribution, authorization,
   GitHub, and Git identity use the frozen identity, never the Session owner.
-- Git identity: owner prefers machine then requester; others never read machine config.
-  Never restart ACP/sandbox for identity, even in preparations.
-  Use `CloudPort`; reject placeholders.
+- Git: owner uses local config, no profile query; others never read it.
+  `CloudPort` profiles: 60s deadline, retry failures, reject placeholders.
+  Identity never restarts ACP/sandbox, even in prep.
 
 ## Dispatch
 
