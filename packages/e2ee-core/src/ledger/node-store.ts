@@ -4,6 +4,8 @@ import type { LedgerKeyOutbox } from './delivery';
 import { fail } from './error';
 import type { LedgerJournal, LedgerStore, LedgerTransaction } from './submit';
 
+export { createNodeSignatureVerifyExecutor } from './node-sig-pool';
+
 const FORMAT = 'lody-e2ee-journal/v0';
 const SNAPSHOT_FORMAT = 'lody-e2ee-journal/v1';
 const MAX_RECORDS = 16_384;

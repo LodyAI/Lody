@@ -1,3 +1,13 @@
+export { liveClock, liveCryptoPlatform, liveEntropy, liveTimerSchedule } from './capabilities';
+export type {
+  Clock,
+  CryptoPlatform,
+  Entropy,
+  SignatureJob,
+  SignatureVerifyExecutor,
+  TimerHandle,
+  TimerSchedule,
+} from './capabilities';
 export { ControlFreshnessLease } from './control-freshness';
 export type { TrustedControlObservation } from './control-freshness';
 export { ContentCipher, inspectContent, MAX_CONTENT_BYTES } from './content';

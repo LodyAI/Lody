@@ -120,7 +120,10 @@ parses, hashes, checks every signature (including nested proofs) and replays
 policy from zero; it caches parsed prime-subgroup public keys and uses
 `@noble/hashes` SHA-512/SHA-256 so the hot path is synchronous. Measured 10k from-zero (16,250 signatures) on Node with parallel Ed25519
 workers was ~2.9s hot vs ~11.5s single-thread under the historical benchmark.
-These measurements did not meet 100ms; that gate is now withdrawn. Set `LODY_E2EE_VERIFY_WORKERS=0` to force sequential verify.
+These measurements did not meet 100ms; that gate is now withdrawn.
+`Ledger.verify` is sequential by default. Pass
+`createNodeSignatureVerifyExecutor()` from `@lody/e2ee-core/ledger-node` to opt
+into Node worker parallelism; environment variables are not consulted.
 README-only consumer (import the public package twice, real
 `verify`/`extend` plus D1 transfer): `pnpm --filter @lody/e2ee-core exec tsx bench/readme-consumer.ts`.
 V3 maintainer trial (someone who did **not** implement this package, clean

@@ -463,7 +463,7 @@ describe('ledger verify and permissions', () => {
     }
   });
 
-  it('parallel from-zero verify still rejects a forged nested possession proof', async () => {
+  it('explicit Node-parallel verify still rejects a forged nested possession proof', async () => {
     const created = await signGenesis(owner, random(32));
     const records = [created.record];
     let ledger = created.ledger;
@@ -486,25 +486,22 @@ describe('ledger verify and permissions', () => {
       await owner.sign(proposal.signingBytes)
     );
     const chain = [...records, forgedRecord];
-    const previous = process.env.LODY_E2EE_VERIFY_WORKERS;
+    const { createNodeSignatureVerifyExecutor } = await import('../src/ledger/node-sig-pool');
     try {
-      process.env.LODY_E2EE_VERIFY_WORKERS = '8';
-      try {
-        await Ledger.verify({ anchor: created.anchor, records: chain });
-        throw new Error('forged-proof-accepted-workers');
-      } catch (error) {
-        expectCode(error, 'bad-proof');
-      }
-      process.env.LODY_E2EE_VERIFY_WORKERS = '0';
-      try {
-        await Ledger.verify({ anchor: created.anchor, records: chain });
-        throw new Error('forged-proof-accepted-sequential');
-      } catch (error) {
-        expectCode(error, 'bad-proof');
-      }
-    } finally {
-      if (previous === undefined) delete process.env.LODY_E2EE_VERIFY_WORKERS;
-      else process.env.LODY_E2EE_VERIFY_WORKERS = previous;
+      await Ledger.verify({
+        anchor: created.anchor,
+        records: chain,
+        executor: createNodeSignatureVerifyExecutor(),
+      });
+      throw new Error('forged-proof-accepted-workers');
+    } catch (error) {
+      expectCode(error, 'bad-proof');
+    }
+    try {
+      await Ledger.verify({ anchor: created.anchor, records: chain });
+      throw new Error('forged-proof-accepted-sequential');
+    } catch (error) {
+      expectCode(error, 'bad-proof');
     }
   });
 });

@@ -1,9 +1,13 @@
+import { Effect } from 'effect';
 import { describe, expect, it } from 'vitest';
 import {
   LedgerClient,
   MAX_LEDGER_READ_PAGE_RECORDS,
   MemoryLedgerStore,
   MemoryLedgerStream,
+  classifyLedgerPresence,
+  classifyUnresolvedSubmit,
+  selectSubmitWire,
 } from '../src/ledger';
 import { buildChain } from '../bench/chain';
 import { admitDeviceOp, append, ed25519, signGenesis } from './ledger-fixtures';
@@ -221,6 +225,101 @@ describe('L5 disk save faults', () => {
     a.store.failSave = 'before';
     await expect(a.client.submit(record)).rejects.toThrow('disk-failure');
     expect(stream.records).toEqual([]);
+  });
+
+  it('keeps pending after a post-persist save fault and resumes the same bytes', async () => {
+    const { owner, created, stream, a } = await clients();
+    const phone = await ed25519();
+    const record = (
+      await append(
+        created.ledger,
+        owner,
+        await admitDeviceOp(created.anchor, phone, 'personal', true)
+      )
+    ).record;
+    a.store.failSave = 'after';
+    await expect(a.client.submit(record)).rejects.toThrow('disk-failure');
+    expect(stream.records).toEqual([]);
+    expect(a.store.journal?.pending).toEqual(record);
+    const resumed = await a.client.resume();
+    expect(resumed.status).toBe('committed');
+    expect(stream.records[0]).toEqual(record);
+    expect(a.store.journal?.pending).toBeNull();
+  });
+});
+
+describe('C2 Promise/Effect single implementation', () => {
+  it('classifies wire selection and CAS outcomes without I/O', () => {
+    const pending = new Uint8Array([1, 2, 3]);
+    expect(selectSubmitWire(pending, undefined)).toEqual(pending);
+    expect(selectSubmitWire(null, pending)).toEqual(pending);
+    expect(() => selectSubmitWire(null, undefined)).toThrow();
+    expect(() => selectSubmitWire(pending, new Uint8Array([9]))).toThrow();
+    expect(classifyLedgerPresence({ containsWire: true, previousMatchesHead: false })).toBe(
+      'committed'
+    );
+    expect(classifyLedgerPresence({ containsWire: false, previousMatchesHead: false })).toBe(
+      'conflict'
+    );
+    expect(classifyLedgerPresence({ containsWire: false, previousMatchesHead: true })).toBe(
+      'absent'
+    );
+    expect(classifyUnresolvedSubmit({ cas: 'unsupported', retrying: false })).toBe('unsupported');
+    expect(classifyUnresolvedSubmit({ cas: 'unsupported', retrying: true })).toBe('unknown');
+    expect(classifyUnresolvedSubmit({ cas: 'unknown', retrying: false })).toBe('unknown');
+  });
+
+  it('Promise and Effect submit commit the same protocol bytes', async () => {
+    const owner = await ed25519();
+    const created = await signGenesis(owner);
+    const phone = await ed25519();
+    const record = (
+      await append(
+        created.ledger,
+        owner,
+        await admitDeviceOp(created.anchor, phone, 'personal', true)
+      )
+    ).record;
+    const streamA = new MemoryLedgerStream();
+    const streamB = new MemoryLedgerStream();
+    const clientA = await LedgerClient.open(created.record, new MemoryLedgerStore(), streamA);
+    const clientB = await LedgerClient.open(created.record, new MemoryLedgerStore(), streamB);
+    const promiseResult = await clientA.submit(new Uint8Array(record));
+    const effectResult = await Effect.runPromise(clientB.submitEffect(new Uint8Array(record)));
+    expect(promiseResult.status).toBe('committed');
+    expect(effectResult.status).toBe('committed');
+    expect(streamA.records[0]).toEqual(record);
+    expect(streamB.records[0]).toEqual(record);
+    expect(streamA.records[0]).toEqual(streamB.records[0]);
+  });
+
+  it('Promise and Effect keep the same unknown pending bytes after a false ACK', async () => {
+    const owner = await ed25519();
+    const created = await signGenesis(owner);
+    const phone = await ed25519();
+    const record = (
+      await append(
+        created.ledger,
+        owner,
+        await admitDeviceOp(created.anchor, phone, 'personal', true)
+      )
+    ).record;
+    const streamA = new MemoryLedgerStream();
+    const streamB = new MemoryLedgerStream();
+    streamA.mode = 'false-ack';
+    streamB.mode = 'false-ack';
+    const storeA = new MemoryLedgerStore();
+    const storeB = new MemoryLedgerStore();
+    const clientA = await LedgerClient.open(created.record, storeA, streamA);
+    const clientB = await LedgerClient.open(created.record, storeB, streamB);
+    expect((await clientA.submit(new Uint8Array(record))).status).toBe('unknown');
+    expect((await Effect.runPromise(clientB.submitEffect(new Uint8Array(record)))).status).toBe(
+      'unknown'
+    );
+    expect(storeA.journal?.pending).toEqual(record);
+    expect(storeB.journal?.pending).toEqual(record);
+    expect(streamA.records).toEqual([]);
+    expect(streamB.records).toEqual([]);
   });
 });
 

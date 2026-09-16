@@ -1,5 +1,6 @@
 import { hashes, Point, verify as nobleVerify } from '@noble/ed25519';
 import { sha256, sha512 } from '@noble/hashes/sha2.js';
+import type { SignatureJob, SignatureVerifyExecutor } from '../capabilities';
 import { bytesEqual, copyBytes, encodeCbor, type CborValue } from './cbor';
 import { fail } from './error';
 
@@ -14,9 +15,43 @@ export const HISTORY_PACKET_BYTES = 72;
 
 const text = new TextEncoder();
 const HEX = Array.from({ length: 256 }, (_, byte) => byte.toString(16).padStart(2, '0'));
-const validPoints = new Map<string, Point>();
 
 hashes.sha512 = (message) => sha512(message);
+
+export const DEFAULT_SIGNING_POINT_CACHE_LIMIT = 8192;
+
+/** Instance-owned prime-subgroup point cache. Disable or bound per experiment. */
+export class SigningPointCache {
+  private readonly points = new Map<string, Point>();
+  readonly enabled: boolean;
+  readonly maxEntries: number;
+
+  constructor(options?: { enabled?: boolean; maxEntries?: number }) {
+    this.enabled = options?.enabled !== false;
+    this.maxEntries = options?.maxEntries ?? DEFAULT_SIGNING_POINT_CACHE_LIMIT;
+    if (!Number.isSafeInteger(this.maxEntries) || this.maxEntries < 0) fail('invalid-operation');
+  }
+
+  get size(): number {
+    return this.points.size;
+  }
+
+  get(bytes: Uint8Array): Point | undefined {
+    if (!this.enabled) return undefined;
+    return this.points.get(keyId(bytes));
+  }
+
+  set(bytes: Uint8Array, point: Point): void {
+    if (!this.enabled || this.maxEntries === 0) return;
+    if (this.points.size >= this.maxEntries) {
+      const first = this.points.keys().next().value;
+      if (first !== undefined) this.points.delete(first);
+    }
+    this.points.set(keyId(bytes), point);
+  }
+}
+
+export const liveSigningPointCache = new SigningPointCache();
 
 export const PROTOCOL_VERSION = 1;
 export const SIGNATURE_DOMAIN = text.encode('lody-e2ee/sig/v1\0');
@@ -46,22 +81,28 @@ function concat(parts: readonly Uint8Array[]): Uint8Array<ArrayBuffer> {
   return out;
 }
 
-function validSigningPoint(bytes: Uint8Array): boolean {
+function validSigningPoint(
+  bytes: Uint8Array,
+  cache: SigningPointCache = liveSigningPointCache
+): boolean {
   if (bytes.byteLength !== SIGNING_KEY_BYTES) return false;
-  const id = keyId(bytes);
-  if (validPoints.has(id)) return true;
+  if (cache.get(bytes)) return true;
   try {
     const point = Point.fromBytes(bytes, false);
     if (point.isSmallOrder() || !point.isTorsionFree()) return false;
-    validPoints.set(id, point);
+    cache.set(bytes, point);
     return true;
   } catch {
     return false;
   }
 }
 
-export function checkSigningPublicKey(value: Uint8Array): SigningPublicKey {
-  if (value.byteLength !== SIGNING_KEY_BYTES || !validSigningPoint(value)) fail('invalid-key');
+export function checkSigningPublicKey(
+  value: Uint8Array,
+  cache: SigningPointCache = liveSigningPointCache
+): SigningPublicKey {
+  if (value.byteLength !== SIGNING_KEY_BYTES || !validSigningPoint(value, cache))
+    fail('invalid-key');
   return copyBytes(value);
 }
 
@@ -166,10 +207,11 @@ export async function commitEpochKey(
 export function verifySignature(
   publicKey: SigningPublicKey,
   message: Uint8Array,
-  signature: Signature
+  signature: Signature,
+  cache: SigningPointCache = liveSigningPointCache
 ): boolean {
   if (signature.byteLength !== SIGNATURE_BYTES) return false;
-  if (!validSigningPoint(publicKey)) return false;
+  if (!validSigningPoint(publicKey, cache)) return false;
   try {
     if (!Point.fromBytes(signature.subarray(0, 32), false).isTorsionFree()) return false;
   } catch {
@@ -182,13 +224,26 @@ export function verifySignature(
   }
 }
 
+export function createSequentialSignatureVerify(
+  cache: SigningPointCache = liveSigningPointCache
+): SignatureVerifyExecutor {
+  return {
+    async verify(jobs: readonly SignatureJob[]): Promise<boolean[]> {
+      return jobs.map((job) => verifySignature(job.pk, job.msg, job.sig, cache));
+    },
+  };
+}
+
+export const sequentialSignatureVerify: SignatureVerifyExecutor = createSequentialSignatureVerify();
+
 export function assertSignature(
   publicKey: SigningPublicKey,
   message: Uint8Array,
   signature: Signature,
-  code: 'bad-signature' | 'bad-proof' = 'bad-signature'
+  code: 'bad-signature' | 'bad-proof' = 'bad-signature',
+  cache: SigningPointCache = liveSigningPointCache
 ): void {
-  if (!verifySignature(publicKey, message, signature)) fail(code);
+  if (!verifySignature(publicKey, message, signature, cache)) fail(code);
 }
 
 export function keyId(bytes: Uint8Array): string {

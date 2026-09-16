@@ -1,3 +1,4 @@
+import { liveCryptoPlatform, type CryptoPlatform } from './capabilities';
 import { checkHex, ControlLogError, fromHex, invariant, toHex } from './wire';
 
 const DOMAIN = 'lody-recovery-device/v1';
@@ -70,16 +71,18 @@ function decodeSecret(secret: Uint8Array): {
  * Generate R material: extractable only long enough to export PKCS8, then discarded.
  * Wrap `secret` with sealRecoveryBackup. Daily handles come from importRecoveryDevice.
  */
-export async function createRecoveryDeviceSecret(): Promise<RecoveryDeviceSecretView> {
-  const sign = (await crypto.subtle.generateKey('Ed25519', true, [
+export async function createRecoveryDeviceSecret(
+  platform: CryptoPlatform = liveCryptoPlatform
+): Promise<RecoveryDeviceSecretView> {
+  const sign = (await platform.subtle.generateKey('Ed25519', true, [
     'sign',
     'verify',
   ])) as CryptoKeyPair;
-  const dh = (await crypto.subtle.generateKey('X25519', true, ['deriveBits'])) as CryptoKeyPair;
-  const publicKey = new Uint8Array(await crypto.subtle.exportKey('raw', sign.publicKey));
-  const enc = new Uint8Array(await crypto.subtle.exportKey('raw', dh.publicKey));
-  const signPkcs8 = new Uint8Array(await crypto.subtle.exportKey('pkcs8', sign.privateKey));
-  const dhPkcs8 = new Uint8Array(await crypto.subtle.exportKey('pkcs8', dh.privateKey));
+  const dh = (await platform.subtle.generateKey('X25519', true, ['deriveBits'])) as CryptoKeyPair;
+  const publicKey = new Uint8Array(await platform.subtle.exportKey('raw', sign.publicKey));
+  const enc = new Uint8Array(await platform.subtle.exportKey('raw', dh.publicKey));
+  const signPkcs8 = new Uint8Array(await platform.subtle.exportKey('pkcs8', sign.privateKey));
+  const dhPkcs8 = new Uint8Array(await platform.subtle.exportKey('pkcs8', dh.privateKey));
   const secret = encodeSecret(publicKey, enc, signPkcs8, dhPkcs8);
   signPkcs8.fill(0);
   dhPkcs8.fill(0);

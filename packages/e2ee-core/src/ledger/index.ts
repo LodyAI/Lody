@@ -19,6 +19,12 @@ export {
   encodeCbor,
 } from './cbor';
 export {
+  SigningPointCache,
+  createSequentialSignatureVerify,
+  sequentialSignatureVerify,
+  liveSigningPointCache,
+} from './crypto';
+export {
   ENCRYPTION_KEY_BYTES,
   EPOCH_COMMIT_DOMAIN,
   HASH_BYTES,
@@ -80,6 +86,11 @@ export {
   MAX_LEDGER_READ_PAGES,
   MAX_LEDGER_READ_RECORDS,
 } from './submit';
+export {
+  classifyLedgerPresence,
+  classifyUnresolvedSubmit,
+  selectSubmitWire,
+} from './submit-decision';
 export type {
   LedgerJournal,
   LedgerReadPage,

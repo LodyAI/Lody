@@ -1,3 +1,4 @@
+import { liveTimerSchedule, type TimerHandle, type TimerSchedule } from './capabilities';
 import { ControlLogError, invariant } from './wire';
 
 /** Already verified by the application for this exact request/credential. Not a token format. */
@@ -16,6 +17,8 @@ export interface BoundedStreamsFetchOptions {
   readonly now: () => number;
   /** Synchronous: called after the SDK's credential lookup, before network dispatch. */
   readonly authorize: (request: Request) => StreamsRequestLease;
+  /** Default is the live timer. Tests inject a schedule; original expiry is never restarted. */
+  readonly scheduleTimer?: TimerSchedule;
 }
 
 /** Opt-in fetch for control/history/key SDK clients. Bounds bytes BEFORE SDK buffering.
@@ -25,6 +28,7 @@ export function createBoundedStreamsFetch(
   options: BoundedStreamsFetchOptions
 ): typeof globalThis.fetch {
   const { fetch: upstream, maxResponseBytes, requestTimeoutMs, now, authorize } = options;
+  const scheduleTimer = options.scheduleTimer ?? liveTimerSchedule;
   invariant(
     Number.isSafeInteger(maxResponseBytes) &&
       maxResponseBytes > 0 &&
@@ -48,7 +52,7 @@ export function createBoundedStreamsFetch(
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     let output: ReadableStreamDefaultController<Uint8Array> | undefined;
     let finished = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let timer: TimerHandle | undefined;
     let rejectPending: (error: Error) => void = () => {};
     const cancelled = new Promise<never>((_, reject) => {
       rejectPending = reject;
@@ -56,7 +60,7 @@ export function createBoundedStreamsFetch(
     // A body can be cancelled after the fetch race settled; still observe its rejection.
     void cancelled.catch(() => {});
     const cleanup = () => {
-      if (timer !== undefined) clearTimeout(timer);
+      if (timer !== undefined) timer.clear();
       request.signal.removeEventListener('abort', onAbort);
       signal.removeEventListener('abort', onAbort);
     };
@@ -88,9 +92,8 @@ export function createBoundedStreamsFetch(
       request.signal.addEventListener('abort', onAbort, { once: true });
       signal.addEventListener('abort', onAbort, { once: true });
       check();
-      timer = setTimeout(
-        () => fail(new ControlLogError('stream-request-expired')),
-        deadline - lastTime
+      timer = scheduleTimer(deadline - lastTime, () =>
+        fail(new ControlLogError('stream-request-expired'))
       );
       const pending = upstream(request, { signal: abort.signal, redirect: 'manual' }).then(
         (response) => {

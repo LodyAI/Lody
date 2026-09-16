@@ -1,3 +1,4 @@
+import type { SignatureJob, SignatureVerifyExecutor } from '../capabilities';
 import { copyBytes } from './cbor';
 import {
   assertSignature,
@@ -5,13 +6,15 @@ import {
   checkHash,
   checkSignature,
   checkSigningPublicKey,
+  createSequentialSignatureVerify,
   hashRecordBytes,
   headAttestationSigningBytes,
   recordSigningBytes,
+  sequentialSignatureVerify,
   snapshotSigningBytes,
-  verifySignature,
   type Hash,
   type Signature,
+  type SigningPointCache,
   type SigningPublicKey,
 } from './crypto';
 import { LedgerError, fail } from './error';
@@ -34,7 +37,6 @@ import {
   type DecodedRecord,
   type Operation,
 } from './schema';
-import type { SigJob } from './node-sig-pool';
 import {
   assertEndorserEligible,
   compareNotes,
@@ -79,7 +81,7 @@ function withPosition(position: number, run: () => void): void {
   }
 }
 
-function collectProofJobs(genesis: Hash, decoded: DecodedRecord): SigJob[] {
+function collectProofJobs(genesis: Hash, decoded: DecodedRecord): SignatureJob[] {
   if (decoded.body.type !== 'ordinary') return [];
   const op = decoded.body.fields.operation;
   if (op.type === 'admitMember') {
@@ -157,32 +159,16 @@ function applyRecord(
 }
 
 async function verifyJobs(
-  jobs: SigJob[],
+  jobs: SignatureJob[],
   positions: number[],
-  codes: Array<'bad-signature' | 'bad-proof'>
+  codes: Array<'bad-signature' | 'bad-proof'>,
+  executor: SignatureVerifyExecutor
 ): Promise<void> {
   if (jobs.length === 0) return;
-  let results: boolean[];
-  if (
-    jobs.length >= 32 &&
-    typeof process !== 'undefined' &&
-    process.versions?.node &&
-    process.env.LODY_E2EE_VERIFY_WORKERS !== '0'
-  ) {
-    try {
-      const { verifyJobsParallel } = await import('./node-sig-pool');
-      results = await verifyJobsParallel(jobs);
-    } catch {
-      results = jobs.map((job) => verifySignature(job.pk, job.msg, job.sig));
-    }
-  } else {
-    results = jobs.map((job) => verifySignature(job.pk, job.msg, job.sig));
-  }
-  if (results.length !== jobs.length) {
-    results = jobs.map((job) => verifySignature(job.pk, job.msg, job.sig));
-  }
+  const results = await executor.verify(jobs);
+  if (!Array.isArray(results) || results.length !== jobs.length) fail('invalid-operation');
   for (let i = 0; i < jobs.length; i++) {
-    if (!results[i]) fail(codes[i]!, positions[i]);
+    if (results[i] !== true) fail(codes[i]!, positions[i]);
   }
 }
 
@@ -249,16 +235,26 @@ export class Ledger {
     return false;
   }
 
-  static async verify(input: { anchor: Hash; records: readonly Uint8Array[] }): Promise<Ledger> {
+  static async verify(input: {
+    anchor: Hash;
+    records: readonly Uint8Array[];
+    executor?: SignatureVerifyExecutor;
+    pointCache?: SigningPointCache;
+  }): Promise<Ledger> {
     const anchor = checkHash(input.anchor);
     if (input.records.length === 0) fail('genesis-mismatch', 0);
+    const executor =
+      input.executor ??
+      (input.pointCache
+        ? createSequentialSignatureVerify(input.pointCache)
+        : sequentialSignatureVerify);
     const records = input.records.map((record, position) => {
       if (!(record instanceof Uint8Array)) fail('canonical', position);
       return copyBytes(record);
     });
     const decoded: DecodedRecord[] = [];
     const hashes: Hash[] = [];
-    const outerJobs: SigJob[] = [];
+    const outerJobs: SignatureJob[] = [];
     const outerPos: number[] = [];
     const outerCodes: Array<'bad-signature' | 'bad-proof'> = [];
     for (let position = 0; position < records.length; position++) {
@@ -280,9 +276,9 @@ export class Ledger {
         throw error;
       }
     }
-    await verifyJobs(outerJobs, outerPos, outerCodes);
+    await verifyJobs(outerJobs, outerPos, outerCodes, executor);
     const genesisHash = hashes[0]!;
-    const proofJobs: SigJob[] = [];
+    const proofJobs: SignatureJob[] = [];
     const proofPos: number[] = [];
     const proofCodes: Array<'bad-signature' | 'bad-proof'> = [];
     for (let position = 1; position < decoded.length; position++) {
@@ -293,7 +289,7 @@ export class Ledger {
         proofCodes.push('bad-proof');
       }
     }
-    await verifyJobs(proofJobs, proofPos, proofCodes);
+    await verifyJobs(proofJobs, proofPos, proofCodes, executor);
     let state: InternalState | undefined;
     for (let position = 0; position < decoded.length; position++) {
       state = applyDecoded(

@@ -1,0 +1,76 @@
+/**
+ * Explicit side-effect ports for e2ee-core.
+ *
+ * Pure TS (no Effect, no I/O): codecs, hashes, signature algorithms, policy,
+ * and ledger state transitions (`Ledger.verify` / `extend` / `prepare`).
+ *
+ * Capabilities below are injected by callers. Live defaults use secure entropy
+ * and real clocks; tests replace them. Ordinary callers never pick nonces.
+ *
+ * Effect entrypoints (C2+): `LedgerClient.submit` / `resume` and later delivery,
+ * recovery, and snapshot admission. Promise wrappers stay thin and call the
+ * same implementation. This file does not create an Effect runtime.
+ *
+ * Ownership:
+ * - Entropy / Clock / TimerSchedule / CryptoPlatform: this module
+ * - SignatureVerifyExecutor: sequential default here; Node worker adapter is
+ *   opt-in via `@lody/e2ee-core/ledger-node`
+ * - Storage / streams: existing `LedgerStore` / `LedgerStream` ports
+ * - Live authority: caller policy (`ContentPolicy`, admission `mayWriteDocument`)
+ *
+ * Uninjected (documented gaps, not replay-closed):
+ * - `@hpke/core` DHKEM ephemeral keygen uses WebCrypto internally
+ * - Loro/Flock peer IDs and Wasm clocks belong to those libraries
+ * - noble-ed25519 `hashes.sha512` is pinned at module init and is not a
+ *   public verification bypass
+ */
+
+export interface Entropy {
+  /** Fill `bytes` in place. `label` is a replay tag and is not mixed into bits. */
+  fill(label: string, bytes: Uint8Array): Uint8Array;
+}
+
+export interface Clock {
+  /** Trusted Unix milliseconds. */
+  now(): number;
+}
+
+export interface TimerHandle {
+  clear(): void;
+}
+
+export type TimerSchedule = (ms: number, fire: () => void) => TimerHandle;
+
+export type CryptoPlatform = Pick<Crypto, 'subtle' | 'getRandomValues'>;
+
+export interface SignatureJob {
+  readonly pk: Uint8Array;
+  readonly msg: Uint8Array;
+  readonly sig: Uint8Array;
+}
+
+export interface SignatureVerifyExecutor {
+  verify(jobs: readonly SignatureJob[]): Promise<boolean[]>;
+}
+
+export const liveEntropy: Entropy = {
+  fill(_label, bytes) {
+    crypto.getRandomValues(bytes);
+    return bytes;
+  },
+};
+
+export const liveClock: Clock = {
+  now: () => Date.now(),
+};
+
+export const liveTimerSchedule: TimerSchedule = (ms, fire) => {
+  const id = setTimeout(fire, ms);
+  return {
+    clear() {
+      clearTimeout(id);
+    },
+  };
+};
+
+export const liveCryptoPlatform: CryptoPlatform = globalThis.crypto;

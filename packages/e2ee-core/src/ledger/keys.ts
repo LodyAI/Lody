@@ -1,6 +1,7 @@
 import { CipherSuite, DhkemX25519HkdfSha256, HkdfSha256 } from '@hpke/core';
 import { Chacha20Poly1305 } from '@hpke/chacha20poly1305';
 import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
+import { liveEntropy, type Entropy } from '../capabilities';
 import { encodeCbor } from './cbor';
 import {
   HISTORY_AEAD_DOMAIN,
@@ -40,11 +41,12 @@ export function sealHistoryPacket(
   currentKey: Uint8Array,
   previousKey: Uint8Array,
   genesis: Hash,
-  epoch: number
+  epoch: number,
+  entropy: Entropy = liveEntropy
 ): Uint8Array {
   if (currentKey.byteLength !== 32 || previousKey.byteLength !== 32) fail('invalid-operation');
   if (!Number.isSafeInteger(epoch) || epoch < 1) fail('invalid-operation');
-  const nonce = crypto.getRandomValues(new Uint8Array(NONCE_BYTES));
+  const nonce = entropy.fill('history-packet-nonce', new Uint8Array(NONCE_BYTES));
   const sealed = xchacha20poly1305(
     Uint8Array.from(currentKey),
     nonce,

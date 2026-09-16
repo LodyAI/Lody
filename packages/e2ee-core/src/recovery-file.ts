@@ -1,4 +1,5 @@
 import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
+import { liveEntropy, type Entropy } from './capabilities';
 import { checkHex, ControlLogError, fromHex, invariant, toHex } from './wire';
 
 const FILE_DOMAIN = 'lody-recovery-file/v1';
@@ -15,11 +16,15 @@ export interface RecoveryBackupContext {
 }
 
 /** Secret file bytes. Save/reselect/read-back confirmation belongs to the UI, not this primitive. */
-export function createRecoveryFile(): Uint8Array {
-  const key = crypto.getRandomValues(new Uint8Array(32));
+export function createRecoveryFile(entropy: Entropy = liveEntropy): Uint8Array {
+  const key = entropy.fill('recovery-file-key', new Uint8Array(32));
   try {
     return encoder.encode(
-      JSON.stringify([FILE_DOMAIN, toHex(crypto.getRandomValues(new Uint8Array(16))), toHex(key)])
+      JSON.stringify([
+        FILE_DOMAIN,
+        toHex(entropy.fill('recovery-file-id', new Uint8Array(16))),
+        toHex(key),
+      ])
     );
   } finally {
     key.fill(0);
@@ -68,7 +73,8 @@ function header(backupId: string, context: RecoveryBackupContext): Uint8Array {
 export function sealRecoveryBackup(
   file: Uint8Array,
   context: RecoveryBackupContext,
-  material: Uint8Array
+  material: Uint8Array,
+  entropy: Entropy = liveEntropy
 ): Uint8Array {
   invariant(
     material instanceof Uint8Array &&
@@ -80,7 +86,7 @@ export function sealRecoveryBackup(
   const copy = new Uint8Array(material);
   try {
     const aad = header(backupId, context);
-    const nonce = crypto.getRandomValues(new Uint8Array(24));
+    const nonce = entropy.fill('recovery-backup-nonce', new Uint8Array(24));
     const ciphertext = xchacha20poly1305(key, nonce, aad).encrypt(copy);
     const frame = new Uint8Array(2 + aad.length + nonce.length + ciphertext.length);
     new DataView(frame.buffer).setUint16(0, aad.length);

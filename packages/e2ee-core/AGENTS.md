@@ -18,6 +18,10 @@ in-package tests only; do not re-export it.
   signature including nested proofs, then replay policy. Never skip an invalid
   record or grant unverified authority. The 10k/100ms gate is withdrawn, not
   passed; no required SIMD/Wasm/multithreading work for that target.
+  Sequential verify is the default; Node workers are an explicit
+  `createNodeSignatureVerifyExecutor` adapter, not env/auto detection.
+  Inject entropy, clocks, timers and verify executors; production defaults stay
+  live `crypto.getRandomValues` / real time. Do not add `verified=true`.
 - Approved direction (§6.1): authenticated signed authorization-state snapshot
   for first join, then fully verified increments; full replay remains optional
   audit. Snapshot signer trust must be established outside that snapshot.
@@ -34,7 +38,9 @@ in-package tests only; do not re-export it.
   fails closed and must not advance the journal cursor. Unknown prefix must
   not become up-to-date success, including junk followed by an empty final page.
 - Persist exact pending bytes before CAS. Conflicts never re-sign; retry the
-  same bytes. `openEpochEnvelope` returns plaintext only when epoch matches and
+  same bytes. `LedgerClient.submit`/`resume` are Promise wrappers over one
+  Effect implementation; do not add a second simulated submit path.
+  `openEpochEnvelope` returns plaintext only when epoch matches and
   `commitEpochKey` equals the ledger commitment.
 - Roles owner/admin/member/guest; guest read-only; machines have no Org
   management. Device revoke is this-Org and the named device only. Owner

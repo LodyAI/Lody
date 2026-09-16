@@ -1,9 +1,10 @@
 import { availableParallelism } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
+import type { SignatureJob, SignatureVerifyExecutor } from '../capabilities';
 import { verifySignature } from './crypto';
 
-export type SigJob = { pk: Uint8Array; msg: Uint8Array; sig: Uint8Array };
+export type SigJob = SignatureJob;
 
 const workerPath = fileURLToPath(new URL('./node-sig-worker.ts', import.meta.url));
 const PARALLEL_MIN = 32;
@@ -65,4 +66,13 @@ export async function verifyJobsParallel(jobs: readonly SigJob[]): Promise<boole
   } catch {
     return sequential(jobs);
   }
+}
+
+/** Opt-in Node adapter. Ledger.verify is sequential unless this executor is passed. */
+export function createNodeSignatureVerifyExecutor(): SignatureVerifyExecutor {
+  return {
+    verify(jobs) {
+      return verifyJobsParallel(jobs);
+    },
+  };
 }

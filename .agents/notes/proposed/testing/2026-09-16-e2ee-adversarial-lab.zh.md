@@ -15,13 +15,13 @@ Translation: current
 
 ## 实施计划与唯一任务表
 
-当前状态：只有方案与源码盘点完成；以下全部未验收。工作目录为已有 `lody-e2ee-core` 检出、`feat-e2ee-core` 分支。不开新长期工作区，不接 Lody 产品，不推送/合并；后续推送必须明确目的地，不能默认使用公开 origin。详细设计仍为 draft，已选方向不等于所有实现细节已获验收。
+当前状态：P0–C2 有可复现证据；C3 及之后未验收。工作目录为已有 `lody-e2ee-core` 检出、`feat-e2ee-core` 分支。不开新长期工作区，不接 Lody 产品，不推送/合并；后续推送必须明确目的地，不能默认使用公开 origin。详细设计仍为 draft，已选方向不等于所有实现细节已获验收。
 
 | 完成 | 阶段           | 交付物                         | 必须通过的门槛                              |
 | ---- | -------------- | ------------------------------ | ------------------------------------------- |
-| [ ]  | P0 基线        | 版本、备份、迁移清单、现状结果 | 用户未提交工作可恢复，回归覆盖有去向        |
-| [ ]  | C1 显式依赖    | 纯计算边界、能力接口、兼容草图 | E1–E3，真实验签一致，随机/时钟来源完整      |
-| [ ]  | C2 Effect 试点 | 唯一 submit/resume 实现        | E4–E7，CAS/丢 ACK/中断/重启正确             |
+| [x]  | P0 基线        | 版本、备份、迁移清单、现状结果 | 用户未提交工作可恢复，回归覆盖有去向        |
+| [x]  | C1 显式依赖    | 纯计算边界、能力接口、兼容草图 | E1–E3，真实验签一致，随机/时钟来源完整      |
+| [x]  | C2 Effect 试点 | 唯一 submit/resume 实现        | E4–E7，CAS/丢 ACK/中断/重启正确             |
 | [ ]  | C3 其余流程    | 分钥、恢复、准入与资源管理     | E3–E6，权限重查与原始截止不回退             |
 | [ ]  | P1 常驻协作    | lab 包、真实后端、三副本       | 离线重连与耐久恢复，不是一次性读写          |
 | [ ]  | P2 确定性      | 调度器、记录、重放             | 三次新目录重放一致，首分歧可定位            |
@@ -133,3 +133,24 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 - 整个脏工作区（包括未跟踪文件）已备份到本地 Git stash `5d04e3d42f173c7631afdcbe5f2426979ffdd31a`（`backup/e2ee-workspace-cleanup-2026-09-17`）。未完成的游戏改动、无关 Electron 格式修改和偶然锁文件变动已移出工作区，可从备份恢复。已提交的 demo 基线保留，等 P5 迁移行为覆盖后再删除。
 - 保留公开 LedgerClient 一万条记录的持久化/容量回归测试、权限模型对应修正，以及 README 和包命令已经引用的 benchmark 源码/Wasm 样本。删除源码字符串断言，保留真实行为检查。纠正 probe 的 SIMD 声明：运行时支持和编译标记不能证明实际执行 SIMD，更不能证明与核心验签策略等价。已撤回的 100ms 门槛不恢复。
 - 验证：核心 `check` 通过（34 个文件、372 项测试；一万条测试约 130 秒）。清理编辑后，对应测试复跑通过，后端 probe 以 `--n=32` 跑通，包含 Worker。核心包格式化通过。根 `pnpm check` 通过类型检查，但在 `packages/e2ee-demo/src/host.ts` 已有的未使用 `Server` 导入处停止，该命令后续的全仓测试未执行。本轮不代表启用产品、迁移 Effect、实现实验室、push 或任何阶段验收。
+
+### 2026-09-17 — P0 基线冻结
+
+- HEAD `5bd0e60ebf9770316f27587d68726c25915b8fec`，设计基准 `0bf0fc24`，分支 `feat-e2ee-core`。工作树在本阶段开始时干净。Node v24.21.0，pnpm 10.20.0，Effect catalog 3.18.4，demo Riverrun 0.3.0。lockfile SHA-256 `eb169cb2ef2fcc13de10e18c43938fa11456c1993e2fee529870c14060503f1c`；`packages/e2ee-demo/vendor/streams-crdt.tgz` SHA-256 `a1314d8fbfaed381505001342d563993ae1f32c0682d9db8252c6f6eb97a391e`。
+- 可恢复备份仍为 stash `5d04e3d42f173c7631afdcbe5f2426979ffdd31a`（`backup/e2ee-workspace-cleanup-2026-09-17`）。原始命令输出在 `.agents/runs/e2ee-lab/p0/`（已 gitignore）。
+- 基线命令：`pnpm --filter @lody/e2ee-core check` 退出 0（34 文件 / 372 测试）。`pnpm --filter @lody/e2ee-demo typecheck` 退出 0；`pnpm --filter @lody/e2ee-demo test` 退出 0（41 通过，2 跳过：`d2-browser` 需 `LODY_E2EE_DEMO_BROWSER=1`）。未把既有失败改名为通过。根 `pnpm check` 的 demo lint 问题仍在 `host.ts` 未使用 `Server` 与 `Inspector.tsx` 变量遮蔽，本阶段不改无关 UI。
+- 旧用例去向：`d0-start`/`d1-control`/`d2-invite`/`d3-content`/`d4-revoke`/`d5-matrix`/`browser-persist` 保留到 P1/P3 迁入 lab 后；`d2-browser`/`ui-session` 随 UI 在 P5 删除；`pin` 若仍约束 host 则迁 lab，否则 P5 说明后删除；`helpers.ts` 中真实 Riverrun/host 适配迁入 `packages/e2ee-lab/backend`。无关 Electron/core bench 不纳入清理。
+- 副作用盘点（公开路径）：`Ledger.verify` 曾按 `process.env`/`worker_threads` 自动并行；`crypto.ts` 模块级点缓存；`keys.ts`/`recovery-file.ts` 用 `crypto.getRandomValues`；`user-identity`/`recovery-device` 用 WebCrypto `generateKey`；`streams-fetch.ts` 用全局 `setTimeout`；`content.ts` 与 snapshot admission 已注入平台/时钟。HPKE `@hpke/core` 1.9.0 DHKEM 临时钥无法注入；Loro/Flock peer/Wasm 时钟属库内部，P1 再列。noble `hashes.sha512` 模块初始化不是公开验签旁路。
+
+### 2026-09-17 — C1 显式能力接口
+
+- 类型草图：`packages/e2ee-core/src/capabilities.ts`。纯入口：`Ledger.verify`/`extend`/`prepare`、编解码、哈希、权限。能力：Entropy、Clock、TimerSchedule、CryptoPlatform、SignatureVerifyExecutor、SigningPointCache。默认 `liveEntropy`/`liveClock`/`liveTimerSchedule`/`sequentialSignatureVerify`。Node 并行：`createNodeSignatureVerifyExecutor`（`./ledger-node`）。Effect 入口留给 C2 的 submit/resume。调用方不必选手动 nonce。
+- 行为：`Ledger.verify` 默认单线程，不再读 `LODY_E2EE_VERIFY_WORKERS`。缓存按实例可禁用/设上限。`sealHistoryPacket`/`createRecoveryFile`/`sealRecoveryBackup` 接受 Entropy；`createBoundedStreamsFetch` 接受 `scheduleTimer`；身份/恢复设备生成接受 CryptoPlatform。
+- 证据：`test/capabilities-boundary.test.ts`；`pnpm --filter @lody/e2ee-core exec vitest run --exclude test/ledger-long-chain.test.ts` 退出 0（34 文件 / 377 测试）。公开 consumer 与既有 keys/streams/freshness/ledger 测试通过。未解决：HPKE 封装内部随机、Loro/Flock Wasm 随机/时钟；对应重放项不能勾选。未启用产品 E2EE，无 push/PR。`test/ledger-long-chain.test.ts` 在 C1 后单独退出 0（约 110s）。
+
+### 2026-09-17 — C2 submit/resume Effect 闭环
+
+- 沿用 Effect 3.18.4（catalog），`@lody/e2ee-core` 新增依赖。纯判定在 `submit-decision.ts`；`LedgerClient.submit`/`resume` 是同一 `submitSteps` 的 `runPromise` 薄封装。pending 保存包在 `Effect.uninterruptible` 内；CAS 等待可中断。Promise `LedgerStore.exclusive` 适配器内部仍有一次 `runPromise`，不是每条网络请求新建 runtime，也不构成第二套 submit。
+- 必须项：pending 保存失败不 CAS；persist 后 save 故障保留原字节并 resume 提交；false ACK 保持 pending、不重签；两客户端 CAS 只有一方成功；非法页不推进 cursor；SQLite 杀进程后锁释放/pending 保留（既有 node-store 测试）；Promise 与 Effect 提交同一记录得到相同 status 与协议字节。
+- 证据：`pnpm --filter @lody/e2ee-core exec vitest run --exclude test/ledger-long-chain.test.ts` 退出 0（381 测试）；`pnpm --filter @lody/e2ee-demo test` 退出 0（真实本地 Riverrun，41 通过 / 2 跳过浏览器）。
+- 限制：外层 Fiber 中断不会自动 abort 已进入 `exclusive` 的底层 `appendCas` Promise（E6：中断≠撤回）。HPKE/Wasm 随机源仍未注入。未做实验室调度器，未启用产品 E2EE。

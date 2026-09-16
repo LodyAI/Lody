@@ -1,3 +1,4 @@
+import { liveCryptoPlatform, type CryptoPlatform } from './capabilities';
 import {
   checkHex,
   checkSigningKey,
@@ -157,26 +158,28 @@ export async function restoreUserIdentity(
 /** Explicit new USER identity, separate from every device. Persist privateMaterial
  * safely before publishing this identity; erase the returned byte buffer after use.
  * Generation does not mark a backup ready or replace an existing identity. */
-export async function createUserIdentity(): Promise<{
+export async function createUserIdentity(platform: CryptoPlatform = liveCryptoPlatform): Promise<{
   identity: UserIdentity;
   privateMaterial: Uint8Array;
 }> {
-  const signing = await crypto.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
-  const encryption = await crypto.subtle.generateKey('X25519', true, ['deriveBits']);
+  const signing = await platform.subtle.generateKey('Ed25519', true, ['sign', 'verify']);
+  const encryption = await platform.subtle.generateKey('X25519', true, ['deriveBits']);
   invariant('privateKey' in signing && 'privateKey' in encryption, 'invalid-generated-key-pair');
-  const signingPrivate = new Uint8Array(await crypto.subtle.exportKey('pkcs8', signing.privateKey));
+  const signingPrivate = new Uint8Array(
+    await platform.subtle.exportKey('pkcs8', signing.privateKey)
+  );
   let encryptionPrivate: Uint8Array | undefined;
   let material: Uint8Array | undefined;
   let returned = false;
   try {
     encryptionPrivate = new Uint8Array(
-      await crypto.subtle.exportKey('pkcs8', encryption.privateKey)
+      await platform.subtle.exportKey('pkcs8', encryption.privateKey)
     );
     const signingPublic = toHex(
-      new Uint8Array(await crypto.subtle.exportKey('raw', signing.publicKey))
+      new Uint8Array(await platform.subtle.exportKey('raw', signing.publicKey))
     );
     const encryptionPublic = toHex(
-      new Uint8Array(await crypto.subtle.exportKey('raw', encryption.publicKey))
+      new Uint8Array(await platform.subtle.exportKey('raw', encryption.publicKey))
     );
     material = encoder.encode(
       JSON.stringify([

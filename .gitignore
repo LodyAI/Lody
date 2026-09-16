@@ -150,6 +150,9 @@ apps/electron/resources/cli/
 .claude/scheduled_tasks.lock
 .dev.vars
 
+# Local lab/run evidence (may include traces; never commit secrets)
+.agents/runs/
+
 # Locally-installed App Store agent skills (kept local, not committed)
 /.agents/skills/apple-appstore-reviewer/
 /.agents/skills/appstore-info-generator/

@@ -1,9 +1,16 @@
+import { Effect } from 'effect';
 import { copyBytes, bytesEqual } from './cbor';
 import { hashRecord, type Hash } from './crypto';
 import { fail } from './error';
 import { Ledger } from './ledger';
 import { decodeRecord } from './schema';
 import type { SnapshotTrust } from './snapshot';
+import {
+  classifyLedgerPresence,
+  classifyUnresolvedSubmit,
+  ordinaryPreviousHash,
+  selectSubmitWire,
+} from './submit-decision';
 
 /** Cumulative verified records a client may retain. 10k from-zero chains must fit. */
 export const MAX_LEDGER_RECORDS = 16_384;
@@ -337,61 +344,82 @@ export class LedgerClient {
   }
 
   async submit(record: Uint8Array): Promise<LedgerSubmitResult> {
-    if (!(record instanceof Uint8Array)) fail('canonical');
-    decodeRecord(record);
-    return this.run(copyBytes(record));
+    return Effect.runPromise(this.submitEffect(record));
   }
 
   async resume(): Promise<LedgerSubmitResult> {
-    return this.run();
+    return Effect.runPromise(this.resumeEffect());
   }
 
-  private async run(requested?: Uint8Array): Promise<LedgerSubmitResult> {
-    return this.store.exclusive(async (tx) => {
-      const session = await this.load(tx);
+  /** Same implementation as `submit`. Promise methods are thin runPromise wrappers. */
+  submitEffect(record: Uint8Array): Effect.Effect<LedgerSubmitResult, unknown> {
+    if (!(record instanceof Uint8Array)) fail('canonical');
+    decodeRecord(record);
+    return this.runEffect(copyBytes(record));
+  }
+
+  resumeEffect(): Effect.Effect<LedgerSubmitResult, unknown> {
+    return this.runEffect();
+  }
+
+  private runEffect(requested?: Uint8Array): Effect.Effect<LedgerSubmitResult, unknown> {
+    // Promise LedgerStore is the adapter boundary. One runtime at submit/resume.
+    return tryCall(() =>
+      this.store.exclusive((tx) => Effect.runPromise(this.submitSteps(tx, requested)))
+    );
+  }
+
+  private submitSteps(
+    tx: LedgerTransaction,
+    requested?: Uint8Array
+  ): Effect.Effect<LedgerSubmitResult, unknown> {
+    return Effect.gen(this, function* () {
+      const session = yield* tryCall(() => this.load(tx));
       const retrying = session.journal.pending !== null;
-      const wire = requested ?? session.journal.pending;
-      if (wire === null || wire === undefined) fail('invalid-operation');
-      if (session.journal.pending !== null && !bytesEqual(session.journal.pending, wire)) {
-        fail('replay');
-      }
-      const decoded = decodeRecord(wire);
-      if (decoded.body.type !== 'ordinary') fail('genesis-mismatch');
-      const previousHash = decoded.body.fields.previousHash;
-      await this.refresh(tx, session);
+      const wire = selectSubmitWire(session.journal.pending, requested);
+      const previousHash = ordinaryPreviousHash(wire);
+      yield* tryCall(() => this.refresh(tx, session));
 
-      const reconcile = async (): Promise<LedgerSubmitResult | undefined> => {
-        if (await containsHash(session.ledger, wire)) {
-          await this.save(tx, session, null);
-          return { status: 'committed', ledger: session.ledger };
-        }
-        if (!bytesEqual(previousHash, session.ledger.head)) {
-          await this.save(tx, session, null);
-          return { status: 'conflict', ledger: session.ledger };
-        }
-        return undefined;
-      };
+      const reconcile = (): Effect.Effect<LedgerSubmitResult | undefined, unknown> =>
+        Effect.gen(this, function* () {
+          const presence = classifyLedgerPresence({
+            containsWire: yield* tryCall(() => containsHash(session.ledger, wire)),
+            previousMatchesHead: bytesEqual(previousHash, session.ledger.head),
+          });
+          if (presence === 'absent') return undefined;
+          yield* tryCall(() => this.save(tx, session, null));
+          return { status: presence, ledger: session.ledger };
+        });
 
-      const prior = await reconcile();
+      const prior = yield* reconcile();
       if (prior) return prior;
-      await session.ledger.extend([wire]);
-      await this.save(tx, session, wire);
-      let result: 'accepted' | 'conflict' | 'unsupported' | 'unknown';
-      try {
-        result = await this.stream.appendCas(session.journal.offset, wire);
-      } catch {
-        result = 'unknown';
-      }
-      await this.refresh(tx, session);
-      const observed = await reconcile();
+      yield* tryCall(() => session.ledger.extend([wire]));
+      yield* Effect.uninterruptible(tryCall(() => this.save(tx, session, wire)));
+      const cas = yield* appendCas(this.stream, session.journal.offset, wire);
+      yield* tryCall(() => this.refresh(tx, session));
+      const observed = yield* reconcile();
       if (observed) return observed;
-      if (result === 'unsupported' && !retrying) {
-        await this.save(tx, session, null);
-        return { status: 'unsupported', ledger: session.ledger };
+      const unresolved = classifyUnresolvedSubmit({ cas, retrying });
+      if (unresolved === 'unsupported') {
+        yield* tryCall(() => this.save(tx, session, null));
       }
-      return { status: 'unknown', ledger: session.ledger };
+      return { status: unresolved, ledger: session.ledger };
     });
   }
+}
+
+function tryCall<A>(fn: () => Promise<A>): Effect.Effect<A, unknown> {
+  return Effect.tryPromise({ try: fn, catch: (error) => error });
+}
+
+function appendCas(
+  stream: LedgerStream,
+  offset: string,
+  record: Uint8Array
+): Effect.Effect<'accepted' | 'conflict' | 'unsupported' | 'unknown', never> {
+  return tryCall(() => stream.appendCas(offset, record)).pipe(
+    Effect.catchAll(() => Effect.succeed('unknown' as const))
+  );
 }
 
 export class MemoryLedgerStore implements LedgerStore {
