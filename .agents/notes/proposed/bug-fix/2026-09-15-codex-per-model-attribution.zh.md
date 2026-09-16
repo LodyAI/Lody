@@ -1,4 +1,4 @@
-# Codex 用量：原生快照取代分模型账本
+# Codex 用量：按 turn 归因原生快照
 
 Status: proposed
 Translation: current
@@ -7,60 +7,53 @@ Translation: current
 
 ## 摘要
 
-最初方案从 raw completion 重建历史分模型用量，并持久化本地 sidecar。
-2026-09-16 用户选择改用 Codex 原生快照：展示总用量不需要历史模型账本及其恢复复杂度。
-adapter 现在仅转换根 thread 原生快照、不自行累计，CLI 也不再补偿 native reset。
-不承诺准确的历史模型费用或 fork/reset 生命周期计量。
+Codex 用量来自原生累计快照，每个 turn 的新增 token 归给该 turn 提交的模型。
+这取代了最初的 raw-response/sidecar 账本方案，以及中间的未归属快照方案。
+adapter 只在内存保留上一条快照和当前 turn 计数；CLI 使用现有托管 API，
+以 turn 区分计量身份。不承诺 crash、fork、reset 和 reroute 的精确计量。
 
-## 决定
+## 决定与职责
 
-历史分模型账本的用途是跨重启保留模型统计，并为历史用量匹配各模型价格；
-它不是展示原生总用量的必要条件。用户先拒绝 session metadata 基线，
-随后明确选择原生快照，放弃整套额外账本。
+最初方案通过 raw completion 和本地 sidecar 跨重启保留历史模型总量。
+随后原生快照简化移除了账本，但上报未归属总量。澄清后的要求是归因
+**当前 turn 的新增用量**，而不是把历史累计量改归当前 UI 模型。
 
 ```text
-Codex 根 thread/tokenUsage/updated
-  -> 无状态互斥桶转换（codex:unattributed）
-  -> CLI 最新快照 / 失败 payload 重试
-  -> 托管端逐字段高水位持久化
+原生根 thread 累计快照
+  -> adapter 快照差值 + 提交时的 turn 模型
+  -> turn 内累计更新 + 通知局部 usageTurnId
+  -> CLI 稳定 nativeSessionId:turn:encodedTurnId 计量 key
+  -> 现有托管端逐 key/model/字段取最大值
 ```
 
-删除 raw-response 计量、model/reroute/compaction 状态、sidecar 存储、去重、
-历史排除、native 缓存基线传递，以及 adapter/CLI reset 偏移。
-保留普通 token/cache/reasoning 归一化、上下文窗口展示、原生生命周期、
-payload 字段投影及失败重试。不再仅为计量启用实验 raw 事件。
-当前 UI 模型及其价格都不是历史归因证据。
+adapter 在异步提交请求前冻结模型，之后切换 UI 模型不会改写当前 turn 归因。
+原生 Goal 后续 turn 保留提交模型。重复快照不产生新增 token。
+恢复时已有原生快照只作为比较起点、不计入历史；若快照缺失，首条仅作为起点，
+因此可能漏掉一条新增响应。
+
+CLI 仅对 Codex 识别此标记。计量身份与真实 ACP session ID 分开，
+不修改会话路由或 metadata。分 turn key 使 A=10000、随后 B=2000 累计为
+12000，而不是按整段 session 取最大值。未标记 adapter 保持原有范围。
+不增加私有后端、Core schema、session metadata baseline、磁盘 sidecar、
+raw-response 账本或历史模型映射。
 
 ## 取舍与发布
 
-- native resume/fork 总量可以包含继承历史，计数可以重置。不把子 thread 总量
-  加到根会话，不额外制造 delta。
-- Codex 负责原生历史恢复；旧开发版 sidecar 文件忽略、不删除。
-  Session metadata 不存 usage baseline。
-- 托管持久化仍按模型逐字段取最大值，native 快照下降时可能保留旧高水位；
-  本次两个 PR 不修改该 API。
-- 若实验分模型版本已经持久化模型桶，同一计量身份切回原生未归属历史，
-  可能跨 key 重复计入旧历史。这两个未合并 PR 不迁移这些开发记录。
-  如需修复，应另行限定范围操作，不能声称已完成迁移。
-- Runtime 产物仍需重新构建/发布。两个有意保留的 gitlink 变化不提交；
-  不删除历史数据或 sidecar 文件。
+- adapter 必须与匹配的 CLI 一起发布，旧 CLI 无法正确解释新的 turn 内累计范围。
+- 不将子 thread 用量加入根会话。reroute、compaction/reset、fork 和 crash
+  恢复尽力而为，不维护持久化回放账本。
+- 不迁移或修复已有实验计量行；旧 sidecar 文件忽略、不删除。
+  Runtime 产物仍需重新构建/发布。
+- 两个有意保留的 gitlink 变化均不提交。
 
-## 审查历史与证据
+## 证据与限制
 
-早期审查 adapter `94f51b7` 发现缺少 raw opt-in、fork 历史排除及重启/reset
-问题，以及 compaction/reroute 模型不明确。修复持续到 `9457493`；
-`c176b2b` 移除了 session metadata 基线和 fork 等待。
-这些修复针对的是现已放弃的账本设计，并不构成继续保留它的要求；
-本次明确删除整套设计。
-
-原生快照验证：adapter 620 个测试通过、27 个 E2E 跳过；
-adapter/examples 类型检查及构建通过。CLI 用量投递的 16 个测试全部通过，
-覆盖 native reset payload `[1000, 0, 50]`、待发快照合并、重试和并发 flush。
-三路独立代码复审未发现快照实现新增 P0/P1；上述开发数据迁移限制仍保留。
-根全量 `pnpm check:affected` 及文档检查也已通过。
+行为测试覆盖切换模型、提交模型冻结、Goal 延续、重复快照、恢复历史、
+恢复快照缺失和计数重置。parser 到 usage service 测试覆盖 turn A=10000、
+turn B=2000、服务重启后 turn C=500，模拟托管端最大值持久化后合计 12500。
+最终验证结果随提交报告；此前仅原生快照版本的验证不能作为本版本证据。
 未运行付费模型 completion、线上云端数据修复或真实崩溃测试。
 
-- [Adapter PR #45](https://github.com/LodyAI/acp-extension-codex/pull/45)：
-  `src/CodexUsage.ts`、`src/CodexEventHandler.ts`、token-usage 事件测试。
-- [Lody PR #736](https://github.com/LodyAI/Lody/pull/736)：
-  CLI 用量投递实现/测试及 [Spec](../../../../specs/usage-delivery.zh.md)。
+- [Adapter PR #45](https://github.com/LodyAI/acp-extension-codex/pull/45)
+- [Lody PR #736](https://github.com/LodyAI/Lody/pull/736)
+- [用量投递 Spec](../../../../specs/usage-delivery.zh.md)

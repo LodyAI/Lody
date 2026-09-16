@@ -33,14 +33,20 @@ their attribution until acknowledged; concurrent flushes share one drain. Delta
 is neither added to totals nor forwarded to the legacy persistence endpoint.
 Persistence projects only token/cost fields and aggregate contextWindow; search
 request counts and model-level contextWindow are not forwarded.
-Codex intentionally uses its native root-thread snapshots, projected into disjoint
-buckets under `codex:unattributed`. Neither adapter nor CLI reconstructs historical
-model attribution, adds reset offsets, or maintains a usage sidecar/baseline.
-No delta or model-price estimate is invented. Native resume/fork history and
-counter resets are accepted, and child-thread totals are not added to the root.
-The hosted persistence endpoint retains per-model, per-field high-water marks,
-so a lower native snapshot need not lower the stored total. This is reporting,
-not a guarantee of exact lifetime billing.
+Codex attributes native root-thread counter increments to the model frozen from
+the submitted turn parameters. A native turn is one accounting lifetime.
+Its cumulative turn snapshot carries notification-local `_meta.codex.usageTurnId`;
+the CLI uses `nativeSessionId:turn:encodedTurnId` as the existing usage endpoint's
+accounting identity. The actual ACP session ID and session metadata stay unchanged.
+This keeps A's earlier tokens out of B's new turn and makes repeat delivery
+idempotent without modifying hosted persistence.
+
+Only the previous native snapshot and current turn are kept in memory. Restored
+snapshots are comparison points; if missing, the first notification is skipped
+rather than billing historical usage. There is no sidecar, persisted baseline,
+historical model ledger or raw-response bookkeeping. Child usage is not added.
+Resets, reroutes and crashes remain best effort, not an exact billing guarantee.
+Unmarked adapters keep their old scope; the new adapter requires the matching CLI.
 
 Claude query and Kimi activation snapshots can provide delta without
 changing their cumulative scope. Kimi source changes require a new managed artifact
@@ -71,6 +77,4 @@ pricing boundary may differ from billing. Unreported runtime activity cannot be 
 Publish Core 0.1.5 before adapters requiring its accumulator, then rebuild/release
 adapters before updating consuming gitlinks/artifacts. Local changes do not
 publish packages, repair historical data, or prove deployed hosted behavior.
-Switching an experimental per-model ledger back to native unattributed totals
-under the same persisted identity can overlap old model rows; those development
-records require separate reconciliation, not an automatic migration in these PRs.
+Old experimental accounting rows and sidecar files are not automatically migrated.

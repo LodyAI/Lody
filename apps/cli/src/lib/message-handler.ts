@@ -1063,7 +1063,7 @@ export class MessageHandler {
 
   private async handleUsageUpdate(
     sessionId: SessionId,
-    acpSessionId: ACPSessionId,
+    acpSessionId: string,
     update: SessionUsageUpdate
   ): Promise<void> {
     try {
@@ -3574,8 +3574,8 @@ export class MessageHandler {
       );
     });
 
-    this.sessionManager.on('onUsageUpdate', ({ sessionId, acpSessionId, usage }) => {
-      const promise = this.handleUsageUpdate(sessionId, acpSessionId, usage);
+    this.sessionManager.on('onUsageUpdate', ({ sessionId, acpSessionId, usage, accountingId }) => {
+      const promise = this.handleUsageUpdate(sessionId, accountingId ?? acpSessionId, usage);
       const usageState = this.store.get(sessionId);
       usageState.pendingUsageHandlers.add(promise);
       void promise.finally(() => {

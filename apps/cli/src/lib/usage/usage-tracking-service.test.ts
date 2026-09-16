@@ -2,6 +2,8 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { ConvexHttpClient } from 'convex/browser';
 import type { Logger } from '@/utils/logger';
 import { UsageTrackingService, type RecordSessionUsageInput } from './usage-tracking-service';
+import { parseLodyExtensionMessage } from '@/agent/lody-acp-extension';
+import { LODY_EXTENSION_METHODS } from 'acp-extension-core';
 
 type Payload = Omit<RecordSessionUsageInput, 'update'> & RecordSessionUsageInput['update'];
 const logger: Logger = {
@@ -82,6 +84,56 @@ describe('usage delivery', () => {
     });
   });
   afterEach(() => vi.restoreAllMocks());
+
+  it('persists turn snapshots independently across model switches, retries and adapter restarts', async () => {
+    const report = (turnId: string, model: string, tokens: number) => {
+      const usage = { inputTokens: tokens, outputTokens: 0, cacheReadInputTokens: 0 };
+      const event = parseLodyExtensionMessage({
+        method: LODY_EXTENSION_METHODS.sessionUsageUpdate,
+        sessionId: 'native',
+        provider: 'codex',
+        params: {
+          sessionId: 'native',
+          usage,
+          modelUsage: { [model]: usage },
+          _meta: { codex: { usageTurnId: turnId } },
+        },
+      });
+      if (event?.type !== 'usage' || !event.accountingId)
+        throw new Error('Missing accounting scope');
+      service.recordSessionUsageUpdate({
+        ...input(0, 'codex'),
+        acpSessionId: event.accountingId,
+        update: event.update,
+      });
+    };
+    report('a', 'model-a', 10000);
+    report('b', 'model-b', 1000);
+    report('b', 'model-b', 2000);
+    await service.flushSessionUsage('s');
+    report('b', 'model-b', 2000); // Replay uses the same hosted idempotency key.
+    await service.flushSessionUsage('s');
+    service = new UsageTrackingService({
+      convexUrl: 'https://synthetic.convex.cloud',
+      cliToken: 'synthetic',
+      logger,
+    });
+    report('c', 'model-b', 500);
+    await service.flushSessionUsage('s');
+    const stored = new Map<string, number>();
+    for (const payload of persisted) {
+      for (const [model, usage] of Object.entries(payload.modelUsage ?? {})) {
+        const key = `${payload.acpSessionId}:${model}`;
+        stored.set(key, Math.max(stored.get(key) ?? 0, usage.inputTokens));
+      }
+    }
+    expect([...stored.entries()]).toEqual([
+      ['native:turn:a:model-a', 10000],
+      ['native:turn:b:model-b', 2000],
+      ['native:turn:c:model-b', 500],
+    ]);
+    expect([...stored.values()].reduce((a, b) => a + b, 0)).toBe(12500);
+  });
 
   it('projects provider fields without losing token buckets, known costs or unknown costs', async () => {
     const report = input(100);

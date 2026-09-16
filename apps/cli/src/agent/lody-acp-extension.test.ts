@@ -8,6 +8,31 @@ import {
 } from './lody-acp-extension';
 
 describe('Core usage accounting boundary', () => {
+  it('scopes only marked Codex turn snapshots and keeps their native routing session unchanged', () => {
+    const usage = { inputTokens: 2000, outputTokens: 0, cacheReadInputTokens: 0 };
+    const params = {
+      sessionId: 'native',
+      usage,
+      modelUsage: { 'model-b': usage },
+      _meta: { codex: { usageTurnId: 'turn-b' } },
+    };
+    const parse = (provider: string, value = params) =>
+      parseLodyExtensionMessage({
+        method: LODY_EXTENSION_METHODS.sessionUsageUpdate,
+        params: value,
+        sessionId: 'native',
+        provider,
+      });
+    expect(parse('codex')).toEqual({
+      type: 'usage',
+      accountingId: 'native:turn:turn-b',
+      update: { sessionId: 'native', usage, modelUsage: { 'model-b': usage } },
+    });
+    expect(parse('claude')).toEqual({
+      type: 'usage',
+      update: { sessionId: 'native', usage, modelUsage: { 'model-b': usage } },
+    });
+  });
   it.each(['codex', 'claude', 'kimi', 'grok', 'deepseek'] as const)(
     'preserves %s optional delta separately from cumulative totals and rejects invalid buckets',
     (provider) => {

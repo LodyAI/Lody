@@ -26,12 +26,16 @@ exactly-once 账本。缓存读/写、普通输入/输出、推理桶互不重�
 CLI 合并待发累计快照，包括 Grok。失败 payload 保留原归属直至确认，
 并发 flush 共用发送过程。delta 不再加到总量，也不传给旧持久化端点。
 持久化仅投影 Token/费用字段及顶层 contextWindow；不转发搜索请求次数或模型级 contextWindow。
-Codex 明确选择使用 native 根 thread 快照，转换为互斥桶后放入
-`codex:unattributed`。adapter 和 CLI 均不重建历史模型归因、不补偿 reset 偏移，
-也不维护 usage sidecar/基线；不伪造 delta 或模型价格估算。接受 native resume/fork
-继承历史及计数重置，不把子 thread 总量加入根会话。
-托管持久化接口仍按模型、按字段保留最高累计值，因此较低的 native 快照不一定降低
-已保存总量。这是用量报告，不保证精确的生命周期计费。
+Codex 将 native 根 thread 计数的增量归给实际提交参数中冻结的模型，
+每个 native turn 是一个计量生命周期。累计 turn 快照带有通知级
+`_meta.codex.usageTurnId`；CLI 将 `nativeSessionId:turn:encodedTurnId`
+用作现有用量接口的计量身份，真实 ACP session ID 和 session metadata 不变。
+因此 A 的历史用量不会记到 B 的新 turn，重试保持幂等，无需修改托管持久化逻辑。
+
+内存中仅保留前一份原生快照和当前 turn。恢复快照仅作比较起点；缺失时保守跳过
+首条通知，不把历史计入新增。不使用 sidecar、持久化基线、历史模型账本或 raw-response
+计量，也不汇总子 agent。reset、reroute 和崩溃仍尽力而为，不保证精确计费。
+无标记旧 adapter 保留原累计范围；新版 adapter 需要配套 CLI。
 
 Claude query 和 Kimi activation 快照可提供
 delta，而不改变累计范围。Kimi 源码变更需新 managed artifact 才会影响实际运行版本。
@@ -58,5 +62,4 @@ DSH 按请求完成事件时间，使用官方 UTC 工作日高峰/非高峰价�
 先发布 Core 0.1.5，再构建/发布依赖累加器的 adapters，之后更新消费端 gitlink/
 产物。本地修改不发布包、不修复历史数据，也不证明线上托管行为。
 
-若将实验版分模型账本切回同一持久化身份下的原生未归属总量，可能与旧模型桶
-重叠；这些开发记录需要单独核对修复，不在本次 PR 中自动迁移。
+旧实验版计量记录及 sidecar 文件不会自动迁移。

@@ -581,7 +581,7 @@ export interface AgentClientOptions {
     requestId: string,
     request: acp.RequestPermissionRequest
   ): Promise<acp.RequestPermissionResponse>;
-  onUsageUpdate?(usage: SessionUsageUpdate): void;
+  onUsageUpdate?(usage: SessionUsageUpdate, accountingId?: string): void;
   onContextWindowUsageUpdate?(usage: SessionContextWindowUsage): void;
   onRateLimitUpdate?(limits: RateLimit): void;
   onThreadGoalUpdated?(goal: SessionGoalContent): void;
@@ -1457,10 +1457,13 @@ export class AgentClient implements acp.Client {
       case 'usage': {
         // Never invent a model from the UI selection. Legacy adapters without
         // modelUsage stay unattributed/skipped instead of being misattributed.
-        this.options.onUsageUpdate?.({
-          ...event.update,
-          modelUsage: sanitizeModelUsage(event.update.modelUsage),
-        });
+        this.options.onUsageUpdate?.(
+          {
+            ...event.update,
+            modelUsage: sanitizeModelUsage(event.update.modelUsage),
+          },
+          event.accountingId
+        );
         return;
       }
       case 'rateLimits':
