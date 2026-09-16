@@ -408,6 +408,41 @@ describe('SessionBrowserPanel controller', () => {
     expect(publicBrowserSurfaceRender.mock.calls.at(-1)?.[0].navigationRequest).toBeNull();
   });
 
+  it('assigns a new request id when retrying a consumed public navigation', async () => {
+    const testRuntime = createRuntime();
+    const rendered = await renderPanel(testRuntime.runtime);
+
+    await enterAddress(rendered, 'example.com/docs');
+
+    const firstProps = publicBrowserSurfaceRender.mock.calls.at(-1)?.[0] as {
+      navigationRequest: { id: number; url: string } | null;
+      onStateChange: (state: ElectronPublicBrowserState) => void;
+      onNavigationRequestConsumed: (request: { id: number; url: string }) => void;
+    };
+    const firstRequest = firstProps.navigationRequest!;
+    expect(firstRequest).toEqual({ id: 1, url: 'https://example.com/docs' });
+
+    await act(async () => {
+      firstProps.onNavigationRequestConsumed(firstRequest);
+      firstProps.onStateChange({
+        browserId: 'session-browser-session-browser-controller',
+        phase: 'error',
+        url: firstRequest.url,
+        canGoBack: false,
+        canGoForward: false,
+        error: 'load failed',
+      });
+      await flushMicrotasks();
+    });
+
+    await enterAddress(rendered, 'example.com/docs');
+
+    expect(publicBrowserSurfaceRender.mock.calls.at(-1)?.[0].navigationRequest).toEqual({
+      id: 2,
+      url: 'https://example.com/docs',
+    });
+  });
+
   it('reattaches a public browser without navigating again after remount', async () => {
     const testRuntime = createRuntime();
     const rendered = await renderPanel(testRuntime.runtime);

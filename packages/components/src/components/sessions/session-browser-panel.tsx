@@ -170,6 +170,7 @@ function SessionBrowserPanelController({
   const [machinePlane, setMachinePlane] = useState<'local' | 'cloud' | null>(null);
   const [resumeAddress, setResumeAddress] = useState<BrowserAddress | null>(null);
   const navigationSequenceRef = useRef(0);
+  const publicNavigationSequenceRef = useRef(0);
   const restoreAttemptKeyRef = useRef<string | null>(null);
   const handledCandidateNavigationRequestRef = useRef(0);
 
@@ -429,7 +430,9 @@ function SessionBrowserPanelController({
         if (sequence !== navigationSequenceRef.current) return;
         commitOpenedAddress(next, null, options?.historyIndex);
         setPublicNavigationRequest((current) =>
-          options?.restore ? null : { id: (current?.id ?? 0) + 1, url: next.logicalUrl }
+          options?.restore
+            ? null
+            : { id: ++publicNavigationSequenceRef.current, url: next.logicalUrl }
         );
         return;
       }
