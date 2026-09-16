@@ -65,7 +65,7 @@ const deriveDiffCount = (turn: { fileDiff?: unknown }) => ({
 });
 
 describe('createConversationDerivation', () => {
-  it('shares goal and diff facts until the last consumer releases the view', async () => {
+  it('shares goal and diff facts and holds the table after the last consumer releases', async () => {
     const { view, doc } = await openView(2, { tailKeep: 4, maxHydrated: 4 });
     const goalReader = acquireConversationDerivation(view, deriveSessionTurnFacts);
     const diffReader = acquireConversationDerivation(view, deriveSessionTurnFacts);
@@ -77,8 +77,32 @@ describe('createConversationDerivation', () => {
     await flushReaderChanges();
     await drain(() => diffReader.table.facts.get('a-0')?.fileDiff?.length === 0);
     expect(diffReader.table.facts.get('a-0')?.fileDiff).toEqual([]);
+    const held = diffReader.table;
     diffReader.release();
-    expect(diffReader.table.facts.size).toBe(0);
+    // Deriving a fact needs the turn's body, so discarding the table on the
+    // last release re-materialized the whole conversation the next time the
+    // session was opened. Facts survive the release instead.
+    expect(held.facts.get('a-0')?.fileDiff).toEqual([]);
+    expect(held.facts.size).toBeGreaterThan(0);
+
+    // ...and the background pass is held while nothing is reading. Turns that
+    // land inside the retained tail are still derived for free; one that falls
+    // outside it needs the pass, and stays underived until someone re-acquires.
+    const peer = reimport(doc);
+    const appended = buildFixtureHistory(12).slice(4);
+    const peerWriter = createHistoryWriter(peer);
+    for (const entry of appended) peerWriter.append(entry);
+    doc.import(peer.export({ mode: 'update', from: doc.version() }));
+    await flushReaderChanges();
+    const appendedId = appended[0]!.id;
+    expect(view.isHydrated(view.indexOf(appendedId))).toBe(false);
+    expect(held.facts.has(appendedId)).toBe(false);
+
+    const reopened = acquireConversationDerivation(view, deriveSessionTurnFacts);
+    expect(reopened.table).toBe(held);
+    await drain(() => reopened.table.facts.has(appendedId));
+    expect(reopened.table.facts.has(appendedId)).toBe(true);
+    reopened.release();
     data.dispose();
     view.dispose();
   });

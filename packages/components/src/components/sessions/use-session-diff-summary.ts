@@ -102,28 +102,75 @@ function collectDiffInputs(
   return entries;
 }
 
+/** The diff-relevant identity of one turn. */
+const diffInputEntryShape = (entry: SessionDiffInputEntry): unknown => [
+  entry?.id ?? '',
+  getSessionHistoryEntryRole(entry) ?? '',
+  normalizeHistoryEntryFileDiffs(entry).map((fileDiff) => [
+    fileDiff.filePath,
+    fileDiff.add,
+    fileDiff.del,
+    fileDiff.cc === undefined
+      ? null
+      : [
+          fileDiff.cc.v,
+          fileDiff.cc.fileId,
+          fileDiff.cc.baseOpId ?? '',
+          fileDiff.cc.opId ?? '',
+          fileDiff.cc.base ?? '',
+          fileDiff.cc.deleted === true,
+        ],
+  ]),
+];
+
 export function computeSessionDiffInputsFingerprint(history: SessionHistoryInput): string {
-  return JSON.stringify(
-    (history ?? []).map((entry) => [
-      entry?.id ?? '',
-      getSessionHistoryEntryRole(entry) ?? '',
-      normalizeHistoryEntryFileDiffs(entry).map((fileDiff) => [
-        fileDiff.filePath,
-        fileDiff.add,
-        fileDiff.del,
-        fileDiff.cc === undefined
-          ? null
-          : [
-              fileDiff.cc.v,
-              fileDiff.cc.fileId,
-              fileDiff.cc.baseOpId ?? '',
-              fileDiff.cc.opId ?? '',
-              fileDiff.cc.base ?? '',
-              fileDiff.cc.deleted === true,
-            ],
-      ]),
-    ])
-  );
+  return JSON.stringify((history ?? []).map((entry) => diffInputEntryShape(entry)));
+}
+
+type SessionDiffInputEntry = NonNullable<SessionHistoryInput>[number];
+
+/**
+ * Per-entry serialization, memoized on the entry object.
+ *
+ * A fact is replaced only when its turn changed, so an unchanged entry keeps
+ * its identity across passes and is never re-serialized.
+ */
+const diffInputEntryFingerprints = new WeakMap<object, string>();
+const diffInputEntryFingerprint = (entry: SessionDiffInputEntry): string => {
+  if (!entry || typeof entry !== 'object') return JSON.stringify(diffInputEntryShape(entry));
+  const cached = diffInputEntryFingerprints.get(entry);
+  if (cached !== undefined) return cached;
+  const computed = JSON.stringify(diffInputEntryShape(entry));
+  diffInputEntryFingerprints.set(entry, computed);
+  return computed;
+};
+
+/**
+ * Whether the diff-relevant content of the collected turns changed.
+ *
+ * Facts arrive at token rate while a turn streams and in chunks while the
+ * background pass fills the conversation, so this runs once per frame over
+ * every turn. Serializing the whole conversation to answer it cost a 144 KiB
+ * string per frame on a 4,000-turn session; identical entries are now settled
+ * by reference and only a replaced entry is serialized.
+ */
+export function sessionDiffInputsChanged(
+  previous: SessionHistoryInput | undefined,
+  next: SessionHistoryInput
+): boolean {
+  if (previous === undefined) return true;
+  const before = previous ?? [];
+  const after = next ?? [];
+  if (before.length !== after.length) return true;
+  for (let index = 0; index < after.length; index += 1) {
+    const beforeEntry = before[index];
+    const afterEntry = after[index];
+    if (beforeEntry === afterEntry) continue;
+    if (diffInputEntryFingerprint(beforeEntry) !== diffInputEntryFingerprint(afterEntry)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function selectProviderDiffTurnIds(history: SessionHistoryInput): string[] {
@@ -199,7 +246,8 @@ export function useSessionDiffSummary(
   const [state, setState] = useState<SessionDiffSummaryState>(INITIAL_STATE);
   const [diffInputsVersion, setDiffInputsVersion] = useState(0);
   const historyRef = useRef<SessionHistoryInput>(undefined);
-  const diffInputsFingerprintRef = useRef<string | undefined>(undefined);
+  /** The entries the last accepted pass produced, for the per-frame compare. */
+  const diffInputsSeenRef = useRef<SessionHistoryInput | undefined>(undefined);
   const fileProviderRef = useRef<SessionFileProvider | null>(fileProvider);
   const providerSummaryRetryAttemptsRef = useRef(0);
   const providerSummaryRetryTimeoutRef = useRef<number | null>(null);
@@ -254,7 +302,7 @@ export function useSessionDiffSummary(
   useEffect(() => {
     if (!enabled) {
       historyRef.current = undefined;
-      diffInputsFingerprintRef.current = undefined;
+      diffInputsSeenRef.current = undefined;
       setState(INITIAL_STATE);
       return undefined;
     }
@@ -401,7 +449,7 @@ export function useSessionDiffSummary(
     let lease: ReturnType<typeof acquireConversationDerivation<SessionTurnFacts>> | null = null;
 
     historyRef.current = undefined;
-    diffInputsFingerprintRef.current = undefined;
+    diffInputsSeenRef.current = undefined;
     setDiffInputsVersion((prev) => prev + 1);
     setState(INITIAL_STATE);
 
@@ -426,7 +474,7 @@ export function useSessionDiffSummary(
         const derivation = lease.table;
         const initialHistory = collectDiffInputs(store.history, derivation.facts) as never;
         historyRef.current = initialHistory;
-        diffInputsFingerprintRef.current = computeSessionDiffInputsFingerprint(initialHistory);
+        diffInputsSeenRef.current = initialHistory;
         setDiffInputsVersion((prev) => prev + 1);
         if (shouldUpdateFallbackSummary()) {
           const initialSummary = buildSessionDiffSummary(initialHistory);
@@ -456,11 +504,10 @@ export function useSessionDiffSummary(
           frame = null;
           if (cancelled) return;
           const nextHistory = collectDiffInputs(store.history, activeDerivation.facts) as never;
-          const nextFingerprint = computeSessionDiffInputsFingerprint(nextHistory);
-          if (nextFingerprint === diffInputsFingerprintRef.current) {
+          if (!sessionDiffInputsChanged(diffInputsSeenRef.current, nextHistory)) {
             return;
           }
-          diffInputsFingerprintRef.current = nextFingerprint;
+          diffInputsSeenRef.current = nextHistory;
           historyRef.current = nextHistory;
           setDiffInputsVersion((prev) => prev + 1);
           if (!shouldUpdateFallbackSummary()) {

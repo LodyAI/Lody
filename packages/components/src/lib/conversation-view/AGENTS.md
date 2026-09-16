@@ -16,6 +16,14 @@
   turn ids). Every body edit includes its id even when evicted. Derivations drop
   those cached facts before recomputing; shallow equality cannot detect body
   changes. Empty `changed.ids` only announces summary/cache bookkeeping.
+- Only the reported ids invalidate a body: a directory row cannot tell whether a
+  body changed, and merging sparse targets into one span re-read the whole
+  conversation. Refresh those rows in contiguous runs; escalate to a structural
+  re-key if the length moved. An unchanged row keeps its object — placeholder
+  and Virtua caches key on that identity — so carry forward the counts a
+  directory refresh does not supply before comparing them.
+- A row's send configuration projects on first read and memoizes. Do not force
+  it while collecting sources; the resolver reads the newest turn or two.
 - Derivations retain small facts and weak identity hints, not evicted bodies.
   Structure updates prune deleted ids and restart incomplete coverage. Search
   refreshes membership/positions after structure changes.
@@ -23,7 +31,9 @@
   baseline or export/hash input; `readAll` forwards the authoritative read.
   The array adapter serves static shared pages, not a runtime fallback.
 - Goal, permission, scheduling and diff consumers acquire the same per-view
-  fact table. Only the final consumer release disposes its background scan.
+  fact table. The final consumer release HOLDS its background scan and keeps the
+  facts: deriving one needs the turn's body, so discarding them re-materialized
+  the conversation on the next open. The table is collected with its view.
 - Control-plane Mirror ignores history and does not enumerate its containers.
   Queue identity must retain non-enumerable `$cid` through Immer, not a
   `structuredClone` that drops it.

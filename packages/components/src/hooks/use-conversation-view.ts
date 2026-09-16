@@ -119,14 +119,27 @@ export function useConversationIndexRows(
   view: ConversationView | null | undefined
 ): readonly TurnIndexRow[] {
   const version = useConversationVersion(view);
+  const previousRef = useRef<readonly TurnIndexRow[]>(EMPTY_ROWS);
   return useMemo(() => {
-    if (!view) return EMPTY_ROWS;
+    if (!view) {
+      previousRef.current = EMPTY_ROWS;
+      return EMPTY_ROWS;
+    }
     const rows: TurnIndexRow[] = [];
     for (let i = 0; i < view.turnCount; i += 1) {
       const row = view.index(i);
       if (row) rows.push(row);
     }
-    return rows;
+    // The view hands back the same row object for a turn whose index facts did
+    // not change, so an array of identical rows is the previous array. Every
+    // consumer of this list recomputes on its identity, and the version bumps
+    // at token rate.
+    const previous = previousRef.current;
+    const reusable =
+      previous.length === rows.length && previous.every((row, index) => row === rows[index]);
+    const result = reusable ? previous : rows;
+    previousRef.current = result;
+    return result;
     // `version` is the change signal for the view's contents.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, version]);
