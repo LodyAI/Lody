@@ -2311,7 +2311,13 @@ const SessionDetail = ({
       });
       try {
         await setSessionTabClosed(tabSessionId, true);
-        if (tabSessionId === activeTabSessionId && router.state.location.search.tab === urlTab) {
+        // The shared-close effect chooses the neighbour once hydration finishes.
+        // Do not commit a fallback from this handler's partial metadata snapshot.
+        if (
+          docMetaCacheReady &&
+          tabSessionId === activeTabSessionId &&
+          router.state.location.search.tab === urlTab
+        ) {
           navigateToSessionTab(
             getSessionTabFallback(
               tabSessionId,
@@ -2335,6 +2341,7 @@ const SessionDetail = ({
     [
       activeTabSessionId,
       setSessionTabClosed,
+      docMetaCacheReady,
       captureSessionDetailEvent,
       closeDraftTab,
       navigateToSessionTab,
