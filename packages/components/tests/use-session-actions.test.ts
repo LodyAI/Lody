@@ -1165,19 +1165,19 @@ describe('useSessionActions', () => {
 
   it('closes only the selected tab while retaining all lifecycle and dispatch state', async () => {
     const tree = createContainmentSessions('close', false);
-    const root = {
+    const rootSession = {
       ...tree.rootSession,
       latestUserMsgId: 'turn-pending',
       status: { type: 'running' },
     } as SessionMeta;
-    const metaRepo = createSessionMetaRepo([root, ...tree.sessions.slice(1)]);
+    const metaRepo = createSessionMetaRepo([rootSession, ...tree.sessions.slice(1)]);
     const actions = await renderActions(createRuntime({ repo: metaRepo.repo }));
-    await actions.setSessionTabClosed(root.id, true);
-    expect(metaRepo.getSession(root.id)).toEqual({ ...root, isTabClosed: true });
+    await actions.setSessionTabClosed(rootSession.id, true);
+    expect(metaRepo.getSession(rootSession.id)).toEqual({ ...rootSession, isTabClosed: true });
     expect(metaRepo.getSession(tree.tabSession.id)).toEqual(tree.tabSession);
     expect(metaRepo.getSession(tree.openedSession.id)).toEqual(tree.openedSession);
-    await actions.reopenSessionTab(root.id);
-    expect(metaRepo.getSession(root.id)).toEqual({ ...root, isTabClosed: false });
+    await actions.reopenSessionTab(rootSession.id);
+    expect(metaRepo.getSession(rootSession.id)).toEqual({ ...rootSession, isTabClosed: false });
   });
 
   it('reopens a historical archived child without restoring the root or opened sessions', async () => {
