@@ -12,7 +12,7 @@ opaque `codex:unattributed` bucket. The pinned runtime also emits exact
 per-response usage events; the adapter now attributes those to the resolved
 model, keeps only the unaccounted remainder unattributed, and restores a small
 cumulative sidecar on resume. Review corrections enable raw on new threads,
-capture fork history before paid work, and persist the native reset cursor.
+persist the native reset cursor, and keep fork history exclusion best effort.
 A resumed thread without that sidecar starts a fresh accounting lifetime at the
 captured native baseline, so persisted history is not re-booked under a new key.
 Cold resume/fork and ambiguous compaction/reroute responses remain unattributed
@@ -41,10 +41,12 @@ responses also stay unattributed. Reroute evidence applies only to its next raw
 completion, including completions without usage; later responses stay unattributed.
 
 The adapter keeps a small cumulative sidecar under `$CODEX_HOME` and restores
-the native total, reset offset and reset flag with the model ledger. Fork waits
-for native `thread/started`, after the restored usage notification, and persists
-that exact source baseline before accepting a prompt. Empty history means zero;
-the first paid response is never used to infer source history. If the sidecar is
+the native total, reset offset and reset flag with the model ledger. At the user's
+request, `SessionMetadata.usageBaseline` and the fork `thread/started` wait have
+been removed. Native snapshots stay adapter-local; fork uses an already cached
+snapshot without waiting for replay. Fork and similar special operations may
+over/undercount, an accepted tradeoff. The first paid response is never used to
+infer source history. If the sidecar is
 missing on resume, the captured native baseline becomes the start of a fresh
 accounting lifetime and only later increments are reported. The sidecar is not a
 delivery ledger; the CLI still retries its own cumulative snapshot. The CLI no
@@ -68,6 +70,11 @@ missing attribution is skipped instead.
   Already missing historical usage cannot be reconstructed by this migration.
 
 ## Evidence
+
+The metadata/fork simplification was revalidated with 639 adapter tests passing
+and 27 E2E tests skipped, plus adapter/example typechecks and the official build.
+Independent review found no P0/P1 outside the explicitly accepted fork accuracy
+tradeoff. The local native cache and sidecar-loss resume handling remain intact.
 
 ### Review and ablation (2026-09-16)
 

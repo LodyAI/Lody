@@ -38,8 +38,10 @@ adapter-owned cumulative updates carrying delta bypass that compatibility path.
 Codex exact per-response events are attributed to the model that produced them;
 any thread-total remainder stays in an explicit unattributed bucket, never the
 currently selected UI model or its price. A process-persistent sidecar restores
-Codex's cumulative model ledger across restarts, and fork sessions exclude source
-history using the native replay captured before their first turn. If that sidecar
+Codex's cumulative model ledger across restarts. Native usage snapshots stay
+adapter-local, not on session metadata. Fork history exclusion uses an already
+cached snapshot without waiting for replay; fork and similar special operations
+may over/undercount by design. If that sidecar
 is missing for a resumed thread, a fresh accounting lifetime starts at the captured
 native baseline and only later increments are reported, so persisted history is not
 re-booked under a new key. The sidecar preserves the native reset cursor alongside

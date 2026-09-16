@@ -11,7 +11,7 @@ Codex 的 thread 总量此前没有模型归属，因此用量界面只能显示
 `codex:unattributed` 桶。锁定 runtime 还会发送精确的单次 completion 用量事件；
 适配器现在会把这些事件归到已解析的模型，只把未覆盖的余量保留为未归属，并在
 resume 时恢复一个小的累计 sidecar。审查后的修复为新 thread 开启 raw 事件，
-在付费请求前捕获 fork 历史，并持久化 native reset 游标。resume 时若 sidecar
+持久化 native reset 游标，fork 历史排除则尽力而为。resume 时若 sidecar
 缺失，则以捕获到的 native 基线开启新的计量生命周期，避免已持久化历史被重新
 记到新 key 下。冷 resume/fork 以及模型不明确的压缩/reroute 响应保持未归属，
 因为锁定协议无法确认其实际模型。
@@ -36,8 +36,9 @@ listener 没有相应开关，使用未归属的累计用量。压缩可能使�
 包括不含 usage 的 completion；再之后的响应保持未归属。
 
 适配器在 `$CODEX_HOME` 下保留小的累计 sidecar，恢复模型账本时一同恢复 native
-total、reset offset 和 reset 标记。fork 等待 native `thread/started`，该信号
-位于历史 usage 通知之后；接收 prompt 前持久化准确的源基线。空历史为零，
+total、reset offset 和 reset 标记。按用户要求，已移除 `SessionMetadata.usageBaseline`
+及 fork 的 `thread/started` 等待。native 快照仅保留在 adapter 本地；fork 只使用
+已缓存快照，不等待历史回放，接受 fork 等特殊操作多计或少计的取舍。
 绝不用首次付费响应推测源历史。resume 时若 sidecar 缺失，则用捕获到的 native
 基线作为新生命周期的起点，只报告之后的增量。
 sidecar 不是投递账本；CLI 仍会重试自己的累计快照。CLI 不再为 legacy adapter
@@ -58,6 +59,10 @@ sidecar 不是投递账本；CLI 仍会重试自己的累计快照。CLI 不再�
   已经遗漏的历史用量。
 
 ## 证据
+
+metadata/fork 简化后重新验证：adapter 639 个测试通过、27 个 E2E 跳过，
+adapter/examples 类型检查及正式构建通过。独立复审未发现已明确接受的 fork
+精度取舍之外的 P0/P1；本地 native 缓存及 sidecar 缺失时的 resume 处理均保留。
 
 ### 审查与消融（2026-09-16）
 
