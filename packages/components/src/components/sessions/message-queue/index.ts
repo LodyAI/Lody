@@ -3,7 +3,6 @@ export type { MessageQueueDisplayProps } from './message-queue-display';
 export { MessageQueueRow } from './message-queue-row';
 export type { MessageQueueRowProps } from './message-queue-row';
 export {
-  resolveQueuedUserHistoryEntry,
   shouldRequestNativeQueueSteer,
 } from './queued-message-steer';
 export { QueuedImagePreview } from './queued-image-preview';

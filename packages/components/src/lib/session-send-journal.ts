@@ -170,6 +170,41 @@ export function createSessionSendJournal(ports: SessionSendJournalPorts) {
     },
     refresh,
     read: async (id: string) => (await ports.storage.list()).find((record) => record.id === id),
+    /**
+     * A native queue steer changes an already delivered queue operation into a
+     * normal history turn. Keep its durable identity, but prepare fresh history
+     * operations before the queue row may be removed.
+     */
+    promoteQueuedTurn: async (
+      id: string,
+      entry: SessionHistory,
+      delivery: Extract<SessionSendRecord['delivery'], { kind: 'guide' }>
+    ) =>
+      ports.resources.run(async (signal) => {
+        const found = (await ports.storage.list()).find((record) => record.id === id);
+        if (!found) return undefined;
+        return ports.lock(`submit:${found.sessionId}`, signal, async () => {
+          const current = (await ports.storage.list()).find((record) => record.id === id);
+          if (!current) return undefined;
+          if (!current.queue) return current;
+          if (current.stage !== 'delivered')
+            throw new Error('Queued message must be delivered before it can be guided');
+          if (current.guideOffer)
+            throw new Error('Guide outcome must be reconciled before promoting the queued message');
+          const next: SessionSendRecord = {
+            ...current,
+            entry,
+            queue: undefined,
+            delivery,
+            stage: 'saved',
+            update: undefined,
+            error: undefined,
+          };
+          await ports.storage.put(next);
+          await changed();
+          return next;
+        });
+      }),
     activate: async (id: string, delivery: SessionSendRecord['delivery']) =>
       ports.resources.run(async (signal) => {
         const found = (await ports.storage.list()).find((record) => record.id === id);
@@ -240,6 +275,22 @@ export function createSessionSendJournal(ports: SessionSendJournalPorts) {
             throw new Error('Submission may already be accepted; reconcile before cancellation');
           await ports.storage.remove(id);
           await changed();
+        });
+      }),
+    /** Discard a locally committed recovery obligation after explicit user disclosure. */
+    discard: async (id: string) =>
+      ports.resources.run(async (signal) => {
+        const found = (await ports.storage.list()).find((record) => record.id === id);
+        if (!found) return;
+        await ports.lock(`submit:${found.sessionId}`, signal, async () => {
+          await ports.lock(`delivery:${found.sessionId}`, signal, async () => {
+            const current = (await ports.storage.list()).find((record) => record.id === id);
+            if (!current) return;
+            if (current.stage !== 'committed')
+              throw new Error('Only a committed submission can be discarded');
+            await ports.storage.remove(id);
+            await changed();
+          });
         });
       }),
     close: async () => {

@@ -70,7 +70,6 @@ import {
 import { useSessionMcpSelection } from '@/hooks/use-session-mcp-selection';
 import {
   MessageQueueDisplay,
-  resolveQueuedUserHistoryEntry,
   shouldRequestNativeQueueSteer,
 } from './message-queue';
 import { useTranslation } from 'react-i18next';
@@ -5157,20 +5156,22 @@ export const SessionChatInterface = memo(
             throw new Error('Queued message is empty');
           }
           const queuedUserTurnId = item.userTurnId?.trim() || `queued-${item.$cid}`;
-          // Queue admission already owns this turn ID. Promoting it to a guide
-          // must reuse that durable record: admitting a second, pending_apply
-          // version changes the persisted identity and is correctly rejected.
-          const historyEntry = await resolveQueuedUserHistoryEntry(
-            runtime?.sendJournal,
+          // Queue admission owns this ID, but its delivered operation only
+          // inserted the queue row. Promote that record back to saved work so
+          // the journal appends the matching history turn before queue removal.
+          const promoted = await runtime?.sendJournal?.promoteQueuedTurn(
             queuedUserTurnId,
-            async () =>
-              (
-                await addSessionHistory({
-                  ...pendingHistoryEntry,
-                  id: queuedUserTurnId,
-                })
-              ).entry
+            { ...pendingHistoryEntry, id: queuedUserTurnId },
+            { kind: 'guide', expectedTurnId: activeAssistantTurnId }
           );
+          const historyEntry =
+            promoted?.entry ??
+            (
+              await addSessionHistory({
+                ...pendingHistoryEntry,
+                id: queuedUserTurnId,
+              })
+            ).entry;
           await removeMessageQueueItem(item.$cid);
           trackMessageSend(historyEntry.id);
           touchSessionActivity(session.id).catch((error: unknown) => {

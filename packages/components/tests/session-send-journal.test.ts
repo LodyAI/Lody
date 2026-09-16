@@ -143,6 +143,49 @@ describe('persistent submission stages', () => {
     await expect(f.journal.cancel('fixed')).rejects.toThrow(/already be accepted/);
     expect(f.writer.readStored().map((turn) => turn.id)).toEqual(['fixed']);
   });
+
+  it('promotes a delivered queue record into a history turn before guide delivery', async () => {
+    const f = fixture();
+    await f.journal.accept({
+      ...record('queued-turn'),
+      delivery: { kind: 'queue' },
+      queue: { $cid: 'queue-row' },
+    });
+    const queued = (await f.ports.storage.list())[0]!;
+    await f.ports.storage.put({ ...queued, stage: 'delivered' });
+    const promoted = await f.journal.promoteQueuedTurn(
+      'queued-turn',
+      {
+        ...record('queued-turn').entry,
+        status: 'pending_apply',
+      },
+      { kind: 'guide', expectedTurnId: 'assistant-turn' }
+    );
+    expect(promoted).toMatchObject({
+      stage: 'saved',
+      queue: undefined,
+      delivery: { kind: 'guide', expectedTurnId: 'assistant-turn' },
+    });
+
+    await f.journal.retry('session' as SessionId);
+    expect(f.writer.readStored().map((turn) => turn.id)).toEqual(['queued-turn']);
+    expect((await f.ports.storage.list())[0]).toMatchObject({
+      stage: 'delivered',
+      delivery: { kind: 'guide', expectedTurnId: 'assistant-turn' },
+    });
+  });
+
+  it('lets an explicit discard remove an undeliverable committed recovery record', async () => {
+    const f = fixture({
+      deliver: async () => {
+        throw new Error('Target unavailable');
+      },
+    });
+    await f.journal.accept(record('stuck'));
+    await expect(f.journal.retry('session' as SessionId)).rejects.toThrow('Target unavailable');
+    await f.journal.discard('stuck');
+    expect(await f.ports.storage.list()).toEqual([]);
+  });
 });
 
 describe('IndexedDB recovery receipts', () => {

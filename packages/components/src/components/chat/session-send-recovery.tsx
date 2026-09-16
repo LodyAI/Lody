@@ -172,6 +172,21 @@ export function SessionSendRecovery({ runtime }: { runtime: WorkspaceRuntime | n
       setBusy(null);
     }
   };
+  const discard = async (record: SessionSendRecord) => {
+    if (!journal) return;
+    setBusy(record.id);
+    try {
+      await journal.discard(record.id);
+      void journal
+        .retry(record.sessionId)
+        .catch((failure: unknown) => console.warn('Following message remains pending', failure));
+      setError(null);
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : t('sessions.sendRecoveryUnavailable'));
+    } finally {
+      setBusy(null);
+    }
+  };
   const destructiveExit = exitRequest?.reason === 'logout' || exitRequest?.reason === 'cache-clear';
 
   return (
@@ -231,7 +246,24 @@ export function SessionSendRecovery({ runtime }: { runtime: WorkspaceRuntime | n
                       {t('sessions.cancelPendingSend')}
                     </Button>
                   ) : null}
+                  {record.stage === 'committed' ? (
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      disabled={busy !== null}
+                      onClick={() => {
+                        void discard(record);
+                      }}
+                    >
+                      {t('sessions.discardPendingSend')}
+                    </Button>
+                  ) : null}
                 </div>
+                {record.stage === 'committed' ? (
+                  <p className="text-xs text-muted-foreground">
+                    {t('sessions.discardPendingSendDescription')}
+                  </p>
+                ) : null}
               </li>
             ))}
           </ol>
@@ -263,11 +295,15 @@ export function SessionSendRecovery({ runtime }: { runtime: WorkspaceRuntime | n
             <AlertDialogCancel ref={cancelRef} onClick={() => finishExit(false)}>
               {t('sessions.stayWithPendingSends')}
             </AlertDialogCancel>
-            {!destructiveExit ? (
+            {destructiveExit ? (
+              <Button variant="destructive" onClick={() => finishExit(true)}>
+                {t('sessions.discardPendingSendsAndContinue')}
+              </Button>
+            ) : (
               <Button onClick={() => finishExit(true)}>
                 {t('sessions.leaveWithPendingSends')}
               </Button>
-            ) : null}
+            )}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
