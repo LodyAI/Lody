@@ -7474,6 +7474,47 @@ describe('SessionExecutionService', () => {
     );
   });
 
+  it('syncs and re-reads a provider config before reporting it missing', async () => {
+    const persistedConfig = createLaunchConfig({
+      cliType: 'registry',
+      agentType: 'deepseek',
+      env: {},
+    });
+    let visibleConfig: AgentConfigMeta | null = null;
+    const getAgentConfigForMachineLaunch = vi.fn(async () => visibleConfig);
+    const syncMachineFlockDoc = vi.fn(async () => {
+      visibleConfig = persistedConfig;
+      return true;
+    });
+    const fetchAcpCapabilities = vi.fn(async () => ({ modes: [], models: [] }));
+    const service = new SessionExecutionService(
+      createBaseDeps({
+        workspaceDocument: {
+          getAgentConfigForMachineLaunch,
+          syncMachineFlockDoc,
+          updateAcpCapabilities: vi.fn(async () => {}),
+        } as unknown as LoroDocumentManager,
+        fetchAcpCapabilities,
+      })
+    );
+
+    const result = await service.refreshMachineAcpCapabilities({
+      type: 'machine/acp-capabilities-refresh',
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      configId: capabilityConfigId,
+    });
+
+    expect(syncMachineFlockDoc).toHaveBeenCalledWith('machine-1', {
+      reason: 'acp-capabilities-config-resolve',
+      timeoutMs: 1_500,
+      scheduleRetry: false,
+    });
+    expect(getAgentConfigForMachineLaunch).toHaveBeenCalledTimes(2);
+    expect(fetchAcpCapabilities).toHaveBeenCalledOnce();
+    expect(result).toEqual(expect.objectContaining({ success: true }));
+  });
+
   it('deduplicates concurrent ACP capability refreshes for the same config and launch inputs', async () => {
     let release: () => void = () => {};
     const fetched = new Promise<void>((resolve) => {
