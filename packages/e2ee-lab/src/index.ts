@@ -15,4 +15,5 @@ export {
 export { exploreSubmitInterleavings } from './model';
 export { publicTrace, type PublicTrace } from './trace';
 export { eventSignature, firstDivergence, type Divergence } from './replay';
-export { honestBaselineReport, type JudgeReport, type JudgeVerdict } from './judge';
+export { honestBaselineReport, judgeImport, type JudgeReport, type JudgeVerdict } from './judge';
+export { appendControlRecord } from './attacks';

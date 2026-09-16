@@ -172,3 +172,8 @@ Implementers choose filenames, service names and test organization without repea
 - Scheduler is now `request → permit → complete`. Unpermitted events cannot run; only one event may be permitted; each event is consumed once. Bounded two-actor submit exploration `exploreSubmitInterleavings` passes. `firstDivergence` reports index 0 when the actor is changed.
 - `test/replay-cas.test.ts` runs a real Riverrun CAS race in three fresh data directories; event shape matches and a mutated schedule is the first divergence. `pnpm --filter @lody/e2ee-lab check` includes this test in the pending commit.
 - P2 stays unchecked: honest client keygen still uses live entropy, so protocol bytes cannot replay from a public seed alone. Lost-ACK and ciphertext-tamper three-directory byte replay are not done. DemoSession does not yet take lab Entropy.
+
+### 2026-09-17 — P3 judge and live control tamper start (unchecked)
+
+- `judgeImport` reports `violation` when a defective importer accepts an invalid record. `appendControlRecord` posts a tampered signature to the real host; the backend refuses and ledger length stays 1. `pnpm --filter @lody/e2ee-lab exec vitest run test/attacks.test.ts` exit 0.
+- P3 stays unchecked: Spec §7 full matrix, offline Riverrun mutation, injecting a defect into the verify path, and malicious-server fork reporting are not done.

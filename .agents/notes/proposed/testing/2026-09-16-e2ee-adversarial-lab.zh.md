@@ -172,3 +172,8 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 - 调度器现为 `request → permit → complete`。未许可不能 run；同时只允许一个 permitted；事件只消费一次。有限两 actor submit 交错探索 `exploreSubmitInterleavings` 通过。`firstDivergence` 在改 actor 时报告 index 0。
 - `test/replay-cas.test.ts` 在三个全新 dataDir 上跑真实 Riverrun CAS 竞争，事件形状一致，故意改调度可定位首分歧。`pnpm --filter @lody/e2ee-lab check` 含该测试后待提交。
 - 未勾选 P2：诚实客户端密钥生成仍用安全随机，协议字节不能仅靠公开 seed 重放；丢 ACK 与密文篡改的三目录字节重放未做。DemoSession 尚未注入 lab Entropy。
+
+### 2026-09-17 — P3 裁判与真实控制篡改起步（未勾选）
+
+- `judgeImport` 在缺陷导入器接受非法记录时给出 `violation`。`appendControlRecord` 对真实 host 提交篡改签名，后端拒绝，账本长度仍为 1。`pnpm --filter @lody/e2ee-lab exec vitest run test/attacks.test.ts` 退出 0。
+- 未勾选 P3：Spec §7 全表、Riverrun 停机改库、已知缺陷注入到验签路径、恶意服务器分叉报告均未完成。

@@ -75,9 +75,9 @@ async function casRace(): Promise<{ events: readonly LabEvent[]; statuses: strin
     row.status === 'fulfilled' ? row.value.status : 'rejected'
   );
   scheduler = recordEvent(scheduler, {
-    actor: statuses[0] === 'committed' ? 'alice' : 'twin',
+    actor: 'cas',
     operation: 'submit',
-    phase: 'backend-committed',
+    phase: 'one-committed',
   }).state;
   return { events: scheduler.events, statuses };
 }
