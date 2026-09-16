@@ -482,7 +482,9 @@ let bootClearPromise: Promise<PendingLocalClearMode | null> | null = null;
 async function runPendingClearOnBoot(): Promise<PendingLocalClearMode | null> {
   const raw = typeof localStorage === 'undefined' ? null : localStorage.getItem(CACHE_CLEAR_FLAG);
   const forced = raw === FORCED_CACHE_CLEAR_VALUE || raw === FORCED_HARD_RESET_VALUE;
-  const mode = readPendingLocalClearMode() ?? (await readNativePendingClearMode());
+  const localMode = readPendingLocalClearMode();
+  const nativeMode = localMode ? null : await readNativePendingClearMode();
+  const mode = localMode ?? nativeMode;
   if (!mode) return null;
   let completed = false;
   try {
@@ -498,7 +500,10 @@ async function runPendingClearOnBoot(): Promise<PendingLocalClearMode | null> {
     completed = true;
   } catch (error) {
     // Retain a blocked non-forced request for a later boot, but never prevent
-    // the runtime from starting merely because recovery is still present.
+    // the runtime from starting merely because recovery is still present. The
+    // desktop bridge consumes its request once, so persist that case locally.
+    if (nativeMode && !forced)
+      writePendingFlag(nativeMode === 'hard' ? HARD_RESET_VALUE : CACHE_CLEAR_VALUE);
     console.warn('[Lody] pending local clear deferred', error);
     return null;
   } finally {
