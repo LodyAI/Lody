@@ -48,6 +48,7 @@ vi.mock('./worktree/worktree-setup-config-store', () => ({
 const createLogger = (): Logger => {
   const logger: Logger = {
     debug: vi.fn(),
+    trace: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),

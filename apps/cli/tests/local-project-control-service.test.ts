@@ -14,6 +14,7 @@ const noopLogger: Logger = {
   error: () => undefined,
   success: () => undefined,
   debug: () => undefined,
+  trace: () => undefined,
   setLevel: () => undefined,
   setDebug: () => undefined,
   child: () => noopLogger,

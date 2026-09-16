@@ -165,6 +165,7 @@ describe('createTaskAutomationWorkspace', () => {
     const warned = createDeferred<string>();
     const logger = {
       debug: vi.fn(),
+      trace: vi.fn(),
       info: vi.fn(),
       warn: vi.fn((message: string) => warned.resolve(message)),
       error: vi.fn(),
@@ -234,6 +235,7 @@ describe('createTaskAutomationWorkspace', () => {
     const warned = createDeferred<string>();
     const logger = {
       debug: vi.fn(),
+      trace: vi.fn(),
       info: vi.fn(),
       warn: vi.fn((message: string) => warned.resolve(message)),
       error: vi.fn(),

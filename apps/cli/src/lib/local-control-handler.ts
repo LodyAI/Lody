@@ -122,9 +122,10 @@ async function handleSessionControlRequest(
   }
 
   const message = parsed.data;
-  config.logger.debug(
-    `[local-control:${requestId}] session request parsed: type=${message.type} workspaceId=${message.workspaceId}`
-  );
+  // The parse step has no record of its own: a request that gets past it is
+  // described by the completion record below, and one that does not is reported
+  // by the parse-failure, machine-mismatch or dispatch-failure branches.
+  const startedAtMs = Date.now();
   if (message.machineId !== config.machineId) {
     config.logger.debug(
       `[local-control:${requestId}] session machine mismatch: expected=${config.machineId} actual=${message.machineId}`
@@ -149,7 +150,7 @@ async function handleSessionControlRequest(
     }
 
     config.logger.debug(
-      `[local-control:${requestId}] session request completed: type=${message.type} responses=${responses.length}`
+      `[local-control:${requestId}] session request completed: type=${message.type} workspaceId=${message.workspaceId} responses=${responses.length} duration=${Date.now() - startedAtMs}ms`
     );
     return handlerResponse(200, { ok: true, responses });
   } catch (error) {

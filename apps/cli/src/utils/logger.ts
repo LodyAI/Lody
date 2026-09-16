@@ -5,6 +5,37 @@ import { cleanupExpiredLogs, LODY_LOG_DIR, LODY_LOG_RETENTION_MAX_FILES } from '
 
 const cleanedLogDirs = new Set<string>();
 
+// Winston's npm levels stop at `debug`, so a dedicated `trace` severity is added
+// below it. The split exists because the file sink is always on: every
+// `logger.debug` call is formatted and written regardless of the user's console
+// level, and high-frequency records (per-flush spans, presence heartbeats,
+// steady-state request plumbing) evicted hours of useful history from the 20 MB
+// rotation window. `trace` is where those records live; `debug` stays the
+// default file level so a routine failure is still diagnosable from the log the
+// daemon writes without anyone opting in.
+const LOG_LEVELS = {
+  error: 0,
+  warn: 1,
+  info: 2,
+  debug: 3,
+  trace: 4,
+} as const;
+
+const TRACE_ENV_VAR = 'LODY_LOG_TRACE';
+
+const TRUTHY_ENV_VALUES = new Set(['1', 'true', 'yes', 'on']);
+
+/** Whether `trace` records should reach the file sink. Opt-in, off by default. */
+export const isTraceLoggingEnabled = (env: NodeJS.ProcessEnv = process.env): boolean =>
+  TRUTHY_ENV_VALUES.has((env[TRACE_ENV_VAR] ?? '').trim().toLowerCase());
+
+/**
+ * The file transport ignores the console level: it is the diagnostic sink and
+ * always captures `debug`. It only descends to `trace` when explicitly enabled.
+ */
+export const resolveFileLogLevel = (env: NodeJS.ProcessEnv = process.env): 'debug' | 'trace' =>
+  isTraceLoggingEnabled(env) ? 'trace' : 'debug';
+
 // 自定义格式化器 (控制台 - 无时间戳)
 const createConsoleFormatter = () => {
   return winston.format.combine(
@@ -60,8 +91,9 @@ const createConsoleTransport = (config: LoggerConfig) => {
 };
 
 // 文件传输配置
-// File transport always logs at debug level to capture all logs for diagnostics
-const createFileTransport = (config: LoggerConfig) => {
+// File transport captures debug regardless of the console level, and trace only
+// when LODY_LOG_TRACE is set; see resolveFileLogLevel.
+export const createFileTransport = (config: LoggerConfig) => {
   const fileConfig = config.file || {};
   const dirname = fileConfig.dirname || LODY_LOG_DIR;
 
@@ -75,7 +107,7 @@ const createFileTransport = (config: LoggerConfig) => {
   }
 
   return new DailyRotateFile({
-    level: 'debug',
+    level: resolveFileLogLevel(),
     filename: fileConfig.filename || `%DATE%.log`,
     dirname,
     datePattern: fileConfig.datePattern || 'YYYY-MM-DD',
@@ -113,12 +145,13 @@ class WinstonLogger implements Logger {
     // error tracking via the process-level handlers (utils/telemetry.ts) and
     // explicit captureException calls; logger.error stays a pure log sink.
 
-    // Set logger level to debug to allow all messages through to transports.
-    // Each transport controls its own filtering level:
+    // Set the logger to the lowest severity so every record reaches the
+    // transports. Each transport controls its own filtering level:
     // - Console: respects config.level (default info)
-    // - File: always debug to capture all logs for diagnostics
+    // - File: debug, or trace when LODY_LOG_TRACE is set
     return winston.createLogger({
-      level: 'debug',
+      levels: LOG_LEVELS,
+      level: 'trace',
       transports,
       exitOnError: false,
     });
@@ -146,20 +179,23 @@ class WinstonLogger implements Logger {
     this.winston.debug(formatLogArgs(...args));
   };
 
+  trace = (...args: unknown[]): void => {
+    this.winston.log('trace', formatLogArgs(...args));
+  };
+
   setLevel = (level: LogLevel): void => {
     this.config.level = level;
-    // Set logger level to debug to allow all messages through to transports
-    // Each transport controls its own filtering level
-    this.winston.level = 'debug';
+    // Keep the logger at the lowest severity so every record reaches the
+    // transports; each transport controls its own filtering level.
+    this.winston.level = 'trace';
 
-    // Update transport levels - file always stays at debug, console follows config
+    // Update transport levels - the file sink keeps its own level, console follows config
     this.winston.transports.forEach((transport: winston.transport) => {
       if (transport instanceof winston.transports.Console) {
         transport.level = level === 'silent' ? 'error' : level;
         transport.silent = level === 'silent';
       } else if (transport instanceof DailyRotateFile) {
-        // File transport always logs at debug level
-        transport.level = 'debug';
+        transport.level = resolveFileLogLevel();
       }
     });
   };
@@ -265,6 +301,11 @@ export interface Logger {
   error: (...args: unknown[]) => void;
   success: (...args: unknown[]) => void;
   debug: (...args: unknown[]) => void;
+  /**
+   * High-frequency diagnostics that would otherwise evict useful history from
+   * the rotation window. Excluded from the file sink unless LODY_LOG_TRACE is set.
+   */
+  trace: (...args: unknown[]) => void;
 
   setLevel: (level: LogLevel) => void;
   setDebug: (enabled: boolean) => void;
@@ -272,7 +313,7 @@ export interface Logger {
   close: () => Promise<void>;
 }
 
-export type LogLevel = 'error' | 'warn' | 'info' | 'debug' | 'silent';
+export type LogLevel = 'error' | 'warn' | 'info' | 'debug' | 'trace' | 'silent';
 
 export type LogTransport = 'console' | 'file' | 'both';
 

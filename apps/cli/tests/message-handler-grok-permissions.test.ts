@@ -48,6 +48,7 @@ function fixture(initialMode = 'ask') {
     error: vi.fn(),
     success: vi.fn(),
     debug: vi.fn(),
+    trace: vi.fn(),
     setLevel: vi.fn(),
     child: () => logger,
     close: async () => {},

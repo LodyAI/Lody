@@ -71,7 +71,10 @@ export function createLocalSessionControlRequestHandler(
     const controlHeaderValue = Array.isArray(controlHeader)
       ? controlHeader.join(',')
       : (controlHeader ?? '');
-    config.logger.debug(
+    // Per-request plumbing: every accepted request already reports once when it
+    // completes, and every rejected one reports its reason below, so the
+    // arrival and body-size records only matter when replaying a request.
+    config.logger.trace(
       `[local-control:${requestId}] incoming request: method=${req.method ?? 'UNKNOWN'} path=${requestPath || '/'} header=${controlHeaderValue || 'missing'}`
     );
 
@@ -134,7 +137,7 @@ export function createLocalSessionControlRequestHandler(
         }
 
         const raw = Buffer.concat(chunks).toString('utf8');
-        config.logger.debug(
+        config.logger.trace(
           `[local-control:${requestId}] request body received: bytes=${Buffer.byteLength(raw, 'utf8')} path=${requestPath}`
         );
         const streamResponses = wantsSessionControlStream(req, requestPath);

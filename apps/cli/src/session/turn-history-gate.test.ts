@@ -13,6 +13,7 @@ const userTurnId = 'user-turn-1';
 
 const logger = {
   debug: () => {},
+  trace: () => {},
   info: () => {},
   warn: () => {},
   error: () => {},

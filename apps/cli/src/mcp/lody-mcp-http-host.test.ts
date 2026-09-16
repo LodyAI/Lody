@@ -25,6 +25,7 @@ const NOOP_LOGGER: Logger = {
   error: () => {},
   success: () => {},
   debug: () => {},
+  trace: () => {},
   setLevel: () => {},
   setDebug: () => {},
   child: () => NOOP_LOGGER,

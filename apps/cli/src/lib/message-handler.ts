@@ -4830,13 +4830,20 @@ export class MessageHandler {
     state.acpFlushCountInTurn += 1;
     const notifications = queue.map((item) => item.notification);
     const groups = this.groupBufferedACPUpdates(queue);
-    const span = startTraceSpan(this.logger, 'acp.flush_updates_batch', {
-      sessionId,
-      turnId: this.store.getTurnId(sessionId),
-      updates: notifications.length,
-      groups: groups.length,
-      flushCount: state.acpFlushCountInTurn,
-    });
+    // One span per streamed-token batch: kept out of the default file sink, but
+    // still reported at debug when the flush fails or runs long.
+    const span = startTraceSpan(
+      this.logger,
+      'acp.flush_updates_batch',
+      {
+        sessionId,
+        turnId: this.store.getTurnId(sessionId),
+        updates: notifications.length,
+        groups: groups.length,
+        flushCount: state.acpFlushCountInTurn,
+      },
+      { hot: true }
+    );
 
     const session = this.sessionManager.getSession(sessionId);
     const modelInfo = session?.agentClient?.currentModel;

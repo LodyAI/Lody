@@ -286,6 +286,13 @@ import { ConcurrentQueue } from '../concurrent-queue';
 import type { CliSqliteRepoStore } from './sqlite-repo-store';
 import type { CloudBillingPort, CloudStreamsTokenPort } from '@lody/platform';
 
+/**
+ * A local SQLite flush that finishes under this budget is routine; only a
+ * slower one is worth a record in the default log. Observed healthy flushes sit
+ * around 2ms with a tail well under 50ms.
+ */
+const LORO_REPO_FLUSH_SLOW_LOG_MS = 200;
+
 type AcpModeSummary = {
   id: string;
   name: string;
@@ -732,18 +739,24 @@ export class LoroDocumentManager {
    */
   async persistPendingChanges(reason: LoroRepoPersistReason): Promise<void> {
     const startedAt = Date.now();
-    this.logger.debug(`[${this.workspaceId}] Loro repo flush started (reason=${reason})`);
+    this.logger.trace(`[${this.workspaceId}] Loro repo flush started (reason=${reason})`);
     await withSlowOperationWarning(
       this.repo.flush(),
       this.logger,
       `loro-repo.flush(${reason})`,
       this.workspaceId
     );
-    this.logger.debug(
-      `[${this.workspaceId}] Loro repo flush completed (reason=${reason} duration=${
-        Date.now() - startedAt
-      }ms)`
-    );
+    // Remote sync drives thousands of these a day and a healthy flush lands in a
+    // few milliseconds, so only a flush slow enough to be worth investigating
+    // reaches the default file sink. A flush that hangs instead of returning is
+    // still reported by withSlowOperationWarning above.
+    const durationMs = Date.now() - startedAt;
+    const completed = `[${this.workspaceId}] Loro repo flush completed (reason=${reason} duration=${durationMs}ms)`;
+    if (durationMs >= LORO_REPO_FLUSH_SLOW_LOG_MS) {
+      this.logger.debug(completed);
+    } else {
+      this.logger.trace(completed);
+    }
   }
 
   /**
