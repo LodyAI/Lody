@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-09-16-bub-capability-test.md)
 
+PR: [#743](https://github.com/LodyAI/Lody/pull/743)
+
 ## 摘要
 
 Bub 创建界面隐藏了能力测试入口，安装问题要离开窗口后才能看到。现在窗口提供测试

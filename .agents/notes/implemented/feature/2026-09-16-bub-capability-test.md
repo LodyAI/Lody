@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-09-16-bub-capability-test.zh.md)
 
+PR: [#743](https://github.com/LodyAI/Lody/pull/743)
+
 ## Abstract
 
 Bub creation hid the capability-test action, making installation problems visible
