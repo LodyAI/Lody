@@ -539,6 +539,41 @@ describe.each(backends)('createConversationViewFromReader over $name', (backend)
     }
   });
 
+  it("refreshes an unhydrated user turn's send configuration when it changes", async () => {
+    const harness = openView(backend, 12, { tailKeep: 2, maxHydrated: 4 });
+    const { idle, data } = harness;
+    try {
+      await settle(idle, harness.view);
+      const position = harness.view.indexOf('u-1');
+      expect(position).toBeGreaterThanOrEqual(0);
+      // Outside every window: the index row is all a caller can read, and the
+      // sticky send-config resolver reads exactly this.
+      expect(harness.view.isHydrated(position)).toBe(false);
+      expect(harness.view.index(position)?.inputConfig?.modelId).toBe('sonnet');
+
+      data.writer.updateEntry('u-1', (entry) => ({
+        ...entry,
+        inputConfig: {
+          ...(entry.inputConfig as Record<string, unknown>),
+          modelId: 'opus',
+          agentRoleId: 'role-reassigned',
+          agentRoleRevision: 42,
+          mcpServerIds: [],
+        },
+      }));
+      await flush();
+
+      const row = harness.view.index(position);
+      expect(row?.inputConfig?.modelId).toBe('opus');
+      expect(row?.inputConfig?.agentRoleId).toBe('role-reassigned');
+      expect(row?.inputConfig?.agentRoleRevision).toBe(42);
+      expect(row?.inputConfig?.mcpServerIds).toEqual([]);
+    } finally {
+      harness.view.dispose();
+      harness.teardown();
+    }
+  });
+
   it('patches a streamed tail update from its ranged event without a whole-history read', async () => {
     const harness = openView(backend, 12, { tailKeep: 4 });
     const { idle, data } = harness;

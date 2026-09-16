@@ -260,11 +260,17 @@ export function acquireConversationDerivation<F>(
   view: ConversationView,
   derive: DeriveTurnFact<F>
 ) {
-  let tables = sharedDerivations.get(view);
-  if (!tables) sharedDerivations.set(view, (tables = new Map()));
+  // Key and subscribe on the conversation's own view. A projection wrapper is
+  // rebuilt whenever an optimistic entry appears or resolves; giving each one a
+  // table left every released wrapper subscribed through the base view, so a
+  // later token derived once per wrapper ever created and none of them could be
+  // collected.
+  const owner = view.factSource ?? view;
+  let tables = sharedDerivations.get(owner);
+  if (!tables) sharedDerivations.set(owner, (tables = new Map()));
   let entry = tables.get(derive);
   if (!entry) {
-    entry = { table: createConversationDerivation(view, derive), users: 0 };
+    entry = { table: createConversationDerivation(owner, derive), users: 0 };
     tables.set(derive, entry);
   }
   entry.users++;

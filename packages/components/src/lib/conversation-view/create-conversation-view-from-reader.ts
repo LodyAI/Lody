@@ -521,9 +521,12 @@ export function createConversationViewFromReader(
           // Drop stale previews; the next explicit read will recompute them.
           row.summary = undefined;
         }
-        if (indexChanged) {
-          // Row identity is the renderer's change signal (placeholder items and
-          // Virtua rows are keyed by it), so an unchanged row keeps its object.
+        if (bodyChanged || indexChanged) {
+          // A reported turn always takes the fresh row: `rowChanged` compares
+          // only the facts it can compare, and a user turn's send configuration
+          // is a deferred projection that cannot be diffed without forcing it.
+          // A turn nothing reported keeps its object — placeholder items and
+          // Virtua rows are keyed by that identity.
           rows[pos] = row;
           if (row.id !== old?.id) rebuildLookups(pos);
         }

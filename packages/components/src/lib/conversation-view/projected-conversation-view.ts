@@ -100,6 +100,10 @@ export function createProjectedConversationView(
     get structureVersion() {
       return base.structureVersion;
     },
+    // Fact tables belong to the conversation, not to this wrapper: wrappers are
+    // rebuilt as optimistic entries appear and resolve, and a table acquired on
+    // one would be pinned by the base view's listener set forever.
+    factSource: base.factSource ?? base,
     ready: base.ready,
     index: (i) => {
       rebuild();

@@ -103,6 +103,31 @@ Keeping the fact table alive after the last release trades memory for the reopen
 The table is keyed by the view, so the session store's existing eviction bounds it; a
 per-consumer timeout was rejected as a second lifetime to reason about.
 
+## Two corrections found in review
+
+Both were introduced by this work and are fixed in the same branch, each pinned by
+a test that fails on the intermediate implementation.
+
+Holding the fact table instead of disposing it stopped the background pass but left
+the view subscription in place. That is correct when the table is keyed on the
+conversation's own view, and wrong when it is keyed on a projection wrapper: the
+wrapper is rebuilt whenever an optimistic entry appears or resolves, so the base
+view's listener set accumulated one released wrapper — and one live fact table — per
+message sent, each still deriving on every token. Tables are now keyed and
+subscribed on `factSource`, the underlying view. That also collapses a duplicate
+that predates this branch: the diff summary acquired on the base view while the
+turn-fact readers acquired on the wrapper, so an unconfirmed entry meant two full
+fact tables for one conversation.
+
+Keeping the index row object when `rowChanged` reported no change assumed that
+`rowChanged` sees everything a row carries. It does not see `inputConfig`, which is
+a deferred projection that cannot be diffed without forcing it — exactly the cost
+this branch removed. A user turn whose send configuration changed while outside
+every hydrated window therefore kept its old model, Role and MCP selection in the
+index, which is what the sticky-configuration resolver reads. A reported turn now
+always takes the fresh row; identity is preserved only for turns the notification
+did not name, which is where the churn this optimization targets came from.
+
 ## Verification and limits
 
 Regression coverage pins the invalidation contract: a batch carrying an early edit and
