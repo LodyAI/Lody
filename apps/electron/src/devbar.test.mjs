@@ -1,17 +1,55 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { isDevbarEnabled, summarizeDevbarMetrics } from './main/services/devbar-metrics.ts'
+import {
+  initialDevbarControl,
+  devbarRendererEntry,
+  isAllowedDevbarRequestOrigin,
+  parseDevbarControlInput
+} from './main/services/devbar-control.ts'
+import { summarizeDevbarMetrics } from './main/services/devbar-metrics.ts'
 import { createDevbarViewState } from './main/services/devbar-json-render.ts'
 import { DevbarRecording } from './main/services/devbar-recording.ts'
 import { createClsTracker } from './renderer/src/devbar-cls.ts'
 import { createLongTaskBuffer } from './renderer/src/devbar-long-tasks.ts'
 import { isDevbarDeepLink } from './renderer/src/devbar-deep-link.ts'
 
-void test('devbar is enabled only by the explicit runtime boolean', () => {
-  assert.equal(isDevbarEnabled('true'), true)
+void test('environment activation remains an explicit automation override', () => {
+  assert.deepEqual(initialDevbarControl('true'), { enabled: true, agentAccess: true })
   for (const value of [undefined, '', 'false', '0', '1', 'dev', 'staging', 'prod']) {
-    assert.equal(isDevbarEnabled(value), false)
+    assert.deepEqual(initialDevbarControl(value), { enabled: false, agentAccess: false })
   }
+})
+
+void test('runtime control validates the secondary agent capability gate', () => {
+  assert.deepEqual(parseDevbarControlInput({ enabled: true, agentAccess: false }), {
+    enabled: true,
+    agentAccess: false
+  })
+  assert.deepEqual(parseDevbarControlInput({ enabled: true, agentAccess: true }), {
+    enabled: true,
+    agentAccess: true
+  })
+  assert.throws(() => parseDevbarControlInput({ enabled: false, agentAccess: true }))
+  assert.throws(() => parseDevbarControlInput({ enabled: 'true', agentAccess: false }))
+})
+
+void test('runtime activation selects the Devbar entry only for the primary product window', () => {
+  assert.equal(devbarRendererEntry(false, false), 'index.html')
+  assert.equal(devbarRendererEntry(true, false), 'devbar.html')
+  assert.equal(devbarRendererEntry(true, true), 'index.html')
+})
+
+void test('loopback Hub accepts only its own and the packaged file renderer origins', () => {
+  const hubOrigin = 'http://127.0.0.1:9765'
+  assert.equal(isAllowedDevbarRequestOrigin(undefined, hubOrigin), true)
+  assert.equal(isAllowedDevbarRequestOrigin('null', hubOrigin), true)
+  assert.equal(isAllowedDevbarRequestOrigin(hubOrigin, hubOrigin), true)
+  assert.equal(
+    isAllowedDevbarRequestOrigin('http://localhost:5173', hubOrigin, 'http://localhost:5173'),
+    true
+  )
+  assert.equal(isAllowedDevbarRequestOrigin('https://example.test', hubOrigin), false)
+  assert.equal(isAllowedDevbarRequestOrigin('http://localhost:3000', hubOrigin), false)
 })
 
 void test('process metrics sum Electron working sets and report GPU process separately', () => {
@@ -93,6 +131,7 @@ void test('devbar recording bounds sample history while retaining aggregate long
       fps: 60,
       cls: 0,
       heapBytes: 1,
+      heapPrecise: true,
       cpu: 2,
       rssBytes: 3,
       gpuCpu: 4,
@@ -127,6 +166,7 @@ void test('devbar JSON-render state presents live metrics and bounded task rows'
     fps: 48,
     cls: 0.0123,
     heapBytes: 20 * 1024 * 1024,
+    heapPrecise: false,
     cpu: 12.5,
     rssBytes: 300 * 1024 * 1024,
     gpuCpu: 4,
@@ -177,11 +217,11 @@ void test('devbar JSON-render state presents live metrics and bounded task rows'
   assert.deepEqual(state.headline, {
     fps: '48',
     cpu: '12.5%',
-    heap: '20 MiB',
+    heap: '~20 MiB',
     blocked: '72 ms'
   })
   assert.equal(state.metrics['Electron CPU'], '12.5%')
-  assert.equal(state.metrics['JavaScript heap'], '20 MiB')
+  assert.equal(state.metrics['JavaScript heap'], '~20 MiB')
   assert.deepEqual(state.trends[0], {
     signal: 'FPS',
     trend: '█▁',

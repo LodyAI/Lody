@@ -11,6 +11,7 @@ import { defineDevframe, defineRpcFunction } from 'devframe'
 import { DevbarRendererSampleSchema, DevbarSnapshotSchema } from '@lody/shared/devbar'
 import { z } from 'zod'
 import pkg from '../../../package.json' with { type: 'json' }
+import { isAllowedDevbarRequestOrigin } from './devbar-control'
 import { createDevbarViewState, DEVBAR_VIEW_SPEC } from './devbar-json-render'
 import { DevbarRecording } from './devbar-recording'
 
@@ -23,7 +24,7 @@ export interface DevbarDevframeRuntime {
     connectionMeta: ConnectionMeta
     metaBaseUrl: string
   }
-  mcpUrl: string
+  mcpUrl: string | null
   uiUrl: string
   embeddedScriptUrl: string
   deepLink: string
@@ -96,7 +97,10 @@ function renderSnapshot(snapshot: DevbarSnapshot, deepLink: string): string {
   ].join('\n')
 }
 
-export async function startDevbarDevframe(deepLink: string): Promise<DevbarDevframeRuntime> {
+export async function startDevbarDevframe(
+  deepLink: string,
+  options: { agentAccess: boolean; rendererOrigin?: string }
+): Promise<DevbarDevframeRuntime> {
   const recording = new DevbarRecording()
   let dashboardView: JsonRenderView | undefined
   const definition = defineDevframe({
@@ -192,8 +196,18 @@ export async function startDevbarDevframe(deepLink: string): Promise<DevbarDevfr
   })
 
   let hub: HubInstance | undefined
+  let origin: string | undefined
   const server = createServer((request, response) => {
-    response.setHeader('Access-Control-Allow-Origin', '*')
+    const requestOrigin = request.headers.origin
+    if (origin && !isAllowedDevbarRequestOrigin(requestOrigin, origin, options.rendererOrigin)) {
+      response.statusCode = 403
+      response.end('Origin not allowed')
+      return
+    }
+    if (requestOrigin) {
+      response.setHeader('Access-Control-Allow-Origin', requestOrigin)
+      response.setHeader('Vary', 'Origin')
+    }
     response.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
     if (!hub) {
       response.statusCode = 503
@@ -206,7 +220,7 @@ export async function startDevbarDevframe(deepLink: string): Promise<DevbarDevfr
     })
   })
   const port = await listenOnAvailablePort(server)
-  const origin = `http://127.0.0.1:${port}`
+  origin = `http://127.0.0.1:${port}`
 
   try {
     const [hubUi, jsonRenderUi, inspect, a11y, terminals] = await Promise.all([
@@ -214,7 +228,7 @@ export async function startDevbarDevframe(deepLink: string): Promise<DevbarDevfr
       import('@devframes/json-render-ui/hub'),
       import('@devframes/plugin-inspect'),
       import('@devframes/plugin-a11y'),
-      import('@devframes/plugin-terminals')
+      options.agentAccess ? import('@devframes/plugin-terminals') : Promise.resolve(null)
     ])
     hub = initHub({
       name: 'Lody DevTools',
@@ -224,8 +238,12 @@ export async function startDevbarDevframe(deepLink: string): Promise<DevbarDevfr
       origin,
       host: '127.0.0.1',
       auth: false,
-      allowedOrigins: ['file://'],
-      mcp: true,
+      allowedOrigins: [
+        'file://',
+        origin,
+        ...(options.rendererOrigin ? [options.rendererOrigin] : [])
+      ],
+      mcp: options.agentAccess,
       register: true,
       ui: hubUi.createUi({
         branding: {
@@ -247,11 +265,15 @@ export async function startDevbarDevframe(deepLink: string): Promise<DevbarDevfr
         },
         inspect.createInspectDevframe(),
         a11y.createA11yDevframe(),
-        terminals.createTerminalsDevframe({
-          cwd: process.cwd(),
-          allowArbitraryCommands: false,
-          scrollback: 2_000
-        })
+        ...(terminals
+          ? [
+              terminals.createTerminalsDevframe({
+                cwd: process.cwd(),
+                allowArbitraryCommands: false,
+                scrollback: 2_000
+              })
+            ]
+          : [])
       ],
       configure(ctx) {
         for (const dock of ctx.docks.views.values()) {
@@ -288,7 +310,7 @@ export async function startDevbarDevframe(deepLink: string): Promise<DevbarDevfr
 
   return {
     connection,
-    mcpUrl: `${origin}${DEVFRAMES_HUB_BASE}__mcp`,
+    mcpUrl: options.agentAccess ? `${origin}${DEVFRAMES_HUB_BASE}__mcp` : null,
     uiUrl: `${origin}${DEVFRAMES_HUB_BASE}`,
     embeddedScriptUrl: `${origin}${DEVFRAMES_HUB_BASE}embedded.js`,
     deepLink,

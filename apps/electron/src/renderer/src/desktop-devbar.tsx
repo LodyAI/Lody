@@ -30,6 +30,7 @@ export function DesktopDevbar(): JSX.Element {
   const [fps, setFps] = useState<number | null>(null)
   const [cls, setCls] = useState<number | null>(null)
   const [heap, setHeap] = useState<number | null>(null)
+  const [heapPrecise, setHeapPrecise] = useState(false)
   const [longTaskDuration, setLongTaskDuration] = useState<number | null>(null)
   const [devframeStatus, setDevframeStatus] = useState('unavailable')
   const activateDockRef = useRef<(() => void) | null>(null)
@@ -51,6 +52,7 @@ export function DesktopDevbar(): JSX.Element {
     let clsObserver: PerformanceObserver | undefined
     let longTaskObserver: PerformanceObserver | undefined
     let recordSample: ((sample: DevbarRendererSample) => Promise<unknown>) | undefined
+    let sampleHeapPrecise = false
     let closeDevframe: (() => void) | undefined
     if (PerformanceObserver.supportedEntryTypes.includes('layout-shift')) {
       clsValue = 0
@@ -104,6 +106,7 @@ export function DesktopDevbar(): JSX.Element {
             fps: latestFps,
             cls: clsValue,
             heapBytes: nextHeap,
+            heapPrecise: sampleHeapPrecise,
             cpu: next?.cpu ?? null,
             rssBytes: next?.rss ?? null,
             gpuCpu: next?.gpuCpu ?? null,
@@ -144,6 +147,8 @@ export function DesktopDevbar(): JSX.Element {
       .getDevbarConfig()
       .then(async (config) => {
         if (disposed || !config.devframe) return
+        sampleHeapPrecise = config.preciseMemory
+        setHeapPrecise(config.preciseMemory)
         const embeddedScript = document.createElement('script')
         embeddedScript.type = 'module'
         embeddedScript.src = config.devframe.embeddedScriptUrl
@@ -231,7 +236,7 @@ export function DesktopDevbar(): JSX.Element {
         </span>
         <span title="Sum of Electron process CPU usage">CPU {percent(metrics?.cpu)}</span>
         <span title="Current renderer JS heap reported by Chromium, not total app memory or other worker heaps (M = MiB)">
-          Heap {memory(heap, 'M')}
+          Heap {heap == null ? '—' : `${heapPrecise ? '' : '~'}${memory(heap, 'M')}`}
         </span>
         <span title="GPU process: CPU usage and resident working set (M = MiB), not GPU hardware utilization or VRAM">
           GPU {percent(metrics?.gpuCpu)} {memory(metrics?.gpuRss, 'M')}

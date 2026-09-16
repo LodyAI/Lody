@@ -33,20 +33,22 @@ and should not be used as the normal development command.
 
 ### Desktop performance bar
 
-Set `LODY_DEVBAR=true` when launching Desktop to show the bottom performance bar.
-The same runtime switch works for Dev, Staging, and Prod builds; it is off by
-default:
+Devbar ships in Dev, Staging, and Prod builds and is off at each launch. In the
+primary Desktop window, open Settings > About, double-click `Open Source Licenses`
+to reveal Developer Mode, enable it, then select `Open Devbar`. The app starts the
+loopback Hub and reloads that window through the Devbar-only renderer entry. Use
+`Stop Devbar` to close the Hub and return to the normal entry.
+
+`LODY_DEVBAR=true` remains an automation override for smoke tests that need Devbar
+active before the first renderer loads:
 
 ```bash
 LODY_DEVBAR=true pnpm start:local
-LODY_DEVBAR=true /path/to/Lody.AppImage
-LODY_DEVBAR=true /Applications/Lody.app/Contents/MacOS/Lody
+LODY_DEVBAR=true pnpm --dir apps/electron preview:local
 ```
 
-On Windows PowerShell, use `$env:LODY_DEVBAR='true'` before launching the `.exe`.
-Fully quit the existing app first. Unset the variable or set it to `false` to
-disable the bar. This switch does not select a deployment; the public build
-remains local-only. The same packaged artifact can be inspected without rebuilding.
+The override does not select a deployment; the public build remains local-only.
+Product users do not need an environment variable or a separate artifact.
 
 The right side shows renderer animation-callback FPS, Long Task duration for the
 latest interval, session-window CLS,
@@ -58,34 +60,35 @@ pages may be counted more than once); CLI/agent descendants outside Electron's
 metrics are excluded. Missing/warming-up measurements show `—`. Sampling pauses
 while the window is hidden. Values stay in memory and are never uploaded.
 Heap uses Chromium's JS heap estimate for the current renderer, not other
-worker/renderer heaps or total app memory. Enabling devbar at launch also enables
-precise Chromium memory readings; unavailable readings display `Heap —`.
+worker/renderer heaps or total app memory. A Devbar opened after app launch prefixes
+the bucketed estimate with `~`; the automation override enables precise Chromium
+memory readings before app readiness. Unavailable readings display `Heap —`.
 
 Select `DEVBAR` to activate Main Thread in Devframe's official floating Hub UI.
 The same Hub is available from its loopback URL as a standalone viewer. It also
-includes the Devframe Inspector, Accessibility Inspector, and Terminals panels;
-the latter provides an interactive local shell. The performance view shows live
-metric cards, 60-sample sparklines for FPS/CPU/memory/blocking, and a bounded
-recent Long Task list. Chromium reports the blocking
-interval but not a JavaScript stack, so exact function attribution still needs a
-CPU profile. The
-installation-profile deep link `<protocol>://devbar?view=main-thread` opens the
-same view (`lody://...` in the public build).
+includes the Devframe Inspector and Accessibility Inspector. The performance view
+shows live metric cards, 60-sample sparklines for FPS/CPU/memory/blocking, and a
+bounded recent Long Task list. Chromium reports the blocking interval but not a
+JavaScript stack, so exact function attribution still needs a CPU profile. The
+installation-profile deep link `<protocol>://devbar?view=main-thread` opens the same
+view (`lody://...` in the public build).
 
 While enabled, Desktop starts a loopback-only Devframe Hub on the first free port
 from 9765 through 9785. It serves the official viewer and dock, live RPC streams,
-shared state, and one aggregate HTTP MCP endpoint. Coding agents can read the
-performance snapshot and Inspector resources and can use the Terminals tools to
-start local subprocesses. Arbitrary command requests are disabled, but the
-interactive shell remains a privileged process-control capability. The Hub is
-unavailable when `LODY_DEVBAR` is off; startup failure leaves the local metrics
-bar running. See the [current behavior and security boundary](../../specs/desktop-devbar.md#devframe-hub).
+and shared state. Developer Mode shows a separate `Agent and terminal access`
+switch while Devbar runs. Enabling it restarts the Hub with the aggregate HTTP MCP
+endpoint and Terminals panel. Coding agents can then read the performance snapshot
+and Inspector resources, and Terminals can start local subprocesses. Arbitrary
+command requests are disabled, but the interactive shell remains a privileged
+process-control capability. Stopping Devbar removes both capabilities. See the
+[current behavior and security boundary](../../specs/desktop-devbar.md#devframe-hub).
 
-Configure a coding-agent host once with the stdio command
-`apps/electron/node_modules/.bin/devframe connect`. The connector discovers the
-runtime-selected port and supplies the endpoint's loopback Origin header; a direct
-generic HTTP entry usually does neither. In Lody, review and select the resulting
-MCP catalog entry in trusted UI/CLI before starting a later agent session.
+After enabling Agent and terminal access, configure a coding-agent host once with
+the stdio command `apps/electron/node_modules/.bin/devframe connect`. The connector
+discovers the runtime-selected port and supplies the endpoint's loopback Origin
+header; a direct generic HTTP entry usually does neither. In Lody, review and
+select the resulting MCP catalog entry in trusted UI/CLI before starting a later
+agent session.
 
 ### Build
 

@@ -8,10 +8,9 @@ Translation: current
 ## 摘要
 
 首个 Desktop 接入通过 Devframe 暴露诊断数据，但没有提供 Devframe 完整的参考界面。
-Desktop 现在把官方 Hub UI、JSON-render renderer、Inspector、Accessibility Inspector
-和 Terminals add-on 组合到同一个 loopback server 和聚合 MCP endpoint 后。该决策在
-显式 Devbar runtime gate 下有意加入本地子进程访问；文件管理、code-server 和远程绑定
-仍然排除。
+Desktop 现在把官方 Hub UI、JSON-render renderer、Inspector 和 Accessibility Inspector
+组合到同一个 loopback server。独立的产品内 capability gate 会加入聚合 MCP 和 Terminals
+add-on。文件管理、code-server 和远程绑定仍然排除。
 
 ## 决策
 
@@ -24,22 +23,26 @@ dock。Lody 性能 definition 注册 JSON-render view 并投影成 `json-render`
 中用 Unicode sparkline 展示最近 60 个 FPS、CPU、heap、RSS 和阻塞时间样本。这样既保留
 官方 renderer 边界，也让 dashboard 具备可快速浏览的时间序列视图。
 
-Hub 还挂载 `plugin-inspect`、`plugin-a11y`、`plugin-terminals` 及其发布的 assets package。
-Main Thread 是首次激活项。Hub 为无 UI 的 `lody-devbar` definition 自动生成的 iframe
-entry 会隐藏，因此用户只会看到可工作的 JSON-render 性能 dock。
+Hub 始终挂载 `plugin-inspect`、`plugin-a11y` 及其发布的 assets package。只有用户启用
+“Agent 与终端权限”后，才挂载 `plugin-terminals` 和聚合 MCP。Main Thread 是首次激活项。
+Hub 为无 UI 的 `lody-devbar` definition 自动生成的 iframe entry 会隐藏，因此用户只会
+看到可工作的 JSON-render 性能 dock。
 
 Electron 用户页面使用 `file://`，而参考 Hub 通常运行在同源 web host 中。因此 node host
-会在发布前把已挂载 iframe entry 改写为完整 loopback URL。只有
-`LODY_DEVBAR=true` 时才加载独立 `devbar.html` renderer 入口；该入口允许 loopback
+会在发布前把已挂载 iframe entry 改写为完整 loopback URL。隐藏的 Developer Mode 控件
+会启动 Hub，并把主窗口重载到独立的 `devbar.html` renderer 入口；该入口允许 loopback
 scripts、frames、connections，以及参考 UI 使用的 Iconify endpoint。普通 `index.html`
-CSP 不变。
+CSP 不变，辅助窗口也始终使用普通入口。`LODY_DEVBAR=true` 仅保留为自动化覆盖。
 
 ## Capability 边界
 
-Hub 只绑定 `127.0.0.1`，只接受 Lody `file://` 页面，并且仅在开发者显式设置
-`LODY_DEVBAR=true` 时存在。该边界内关闭浏览器认证。聚合 MCP endpoint 暴露性能和
-Inspector 读取接口以及 Terminals 工具。Terminals 拒绝任意 command 请求，但其交互式
-shell 仍提供通用本地进程控制；这是 Devbar 明确要求的子进程能力，不是只读诊断的隐式扩展。
+Hub 只绑定 `127.0.0.1`，只接受 Lody `file://` 页面和自身 loopback Origin，并拒绝其他
+浏览器 Origin。该单用户边界内关闭浏览器认证。Devbar 在每次进程启动时默认关闭，只能从
+主窗口隐藏的 Developer Mode 控件或自动化覆盖启动。
+
+默认 Hub 没有聚合 MCP endpoint 或 Terminals dock。独立的“Agent 与终端权限”开关会重启
+Hub，加入性能与 Inspector 的 Agent 接口和 Terminals 工具。Terminals 拒绝任意 command
+请求，但其交互式 shell 仍提供通用本地进程控制。停止 Devbar 会关闭 listener 并移除两项能力。
 
 本决策不允许增加 Assets、Code Server、文件系统操作、非 loopback host 或远程访问。
 这些变化需要独立的 capability 和认证评审。
@@ -54,9 +57,10 @@ import，使其相对于 `import.meta.url` 的预构建 assets 从已安装 pack
 ## 验证
 
 Node/Web 类型检查和 Electron 应用构建通过。隔离启动的构建产物从 loopback 提供 Hub
-index、embedded bootstrap、JSON renderer 和三个 plugin SPA。MCP initialize 能列出
-性能、Inspector、共享状态和 Terminals 工具；共享 dock state 包含完整 loopback iframe
-URL，并选中 `lody-main-thread`。静态导出、跨平台打包启动和远程部署未验证。
+index、embedded bootstrap、JSON renderer 和 plugin SPA。不设置 `LODY_DEVBAR` 的启动测试
+验证了关闭 → 无 MCP 的 Hub → 带 MCP 与 Terminals 的 Hub → 关闭。启用二级 capability 后，
+MCP initialize 能列出性能、Inspector、共享状态和 Terminals 工具；共享 dock state 包含完整
+loopback iframe URL，并选中 `lody-main-thread`。静态导出、跨平台打包启动和远程部署未验证。
 
 本决策部分替代早先[桥接决策](../architecture/2026-09-16-devbar-devframe-bridge.zh.md)
 中的 UI 与子进程排除项。当前保证由草案状态的

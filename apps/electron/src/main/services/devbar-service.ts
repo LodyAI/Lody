@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { desktopInstallationProfile } from '../platform'
-import { isDevbarEnabled, summarizeDevbarMetrics } from './devbar-metrics'
+import { initialDevbarControl, type DevbarControlInput } from './devbar-control'
+import { summarizeDevbarMetrics } from './devbar-metrics'
 
 type DevbarRuntime = Awaited<
   ReturnType<(typeof import('./devbar-devframe'))['startDevbarDevframe']>
@@ -9,6 +10,8 @@ type DevbarMetrics = ReturnType<typeof summarizeDevbarMetrics>
 
 interface DevbarConfig {
   enabled: boolean
+  agentAccess: boolean
+  preciseMemory: boolean
   devframe: Pick<DevbarRuntime, 'connection' | 'mcpUrl' | 'uiUrl' | 'embeddedScriptUrl'> | null
 }
 
@@ -16,10 +19,15 @@ interface DevbarConfig {
 let sampledAt: number | undefined
 let snapshot: ReturnType<typeof summarizeDevbarMetrics> | null = null
 let devframeRuntime: DevbarRuntime | null = null
+let devframeStart: Promise<DevbarRuntime> | null = null
+let control = initialDevbarControl(process.env.LODY_DEVBAR)
+const preciseMemory = control.enabled
 
 export function getDevbarConfig(): DevbarConfig {
   return {
-    enabled: isDevbarEnabled(process.env.LODY_DEVBAR),
+    enabled: control.enabled,
+    agentAccess: control.agentAccess,
+    preciseMemory,
     devframe: devframeRuntime
       ? {
           connection: devframeRuntime.connection,
@@ -32,28 +40,81 @@ export function getDevbarConfig(): DevbarConfig {
 }
 
 export function configureDevbarDiagnostics(): void {
-  if (getDevbarConfig().enabled) {
+  if (preciseMemory) {
     // Avoid Chromium's bucketized, long-lived performance.memory cache.
     app.commandLine.appendSwitch('enable-precise-memory-info')
   }
 }
 
-export async function startDevbarDevframeService(): Promise<void> {
-  if (!getDevbarConfig().enabled || devframeRuntime) return
+export function isDevbarRendererEnabled(): boolean {
+  return control.enabled
+}
+
+async function createDevbarRuntime(): Promise<DevbarRuntime> {
+  const { startDevbarDevframe } = await import('./devbar-devframe')
+  let rendererOrigin: string | undefined
   try {
-    const { startDevbarDevframe } = await import('./devbar-devframe')
-    devframeRuntime = await startDevbarDevframe(
-      `${desktopInstallationProfile.desktopProtocol}://devbar?view=main-thread`
-    )
+    rendererOrigin = process.env.ELECTRON_RENDERER_URL
+      ? new URL(process.env.ELECTRON_RENDERER_URL).origin
+      : undefined
+  } catch {
+    rendererOrigin = undefined
+  }
+  return await startDevbarDevframe(
+    `${desktopInstallationProfile.desktopProtocol}://devbar?view=main-thread`,
+    { agentAccess: control.agentAccess, rendererOrigin }
+  )
+}
+
+export async function startDevbarDevframeService(): Promise<boolean> {
+  if (!control.enabled) return false
+  if (devframeRuntime) return true
+  if (!devframeStart) {
+    devframeStart = createDevbarRuntime().then((runtime) => {
+      devframeRuntime = runtime
+      return runtime
+    })
+  }
+  const pending = devframeStart
+  try {
+    await pending
+    return true
   } catch (error) {
     console.error('[Devbar] Failed to start Devframe bridge', error)
+    return false
+  } finally {
+    if (devframeStart === pending) devframeStart = null
   }
 }
 
 export async function stopDevbarDevframeService(): Promise<void> {
+  const pending = devframeStart
+  if (pending) await pending.catch(() => undefined)
+  devframeStart = null
   const runtime = devframeRuntime
   devframeRuntime = null
   await runtime?.close()
+}
+
+export async function setDevbarControl(next: DevbarControlInput): Promise<{
+  ok: boolean
+  config: DevbarConfig
+}> {
+  const previous = control
+  if (!next.enabled) {
+    control = next
+    await stopDevbarDevframeService()
+    return { ok: true, config: getDevbarConfig() }
+  }
+
+  const mustRestart = devframeRuntime != null && previous.agentAccess !== next.agentAccess
+  control = next
+  if (mustRestart) await stopDevbarDevframeService()
+  const started = await startDevbarDevframeService()
+  if (!started) {
+    control = { enabled: false, agentAccess: false }
+  }
+  return { ok: started, config: getDevbarConfig() }
 }
 
 export function getDevbarMetrics(): DevbarMetrics | null {

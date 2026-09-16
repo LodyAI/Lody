@@ -26,6 +26,7 @@ export const DevbarRendererSampleSchema = z.object({
   fps: nullableMetric,
   cls: nullableMetric,
   heapBytes: nullableMetric,
+  heapPrecise: z.boolean(),
   cpu: nullableMetric,
   rssBytes: nullableMetric,
   gpuCpu: nullableMetric,

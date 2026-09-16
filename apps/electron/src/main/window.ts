@@ -25,6 +25,8 @@ import { formatUnknownError, normalizeExternalHttpUrl } from './utils'
 import { describeDeepLinkForAuthDebug } from './auth-debug'
 import { resolveMainWindowRuntimePolicy } from './window-runtime-policy'
 import { serializePreferredSystemLanguagesArgument } from '../system-language-argument'
+import { isDevbarRendererEnabled } from './services/devbar-service'
+import { devbarRendererEntry } from './services/devbar-control'
 import {
   clearMountWatchdog,
   clearUnresponsiveWatchdog,
@@ -136,8 +138,12 @@ function formatLoadFailure(details: LoadFailureDetails): string {
   ].join('\n')
 }
 
-function resolveMainRendererTarget(initialPath = '/'): ReloadTarget {
-  const rendererEntry = process.env.LODY_DEVBAR === 'true' ? 'devbar.html' : 'index.html'
+function resolveMainRendererTarget(
+  initialPath = '/',
+  devbarEnabled = isDevbarRendererEnabled(),
+  auxiliary = false
+): ReloadTarget {
+  const rendererEntry = devbarRendererEntry(devbarEnabled, auxiliary)
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
     return {
       type: 'url',
@@ -169,6 +175,28 @@ function loadRendererTarget(window: BrowserWindow, target: ReloadTarget): Promis
     return window.loadURL(target.url)
   }
   return window.loadFile(target.filePath, target.hash ? { hash: target.hash } : undefined)
+}
+
+function readCurrentRendererPath(window: BrowserWindow): string {
+  try {
+    const current = new URL(window.webContents.getURL())
+    if (current.hash.startsWith('#/')) return current.hash.slice(1)
+    if (!current.pathname.endsWith('.html') && current.pathname.startsWith('/')) {
+      return `${current.pathname}${current.search}`
+    }
+  } catch {
+    // A window still navigating has no route worth preserving.
+  }
+  return '/'
+}
+
+export async function reloadMainWindowForDevbar(
+  window: BrowserWindow,
+  enabled: boolean
+): Promise<void> {
+  const target = resolveMainRendererTarget(readCurrentRendererPath(window), enabled)
+  setReloadTarget(window, target)
+  await loadRendererTarget(window, target)
 }
 
 function isTrustedNavigation(url: string, targets: readonly ReloadTarget[]): boolean {
@@ -394,9 +422,16 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
     }
   })
   if (!options.auxiliary) trackMainWindowState(window)
-  const mainTarget = resolveMainRendererTarget(options.initialPath)
+  const initialDevbarEnabled = isDevbarRendererEnabled()
+  const mainTarget = resolveMainRendererTarget(
+    options.initialPath,
+    initialDevbarEnabled,
+    options.auxiliary
+  )
+  const standardTarget = resolveMainRendererTarget(options.initialPath, false)
+  const devbarTarget = resolveMainRendererTarget(options.initialPath, true)
   const recoveryTarget = resolveRecoveryTarget()
-  installNavigationGuard(window, [mainTarget, recoveryTarget])
+  installNavigationGuard(window, [standardTarget, devbarTarget, recoveryTarget])
   installContextMenu(window)
   setReloadTarget(window, mainTarget)
   attachMainWindowDiagnostics(window, recoveryTarget)

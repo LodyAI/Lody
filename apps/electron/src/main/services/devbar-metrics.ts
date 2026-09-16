@@ -1,9 +1,5 @@
 import type { ProcessMetric } from 'electron'
 
-export function isDevbarEnabled(value: string | undefined) {
-  return value === 'true'
-}
-
 export function summarizeDevbarMetrics(metrics: ProcessMetric[], cpuReady: boolean) {
   const gpu = metrics.filter((metric) => metric.type === 'GPU')
   const cpu = (rows: ProcessMetric[]) =>

@@ -8,8 +8,10 @@ function percent(value: number | null): string {
   return value == null ? 'Unavailable' : `${value.toFixed(1)}%`
 }
 
-function memory(value: number | null): string {
-  return value == null ? 'Unavailable' : `${(value / 1024 / 1024).toFixed(0)} MiB`
+function memory(value: number | null, precise = true): string {
+  return value == null
+    ? 'Unavailable'
+    : `${precise ? '' : '~'}${(value / 1024 / 1024).toFixed(0)} MiB`
 }
 
 function decimal(value: number | null, digits = 1): string {
@@ -77,13 +79,17 @@ export function createDevbarViewState(snapshot: DevbarSnapshot) {
     headline: {
       fps: latest?.fps == null ? '—' : latest.fps.toFixed(0),
       cpu: percent(latest?.cpu ?? null),
-      heap: memory(latest?.heapBytes ?? null),
+      heap: memory(latest?.heapBytes ?? null, latest?.heapPrecise ?? true),
       blocked: recentBlockedMs == null ? '—' : `${recentBlockedMs.toFixed(0)} ms`
     },
     trends: [
       trendRow('FPS', fpsValues, (value) => `${value.toFixed(0)}`),
       trendRow('Electron CPU', cpuValues, (value) => `${value.toFixed(1)}%`),
-      trendRow('JS heap', heapValues, (value) => `${value.toFixed(0)} MiB`),
+      trendRow(
+        latest?.heapPrecise === false ? 'JS heap (approx.)' : 'JS heap',
+        heapValues,
+        (value) => `${value.toFixed(0)} MiB`
+      ),
       trendRow('Resident memory', rssValues, (value) => `${value.toFixed(0)} MiB`),
       trendRow('Blocked / sample', blockedValues, (value) => `${value.toFixed(0)} ms`)
     ],
@@ -91,7 +97,7 @@ export function createDevbarViewState(snapshot: DevbarSnapshot) {
       'Frame rate': latest?.fps == null ? 'Unavailable' : `${latest.fps.toFixed(0)} FPS`,
       'Electron CPU': percent(latest?.cpu ?? null),
       'Resident memory': memory(latest?.rssBytes ?? null),
-      'JavaScript heap': memory(latest?.heapBytes ?? null),
+      'JavaScript heap': memory(latest?.heapBytes ?? null, latest?.heapPrecise ?? true),
       'Layout shift (CLS)': decimal(latest?.cls ?? null, 4),
       'GPU process CPU': percent(latest?.gpuCpu ?? null),
       'GPU process RSS': memory(latest?.gpuRssBytes ?? null)
@@ -297,7 +303,7 @@ export const DEVBAR_VIEW_SPEC: DevframeJsonRenderSpec = {
     explanation: {
       type: 'Text',
       props: {
-        text: 'Measurements stay in memory. Long Tasks identify blocking windows of 50 ms or more but do not include JavaScript stacks.',
+        text: 'Measurements stay in memory. A ~ heap value is Chromium’s bucketed estimate when Devbar starts after launch. Long Tasks identify blocking windows of 50 ms or more but do not include JavaScript stacks.',
         variant: 'caption',
         color: 'faint'
       },

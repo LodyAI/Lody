@@ -11,7 +11,12 @@ import macIcon from '../../build/icon-mac.padded.png?asset'
 import { acquireSingleInstanceLock, registerOpenUrlHandler } from './deep-link'
 import { registerLodyProtocolClient } from './protocol-client'
 import { registerIpcServices } from './ipc/register-services'
-import { openMainWindow, openOrFocusMainWindow, setMainWindowProductReloadTarget } from './window'
+import {
+  openMainWindow,
+  openOrFocusMainWindow,
+  reloadMainWindowForDevbar,
+  setMainWindowProductReloadTarget
+} from './window'
 import { getMainWindow, setAppQuitting, setWindowsTrayAvailable } from './window-state'
 import { CliService } from './services/cli-service'
 import { applyPendingDesktopLocalReset } from './services/local-reset-service'
@@ -278,7 +283,8 @@ if (hasSingleInstanceLock) {
       windowBadgeService,
       globalShortcutsService,
       getMainWindow,
-      completeOnboarding
+      completeOnboarding,
+      reloadMainWindowForDevbar
     })
 
     setupApplicationMenu({

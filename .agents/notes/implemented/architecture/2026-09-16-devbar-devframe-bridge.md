@@ -9,11 +9,10 @@ Translation: current
 
 The Desktop performance bar could show live counters but could not preserve a
 short diagnostic history or expose it to coding agents. The bar now uses one
-Devframe definition as a loopback RPC, shared-state, streaming, and read-only MCP
-bridge while retaining its existing React surface. This first phase intentionally
-excludes filesystem and subprocess control, standalone/static UI assets, and CPU
-profile attribution; those capabilities require separate security and product
-decisions.
+Devframe definition as a loopback RPC, shared-state, and streaming bridge while
+retaining its existing React surface. Agent projection is available only through
+a second explicit capability gate. Filesystem control, standalone/static UI
+assets, and CPU profile attribution remain separate security and product decisions.
 
 ## Problem and responsibilities
 
@@ -26,21 +25,23 @@ schemas in `@lody/shared/devbar` are the contract across both processes.
 
 ## Decision
 
-Start `lody-devbar` only when `LODY_DEVBAR=true`. It binds to `127.0.0.1` on the
-first free port from 9765 through 9785 and uses the existing React footer/overlay
-as its browser client. `record-sample` updates a shared snapshot and a replayable
-stream; `get-snapshot` and a Markdown resource are the explicitly registered
-agent-facing surfaces. Samples are capped at 120 and recent Long Tasks at 100, with
-aggregate Long Task totals retained for the process lifetime. Devframe also
-projects that shared state as a read-only MCP resource/tool.
+Ship `lody-devbar` in the production application but leave it off at process
+launch. The hidden Developer Mode control starts it on demand and reloads only the
+primary window through the Devbar-specific renderer entry; `LODY_DEVBAR=true`
+remains an automation override. The server binds to `127.0.0.1` on the first free
+port from 9765 through 9785 and uses the existing React footer/overlay as its
+browser client. `record-sample` updates a shared snapshot and a replayable stream;
+samples are capped at 120 and recent Long Tasks at 100, with aggregate Long Task
+totals retained for the process lifetime.
 
 Devframe browser authentication is disabled only for this single-user loopback
-listener; MCP retains its loopback Origin gate. The surface contains diagnostic
-data and has no file, shell, terminal, or process operations. A remote listener or
-privileged RPC must restore authentication and define a capability policy first.
-Bridge startup failure is non-fatal: local metrics and the overlay continue without
-MCP or streaming. Coding-agent hosts use `devframe connect` so discovery follows
-the runtime-selected port and requests carry the required loopback Origin header.
+listener. The HTTP host accepts the packaged file renderer and its own origin and
+rejects other browser origins. The default surface contains diagnostic data and no
+shell, terminal, or process operations. Developer Mode provides a second switch
+that restarts the Hub with aggregate MCP and the restricted Terminals add-on; the
+later [official Hub UI decision](../feature/2026-09-16-devbar-hub-ui.md) owns that
+privileged boundary. A remote listener must restore authentication and define a
+capability policy first. Startup failure leaves the normal renderer active.
 
 The installation-profile URL `<protocol>://devbar?view=main-thread` opens the
 overlay. The Markdown agent resource includes this link, so an agent can report a
@@ -61,9 +62,9 @@ versions are listed in `minimumReleaseAgeExclude`; later releases remain quarant
 A separate Devframe SPA would duplicate the established footer and delay the first
 useful integration. It remains appropriate if diagnostics need a standalone or
 static deployment, at which point the definition must gain client assets and the
-build adapter. The terminals add-on was not included: subprocess access is a
-privileged capability unrelated to observing main-thread stalls. Long Tasks also
-do not contain JavaScript stacks, so CPU profile capture remains a later feature.
+build adapter. Subprocess access stays outside the default diagnostic capability
+and requires its separate runtime switch. Long Tasks do not contain JavaScript
+stacks, so CPU profile capture remains a later feature.
 
 This decision extends, rather than replaces, the original
 [runtime bar decision](../feature/2026-09-08-desktop-devbar.md). Current guarantees
@@ -73,9 +74,10 @@ partially supersedes this note's UI and subprocess exclusions.
 
 ## Outcome and verification
 
-Electron and shared-package typechecks pass. Seven deterministic Devbar tests cover
-the runtime gate, metrics, CLS windows, bounded Long Task history, aggregate
-recording, and deep-link selection. The Electron application build succeeds with
+Electron and shared-package typechecks pass. Deterministic Devbar tests cover the
+runtime and secondary capability gates, browser-origin boundary, renderer entry,
+metrics, CLS windows, bounded Long Task history, aggregate recording, and deep-link
+selection. The Electron application build succeeds with
 Devframe in the main bundle. A built-output smoke starts the server, fetches its
 connection metadata, and completes the MCP initialize handshake through the
 loopback Origin gate. This is not a packaged cross-platform launch, broad MCP-client

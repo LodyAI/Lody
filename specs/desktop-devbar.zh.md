@@ -14,20 +14,24 @@ Translation: current
 
 ## 行为
 
-`LODY_DEVBAR=true` 在 Dev、Staging 和 Prod 构建中启用性能栏；未设置或其他值均禁用。
-该开关不选择云部署，也不改变平台组合。
+Devbar 随 Dev、Staging 和 Prod 构建发布，但每次进程启动时默认关闭。Desktop 的
+Settings > About 中，隐藏的 Developer Mode 会显示“打开 Devbar”控件。点击后会启动本地
+Hub，并在保留路由的情况下把主窗口重载到 Devbar renderer 入口；“停止 Devbar”会关闭
+Hub 并返回普通 renderer 入口。辅助窗口不会加载 Devbar 入口。`LODY_DEVBAR=true` 仅保留
+为启动前自动开启的测试覆盖，不是产品使用的必要条件，也不选择云部署或改变平台组合。
 
 右侧显示 renderer 动画回调 FPS、排除近期输入的 CLS 最大会话窗口、最近采样区间的
 Long Task 时长，以及 Electron 进程汇总 CPU 与常驻内存。`Heap xxxM` 是 Chromium
-当前 renderer 的 JS heap 估算值，不包括其他 worker/renderer。Devbar 启动时启用精确
-内存读数。`GPU xx% xxxM` 表示 GPU 进程 CPU 和常驻内存，不表示 GPU 硬件利用率或
-VRAM。Electron 汇总不包括外部 CLI/Agent 进程，并可能重复计算共享内存页。
+当前 renderer 的 JS heap 估算值，不包括其他 worker/renderer。应用启动后才打开 Devbar
+时，该值带 `~` 前缀，因为 Chromium 精确内存开关只能在 app ready 前设置；自动化覆盖
+会在启动时启用精确读数。`GPU xx% xxxM` 表示 GPU 进程 CPU 和常驻内存，不表示 GPU
+硬件利用率或 VRAM。Electron 汇总不包括外部 CLI/Agent 进程，并可能重复计算共享内存页。
 
 选择 `DEVBAR` 会在用户应用内加载的 Devframe 官方 Hub UI 中激活 Main Thread。
 Hub 的 loopback 根地址也提供相同的独立 viewer，并包含 Main Thread、Devframe
-Inspector、Accessibility Inspector、Terminals、命令面板、设置和 dock 控件。
-Main Thread 使用 Devframe 官方 JSON-render renderer 和 `@antfu/design` 组件；Lody
-不维护另一套详细界面样式。
+Inspector、Accessibility Inspector、命令面板、设置和 dock 控件。只有开启独立的 Agent
+与终端能力后才会出现 Terminals。Main Thread 使用 Devframe 官方 JSON-render renderer
+和 `@antfu/design` 组件；Lody 不维护另一套详细界面样式。
 
 性能视图首先展示当前 FPS、CPU、heap 和阻塞时间卡片，再以紧凑 Unicode sparkline
 显示最近 60 个样本的趋势、当前值与范围，之后是可折叠的当前指标、阻塞汇总和 Chromium
@@ -35,7 +39,7 @@ Performance Timeline 报告的有界近期 Long Tasks。Devframe 1.0 官方 JSON
 没有 chart primitive，因此 sparkline 使用其标准 `DataTable` 和文本渲染，而不增加自定义
 浏览器组件或样式表。Long Task 证明 renderer 主线程至少阻塞 50 ms，但不包含 JavaScript 调用栈；
 函数归因仍需后续 CPU profile。`lody://devbar?view=main-thread`（或安装配置对应协议）
-会聚焦 Desktop 并打开该视图。
+只在 Devbar 已启用时聚焦 Desktop 并打开该视图；深链接本身不会授予能力。
 
 指标在窗口可见时约每秒刷新一次。禁用时不采样也不监听网络；窗口隐藏时暂停动画回调
 和进程轮询。不可用指标和 CPU 预热显示破折号。测量仅保存在内存，不产生遥测或持久化。
@@ -44,28 +48,32 @@ Performance Timeline 报告的有界近期 Long Tasks。Devframe 1.0 官方 JSON
 
 启用性能栏时，Desktop 在 `127.0.0.1` 启动一个 Devframe Hub，从 9765 到 9785
 选择首个可用端口。Hub 将 `lody-devbar` definition 与官方 Inspector、Accessibility
-Inspector 和 Terminals add-on 组合。React 性能栏通过类型安全 RPC 发送校验后的样本，
+Inspector 组合。React 性能栏通过类型安全 RPC 发送校验后的样本，
 发布最多 120 个样本的可重放 stream，并更新共享快照和 JSON-render view。node 端最多
 保留 120 个样本和 100 个 Long Tasks，同时在当前进程生命周期保留 Long Task 汇总。
 
-聚合 HTTP MCP endpoint 暴露只读性能查询、共享状态、Markdown resource、Inspector
-工具和 Terminals 工具。浏览器样本写入不会暴露给 Agent。Terminals 支持交互式本地 shell
-和子进程会话；任意 command 请求保持禁用，但 shell 本身仍是高权限能力。该能力只在
-显式 `LODY_DEVBAR=true` 开发者开关、loopback 绑定和 file/loopback 浏览器 Origin gate
-内接受。此本地模式关闭 Devframe 浏览器信任提示。文件管理、code-server、非 loopback
-绑定和远程访问均不在范围内，需要独立的 capability 决策与认证方案。
+Devbar 运行时，Developer Mode 会显示第二个“Agent 与终端权限”开关。启用后 Hub 会重启，
+加入聚合 HTTP MCP endpoint 和官方 Terminals add-on。MCP 此时暴露只读性能查询、共享状态、
+Markdown resource、Inspector 工具和 Terminals 工具。浏览器样本写入不会暴露给 Agent。
+Terminals 支持交互式本地 shell 和子进程会话；任意 command 请求保持禁用，但 shell 本身仍是
+高权限能力。停止 Devbar 会同时移除这两项能力。
 
-普通 renderer 入口保留原 CSP。仅 Devbar renderer 入口允许 loopback Hub script、frame、
-connection，以及官方 UI 使用的 Iconify endpoint。由于 Electron host page 使用 `file://`，
-Hub iframe dock URL 会发布成完整 loopback URL，而不是根相对路径。
+只有这个单用户 loopback 模式会关闭 Devframe 浏览器信任提示。Hub 只接受打包后的 `file://`
+renderer 和自身 loopback Origin；HTTP host 会拒绝其他浏览器 Origin。普通 renderer 入口保留
+原 CSP。仅 Devbar renderer 入口允许 loopback Hub script、frame、connection，以及官方 UI
+使用的 Iconify endpoint。由于 Electron host page 使用 `file://`，Hub iframe dock URL 会发布
+成完整 loopback URL，而不是根相对路径。文件管理、code-server、非 loopback 绑定和远程访问
+均不在范围内，需要独立的 capability 决策与认证方案。
 
 编码 Agent host 应配置一次 stdio `devframe connect` connector，而不是固定 HTTP 端口。
-connector 会发现运行实例、补充 loopback Origin header，并代理 Hub 聚合工具。Lody 中由
-Agent 写入的 MCP entry 在受信 UI 或 CLI 审核选择前保持禁用。
+connector 会发现运行实例、补充 loopback Origin header，并代理二级 gate 启用的读取或终端
+工具。Lody 中由 Agent 写入的 MCP entry 在受信 UI 或 CLI 审核选择前保持禁用。
 
-Hub 启动或连接失败不会移除本地性能栏。官方 Hub UI 和内置插件资源以锁定版本的 package
-assets 随应用提供，可嵌入也可独立打开。可移植静态快照仍需 build adapter；live Terminals
-不能进入静态构建。CPU profile 捕获仍属于独立的高权限阶段。
+Hub 启动失败时主窗口保留普通 renderer，并在 Settings 中显示错误。嵌入客户端后续断开时
+不会停止本地采样，因此 footer 可以在不丢失 node 端有界历史的情况下重连。官方 Hub UI
+和内置插件资源以锁定版本的 package assets 随应用提供，可嵌入也可独立打开。可移植静态
+快照仍需 build adapter；live Terminals 不能进入静态构建。CPU profile 捕获仍属于独立的
+高权限阶段。
 
 ## 证据
 
