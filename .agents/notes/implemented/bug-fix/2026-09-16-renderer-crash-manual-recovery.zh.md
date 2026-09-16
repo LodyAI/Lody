@@ -17,6 +17,7 @@ Electron 渲染进程崩溃会销毁通常用于上报前端异常的进程，�
 恢复页不是产品刷新。它是一个最小、独立的界面，展示原因和退出码、持久化完整的本地诊断记录，并让 Reload 按钮始终由用户发起。共享的 React `ErrorBoundary` 遵循相同规则：其 API 仍接受 `resetKeys`，但它们不能清除已捕获的错误；只有可见的 Retry 或 Reload 操作才能清除。这与等待渲染进程侧的 PostHog 不同：原生崩溃的进程已经不在了，而 React 边界可以在异常客户端 flush 时保持错误可见。
 
 没有按钮的边界需要由其拥有者提供用户操作。引导阶段的工作区 slug 探针查询出错后会刻意渲染 `null`，因为表单拥有内联诊断与 Retry 按钮；该按钮现在会在重新挂载探针前调用边界的公开 reset 方法。在此契约下交给 `resetKeys` 会使 Retry 无效，并让必经的引导步骤无法继续。
+聊天目标选择器则在边界后备界面中直接渲染紧凑的 Retry 控件，因此瞬态选择器故障无需刷新页面也能恢复。
 
 ## 考虑过的替代方案
 
@@ -26,4 +27,4 @@ Electron 渲染进程崩溃会销毁通常用于上报前端异常的进程，�
 
 ## 验证
 
-`renderer-process-gone.test.mjs` 覆盖了 clean-exit 排除和崩溃负载，包括稳定的遥测字段与恢复详情。`error-boundary-manual-recovery.test.tsx` 证明 reset-key 变化会保留崩溃页，且只有用户重试才会渲染健康子树。`workspace-screen.test.tsx` 证明无按钮的 slug 探针会通过表单拥有的 Retry 操作恢复。尚未在打包桌面构建中强制制造真实的渲染进程崩溃。
+`renderer-process-gone.test.mjs` 覆盖了 clean-exit 排除和崩溃负载，包括稳定的遥测字段与恢复详情。`error-boundary-manual-recovery.test.tsx` 证明 reset-key 变化会保留崩溃页，且只有用户重试才会渲染健康子树，并覆盖后备界面提供的恢复操作。`workspace-screen.test.tsx` 证明无按钮的 slug 探针会通过表单拥有的 Retry 操作恢复。尚未在打包桌面构建中强制制造真实的渲染进程崩溃。

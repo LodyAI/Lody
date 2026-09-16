@@ -39,6 +39,9 @@ slug probe deliberately renders `null` after a query error because the form owns
 the inline diagnostic and Retry button; that Retry now calls the boundary's public
 reset method before remounting the probe. Leaving it to `resetKeys` would make the
 retry inert under this contract and strand the required onboarding step.
+The chat target selector instead renders its own compact Retry control from the
+boundary fallback, so a transient selector failure remains recoverable without a
+page reload.
 
 ## Alternatives considered
 
@@ -56,5 +59,6 @@ crash payload, including the stable telemetry fields and recovery details.
 `error-boundary-manual-recovery.test.tsx` proves reset-key changes retain the
 crash screen and only a user retry renders the healthy subtree.
 `workspace-screen.test.tsx` proves the buttonless slug probe recovers through its
-form-owned Retry action. A real renderer-process crash has not been forced in a
-packaged desktop build.
+form-owned Retry action. The inline-boundary case proves a fallback-provided
+recovery action remounts its healthy subtree. A real renderer-process crash has
+not been forced in a packaged desktop build.
