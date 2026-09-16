@@ -148,7 +148,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   /** A crash screen changes only when the user explicitly asks it to. */
-  private reset = () => {
+  resetErrorBoundary = () => {
     this.props.onReset?.();
     this.setState({
       error: null,
@@ -167,7 +167,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
     const fallbackProps: ErrorBoundaryFallbackProps = {
       error,
-      resetErrorBoundary: this.reset,
+      resetErrorBoundary: this.resetErrorBoundary,
       componentStack: this.state.componentStack,
     };
 

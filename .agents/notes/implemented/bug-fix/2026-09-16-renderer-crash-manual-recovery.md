@@ -34,6 +34,12 @@ deliberately different from waiting for renderer-side PostHog: a native-crashed
 process is already gone, while a React boundary can keep its error visible as the
 exception client flushes.
 
+Buttonless boundaries need an owner-provided user action. The onboarding workspace
+slug probe deliberately renders `null` after a query error because the form owns
+the inline diagnostic and Retry button; that Retry now calls the boundary's public
+reset method before remounting the probe. Leaving it to `resetKeys` would make the
+retry inert under this contract and strand the required onboarding step.
+
 ## Alternatives considered
 
 **Ask the failed renderer to report before reloading.** A terminated process
@@ -48,5 +54,7 @@ copyable context and can repeat the same edge case before a user can act.
 `renderer-process-gone.test.mjs` exercises both the clean-exit exclusion and a
 crash payload, including the stable telemetry fields and recovery details.
 `error-boundary-manual-recovery.test.tsx` proves reset-key changes retain the
-crash screen and only a user retry renders the healthy subtree. A real
-renderer-process crash has not been forced in a packaged desktop build.
+crash screen and only a user retry renders the healthy subtree.
+`workspace-screen.test.tsx` proves the buttonless slug probe recovers through its
+form-owned Retry action. A real renderer-process crash has not been forced in a
+packaged desktop build.
