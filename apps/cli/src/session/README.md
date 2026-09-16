@@ -9,11 +9,17 @@ Dispatch architecture: context/message-flow.md — user turns arrive by being wr
 session doc (meta pointers), not via a message bus. The WS/DO path is DEPRECATED. The
 CLI/MCP orchestration contract is specs/session-orchestration.md.
 
+| Boundary         | Owner                                             | Responsibility                                                       |
+| ---------------- | ------------------------------------------------- | -------------------------------------------------------------------- |
+| Admission        | [Dispatch watcher](session-dispatch-watcher.ts)   | Resolves metadata activation against history, queue, and RPC offers. |
+| Execution        | [Execution service](session-execution-service.ts) | Owns turns, steer results, cancellation, and raw-request drain.      |
+| Process lifetime | [Session](session.ts)                             | Owns ACP resources and confirmed termination.                        |
+
 ## Files
 
 - `session-dispatch-watcher.ts` — the current dispatch entry: watches
   `repo.watch('doc-metadata')` plus a per-session mirror subscribe and dispatches when
-  `latestUserMsgId` differs from `lastHandledUserMsgId`. Also accepts `session/dispatch-turn`
+  the shared pending-activation predicate identifies work. Also accepts `session/dispatch-turn`
   Machine RPC pushes via `offerRpcTurn`, which stash the payload as a third turn source
   (history → queue → stash) and wake the per-session check chain. That RPC ack means delivered, not
   authorized or executed. Its extensive header comment
@@ -107,28 +113,33 @@ writes are never gated; some sit on the prompt critical path.
 
 ### Why the pointer write is bundled with the history append
 
-`latestUserMsgId` lives in workspace meta — the activation index that startup scans — and so
-cannot be derived from history. `lastHandledUserMsgId` advances to every turn that RUNS, so a
-turn that never passes through `latestUserMsgId` leaves a drained queue with the two pointers
-permanently unequal, which reads as a pending activation forever: the watcher waits out
-`HISTORY_SYNC_WAIT_TIMEOUT_MS` and then negatively acknowledges a present, terminal turn with a
-bogus `message_delivery_failed` notice. `SessionDocument.appendUserTurn` is the binding that
-prevents a separate hand-written pointer write from being one forgotten line away from that
-bug. The producers that deliberately fold the pointer into a larger meta patch are durable
-create (`commands/session.ts` `writeDispatchPointer`), dispatch start and steer ownership
-transfer (`session-execution-service.ts`), and edit-and-resend; the renderer authors its own
-writes and cannot reach `SessionDocument` at all.
+`latestUserMsgId` is the producer-owned metadata activation, separate from history transport.
+`SessionDocument.appendUserTurn` bundles history acceptance with publication so idle watchers
+and startup can discover an ordinary send. Durable create and edit-and-resend publish their
+own producer activation; execution start, completion, and steer handoff never rewrite it.
 
-Requeueing a refused steer works through the pointer rather than the entry status because
-`sessionNeedsActiveWatch` reads meta only: a turn visible solely in history is dropped the
-moment the session goes idle and is never reconsidered, restart included.
+Refused steers use daemon-owned `steerTurnStatuses[userTurnId] = 'pending'`. A history-only
+status change would not wake an idle watcher, while reusing the latest pointer could erase a
+newer send. The shared activation predicate includes these exact-id pending records; ordinary
+claim and missing-history failure acknowledge only that record. The same map retains steer
+status/provenance until the exact history row arrives. Terminal projections clear their
+records; applied processing stays recorded until execution ends. After restart, an abandoned
+applied processing record becomes canceled, never an ordinary replay.
 
 The execution service does not decide that interruption means non-delivery. AgentClient returns
 `applied`, `not-applied`, or `unknown`; only `not-applied` can move a steer back to ordinary
 dispatch, and only when the cancellation boundary selected `pendingInput: 'promote'`. User Stop
 selects promotion, while internal cancellation such as Edit & Resend and access revocation
-preserves the pending input. `unknown` remains `pending_apply` and is surfaced as
-`delivery-unknown`, preventing an exactly-once ambiguity from becoming a duplicate prompt.
+preserves the pending input. `unknown` becomes `delivery_unknown` in history. The UI offers a
+confirmed fresh send with a duplicate-work warning, never an automatic retry. RPC application
+ACKs update presentation only; the execution service alone projects processing and terminal
+steer status, so delayed ACKs cannot resurrect canceled or completed history.
+
+Stop and target completion abort local steer waits before entering the serialized completion
+lane. A submitted request keeps its late verdict outside that lane and its rewrite lease.
+Raw prompt/steer requests and configuration work remain in the owner's five-second drain;
+termination failure keeps ownership. Steer configuration checks the local signal before each
+subsequent mutation. Already-applied handoff commits before queued completion can run.
 
 Cancellation separately selects the pre-prompt process lifetime. Stop and access revocation
 discard it; Edit & Resend keeps it because preparation has already created the replacement
@@ -136,11 +147,11 @@ inside that same ACP process. Creation/restoration retain their cancellation fen
 initialization completes; those fences must not override a later `keep` during configuration.
 Binding a ready session alone does not authorize termination.
 
-History promotion and the activation pointer can fail independently. A failure returns
-`promotion-failed` with its error, preserving proof of non-delivery. The renderer repairs
-`pending_apply`, `pending`, or `seen` through ordinary dispatch, including a legacy
-`no-active-turn` response after partial promotion. Active, terminal, and removed entries
-are left alone; an unknown provider outcome never takes this recovery path.
+History promotion and activation can fail independently. `promotion-failed` preserves proof
+of non-delivery. `recoveryOwned` tells the renderer not to publish a conflicting activation;
+it retries that proven failure once through the daemon and surfaces persistent failure.
+Legacy replies retain ordinary dispatch repair for pending_apply/pending/seen. Active,
+terminal, and removed entries are left alone; unknown delivery never takes this retry path.
 
 Foreground ACP configuration runs with the owner Effect's `AbortSignal`. Each mutation checks
 that signal before the next mutation, so an old turn whose first configuration call finishes

@@ -89,7 +89,8 @@ describe('UserMessageRowView undelivered resend dialog', () => {
   });
 
   const renderRow = async (
-    onResendUndelivered: (userTurnId: string, inputBlocks: unknown) => Promise<boolean>
+    onResendUndelivered: (userTurnId: string, inputBlocks: unknown) => Promise<boolean>,
+    message = undeliveredMessage
   ) => {
     const store = createStore();
     store.set(sessionMetaCacheAtom, { [getSessionRoomId(sessionId)]: markerMeta });
@@ -99,7 +100,7 @@ describe('UserMessageRowView undelivered resend dialog', () => {
           JotaiProvider,
           { store },
           createElement(MessageRowView, {
-            message: undeliveredMessage,
+            message,
             sessionId,
             onResendUndelivered,
           })
@@ -136,6 +137,27 @@ describe('UserMessageRowView undelivered resend dialog', () => {
     await click(queryBodyButton('Cancel'));
     expect(onResendUndelivered).not.toHaveBeenCalled();
     expect(document.body.textContent).not.toContain('did not run');
+  });
+
+  it('warns that unknown delivery may repeat work and waits for explicit confirmation', async () => {
+    const submissions: unknown[] = [];
+    await renderRow(
+      async (id, blocks) => {
+        submissions.push({ id, blocks });
+        return true;
+      },
+      { ...undeliveredMessage, status: 'delivery_unknown', read: true }
+    );
+    expect(document.body.textContent).not.toContain('Not delivered');
+    await click(queryBodyButton('Application unknown'));
+    expect(document.body.textContent).toContain('may already have applied');
+    expect(document.body.textContent).toContain('could repeat work');
+    expect(document.body.textContent).not.toContain('did not run');
+    expect(submissions).toEqual([]);
+    await click(queryBodyButton('Resend message'));
+    expect(submissions).toEqual([
+      { id: missingTurnId, blocks: buildResendInputBlocks(undeliveredMessage) },
+    ]);
   });
 
   it('keeps the label non-interactive without a resend handler', async () => {

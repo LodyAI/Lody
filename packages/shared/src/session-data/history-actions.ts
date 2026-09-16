@@ -42,6 +42,8 @@ export type HistoryAction =
       requeueUndelivered?: boolean;
       onlyPendingApply?: boolean;
       deliveredSteer?: boolean;
+      /** Execution-owned steer projection cannot regress a terminal or ordinary input. */
+      steerProjection?: boolean;
     }
   | {
       kind: 'finish-assistant';
@@ -180,6 +182,8 @@ export function applyHistoryAction(
       const entry = history.find((t) => t.id === action.turnId && t.role === 'user');
       if (!entry) return { turns: history, matched: action.requeueUndelivered === true };
       if (action.onlyPendingApply && entry.status !== 'pending_apply')
+        return { turns: history, matched: false };
+      if (action.steerProjection && !['pending_apply', 'processing'].includes(entry.status ?? ''))
         return { turns: history, matched: false };
       if (action.requeueUndelivered) {
         if (!['pending_apply', 'pending', 'seen'].includes(entry.status ?? ''))

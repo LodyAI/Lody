@@ -482,6 +482,7 @@ export type SessionHistorySendStatus = 'timeout';
 export type SessionHistoryStatus =
   | 'pending'
   | 'pending_apply'
+  | 'delivery_unknown'
   | 'seen'
   | 'processing'
   | 'handled'
@@ -586,7 +587,7 @@ export const isSessionHistoryDelivered = (
 ): boolean => {
   const status = resolveSessionHistoryStatus(entry);
   if (status) {
-    return status !== 'pending' && status !== 'pending_apply';
+    return status !== 'pending' && status !== 'pending_apply' && status !== 'delivery_unknown';
   }
   return entry?.read === true;
 };
@@ -918,6 +919,11 @@ export type SessionMeta = {
    * producers; execution terminal bookkeeping must never rewrite it.
    */
   latestUserMsgId?: string;
+  /** Daemon-owned steer results awaiting history projection or ordinary dispatch claim. */
+  steerTurnStatuses?: Record<
+    string,
+    'pending' | 'processing' | 'handled' | 'failed' | 'canceled' | 'delivery_unknown'
+  >;
   /** Assistant turn id the client wants to stop; cancel is ignored unless it matches the machine's in-memory active turn. */
   lastCanceledTurn?: string;
   /** Latest user history entry id that the machine has fully handled. */
@@ -1033,7 +1039,12 @@ export function getPendingUserTurnActivationId(meta: SessionMeta): string | unde
   ) {
     return meta.latestUserMsgId;
   }
-  return undefined;
+  return Object.keys(meta.steerTurnStatuses ?? {}).find(
+    (id) =>
+      meta.steerTurnStatuses?.[id] === 'pending' &&
+      id !== missingUserTurnId &&
+      id !== settledUserTurnId
+  );
 }
 
 export function hasPendingUserTurnActivation(meta: SessionMeta): boolean {

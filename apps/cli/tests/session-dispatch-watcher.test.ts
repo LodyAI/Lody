@@ -90,6 +90,8 @@ const addPreparedDispatchShim = (
     tryAcquireSessionRewriteConflictLease?: () => (() => void) | null;
   };
   service.tryAcquireSessionRewriteConflictLease ??= () => () => {};
+  service.reconcileSteerHistory ??= async () => {};
+  service.acknowledgeSteerTurn ??= async () => {};
   if (service.dispatchPreparedSessionTurn) {
     return executionService;
   }

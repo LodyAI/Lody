@@ -669,6 +669,7 @@ export const SessionSteerResponseSchema = z
     sessionId: SessionIdSchema,
     userTurnId: z.string().trim().min(1),
     applied: z.boolean(),
+    recoveryOwned: z.boolean().optional(),
     disposition: z.enum([
       'applied',
       'unsupported',

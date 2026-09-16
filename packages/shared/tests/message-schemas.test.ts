@@ -200,6 +200,7 @@ describe('message-schemas session steer', () => {
         userTurnId: 'user-2',
         applied: false,
         disposition: 'promotion-failed',
+        recoveryOwned: true,
         error: 'Activation write failed',
       }).success
     ).toBe(true);

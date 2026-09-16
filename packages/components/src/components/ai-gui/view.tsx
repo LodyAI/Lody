@@ -2894,6 +2894,10 @@ const UserMessageRowView = ({
   const rpcDeliveredTurns = useAtomValue(rpcDeliveredTurnsAtom);
   const rpcDelivered = rpcDeliveredTurns.has(getRpcDeliveredTurnKey(sessionId, message.id));
   const isPendingApply = message.status === 'pending_apply' && !rpcDelivered;
+  const isDeliveryUnknown = message.status === 'delivery_unknown';
+  const recoveryLabel = isDeliveryUnknown
+    ? t('sessions.messageStatus.deliveryUnknown', 'Application unknown')
+    : t('sessions.messageStatus.notDelivered', 'Not delivered');
   const isDelivered = !isPendingApply && (isSessionHistoryDelivered(message) || rpcDelivered);
   // Missing-history recovery negatively acknowledged this exact turn
   // (`SessionMeta.lastMissingHistoryUserMsgId`): the entry is visible but kept
@@ -2908,7 +2912,7 @@ const UserMessageRowView = ({
   );
   const pinCtx = useSessionPin();
   const showSendingSpinner =
-    useIsMessageSendingVisible(message.id) && !isDelivered && !isUndelivered;
+    useIsMessageSendingVisible(message.id) && !isDelivered && !isUndelivered && !isDeliveryUnknown;
 
   const hasTextContent = hasTextContentFromMessageItems(message.items);
   const [didCopy, setDidCopy] = useState(false);
@@ -3002,21 +3006,24 @@ const UserMessageRowView = ({
             </span>
           ) : null}
           {timestampLabel ? <span className="tabular-nums">{timestampLabel}</span> : null}
-          {isUndelivered ? (
+          {isUndelivered || isDeliveryUnknown ? (
             onResendUndelivered ? (
               <button
                 type="button"
                 className="inline-flex items-center gap-1 rounded-sm text-destructive underline-offset-2 transition-colors hover:text-destructive/80 hover:underline"
-                aria-label={t('sessions.resendUndelivered.action', 'Resend message')}
                 onClick={() => setResendDialogOpen(true)}
+                aria-label={recoveryLabel}
               >
                 <AlertCircle className="h-3.5 w-3.5" strokeWidth={2} />
-                {!isMobile ? t('sessions.messageStatus.notDelivered', 'Not delivered') : null}
+                {!isMobile ? recoveryLabel : null}
               </button>
             ) : (
-              <span className="inline-flex items-center gap-1 text-destructive">
+              <span
+                className="inline-flex items-center gap-1 text-destructive"
+                title={recoveryLabel}
+              >
                 <AlertCircle className="h-3.5 w-3.5" strokeWidth={2} />
-                {!isMobile ? t('sessions.messageStatus.notDelivered', 'Not delivered') : null}
+                {!isMobile ? recoveryLabel : null}
               </span>
             )
           ) : isPendingApply ? (
@@ -3194,6 +3201,7 @@ const UserMessageRowView = ({
       </div>
       {onResendUndelivered ? (
         <ResendUndeliveredDialog
+          deliveryUnknown={isDeliveryUnknown}
           open={resendDialogOpen}
           onOpenChange={setResendDialogOpen}
           isResending={isResending}
@@ -3277,11 +3285,13 @@ const ResendUndeliveredDialog = ({
   onOpenChange,
   isResending,
   onConfirm,
+  deliveryUnknown = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   isResending: boolean;
   onConfirm: () => void;
+  deliveryUnknown?: boolean;
 }) => {
   const { t } = useTranslation();
   return (
@@ -3289,13 +3299,20 @@ const ResendUndeliveredDialog = ({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            {t('sessions.resendUndelivered.title', 'Message not delivered')}
+            {deliveryUnknown
+              ? t('sessions.messageStatus.deliveryUnknown', 'Application unknown')
+              : t('sessions.resendUndelivered.title', 'Message not delivered')}
           </AlertDialogTitle>
           <AlertDialogDescription>
-            {t(
-              'sessions.resendUndelivered.description',
-              'This message never reached the agent, so it did not run. Resend the same content as a new message?'
-            )}
+            {deliveryUnknown
+              ? t(
+                  'sessions.resendUndelivered.unknownDescription',
+                  'The agent may already have applied this guidance. Sending it as a new message could repeat work. Send again?'
+                )
+              : t(
+                  'sessions.resendUndelivered.description',
+                  'This message never reached the agent, so it did not run. Resend the same content as a new message?'
+                )}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

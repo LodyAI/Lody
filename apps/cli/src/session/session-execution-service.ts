@@ -91,7 +91,7 @@ import {
   type ManagedRuntimeName,
 } from '@/agent/managed-agent-runtime';
 import type { FetchAcpCapabilitiesOptions } from '@/agent/acp-capabilities';
-import { AcpAuthenticationRequiredError } from '@/agent/agent-client';
+import { AcpAuthenticationRequiredError, type SteerOutcomeResult } from '@/agent/agent-client';
 import type { GoalPromptControl } from '@/agent/goal-control';
 import {
   AcpAuthenticationManager,
@@ -233,6 +233,23 @@ type PromptHandoffRun = {
   signalSuccessor: () => void;
 };
 
+class SteerWaitEnded extends Error {}
+
+/** Cancels only the local wait; the caller retains ownership of any submitted work. */
+async function waitForSteer<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
+  let onAbort: (() => void) | undefined;
+  const stopped = new Promise<never>((_, reject) => {
+    onAbort = () => reject(new SteerWaitEnded('The target turn is no longer accepting steer'));
+    signal.addEventListener('abort', onAbort, { once: true });
+    if (signal.aborted) onAbort();
+  });
+  try {
+    return await Promise.race([work, stopped]);
+  } finally {
+    if (onAbort) signal.removeEventListener('abort', onAbort);
+  }
+}
+
 type SessionGoalTurnRequest = {
   sessionId: SessionId;
   control: GoalPromptControl;
@@ -272,6 +289,8 @@ type TurnRuntimeState = {
   cancelFinalized: boolean;
   /** One drain deadline shared by Stop and the cancellation finalizer. */
   cancellationDrain?: Promise<void>;
+  steerWaitController?: AbortController;
+  pendingSteerConfig?: Set<Promise<void>>;
   interruptRequested: boolean;
   terminateSessionOnCancel: boolean;
   settlement?: {
@@ -742,6 +761,7 @@ export class SessionExecutionService {
   // application never race the boundary. No global concurrency cap (Infinity):
   // this is pure per-session serialization, matching the old hand-rolled lock.
   private readonly steerMutationQueue = new ConcurrentQueue<SessionId>(Number.POSITIVE_INFINITY);
+  private readonly steerStatusQueue = new ConcurrentQueue<SessionId>(Number.POSITIVE_INFINITY);
   // Analytics-only state (spec §5b). Tracks per-turn timing + the last status
   // we reported so status_changed can carry from→to + dwell time. Never read by
   // product logic; kept here so capture stays side-effect-only.
@@ -796,6 +816,7 @@ export class SessionExecutionService {
         run.promptOutcome.then((outcome) => ({ type: 'prompt' as const, outcome })),
         run.successorReady.then(() => ({ type: 'successor' as const })),
       ]);
+      if (settled.type === 'prompt' && !run.successor) runtime.steerWaitController?.abort();
       const decision = await this.steerMutationQueue.enqueue(runtime.sessionId, async () => {
         if (
           this.turnRuntimeBySession.get(runtime.sessionId) !== runtime ||
@@ -826,6 +847,7 @@ export class SessionExecutionService {
         run = decision.run;
         continue;
       }
+      if (runtime.session) await this.drainCancelledPrompt(runtime.session, runtime);
       if (decision.outcome.status === 'rejected') {
         throw decision.outcome.error;
       }
@@ -1367,7 +1389,9 @@ export class SessionExecutionService {
     timestamp: string;
     inputConfig: SessionTurnInputConfig;
   }): Promise<SessionSteerResponse> {
-    return await this.steerMutationQueue.enqueue(options.sessionId, async () => {
+    const result = await this.steerMutationQueue.enqueue<
+      SessionSteerResponse | { response: Promise<SessionSteerResponse> }
+    >(options.sessionId, async () => {
       const releaseConflict = this.tryAcquireSessionRewriteConflictLease(options.sessionId);
       if (!releaseConflict) {
         // A rewrite (not user Stop) owns the session. Keep the steer in
@@ -1388,6 +1412,7 @@ export class SessionExecutionService {
         releaseConflict();
       }
     });
+    return 'response' in result ? await result.response : result;
   }
 
   private async steerSessionLocked(options: {
@@ -1397,7 +1422,8 @@ export class SessionExecutionService {
     userId: string;
     timestamp: string;
     inputConfig: SessionTurnInputConfig;
-  }): Promise<SessionSteerResponse> {
+  }): Promise<SessionSteerResponse | { response: Promise<SessionSteerResponse> }> {
+    let preparedDoc: SessionDocument | undefined;
     const reject = (
       disposition: Exclude<SessionSteerResponse['disposition'], 'applied'>,
       error?: string
@@ -1406,6 +1432,7 @@ export class SessionExecutionService {
       sessionId: options.sessionId,
       userTurnId: options.userTurnId,
       applied: false,
+      recoveryOwned: true,
       disposition,
       ...(error ? { error } : {}),
     });
@@ -1420,9 +1447,7 @@ export class SessionExecutionService {
       error?: string
     ): Promise<SessionSteerResponse> => {
       try {
-        await this.requeueUndeliveredSteer(options.sessionId, options.userTurnId, {
-          canWriteHistory: true,
-        });
+        await this.requeueUndeliveredSteer(options.sessionId, options.userTurnId, preparedDoc);
       } catch (promotionError) {
         // Delivery is known even when its recovery write fails. Do not let the
         // provider-submission catch below reclassify it as delivery-unknown.
@@ -1445,6 +1470,8 @@ export class SessionExecutionService {
     if (!runtime.promptInFlight) {
       return await rejectAndPromote('no-active-turn');
     }
+    const waitController = (runtime.steerWaitController ??= new AbortController());
+    const wait = <T>(work: Promise<T>) => waitForSteer(work, waitController.signal);
     if (runtime.userTurnId === options.userTurnId) {
       return {
         type: 'session/steer_response',
@@ -1491,27 +1518,41 @@ export class SessionExecutionService {
     // Everything up to `steerPrompt` returning is provably undelivered; after
     // that only the agent's own inject-or-refuse verdict can say so.
     let providerSubmissionStarted = false;
+    let providerApplicationConfirmed = false;
     try {
-      const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(options.sessionId);
+      const sessionDoc = await wait(
+        this.deps.workspaceDocument.getOrCreateSessionDoc(options.sessionId)
+      );
+      preparedDoc = sessionDoc;
       const inputBlocks = normalizeSessionInputBlocks(
         options.inputConfig.inputBlocks,
         options.inputConfig.prompt ?? ''
       );
-      const promptBlocks = await this.deps.buildAcpPromptBlocks({
-        workspaceId: this.deps.workspaceId,
-        sessionId: options.sessionId,
-        inputBlocks,
-        issuePRMentions: options.inputConfig.issuePRMentions,
-      });
+      const promptBlocks = await wait(
+        this.deps.buildAcpPromptBlocks({
+          workspaceId: this.deps.workspaceId,
+          sessionId: options.sessionId,
+          inputBlocks,
+          issuePRMentions: options.inputConfig.issuePRMentions,
+        })
+      );
       const preConfigRejection = await rejectBeforeProviderSubmission();
       if (preConfigRejection) {
         return preConfigRejection;
       }
       if (steerCapability.configPolicy === 'apply') {
-        await this.deps.applyAcpModeAndModel(runtime.session, options.inputConfig, {
+        const configuring = this.deps.applyAcpModeAndModel(runtime.session, options.inputConfig, {
           sessionDoc,
           basedOnUserTurnId: options.userTurnId,
+          signal: waitController.signal,
         });
+        const pending = (runtime.pendingSteerConfig ??= new Set());
+        pending.add(configuring);
+        const release = () => {
+          pending.delete(configuring);
+        };
+        void configuring.then(release, release);
+        await wait(configuring);
       }
 
       const preSubmitRejection = await rejectBeforeProviderSubmission();
@@ -1538,7 +1579,57 @@ export class SessionExecutionService {
       const previousUserTurnId = runtime.userTurnId;
       const steerRun = agentClient.steerPrompt(acpSessionId, promptBlocks);
       providerSubmissionStarted = true;
-      const steerOutcome = await steerRun.outcome;
+      let steerOutcome: SteerOutcomeResult;
+      try {
+        steerOutcome = await wait(steerRun.outcome);
+      } catch (error) {
+        if (!(error instanceof SteerWaitEnded)) throw error;
+        // The raw request still owns its delivery verdict. It no longer owns
+        // this queue/lease, and can only settle this exact user input.
+        const response = steerRun.outcome
+          .then(async (outcome) => {
+            providerApplicationConfirmed = outcome.outcome === 'applied';
+            try {
+              if (outcome.outcome === 'not-applied') {
+                if (!runtime.cancelRequested || runtime.pendingInputOnCancel === 'promote') {
+                  return await rejectAndPromote(
+                    'no-active-turn',
+                    formatErrorMessage(outcome.error)
+                  );
+                }
+              } else {
+                await this.setSteerHistoryStatus(
+                  options.sessionId,
+                  sessionDoc,
+                  options.userTurnId,
+                  outcome.outcome === 'unknown'
+                    ? 'delivery_unknown'
+                    : runtime.cancelRequested
+                      ? 'canceled'
+                      : 'handled'
+                );
+                if (outcome.outcome === 'unknown')
+                  return reject('delivery-unknown', formatErrorMessage(outcome.error));
+              }
+              return reject(
+                'stale-turn',
+                'The target turn ended before steer ownership could transfer'
+              );
+            } finally {
+              if (outcome.outcome === 'applied') outcome.application.release();
+            }
+          })
+          .catch((failure: unknown) => {
+            this.deps.logger.error(
+              `[${options.sessionId}] Failed to settle stopped steer ${options.userTurnId}: ${formatErrorMessage(failure)}`
+            );
+            return reject(
+              providerApplicationConfirmed ? 'error' : 'delivery-unknown',
+              formatErrorMessage(failure)
+            );
+          });
+        return { response };
+      }
       if (steerOutcome.outcome === 'not-applied') {
         if (!runtime.cancelRequested || runtime.pendingInputOnCancel === 'promote') {
           return await rejectAndPromote('no-active-turn', formatErrorMessage(steerOutcome.error));
@@ -1549,9 +1640,16 @@ export class SessionExecutionService {
         );
       }
       if (steerOutcome.outcome === 'unknown') {
+        await this.setSteerHistoryStatus(
+          options.sessionId,
+          sessionDoc,
+          options.userTurnId,
+          'delivery_unknown'
+        );
         return reject('delivery-unknown', formatErrorMessage(steerOutcome.error));
       }
       const { application } = steerOutcome;
+      providerApplicationConfirmed = true;
       try {
         if (
           runtime.cancelRequested ||
@@ -1561,14 +1659,12 @@ export class SessionExecutionService {
           runtime.activePromptRun !== ownedPromptRun
         ) {
           // Provider acceptance forbids replay; Stop keeps the source cancellation owner.
-          if (runtime.cancelRequested) {
-            await this.setTerminalUserTurnStatus(
-              options.sessionId,
-              sessionDoc,
-              options.userTurnId,
-              'canceled'
-            );
-          }
+          await this.setSteerHistoryStatus(
+            options.sessionId,
+            sessionDoc,
+            options.userTurnId,
+            runtime.cancelRequested ? 'canceled' : 'handled'
+          );
           return reject(
             'stale-turn',
             'Steer application arrived after cancellation or ownership changed'
@@ -1638,6 +1734,7 @@ export class SessionExecutionService {
         runtime.activePromptRun = nextPromptRun;
         runtime.turnId = nextTurnId;
         runtime.userTurnId = options.userTurnId;
+        if (!runtime.cancelRequested) runtime.steerWaitController = new AbortController();
         this.markCurrentTurn(options.sessionId, nextTurnId);
         ownedPromptRun.signalSuccessor();
         return {
@@ -1652,7 +1749,33 @@ export class SessionExecutionService {
       }
     } catch (error) {
       if (providerSubmissionStarted) {
-        return reject('delivery-unknown', formatErrorMessage(error));
+        try {
+          if (preparedDoc)
+            await this.setSteerHistoryStatus(
+              options.sessionId,
+              preparedDoc,
+              options.userTurnId,
+              providerApplicationConfirmed
+                ? runtime.cancelRequested
+                  ? 'canceled'
+                  : 'failed'
+                : 'delivery_unknown'
+            );
+        } catch (projectionError) {
+          this.deps.logger.error(
+            `[${options.sessionId}] Failed to project steer ${options.userTurnId}: ${formatErrorMessage(projectionError)}`
+          );
+        }
+        return reject(
+          providerApplicationConfirmed ? 'error' : 'delivery-unknown',
+          formatErrorMessage(error)
+        );
+      }
+      if (runtime.cancelRequested && runtime.pendingInputOnCancel !== 'promote') {
+        return reject(
+          'stale-turn',
+          'The target turn was cancelled without promoting pending input'
+        );
       }
       // Failures before `steerPrompt` returns are local and therefore
       // provably unsubmitted. Provider-side ambiguity is represented only by
@@ -1667,17 +1790,13 @@ export class SessionExecutionService {
    * message gets. Without this it would sit in `pending_apply`, which dispatch
    * skips, and never run at all.
    *
-   * The `latestUserMsgId` pointer is the load-bearing half, not the entry status:
-   * `SessionDispatchWatcher.sessionNeedsActiveWatch` reads META only, so a turn
-   * visible solely in history is dropped the moment the session goes idle (the
-   * watcher unsubscribes) and is never reconsidered, including after a daemon
-   * restart. The pointer is also what survives a cancel. It is the same pointer a
-   * Web send writes, so this is the ordinary dispatch signal, not a second path.
+   * Publish an execution-owned activation, never rewind the producer's pointer.
+   * The watcher can project this result even when history arrives after the RPC.
    */
   private async requeueUndeliveredSteer(
     sessionId: SessionId,
     userTurnId: string,
-    { canWriteHistory }: { canWriteHistory: boolean }
+    sessionDoc?: SessionDocument
   ): Promise<void> {
     try {
       // Guards against a late duplicate steer request resurrecting a turn that
@@ -1693,16 +1812,10 @@ export class SessionExecutionService {
       if (meta?.lastHandledUserMsgId === userTurnId) {
         return;
       }
-      if (canWriteHistory) {
-        const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
-        if (!(await this.markSteerTurnPending(sessionDoc, userTurnId))) {
-          return;
-        }
+      if (sessionDoc && !(await this.markSteerTurnPending(sessionDoc, userTurnId))) {
+        return;
       }
-      await this.upsertSessionMeta(sessionId, {
-        latestUserMsgId: userTurnId,
-        lastMissingHistoryUserMsgId: undefined,
-      });
+      await this.updateSteerTurnStatus(sessionId, userTurnId, 'pending');
       this.deps.logger.info(
         `[${sessionId}] Undelivered steer ${userTurnId} requeued as a follow-up turn`
       );
@@ -1741,6 +1854,79 @@ export class SessionExecutionService {
         queueable = result.matched ?? false;
       });
     return queueable;
+  }
+
+  private async updateSteerTurnStatus(
+    sessionId: SessionId,
+    userTurnId: string,
+    status: NonNullable<SessionMeta['steerTurnStatuses']>[string] | undefined
+  ): Promise<void> {
+    await this.steerStatusQueue.enqueue(sessionId, async () => {
+      const meta = await this.getSessionMeta(sessionId);
+      const statuses = { ...meta?.steerTurnStatuses };
+      if (statuses[userTurnId] === status) return;
+      if (status === undefined) delete statuses[userTurnId];
+      else statuses[userTurnId] = status;
+      await this.upsertSessionMeta(sessionId, { steerTurnStatuses: statuses });
+    });
+  }
+
+  /** Acknowledges an exact recovery input, without changing a producer's activation. */
+  async acknowledgeSteerTurn(sessionId: SessionId, userTurnId: string): Promise<void> {
+    await this.updateSteerTurnStatus(sessionId, userTurnId, undefined);
+  }
+
+  private async setSteerHistoryStatus(
+    sessionId: SessionId,
+    sessionDoc: Pick<SessionDocument, 'sessionData'>,
+    userTurnId: string,
+    status: 'processing' | 'handled' | 'failed' | 'canceled' | 'delivery_unknown'
+  ): Promise<void> {
+    await this.updateSteerTurnStatus(sessionId, userTurnId, status);
+    await this.reconcileSteerHistory(sessionId, sessionDoc);
+  }
+
+  /** Results can arrive before the producer's history; metadata retains only their identity/state. */
+  async reconcileSteerHistory(
+    sessionId: SessionId,
+    sessionDoc: Pick<SessionDocument, 'sessionData'>
+  ): Promise<void> {
+    await this.steerStatusQueue.enqueue(sessionId, async () => {
+      const meta = await this.getSessionMeta(sessionId);
+      const statuses = { ...meta?.steerTurnStatuses };
+      let changed = false;
+      for (const [turnId, status] of Object.entries(statuses)) {
+        const turn = await sessionDoc.sessionData.history.readTurn(turnId);
+        if (turn.state !== 'ready' || turn.turn.role !== 'user') continue;
+        const terminal =
+          !!turn.turn.status &&
+          !['pending_apply', 'pending', 'seen', 'processing'].includes(turn.turn.status);
+        const projectedStatus =
+          status === 'processing' && !this.getExecutionSnapshot(sessionId).hasActiveTurn
+            ? 'canceled'
+            : status;
+        let matched = false;
+        if (!terminal) {
+          const result = await sessionDoc.sessionData.commands.applyHistoryAction({
+            kind: 'user-status',
+            turnId,
+            status: projectedStatus,
+            ...(status === 'pending'
+              ? { requeueUndelivered: true }
+              : {
+                  steerProjection: true,
+                  deliveredSteer: status !== 'delivery_unknown',
+                }),
+          });
+          matched = result.matched ?? false;
+        }
+        if (!matched || (projectedStatus !== 'pending' && projectedStatus !== 'processing')) {
+          delete statuses[turnId];
+          changed = true;
+        }
+      }
+      if (changed) await this.upsertSessionMeta(sessionId, { steerTurnStatuses: statuses });
+    });
   }
 
   async dispatchPreparedSessionTurn(options: PreparedSessionDispatchOptions): Promise<void> {
@@ -2040,13 +2226,18 @@ export class SessionExecutionService {
 
   private drainCancelledPrompt(session: ISession, runtime?: TurnRuntimeState): Promise<void> {
     if (runtime?.cancellationDrain) return runtime.cancellationDrain;
-    const pendingPrompt = session.agentClient?.pendingPromptCompletion;
-    if (!pendingPrompt) return Promise.resolve();
+    const requests = () =>
+      [session.agentClient?.pendingPromptCompletion, ...(runtime?.pendingSteerConfig ?? [])].filter(
+        (work): work is Promise<void> => !!work
+      );
+    const pending = requests();
+    if (pending.length === 0) return Promise.resolve();
+    const pendingPrompt = Promise.allSettled(pending).then(() => undefined);
 
     const drain = withTimeout(pendingPrompt, 5_000, 'ACP prompt cancellation timed out').catch(
       async () => {
         // A terminal response may have won just after the timeout fired.
-        if (!session.agentClient?.pendingPromptCompletion) return;
+        if (requests().length === 0) return;
         if (runtime && this.getTurnRuntime(runtime.sessionId, runtime.turnId) !== runtime) return;
         this.deps.logger.warn(
           `[${session.sessionId}] ACP prompt did not finish after cancellation; terminating session before reuse`
@@ -2132,6 +2323,7 @@ export class SessionExecutionService {
       if (runtime) {
         runtime.cancelFinalized = true;
         runtime.cancelRequested = true;
+        runtime.steerWaitController?.abort();
       }
       self.deps.clearActiveTurnId(options.sessionId, options.turnId);
 
@@ -3412,6 +3604,11 @@ export class SessionExecutionService {
     userTurnId: string,
     status: 'handled' | 'failed' | 'canceled'
   ): Promise<void> {
+    const meta = await this.getSessionMeta(sessionId);
+    if (meta?.steerTurnStatuses?.[userTurnId] === 'processing') {
+      await this.setSteerHistoryStatus(sessionId, sessionDoc, userTurnId, status);
+      return;
+    }
     const matched = await this.setUserTurnStatus(sessionDoc, userTurnId, status);
     if (!matched) {
       this.recordTerminalTurnWithoutEntry(sessionId, userTurnId, status);
@@ -3486,6 +3683,7 @@ export class SessionExecutionService {
       // newer activation published by another peer.
       processingUserMsgId: userTurnId,
     });
+    await this.acknowledgeSteerTurn(sessionId, userTurnId);
   }
 
   private async transitionDispatchOwnership(options: {
@@ -3502,17 +3700,15 @@ export class SessionExecutionService {
         'handled'
       );
     }
-    await options.sessionDoc.sessionData.commands.applyHistoryAction({
-      kind: 'user-status',
-      turnId: options.nextUserTurnId,
-      status: 'processing',
-      deliveredSteer: true,
-    });
+    await this.setSteerHistoryStatus(
+      options.sessionId,
+      options.sessionDoc,
+      options.nextUserTurnId,
+      'processing'
+    );
     await this.upsertSessionMeta(options.sessionId, {
-      latestUserMsgId: options.nextUserTurnId,
       ...(options.previousUserTurnId ? { lastHandledUserMsgId: options.previousUserTurnId } : {}),
       processingUserMsgId: options.nextUserTurnId,
-      lastMissingHistoryUserMsgId: undefined,
     });
   }
 
@@ -5294,7 +5490,6 @@ export class SessionExecutionService {
     }
     this.deps.logger.info(`Session stop requested: ${sessionId}`);
     this.deps.logger.debug(`[${sessionId}] Received stop request for turn ${turnId}`);
-    const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
     const activeTurnId = this.deps.getActiveTurnId(sessionId);
     const executionTurnId = this.currentTurnBySession.get(sessionId);
     const runtimeTurnId = this.turnRuntimeBySession.get(sessionId)?.turnId;
@@ -5312,6 +5507,7 @@ export class SessionExecutionService {
         const releaseConflict = this.tryAcquireSessionRewriteConflictLease(sessionId);
         if (releaseConflict) {
           try {
+            const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
             const liveTurnId =
               this.deps.getActiveTurnId(sessionId) ??
               this.currentTurnBySession.get(sessionId) ??
@@ -5380,6 +5576,14 @@ export class SessionExecutionService {
         }
       }
       runtime.cancelRequested = true;
+      runtime.steerWaitController?.abort();
+      const runtimeSession = runtime.session ?? this.deps.sessionManager.getSession(sessionId);
+      if (
+        runtime.cancellationDrain &&
+        (runtimeSession?.agentClient?.pendingPromptCompletion || runtime.pendingSteerConfig?.size)
+      ) {
+        return { success: true };
+      }
       if (runtime.finalizeStarted) {
         this.deps.logger.debug(
           `[${sessionId}] Stop request received while turn ${turnId} is finalizing; interrupting owner turn`
@@ -5387,7 +5591,6 @@ export class SessionExecutionService {
         this.requestTurnInterrupt(runtime);
         return { success: true };
       }
-      const runtimeSession = runtime.session ?? this.deps.sessionManager.getSession(sessionId);
       if (runtime.promptInFlight) {
         if (!runtimeSession?.agentClient?.isCreated() || !runtimeSession.acpSessionId) {
           this.deps.logger.debug(
@@ -5413,6 +5616,13 @@ export class SessionExecutionService {
       return { success: true };
     }
 
+    const sessionDoc = await this.deps.workspaceDocument.getOrCreateSessionDoc(sessionId);
+    const liveTurnId =
+      this.turnRuntimeBySession.get(sessionId)?.turnId ??
+      this.currentTurnBySession.get(sessionId) ??
+      this.deps.getActiveTurnId(sessionId);
+    if (liveTurnId && liveTurnId !== turnId) return { success: true };
+    if (this.getTurnRuntime(sessionId, turnId)) return this.cancelSession(message, options);
     if (isPrompting) {
       this.deps.clearActiveTurnId(sessionId, turnId);
     }

@@ -202,6 +202,7 @@ export function resolveEditableTail<T extends EditableTailTurn>(
   if (userIndex < 0 || !turn || turn.id !== expectedUserTurnId || turn.role !== 'user') return null;
   if (
     turn.status === 'pending_apply' ||
+    turn.status === 'delivery_unknown' ||
     asRecord(turn.inputConfig)?._lodyDeliveryKind === 'steer'
   ) {
     return null;

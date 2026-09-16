@@ -44,15 +44,26 @@ Translation: current
 - 手动 Codex 压缩持有 native turn 直到完成。Stop 中断该 turn，并保留 ACP prompt，
   直到 `turn/completed` 确认结果或 provider 连接关闭。对已 in-flight 且 ACP session 就绪的
   prompt，Lody 记录取消并发送 provider cancel，不中断 owner fiber。ACP 返回前保留 owner
-  和未完成的历史；新 dispatch 及未投递的 steer 保持 pending。Stop 后五秒 raw prompt
-  仍未结束时，Lody 终止旧 session，让连接关闭结束 prompt。计时不等待 cancel ACK，
+  和未完成的历史；新 dispatch 及未投递的 steer 保持 pending。raw steer 请求和在途 steer
+  配置也纳入同一收尾流程。Stop 后五秒仍有请求未结束时，Lody 终止旧 session，让连接关闭
+  结束请求。计时不等待 cancel ACK，
   也不因重复 Stop 重置。终止失败则继续持有 owner，直到 ACP 结束。start/interrupt ACK
   和压缩 item 的完成均不能释放执行 ownership。CLI 在取消确认后、接受下一轮前，
   将尚未结束的压缩标记为 failed。打开 Session 不触发历史修复 RPC，也不改写旧结果。
 - steer adapter 只报告三种最终投递结果：`applied`、`not-applied` 或 `unknown`。只有
   `not-applied` 可以把同一个用户轮次交回普通 dispatch；`applied` 表示已经消费，
-  `unknown` 则保持 `pending_apply` 并返回 `delivery-unknown`。Session execution 不根据
-  Stop、传输失败或本地 ownership 状态推断投递结果。
+  `unknown` 则在历史中变为 `delivery_unknown` 并返回 `delivery-unknown`，绝不自动调度。
+  显式重发必须提示原消息可能已经执行，并创建新的用户轮次；不能改写原投递结论。
+  Session execution 不根据 Stop、传输失败或本地 ownership 状态推断投递结果。
+- Stop 和目标 prompt 结束会中止本地文档加载、准备、配置及投递结论等待，释放 steer 队列
+  和 rewrite lease；不取消原始请求，也不丢弃其结论。已经进入 applied 所有权交接的操作
+  必须完整结束；排队中的 steer 不得为已停止的目标开始准备。结果持久化失败仍须释放
+  application lease，并允许取消收尾继续。
+- 执行端统一拥有 steer 状态，以及 `steerTurnStatuses` 中按消息 ID 记录的恢复激活。
+  拒绝结果不得回退生产者的 `latestUserMsgId`，也不得清除其他消息的 missing-history 标记。
+  watcher 在历史到达时投影结果，并在普通执行接管、终态投影或历史缺失失败后清理恢复项。
+  RPC applied ACK 只是展示提示，不能由前端回写执行状态；迟到 ACK 不得复活终态消息。
+  已应用的 steer provenance 必须阻止普通重启调度重放该消息。
 - 取消 turn 必须显式携带 pending-input 策略。用户 Stop 可以提升已确定为
   `not-applied` 的 steer；Edit & Resend、访问撤销和 cleanup 必须保持它。若 Stop 先于
   `applied` 结果发生，晚到结果不能转移 ownership，也不能重放该用户轮次。重复取消竞争时，
@@ -61,10 +72,13 @@ Translation: current
   选择 preserve/keep，访问撤销选择 preserve/discard。Edit & Resend 必须保留持有 prepared
   replacement 的进程。create/restore 原有的取消 fence 保持有效。
 - promotion 写入失败不能丢失已确认的未投递结论。CLI 返回 `promotion-failed` 和错误，不能
-  假装恢复成功或改报投递未知。客户端对已变成 pending/seen 的历史仍修复 dispatch，也支持
-  pending_apply 和旧服务返回的 `no-active-turn`。不得复活 active、terminal 或已删除的轮次。
+  假装恢复成功或改报投递未知。daemon 的 `recoveryOwned` 响应表示恢复仍由该 daemon 负责：
+  前端仅对明确的 promotion 失败通过同一 RPC 重试一次，持续失败则报错。旧响应保留
+  pending_apply/pending/seen 的 dispatch 修复。不得复活 active、terminal 或已删除的轮次；
+  超时或投递未知绝不授权重试。
 - foreground run configuration 归属其 turn 的 Effect signal。turn 被中断后，在途配置请求
   可以结束，但不得再发送后续配置 mutation，也不得持久化被中断 turn 的 runtime patch。
+  steer 配置使用目标的本地等待 signal，遵循同一 mutation fence。
 - 已接受的 steer 标记在写入和读取归一化后都必须保留；编辑重发不能把 steer
   当作可独立重放的普通用户轮次。
 
@@ -112,6 +126,7 @@ UI）不在本次实现；本次只是保证将来出现这类骨架轮次时不
 - [业务字段修复与待定 hash 决策](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.zh.md)
 - [外部历史基线修复](../.agents/notes/implemented/architecture/2026-09-07-single-history-writer.zh.md)
 - [中断时 pending input 的 exactly-once](../.agents/notes/implemented/bug-fix/2026-09-14-interrupt-pending-input-exactly-once.zh.md)
+- [Steer Stop 与恢复所有权](../.agents/notes/implemented/bug-fix/2026-09-16-steer-stop-recovery-ownership.zh.md)
 - [带版本轮次 hash 与 primitive 元数据插入](../.agents/notes/implemented/architecture/2026-09-14-versioned-history-hashes-and-primitive-metadata.zh.md)
 
 这是供人工审阅的草稿；实现和测试通过不代表 Spec 已获批准。

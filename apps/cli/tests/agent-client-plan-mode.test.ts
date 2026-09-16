@@ -584,6 +584,14 @@ describe('AgentClient plan mode permission restoration', () => {
       ]);
       completeTurn();
       await Promise.resolve();
+      const drain = client.pendingPromptCompletion;
+      expect(drain).not.toBeNull();
+      let drained = false;
+      void drain?.then(() => {
+        drained = true;
+      });
+      await Promise.resolve();
+      expect(drained).toBe(false);
       refuse(
         Object.assign(new Error('Invalid request: No active Codex turn to steer'), { code: -32600 })
       );
@@ -592,6 +600,8 @@ describe('AgentClient plan mode permission restoration', () => {
         outcome: 'not-applied',
         error: expect.any(AgentSteerNotDeliveredError),
       });
+      await drain;
+      expect(client.pendingPromptCompletion).toBeNull();
     });
 
     it('handles rate limit extension notifications', async () => {

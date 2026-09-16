@@ -2909,6 +2909,7 @@ export const SessionChatInterface = memo(
       if (
         !userMessage ||
         userMessage.status === 'pending_apply' ||
+        userMessage.status === 'delivery_unknown' ||
         (userMessage.inputConfig as Record<string, unknown> | undefined)?._lodyDeliveryKind ===
           'steer'
       ) {
@@ -3582,28 +3583,11 @@ export const SessionChatInterface = memo(
 
     const guideHistoryEntry = useCallback(
       async (userTurnId: string, expectedTurnId: string): Promise<boolean> => {
-        const applied = await requestSessionSteer(session.id, expectedTurnId, userTurnId, {
+        return await requestSessionSteer(session.id, expectedTurnId, userTurnId, {
           machineId: session.machineId,
         });
-        if (!applied) {
-          return false;
-        }
-        try {
-          await updateHistoryEntry(userTurnId, (entry) => ({
-            ...entry,
-            status: 'processing',
-            read: true,
-            inputConfig: {
-              ...entry.inputConfig,
-              _lodyDeliveryKind: 'steer',
-            },
-          }));
-        } catch (error) {
-          console.warn('Guide was applied before local history status updated', error);
-        }
-        return true;
       },
-      [requestSessionSteer, session.id, session.machineId, updateHistoryEntry]
+      [requestSessionSteer, session.id, session.machineId]
     );
 
     const enqueueInputBlocks = useCallback(
@@ -3709,6 +3693,7 @@ export const SessionChatInterface = memo(
               })
               .catch((error: unknown) => {
                 console.error('Failed to apply guide message', error);
+                toast.error(t('sessions.sendError'), { description: getErrorMessage(error) });
               });
           }
 
@@ -4083,11 +4068,15 @@ export const SessionChatInterface = memo(
         if (accepted) {
           // The marker stays as a tombstone; terminalize the abandoned entry.
           try {
-            await updateHistoryEntry(userTurnId, (entry) => ({
-              ...entry,
-              status: 'canceled',
-              read: true,
-            }));
+            await updateHistoryEntry(userTurnId, (entry) =>
+              entry.status === 'delivery_unknown'
+                ? entry
+                : {
+                    ...entry,
+                    status: 'canceled',
+                    read: true,
+                  }
+            );
           } catch (error) {
             console.warn('Failed to supersede the undelivered user turn', {
               userTurnId,

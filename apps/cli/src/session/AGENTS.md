@@ -46,8 +46,8 @@ Contract: specs/session-orchestration.md.
 
 - Gate turn-scoped LIST writes on user-entry sync (`turn-history-gate.ts`, 20s), never status/meta.
 - Goals obey [this contract](../../../../specs/session-goal-control.md).
-- In-flight Stop cancels ACP, never its owner fiber. Keep `TurnRuntimeState` until raw ACP
-  completion or confirmed termination; no second turn. Assistant ids use `userTurnId`.
+- Stop ends local steer waits, not the owner fiber. Drain raw prompt/steer/config work before
+  reuse, or confirm termination. Assistant ids use `userTurnId`.
   `invocation` owns source Turn, requester and config atomically; steer replaces it before tools.
 - Publish `latestUserMsgId` in the SAME write as the history append (`appendUserTurn`). Only
   dispatch producers publish it. Renderer sends and queue promotion retain the missing-history
@@ -57,9 +57,9 @@ Contract: specs/session-orchestration.md.
 - Never steer after cancellation or infer delivery from it. Stop uses
   `pendingInput: promote` / `prePromptSession: discard`; Edit & Resend uses preserve/keep,
   access revocation preserve/discard. Limit create/restore fences to initialization.
-- Promote only proven non-delivery. Return `promotion-failed` on write failure;
-  repair pending/seen pointers, never replay active/terminal turns.
-- Foreground config uses its owner Effect signal; fence mutations after interrupt.
+- Promote only proven non-delivery via `steerTurnStatuses`, never producer pointers.
+  Unknown never replays; RPC ACKs never revive history. Surface recovery errors.
+- Foreground/steer config uses its owner signal; fence mutations after interrupt.
 - Resume must REOPEN the in-progress assistant entry, clearing
   `finished`/`endedAt`/`permissionWaitMs` there only; never write `finished=false` from teardown.
 - Keep JSON-RPC/transport matching in `acp-error-classification.ts`: disposed/stale `-32603` is

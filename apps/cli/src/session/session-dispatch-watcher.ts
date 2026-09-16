@@ -1853,6 +1853,7 @@ export class SessionDispatchWatcher {
       lastHandledUserMsgId: userTurnId,
       processingUserMsgId: undefined,
     } satisfies Partial<SessionMeta>);
+    await this.deps.executionService.acknowledgeSteerTurn(sessionId, userTurnId);
     await sessionDoc.setStatus(SessionStatusFactory.idle());
 
     // Surface the denial to the user. Without this the turn renders as
@@ -2684,6 +2685,8 @@ export class SessionDispatchWatcher {
       `[${sessionId}] Marking missing-history recovery for user turn ${pendingUserMsgId ?? 'unknown'} (message_delivery_failed)`
     );
     await this.deps.workspaceDocument.repo.upsertDocMeta?.(roomId, recoveryPatch);
+    if (pendingUserMsgId)
+      await this.deps.executionService.acknowledgeSteerTurn(sessionId, pendingUserMsgId);
     this.deps.logger.info(
       `[${sessionId}] Recorded missing-history recovery for user turn ${
         pendingUserMsgId ?? 'unknown'
@@ -2727,6 +2730,7 @@ export class SessionDispatchWatcher {
     meta: SessionMeta,
     isActive: () => boolean = () => true
   ): Promise<{ turn: SessionHistoryInput | null; history: SessionHistoryInput[] }> {
+    await this.deps.executionService.reconcileSteerHistory(meta.id, sessionDoc);
     const history = readSessionHistory(sessionDoc.sessionData.history);
     if (!isActive()) {
       return { turn: null, history };
@@ -2786,7 +2790,7 @@ export class SessionDispatchWatcher {
       sessionId,
       turn.id
     );
-    if (!terminalStatus && turn.status === 'pending') {
+    if (!terminalStatus && ['pending', 'seen', 'processing'].includes(turn.status ?? '')) {
       // Restart backstop (in-memory record is gone): a completed assistant
       // entry linked to this user turn is positive proof it ran to completion.
       // endedAt is written at ACP finalization. Only this proves 'handled'.

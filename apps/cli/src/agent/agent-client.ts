@@ -633,7 +633,7 @@ export class AgentClient implements acp.Client {
   private readonly steerApplicationWaiters = new Map<string, SteerApplicationWaiter>();
   private steerApplicationBarrier: Promise<void> | null = null;
   private activePromptCompletion: ActivePromptCompletion | null = null;
-  private readonly pendingPrompts = new Set<Promise<acp.PromptResponse>>();
+  private readonly pendingPrompts = new Set<Promise<unknown>>();
   private sessionWorkdir: string | null = null;
   private agentMcpCapabilities: acp.McpCapabilities | undefined;
   /** Session config options returned by the agent; the source of model/mode choices and names. */
@@ -2399,6 +2399,7 @@ export class AgentClient implements acp.Client {
           steerId: string;
         }
       >(method, { sessionId, prompt, steerId });
+      this.trackPendingExecution(request);
     } catch (error) {
       // Nothing was written to the agent, so the prompt is provably still ours.
       throw new AgentSteerNotDeliveredError(
@@ -2443,11 +2444,19 @@ export class AgentClient implements acp.Client {
     }
   }
 
-  /** Includes raw ACP requests whose local caller has already been cancelled. */
+  /** Raw prompts and steer submissions remain owned after their local waits end. */
   get pendingPromptCompletion(): Promise<void> | null {
     return this.pendingPrompts.size > 0
       ? Promise.allSettled([...this.pendingPrompts]).then(() => undefined)
       : null;
+  }
+
+  private trackPendingExecution(request: Promise<unknown>): void {
+    this.pendingPrompts.add(request);
+    const release = () => {
+      this.pendingPrompts.delete(request);
+    };
+    void request.then(release, release);
   }
 
   async prompt(
@@ -2504,11 +2513,7 @@ export class AgentClient implements acp.Client {
 
       // A local abort does not finish the remote request. Track every raw
       // request, including overlapping prompts used by acknowledged handoff.
-      this.pendingPrompts.add(promptPromise);
-      const releasePrompt = () => {
-        this.pendingPrompts.delete(promptPromise);
-      };
-      void promptPromise.then(releasePrompt, releasePrompt);
+      this.trackPendingExecution(promptPromise);
 
       let abortListener: (() => void) | undefined;
       let trackedPromptCompletion: ActivePromptCompletion | undefined;

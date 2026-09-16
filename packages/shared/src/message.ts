@@ -162,6 +162,8 @@ export interface SessionSteerResponse {
   userTurnId: string;
   /** True only after adapter activation and CLI turn-ownership commit. */
   applied: boolean;
+  /** The daemon owns recovery; clients must not republish a dispatch pointer. */
+  recoveryOwned?: boolean;
   disposition:
     | 'applied'
     | 'unsupported'

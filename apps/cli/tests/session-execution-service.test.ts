@@ -43,7 +43,10 @@ import { AcpAuthenticationManager } from '../src/agent/acp-authentication';
 import { GitExecutableNotFoundError } from '../src/session/worktree/git-process-error';
 import { LodyOperationStore } from '../src/orchestration/operation-store';
 import { markAssistantTurnFinished } from '../src/lib/assistant-turn-finalize';
-import { shouldWatchSession } from '../src/session/session-dispatch-logic';
+import {
+  findNextDispatchableUserTurn,
+  shouldWatchSession,
+} from '../src/session/session-dispatch-logic';
 import { applyAcpSessionRunConfig } from '../src/session/acp-session-config-applier';
 
 const capabilityConfigId = 'config-1' as AgentConfigId;
@@ -434,7 +437,6 @@ describe('SessionExecutionService', () => {
     expect(upsertDocMeta).toHaveBeenLastCalledWith(
       expect.any(String),
       expect.objectContaining({
-        latestUserMsgId: 'user-3',
         lastHandledUserMsgId: 'user-2',
         processingUserMsgId: 'user-3',
       })
@@ -655,7 +657,7 @@ describe('SessionExecutionService', () => {
       disposition: 'delivery-unknown',
     });
     expect(history).toContainEqual(
-      expect.objectContaining({ id: 'user-d', status: 'pending_apply' })
+      expect.objectContaining({ id: 'user-d', status: 'delivery_unknown' })
     );
     expect(service.getExecutionSnapshot(sessionId).activeTurnId).toBe('assistant:user-c');
 
@@ -692,7 +694,6 @@ describe('SessionExecutionService', () => {
       ])
     );
     expect(meta).toMatchObject({
-      latestUserMsgId: 'user-c',
       lastHandledUserMsgId: 'user-c',
       processingUserMsgId: undefined,
     });
@@ -863,12 +864,11 @@ describe('SessionExecutionService', () => {
     expect(deps.applyAcpModeAndModel).not.toHaveBeenCalled();
     // Neither guide reached Codex, so both are handed back to dispatch instead
     // of being stranded in `pending_apply`.
-    const dispatchPointerWrites = upsertDocMeta.mock.calls.filter(
-      (call) => (call[1] as { latestUserMsgId?: string }).latestUserMsgId !== undefined
+    const promoted = Object.assign(
+      {},
+      ...upsertDocMeta.mock.calls.map((call) => (call[1] as Partial<SessionMeta>).steerTurnStatuses)
     );
-    expect(
-      dispatchPointerWrites.map((call) => (call[1] as { latestUserMsgId?: string }).latestUserMsgId)
-    ).toEqual(['user-2', 'user-3']);
+    expect(promoted).toEqual({ 'user-2': 'pending', 'user-3': 'pending' });
   });
 
   it.each(['before', 'during-build'] as const)(
@@ -952,13 +952,13 @@ describe('SessionExecutionService', () => {
 
       expect(steerPrompt).not.toHaveBeenCalled();
       expect(history.find((entry) => entry.id === 'user-2')).toMatchObject({
-        status: 'pending',
+        status: cancelStage === 'before' ? 'pending_apply' : 'pending',
         read: false,
       });
       expect(history.find((entry) => entry.id === 'user-1')).toMatchObject({ status: 'handled' });
       expect(upsertDocMeta).toHaveBeenCalledWith(
         expect.any(String),
-        expect.objectContaining({ latestUserMsgId: 'user-2' })
+        expect.objectContaining({ steerTurnStatuses: { 'user-2': 'pending' } })
       );
       expect(deps.turnFinalization.finalizeACPState).not.toHaveBeenCalled();
       expect(deps.beginConversationTurn).not.toHaveBeenCalled();
@@ -991,7 +991,11 @@ describe('SessionExecutionService', () => {
       let meta: Record<string, unknown> = { latestUserMsgId: 'user-1' };
       let failurePending = failMetaWrite;
       const upsertDocMeta = vi.fn(async (_roomId: string, patch: Record<string, unknown>) => {
-        if (patch.latestUserMsgId === 'user-2' && failurePending) {
+        if (
+          (patch.steerTurnStatuses as Record<string, string> | undefined)?.['user-2'] ===
+            'pending' &&
+          failurePending
+        ) {
           failurePending = false;
           throw new Error('Injected activation write failure');
         }
@@ -1110,7 +1114,8 @@ describe('SessionExecutionService', () => {
           disposition: 'no-active-turn',
         });
       }
-      expect(meta.latestUserMsgId).toBe('user-2');
+      expect(meta.latestUserMsgId).toBe('user-1');
+      expect(meta.steerTurnStatuses).toEqual({ 'user-2': 'pending' });
       expect(deps.turnFinalization.finalizeACPState).not.toHaveBeenCalled();
       expect(deps.beginConversationTurn).not.toHaveBeenCalled();
 
@@ -1252,16 +1257,20 @@ describe('SessionExecutionService', () => {
       { id: 'user-2', role: 'user', status: 'processing', read: true } as SessionHistoryInput,
     ];
     const sessionDoc = withHistoryPort({
+      getHistory: () => history,
       updateHistory: vi.fn(
         async (update: (entries: SessionHistoryInput[]) => SessionHistoryInput[]) => {
           history = update(history);
         }
       ),
     });
-    const upsertDocMeta = vi.fn(async () => {});
+    let meta: Partial<SessionMeta> = {};
+    const upsertDocMeta = vi.fn(async (_room: string, patch: Partial<SessionMeta>) => {
+      meta = { ...meta, ...patch };
+    });
     const deps = createBaseDeps({
       workspaceDocument: {
-        repo: { upsertDocMeta, getDocMeta: vi.fn(async () => undefined) },
+        repo: { upsertDocMeta, getDocMeta: vi.fn(async () => ({ meta })) },
         getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
       } as unknown as LoroDocumentManager,
     });
@@ -1280,13 +1289,17 @@ describe('SessionExecutionService', () => {
         inputConfig: { prompt: 'do it differently' },
       })
     ).resolves.toMatchObject({ applied: false, disposition: 'no-active-turn' });
+    await service.reconcileSteerHistory(sessionId, sessionDoc);
     expect(history[0]).toMatchObject({ status: 'processing' });
-    expect(upsertDocMeta).not.toHaveBeenCalled();
+    expect(meta.steerTurnStatuses).toEqual({});
   });
 
   it('leaves the producer-owned dispatch pointer untouched when execution takes ownership', async () => {
-    const upsertDocMeta = vi.fn(async () => {});
-    const getDocMeta = vi.fn(async () => ({ meta: { latestUserMsgId: 'user-3' } }));
+    let meta: Partial<SessionMeta> = { latestUserMsgId: 'user-3' };
+    const upsertDocMeta = vi.fn(async (_room: string, patch: Partial<SessionMeta>) => {
+      meta = { ...meta, ...patch };
+    });
+    const getDocMeta = vi.fn(async () => ({ meta }));
     const deps = createBaseDeps({
       workspaceDocument: {
         repo: {
@@ -1315,7 +1328,7 @@ describe('SessionExecutionService', () => {
     expect(upsertDocMeta).toHaveBeenCalledWith(expect.any(String), {
       processingUserMsgId: 'user-2',
     });
-    expect(getDocMeta).not.toHaveBeenCalled();
+    expect(meta).toMatchObject({ latestUserMsgId: 'user-3', processingUserMsgId: 'user-2' });
   });
 
   it('cannot overwrite a newer activation while an earlier turn becomes terminal', async () => {
@@ -1326,8 +1339,11 @@ describe('SessionExecutionService', () => {
     const updateHistory = vi.fn(async () => {
       await historyWriteBlocked;
     });
-    const upsertDocMeta = vi.fn(async () => {});
-    const getDocMeta = vi.fn(async () => ({ meta: { latestUserMsgId: 'user-new' } }));
+    let meta: Partial<SessionMeta> = { latestUserMsgId: 'user-new' };
+    const upsertDocMeta = vi.fn(async (_room: string, patch: Partial<SessionMeta>) => {
+      meta = { ...meta, ...patch };
+    });
+    const getDocMeta = vi.fn(async () => ({ meta }));
     const service = new SessionExecutionService(
       createBaseDeps({
         workspaceDocument: {
@@ -1358,14 +1374,17 @@ describe('SessionExecutionService', () => {
       lastHandledUserMsgId: 'user-old',
       processingUserMsgId: undefined,
     });
-    expect(getDocMeta).not.toHaveBeenCalled();
+    expect(meta).toMatchObject({ latestUserMsgId: 'user-new', lastHandledUserMsgId: 'user-old' });
   });
 
   it('keeps a steer that failed after submission out of the dispatch queue', async () => {
-    const upsertDocMeta = vi.fn(async () => {});
+    let meta: Partial<SessionMeta> = { latestUserMsgId: 'user-3' };
+    const upsertDocMeta = vi.fn(async (_room: string, patch: Partial<SessionMeta>) => {
+      meta = { ...meta, ...patch };
+    });
     const deps = createBaseDeps({
       workspaceDocument: {
-        repo: { upsertDocMeta, getDocMeta: vi.fn(async () => undefined) },
+        repo: { upsertDocMeta, getDocMeta: vi.fn(async () => ({ meta })) },
         getOrCreateSessionDoc: vi.fn(async () =>
           withHistoryPort({ updateHistory: vi.fn(async () => {}) })
         ),
@@ -1417,8 +1436,278 @@ describe('SessionExecutionService', () => {
         inputConfig: { prompt: 'do it differently' },
       })
     ).resolves.toMatchObject({ applied: false, disposition: 'delivery-unknown' });
-    expect(upsertDocMeta).not.toHaveBeenCalled();
+    expect(meta).toMatchObject({
+      latestUserMsgId: 'user-3',
+      steerTurnStatuses: { 'user-2': 'delivery_unknown' },
+    });
+    expect(
+      findNextDispatchableUserTurn(
+        [{ id: 'user-2', role: 'user', status: 'delivery_unknown' } as SessionHistoryInput],
+        meta as SessionMeta
+      )
+    ).toBeNull();
   });
+
+  it.each([
+    ['document', 'stop'],
+    ['blocks', 'stop'],
+    ['config', 'stop'],
+    ['document', 'complete'],
+    ['blocks', 'complete'],
+    ['config', 'complete'],
+  ] as const)('releases the steer lane during stalled %s on %s', async (stage, ending) => {
+    const sessionId = 'session-steer-waits' as SessionId;
+    let meta: Partial<SessionMeta> = {
+      latestUserMsgId: 'newer-input',
+      lastMissingHistoryUserMsgId: 'missing-input',
+    };
+    const repo = {
+      getDocMeta: async () => ({ meta }),
+      upsertDocMeta: async (_room: string, patch: Partial<SessionMeta>) => {
+        meta = { ...meta, ...patch };
+      },
+    };
+    const sessionDoc = new SessionDocument(
+      repo as never,
+      sessionId,
+      async () => {},
+      createSilentLogger()
+    );
+    composeTestSessionDoc(sessionDoc, {
+      history: ['guide', 'queued-guide'].map((id) => ({
+        id,
+        role: 'user',
+        status: 'pending_apply',
+        timestamp: '2026-09-16T00:00:00Z',
+        items: [{ type: 'text', text: id }],
+        inputConfig: { prompt: id },
+      })),
+    });
+    const entered = createDeferred();
+    const release = createDeferred();
+    const prompt = createDeferred();
+    const mutations: string[] = [];
+    const prepared: string[] = [];
+    const block = async () => {
+      entered.resolve();
+      await release.promise;
+    };
+    const agentClient = {
+      isCreated: () => true,
+      cancel: async () => {},
+      pendingPromptCompletion: null,
+      getAcknowledgedSteerCapability: () => ({ configPolicy: 'apply', upstreamTurn: 'handoff' }),
+      steerPrompt: () => {
+        throw new Error('A stopped preparation must never submit');
+      },
+      setSessionMode: async () => {
+        mutations.push('mode');
+        if (stage === 'config') await block();
+      },
+      unstable_setSessionModel: async () => {
+        mutations.push('model');
+      },
+    };
+    const session = { sessionId, acpSessionId: 'acp-waits' as ACPSessionId, agentClient };
+    const deps = createBaseDeps({
+      workspaceDocument: {
+        repo,
+        getOrCreateSessionDoc: async () => {
+          if (stage === 'document') await block();
+          return sessionDoc;
+        },
+      } as unknown as LoroDocumentManager,
+      buildAcpPromptBlocks: async ({ inputBlocks }) => {
+        prepared.push(JSON.stringify(inputBlocks));
+        if (stage === 'blocks') await block();
+        return [{ type: 'text', text: 'guide' }];
+      },
+      applyAcpModeAndModel: async (_session, config, options) => {
+        await applyAcpSessionRunConfig({
+          session: session as never,
+          config,
+          signal: options?.signal,
+          logger: createSilentLogger(),
+        });
+      },
+    });
+    const service = new SessionExecutionService(deps);
+    const run = service['createPromptHandoffRun']({
+      turnId: 'assistant:source',
+      promptPromise: prompt.promise,
+    });
+    const runtime = {
+      sessionId,
+      turnId: run.turnId,
+      userTurnId: 'source',
+      session,
+      promptStarted: true,
+      promptInFlight: true,
+      cancelRequested: false,
+      pendingInputOnCancel: 'preserve',
+    };
+    service['turnRuntimeBySession'].set(sessionId, runtime as never);
+    const tail = service['awaitPromptHandoffTail'](runtime as never, run);
+    const request = {
+      sessionId,
+      expectedTurnId: run.turnId,
+      userTurnId: 'guide',
+      userId: 'user',
+      timestamp: '2026-09-16T00:00:00Z',
+      inputConfig: { prompt: 'guide', modeId: 'mode', modelId: 'model' },
+    };
+    const steering = service.steerSession(request);
+    await entered.promise;
+    const queued = service.steerSession({ ...request, userTurnId: 'queued-guide' });
+    if (ending === 'stop') {
+      await service.cancelSession(
+        {
+          type: 'session/cancel',
+          sessionId,
+          turnId: run.turnId,
+          machineId: 'machine-1',
+          workspaceId: 'workspace-1' as WorkspaceId,
+        },
+        { pendingInput: 'promote' }
+      );
+    }
+    prompt.resolve();
+    await expect(steering).resolves.toMatchObject({ applied: false, recoveryOwned: true });
+    await expect(queued).resolves.toMatchObject({ applied: false, recoveryOwned: true });
+    const releaseRewrite = service.tryAcquireSessionRewriteBarrier(sessionId);
+    expect(releaseRewrite).not.toBeNull();
+    releaseRewrite?.();
+    expect(meta).toMatchObject({
+      latestUserMsgId: 'newer-input',
+      lastMissingHistoryUserMsgId: 'missing-input',
+      steerTurnStatuses: { guide: 'pending', 'queued-guide': 'pending' },
+    });
+    expect(prepared).toHaveLength(stage === 'document' ? 0 : 1);
+    release.resolve();
+    await tail;
+    expect(mutations).toEqual(stage === 'config' ? ['mode'] : []);
+    await service.reconcileSteerHistory(sessionId, sessionDoc);
+    expect(
+      findNextDispatchableUserTurn(
+        (await sessionDoc.sessionData.history.readAll()) as SessionHistoryInput[],
+        meta as SessionMeta
+      )?.id
+    ).toBe('guide');
+  });
+
+  it.each(['not-applied', 'applied', 'unknown'] as const)(
+    'projects a late %s verdict by exact identity when history arrives after Stop',
+    async (outcome) => {
+      const sessionId = 'late-steer-history' as SessionId;
+      let meta: Partial<SessionMeta> = { latestUserMsgId: 'C', lastHandledUserMsgId: 'A' };
+      const repo = {
+        getDocMeta: async () => ({ meta }),
+        upsertDocMeta: async (_room: string, patch: Partial<SessionMeta>) => {
+          meta = { ...meta, ...patch };
+        },
+      };
+      const sessionDoc = new SessionDocument(
+        repo as never,
+        sessionId,
+        async () => {},
+        createSilentLogger()
+      );
+      composeTestSessionDoc(sessionDoc);
+      const submitted = createDeferred();
+      const verdict = createDeferred<import('../src/agent/agent-client').SteerOutcomeResult>();
+      let released = false;
+      const agentClient = {
+        isCreated: () => true,
+        cancel: async () => {},
+        pendingPromptCompletion: null,
+        getAcknowledgedSteerCapability: () => ({ configPolicy: 'active', upstreamTurn: 'same' }),
+        findSteerConfigMismatch: () => null,
+        steerPrompt: () => {
+          submitted.resolve();
+          return { completion: new Promise(() => {}), outcome: verdict.promise };
+        },
+      };
+      const deps = createBaseDeps({
+        workspaceDocument: {
+          repo,
+          getOrCreateSessionDoc: async () => sessionDoc,
+        } as unknown as LoroDocumentManager,
+      });
+      const service = new SessionExecutionService(deps);
+      service['turnRuntimeBySession'].set(sessionId, {
+        sessionId,
+        turnId: 'assistant:A',
+        userTurnId: 'A',
+        session: { sessionId, agentClient, acpSessionId: 'acp' },
+        promptStarted: true,
+        promptInFlight: true,
+        activePromptRun: { turnId: 'assistant:A' },
+        cancelRequested: false,
+      } as never);
+      const steering = service.steerSession({
+        sessionId,
+        expectedTurnId: 'assistant:A',
+        userTurnId: 'B',
+        userId: 'user',
+        timestamp: '2026-09-16T00:00:00Z',
+        inputConfig: { prompt: 'guide' },
+      });
+      await submitted.promise;
+      await service.cancelSession(
+        {
+          type: 'session/cancel',
+          sessionId,
+          turnId: 'assistant:A',
+          machineId: 'machine-1',
+          workspaceId: 'workspace-1' as WorkspaceId,
+        },
+        { pendingInput: 'promote' }
+      );
+      verdict.resolve(
+        outcome === 'applied'
+          ? {
+              outcome,
+              application: {
+                steerId: 'steer-B',
+                release: () => {
+                  released = true;
+                },
+              },
+            }
+          : { outcome, error: new Error('Synthetic verdict') }
+      );
+      await steering;
+      expect(released).toBe(outcome === 'applied');
+      const expected =
+        outcome === 'not-applied'
+          ? 'pending'
+          : outcome === 'applied'
+            ? 'canceled'
+            : 'delivery_unknown';
+      expect(meta).toMatchObject({ latestUserMsgId: 'C', steerTurnStatuses: { B: expected } });
+      const restarted = new SessionExecutionService(deps);
+      await sessionDoc.sessionData.commands.appendTurn({
+        id: 'B',
+        role: 'user',
+        status: 'pending_apply',
+        timestamp: '2026-09-16T00:00:00Z',
+        items: [{ type: 'text', text: 'guide' }],
+      });
+      await restarted.reconcileSteerHistory(sessionId, sessionDoc);
+      expect(await sessionDoc.sessionData.history.readTurn('B')).toMatchObject({
+        state: 'ready',
+        turn: { status: outcome === 'not-applied' ? 'seen' : expected },
+      });
+      expect(meta.latestUserMsgId).toBe('C');
+      expect(
+        findNextDispatchableUserTurn(
+          (await sessionDoc.sessionData.history.readAll()) as SessionHistoryInput[],
+          meta as SessionMeta
+        )?.id
+      ).toBe(outcome === 'not-applied' ? 'B' : undefined);
+      expect(meta.steerTurnStatuses).toEqual(outcome === 'not-applied' ? { B: 'pending' } : {});
+    }
+  );
 
   it('notifies when a prompt completes while a persistent goal remains active', async () => {
     let history: Array<Record<string, unknown>> = [
@@ -3166,9 +3455,9 @@ describe('SessionExecutionService', () => {
       transport: 'r2',
       uploadedAt: 123,
     } satisfies Extract<SessionInputBlock, { type: 'file' }>;
-    const buildAcpPromptBlocks = vi.fn(
-      async (): Promise<ContentBlock[]> => [{ type: 'text', text: 'built prompt' }]
-    );
+    const buildAcpPromptBlocks = vi.fn(async (): Promise<ContentBlock[]> => [
+      { type: 'text', text: 'built prompt' },
+    ]);
     const deps = createBaseDeps({
       sessionManager: {
         getSession: vi.fn(() => null),
@@ -5903,13 +6192,17 @@ describe('SessionExecutionService', () => {
   const cancelCompletions = [
     'native-terminal',
     'late-steer-ack',
+    'late-steer-write-failure',
+    'stalled-steer-request',
     'terminated',
     'termination-failed',
     'cancel-unacknowledged',
   ] as const;
   it.each(cancelCompletions)('retains cancelled ownership (%s)', async (completion) => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    const nativeCompletion = completion === 'native-terminal' || completion === 'late-steer-ack';
+    const lateApplied =
+      completion === 'late-steer-ack' || completion === 'late-steer-write-failure';
+    const nativeCompletion = completion === 'native-terminal' || lateApplied;
     let meta: Record<string, unknown> = {};
     let history: Array<Record<string, unknown>> = [
       {
@@ -5936,6 +6229,12 @@ describe('SessionExecutionService', () => {
       },
     ];
     const upsertDocMeta = vi.fn(async (_roomId: string, patch: Record<string, unknown>) => {
+      if (
+        completion === 'late-steer-write-failure' &&
+        (patch.steerTurnStatuses as Record<string, string> | undefined)?.['steer-user-turn']
+      ) {
+        throw new Error('Synthetic outcome persistence failure');
+      }
       meta = { ...meta, ...patch };
     });
     const sessionDoc = withHistoryPort({
@@ -5955,6 +6254,7 @@ describe('SessionExecutionService', () => {
     const steerSubmitted = createDeferred();
     const steerApplied = createDeferred<{ release: () => void }>();
     const steerReleased = createDeferred();
+    const rawSteer = createDeferred<{ outcome: 'failed' }>();
     const deliveredSteers: ContentBlock[][] = [];
     let steering: ReturnType<SessionExecutionService['steerSession']> | undefined;
     const termination = createDeferred();
@@ -5975,6 +6275,11 @@ describe('SessionExecutionService', () => {
     agentClient.acpSessionId = 'acp-prompt-cancel' as ACPSessionId;
     // @ts-expect-error - only prompt and cancel transport methods are needed here
     agentClient.connection = {
+      request: async (_method: string, request: { prompt: ContentBlock[] }) => {
+        deliveredSteers.push(request.prompt);
+        steerSubmitted.resolve();
+        return rawSteer.promise;
+      },
       cancel: async () => {
         cancelSubmitted.resolve();
         await cancelAck.promise;
@@ -5997,7 +6302,7 @@ describe('SessionExecutionService', () => {
       promptSignal = options?.signal;
       return sendPrompt(id, blocks, options);
     });
-    if (completion === 'late-steer-ack') {
+    if (lateApplied) {
       vi.spyOn(agentClient, 'getAcknowledgedSteerCapability').mockReturnValue({
         provider: 'codex',
         appliedNotificationMethod: 'codex/steerApplied',
@@ -6016,6 +6321,15 @@ describe('SessionExecutionService', () => {
         };
       });
     }
+    if (completion === 'stalled-steer-request') {
+      agentClient['acknowledgedSteerCapability'] = {
+        provider: 'codex',
+        requestMethod: '_session/steering',
+        appliedNotificationMethod: 'codex/steerApplied',
+        upstreamTurn: 'same',
+        configPolicy: 'active',
+      };
+    }
     const session = {
       sessionId: 'session-prompt-cancel' as SessionId,
       acpSessionId: 'acp-prompt-cancel' as ACPSessionId,
@@ -6030,6 +6344,8 @@ describe('SessionExecutionService', () => {
         await termination.promise;
         if (completion === 'termination-failed') throw new Error('Synthetic termination failure');
         nativeTerminal.reject(new Error('Synthetic ACP connection closed'));
+        if (completion === 'stalled-steer-request')
+          rawSteer.reject(new Error('Synthetic ACP connection closed'));
       }),
       updateGitIdentity: vi.fn(),
       createAgent: vi.fn(async () => 'acp-prompt-cancel'),
@@ -6105,7 +6421,7 @@ describe('SessionExecutionService', () => {
     try {
       await promptStarted.promise;
       const sourceInvocation = service.getActiveInvocationContext(message.sessionId);
-      if (completion === 'late-steer-ack') {
+      if (lateApplied || completion === 'stalled-steer-request') {
         history.push({
           id: 'steer-user-turn',
           role: 'user',
@@ -6137,11 +6453,11 @@ describe('SessionExecutionService', () => {
       await cancelSubmitted.promise;
       if (completion !== 'cancel-unacknowledged') cancelAck.resolve();
       await vi.advanceTimersByTimeAsync(0);
-      if (steering) {
+      if (steering && lateApplied) {
         steerApplied.resolve({ release: () => steerReleased.resolve() });
         await expect(steering).resolves.toMatchObject({
           applied: false,
-          disposition: 'stale-turn',
+          disposition: completion === 'late-steer-write-failure' ? 'error' : 'stale-turn',
         });
         await steerReleased.promise;
         expect(onTurnSettled).not.toHaveBeenCalled();
@@ -6150,7 +6466,7 @@ describe('SessionExecutionService', () => {
         expect(meta.processingUserMsgId).toBe(message.userTurnId);
         expect(meta.latestUserMsgId).not.toBe('steer-user-turn');
         expect(history.find((entry) => entry.id === 'steer-user-turn')).toMatchObject({
-          status: 'canceled',
+          status: completion === 'late-steer-write-failure' ? 'pending_apply' : 'canceled',
         });
       }
       expect(agentClient.pendingPromptCompletion).not.toBeNull();
@@ -6161,6 +6477,14 @@ describe('SessionExecutionService', () => {
       expect(promptSignal?.aborted).toBe(false);
       expect(history[0]).toMatchObject({ status: 'processing' });
       expect(history[1]).not.toHaveProperty('finished', true);
+      if (completion === 'stalled-steer-request') {
+        nativeTerminal.resolve({ stopReason: 'cancelled' });
+        await vi.advanceTimersByTimeAsync(0);
+        expect(agentClient.pendingPromptCompletion).not.toBeNull();
+        const releaseRewrite = service.tryAcquireSessionRewriteBarrier(message.sessionId);
+        expect(releaseRewrite).not.toBeNull();
+        releaseRewrite?.();
+      }
       history.push({
         id: nextMessage.userTurnId,
         role: 'user',
@@ -6222,6 +6546,7 @@ describe('SessionExecutionService', () => {
       cancelAck.resolve();
       termination.resolve();
       nativeTerminal.resolve({ stopReason: 'cancelled' });
+      rawSteer.resolve({ outcome: 'failed' });
       await running;
       await steering;
       vi.useRealTimers();
@@ -6266,7 +6591,12 @@ describe('SessionExecutionService', () => {
     if (steering) {
       expect(deliveredSteers).toEqual([[{ type: 'text', text: 'change direction' }]]);
       expect(history.find((entry) => entry.id === 'steer-user-turn')).toMatchObject({
-        status: 'canceled',
+        status:
+          completion === 'stalled-steer-request'
+            ? 'delivery_unknown'
+            : completion === 'late-steer-write-failure'
+              ? 'pending_apply'
+              : 'canceled',
       });
     }
     expect(meta).toMatchObject({

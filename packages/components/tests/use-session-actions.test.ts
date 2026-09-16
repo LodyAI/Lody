@@ -1008,9 +1008,14 @@ describe('useSessionActions', () => {
     ['promotion-failed', 'failed', false],
     ['promotion-failed', 'removed', false],
     ['delivery-unknown', 'pending_apply', false],
+    ['no-active-turn', 'pending_apply', false, true],
+    ['no-active-turn', 'pending', false, true],
+    ['applied', 'canceled', false, true],
+    ['applied', 'handled', false, true],
+    ['promotion-failed', 'pending', false, true],
   ] as const)(
     'repairs steer dispatch for %s with history %s: %s',
-    async (disposition, statusAfterRpc, repair) => {
+    async (disposition, statusAfterRpc, repair, recoveryOwned?: boolean) => {
       const sessionId = 'session-steer-fallback' as SessionId;
       const userTurnId = 'user-turn-steer-fallback';
       const machineId = 'machine-1' as MachineId;
@@ -1046,7 +1051,8 @@ describe('useSessionActions', () => {
           type: 'session/steer_response' as const,
           sessionId,
           userTurnId,
-          applied: false,
+          applied: disposition === 'applied',
+          ...(recoveryOwned ? { recoveryOwned } : {}),
           disposition,
           ...(disposition === 'promotion-failed'
             ? { error: 'Injected activation write failure' }
@@ -1084,9 +1090,14 @@ describe('useSessionActions', () => {
         requestSessionDispatchTurn as WorkspaceRuntime['requestSessionDispatchTurn'];
       const actions = await renderActions(runtime);
 
-      await expect(
-        actions.requestSessionSteer(sessionId, 'assistant:user-1', userTurnId, { machineId })
-      ).resolves.toBe(false);
+      const result = actions.requestSessionSteer(sessionId, 'assistant:user-1', userTurnId, {
+        machineId,
+      });
+      if (recoveryOwned && disposition === 'promotion-failed') {
+        await expect(result).rejects.toThrow('Injected activation write failure');
+      } else {
+        await expect(result).resolves.toBe(disposition === 'applied');
+      }
 
       if (!repair) {
         expect(history[0]?.status).toBe(statusAfterRpc === 'removed' ? undefined : statusAfterRpc);

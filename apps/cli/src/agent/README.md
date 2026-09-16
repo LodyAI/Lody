@@ -10,6 +10,12 @@ context/acp-agent-edit-evidence.md. Adapter source repositories and builtin prov
 [apps/cli/AGENTS.md](../../AGENTS.md). Where updates go after they arrive:
 context/message-flow.md "Upstream".
 
+| Boundary           | Owner                                        | Responsibility                                                               |
+| ------------------ | -------------------------------------------- | ---------------------------------------------------------------------------- |
+| ACP connection     | [AgentClient](agent-client.ts)               | Negotiates capabilities, tracks raw requests, and classifies steer evidence. |
+| Process startup    | [Runner](acp-runner.ts)                      | Spawns agents under the shared startup gate.                                 |
+| Runtime resolution | [Managed runtimes](managed-agent-runtime.ts) | Resolves pinned distributions and verifies their artifacts.                  |
+
 ## Files
 
 - `agent-client.ts` — the ACP connection: initialize/session lifecycle, client
@@ -98,6 +104,12 @@ turn's response: Codex may finish the interrupted turn before returning its defi
 `failed` response. A closed connection, a dead agent process, or an internal error stays
 `unknown`, because the prompt may already be inside the live turn. Session execution consumes
 this outcome without interpreting provider errors or interruption state itself.
+
+`pendingPromptCompletion` aggregates raw prompt requests and request-transport steer
+submissions, even after a caller stops waiting locally. The session owner drains these before
+reuse or confirms termination of the old execution. A prompt response alone cannot release
+an unresolved steer submission. Application leases are released even if history projection
+fails; ending a local waiter never manufactures a provider refusal.
 
 ### DeepSeek Harness is not a managed runtime
 
