@@ -24,7 +24,7 @@ export function ProjectActivityIndicator({ counts }: { counts: ProjectActivityCo
   const items = getProjectActivityItems(counts);
   return (
     <span
-      className="inline-grid h-5 shrink-0 grid-cols-[repeat(2,1.75rem)] items-center gap-1 text-[10px] font-medium leading-none tabular-nums"
+      className="inline-grid h-5 shrink-0 grid-cols-[repeat(2,1.75rem)] items-center gap-0.5 text-[10px] font-medium leading-none tabular-nums"
       aria-hidden="true"
     >
       {items.map(({ status, count }, index) => (
