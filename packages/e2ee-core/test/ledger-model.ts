@@ -12,6 +12,7 @@ export type LeanState = {
   devices: Array<[number, LeanDevice]>;
   epoch: number;
   retired: number[];
+  usedMembers: number[];
 };
 export type LeanOp =
   | { type: 'admitMember'; actor: number; newMember: number; firstDevice: number }
@@ -46,6 +47,7 @@ export function leanStep(s: LeanState, op: LeanOp): LeanState | null {
   switch (op.type) {
     case 'admitMember': {
       if (!isPersonalManage(s, op.actor)) return null;
+      if (s.usedMembers.includes(op.newMember)) return null;
       if (roleOf(s, op.newMember) !== undefined) return null;
       if (deviceOf(s, op.firstDevice) !== undefined) return null;
       if (s.retired.includes(op.firstDevice)) return null;
@@ -56,6 +58,7 @@ export function leanStep(s: LeanState, op: LeanOp): LeanState | null {
           ...s.devices,
           [op.firstDevice, { memberId: op.newMember, kind: 'personal', canManage: false }],
         ],
+        usedMembers: [...s.usedMembers, op.newMember],
       };
     }
     case 'removeMember': {
@@ -89,6 +92,7 @@ export function leanStep(s: LeanState, op: LeanOp): LeanState | null {
       const ok =
         (d.kind === 'personal' || d.kind === 'recovery') &&
         (d.kind !== 'recovery' || op.kind === 'personal') &&
+        (roleOf(s, d.memberId) !== 'guest' || op.kind !== 'machine') &&
         ((op.kind !== 'machine' && op.kind !== 'recovery') || !op.canManage) &&
         (!op.canManage ||
           (op.kind === 'personal' &&
@@ -131,6 +135,7 @@ export function leanStep(s: LeanState, op: LeanOp): LeanState | null {
       };
     }
   }
+  return null;
 }
 
 export const genesis: LeanState = {
@@ -139,18 +144,21 @@ export const genesis: LeanState = {
   devices: [[0, { memberId: 0, kind: 'personal', canManage: true }]],
   epoch: 0,
   retired: [],
+  usedMembers: [0],
 };
 
 export function stateKey(s: LeanState): string {
   const members = [...s.members].sort((a, b) => a[0] - b[0]);
   const devices = [...s.devices].sort((a, b) => a[0] - b[0]);
   const retired = [...s.retired].sort((a, b) => a - b);
+  const usedMembers = [...s.usedMembers].sort((a, b) => a - b);
   return JSON.stringify({
     owner: s.owner,
     members,
     devices,
     epoch: s.epoch,
     retired,
+    usedMembers,
   });
 }
 
@@ -347,6 +355,7 @@ export function submitStep(s: SubmitState, ev: SubmitEvent): SubmitState | null 
         falseAck: false,
       };
   }
+  return null;
 }
 
 function submitKey(s: SubmitState): string {
@@ -435,6 +444,7 @@ export function deliveryStep(s: DeliveryState, ev: DeliveryEvent): DeliveryState
       if (s.recipient !== 'active') return null;
       return { ...s, remote: 'frame' };
   }
+  return null;
 }
 
 function deliveryKey(s: DeliveryState): string {

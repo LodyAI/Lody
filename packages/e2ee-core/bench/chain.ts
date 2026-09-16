@@ -1,4 +1,3 @@
-import { Ledger } from '../src/ledger';
 import { decodeRecord } from '../src/ledger/schema';
 import {
   HISTORY_PACKET_BYTES,
@@ -78,5 +77,5 @@ export async function buildChain(count: number) {
       process.stderr.write(`generated ${records.length}/${count}\n`);
     }
   }
-  return { created, records, ledger };
+  return { owner, created, records, ledger };
 }

@@ -1,0 +1,11 @@
+[package]
+name = "dalek-verify"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+ed25519-dalek = { version = "2.2.0", default-features = false, features = ["alloc"] }

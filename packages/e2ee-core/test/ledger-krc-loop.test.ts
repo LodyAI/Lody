@@ -730,7 +730,7 @@ describe('P3 public-export K/R/C loop', () => {
     const signingPublic = hex(new Uint8Array(await crypto.subtle.exportKey('raw', pair.publicKey)));
     const author = { actor: 'owner', memberInstance: 'm0', device: 'd0' };
     const provider = (
-      genesis: Uint8Array,
+      genesisBytes: Uint8Array,
       resource: string,
       writeEpoch: number,
       readKey: (epoch: number) => Uint8Array | undefined
@@ -742,7 +742,7 @@ describe('P3 public-export K/R/C loop', () => {
             return signingPublic;
           },
         }),
-        genesis: hex(genesis),
+        genesis: hex(genesisBytes),
         resource,
         model: 'loro',
         writeEpoch,
@@ -754,7 +754,7 @@ describe('P3 public-export K/R/C loop', () => {
     async function writePlain(
       streamUrl: string,
       resource: string,
-      genesis: Uint8Array,
+      genesisBytes: Uint8Array,
       writeEpoch: number,
       key: Uint8Array,
       plaintext: string
@@ -765,7 +765,7 @@ describe('P3 public-export K/R/C loop', () => {
         streamUrl,
         adapter: createLoroDocAdapter(doc),
         e2ee: {
-          provider: provider(genesis, resource, writeEpoch, (epoch) =>
+          provider: provider(genesisBytes, resource, writeEpoch, (epoch) =>
             epoch === writeEpoch ? key : undefined
           ),
           readPolicy: 'encrypted-only',
@@ -788,7 +788,7 @@ describe('P3 public-export K/R/C loop', () => {
     async function catchup(
       streamUrl: string,
       pages: Uint8Array[],
-      genesis: Uint8Array,
+      genesisBytes: Uint8Array,
       resource: string,
       writeEpoch: number,
       readKey: (epoch: number) => Uint8Array | undefined
@@ -806,7 +806,7 @@ describe('P3 public-export K/R/C loop', () => {
         adapter: createLoroDocAdapter(reader),
         remoteCursorStore: store,
         e2ee: {
-          provider: provider(genesis, resource, writeEpoch, readKey),
+          provider: provider(genesisBytes, resource, writeEpoch, readKey),
           readPolicy: 'encrypted-only',
           writePolicy: 'encrypt',
         },
