@@ -309,7 +309,7 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     if (!runtime) {
       throw new Error('Runtime not ready');
     }
-    const entry = await runtime.withSessionStore(sessionId, async (sessionStore) => {
+    const entry = await runtime.sendResources.withSessionStore(sessionId, async (sessionStore) => {
       const read = await sessionStore.sessionData.history.readTurn(userTurnId);
       return read.state === 'ready' && read.turn.role === 'user' ? read.turn : undefined;
     });
@@ -331,8 +331,8 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     // Local history writes are the accept boundary. Remote document sync is a
     // sibling of dispatch signaling, never a blocker for clearing the composer.
     // Hold a store ref for the flush so eviction cannot unload the doc mid-flush.
-    void runtime
-      .withSessionStore(sessionId, (sessionStore) => sessionStore.waitUntilSynced())
+    void runtime.sendResources
+      .withSessionStore(sessionId, (sessionStore, signal) => sessionStore.waitUntilSynced(signal))
       .catch((error: unknown) => {
         console.warn('Failed to sync session doc after dispatch request', {
           sessionId,
@@ -380,7 +380,7 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
     if (!runtime) {
       throw new Error('Runtime not ready');
     }
-    const entry = await runtime.withSessionStore(sessionId, async (sessionStore) => {
+    const entry = await runtime.sendResources.withSessionStore(sessionId, async (sessionStore) => {
       const read = await sessionStore.sessionData.history.readTurn(userTurnId);
       return read.state === 'ready' && read.turn.role === 'user' ? read.turn : undefined;
     });
@@ -420,26 +420,29 @@ export function createSessionSubmission(ports: SessionSubmissionPorts) {
       // pending_apply because replay could deliver the input twice.
       // Re-acquire the store for the write: the steer RPC above can run long,
       // and we must not hold a store ref across it.
-      const promoted = await runtime.withSessionStore(sessionId, async (sessionStore) => {
-        const changed =
-          (
+      const promoted = await runtime.sendResources.withSessionStore(
+        sessionId,
+        async (sessionStore) => {
+          const changed =
+            (
             await sessionStore.sessionData.commands.applyHistoryAction({
               kind: 'user-status',
               turnId: userTurnId,
               status: 'pending',
               onlyPendingApply: true,
             })
-          ).matched ?? false;
-        if (changed) return true;
-        // CLI promotion can write history before its activation pointer
-        // fails. Auto-seen may also have observed that pending entry.
-        const read = await sessionStore.sessionData.history.readTurn(userTurnId);
-        return (
-          read.state === 'ready' &&
-          read.turn.role === 'user' &&
-          (read.turn.status === 'pending' || read.turn.status === 'seen')
-        );
-      });
+            ).matched ?? false;
+          if (changed) return true;
+          // CLI promotion can write history before its activation pointer
+          // fails. Auto-seen may also have observed that pending entry.
+          const read = await sessionStore.sessionData.history.readTurn(userTurnId);
+          return (
+            read.state === 'ready' &&
+            read.turn.role === 'user' &&
+            (read.turn.status === 'pending' || read.turn.status === 'seen')
+          );
+        }
+      );
       // Pending promotion is repairable; a started, terminal, or removed turn is not.
       if (!promoted) {
         return false;

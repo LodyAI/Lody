@@ -1,3 +1,4 @@
+import { createSessionSendResources } from '@/lib/session-send-resources';
 import { jotaiStore } from '@/lib/utils';
 import { desktopWindowId } from '@/lib/desktop-window';
 import { navigationSidebarHiddenAtom } from '@/atoms/layout-state';
@@ -3901,7 +3902,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         disposeConversation();
       },
       waitUntilSynced: async (signal?: AbortSignal) => {
-        await transportReady.promise;
+        if (signal) await waitForPromiseOrAbort(transportReady.promise, signal);
+        else await transportReady.promise;
         if (signal?.aborted) {
           return;
         }
@@ -4429,6 +4431,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     }
 
     disposePromise = (async () => {
+      // Cancel and join send I/O while its cache, transport and repo still exist.
+      await sendResources.dispose();
       cancelDelayedBackgroundSyncStart?.();
       cancelDelayedBackgroundSyncStart = null;
       cancelDelayedStartupAcpCapabilitiesRefresh?.();
@@ -4610,11 +4614,16 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
   window.repo = repo;
   const codeCollabFileIndexCache = createCodeCollabFileIndexCache(repo);
+  const sendResources = createSessionSendResources({
+    acquire: sessionStoreCache.acquire,
+    releaseRef: sessionStoreCache.releaseRef,
+  });
   return {
     workspaceSlug: deps.workspaceSlug,
     workspaceId,
     repo,
     codeCollabFileIndexCache,
+    sendResources,
     writer: workspaceWriter,
     prepareSessionTarget: (sessionId, machineId) =>
       targetRouter.prepareSessionTarget(sessionId, machineId),

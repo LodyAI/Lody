@@ -97,3 +97,11 @@ The [Effect probes](../../../../specs/models/session-files.effect-probe.mjs) use
 Reproduce with a temporary effect@3.18.4 installation (`npm install --prefix <temp> --ignore-scripts --no-audit --no-fund effect@3.18.4`). Copy specs/models/session-files.effect-probe.mjs and packages/components/src/providers/store-ref-tracker.ts retaining their repository-relative paths; run `node --experimental-strip-types --test <temp>/specs/models/session-files.effect-probe.mjs`. This establishes only those boundaries, not real XHR/IPC, writer durability, cross-window coordination, or E01–E12 acceptance. Official v3 sources and current code references are in the Spec.
 
 The original design checkout had 20 broken links to uninitialized ACP submodules. The independent implementation checkout initializes the pinned submodules: document checks now have zero errors and no registered SHA-protected topics. The three action/composer suites pass 69 tests for layer 1; full repository verification and PR references are recorded with the stack status. Product draft behavior and device acceptance remain incomplete. Specs remain draft and this Note remains proposed.
+
+## Layer 2 implementation
+
+Layer 2 creates one workspace Effect resource owner for file preparation, image uploads, and send-path store borrows. React keeps Promise interfaces. Navigation does not cancel uploads; workspace disposal cancels and joins work before closing caches/transports. Noncancelable IPC must settle before dependency release. New and continuing conversations share file preparation; cancellation cannot trigger fallback upload, and multipart cleanup is awaited.
+
+Deterministic tests cover parallel cancellation, late store acquisition, sibling isolation, actual XHR cancellation, and progress versus successful response. Transfer still starts on addition. Persistent submission and complete draft behavior remain the next two layers.
+
+Layer 2 validation: `TMPDIR=/private/tmp NODE_ENV=test pnpm check` passes completely (components: 478 files, 3,661 tests). `pnpm format` and `pnpm run docs check` completed; docs have no errors. Packaged-device draft acceptance remains outstanding.
