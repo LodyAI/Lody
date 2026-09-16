@@ -33,11 +33,14 @@ Inspector、Accessibility Inspector、命令面板、设置和 dock 控件。只
 与终端能力后才会出现 Terminals。Main Thread 使用 Devframe 官方 JSON-render renderer
 和 `@antfu/design` 组件；Lody 不维护另一套详细界面样式。
 
-性能视图首先展示当前 FPS、CPU、heap 和阻塞时间卡片，再以紧凑 Unicode sparkline
-显示最近 60 个样本的趋势、当前值与范围，之后是可折叠的当前指标、阻塞汇总和 Chromium
-Performance Timeline 报告的有界近期 Long Tasks。Devframe 1.0 官方 JSON-render catalog
-没有 chart primitive，因此 sparkline 使用其标准 `DataTable` 和文本渲染，而不增加自定义
-浏览器组件或样式表。Long Task 证明 renderer 主线程至少阻塞 50 ms，但不包含 JavaScript 调用栈；
+性能视图首先展示当前 FPS、CPU、heap 和阻塞时间卡片，之后是可折叠的当前指标、
+阻塞汇总和 Chromium Performance Timeline 报告的有界近期 Long Tasks。Devframe 1.0
+官方 JSON-render catalog 没有 chart primitive，因此 Main thread dock 是一个
+`custom-render` 条目：loopback server 提供一个小型 Lody 自有模块，在同一 dock 内
+挂载官方 JSON-render 视图并在其下方追加 canvas 趋势卡，每秒轮询一次快照 JSON 路由，
+绘制 FPS、CPU、heap、常驻内存与阻塞时间的实时折线图。这是对“不维护另一套详细界面样式”
+边界的有限例外：它在原生视图内增加 chart 展示面，而不是并行的视图样式表。
+Long Task 证明 renderer 主线程至少阻塞 50 ms，但不包含 JavaScript 调用栈；
 函数归因仍需后续 CPU profile。`lody://devbar?view=main-thread`（或安装配置对应协议）
 只在 Devbar 已启用时聚焦 Desktop 并打开该视图；深链接本身不会授予能力。
 
@@ -58,12 +61,16 @@ Markdown resource、Inspector 工具和 Terminals 工具。浏览器样本写入
 Terminals 支持交互式本地 shell 和子进程会话；任意 command 请求保持禁用，但 shell 本身仍是
 高权限能力。停止 Devbar 会同时移除这两项能力。
 
-只有这个单用户 loopback 模式会关闭 Devframe 浏览器信任提示。Hub 只接受打包后的 `file://`
-renderer 和自身 loopback Origin；HTTP host 会拒绝其他浏览器 Origin。普通 renderer 入口保留
-原 CSP。仅 Devbar renderer 入口允许 loopback Hub script、frame、connection，以及官方 UI
-使用的 Iconify endpoint。由于 Electron host page 使用 `file://`，Hub iframe dock URL 会发布
-成完整 loopback URL，而不是根相对路径。文件管理、code-server、非 loopback 绑定和远程访问
-均不在范围内，需要独立的 capability 决策与认证方案。
+在这个单用户 loopback 模式下，Hub 用 gate 保护 RPC transport，而不是弹出 Devframe 浏览器
+信任提示。打包后的 `file://` renderer 使用经 IPC 下发的每进程 token 认证；嵌入的 dock
+script 从页面读取同一 token。loopback Origin 上的 Hub 页面、开发 renderer Origin，以及不带
+Origin header 的本地非浏览器调用方保持受信。`null` 等 opaque Origin——打包页面与其他浏览器
+的 sandboxed frame 无法区分——必须携带 token 才能调用，Lody 自有的 `/__lody/*` 路由则直接
+拒绝。HTTP host 仍会拒绝其他浏览器 Origin。普通 renderer 入口保留原 CSP。仅 Devbar renderer
+入口允许 loopback Hub script、frame、connection，以及官方 UI 使用的 Iconify endpoint。由于
+Electron host page 使用 `file://`，Hub iframe dock URL 会发布成完整 loopback URL，而不是根
+相对路径。文件管理、code-server、非 loopback 绑定和远程访问均不在范围内，需要独立的
+capability 决策与认证方案。
 
 编码 Agent host 应配置一次 stdio `devframe connect` connector，而不是固定 HTTP 端口。
 connector 会发现运行实例、补充 loopback Origin header，并代理二级 gate 启用的读取或终端

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type JSX } from 'react'
 import { getIpcServices, onIpcEvent } from '@lody/components/lib/electron-ipc-client'
 import { createClsTracker } from './devbar-cls'
 import { isDevbarDeepLink } from './devbar-deep-link'
+import { devbarSampleRoute } from './devbar-route'
 import { createLongTaskBuffer, type LongTaskEntryLike } from './devbar-long-tasks'
 import './desktop-devbar.css'
 
@@ -54,6 +55,7 @@ export function DesktopDevbar(): JSX.Element {
     let recordSample: ((sample: DevbarRendererSample) => Promise<unknown>) | undefined
     let sampleHeapPrecise = false
     let closeDevframe: (() => void) | undefined
+    let embeddedScript: HTMLScriptElement | undefined
     if (PerformanceObserver.supportedEntryTypes.includes('layout-shift')) {
       clsValue = 0
       clsObserver = new PerformanceObserver((list) => {
@@ -102,7 +104,7 @@ export function DesktopDevbar(): JSX.Element {
           )
           const sample: DevbarRendererSample = {
             recordedAtMs: Date.now(),
-            route: window.location.pathname,
+            route: devbarSampleRoute(window.location),
             fps: latestFps,
             cls: clsValue,
             heapBytes: nextHeap,
@@ -149,14 +151,23 @@ export function DesktopDevbar(): JSX.Element {
         if (disposed || !config.devframe) return
         sampleHeapPrecise = config.preciseMemory
         setHeapPrecise(config.preciseMemory)
-        const embeddedScript = document.createElement('script')
+        embeddedScript =
+          document.querySelector<HTMLScriptElement>('script[data-lody-devframe-hub]') ??
+          document.createElement('script')
         embeddedScript.type = 'module'
         embeddedScript.src = config.devframe.embeddedScriptUrl
         embeddedScript.dataset.lodyDevframeHub = 'true'
-        document.body.appendChild(embeddedScript)
+        embeddedScript.onerror = () => {
+          if (!disposed) setDevframeStatus('error')
+        }
+        // The embedded Hub script reads this global when it builds its own
+        // connection so the opaque `file://` origin can present the token.
+        globalThis.__DEVFRAME_CONNECTION_AUTH_TOKEN__ = config.devframe.authToken
+        if (!embeddedScript.isConnected) document.body.appendChild(embeddedScript)
         const { connectDevframe } = await import('devframe/client')
         const rpc = await connectDevframe({
           connection: config.devframe.connection,
+          authToken: config.devframe.authToken,
           simpleAuth: false,
           webmcp: false
         })
@@ -183,6 +194,7 @@ export function DesktopDevbar(): JSX.Element {
           stopStatus()
           activateDockRef.current = null
           rpc.close?.()
+          delete globalThis.__DEVFRAME_CONNECTION_AUTH_TOKEN__
         }
       })
       .catch(() => setDevframeStatus('error'))
@@ -193,6 +205,7 @@ export function DesktopDevbar(): JSX.Element {
       cancelAnimationFrame(frame)
       clsObserver?.disconnect()
       longTaskObserver?.disconnect()
+      embeddedScript?.remove()
       closeDevframe?.()
       document.removeEventListener('visibilitychange', onVisibility)
     }
@@ -219,14 +232,15 @@ export function DesktopDevbar(): JSX.Element {
           else pendingActivationRef.current = true
         }}
       >
+        <span className="desktop-devbar-status" data-status={devframeStatus} aria-hidden="true" />
         DEVBAR
       </button>
       <span className="desktop-devbar-metrics">
         <span title="Renderer animation-frame callbacks per second; not GPU presentation rate">
           FPS {fps ?? '—'}
         </span>
-        <span title="Total duration of renderer long tasks observed during the last sample interval">
-          LT {longTaskDuration == null ? '—' : `${longTaskDuration.toFixed(0)}ms`}
+        <span title="Renderer main thread blocked by long tasks during the last sample interval">
+          Blk {longTaskDuration == null ? '—' : `${longTaskDuration.toFixed(0)}ms`}
         </span>
         <span title="Renderer maximum layout-shift session window, excluding recent input">
           CLS {cls == null ? '—' : cls.toFixed(3)}

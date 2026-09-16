@@ -65,3 +65,26 @@ loopback iframe URL，并选中 `lody-main-thread`。静态导出、跨平台打
 本决策部分替代早先[桥接决策](../architecture/2026-09-16-devbar-devframe-bridge.zh.md)
 中的 UI 与子进程排除项。当前保证由草案状态的
 [Desktop 性能栏 Spec](../../../../specs/desktop-devbar.zh.md) 负责。
+
+## 更正
+
+- 2026-09-16：Main Thread 旁新增 `Trends` iframe dock，由 Hub 同源的 Lody 自有
+  loopback 路由（`/__lody/chart`、`/__lody/chart.js`、`/__lody/snapshot.json`）提供。
+  页面直接轮询快照路由——不经 devframe client——并用 canvas 绘制折线图。这是对
+  “Lody 不维护第二套详细界面”的有限例外：它补上 JSON-render catalog 缺少的
+  时间序列展示面，而非并行的视图样式表。
+- 2026-09-16：单独的 iframe dock 改为嵌入式：可见的 `Main thread` dock 现在是
+  `custom-render` 条目，其 Lody 自有模块（`/__lody/dock-renderer.mjs`）通过客户端
+  `renderers` 注册表挂载隐藏的 JSON-render 视图，并在同一 dock 内追加 canvas 趋势卡。
+  视图 spec 中的 sparkline `DataTable` 随之移除——真图是它的替代，而非第二份展示。
+- 2026-09-16：更正先前“该单用户边界内关闭浏览器认证”的表述。放行 `Origin: null`
+  的范围超出了它本要覆盖的打包 `file://` 页面：任意网站的 sandboxed frame 呈现相同的
+  opaque Origin，可以借宽松的 `cross-origin` 资源策略访问 Hub 的 HTTP 路由（启用
+  agent access 时还包括 MCP 路由）。Hub 现在安装一个 `DevframeAuthHandler`：renderer
+  经 IPC 获得每进程 token，通过 `connectDevframe({ authToken })` 出示，并经由
+  `__DEVFRAME_CONNECTION_AUTH_TOKEN__` 提供给嵌入的 dock script。Hub 同源页面、开发
+  renderer Origin 和不带 Origin header 的非浏览器调用方保持受信，因此独立 viewer 和
+  `devframe connect` 行为不变；不带 token 的 opaque Origin 可以建立连接，但 `authorize`
+  会拒绝所有非 `anonymous:` 方法。Lody 自有的 `/__lody/*` 路由则直接拒绝 `Origin: null`。
+  MCP 维持原有 `authorization: false` + Origin gate 姿态；token 不写入实例注册表或
+  agent 可读的状态。

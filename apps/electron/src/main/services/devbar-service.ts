@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { randomBytes } from 'node:crypto'
 import { desktopInstallationProfile } from '../platform'
 import { initialDevbarControl, type DevbarControlInput } from './devbar-control'
 import { summarizeDevbarMetrics } from './devbar-metrics'
@@ -12,7 +13,11 @@ interface DevbarConfig {
   enabled: boolean
   agentAccess: boolean
   preciseMemory: boolean
-  devframe: Pick<DevbarRuntime, 'connection' | 'mcpUrl' | 'uiUrl' | 'embeddedScriptUrl'> | null
+  devframe:
+    | (Pick<DevbarRuntime, 'connection' | 'mcpUrl' | 'uiUrl' | 'embeddedScriptUrl'> & {
+        authToken: string
+      })
+    | null
 }
 
 // One shared sampling window across Desktop windows; no background timer.
@@ -22,6 +27,9 @@ let devframeRuntime: DevbarRuntime | null = null
 let devframeStart: Promise<DevbarRuntime> | null = null
 let control = initialDevbarControl(process.env.LODY_DEVBAR)
 const preciseMemory = control.enabled
+// Per-process token the renderer presents to the Hub's RPC transport; stable
+// across capability restarts so a live page keeps working after a Hub restart.
+const devbarAuthToken = randomBytes(24).toString('base64url')
 
 export function getDevbarConfig(): DevbarConfig {
   return {
@@ -33,7 +41,8 @@ export function getDevbarConfig(): DevbarConfig {
           connection: devframeRuntime.connection,
           mcpUrl: devframeRuntime.mcpUrl,
           uiUrl: devframeRuntime.uiUrl,
-          embeddedScriptUrl: devframeRuntime.embeddedScriptUrl
+          embeddedScriptUrl: devframeRuntime.embeddedScriptUrl,
+          authToken: devbarAuthToken
         }
       : null
   }
@@ -62,7 +71,7 @@ async function createDevbarRuntime(): Promise<DevbarRuntime> {
   }
   return await startDevbarDevframe(
     `${desktopInstallationProfile.desktopProtocol}://devbar?view=main-thread`,
-    { agentAccess: control.agentAccess, rendererOrigin }
+    { agentAccess: control.agentAccess, rendererOrigin, authToken: devbarAuthToken }
   )
 }
 

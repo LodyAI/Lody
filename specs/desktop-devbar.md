@@ -45,13 +45,16 @@ after the separate agent-and-terminal capability is enabled. The Main Thread
 view uses Devframe's official JSON-render renderer and `@antfu/design` components;
 Lody does not own a parallel detailed UI stylesheet.
 
-The performance view leads with current FPS, CPU, heap, and blocked-time cards.
-It plots the last 60 samples as compact Unicode sparklines with current and range
-columns, followed by collapsible current-metric and blocking summaries and the
-bounded recent Long Tasks reported by Chromium's Performance Timeline. Devframe
-1.0's official JSON-render catalog has no chart primitive, so the sparklines use
-its stock `DataTable` and text rendering instead of a custom browser component or
-stylesheet. A Long Task proves
+The performance view leads with current FPS, CPU, heap, and blocked-time cards,
+followed by collapsible current-metric and blocking summaries and the bounded
+recent Long Tasks reported by Chromium's Performance Timeline. Devframe 1.0's
+official JSON-render catalog has no chart primitive, so the Main thread dock is
+a `custom-render` entry: a small Lody-owned module served from the loopback
+server mounts the official JSON-render view and appends a canvas trends card
+inside the same dock, polling a snapshot JSON route once a second to draw live
+line charts for FPS, CPU, heap, resident memory, and blocked time. This is a
+narrow exception to the no-Lody-owned-detailed-UI boundary: it adds a chart
+surface inside the stock view, not a parallel view stylesheet. A Long Task proves
 that the renderer main thread was blocked for at least 50 ms, but does not include
 a JavaScript stack; function attribution requires a later CPU-profile capture.
 `lody://devbar?view=main-thread` (or the installation profile's equivalent
@@ -81,10 +84,16 @@ sample ingestion is not agent-facing. Terminals allows an interactive local shel
 and subprocess sessions; arbitrary command requests stay disabled, but shell access
 is still privileged. Stopping Devbar removes both capabilities.
 
-The Hub disables Devframe's browser trust prompt only inside this single-user
-loopback mode. It accepts the packaged `file://` renderer and its own loopback
-origin; the HTTP host rejects other browser origins. The normal renderer entry
-keeps its existing CSP. A Devbar-only renderer entry permits loopback Hub scripts,
+The Hub gates its RPC transport inside this single-user loopback mode instead of
+showing Devframe's browser trust prompt. The packaged `file://` renderer
+authenticates with a per-process token delivered over IPC; the embedded dock
+script reads the same token from the page. Hub pages on the loopback origin, the
+development renderer origin, and local non-browser callers that send no Origin
+header remain trusted. Opaque origins such as `null` — indistinguishable between
+the packaged page and a sandboxed frame in another browser — connect only with
+the token, and the Lody-owned `/__lody/*` routes refuse them outright. The HTTP
+host still rejects other browser origins. The normal renderer entry keeps its
+existing CSP. A Devbar-only renderer entry permits loopback Hub scripts,
 frames, and connections plus the Iconify endpoint used by the official UI. Because
 Electron loads the host page from `file://`, Hub iframe dock URLs are published as
 absolute loopback URLs instead of root-relative paths. Filesystem management,

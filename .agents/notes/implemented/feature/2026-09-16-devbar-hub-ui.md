@@ -82,3 +82,34 @@ This decision partially supersedes the UI and subprocess exclusions in the
 earlier [bridge decision](../architecture/2026-09-16-devbar-devframe-bridge.md).
 Current guarantees are owned by the draft
 [Desktop performance bar Spec](../../../../specs/desktop-devbar.md).
+
+## Corrections
+
+- 2026-09-16: A `Trends` iframe dock now sits next to Main Thread, served from
+  Lody-owned loopback routes (`/__lody/chart`, `/__lody/chart.js`,
+  `/__lody/snapshot.json`) on the Hub's origin. The page polls the snapshot route
+  directly — no devframe client — and draws canvas line charts. This is a narrow
+  exception to "Lody does not maintain a second detailed UI": it adds the
+  time-series surface the JSON-render catalog lacks, not a parallel view
+  stylesheet.
+- 2026-09-16: The separate iframe dock was replaced by embedding: the visible
+  `Main thread` dock is now a `custom-render` entry whose Lody-owned module
+  (`/__lody/dock-renderer.mjs`) mounts the hidden JSON-render view through the
+  client `renderers` registry and appends the canvas trends card inside the
+  same dock. The sparkline `DataTable` was removed from the view spec — the
+  real charts are its replacement, not a second display.
+- 2026-09-16: The earlier "browser auth is disabled inside the single-user
+  boundary" line is corrected. Accepting `Origin: null` was broader than the
+  packaged `file://` page it was meant for: a sandboxed frame in an arbitrary
+  website presents the same opaque origin and could reach the Hub's HTTP routes
+  (and, with agent access enabled, the MCP route) through the permissive
+  `cross-origin` resource policy. The Hub now installs a `DevframeAuthHandler`:
+  the renderer learns a per-process token over IPC, presents it through
+  `connectDevframe({ authToken })`, and exposes it to the embedded dock script
+  via `__DEVFRAME_CONNECTION_AUTH_TOKEN__`. Hub-origin pages, the dev renderer
+  origin, and non-browser callers without an Origin header stay trusted, so the
+  standalone viewer and `devframe connect` are unchanged; opaque origins without
+  the token can open a connection but `authorize` rejects every non-`anonymous:`
+  method. Lody's own `/__lody/*` routes refuse `Origin: null` entirely. MCP
+  keeps its existing `authorization: false` + Origin-gate posture; the token
+  never enters the instance registry or agent-readable state.

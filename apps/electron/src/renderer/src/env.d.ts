@@ -13,3 +13,6 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv
 }
+
+// Read by the embedded Devframe Hub script when it opens its own connection.
+declare var __DEVFRAME_CONNECTION_AUTH_TOKEN__: string | undefined

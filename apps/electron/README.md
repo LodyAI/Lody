@@ -67,15 +67,22 @@ memory readings before app readiness. Unavailable readings display `Heap —`.
 Select `DEVBAR` to activate Main Thread in Devframe's official floating Hub UI.
 The same Hub is available from its loopback URL as a standalone viewer. It also
 includes the Devframe Inspector and Accessibility Inspector. The performance view
-shows live metric cards, 60-sample sparklines for FPS/CPU/memory/blocking, and a
-bounded recent Long Task list. Chromium reports the blocking interval but not a
+shows live metric cards, a bounded recent Long Task list, and collapsible metric
+and blocking summaries. A Lody-owned `custom-render` module mounts the
+stock view and appends live canvas line charts inside the same Main thread
+dock, covering the time-series surface the official JSON-render catalog has no
+primitive for. Chromium reports the blocking interval but not a
 JavaScript stack, so exact function attribution still needs a CPU profile. The
 installation-profile deep link `<protocol>://devbar?view=main-thread` opens the same
 view (`lody://...` in the public build).
 
 While enabled, Desktop starts a loopback-only Devframe Hub on the first free port
 from 9765 through 9785. It serves the official viewer and dock, live RPC streams,
-and shared state. Developer Mode shows a separate `Agent and terminal access`
+and shared state. The Devbar renderer and embedded dock authenticate to the Hub's
+RPC transport with a per-process token delivered over IPC; Hub pages on the
+loopback origin and non-browser callers without an Origin header stay inside the
+boundary, while opaque origins such as `null` cannot call RPC methods without it.
+Developer Mode shows a separate `Agent and terminal access`
 switch while Devbar runs. Enabling it restarts the Hub with the aggregate HTTP MCP
 endpoint and Terminals panel. Coding agents can then read the performance snapshot
 and Inspector resources, and Terminals can start local subprocesses. Arbitrary
@@ -85,8 +92,8 @@ process-control capability. Stopping Devbar removes both capabilities. See the
 
 After enabling Agent and terminal access, configure a coding-agent host once with
 the stdio command `apps/electron/node_modules/.bin/devframe connect`. The connector
-discovers the runtime-selected port and supplies the endpoint's loopback Origin
-header; a direct generic HTTP entry usually does neither. In Lody, review and
+discovers the runtime-selected port and connects as a local non-browser caller,
+which the Hub trusts without an Origin header. In Lody, review and
 select the resulting MCP catalog entry in trusted UI/CLI before starting a later
 agent session.
 

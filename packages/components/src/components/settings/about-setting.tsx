@@ -175,6 +175,22 @@ function DevbarSettingsControls() {
           />
         </CompactRow>
       )}
+      {config?.enabled && config.agentAccess && config.devframe && (
+        <CompactRow
+          label={t('settings.about.devbarAgentConnect', 'Agent connection')}
+          helper={t(
+            'settings.about.devbarAgentConnectHelper',
+            'Run `devframe connect` to proxy this Hub to coding agents over stdio MCP, or use the endpoints below directly.'
+          )}
+        >
+          <div className="flex flex-col items-end gap-0.5 text-right">
+            <code className="text-xs text-muted-foreground">{config.devframe.uiUrl}</code>
+            {config.devframe.mcpUrl && (
+              <code className="text-xs text-muted-foreground">{config.devframe.mcpUrl}</code>
+            )}
+          </div>
+        </CompactRow>
+      )}
       {failed && (
         <CompactRow label={t('settings.about.devbar', 'Lody Devbar')}>
           <span className="flex items-center gap-1 text-xs text-destructive">

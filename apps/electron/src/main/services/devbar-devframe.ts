@@ -11,12 +11,14 @@ import { defineDevframe, defineRpcFunction } from 'devframe'
 import { DevbarRendererSampleSchema, DevbarSnapshotSchema } from '@lody/shared/devbar'
 import { z } from 'zod'
 import pkg from '../../../package.json' with { type: 'json' }
-import { isAllowedDevbarRequestOrigin } from './devbar-control'
+import { createDevbarAuth, isAllowedDevbarRequestOrigin } from './devbar-control'
+import { handleDevbarLocalRoute } from './devbar-local-routes'
 import { createDevbarViewState, DEVBAR_VIEW_SPEC } from './devbar-json-render'
 import { DevbarRecording } from './devbar-recording'
 
 const DEVBAR_ID = 'lody-devbar'
 const DEVBAR_DOCK_ID = 'lody-main-thread'
+const DEVBAR_VIEW_DOCK_ID = 'lody-main-thread-view'
 const DEVBAR_PORT_RANGE = [9765, 9785] as const
 
 export interface DevbarDevframeRuntime {
@@ -99,7 +101,7 @@ function renderSnapshot(snapshot: DevbarSnapshot, deepLink: string): string {
 
 export async function startDevbarDevframe(
   deepLink: string,
-  options: { agentAccess: boolean; rendererOrigin?: string }
+  options: { agentAccess: boolean; rendererOrigin?: string; authToken: string }
 ): Promise<DevbarDevframeRuntime> {
   const recording = new DevbarRecording()
   let dashboardView: JsonRenderView | undefined
@@ -185,6 +187,31 @@ export async function startDevbarDevframe(
         })
       )
 
+      ctx.rpc.register(
+        defineRpcFunction({
+          name: 'anonymous:devframe:auth',
+          type: 'action',
+          jsonSerializable: true,
+          args: [
+            z.object({
+              authToken: z.string(),
+              ua: z.string(),
+              origin: z.string()
+            })
+          ],
+          returns: z.object({ isTrusted: z.boolean() }),
+          handler: (params: { authToken: string }) => {
+            const session = ctx.rpc.getCurrentRpcSession()
+            if (!session) return { isTrusted: false }
+            if (params.authToken === options.authToken) {
+              session.meta.clientAuthToken = params.authToken
+              session.meta.isTrusted = true
+            }
+            return { isTrusted: session.meta.isTrusted === true }
+          }
+        })
+      )
+
       ctx.agent.registerResource({
         id: 'lody-devbar-current',
         name: 'Current Lody performance diagnostics',
@@ -209,6 +236,7 @@ export async function startDevbarDevframe(
       response.setHeader('Vary', 'Origin')
     }
     response.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
+    if (handleDevbarLocalRoute(request, response, () => recording.snapshot())) return
     if (!hub) {
       response.statusCode = 503
       response.end('Lody DevTools is starting')
@@ -237,7 +265,10 @@ export async function startDevbarDevframe(
       server,
       origin,
       host: '127.0.0.1',
-      auth: false,
+      auth: createDevbarAuth(options.authToken, () => ({
+        hub: origin,
+        renderer: options.rendererOrigin
+      })),
       allowedOrigins: [
         'file://',
         origin,
@@ -285,14 +316,29 @@ export async function startDevbarDevframe(
           }
         }
         if (!dashboardView) throw new Error('Lody Devbar view was not initialized')
+        // JSON-render's closed catalog has no chart primitive, so the visible
+        // dock is a `custom-render` entry whose module (served from
+        // `/__lody/dock-renderer.mjs`) mounts the hidden JSON-render view and
+        // appends the canvas trends card below it inside the same dock.
         ctx.docks.register(
           toJsonRenderDockEntry(dashboardView, {
-            id: DEVBAR_DOCK_ID,
+            id: DEVBAR_VIEW_DOCK_ID,
             title: 'Main thread',
             icon: 'ph:activity-duotone',
-            category: 'performance'
+            category: 'performance',
+            visibility: 'false'
           })
         )
+        ctx.docks.register({
+          type: 'custom-render',
+          id: DEVBAR_DOCK_ID,
+          title: 'Main thread',
+          icon: 'ph:activity-duotone',
+          category: 'performance',
+          renderer: {
+            importFrom: new URL('/__lody/dock-renderer.mjs', origin).href
+          }
+        })
         ctx.docks.activate(DEVBAR_DOCK_ID)
       }
     })

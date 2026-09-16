@@ -3,15 +3,18 @@ import test from 'node:test'
 import {
   initialDevbarControl,
   devbarRendererEntry,
+  createDevbarAuth,
   isAllowedDevbarRequestOrigin,
   parseDevbarControlInput
 } from './main/services/devbar-control.ts'
 import { summarizeDevbarMetrics } from './main/services/devbar-metrics.ts'
 import { createDevbarViewState } from './main/services/devbar-json-render.ts'
+import { handleDevbarLocalRoute } from './main/services/devbar-local-routes.ts'
 import { DevbarRecording } from './main/services/devbar-recording.ts'
 import { createClsTracker } from './renderer/src/devbar-cls.ts'
 import { createLongTaskBuffer } from './renderer/src/devbar-long-tasks.ts'
 import { isDevbarDeepLink } from './renderer/src/devbar-deep-link.ts'
+import { devbarSampleRoute } from './renderer/src/devbar-route.ts'
 
 void test('environment activation remains an explicit automation override', () => {
   assert.deepEqual(initialDevbarControl('true'), { enabled: true, agentAccess: true })
@@ -43,6 +46,7 @@ void test('loopback Hub accepts only its own and the packaged file renderer orig
   const hubOrigin = 'http://127.0.0.1:9765'
   assert.equal(isAllowedDevbarRequestOrigin(undefined, hubOrigin), true)
   assert.equal(isAllowedDevbarRequestOrigin('null', hubOrigin), true)
+  assert.equal(isAllowedDevbarRequestOrigin('file://', hubOrigin), true)
   assert.equal(isAllowedDevbarRequestOrigin(hubOrigin, hubOrigin), true)
   assert.equal(
     isAllowedDevbarRequestOrigin('http://localhost:5173', hubOrigin, 'http://localhost:5173'),
@@ -50,6 +54,39 @@ void test('loopback Hub accepts only its own and the packaged file renderer orig
   )
   assert.equal(isAllowedDevbarRequestOrigin('https://example.test', hubOrigin), false)
   assert.equal(isAllowedDevbarRequestOrigin('http://localhost:3000', hubOrigin), false)
+})
+
+void test('devbar auth trusts loopback callers but requires the token for opaque origins', () => {
+  const hub = 'http://127.0.0.1:9765'
+  const auth = createDevbarAuth('launch-token', () => ({
+    hub,
+    renderer: 'http://localhost:5173'
+  }))
+  const connect = (url, origin) => {
+    const session = { meta: {} }
+    auth.onConnect(
+      { request: { url, headers: { get: (name) => (name === 'origin' ? origin : null) } } },
+      session
+    )
+    return session
+  }
+
+  // The packaged file:// renderer and the embedded dock carry the per-process token.
+  const tokenSession = connect(`${hub}/ws?devframe_auth_token=launch-token`, 'null')
+  assert.equal(tokenSession.meta.isTrusted, true)
+  assert.equal(tokenSession.meta.clientAuthToken, 'launch-token')
+  // Hub pages, the dev renderer, and non-browser local clients stay inside the boundary.
+  assert.equal(connect(`${hub}/ws`, hub).meta.isTrusted, true)
+  assert.equal(connect(`${hub}/ws`, 'http://localhost:5173').meta.isTrusted, true)
+  assert.equal(connect(`${hub}/ws`, null).meta.isTrusted, true)
+  // A sandboxed frame presents `null` too but cannot know the token.
+  const sandboxed = connect(`${hub}/ws`, 'null')
+  assert.equal(sandboxed.meta.isTrusted, undefined)
+  assert.equal(connect(`${hub}/ws?devframe_auth_token=wrong`, 'null').meta.isTrusted, undefined)
+
+  assert.equal(auth.authorize('anonymous:devframe:auth', sandboxed), true)
+  assert.equal(auth.authorize('lody-devbar:record-sample', sandboxed), false)
+  assert.equal(auth.authorize('lody-devbar:record-sample', tokenSession), true)
 })
 
 void test('process metrics sum Electron working sets and report GPU process separately', () => {
@@ -222,25 +259,115 @@ void test('devbar JSON-render state presents live metrics and bounded task rows'
   })
   assert.equal(state.metrics['Electron CPU'], '12.5%')
   assert.equal(state.metrics['JavaScript heap'], '~20 MiB')
-  assert.deepEqual(state.trends[0], {
-    signal: 'FPS',
-    trend: '█▁',
-    current: '48',
-    range: '48 – 60'
-  })
-  assert.deepEqual(state.trends[4], {
-    signal: 'Blocked / sample',
-    trend: '▁█',
-    current: '72 ms',
-    range: '0 ms – 72 ms'
-  })
   assert.deepEqual(state.longTasks, [
     { observed: '12:34:56', duration: '72.3 ms', attribution: 'self' }
   ])
+
+  // A healthy main thread with a shifting layout is not "Responsive" either.
+  assert.equal(
+    createDevbarViewState({
+      updatedAtMs: 2_000,
+      latest: { ...latest, fps: 60, cls: 0.3, longTasks: [] },
+      samples: [{ ...latest, fps: 60, cls: 0.3, longTasks: [] }],
+      longTasks: [],
+      summary: {
+        sampleCount: 1,
+        longTaskCount: 0,
+        totalLongTaskDurationMs: 0,
+        maxLongTaskDurationMs: 0
+      }
+    }).statusText,
+    'Needs attention'
+  )
 })
 
 void test('devbar deep links select only the main-thread diagnostics view', () => {
   assert.equal(isDevbarDeepLink('lody://devbar?view=main-thread'), true)
+  assert.equal(isDevbarDeepLink('lody-dev://devbar?view=main-thread'), true)
   assert.equal(isDevbarDeepLink('lody://devbar?view=other'), false)
+  assert.equal(isDevbarDeepLink('https://devbar?view=main-thread'), false)
   assert.equal(isDevbarDeepLink('not a URL'), false)
+})
+
+void test('lody loopback routes serve the dock renderer module and the live snapshot', () => {
+  const snapshot = {
+    updatedAtMs: 1_000,
+    latest: null,
+    samples: [],
+    longTasks: [],
+    summary: {
+      sampleCount: 0,
+      longTaskCount: 0,
+      totalLongTaskDurationMs: 0,
+      maxLongTaskDurationMs: 0
+    }
+  }
+  const respond = () => {
+    const response = {
+      statusCode: 0,
+      headers: {},
+      body: undefined,
+      setHeader(key, value) {
+        this.headers[key.toLowerCase()] = value
+      },
+      writeHead(status) {
+        this.statusCode = status
+        return this
+      },
+      end(body) {
+        this.body = body
+      }
+    }
+    return response
+  }
+  const get = (url, method = 'GET', origin) => {
+    const response = respond()
+    const handled = handleDevbarLocalRoute(
+      { method, url, headers: origin === undefined ? {} : { origin } },
+      response,
+      () => snapshot
+    )
+    return { handled, response }
+  }
+
+  const renderer = get('/__lody/dock-renderer.mjs')
+  assert.equal(renderer.handled, true)
+  assert.match(renderer.response.headers['content-type'], /text\/javascript/)
+  assert.match(renderer.response.body, /export default async function main/)
+
+  const json = get('/__lody/snapshot.json')
+  assert.equal(json.handled, true)
+  assert.deepEqual(JSON.parse(json.response.body), snapshot)
+
+  assert.equal(get('/__lody/unknown').handled, false)
+  assert.equal(get('/__lody/snapshot.json', 'POST').handled, false)
+  // Opaque origins cannot tell a packaged file:// page from a sandboxed frame,
+  // so local routes refuse `Origin: null` outright.
+  const opaque = get('/__lody/snapshot.json', 'GET', 'null')
+  assert.equal(opaque.handled, true)
+  assert.equal(opaque.response.statusCode, 403)
+  assert.equal(get('/__lody/dock-renderer.mjs', 'GET', 'http://127.0.0.1:9765').handled, true)
+})
+
+void test('devbar samples record the hash-history route, not the HTML entry path', () => {
+  assert.equal(
+    devbarSampleRoute({
+      pathname: '/devbar.html',
+      search: '',
+      hash: '#/sessions/abc?focus=1'
+    }),
+    '/sessions/abc?focus=1'
+  )
+  assert.equal(
+    devbarSampleRoute({
+      pathname: '/Applications/Lody.app/Contents/Resources/app.asar/out/renderer/devbar.html',
+      search: '',
+      hash: '#/settings'
+    }),
+    '/settings'
+  )
+  assert.equal(
+    devbarSampleRoute({ pathname: '/devbar.html', search: '', hash: '' }),
+    '/devbar.html'
+  )
 })

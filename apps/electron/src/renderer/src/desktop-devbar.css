@@ -32,6 +32,9 @@ html[data-desktop-devbar] #root :is(.min-h-screen, .min-h-\[100dvh\]) {
 
 .desktop-devbar-label {
   appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 0;
   padding: 2px 4px;
   background: transparent;
@@ -40,6 +43,29 @@ html[data-desktop-devbar] #root :is(.min-h-screen, .min-h-\[100dvh\]) {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   cursor: pointer;
+}
+
+.desktop-devbar-status {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted-foreground);
+}
+
+.desktop-devbar-status[data-status='connected'] {
+  background: #22c55e;
+}
+
+.desktop-devbar-status[data-status='connecting'] {
+  background: #f59e0b;
+}
+
+.desktop-devbar-status:is(
+  [data-status='error'],
+  [data-status='disconnected'],
+  [data-status='unauthorized']
+) {
+  background: #ef4444;
 }
 
 .desktop-devbar-label:hover,
@@ -68,4 +94,23 @@ html[data-desktop-devbar] #root :is(.min-h-screen, .min-h-\[100dvh\]) {
 
 .desktop-devbar-metrics > span:last-child {
   width: 23ch;
+}
+
+/* Narrow windows shed the least useful metrics first: GPU, then CLS, then RSS. */
+@media (max-width: 1080px) {
+  .desktop-devbar-metrics > span:nth-child(7) {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .desktop-devbar-metrics > span:nth-child(3) {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .desktop-devbar-metrics > span:nth-child(4) {
+    display: none;
+  }
 }

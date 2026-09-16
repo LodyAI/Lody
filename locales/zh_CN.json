@@ -2352,6 +2352,8 @@
   "settings.about.devbarStop": "停止 Devbar",
   "settings.about.devbarAgentAccess": "Agent 与终端权限",
   "settings.about.devbarAgentAccessHelper": "在 Devbar 停止前开放本地 MCP 与受限子进程工具。",
+  "settings.about.devbarAgentConnect": "Agent 连接",
+  "settings.about.devbarAgentConnectHelper": "运行 `devframe connect` 可通过 stdio MCP 将此 Hub 代理给编码 Agent，也可以直接使用下方端点。",
   "settings.about.devbarError": "Devbar 启动失败。",
   "settings.beta.title": "Beta 功能",
   "settings.beta.inbox": "收件箱",
