@@ -246,7 +246,7 @@ export function SessionSendRecovery({ runtime }: { runtime: WorkspaceRuntime | n
                       {t('sessions.cancelPendingSend')}
                     </Button>
                   ) : null}
-                  {record.stage === 'committed' ? (
+                  {record.stage === 'prepared' || record.stage === 'committed' ? (
                     <Button
                       size="sm"
                       variant="destructive"
@@ -259,9 +259,13 @@ export function SessionSendRecovery({ runtime }: { runtime: WorkspaceRuntime | n
                     </Button>
                   ) : null}
                 </div>
-                {record.stage === 'committed' ? (
+                {record.stage === 'prepared' || record.stage === 'committed' ? (
                   <p className="text-xs text-muted-foreground">
-                    {t('sessions.discardPendingSendDescription')}
+                    {t(
+                      record.stage === 'committed'
+                        ? 'sessions.discardPendingSendDescription'
+                        : 'sessions.discardPreparedSendDescription'
+                    )}
                   </p>
                 ) : null}
               </li>

@@ -4166,6 +4166,7 @@
   "sessions.discardPendingSendsAndContinue": "丢弃恢复数据并继续",
   "sessions.discardPendingSend": "丢弃恢复数据",
   "sessions.discardPendingSendDescription": "这条消息可能已经发送。丢弃恢复数据后无法确认其结果。",
+  "sessions.discardPreparedSendDescription": "这条已准备消息将不再恢复或投递。",
   "sessions.pendingSendExitUnavailable": "无法确认待发送消息的状态。请保持 Lody 打开并重试。",
   "sessions.pendingSendQuit": "退出并保留消息",
   "sessions.pendingSendReload": "重新加载并保留消息",

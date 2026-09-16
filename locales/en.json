@@ -4166,6 +4166,7 @@
   "sessions.discardPendingSendsAndContinue": "Discard recovery and continue",
   "sessions.discardPendingSend": "Discard recovery",
   "sessions.discardPendingSendDescription": "This message may already have been sent. Discarding recovery data cannot confirm its result.",
+  "sessions.discardPreparedSendDescription": "This prepared message will no longer be recovered or delivered.",
   "sessions.pendingSendExitUnavailable": "Could not confirm pending messages. Keep Lody open and try again.",
   "sessions.pendingSendQuit": "Quit and keep messages",
   "sessions.pendingSendReload": "Reload and keep messages",

@@ -44,8 +44,10 @@ export const META_REMOTE_CURSOR_BYPASS_STORAGE_KEY_PREFIX = 'lody:loroStreamsMet
 const CACHE_CLEAR_FLAG = 'lody:clearCacheOnBoot';
 /** Flag value for the recoverable-cache clear. Historic value, kept as-is. */
 const CACHE_CLEAR_VALUE = '1';
+const FORCED_CACHE_CLEAR_VALUE = 'force-cache';
 /** Flag value for the full local wipe. */
 const HARD_RESET_VALUE = 'all';
+const FORCED_HARD_RESET_VALUE = 'force-all';
 
 export type PendingLocalClearMode = 'cache' | 'hard';
 
@@ -184,16 +186,25 @@ function deleteDatabaseBestEffort(name: string): Promise<void> {
  *   the current workspace's databases, in case its info isn't cached yet. All
  *   visited workspaces are already covered via the cached workspace-info map.
  */
-export async function clearAllLodyLocalCache(extraNames: string[] = []): Promise<void> {
+export async function clearAllLodyLocalCache(
+  extraNames: string[] = [],
+  discardPendingRecovery = false
+): Promise<void> {
   if (typeof navigator !== 'undefined' && navigator.locks) {
-    return navigator.locks.request(SESSION_SEND_STORAGE_LOCK, () => clearRecoverableCache(extraNames));
+    return navigator.locks.request(SESSION_SEND_STORAGE_LOCK, () =>
+      clearRecoverableCache(extraNames, discardPendingRecovery)
+    );
   }
-  return clearRecoverableCache(extraNames);
+  return clearRecoverableCache(extraNames, discardPendingRecovery);
 }
 
-async function clearRecoverableCache(extraNames: string[]): Promise<void> {
+async function clearRecoverableCache(
+  extraNames: string[],
+  discardPendingRecovery = false
+): Promise<void> {
   if (typeof indexedDB !== 'undefined') {
-    if (await hasPendingSessionSends(indexedDB)) throw new Error('Pending messages need their local recovery data. Finish or cancel them before clearing caches.');
+    if (!discardPendingRecovery && await hasPendingSessionSends(indexedDB))
+      throw new Error('Pending messages need their local recovery data. Finish or cancel them before clearing caches.');
     const names = new Set<string>([
       ...KNOWN_INDEXEDDB_NAMES,
       ...knownWorkspaceDatabaseNames(),
@@ -214,7 +225,11 @@ async function clearRecoverableCache(extraNames: string[]): Promise<void> {
     // explicitly destructive hard reset below may remove these databases.
     await Promise.all(
       [...names]
-        .filter((name) => name !== SESSION_SEND_DATABASE && !name.startsWith(PROMPT_SHORTCUT_DATA_PREFIX))
+        .filter(
+          (name) =>
+            (discardPendingRecovery || name !== SESSION_SEND_DATABASE) &&
+            !name.startsWith(PROMPT_SHORTCUT_DATA_PREFIX)
+        )
         .map(deleteDatabaseBestEffort)
     );
   }
@@ -240,9 +255,16 @@ async function clearRecoverableCache(extraNames: string[]): Promise<void> {
  * reset: it also removes the auth token and preferences, so the app comes back
  * signed out and factory-fresh.
  */
-export async function clearAllLodyLocalData(extraNames: string[] = []): Promise<void> {
+export async function clearAllLodyLocalData(
+  extraNames: string[] = [],
+  discardPendingRecovery = false
+): Promise<void> {
   const clear = async () => {
-    if (typeof indexedDB !== 'undefined' && await hasPendingSessionSends(indexedDB)) {
+    if (
+      !discardPendingRecovery &&
+      typeof indexedDB !== 'undefined' &&
+      await hasPendingSessionSends(indexedDB)
+    ) {
       throw new Error('Pending messages must be completed or canceled before resetting local data');
     }
     await clearRecoverableLocalData(extraNames);
@@ -358,7 +380,9 @@ function writePendingFlag(value: string): void {
 
 /** Mark that the cache should be cleared on the next boot, before reloading. */
 export function markCacheClearPending(): void {
-  writePendingFlag(CACHE_CLEAR_VALUE);
+  // The exit guard asks for explicit confirmation when recovery exists. Once it
+  // allows this settings action, boot must actually remove that recovery store.
+  writePendingFlag(FORCED_CACHE_CLEAR_VALUE);
 }
 
 /** Cap on how long the escape hatch waits for the server to revoke the session. */
@@ -401,13 +425,10 @@ async function revokeServerSessionBestEffort(): Promise<void> {
  */
 export async function startHardReset(): Promise<void> {
   if (!(await requestSessionSendExit('cache-clear'))) return;
-  if (typeof indexedDB !== 'undefined' && await hasPendingSessionSends(indexedDB)) {
-    throw new Error('Pending messages must be completed or canceled before resetting local data');
-  }
   await revokeServerSessionBestEffort();
   clearWebStorage();
   clearCookies();
-  writePendingFlag(HARD_RESET_VALUE);
+  writePendingFlag(FORCED_HARD_RESET_VALUE);
   replaceAppWindowLocation('/');
   reloadApp();
 }
@@ -419,8 +440,8 @@ export function readPendingLocalClearMode(): PendingLocalClearMode | null {
   } catch {
     return null;
   }
-  if (raw === HARD_RESET_VALUE) return 'hard';
-  if (raw === CACHE_CLEAR_VALUE) return 'cache';
+  if (raw === HARD_RESET_VALUE || raw === FORCED_HARD_RESET_VALUE) return 'hard';
+  if (raw === CACHE_CLEAR_VALUE || raw === FORCED_CACHE_CLEAR_VALUE) return 'cache';
   return null;
 }
 
@@ -459,23 +480,34 @@ async function readNativePendingClearMode(): Promise<PendingLocalClearMode | nul
 let bootClearPromise: Promise<PendingLocalClearMode | null> | null = null;
 
 async function runPendingClearOnBoot(): Promise<PendingLocalClearMode | null> {
+  const raw = typeof localStorage === 'undefined' ? null : localStorage.getItem(CACHE_CLEAR_FLAG);
+  const forced = raw === FORCED_CACHE_CLEAR_VALUE || raw === FORCED_HARD_RESET_VALUE;
   const mode = readPendingLocalClearMode() ?? (await readNativePendingClearMode());
   if (!mode) return null;
+  let completed = false;
   try {
-    if (typeof indexedDB !== 'undefined' && await hasPendingSessionSends(indexedDB)) {
+    if (!forced && typeof indexedDB !== 'undefined' && await hasPendingSessionSends(indexedDB)) {
       throw new Error('Pending messages must be completed or canceled before clearing caches');
     }
     await getIpcServices()?.app.prepareCacheClear();
     if (mode === 'hard') {
-      await clearAllLodyLocalData();
+      await clearAllLodyLocalData([], forced);
     } else {
-      await clearAllLodyLocalCache();
+      await clearAllLodyLocalCache([], forced);
     }
+    completed = true;
+  } catch (error) {
+    // Retain a blocked non-forced request for a later boot, but never prevent
+    // the runtime from starting merely because recovery is still present.
+    console.warn('[Lody] pending local clear deferred', error);
+    return null;
   } finally {
-    try {
-      localStorage.removeItem(CACHE_CLEAR_FLAG);
-    } catch (error) {
-      console.warn('[Lody] failed to clear cache-clear flag', error);
+    if (completed) {
+      try {
+        localStorage.removeItem(CACHE_CLEAR_FLAG);
+      } catch (error) {
+        console.warn('[Lody] failed to clear cache-clear flag', error);
+      }
     }
   }
   return mode;

@@ -286,8 +286,8 @@ export function createSessionSendJournal(ports: SessionSendJournalPorts) {
           await ports.lock(`delivery:${found.sessionId}`, signal, async () => {
             const current = (await ports.storage.list()).find((record) => record.id === id);
             if (!current) return;
-            if (current.stage !== 'committed')
-              throw new Error('Only a committed submission can be discarded');
+            if (current.stage !== 'prepared' && current.stage !== 'committed')
+              throw new Error('Only a prepared or committed submission can be discarded');
             await ports.storage.remove(id);
             await changed();
           });

@@ -186,6 +186,21 @@ describe('persistent submission stages', () => {
     await f.journal.discard('stuck');
     expect(await f.ports.storage.list()).toEqual([]);
   });
+
+  it('lets an explicit discard remove a prepared record whose commit cannot recover', async () => {
+    const f = fixture({
+      commit: async () => {
+        throw new Error('Original submission replica is unavailable');
+      },
+    });
+    await f.journal.accept(record('prepared-stuck'));
+    await expect(f.journal.submit('session' as SessionId)).rejects.toThrow(
+      'Original submission replica is unavailable'
+    );
+    expect((await f.ports.storage.list())[0]?.stage).toBe('prepared');
+    await f.journal.discard('prepared-stuck');
+    expect(await f.ports.storage.list()).toEqual([]);
+  });
 });
 
 describe('IndexedDB recovery receipts', () => {

@@ -123,7 +123,7 @@ export function ErrorBoundaryFallback({
     setHardResetting(true);
     // Ends in a reload, so there is no success state to render — the dialog just
     // stays in its progress state until the app comes back.
-    void startHardReset();
+    void Promise.resolve(startHardReset()).catch(() => setHardResetting(false));
   }, []);
 
   if (variant === 'inline') {
