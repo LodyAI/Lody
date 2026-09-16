@@ -350,6 +350,7 @@
   "chat.localGitStateMachineOffline": "目标机器已离线。请在该机器上启动 CLI 后再加载分支。",
   "chat.localGitStateRetry": "重新加载分支",
   "chat.localGitStateTimeout": "加载分支超时。",
+  "chat.retryTargetSelector": "重试目标选择器",
   "chat.machineSelector.emptyText": "没有在线的机器",
   "chat.machineSelector.loading": "正在加载机器…",
   "chat.machineSelector.local": "本机",

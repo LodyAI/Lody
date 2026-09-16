@@ -350,6 +350,7 @@
   "chat.localGitStateMachineOffline": "Target machine is offline. Start the CLI on that machine to load branches.",
   "chat.localGitStateRetry": "Retry loading branches",
   "chat.localGitStateTimeout": "Timed out loading branches.",
+  "chat.retryTargetSelector": "Retry target selector",
   "chat.machineSelector.emptyText": "No machines online",
   "chat.machineSelector.loading": "Loading machine...",
   "chat.machineSelector.local": "Local",

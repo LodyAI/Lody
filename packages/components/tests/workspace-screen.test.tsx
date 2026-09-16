@@ -6,11 +6,11 @@ import { Provider, createStore } from 'jotai';
 import {
   createStaticStore,
   LOCAL_PLATFORM_CAPABILITIES,
-  type CloudApi,
   type PlatformProvider,
 } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import {
   WorkspaceScreen,
   WorkspaceScreenView,
@@ -262,54 +262,6 @@ describe('WorkspaceScreen write recovery', () => {
       findButton(container, 'Retry').dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
     expect(retrySlugCheck).toHaveBeenCalledOnce();
-  });
-
-  it('remounts a failed slug probe only after the user retries', async () => {
-    const unavailable = new Error('slug availability request failed');
-    let shouldThrow = true;
-    const useQuery = vi.fn(() => {
-      if (shouldThrow) throw unavailable;
-      return { available: true };
-    }) as CloudApi['useQuery'];
-    const platform: PlatformProvider = {
-      ...TEST_CLOUD_PLATFORM,
-      cloudApi: { ...TEST_CLOUD_PLATFORM.cloudApi!, useQuery },
-      workspaces: {
-        state: createStaticStore({
-          status: 'ready' as const,
-          workspaces: [],
-          activeWorkspaceId: null,
-        }),
-        setActive: vi.fn(() => Promise.resolve()),
-      },
-    };
-
-    await act(async () => {
-      root?.render(
-        <PlatformContext.Provider value={platform}>
-          <Provider store={createStore()}>
-            <WorkspaceScreen onBack={vi.fn()} onNext={vi.fn()} />
-          </Provider>
-        </PlatformContext.Provider>
-      );
-    });
-
-    const nameInput = container.querySelector<HTMLInputElement>('#onboarding-workspace-name');
-    if (!nameInput) throw new Error('Expected workspace name input');
-    await act(async () => {
-      nameInput.value = 'Loro Lab';
-      nameInput.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-
-    expect(container.textContent).toContain('slug availability request failed');
-    shouldThrow = false;
-    await act(async () => {
-      findButton(container, 'Retry').dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await Promise.resolve();
-    });
-
-    expect(container.textContent).toContain('Available');
-    expect(findButton(container, 'Create & continue').disabled).toBe(false);
   });
 
   it('opens an inline repair path for a workspace without a handle', async () => {

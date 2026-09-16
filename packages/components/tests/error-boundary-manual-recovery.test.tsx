@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { act } from 'react';
+import { act, createRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -124,5 +124,40 @@ describe('ErrorBoundary manual recovery', () => {
     });
 
     expect(container.textContent).toContain('target selector');
+  });
+
+  it('lets an owning action recover a buttonless fallback', () => {
+    const boundaryRef = createRef<ErrorBoundary>();
+    act(() => {
+      root.render(
+        <ErrorBoundary
+          ref={boundaryRef}
+          name="ButtonlessTest"
+          variant="inline"
+          fallbackRender={() => null}
+          resetKeys={['slug-a']}
+        >
+          <Subject crash label="unavailable slug" />
+        </ErrorBoundary>
+      );
+    });
+    act(() => {
+      root.render(
+        <ErrorBoundary
+          ref={boundaryRef}
+          name="ButtonlessTest"
+          variant="inline"
+          fallbackRender={() => null}
+          resetKeys={['slug-b']}
+        >
+          <Subject crash={false} label="available slug" />
+        </ErrorBoundary>
+      );
+    });
+
+    expect(container.textContent).not.toContain('available slug');
+    act(() => boundaryRef.current?.resetErrorBoundary());
+
+    expect(container.textContent).toContain('available slug');
   });
 });
