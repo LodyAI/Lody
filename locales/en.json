@@ -63,13 +63,12 @@
   "agents.authentication.authorizeAndOpen": "Authorize and open page",
   "agents.authentication.browserOpenFailed": "Could not open the authorization page. Check your browser settings and try again.",
   "agents.authentication.browserOpened": "Complete authorization in the browser window, then return to Lody.",
-  "agents.authentication.chooseMethod": "Choose how to sign in to {{provider}}",
+  "agents.authentication.chooseMethod": "Choose a sign-in method",
   "agents.authentication.codeCopied": "Copied",
   "agents.authentication.codeSubmitFailed": "Could not submit the authorization code. Please try again.",
   "agents.authentication.codeSubmitted": "Submitted",
   "agents.authentication.copyCode": "Copy code",
   "agents.authentication.copyCodeFailed": "Could not copy the code.",
-  "agents.authentication.chooseMethod": "Choose a sign-in method",
   "agents.authentication.enterCode": "Enter this code on the authorization page.",
   "agents.authentication.enterCodeWithExpiry": "Enter this code on the authorization page. It expires in {{minutes}} minutes.",
   "agents.authentication.finishInBrowser": "Finish signing in to {{provider}}",
@@ -4150,5 +4149,6 @@
   "promptShortcut.bodyOffline": "Body is not available offline. Reconnect and select again.",
   "promptShortcut.loadFailed": "Could not load Shortcut. Select it again to retry.",
   "settings.beta.promptShortcutsHelper": "Create reusable prompts and insert them with /. In development — expect rough edges.",
-  "settings.promptShortcuts.disabled": "Enable Prompt Shortcuts under Developer mode in Settings → About to use this feature."
+  "settings.promptShortcuts.disabled": "Enable Prompt Shortcuts under Developer mode in Settings → About to use this feature.",
+  "sessions.attachmentTransferInterrupted": "Transfer interrupted. Retry when you return."
 }
