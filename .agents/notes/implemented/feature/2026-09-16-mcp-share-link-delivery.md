@@ -30,6 +30,17 @@ without introducing a second daemon control protocol or renderer-to-daemon autho
 It adds local private-key storage and requires coordinated host/client deployment.
 Legacy intents without the new consent fields expire rather than gain new authority.
 
+Review correction: workspace membership alone did not prove that the daemon account
+was acting for the claimed human. Undisclosed cross-account requests could deliver a
+victim-approved credential to a different submitter. Delivery now requires the CLI
+account, active requester and real approver to be the same user, enforced at admission
+and every existing-request publication/delivery path. CLI mismatch fails before key
+creation; it never substitutes the machine owner. Same-account remote approval remains
+available, but cross-account shared-machine MCP sharing is deliberately unsupported.
+Displaying a recipient's name alone was rejected in favor of this fail-closed boundary;
+delegation needs a separately verified consent contract. This is account binding, not
+cryptographic attestation of Session/Turn provenance, and cannot recall old disclosures.
+
 Calls wait briefly, then resume with the same request ID, purpose and targets;
 the user approves once. The key survives MCP restarts. The result is unavailable
 after the 24-hour delivery window, reset, revoke or membership replacement.
@@ -46,6 +57,8 @@ Behavioral tests cover recipient/request/origin binding, history projection, one
 publication, retry credentials, server membership/result gates, independent shares and
 approval across the expiry boundary. No hosted deployment or real-user conversation
 publication is part of this change. Public and hosting changes require coordinated PRs.
+Regression tests reject a different workspace writer's direct API request and fence
+legacy pending, confirmed, sealed and published requests, including replay paths.
 
 Implementation: [PR #762](https://github.com/LodyAI/Lody/pull/762).
 Integration retains the non-virtualized card boundary; explicit upload signals verify

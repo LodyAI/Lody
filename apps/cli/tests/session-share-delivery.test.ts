@@ -80,15 +80,15 @@ it('returns the full URL and reuses the recipient when a later turn resumes', as
       ),
     }),
   };
-  const first = await requestSessionShare(port, input, 'account');
+  const first = await requestSessionShare(port, input, 'alice');
   expect(first).toMatchObject({
     status: 'published',
     url: `https://share.test/s/share#access=v1.${secret}`,
   });
   expect(first).not.toHaveProperty('delivery');
-  expect(
-    await requestSessionShare(port, { ...input, sourceTurnId: 'next-turn' }, 'account')
-  ).toEqual(first);
+  expect(await requestSessionShare(port, { ...input, sourceTurnId: 'next-turn' }, 'alice')).toEqual(
+    first
+  );
 });
 
 it('returns cancellation without a credential and honors abort before submission', async () => {
@@ -100,10 +100,25 @@ it('returns cancellation without a credential and honors abort before submission
       status: 'cancelled',
     }),
   };
-  expect(await requestSessionShare(port, input, 'account')).toEqual({
+  expect(await requestSessionShare(port, input, 'alice')).toEqual({
     requestId: 'request',
     shareRequestId: 'record',
     status: 'cancelled',
   });
-  await expect(requestSessionShare(port, input, 'account', AbortSignal.abort())).rejects.toThrow();
+  await expect(requestSessionShare(port, input, 'alice', AbortSignal.abort())).rejects.toThrow();
+});
+
+it('rejects a shared-machine account mismatch before creating keys or submitting intent', async () => {
+  const port: CloudSessionSharingPort = {
+    request: async () => {
+      throw new Error('Unexpected submission');
+    },
+    getResult: async () => {
+      throw new Error('Unexpected retrieval');
+    },
+  };
+  await expect(requestSessionShare(port, input, 'bob')).rejects.toThrow(
+    'active user and CLI signed-in account to match'
+  );
+  expect(await readdir(directory)).toEqual([]);
 });

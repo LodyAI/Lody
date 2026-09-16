@@ -160,6 +160,16 @@ Each request creates an independent share; it never updates or rotates an existi
 link, including when approval comes from a different device. Settings manages all
 these links. The header selects the latest active share before an unfinished draft.
 
+MCP delivery is same-account only: the CLI credential owner, active Turn's human
+requester and authenticated approver must be the same user. The service rejects
+cross-account intent even if both accounts are workspace writers; the CLI must not
+substitute its owner for the active user. Same-account approval from another device
+remains supported. A Turn running on somebody else's signed-in machine must use
+manual app sharing or a machine signed in to the requesting user's account.
+Existing cross-account intents cannot be approved, resumed, published or retrieved.
+This authenticates the recipient account, not an independently attested Session/Turn;
+cross-account delegation requires a separately designed, verifiable consent contract.
+
 The requesting CLI durably creates a private recipient key before submitting intent.
 The app encrypts the reader secret to that request's public key, binding the request
 record and share origin. Begin binds this envelope to the immutable deployment;

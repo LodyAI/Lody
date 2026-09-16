@@ -2,6 +2,9 @@
 
 Parent instructions apply.
 
+- MCP sharing requires the active Turn user to equal the CLI authenticated account.
+  Fail closed on shared-machine account mismatch; never substitute the machine owner.
+
 - `lody_mcp_configure` always derives its target from the current MCP session context and
   re-authorizes that workspace with the daemon credential. Never accept a workspace selector.
 - MCP configuration is an execution and credential boundary. The tool may act only on an

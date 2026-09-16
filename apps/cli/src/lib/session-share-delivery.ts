@@ -57,12 +57,17 @@ export async function loadShareDeliveryKey(
 export async function requestSessionShare(
   port: CloudSessionSharingPort,
   input: Omit<SessionShareRequestInput, 'deliveryPublicKey'>,
-  credentialScope: string,
+  authenticatedUserId: string,
   signal?: AbortSignal
 ) {
+  if (input.requesterUserId !== authenticatedUserId) {
+    throw new Error(
+      'MCP sharing requires the active user and CLI signed-in account to match. Use a machine signed in to your account, or share manually in the app.'
+    );
+  }
   const key = await loadShareDeliveryKey(
     JSON.stringify([
-      credentialScope,
+      authenticatedUserId,
       input.workspaceId,
       input.requesterUserId,
       input.sourceSessionId,
