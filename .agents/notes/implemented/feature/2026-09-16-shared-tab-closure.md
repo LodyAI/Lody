@@ -10,7 +10,7 @@ Translation: current
 Main tabs could not close, while child closes archived or deleted conversations.
 Tab visibility now uses shared `SessionMeta.isTabClosed`, without lifecycle cleanup.
 The closed list also includes historical archives and reopening restores them.
-Selection stays local and can explicitly resolve to an empty workspace surface.
+Selection stays local and falls back to a local new-conversation draft.
 
 ## Decisions and evidence
 
@@ -35,6 +35,9 @@ Review corrections in [PR #746](https://github.com/LodyAI/Lody/pull/746): shared
 fallback, URL replacement, and selection persistence wait for metadata hydration so
 a partial scan cannot persist a false empty state. The explicit close handler also
 defers navigation during hydration, leaving selection to that reconciliation effect.
-On mobile the empty surface
-unmounts while a viewer is active, preserving the single-surface layout. Regression
-tests cover partial-to-complete fallback and empty-surface visibility transitions.
+The later UX revision replaces the standalone empty surface with the existing draft
+composer. `useEmptySessionDraft` reuses local input or inserts one draft before URL
+selection, without clearing mobile viewers or creating shared Sessions. The empty
+sentinel remains compatible; Strict Mode must not duplicate draft insertion.
+Tests cover partial-to-complete fallback, existing draft preservation and single
+insertion. Native visual acceptance remains separate from these tests.

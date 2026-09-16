@@ -4,6 +4,13 @@ Binding rules for this directory live in [AGENTS.md](AGENTS.md); this file keeps
 the reasoning behind them so the rules can stay short. It explains only the hooks
 that carry an invariant — the directory itself is the list of hooks.
 
+## Default conversation draft
+
+`use-empty-session-draft.ts` materializes the empty conversation URL sentinel only
+after metadata hydration. It reuses an existing local draft or inserts one before
+selecting its URL; replayed effects must not create duplicate drafts. It never owns
+mobile viewer selection or creates a shared Session.
+
 ## Horizontal wheel scrolling
 
 `use-horizontal-wheel-scroll.ts` is the one owner for converting a plain vertical

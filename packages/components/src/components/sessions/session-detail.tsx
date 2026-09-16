@@ -1,4 +1,4 @@
-import { SessionEmptySurface } from './session-empty-surface';
+import { useEmptySessionDraft } from '@/hooks/use-empty-session-draft';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import {
   Archive,
@@ -2019,6 +2019,21 @@ const SessionDetail = ({
     },
     [setDraftTabs]
   );
+
+  useEmptySessionDraft({
+    enabled: docMetaCacheReady && isEmptyConversation,
+    parent: activeSession,
+    drafts: draftTabs,
+    onCreate: (draft) => {
+      setDraftTabs((prev) => (prev.some((tab) => tab.id === draft.id) ? prev : [...prev, draft]));
+      setTabOrderState((prev) => appendTabOrderId(prev, sessionGroupIds, draft.id));
+    },
+    onSelect: (draftId) => {
+      if (router.state.location.search.tab !== urlTab) return;
+      // Replace the empty sentinel without deactivating a mobile tool viewer.
+      navigateToSessionTab(draftId);
+    },
+  });
 
   const closeDraftTab = useCallback(
     (draftId: DraftSessionTab['id']) => {
@@ -4655,15 +4670,6 @@ const SessionDetail = ({
     return null;
   }
 
-  const emptyConversationSurface = isEmptyConversation ? (
-    <SessionEmptySurface
-      visible={!isMobile || !hasActiveViewerTab}
-      closedSessions={closedConversations}
-      onNew={handleNewTab}
-      onReopen={handleTabRestore}
-    />
-  ) : null;
-
   /* The URL names a child tab whose meta has not reached this replica yet
      (a just-promoted draft, or a tab still syncing from another device).
      The tab STAYS active — bouncing to the parent is exactly the bug this
@@ -5239,7 +5245,6 @@ const SessionDetail = ({
           tabIndex={-1}
           className="flex-1 overflow-hidden relative"
         >
-          {emptyConversationSurface}
           {/* Keep inactive tabs mounted for fast switching; only the active tab holds room sync. */}
           {[activeSession, ...visibleChildSessions].map((tabSession) => {
             const isActive = !hasActiveViewerTab && tabSession.id === activeTabSessionId;
@@ -5936,7 +5941,6 @@ const SessionDetail = ({
       excludeSessionId={sessionMentionExcludeId}
       onDropSessionId={handleInsertDroppedSessionMention}
     >
-      {emptyConversationSurface}
       {[activeSession, ...visibleChildSessions].map((tabSession) => {
         const isActive = tabSession.id === activeTabSessionId;
         const externalHistoryRefresh = externalHistoryRefreshBySessionId[tabSession.id];

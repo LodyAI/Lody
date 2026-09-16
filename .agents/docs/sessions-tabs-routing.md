@@ -36,9 +36,9 @@ this page is the full text of the rules summarised there.
     second visible tab exists. On desktop, Cmd/Ctrl+W is the native Close
     accelerator. Session-detail registers a tab closer: focused side panel or
     conversation tab closes, including the parent. Close writes shared `isTabClosed`,
-    selects the next open neighbour (right then left), or shows `?tab=empty`.
-    On the empty conversation surface, close the active open side-panel tab first,
-    then yield to window close. With
+    selects the next open neighbour (right then left), or enters a local draft.
+    `?tab=empty` remains an entry sentinel: after hydration, reuse a local draft or
+    create one and replace the URL. Mobile viewers remain active. With
     no closer mounted (Chat Landing and other surfaces) the chord closes the
     window.
     Each Session tab has ONE leading status slot, priority-ordered
@@ -127,7 +127,7 @@ this page is the full text of the rules summarised there.
   positive evidence resolves away from the named tab (an archived/closed conversation,
   side-panel child, or a device-local draft that is provably gone). A confirmed
   shared close replaces only the still-current URL choice with an open neighbour
-  or `empty`; this narrow invalidation never reopens the parent or mirrors selection
+  or `empty` (materialized into a local draft); this narrow invalidation never reopens the parent or mirrors selection
   into React state. The old broad `shouldClearSessionUrlTab` normalizer remains dead.
   Promotion keeps its `pendingDraftChildSessionIds` entry
   as a draft→child resolution alias through the send window. The ABSENT value

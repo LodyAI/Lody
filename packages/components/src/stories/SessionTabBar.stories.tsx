@@ -563,12 +563,12 @@ export const AllConversationsClosed: Story = {
   args: {
     parentSession: { ...screenshotParentSession, isTabClosed: true },
     childSessions: [],
-    draftTabs: [],
+    draftTabs: [draftTabs[0]!],
     archivedChildSessions: [
       { ...screenshotParentSession, isTabClosed: true },
       ...archivedChildSessions,
     ],
-    activeTabSessionId: 'empty',
+    activeTabSessionId: draftTabs[0]!.id,
   },
 };
 
