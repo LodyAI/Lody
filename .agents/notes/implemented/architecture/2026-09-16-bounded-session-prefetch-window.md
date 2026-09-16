@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#753](https://github.com/LodyAI/Lody/pull/753)
 
 [中文](2026-09-16-bounded-session-prefetch-window.zh.md)
 
