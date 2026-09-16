@@ -13,7 +13,8 @@ presence heartbeat every 10 seconds until the daemon was restarted. Two sessions
 did this for 1h51m and 1h47m on 2026-09-16, ending only at a supervisor
 shutdown. Initialization now carries a per-stage deadline measured from the last
 published progress; exceeding it records a visible `session_init_failed`, stops
-the heartbeat, and releases the turn. The budgets are calibrated from one
+the heartbeat, releases the turn, and detaches the wedged create so the retry is
+not handed the same promise. The budgets are calibrated from one
 machine's logs and remain unvalidated against a slow managed-runtime download or
 a large clone, which is why the stages that report progress are bounded by
 silence rather than by elapsed time.
@@ -87,6 +88,35 @@ The hung promise itself is abandoned, not cancelled. As with the
 offers no cancellation signal; the wait ends, the underlying request may not. No
 message is automatically resent.
 
+### Detaching the wedged create (review follow-up)
+
+The first implementation failed a stalled turn but left the create itself in
+`SessionManager.pendingSessionCreates`. `createSession` answers with the cached
+in-flight promise for a session id, and that entry is cleared only by the
+promise's own `finally`, so a create wedged in a managed-runtime install or ACP
+startup never clears it — and the retry this note claims as the recovery path was
+handed the same wedged promise and stalled identically. The documented
+self-healing did not exist. `requestSessionTerminate` was no escape either: its
+pending-create branch did a bare `await pendingCreate`, so the cleanup hung too.
+
+Skipping `finalizeCancelledTurnEffect` on the stall path is still correct — it
+would mark the user's turn cancelled — but that finalizer also owned the
+pending-session release, and the stall is the first halt that can land *while*
+`createSession` is in flight. The release therefore moved into a dedicated
+`finalizeStalledInitializationEffect`, and `wasCancelled` went back to its
+original form now that branch ordering distinguishes the two.
+
+`SessionManager.abandonPendingSessionCreate` detaches the entry so the next
+`createSession` starts fresh. The underlying work cannot be cancelled — there is
+no abort signal through `createSessionFromPreparationOrCold` — so it is reaped:
+if the abandoned create ever yields a Session, that Session is terminated, and
+the registry entry is dropped only while it still points at that instance so a
+completed retry's Session is never unregistered. Nothing awaits the wedged
+promise. `requestSessionTerminate` now races its wait against a 300s deadline
+(the slowest healthy ACP start observed was 249s) using a sentinel rather than a
+rejection, so a genuine `terminate()` failure still propagates to the caller, and
+on expiry it detaches through the same reaper.
+
 ### Garbage collection
 
 `SessionGCManager` does not read presence directly, but `isEligibleForCleanup`
@@ -108,9 +138,20 @@ further heartbeat is published however far the clock advances, and that
 download 450 seconds past a 60-second budget while reporting progress, proving
 the progress reset, then wedges it.
 
+A third test covers the review follow-up end to end: the first create wedges, the
+turn fails, and the retry — a second user turn — reaches `agent.prompt` and is
+recorded `handled`. `session-manager.test.ts` covers the manager contract against
+the real dedupe map: a naive retry is handed the same wedged promise, abandoning
+detaches it so a retry completes, a create that materializes after abandonment is
+terminated, and a wedged create makes `requestSessionTerminate` detach on its
+deadline instead of hanging.
+
 Ablation: disabling the watchdog, and separately removing the race while leaving
-the watchdog, each make both tests hang until the 30s vitest timeout — the
-production symptom. The full 130-test suite passes.
+the watchdog, each make the first two tests hang until the 30s vitest timeout —
+the production symptom. Removing only the `abandonPendingSessionCreate` call
+fails the retry test on the leftover map entry, and removing that assertion too
+makes the retry itself hang for 30s, which is precisely the defect the review
+reported. Full CLI suite: 2872 passing.
 
 Not validated: the 900s and 1800s budgets have never been reached by a real
 download or clone, so they are bounds rather than measurements. Only the

@@ -198,6 +198,14 @@ const tryDeriveGitHubRepoFromUrl = (rawUrl?: string): string | null => {
 };
 
 const SESSION_PREPARATION_HARD_TTL_MS = 120_000;
+/**
+ * How long teardown waits for an in-flight create to reach a terminable state
+ * before detaching it. Generous enough for a cold ACP start (the slowest healthy
+ * one observed was 249s), while keeping a wedged create from hanging shutdown.
+ */
+const PENDING_CREATE_TERMINATE_TIMEOUT_MS = 300_000;
+const PENDING_CREATE_TERMINATE_TIMED_OUT = Symbol('pending-create-terminate-timed-out');
+
 const MAX_CONCURRENT_SESSION_PREPARATIONS = 1;
 
 function getSessionPreparationSandboxId(sessionId: SessionId, preparationId: string): SessionId {
@@ -532,6 +540,56 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     return this.pendingSessionCreates.get(sessionId) ?? null;
   }
 
+  /**
+   * Detach a create that will never be awaited again, so the deduplication map
+   * stops handing the same promise to every retry.
+   *
+   * `createSession` returns the cached in-flight promise for a session id, and
+   * that entry is only removed by the promise's own `finally`. A create wedged
+   * inside a managed-runtime install or ACP startup therefore never settles,
+   * never clears its entry, and turns every subsequent attempt into the same
+   * stall. Callers that have given up (the initialization stall watchdog) must
+   * detach it here instead.
+   *
+   * The underlying work cannot be cancelled — there is no abort signal through
+   * `createSessionFromPreparationOrCold` — so it is reaped instead: if the
+   * abandoned create ever produces a Session, that Session is terminated rather
+   * than left as an orphan process. Returns whether an entry was detached.
+   */
+  abandonPendingSessionCreate(sessionId: SessionId, reason: string): boolean {
+    const pending = this.pendingSessionCreates.get(sessionId);
+    if (!pending) {
+      return false;
+    }
+    this.pendingSessionCreates.delete(sessionId);
+    this.logger.warn(
+      `[${sessionId}] Abandoning in-flight session create (${reason}); a retry will start a new one`
+    );
+    void pending.then(
+      async (session) => {
+        // The create finished after all. Its Session was never handed to a
+        // caller, so it is an orphan: terminate it. Only drop the registry entry
+        // when it still points at this instance — a retry that already published
+        // its own Session must keep it.
+        if (this.sessions.get(sessionId) === session) {
+          this.sessions.delete(sessionId);
+        }
+        try {
+          await session.terminate(true);
+          this.logger.debug(
+            `[${sessionId}] Terminated orphaned session from abandoned create (${reason})`
+          );
+        } catch (error) {
+          this.logger.debug(
+            `[${sessionId}] Failed to terminate orphaned session from abandoned create: ${formatErrorMessage(error)}`
+          );
+        }
+      },
+      () => undefined
+    );
+    return true;
+  }
+
   requestSessionPreparation(spec: SessionPreparationSpec): SessionPrepareResponse {
     const { sessionId } = spec;
     if (this.sessions.has(sessionId) || this.pendingSessionCreates.has(sessionId)) {
@@ -750,7 +808,32 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         }
       };
       void termination.then(clearTermination, clearTermination);
-      await termination;
+      // A create wedged in a managed-runtime install or ACP startup never
+      // settles, so awaiting it outright makes teardown hang with it. Wait only
+      // as long as a create plausibly needs to reach a terminable state, then
+      // detach: `abandonPendingSessionCreate` keeps reaping it, so a Session
+      // that materializes later is still terminated rather than orphaned. The
+      // deadline is raced through a sentinel rather than a rejection so a
+      // genuine terminate failure still propagates to the caller.
+      let deadlineTimer: NodeJS.Timeout | undefined;
+      const deadline = new Promise<typeof PENDING_CREATE_TERMINATE_TIMED_OUT>((resolve) => {
+        deadlineTimer = setTimeout(
+          () => resolve(PENDING_CREATE_TERMINATE_TIMED_OUT),
+          PENDING_CREATE_TERMINATE_TIMEOUT_MS
+        );
+        deadlineTimer.unref?.();
+      });
+      try {
+        const outcome = await Promise.race([termination, deadline]);
+        if (outcome === PENDING_CREATE_TERMINATE_TIMED_OUT) {
+          clearTermination();
+          this.abandonPendingSessionCreate(sessionId, 'terminate-timeout');
+        }
+      } finally {
+        if (deadlineTimer) {
+          clearTimeout(deadlineTimer);
+        }
+      }
       return 'terminated';
     }
     const pendingPreparationCleanup = this.preparationService.discard(sessionId);

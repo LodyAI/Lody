@@ -11,7 +11,7 @@ Translation: current
 只会每 10 秒继续写一次 presence 心跳，直到守护进程被重启。2026-09-16 有两个会话分别这样
 卡了 1 小时 51 分和 1 小时 47 分，最后是被 Supervisor 关停才结束。现在初始化按阶段设有
 期限，计时起点是最近一次已发布的进度；超时后记录用户可见的 `session_init_failed`、停止
-心跳并释放该回合。这些预算取自单台机器的日志，尚未在慢速网络下的托管运行时下载或大仓库
+心跳、释放该回合，并摘除卡死的 create，使重试不会再拿到同一个 Promise。这些预算取自单台机器的日志，尚未在慢速网络下的托管运行时下载或大仓库
 克隆上验证过——这正是「会上报进度的阶段按静默而非按耗时计量」的原因。
 
 ## 证据
@@ -71,6 +71,30 @@ Translation: current
 [有界身份查询](2026-09-16-bounded-session-user-identity.zh.md)一样，CloudPort 没有提供
 取消信号；等待结束了，底层请求可能仍在继续。不会自动重发消息。
 
+### 摘除卡死的 create（评审后续）
+
+第一版实现让停滞的回合失败了，却把 create 本身留在
+`SessionManager.pendingSessionCreates` 里。`createSession` 按 session id 返回缓存的
+进行中 Promise，而该条目只由这个 Promise 自己的 `finally` 清除，因此卡在托管运行时安装或
+ACP 启动里的 create 永远不会清除它——于是本笔记宣称的恢复路径「重试」，拿到的正是同一个
+挂死的 Promise，并以完全相同的方式再次停滞。所谓的自愈其实并不存在。
+`requestSessionTerminate` 也救不了：它的 pending-create 分支是裸的
+`await pendingCreate`，清理动作自己也会挂住。
+
+在停滞路径上跳过 `finalizeCancelledTurnEffect` 依然是对的——否则会把用户回合标记为已取消
+——但那个终结器同时还承担着 pendingSession 的释放职责，而停滞是第一种能在 `createSession`
+仍在进行**期间**发生的中止。因此释放逻辑被移入专用的
+`finalizeStalledInitializationEffect`，而 `wasCancelled` 恢复为原来的写法，因为分支顺序
+已经区分了这两者。
+
+`SessionManager.abandonPendingSessionCreate` 摘除该条目，使下一次 `createSession` 重新
+开始。底层工作无法取消——`createSessionFromPreparationOrCold` 没有中止信号——因此改为回收：
+被放弃的 create 一旦真的产出 Session，该 Session 会被终止；并且只有当注册表条目仍指向该
+实例时才删除它，以免误删一次已完成重试所产出的 Session。没有任何地方会去 await 那个挂死的
+Promise。`requestSessionTerminate` 现在把等待与 300 秒期限竞速（观测到的最慢健康 ACP 启动
+为 249 秒），并且用哨兵值而非 reject 来表示超时，因此真正的 `terminate()` 失败仍会抛给
+调用方；期限到达后则走同一条回收路径摘除。
+
 ### 垃圾回收
 
 `SessionGCManager` 并不直接读 presence，但 `isEligibleForCleanup` 会调用
@@ -89,8 +113,16 @@ presence 条目，回收资格随之恢复。
 managed-runtime 下载在持续上报进度的情况下超出 60 秒预算达 450 秒，证明进度重置有效，
 随后让它卡住。
 
-消融验证：分别禁用看门狗、以及保留看门狗但移除竞速，都会让两个测试一直挂到 vitest 的
-30 秒超时——正是线上的症状。完整的 130 个测试全部通过。
+第三个测试端到端覆盖了评审后续：第一次 create 卡死、回合失败，随后的重试（第二个用户回合）
+成功到达 `agent.prompt` 并被记为 `handled`。`session-manager.test.ts` 则针对真实的 dedupe
+map 覆盖管理器契约：朴素的重试会拿到同一个挂死 Promise；摘除之后重试可以完成；在摘除之后
+才实例化出来的 create 会被终止；卡死的 create 会让 `requestSessionTerminate` 在期限到达时
+摘除而不是挂住。
+
+消融验证：分别禁用看门狗、以及保留看门狗但移除竞速，都会让前两个测试一直挂到 vitest 的
+30 秒超时——正是线上的症状。仅移除 `abandonPendingSessionCreate` 调用，重试测试会因残留的
+map 条目而失败；把该断言也去掉后，重试本身会挂满 30 秒，这正是评审所报告的缺陷。
+完整 CLI 套件：2872 个测试通过。
 
 未验证：900s 与 1800s 预算从未被真实的下载或克隆触达，因此它们是上界而非实测值。
 只有 `initializing` 的预算是对照实际卡死校准的。

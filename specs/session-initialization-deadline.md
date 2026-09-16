@@ -51,6 +51,18 @@ is released, active presence keeps the session counted as busy, which both
 suppresses idle collection and makes the machine publish a Session that looks
 like it is working when nothing is.
 
+Release includes abandoning the initialization work itself, and that is what
+makes retrying meaningful. Lody coalesces concurrent starts for one Session onto
+a single in-flight attempt, so an attempt nobody is waiting for any more must be
+detached rather than left to be reused — otherwise the retry rejoins the same
+wedged attempt and stalls identically, and the failure is not recoverable at all.
+A retry therefore always begins genuinely new initialization work.
+
+Detaching is not cancellation: the abandoned attempt may still be running, and
+Lody cannot stop it. It is watched instead, and any Session it eventually
+produces is terminated rather than left behind as an orphan agent process.
+Teardown never blocks indefinitely on an attempt that may never finish.
+
 The deadline is a backstop for a dependency that never answers. It is not a
 performance budget, and a step that trips it is a defect somewhere else.
 
@@ -58,7 +70,10 @@ performance budget, and a step that trips it is a defect somewhere else.
 
 The watchdog and its per-stage budgets live in
 `apps/cli/src/lib/loro/session-active-presence.ts`; the turn-side enforcement is
-`awaitInitializationStall` in `apps/cli/src/session/session-execution-service.ts`.
+`awaitInitializationStall` and `finalizeStalledInitializationEffect` in
+`apps/cli/src/session/session-execution-service.ts`. Detaching and reaping the
+abandoned attempt is `SessionManager.abandonPendingSessionCreate`, which
+`requestSessionTerminate` also uses once its own wait expires.
 The requester-profile deadline it is calibrated against is
 `USER_PROFILE_TIMEOUT_MS` in `apps/cli/src/session/session-user-resolver.ts`.
 

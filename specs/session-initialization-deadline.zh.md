@@ -35,13 +35,24 @@ Agent。只有这些工作完成后，回合才会进入 `running`。
 Agent 进程。在释放之前，active presence 会让该会话一直被计为繁忙，这既抑制了空闲回收，
 也让机器对外发布一个看似在工作、实则什么也没做的 Session。
 
+释放还包括放弃初始化工作本身，而这正是「重试」有意义的前提。Lody 会把同一个 Session 的
+并发启动合并到同一次进行中的尝试上，因此一旦不再有人等待某次尝试，就必须把它摘除，而不能
+留着被复用——否则重试会重新挂到那次卡死的尝试上、以完全相同的方式停滞，失败也就根本谈不上
+可恢复。所以重试总是从全新的初始化工作开始。
+
+摘除不等于取消：被放弃的尝试可能仍在运行，Lody 无法终止它。取而代之的是持续观察它，
+它最终若真的产出一个 Session，该 Session 会被终止，而不会作为孤儿 Agent 进程遗留下来。
+拆除流程也绝不会无限期地等待一次可能永远不会结束的尝试。
+
 该期限是对「永不应答的依赖」的兜底，不是性能预算；触发它的步骤说明别处存在缺陷。
 
 ## 证据
 
 看门狗及其按阶段的预算位于 `apps/cli/src/lib/loro/session-active-presence.ts`；
 回合侧的执行是 `apps/cli/src/session/session-execution-service.ts` 中的
-`awaitInitializationStall`。作为校准基准的请求者档案期限是
+`awaitInitializationStall` 与 `finalizeStalledInitializationEffect`。摘除并回收被放弃的
+尝试由 `SessionManager.abandonPendingSessionCreate` 负责，`requestSessionTerminate`
+在自身等待超时后也会走同一条路径。作为校准基准的请求者档案期限是
 `apps/cli/src/session/session-user-resolver.ts` 中的 `USER_PROFILE_TIMEOUT_MS`。
 
 本草案记录所请求的保证。预算是依据单台机器的守护进程日志（一周内 923 次初始化）以及促成此项

@@ -146,6 +146,7 @@ const createBaseDeps = (
     getSession: vi.fn(() => null),
     getPendingSession: vi.fn(() => null),
     createSession: vi.fn(),
+    abandonPendingSessionCreate: vi.fn(() => false),
     setSessionError: vi.fn(),
     terminateSession: vi.fn(),
     refreshGhTokenForSession: vi.fn(async () => {}),
@@ -8478,9 +8479,12 @@ describe('SessionExecutionService initialization deadline', () => {
   const createDeadlineHarness = (options: {
     sessionId: string;
     /** Resolves/rejects the session creation the turn is blocked on. */
-    onCreateSession?: (config: {
-      onPresencePhase?: (phase: SessionActivePresencePhase, detail?: string) => void;
-    }) => Promise<unknown>;
+    onCreateSession?: (
+      config: {
+        onPresencePhase?: (phase: SessionActivePresencePhase, detail?: string) => void;
+      },
+      attempt: number
+    ) => Promise<unknown>;
     stallBudgetsMs?: Record<string, number>;
   }) => {
     const presenceEvents: PresenceEvent[] = [];
@@ -8544,18 +8548,37 @@ describe('SessionExecutionService initialization deadline', () => {
       }
     );
 
+    // Mirrors `SessionManager`'s real deduplication: `createSession` returns the
+    // cached in-flight promise for a session id, and only the promise's own
+    // `finally` clears it — so a create that never settles is handed to every
+    // retry unless something detaches it.
+    const pendingCreates = new Map<string, Promise<unknown>>();
+    let createAttempts = 0;
+    const createSession = async (config: {
+      sessionId?: string;
+      onPresencePhase?: (phase: SessionActivePresencePhase, detail?: string) => void;
+    }) => {
+      const id = config.sessionId ?? options.sessionId;
+      const existing = pendingCreates.get(id);
+      if (existing) return await existing;
+      createAttempts += 1;
+      const promise = (
+        options.onCreateSession
+          ? options.onCreateSession(config, createAttempts)
+          : new Promise<unknown>(() => {})
+      ).finally(() => {
+        if (pendingCreates.get(id) === promise) pendingCreates.delete(id);
+      });
+      pendingCreates.set(id, promise);
+      return await promise;
+    };
+
     const deps = createBaseDeps({
       sessionManager: {
         getSession: vi.fn(() => null),
-        getPendingSession: vi.fn(() => null),
-        createSession: vi.fn(
-          async (config: {
-            onPresencePhase?: (phase: SessionActivePresencePhase, detail?: string) => void;
-          }) =>
-            options.onCreateSession
-              ? await options.onCreateSession(config)
-              : await new Promise(() => {})
-        ),
+        getPendingSession: vi.fn((id: string) => pendingCreates.get(id) ?? null),
+        createSession: vi.fn(createSession),
+        abandonPendingSessionCreate: vi.fn((id: string) => pendingCreates.delete(id)),
         setSessionError: vi.fn(),
         terminateSession: vi.fn(),
         refreshGhTokenForSession: vi.fn(async () => {}),
@@ -8572,7 +8595,7 @@ describe('SessionExecutionService initialization deadline', () => {
     });
     service = new SessionExecutionService(deps);
 
-    const start = () =>
+    const start = (userTurnId = 'turn-user-1') =>
       service.startSession({
         type: 'session/create',
         sessionId: options.sessionId as SessionId,
@@ -8580,7 +8603,7 @@ describe('SessionExecutionService initialization deadline', () => {
         workspaceId: 'workspace-1' as WorkspaceId,
         project: undefined,
         acpSessionConfig: { prompt: 'hi', cliType: 'builtin', agentType: 'codex' },
-        userTurnId: 'turn-user-1',
+        userTurnId,
         userId: 'user-1',
         userName: 'User',
         userEmail: 'user@example.com',
@@ -8594,6 +8617,10 @@ describe('SessionExecutionService initialization deadline', () => {
       service,
       sessionDoc,
       start,
+      pendingCreates,
+      appendUserTurn: (id: string) => {
+        history = [...history, { id, role: 'user', status: 'pending', read: false }];
+      },
       getHistory: () => history,
       heartbeatsFor: (sessionId: string) =>
         presenceEvents.filter((e) => e.kind === 'publish' && e.sessionId === sessionId),
@@ -8648,6 +8675,62 @@ describe('SessionExecutionService initialization deadline', () => {
       expect(harness.service.getExecutionSnapshot('session-stalled-init' as SessionId).hasActiveTurn).toBe(
         false
       );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('lets the retry after a stall start a fresh create instead of the wedged one', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+    try {
+      const agentClient = {
+        isCreated: vi.fn(() => true),
+        cancel: vi.fn(async () => {}),
+        prompt: vi.fn(async () => ({})),
+        currentModel: undefined,
+      };
+      const harness = createDeadlineHarness({
+        sessionId: 'session-stall-then-retry',
+        onCreateSession: (_config, attempt) =>
+          // First attempt wedges forever; the second is a healthy create.
+          attempt === 1
+            ? new Promise(() => {})
+            : Promise.resolve({
+                sessionId: 'session-stall-then-retry' as SessionId,
+                acpSessionId: 'acp-1' as ACPSessionId,
+                agentClient,
+                terminalManager: {} as unknown,
+                getWorkdir: () => '/tmp',
+                getHostWorkdir: () => '/tmp',
+                getParentSessionId: () => undefined,
+                exec: vi.fn(async () => ''),
+                terminate: vi.fn(async () => {}),
+                updateGitIdentity: vi.fn(),
+                createAgent: vi.fn(async () => 'acp-1'),
+                applyExecutionPlaneLimits: vi.fn(async () => {}),
+              }),
+      });
+
+      const stalledTurn = harness.start();
+      await harness.settle();
+      await harness.advance(190_000);
+      await stalledTurn;
+
+      expect(harness.getHistory()[0]?.status).toBe('failed');
+      // The wedged create must not be left in the deduplication map, or the
+      // retry below is handed the same promise and stalls again.
+      expect(harness.pendingCreates.size).toBe(0);
+
+      // Retrying is sending the message again. It has to actually run.
+      harness.appendUserTurn('turn-user-2');
+      const retryTurn = harness.start('turn-user-2');
+      await harness.settle();
+      await retryTurn;
+
+      expect(agentClient.prompt).toHaveBeenCalled();
+      expect(harness.getHistory()[1]?.status).toBe('handled');
+      // Only the first turn failed; the retry did not stall a second time.
+      expect(harness.deps.recordChatFailure).toHaveBeenCalledTimes(1);
     } finally {
       vi.useRealTimers();
     }

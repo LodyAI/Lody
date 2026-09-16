@@ -308,9 +308,10 @@ type TurnRuntimeState = {
   pendingSession?: Promise<ISession>;
   /**
    * Latched when the initialization stall watchdog halted this turn. The halt is
-   * a FAILURE, not a cancellation, so the scope finalizer must not route it
-   * through `finalizeCancelledTurnEffect` even though the losing body fiber is
-   * interrupted by the race.
+   * a FAILURE, not a cancellation, so the scope finalizer takes
+   * `finalizeStalledInitializationEffect` instead of
+   * `finalizeCancelledTurnEffect` — the race interrupts the losing body fiber,
+   * which would otherwise read as a user cancellation.
    */
   initializationStalled: boolean;
   fiber?: Fiber.RuntimeFiber<unknown, unknown>;
@@ -2258,6 +2259,58 @@ export class SessionExecutionService {
       });
   }
 
+  /**
+   * Release what a stalled initialization was holding.
+   *
+   * The stall is a failure, not a cancellation, so it must not go through
+   * `finalizeCancelledTurnEffect` — that would mark the user's turn cancelled.
+   * But that finalizer also owned the pending-create cleanup, and the stall is
+   * the first halt that can land WHILE `SessionManager.createSession` is still
+   * in flight, so the release has to happen here instead.
+   *
+   * Detaching matters more than terminating: the create is cached in
+   * `pendingSessionCreates` keyed by session id, so leaving it there hands the
+   * user's retry the very same wedged promise and stalls it again — the
+   * documented retry path would not actually recover. Nothing here awaits the
+   * wedged promise; if it ever settles, the manager's reaper terminates the
+   * Session it produced.
+   */
+  private finalizeStalledInitializationEffect(
+    runtime: TurnRuntimeState
+  ): Effect.Effect<void, never, never> {
+    const self = this;
+    return Effect.gen(function* () {
+      self.deps.clearActiveTurnId(runtime.sessionId, runtime.turnId);
+
+      // A Session that already materialized is owned by this turn and nobody
+      // else will stop it.
+      const session = runtime.session;
+      if (session) {
+        yield* self.ignoreWithWarning(
+          runtime.sessionId,
+          'Failed to terminate session after initialization stalled',
+          self.tryPromise(() => session.terminate(true))
+        );
+        return;
+      }
+
+      const detached = self.deps.sessionManager.abandonPendingSessionCreate(
+        runtime.sessionId,
+        'initialization-stalled'
+      );
+      if (detached || !runtime.pendingSession) {
+        return;
+      }
+      // The pending promise did not come from the dedupe map (nothing to
+      // detach), so reap it directly rather than leaving a possible orphan.
+      self.terminatePendingSessionWhenReady({
+        sessionId: runtime.sessionId,
+        turnId: runtime.turnId,
+        pendingSession: runtime.pendingSession,
+      });
+    });
+  }
+
   private drainCancelledPrompt(session: ISession, runtime?: TurnRuntimeState): Promise<void> {
     if (runtime?.cancellationDrain) return runtime.cancellationDrain;
     const requests = () =>
@@ -3287,11 +3340,12 @@ export class SessionExecutionService {
           yield* Effect.promise(() => turnRuntime.yieldedFinalization);
           const wasInterrupted = Exit.isFailure(exit) && Cause.isInterrupted(exit.cause);
           const wasCancelled =
-            !turnRuntime.initializationStalled &&
-            (turnRuntime.cancelRequested ||
-              self.isTurnCancelled(sessionId, turnRuntime.turnId) ||
-              wasInterrupted);
-          if (wasCancelled) {
+            turnRuntime.cancelRequested ||
+            self.isTurnCancelled(sessionId, turnRuntime.turnId) ||
+            wasInterrupted;
+          if (turnRuntime.initializationStalled) {
+            yield* self.finalizeStalledInitializationEffect(turnRuntime);
+          } else if (wasCancelled) {
             yield* self.finalizeCancelledTurnEffect({
               sessionId,
               sessionDoc,
