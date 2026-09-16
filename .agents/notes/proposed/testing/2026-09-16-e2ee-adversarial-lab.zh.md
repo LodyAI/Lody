@@ -15,15 +15,15 @@ Translation: current
 
 ## 实施计划与唯一任务表
 
-当前状态：P0–C2 有可复现证据；C3 及之后未验收。工作目录为已有 `lody-e2ee-core` 检出、`feat-e2ee-core` 分支。不开新长期工作区，不接 Lody 产品，不推送/合并；后续推送必须明确目的地，不能默认使用公开 origin。详细设计仍为 draft，已选方向不等于所有实现细节已获验收。
+当前状态：P0–P1 有可复现证据；P2 及之后未验收。工作目录为已有 `lody-e2ee-core` 检出、`feat-e2ee-core` 分支。不开新长期工作区，不接 Lody 产品，不推送/合并；后续推送必须明确目的地，不能默认使用公开 origin。详细设计仍为 draft，已选方向不等于所有实现细节已获验收。
 
 | 完成 | 阶段           | 交付物                         | 必须通过的门槛                              |
 | ---- | -------------- | ------------------------------ | ------------------------------------------- |
 | [x]  | P0 基线        | 版本、备份、迁移清单、现状结果 | 用户未提交工作可恢复，回归覆盖有去向        |
 | [x]  | C1 显式依赖    | 纯计算边界、能力接口、兼容草图 | E1–E3，真实验签一致，随机/时钟来源完整      |
 | [x]  | C2 Effect 试点 | 唯一 submit/resume 实现        | E4–E7，CAS/丢 ACK/中断/重启正确             |
-| [ ]  | C3 其余流程    | 分钥、恢复、准入与资源管理     | E3–E6，权限重查与原始截止不回退             |
-| [ ]  | P1 常驻协作    | lab 包、真实后端、三副本       | 离线重连与耐久恢复，不是一次性读写          |
+| [x]  | C3 其余流程    | 分钥、恢复、准入与资源管理     | E3–E6，权限重查与原始截止不回退             |
+| [x]  | P1 常驻协作    | lab 包、真实后端、三副本       | 离线重连与耐久恢复，不是一次性读写          |
 | [ ]  | P2 确定性      | 调度器、记录、重放             | 三次新目录重放一致，首分歧可定位            |
 | [ ]  | P3 固定攻击    | Spec 场景矩阵、有效裁判        | 真实改库被检验，注入已知缺陷时裁判失败      |
 | [ ]  | P4 Agent       | 受限 API、自由攻击记录         | 隔离自测通过，至少一轮真实 Agent 运行可重放 |
@@ -154,3 +154,15 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 - 必须项：pending 保存失败不 CAS；persist 后 save 故障保留原字节并 resume 提交；false ACK 保持 pending、不重签；两客户端 CAS 只有一方成功；非法页不推进 cursor；SQLite 杀进程后锁释放/pending 保留（既有 node-store 测试）；Promise 与 Effect 提交同一记录得到相同 status 与协议字节。
 - 证据：`pnpm --filter @lody/e2ee-core exec vitest run --exclude test/ledger-long-chain.test.ts` 退出 0（381 测试）；`pnpm --filter @lody/e2ee-demo test` 退出 0（真实本地 Riverrun，41 通过 / 2 跳过浏览器）。
 - 限制：外层 Fiber 中断不会自动 abort 已进入 `exclusive` 的底层 `appendCas` Promise（E6：中断≠撤回）。HPKE/Wasm 随机源仍未注入。未做实验室调度器，未启用产品 E2EE。
+
+### 2026-09-17 — C3 分钥/准入接到同一能力体系
+
+- `LedgerKeyDelivery.send` 与 `sendEffect` 共用实现；Promise 入口用 `runPromiseThrow` 解开 FiberFailure，调用方仍看到 `LedgerError`。保存后重发同一密文、二次授权失败不 put、撤销后不发送：既有 delivery 测试 + Promise/Effect 对照。
+- 快照准入已注入 `now`，验签期间时钟推进/原截止不延长：`test/snapshot-admission.test.ts`。恢复设备/文件走 C1 CryptoPlatform/Entropy，两进程恢复：`test/ledger-recovery-process.test.ts`。SQLite busy/杀进程：既有 publication/node-store 测试。
+- 证据：`pnpm --filter @lody/e2ee-core exec vitest run test/ledger-delivery.test.ts test/ledger-submit.test.ts` 退出 0。恢复流程仍是 Promise 适配器上的 Effect 薄包装，没有第二套模拟实现。未引入跨流事务。
+
+### 2026-09-17 — P1 实验室包与三人常驻协作
+
+- 新增 `packages/e2ee-lab`。第一版 backend/actors 复用 `@lody/e2ee-demo/host` 与 `DemoSession`（真实 sqlite Riverrun）。调度器目前只记录事件，不执行副作用；暂停/放行在 P2。
+- `test/collab-baseline.test.ts`：Alice 建空间，Bob/Carol 入账本，Alice/Bob 真实 Loro 编辑，Bob 用同一 clientDir/device 重连，host 关停后在同一 dataDir 再开，Alice/Carol 读回成员数与文档。`pnpm --filter @lody/e2ee-lab check` 退出 0（2 文件 / 2 测试）。
+- 限制：Carol 尚未走分钥/内容写入（多信封同页拆分留给后续）。lab 仍依赖 demo host，P5 再迁。无重放、无攻击 Agent、未启用产品 E2EE。

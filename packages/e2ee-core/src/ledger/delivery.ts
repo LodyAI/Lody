@@ -1,3 +1,5 @@
+import { Effect } from 'effect';
+import { runPromiseThrow } from '../effect-run';
 import { bytesEqual, copyBytes } from './cbor';
 import { fail } from './error';
 
@@ -59,28 +61,40 @@ export class LedgerKeyDelivery {
     frame: Uint8Array | undefined,
     authorize: (frame: Uint8Array) => void | Promise<void>
   ): Promise<'observed' | 'unknown'> {
+    return runPromiseThrow(this.sendEffect(id, frame, authorize));
+  }
+
+  sendEffect(
+    id: string,
+    frame: Uint8Array | undefined,
+    authorize: (frame: Uint8Array) => void | Promise<void>
+  ): Effect.Effect<'observed' | 'unknown', unknown> {
     if (!/^[0-9a-f]{32}$/.test(id)) fail('canonical');
-    return this.outbox.exclusive(async (tx) => {
-      const saved = await tx.load(id);
-      if (saved && frame && !bytesEqual(saved, frame)) fail('replay');
-      const bytes = saved ?? (frame ? copyBytes(frame) : null);
-      if (!bytes) fail('invalid-operation');
-      await authorize(bytes);
-      if (!saved) await tx.save(id, bytes);
-      await authorize(bytes);
-      try {
-        await this.remote.put(id, copyBytes(bytes));
-      } catch {
-        /* lost ACK: read back */
-      }
-      let observed: Uint8Array | null;
-      try {
-        observed = await this.remote.read(id);
-      } catch {
-        return 'unknown';
-      }
-      if (!observed || !bytesEqual(observed, bytes)) return 'unknown';
-      return 'observed';
+    return Effect.tryPromise({
+      try: () =>
+        this.outbox.exclusive(async (tx) => {
+          const saved = await tx.load(id);
+          if (saved && frame && !bytesEqual(saved, frame)) fail('replay');
+          const bytes = saved ?? (frame ? copyBytes(frame) : null);
+          if (!bytes) fail('invalid-operation');
+          await authorize(bytes);
+          if (!saved) await tx.save(id, bytes);
+          await authorize(bytes);
+          try {
+            await this.remote.put(id, copyBytes(bytes));
+          } catch {
+            /* lost ACK: read back */
+          }
+          let observed: Uint8Array | null;
+          try {
+            observed = await this.remote.read(id);
+          } catch {
+            return 'unknown';
+          }
+          if (!observed || !bytesEqual(observed, bytes)) return 'unknown';
+          return 'observed';
+        }),
+      catch: (error) => error,
     });
   }
 }

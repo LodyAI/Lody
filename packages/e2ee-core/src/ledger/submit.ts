@@ -1,4 +1,5 @@
 import { Effect } from 'effect';
+import { runPromiseThrow } from '../effect-run';
 import { copyBytes, bytesEqual } from './cbor';
 import { hashRecord, type Hash } from './crypto';
 import { fail } from './error';
@@ -344,11 +345,11 @@ export class LedgerClient {
   }
 
   async submit(record: Uint8Array): Promise<LedgerSubmitResult> {
-    return Effect.runPromise(this.submitEffect(record));
+    return runPromiseThrow(this.submitEffect(record));
   }
 
   async resume(): Promise<LedgerSubmitResult> {
-    return Effect.runPromise(this.resumeEffect());
+    return runPromiseThrow(this.resumeEffect());
   }
 
   /** Same implementation as `submit`. Promise methods are thin runPromise wrappers. */

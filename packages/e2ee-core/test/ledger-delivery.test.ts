@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { Effect } from 'effect';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LedgerError } from '../src/ledger';
 import {
@@ -141,6 +142,54 @@ describe('K1 durable epoch-key delivery', () => {
     }
     expect(puts).toBe(before);
     expect(outbox.frames.get(id)).toEqual(sealedOnce);
+  });
+
+  it('Promise and Effect send persist and retry the same ciphertext', async () => {
+    const owner = await device();
+    const k0 = random(32);
+    const created = await signGenesis(owner, k0);
+    const phone = await device();
+    const admitted = await append(
+      created.ledger,
+      owner,
+      await admitDeviceOp(created.anchor, phone, 'personal', true)
+    );
+    const frame = await sealEpochEnvelope({
+      state: admitted.ledger.state,
+      genesis: created.anchor,
+      epoch: 0,
+      sender: owner.publicKey,
+      recipient: phone.publicKey,
+      recipientEncryptionKey: phone.enc,
+      epochKey: k0,
+      sign: (bytes) => owner.sign(bytes),
+    });
+    const remoteA = new Map<string, Uint8Array>();
+    const remoteB = new Map<string, Uint8Array>();
+    const authorize = async () => {};
+    const deliveryA = new LedgerKeyDelivery(new MemoryLedgerKeyOutbox(), {
+      async put(id, body) {
+        remoteA.set(id, new Uint8Array(body));
+      },
+      async read(id) {
+        return remoteA.get(id) ? new Uint8Array(remoteA.get(id)!) : null;
+      },
+    });
+    const deliveryB = new LedgerKeyDelivery(new MemoryLedgerKeyOutbox(), {
+      async put(id, body) {
+        remoteB.set(id, new Uint8Array(body));
+      },
+      async read(id) {
+        return remoteB.get(id) ? new Uint8Array(remoteB.get(id)!) : null;
+      },
+    });
+    const id = deliveryId();
+    expect(await deliveryA.send(id, new Uint8Array(frame), authorize)).toBe('observed');
+    expect(
+      await Effect.runPromise(deliveryB.sendEffect(id, new Uint8Array(frame), authorize))
+    ).toBe('observed');
+    expect(remoteA.get(id)).toEqual(frame);
+    expect(remoteB.get(id)).toEqual(frame);
   });
 
   it('re-checks authorization after save and does not put if the second check fails', async () => {

@@ -15,15 +15,15 @@ The [specification](../../../../specs/e2ee-adversarial-lab.md) owns contracts; t
 
 ## Implementation plan and single task tracker
 
-Current state: P0–C2 have reproducible evidence; C3 and later are unaccepted. Work in the existing `lody-e2ee-core` checkout on `feat-e2ee-core`. No new permanent workspace, product integration, push or merge. Any later push needs an explicit destination rather than defaulting to public origin. Detailed design stays draft; selecting a direction does not accept every implementation detail.
+Current state: P0–P1 have reproducible evidence; P2 and later are unaccepted. Work in the existing `lody-e2ee-core` checkout on `feat-e2ee-core`. No new permanent workspace, product integration, push or merge. Any later push needs an explicit destination rather than defaulting to public origin. Detailed design stays draft; selecting a direction does not accept every implementation detail.
 
 | Done | Stage                       | Deliverable                                             | Required gate                                                    |
 | ---- | --------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------- |
 | [x]  | P0 Baseline                 | Versions, backup, migration inventory, baseline results | Recoverable user work and regression migration map               |
 | [x]  | C1 Explicit dependencies    | Pure boundary, ports, compatibility sketch              | E1–E3; real verification parity; complete entropy/time inventory |
 | [x]  | C2 Effect pilot             | Single submit/resume implementation                     | E4–E7; CAS/lost ACK/interruption/restart                         |
-| [ ]  | C3 Remaining workflows      | Delivery, recovery, admission, resources                | E3–E6; live authority and original expiry preserved              |
-| [ ]  | P1 Persistent collaboration | Lab package, real backend, three replicas               | Offline/restart durability, not one-shot read/write              |
+| [x]  | C3 Remaining workflows      | Delivery, recovery, admission, resources                | E3–E6; live authority and original expiry preserved              |
+| [x]  | P1 Persistent collaboration | Lab package, real backend, three replicas               | Offline/restart durability, not one-shot read/write              |
 | [ ]  | P2 Determinism              | Scheduler, recording, replay                            | Three fresh-directory replays; first-divergence detection        |
 | [ ]  | P3 Fixed attacks            | Scenario matrix and effective judge                     | Real database mutation; known injected defects fail judging      |
 | [ ]  | P4 Agent                    | Restricted API and exploration trace                    | Isolation checks; at least one real replayable Agent run         |
@@ -154,3 +154,15 @@ Implementers choose filenames, service names and test organization without repea
 - Required cases: pending save failure does not CAS; a post-persist save fault keeps the original bytes and resume commits them; a false ACK keeps pending without re-signing; only one of two CAS clients wins; a bad page does not advance the cursor; SQLite kill-and-reopen keeps pending/releases the lock (existing node-store tests); Promise and Effect submit of the same record share status and protocol bytes.
 - Evidence: `pnpm --filter @lody/e2ee-core exec vitest run --exclude test/ledger-long-chain.test.ts` exit 0 (381 tests); `pnpm --filter @lody/e2ee-demo test` exit 0 (real local Riverrun, 41 passed / 2 skipped browser).
 - Limits: interrupting the outer Fiber does not abort an `appendCas` Promise already inside `exclusive` (E6: interrupt is not withdraw). HPKE/Wasm entropy remains uninjected. No lab scheduler yet. Product E2EE is not enabled.
+
+### 2026-09-17 — C3 delivery/admission on the same capability ports
+
+- `LedgerKeyDelivery.send` and `sendEffect` share one implementation. The Promise entry uses `runPromiseThrow` so callers still see `LedgerError` rather than FiberFailure. Exact-ciphertext retry, second-authorize refusal, and post-revoke non-delivery: existing delivery tests plus Promise/Effect parity.
+- Snapshot admission already injects `now`; clock advance during verify does not extend the original lease: `test/snapshot-admission.test.ts`. Recovery file/device use C1 CryptoPlatform/Entropy; two-process restore: `test/ledger-recovery-process.test.ts`. SQLite busy/kill: existing publication/node-store tests.
+- Evidence: `pnpm --filter @lody/e2ee-core exec vitest run test/ledger-delivery.test.ts test/ledger-submit.test.ts` exit 0. Recovery remains a thin Effect wrapper over the Promise adapter, not a second simulated path. No cross-stream transactions.
+
+### 2026-09-17 — P1 lab package and persistent three-client collab
+
+- Added `packages/e2ee-lab`. The first backend/actors reuse `@lody/e2ee-demo/host` and `DemoSession` (real sqlite Riverrun). The scheduler currently records events and does not perform I/O; pause/permit is P2.
+- `test/collab-baseline.test.ts`: Alice creates a space, Bob/Carol join the ledger, Alice/Bob edit a real Loro document, Bob reconnects with the same clientDir/device, the host restarts on the same dataDir, Alice/Carol reread membership and the document. `pnpm --filter @lody/e2ee-lab check` exit 0 (2 files / 2 tests).
+- Limits: Carol does not yet receive epoch keys/content writes (multi-envelope page splitting is later). The lab still depends on the demo host until P5. No replay, no attack Agent, product E2EE not enabled.

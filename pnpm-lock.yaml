@@ -1451,6 +1451,31 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(@types/debug@4.1.12)(@types/node@24.10.12)(jiti@2.7.0)(jsdom@26.1.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)
 
+  packages/e2ee-lab:
+    dependencies:
+      '@lody/e2ee-core':
+        specifier: workspace:*
+        version: link:../e2ee-core
+      '@lody/e2ee-demo':
+        specifier: workspace:*
+        version: link:../e2ee-demo
+      effect:
+        specifier: 'catalog:'
+        version: 3.18.4
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.10.12
+      tsx:
+        specifier: 4.23.13
+        version: 4.23.13
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.4(@types/debug@4.1.12)(@types/node@24.10.12)(jiti@2.7.0)(jsdom@26.1.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)
+
   packages/ignore:
     dependencies:
       effect:

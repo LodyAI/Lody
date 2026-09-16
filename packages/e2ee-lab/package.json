@@ -1,0 +1,28 @@
+{
+  "name": "@lody/e2ee-lab",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsgo --noEmit",
+    "test": "vitest run",
+    "check": "pnpm typecheck && pnpm test",
+    "scenario:collab": "vitest run test/collab-baseline.test.ts",
+    "format": "prettier --write src test package.json tsconfig.json README.md README.zh.md AGENTS.md vitest.config.ts",
+    "format:check": "prettier --check src test package.json tsconfig.json README.md README.zh.md AGENTS.md vitest.config.ts"
+  },
+  "dependencies": {
+    "@lody/e2ee-core": "workspace:*",
+    "@lody/e2ee-demo": "workspace:*",
+    "effect": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "tsx": "4.23.13",
+    "typescript": "catalog:",
+    "vitest": "^3.2.4"
+  }
+}
