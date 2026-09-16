@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { delimiter, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -40,9 +40,17 @@ async function readGeneratedProfile(
   launch: Awaited<ReturnType<typeof resolveDeepSeekHarnessProcessLaunch>>,
   rootDir: string
 ) {
-  const profileFlagIndex = launch.args.indexOf('--profile');
-  const profileName = launch.args.at(profileFlagIndex + 1);
-  if (profileFlagIndex < 0 || profileName === undefined) {
+  const encodedRuntimeArgs = launch.env.LODY_DSH_NODE_ARGS;
+  if (!encodedRuntimeArgs) {
+    throw new Error('DeepSeek Harness launch did not include bundled Node arguments');
+  }
+  const runtimeArgs: unknown = JSON.parse(Buffer.from(encodedRuntimeArgs, 'base64').toString());
+  if (!Array.isArray(runtimeArgs) || !runtimeArgs.every((arg) => typeof arg === 'string')) {
+    throw new Error('DeepSeek Harness bundled Node arguments are invalid');
+  }
+  const profileFlagIndex = runtimeArgs.indexOf('--profile');
+  const profileName = runtimeArgs.at(profileFlagIndex + 1);
+  if (profileFlagIndex < 0 || typeof profileName !== 'string') {
     throw new Error('DeepSeek Harness launch did not include a profile name');
   }
   const profileDir = join(rootDir, 'profiles', profileName);
@@ -130,9 +138,12 @@ describe('resolveDeepSeekHarnessProcessLaunch', () => {
     expect(profile.cordisYml).toBe('[]\n');
     expect(profile.packageJson).toContain('"@deepseek-ai/dsh-base"');
     expect(profile.cordisPatchYml).toContain('compression: zstd');
-    expect(launch.args).toContain('dsh');
-    expect(launch.args).toContain('--profile');
-    expect(launch.args).toContain(profile.profileName);
+    expect(launch.args).toContain('node');
+    expect(launch.args).not.toContain('dsh');
+    expect(launch.env.LODY_DSH_NODE_EXECUTABLE).toBe(process.execPath);
+    expect(Buffer.from(launch.env.LODY_DSH_NODE_ARGS, 'base64').toString()).toContain(
+      profile.profileName
+    );
     expect(launch.args).not.toContain('dsh-acp-demo');
     expect(launch.args).not.toContain('--force');
     expect(launch.args).not.toContain('--legacy-peer-deps');
@@ -144,6 +155,69 @@ describe('resolveDeepSeekHarnessProcessLaunch', () => {
     expect(launch.args).not.toContain(`@deepseek-ai/cordis@${DEEPSEEK_HARNESS_VERSION}`);
     expect(launch.env[DEEPSEEK_HARNESS_HOME_ENV]).toBe(rootDir);
     expect(await readdir(rootDir)).toEqual(expect.arrayContaining(['profiles', 'sessions']));
+  });
+
+  it('executes the pinned dsh entry with the selected Lody Node runtime', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'lody-dsh-home-'));
+    temporaryRoots.push(rootDir);
+    const closureRoot = join(rootDir, 'synthetic-npx', 'node_modules');
+    const binDir = join(closureRoot, '.bin');
+    const packageRoot = join(closureRoot, '@deepseek-ai', 'dsh');
+    const outputPath = join(rootDir, 'dsh-bootstrap-output.json');
+    await mkdir(join(packageRoot, 'lib'), { recursive: true });
+    await mkdir(binDir, { recursive: true });
+    await writeFile(
+      join(packageRoot, 'package.json'),
+      JSON.stringify({
+        name: '@deepseek-ai/dsh',
+        version: DEEPSEEK_HARNESS_VERSION,
+        type: 'module',
+      })
+    );
+    await writeFile(
+      join(packageRoot, 'lib', 'bin.js'),
+      `
+import { writeFile } from 'node:fs/promises';
+export async function runCli() {
+  await writeFile(process.env.DSH_BOOTSTRAP_OUTPUT, JSON.stringify({
+    execPath: process.execPath,
+    argv: process.argv,
+    importedAsMain: import.meta.main === true,
+  }));
+}
+`.trim()
+    );
+
+    const launch = await resolveDeepSeekHarnessProcessLaunch({
+      adapterPath: '/bundled/deepseek-acp.js',
+      rootDir,
+      extraArgs: ['--synthetic-flag'],
+    });
+    const launcherIndex = launch.args.indexOf('node');
+    expect(launcherIndex).toBeGreaterThan(0);
+    const launcher = launch.args.at(launcherIndex + 2);
+    if (!launcher) throw new Error('DeepSeek Harness Node launcher was missing');
+    await promisify(execFile)(process.execPath, ['-e', launcher], {
+      env: {
+        ...process.env,
+        ...launch.env,
+        PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
+        DSH_BOOTSTRAP_OUTPUT: outputPath,
+      },
+    });
+
+    const result: unknown = JSON.parse(await readFile(outputPath, 'utf8'));
+    expect(result).toEqual({
+      execPath: process.execPath,
+      argv: [
+        process.execPath,
+        join(packageRoot, 'lib', 'bin.js'),
+        '--profile',
+        expect.stringMatching(/^lody-acp-/),
+        '--synthetic-flag',
+      ],
+      importedAsMain: false,
+    });
   });
 
   it('uses zstd when an existing standalone Harness root is compressed', async () => {

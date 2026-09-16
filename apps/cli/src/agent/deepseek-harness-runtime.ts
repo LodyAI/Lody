@@ -23,6 +23,72 @@ export const DEEPSEEK_HARNESS_HOME_ENV = 'DSH_HOME';
 
 const RAW_SESSION_ARTIFACT = 'session.jsonl';
 const ZSTD_SESSION_ARTIFACT = 'session.jsonl.zstd';
+const DSH_NODE_EXECUTABLE_ENV = 'LODY_DSH_NODE_EXECUTABLE';
+const DSH_NODE_ARGS_ENV = 'LODY_DSH_NODE_ARGS';
+
+function encodeBase64(value: string): string {
+  return Buffer.from(value, 'utf8').toString('base64');
+}
+
+function createDeepSeekHarnessNodeLauncherArg(): string {
+  const source = `
+const { spawn } = require('node:child_process');
+const executable = process.env.${DSH_NODE_EXECUTABLE_ENV};
+const encodedArgs = process.env.${DSH_NODE_ARGS_ENV};
+if (!executable || !encodedArgs) throw new Error('Missing Lody DSH runtime launch environment');
+const args = JSON.parse(Buffer.from(encodedArgs, 'base64').toString('utf8'));
+const child = spawn(executable, args, { env: process.env, stdio: 'inherit' });
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, () => child.kill(signal));
+}
+child.on('error', (error) => {
+  console.error(error && error.stack ? error.stack : error);
+  process.exitCode = 1;
+});
+child.on('exit', (code) => {
+  process.exitCode = code === null ? 1 : code;
+});
+`.trim();
+  // Keep the eval payload opaque so npm can safely forward it as one argument.
+  return `eval(Buffer.from('${encodeBase64(source)}','base64').toString('utf8'))`;
+}
+
+function createDeepSeekHarnessBootstrapSource(): string {
+  return `
+import { readFile } from 'node:fs/promises';
+import { delimiter, dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const expectedVersion = ${JSON.stringify(DEEPSEEK_HARNESS_VERSION)};
+let entryPath;
+
+for (const binDir of (process.env.PATH ?? '').split(delimiter)) {
+  if (!binDir) continue;
+  const packageRoot = join(dirname(binDir), '@deepseek-ai', 'dsh');
+  try {
+    const manifest = JSON.parse(await readFile(join(packageRoot, 'package.json'), 'utf8'));
+    if (manifest.version !== expectedVersion) continue;
+    entryPath = join(packageRoot, 'lib', 'bin.js');
+    await readFile(entryPath, 'utf8');
+    break;
+  } catch {}
+}
+
+if (!entryPath) {
+  throw new Error(
+    'The pinned @deepseek-ai/dsh@' + expectedVersion + ' entry was not found in the npx closure'
+  );
+}
+
+const dshArgs = process.argv.slice(1);
+process.argv = [process.execPath, entryPath, ...dshArgs];
+const dsh = await import(pathToFileURL(entryPath).href);
+if (typeof dsh.runCli !== 'function') {
+  throw new Error('The pinned @deepseek-ai/dsh entry does not export runCli()');
+}
+await dsh.runCli();
+`.trim();
+}
 
 export class DeepSeekHarnessMixedSessionCompressionError extends Error {
   readonly code = 'DSH_MIXED_SESSION_COMPRESSION';
@@ -169,6 +235,16 @@ export async function resolveDeepSeekHarnessProcessLaunch(options: {
     ),
   ]);
 
+  const dshNodeArgs = [
+    '--input-type=module',
+    '--eval',
+    createDeepSeekHarnessBootstrapSource(),
+    '--',
+    '--profile',
+    profileName,
+    ...(options.extraArgs ?? []),
+  ];
+
   return {
     command: 'npx',
     args: [
@@ -178,15 +254,19 @@ export async function resolveDeepSeekHarnessProcessLaunch(options: {
       // independently of the Harness family and have no release at
       // `DEEPSEEK_HARNESS_VERSION`.
       ...createDeepSeekHarnessNpxSpecifiers().flatMap((specifier) => ['--package', specifier]),
-      'dsh',
-      '--profile',
-      profileName,
-      ...(options.extraArgs ?? []),
+      // npm exec does not shell-quote executable paths, so a minimal Node
+      // launcher safely passes Lody Helper's space-containing path to spawn().
+      // DSH itself still runs only under process.execPath.
+      'node',
+      '-e',
+      createDeepSeekHarnessNodeLauncherArg(),
     ],
     env: {
       [DEEPSEEK_HARNESS_HOME_ENV]: rootDir,
       [ACP_EXTENSION_DSH_SESSION_ROOT_ENV]: sessionsRoot,
       [ACP_EXTENSION_DSH_QUERY_PATH_ENV]: join(sessionsRoot, 'session-query.db'),
+      [DSH_NODE_EXECUTABLE_ENV]: process.execPath,
+      [DSH_NODE_ARGS_ENV]: encodeBase64(JSON.stringify(dshNodeArgs)),
     },
   };
 }

@@ -48,8 +48,8 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   that gate.
 - `setting.ts`: every builtin requires `resolveACPProcessLaunchAsync()`.
 - `deepseek-harness-runtime.ts` is NOT a managed runtime: keep it out of runtime download,
-  prefetch, override, and interactive-auth flows. Launch the pinned closure through
-  `dsh --profile` (see README.md). Credentials stay in the agent config environment; never
+  prefetch, override, and auth flows. npx installs the closure; run `dsh --profile` with packaged
+  `process.execPath` and inherited `ELECTRON_RUN_AS_NODE`. Credentials stay in agent env; never
   write them into the generated config. The adapter applies model/reasoning selection
   through the Agent-scoped request waterfall, permissions through Harness presets,
   and `agent_preset` through `AgentPresets.mount/recompose` — never as UI-only state. Presets
