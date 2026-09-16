@@ -15,7 +15,7 @@ Translation: current
 
 ## 实施计划与唯一任务表
 
-当前状态：P0–P1 有可复现证据；P2 及之后未验收。工作目录为已有 `lody-e2ee-core` 检出、`feat-e2ee-core` 分支。不开新长期工作区，不接 Lody 产品，不推送/合并；后续推送必须明确目的地，不能默认使用公开 origin。详细设计仍为 draft，已选方向不等于所有实现细节已获验收。
+当前状态：P0–P1 已验收；P2 调度/有限模型/事件形状重放有证据，协议字节重放与 P3–P5 未验收。工作目录为已有 `lody-e2ee-core` 检出、`feat-e2ee-core` 分支。不开新长期工作区，不接 Lody 产品，不推送/合并；后续推送必须明确目的地，不能默认使用公开 origin。详细设计仍为 draft，已选方向不等于所有实现细节已获验收。
 
 | 完成 | 阶段           | 交付物                         | 必须通过的门槛                              |
 | ---- | -------------- | ------------------------------ | ------------------------------------------- |
@@ -166,3 +166,9 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 - 新增 `packages/e2ee-lab`。第一版 backend/actors 复用 `@lody/e2ee-demo/host` 与 `DemoSession`（真实 sqlite Riverrun）。调度器目前只记录事件，不执行副作用；暂停/放行在 P2。
 - `test/collab-baseline.test.ts`：Alice 建空间，Bob/Carol 入账本，Alice/Bob 真实 Loro 编辑，Bob 用同一 clientDir/device 重连，host 关停后在同一 dataDir 再开，Alice/Carol 读回成员数与文档。`pnpm --filter @lody/e2ee-lab check` 退出 0（2 文件 / 2 测试）。
 - 限制：Carol 尚未走分钥/内容写入（多信封同页拆分留给后续）。lab 仍依赖 demo host，P5 再迁。无重放、无攻击 Agent、未启用产品 E2EE。
+
+### 2026-09-17 — P2 调度许可与事件形状重放（未勾选）
+
+- 调度器现为 `request → permit → complete`。未许可不能 run；同时只允许一个 permitted；事件只消费一次。有限两 actor submit 交错探索 `exploreSubmitInterleavings` 通过。`firstDivergence` 在改 actor 时报告 index 0。
+- `test/replay-cas.test.ts` 在三个全新 dataDir 上跑真实 Riverrun CAS 竞争，事件形状一致，故意改调度可定位首分歧。`pnpm --filter @lody/e2ee-lab check` 含该测试后待提交。
+- 未勾选 P2：诚实客户端密钥生成仍用安全随机，协议字节不能仅靠公开 seed 重放；丢 ACK 与密文篡改的三目录字节重放未做。DemoSession 尚未注入 lab Entropy。

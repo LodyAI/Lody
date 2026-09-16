@@ -15,7 +15,7 @@ The [specification](../../../../specs/e2ee-adversarial-lab.md) owns contracts; t
 
 ## Implementation plan and single task tracker
 
-Current state: P0–P1 have reproducible evidence; P2 and later are unaccepted. Work in the existing `lody-e2ee-core` checkout on `feat-e2ee-core`. No new permanent workspace, product integration, push or merge. Any later push needs an explicit destination rather than defaulting to public origin. Detailed design stays draft; selecting a direction does not accept every implementation detail.
+Current state: P0–P1 accepted; P2 has scheduler/model/event-shape replay evidence; protocol-byte replay and P3–P5 are unaccepted. Work in the existing `lody-e2ee-core` checkout on `feat-e2ee-core`. No new permanent workspace, product integration, push or merge. Any later push needs an explicit destination rather than defaulting to public origin. Detailed design stays draft; selecting a direction does not accept every implementation detail.
 
 | Done | Stage                       | Deliverable                                             | Required gate                                                    |
 | ---- | --------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------- |
@@ -166,3 +166,9 @@ Implementers choose filenames, service names and test organization without repea
 - Added `packages/e2ee-lab`. The first backend/actors reuse `@lody/e2ee-demo/host` and `DemoSession` (real sqlite Riverrun). The scheduler currently records events and does not perform I/O; pause/permit is P2.
 - `test/collab-baseline.test.ts`: Alice creates a space, Bob/Carol join the ledger, Alice/Bob edit a real Loro document, Bob reconnects with the same clientDir/device, the host restarts on the same dataDir, Alice/Carol reread membership and the document. `pnpm --filter @lody/e2ee-lab check` exit 0 (2 files / 2 tests).
 - Limits: Carol does not yet receive epoch keys/content writes (multi-envelope page splitting is later). The lab still depends on the demo host until P5. No replay, no attack Agent, product E2EE not enabled.
+
+### 2026-09-17 — P2 permit scheduling and event-shape replay (unchecked)
+
+- Scheduler is now `request → permit → complete`. Unpermitted events cannot run; only one event may be permitted; each event is consumed once. Bounded two-actor submit exploration `exploreSubmitInterleavings` passes. `firstDivergence` reports index 0 when the actor is changed.
+- `test/replay-cas.test.ts` runs a real Riverrun CAS race in three fresh data directories; event shape matches and a mutated schedule is the first divergence. `pnpm --filter @lody/e2ee-lab check` includes this test in the pending commit.
+- P2 stays unchecked: honest client keygen still uses live entropy, so protocol bytes cannot replay from a public seed alone. Lost-ACK and ciphertext-tamper three-directory byte replay are not done. DemoSession does not yet take lab Entropy.
