@@ -1,7 +1,7 @@
 # Attachment draft lifetimes and PR boundaries
 
 Status: proposed
-Translation: pending
+Translation: current
 
 [中文](2026-09-14-deferred-attachment-send.zh.md)
 
@@ -191,5 +191,4 @@ assertion: recolouring the message status, and dropping the reserved progress
 row. The reserved row is asserted through a `data-attachment-progress` hook
 because `Progress` merges to the same `h-1 w-full` and is indistinguishable by
 styling alone; jsdom has no layout, so the equal-height property is guarded
-structurally there and measured in the browser. The Chinese translation of this
-section is still outstanding.
+structurally there and measured in the browser.

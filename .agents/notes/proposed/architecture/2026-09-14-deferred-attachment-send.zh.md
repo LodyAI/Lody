@@ -120,3 +120,19 @@ Layer 3 validation: full `TMPDIR=/private/tmp NODE_ENV=test pnpm check` passes, 
 验证：最终 `TMPDIR=/private/tmp NODE_ENV=test pnpm check` 通过，含 480 个组件测试文件、3,677 项测试；随后资源与预热定向测试 9 项及组件类型检查通过，覆盖空闲预热不触发未保存输入提示。重排及并发接管修正后，定向测试 60 项和组件类型检查通过。根格式化、组件 Prettier 和文档检查完成，文档零错误。打包设备、多窗口真实网络及原生移动壳尚未验收；本文仍为 proposed，不推断人工批准。
 
 跨窗口接管时记录实际准备操作的副本；接管输入的窗口不一定拥有原操作基线。确定性 journal 测试覆盖此恢复边界。
+
+## Pending 失败层级
+
+最初的 pending 行会把同一失败显示三次：消息级“未发送 · 附件上传失败”、record 的 `error` 以及每个失败附件自己的原因。部分失败因此像诊断输出，而不像一条消息。现在每个事实只有一个展示所有者：
+
+- 消息级只保留一个短状态：`sessions.pendingMessageUploadFailed` 只显示“未发送”，并使用 `text-muted-foreground`。图标与文字已经表达含义；再把这行染红会在同一条消息里堆出三个红色信号。
+- 失败原因属于失败附件。只有没有附件携带原因时才显示 record 级原因，因此所有附件已就绪但 journal 失败时仍有解释，同时不会重复。
+- `FAILED_FRAME_CLASS`（`border-destructive/30 bg-destructive/[0.04]`）是失败的全部红色预算，且只由失败卡片使用。图标块、文件名和消息状态保持中性；整行只有卡片边框、一个 `AlertCircle` 和一条原因文字为红色。图片卡片用中性的 `bg-background/55` 遮罩保证任意照片上图标可读，不使用红色蒙层。
+- 没有卡片承载的原因使用 `PendingFailureNotice`，即 notice 尺寸的同一容器，而不是气泡下方零散的红字；重试或取消动作失败也复用它。
+- 已完成附件保持普通 Ready 卡片，因此部分成功仍清楚可见。文件卡与已投递的 `SessionFileCard` 共用 `getSessionFileIcon`，draft 与最终形态读作同一对象。
+- 上传、就绪、失败共享同一骨架：图标槽、名称加一行状态、尾部状态图标。进度条是贴在卡片底部的满宽流式条，始终占相同高度，非传输状态为空，保证三种状态高度不变。此前把它绝对定位在 padding 内会覆盖 40px 内容行并留下无关间隙，已移除。图片卡片把同一条放在缩略图和说明之间。量得图片卡始终为 198px、文件卡始终为 66px。三个尾部图标始终挂载，以 opacity/scale/blur（0→1、0.25→1、4px→0）在 300ms 内交叉淡入；只用 CSS 明确声明这些属性，不把 framer-motion 引入对话模块图。
+- 图片预览使用 1px `outline-black/10 dark:outline-white/10` 边缘；带色中性边会吸收下层表面颜色，看起来像污渍。
+- 两个动作不加按压缩放：共享 `Button` 与周边编辑、置顶、复制控件都没有这种反馈。
+- “继续发送”是主动作，“取消发送”是 ghost 次动作；二者紧贴消息放在同一行，而不是独立的控制条。
+
+这只是渲染变更，不改变 journal stage、Effect 生命周期、重试/取消语义、顺序或持久化。`PendingMessageRow` 导出为纯组件，使 Storybook 与 `tests/session-pending-message-row.test.tsx` 不需要 workspace runtime 即可驱动所有状态。回归测试已分别删去重复原因和统一 destructive 样式以确认会失败；ready-file fixture 用来覆盖仅有 ready image 看不到的文件卡回归。已用组件 typecheck、`lint:i18n`、oxlint、完整 481 文件/3,684 测试组件套件，以及 720px 和 380px、浅色和深色的 Storybook 截图验证。浏览器中读取过交叉淡入的 `opacity`、`scale`、`filter` 与 `transition-property`，没有靠假设。两次 mutation 最初静默通过，现已有对应断言：消息状态重新着色、以及移除保留进度行。进度行通过 `data-attachment-progress` 断言，因为 `Progress` 最终合并为同样的 `h-1 w-full`，仅靠样式不能区分；jsdom 没有布局，因此等高先用结构性断言守住，再在浏览器中测量。
