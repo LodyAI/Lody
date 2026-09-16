@@ -20,6 +20,12 @@ import type {
 
 export interface CloudSessionSharingPort {
   request(input: SessionShareRequestInput): Promise<SessionShareRequestResult>;
+  getResult(
+    input: Pick<
+      SessionShareRequestInput,
+      'workspaceId' | 'sourceSessionId' | 'requesterUserId' | 'deliveryPublicKey'
+    > & { shareRequestId: string }
+  ): Promise<SessionShareRequestResult>;
 }
 
 /**

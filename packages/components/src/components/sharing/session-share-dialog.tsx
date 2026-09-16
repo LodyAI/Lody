@@ -85,14 +85,12 @@ function ShareEditor({
   workspaceId,
   session,
   shareId,
-  confirmation,
   onClose,
   title,
 }: {
   workspaceId: WorkspaceId;
   session: SessionMeta;
   shareId?: string;
-  confirmation?: { requestId: string; sessionIds: string[] };
   onClose: () => void;
   title: string;
 }) {
@@ -113,15 +111,13 @@ function ShareEditor({
     workspaceId,
     session.id,
     candidates.map((entry) => entry.sessionId),
-    shareId,
-    confirmation
+    shareId
   );
   return (
     <SessionShareDialogFrame title={title} onClose={onClose}>
       <SessionShareManager
         sessionId={session.id}
         candidates={candidates}
-        selectionLocked={!!confirmation}
         onClose={onClose}
         {...management}
       />
@@ -135,13 +131,11 @@ export function SessionShareDialog({
   session,
   onClose,
   shareId,
-  confirmation,
 }: {
   workspaceId: WorkspaceId;
   session: SessionMeta;
   onClose: () => void;
   shareId?: string;
-  confirmation?: { requestId: string; sessionIds: string[] };
 }) {
   const { t } = useTranslation();
   const userId = useAtomValue(userAtom)?.id;
@@ -149,11 +143,10 @@ export function SessionShareDialog({
   if (userId === undefined) return <SessionShareDialogFrame title={title} onClose={onClose} />;
   return (
     <ShareEditor
-      key={`${userId}:${workspaceId}:${session.id}:${shareId ?? ''}:${confirmation?.requestId ?? ''}`}
+      key={`${userId}:${workspaceId}:${session.id}:${shareId ?? ''}`}
       workspaceId={workspaceId}
       session={session}
       shareId={shareId}
-      confirmation={confirmation}
       onClose={onClose}
       title={title}
     />

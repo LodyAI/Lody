@@ -293,7 +293,12 @@ function projectShareHistory(
 
 /** Capture projects sharing content before attachments; never edits persisted history. */
 export function captureShareHistory(value: unknown): ShareHistoryEntry[] {
-  return projectShareHistory(value, true);
+  const projected = projectShareHistory(value, true);
+  // Known capability syntax only, including credentials repeated in opaque tool
+  // output. This transforms the detached export, never the live conversation.
+  return JSON.parse(
+    JSON.stringify(projected).replace(/#access=v1\.[a-f0-9]{64}/g, '#access=omitted')
+  ) as ShareHistoryEntry[];
 }
 
 /** Readers reject task proposals rather than mounting workspace task actions. */

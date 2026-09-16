@@ -1,4 +1,10 @@
 {
+  "sharing.request.purpose": "Purpose: {{purpose}}",
+  "sharing.request.deliveryDisclosure": "Approval publishes the selected conversations, including thinking, tool output and images, but not file attachments. Anyone with the link can read them without signing in. The complete access link will be returned to the requesting agent, which can use or forward it. You can revoke the link in Share management; downloaded copies cannot be recalled.",
+  "sharing.request.publishing": "Publishing automatically…",
+  "sharing.request.delivered": "Published. The agent can now receive the complete link.",
+  "sharing.request.deny": "Do not share",
+  "sharing.request.approve": "Approve and share",
   "sharing.toggleTree": "Toggle conversation tree",
   "sharing.fileAttachmentOmitted": "File attachment not included in this share",
   "sharing.static.attachmentNotice": "Images are also shared. File attachments are not included.",

@@ -26,6 +26,8 @@ it('preserves the client retry key and separate server ID through the real HTTP 
     sourceSessionId: 'root',
     sourceTurnId: 'turn',
     sessionIds: ['root'],
+    purpose: 'Share for review',
+    deliveryPublicKey: 'a'.repeat(588),
   };
   const first = await port.request(input);
   expect(first).toEqual({

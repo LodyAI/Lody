@@ -24,6 +24,14 @@
       "types": "./src/session-sharing.ts",
       "import": "./src/session-sharing.ts"
     },
+    "./session-share-credentials": {
+      "types": "./src/session-share-credentials.ts",
+      "import": "./src/session-share-credentials.ts"
+    },
+    "./session-share-delivery": {
+      "types": "./src/session-share-delivery.ts",
+      "import": "./src/session-share-delivery.ts"
+    },
     ".": {
       "types": "./src/index.ts",
       "import": "./src/index.ts"

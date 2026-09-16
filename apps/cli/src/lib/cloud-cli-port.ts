@@ -1,6 +1,7 @@
 import { ConvexClient, ConvexHttpClient } from 'convex/browser';
 import { z } from 'zod';
 import { api } from '@lody/cloud-api';
+import { ShareDeliveryEnvelopeSchema } from '@lody/shared/session-share-delivery';
 import {
   buildLoroStreamsTokenEndpoint,
   createLoroStreamsTokenProvider,
@@ -56,10 +57,19 @@ export function createCloudSessionSharingPort(options: {
     .object({
       requestId: z.string().min(1),
       shareRequestId: z.string().min(1),
-      status: z.enum(['pending', 'confirmed', 'cancelled', 'expired']),
+      status: z.enum(['pending', 'confirmed', 'cancelled', 'expired', 'published']),
+      shareId: z.string().optional(),
+      delivery: ShareDeliveryEnvelopeSchema.optional(),
     })
     .strict();
   return {
+    getResult: async (input) =>
+      result.parse(
+        await client.query(api.sessionSharing.getRequestResultFromCli, {
+          ...input,
+          cliToken: options.token,
+        })
+      ),
     request: async (input) =>
       result.parse(
         await client.mutation(api.sessionSharing.requestFromCli, {

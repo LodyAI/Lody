@@ -6,6 +6,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { Effect } from 'effect';
 import { z } from 'zod';
+import { requestSessionShare } from '@/lib/session-share-delivery';
 import {
   getAcpCapabilityCacheKey,
   getActiveTaskPrLinks,
@@ -4018,10 +4019,11 @@ export function buildLodyMcpServer(config: { taskToolsEnabled?: boolean } = {}):
     {
       title: 'Request a conversation share',
       description:
-        'Request a static share of this conversation only when the user asks to share. A confirmation card appears in the current Lody conversation. The user must review and confirm in the app before any content is uploaded or a link is created. Supply a stable requestId and reuse it after an ambiguous response. The response echoes that requestId; shareRequestId is a separate server record ID, never a retry key. sessionIds may explicitly include related conversations; the current conversation is always included. This tool cannot approve, upload, update, reset or revoke a share and never returns a link credential.',
+        'Request a static share only when the user asks to share. Supply a short purpose for the consent card. The user approves once in Lody; the client then automatically publishes and returns the complete bearer URL to you. The card explicitly discloses this. Supply a stable requestId; repeat this call with the same requestId, purpose and targets while pending or confirmed to receive the result, including after a timeout. shareRequestId is a server record ID, never a retry key. The current conversation is always included. Do not retry cancelled or expired requests with a new ID without a new user request. This tool cannot approve, upload, reset or revoke shares.',
       inputSchema: z
         .object({
           requestId: z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/),
+          purpose: z.string().trim().min(1).max(280),
           sessionIds: z
             .array(z.string().regex(/^[a-zA-Z0-9_-]{1,128}$/))
             .max(31)
@@ -4029,7 +4031,7 @@ export function buildLodyMcpServer(config: { taskToolsEnabled?: boolean } = {}):
         })
         .strict(),
     },
-    async (args) => {
+    async (args, extra) => {
       try {
         const port = getCommandSessionSharingPort();
         if (!port) throw new Error('Sharing is unavailable on this platform');
@@ -4037,14 +4039,20 @@ export function buildLodyMcpServer(config: { taskToolsEnabled?: boolean } = {}):
         const source = await resolveInvokingTurnSource();
         const identity = buildInvocationIdentity(source);
         return jsonTextResult(
-          await port.request({
-            workspaceId: getMcpWorkspaceId(ctx),
-            requestId: args.requestId,
-            sourceSessionId: ctx.sessionId,
-            sourceTurnId: identity.sourceTurnId,
-            requesterUserId: identity.userId,
-            sessionIds: [...new Set([ctx.sessionId, ...(args.sessionIds ?? [])])],
-          })
+          await requestSessionShare(
+            port,
+            {
+              workspaceId: getMcpWorkspaceId(ctx),
+              requestId: args.requestId,
+              purpose: args.purpose,
+              sourceSessionId: ctx.sessionId,
+              sourceTurnId: identity.sourceTurnId,
+              requesterUserId: identity.userId,
+              sessionIds: [...new Set([ctx.sessionId, ...(args.sessionIds ?? [])])],
+            },
+            getCliAuthContextOrThrow('mcp').userId,
+            extra.signal
+          )
         );
       } catch (error) {
         return mcpErrorResult(error);

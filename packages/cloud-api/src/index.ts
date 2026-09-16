@@ -363,6 +363,17 @@ export type CloudApi = {
       SessionShareRequestResult
     >;
     listRequests: Query<{ workspaceId: string; sourceSessionId: string }, SessionShareRequest[]>;
+    getRequestResultFromCli: Query<
+      {
+        cliToken: string;
+        workspaceId: string;
+        shareRequestId: string;
+        sourceSessionId: string;
+        requesterUserId: string;
+        deliveryPublicKey: string;
+      },
+      SessionShareRequestResult
+    >;
     cancelRequest: Mutation<{ requestId: string }, void>;
     list: Query<
       { workspaceId: string; paginationOpts: { numItems: number; cursor: string | null } },

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { webcrypto } from 'node:crypto';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
@@ -46,7 +47,11 @@ vi.mock('@lody/shared/session-sharing', async (original) => ({
   hashSessionShareSecret: async () => 'b'.repeat(64),
   uploadPreparedShare: (...args: unknown[]) => cloud.upload(...args),
 }));
-import { prepareSharePackage } from '@lody/shared/session-sharing';
+import {
+  prepareSharePackage,
+  createShareDeliveryKey,
+  decryptShareDelivery,
+} from '@lody/shared/session-sharing';
 import { userAtom } from '../src/atoms';
 import {
   useSessionShareManagement,
@@ -79,7 +84,10 @@ const key = sessionShareSecretKey('alice', 'workspace', 'share');
 describe('static publication client lifecycle', () => {
   let root: Root, container: HTMLDivElement, store: ReturnType<typeof createStore>;
   let control: ReturnType<typeof useSessionShareManagement>;
-  let confirmation: { requestId: string; sessionIds: string[] } | undefined;
+  let recipient: Awaited<ReturnType<typeof createShareDeliveryKey>>;
+  let confirmation:
+    | { requestId: string; sessionIds: string[]; deliveryPublicKey: string }
+    | undefined;
   function Harness() {
     control = useSessionShareManagement(
       'workspace' as WorkspaceId,
@@ -99,6 +107,8 @@ describe('static publication client lifecycle', () => {
       )
     );
   beforeEach(async () => {
+    vi.stubGlobal('crypto', webcrypto);
+    recipient = await createShareDeliveryKey();
     cloud.state = null;
     confirmation = undefined;
     cloud.enabled = true;
@@ -338,7 +348,11 @@ describe('static publication client lifecycle', () => {
     expect(control.hasPending).toBe(false);
   });
   it('requires the frozen MCP target set and sends its approval identity only when publishing', async () => {
-    confirmation = { requestId: 'request', sessionIds: ['root'] };
+    confirmation = {
+      requestId: 'request',
+      sessionIds: ['root'],
+      deliveryPublicKey: recipient.publicKey,
+    };
     await render();
     await act(async () => control.onSelect(['root', 'foreign']));
     expect(cloud.capture).not.toHaveBeenCalled();
@@ -348,9 +362,53 @@ describe('static publication client lifecycle', () => {
       cloud.capture.mock.calls[0]?.[0].sessions.map((session: { id: string }) => session.id)
     ).toEqual(['root']);
     expect(cloud.mutation.mock.calls[0]?.[1]).toMatchObject({ confirmationRequestId: 'request' });
+    const delivery = cloud.mutation.mock.calls[0]?.[1].delivery;
+    expect(await decryptShareDelivery(recipient.privateKey, 'request', delivery)).toBe(
+      'a'.repeat(64)
+    );
+    expect(control.result?.url).toBe('https://share.test/s/share#access=v1.' + 'a'.repeat(64));
   });
+  it("publishes an independent MCP link without requiring another device's existing secret", async () => {
+    cloud.state = entry;
+    confirmation = {
+      requestId: 'request',
+      sessionIds: ['root'],
+      deliveryPublicKey: recipient.publicKey,
+    };
+    await render();
+    await act(async () => control.onPublish());
+    const args = cloud.mutation.mock.calls[0]?.[1];
+    expect(args.shareId).toBeUndefined();
+    expect(args.credentialHash).toBeDefined();
+    expect(await decryptShareDelivery(recipient.privateKey, 'request', args.delivery)).toBe(
+      'a'.repeat(64)
+    );
+    expect(control.result?.url).toContain('/s/share#access=v1.');
+  });
+
+  it('keeps the encrypted result identical after an ambiguous begin response', async () => {
+    confirmation = {
+      requestId: 'request',
+      sessionIds: ['root'],
+      deliveryPublicKey: recipient.publicKey,
+    };
+    cloud.mutation.mockRejectedValueOnce(new Error('Response lost'));
+    await render();
+    await act(async () => control.onPublish());
+    const first = cloud.mutation.mock.calls[0]?.[1];
+    expect(control.hasPending).toBe(true);
+    expect(control.result).toBeNull();
+    await act(async () => control.onPublish());
+    expect(cloud.mutation.mock.calls[1]?.[1]).toEqual(first);
+    expect(control.result?.url).toContain('/s/share#access=v1.');
+  });
+
   it('retries MCP capture only after another explicit publish action', async () => {
-    confirmation = { requestId: 'request', sessionIds: ['root'] };
+    confirmation = {
+      requestId: 'request',
+      sessionIds: ['root'],
+      deliveryPublicKey: recipient.publicKey,
+    };
     cloud.capture.mockRejectedValueOnce(new Error('Capture unavailable'));
     await render();
     expect(cloud.capture).not.toHaveBeenCalled();
