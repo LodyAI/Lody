@@ -19,7 +19,7 @@ previous emitted update, already included in `modelUsage`: never add both.
 Delta delivery is not an exactly-once ledger. Cache reads/writes, ordinary input/
 output and reasoning are disjoint. Unknown costs are omitted, not zero.
 
-Replay adds nothing; model changes and compaction preserve counters. A new
+For adapter-owned ledgers, replay adds nothing; model changes and compaction preserve counters. A new
 accounting lifetime requires a fresh consumer accounting identity or a restored
 baseline. Process-local state does not guarantee restart continuity.
 Grok deduplicates prompt contributions across both completion channels and permits
@@ -33,22 +33,16 @@ their attribution until acknowledged; concurrent flushes share one drain. Delta
 is neither added to totals nor forwarded to the legacy persistence endpoint.
 Persistence projects only token/cost fields and aggregate contextWindow; search
 request counts and model-level contextWindow are not forwarded.
-Codex's legacy compaction offsets survive successful flushes in the same process;
-adapter-owned cumulative updates carrying delta bypass that compatibility path.
-Codex exact per-response events are attributed to the model that produced them;
-any thread-total remainder stays in an explicit unattributed bucket, never the
-currently selected UI model or its price. A process-persistent sidecar restores
-Codex's cumulative model ledger across restarts. Native usage snapshots stay
-adapter-local, not on session metadata. Fork history exclusion uses an already
-cached snapshot without waiting for replay; fork and similar special operations
-may over/undercount by design. If that sidecar
-is missing for a resumed thread, a fresh accounting lifetime starts at the captured
-native baseline and only later increments are reported, so persisted history is not
-re-booked under a new key. The sidecar preserves the native reset cursor alongside
-the ledger. Pinned Codex 0.153.4 only allows raw-event opt-in on new threads; cold
-resume/fork usage remains unattributed.
-Compaction and responses after one-shot reroute evidence likewise stay unattributed
-when the producing model cannot be established. Claude query and Kimi activation snapshots can provide delta without
+Codex intentionally uses its native root-thread snapshots, projected into disjoint
+buckets under `codex:unattributed`. Neither adapter nor CLI reconstructs historical
+model attribution, adds reset offsets, or maintains a usage sidecar/baseline.
+No delta or model-price estimate is invented. Native resume/fork history and
+counter resets are accepted, and child-thread totals are not added to the root.
+The hosted persistence endpoint retains per-model, per-field high-water marks,
+so a lower native snapshot need not lower the stored total. This is reporting,
+not a guarantee of exact lifetime billing.
+
+Claude query and Kimi activation snapshots can provide delta without
 changing their cumulative scope. Kimi source changes require a new managed artifact
 before they affect the consuming runtime.
 Provider costs are preserved; missing cache-write tariffs cannot be replaced with
@@ -77,3 +71,6 @@ pricing boundary may differ from billing. Unreported runtime activity cannot be 
 Publish Core 0.1.5 before adapters requiring its accumulator, then rebuild/release
 adapters before updating consuming gitlinks/artifacts. Local changes do not
 publish packages, repair historical data, or prove deployed hosted behavior.
+Switching an experimental per-model ledger back to native unattributed totals
+under the same persisted identity can overlap old model rows; those development
+records require separate reconciliation, not an automatic migration in these PRs.

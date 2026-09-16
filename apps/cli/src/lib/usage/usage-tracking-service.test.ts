@@ -214,7 +214,7 @@ describe('usage delivery', () => {
     expect(persisted.map((p) => p.usage.inputTokens)).toEqual([100, 200]);
   });
 
-  it('retains cumulative-provider coalescing and Codex compaction', async () => {
+  it('coalesces the latest snapshot without compensating Codex resets', async () => {
     service.recordSessionUsageUpdate(input(100, 'claude'));
     service.recordSessionUsageUpdate(input(200, 'claude'));
     await service.flushSessionUsage('s');
@@ -227,10 +227,10 @@ describe('usage delivery', () => {
     service.recordSessionUsageUpdate(reset);
     service.recordSessionUsageUpdate(input(20, 'codex'));
     await service.flushSessionUsage('s');
-    expect(persisted.map((p) => p.usage.inputTokens)).toEqual([120]);
+    expect(persisted.map((p) => p.usage.inputTokens)).toEqual([20]);
   });
 
-  it('keeps legacy Codex compaction offsets after acknowledgement without inventing cost', async () => {
+  it('forwards native Codex resets after acknowledgement without inventing history or cost', async () => {
     service.recordSessionUsageUpdate(input(1000, 'codex'));
     await service.flushSessionUsage('s');
     const reset = input(0, 'codex');
@@ -241,11 +241,11 @@ describe('usage delivery', () => {
     service.recordSessionUsageUpdate(input(50, 'codex'));
     await service.flushSessionUsage('s');
     await service.flushSessionUsage('s');
-    expect(persisted.map((p) => p.modelUsage?.synthetic.inputTokens)).toEqual([1000, 1000, 1050]);
+    expect(persisted.map((p) => p.modelUsage?.synthetic.inputTokens)).toEqual([1000, 0, 50]);
     expect(persisted[2]?.modelUsage?.synthetic.costUSD).toBeUndefined();
   });
 
-  it('does not apply legacy compaction to adapter-owned cumulative accounting', async () => {
+  it('preserves cumulative model snapshots independently of aggregate usage', async () => {
     const update = input(1000, 'codex');
     update.update.delta = {
       usage: update.update.usage,

@@ -27,16 +27,12 @@ type PendingKey = string;
 type PendingState = {
   latestMeta: Omit<RecordSessionUsageInput, 'update'>;
   staged: SessionUsageUpdate | null;
-  compacted: SessionUsageUpdate | null;
-  // Legacy Codex accounting baseline outlives delivery acknowledgement.
-  lastLegacyCodex: SessionUsageUpdate | null;
   // Keep one unacknowledged payload; newer updates coalesce separately in staged.
   unacknowledged: RecordSessionUsageInput | null;
   inFlight: Promise<void> | null;
 };
 
-// Keep per-ACP-session accumulation isolated to avoid snapshot baseline resets
-// when one Lody session is resumed as a brand new ACP session.
+// Keep delivery queues isolated by native session identity.
 const toPendingKey = (
   input: Pick<RecordSessionUsageInput, 'workspaceId' | 'sessionId' | 'acpSessionId' | 'userId'>
 ): PendingKey => `${input.workspaceId}:${input.sessionId}:${input.acpSessionId}:${input.userId}`;
@@ -79,61 +75,6 @@ const persistedCounters = (usage: SessionUsageUpdate['usage']) => {
   return counters;
 };
 
-const mergeModelUsage = (
-  base: SessionUsageUpdate['modelUsage'],
-  delta: SessionUsageUpdate['modelUsage']
-): SessionUsageUpdate['modelUsage'] => {
-  const merged: NonNullable<SessionUsageUpdate['modelUsage']> = {};
-  if (base) {
-    for (const [model, usage] of Object.entries(base)) {
-      merged[model] = { ...usage };
-    }
-  }
-  if (!delta) {
-    return Object.keys(merged).length > 0 ? merged : undefined;
-  }
-
-  for (const [model, usage] of Object.entries(delta)) {
-    const prev = merged[model];
-    merged[model] = {
-      inputTokens: (prev?.inputTokens ?? 0) + usage.inputTokens,
-      outputTokens: (prev?.outputTokens ?? 0) + usage.outputTokens,
-      cacheReadInputTokens: (prev?.cacheReadInputTokens ?? 0) + usage.cacheReadInputTokens,
-      cacheCreationInputTokens:
-        (prev?.cacheCreationInputTokens ?? 0) + (usage.cacheCreationInputTokens ?? 0),
-      reasoningOutputTokens:
-        (prev?.reasoningOutputTokens ?? 0) + (usage.reasoningOutputTokens ?? 0),
-      ...((!prev || prev.costUSD !== undefined) && usage.costUSD !== undefined
-        ? { costUSD: (prev?.costUSD ?? 0) + usage.costUSD }
-        : {}),
-      contextWindow: usage.contextWindow ?? prev?.contextWindow,
-    };
-  }
-
-  return Object.keys(merged).length > 0 ? merged : undefined;
-};
-
-const mergeUsageUpdate = (
-  base: SessionUsageUpdate,
-  delta: SessionUsageUpdate
-): SessionUsageUpdate => ({
-  sessionId: delta.sessionId,
-  usage: {
-    inputTokens: base.usage.inputTokens + delta.usage.inputTokens,
-    outputTokens: base.usage.outputTokens + delta.usage.outputTokens,
-    cacheReadInputTokens: base.usage.cacheReadInputTokens + delta.usage.cacheReadInputTokens,
-    cacheCreationInputTokens:
-      (base.usage.cacheCreationInputTokens ?? 0) + (delta.usage.cacheCreationInputTokens ?? 0),
-    reasoningOutputTokens:
-      (base.usage.reasoningOutputTokens ?? 0) + (delta.usage.reasoningOutputTokens ?? 0),
-    ...(base.usage.costUSD !== undefined && delta.usage.costUSD !== undefined
-      ? { costUSD: base.usage.costUSD + delta.usage.costUSD }
-      : {}),
-    contextWindow: delta.usage.contextWindow ?? base.usage.contextWindow,
-  },
-  modelUsage: mergeModelUsage(base.modelUsage, delta.modelUsage),
-});
-
 export class UsageTrackingService {
   private readonly client: ConvexHttpClient;
   private readonly cliToken: string;
@@ -149,7 +90,7 @@ export class UsageTrackingService {
 
   recordSessionUsageUpdate(input: RecordSessionUsageInput): void {
     const key = toPendingKey(input);
-    // Take ownership once; staged/compaction/delivery only replace or merge snapshots.
+    // Own the snapshot while coalescing or retrying delivery.
     const update = this.calculatePrice(cloneUsageUpdate(input.update), input.cliType);
     const latestMeta = {
       workspaceId: input.workspaceId,
@@ -163,19 +104,16 @@ export class UsageTrackingService {
     const existing = this.pending.get(key);
     if (existing) {
       existing.latestMeta = latestMeta;
-      this.applyUpdateToState(existing, input.cliType, update);
+      existing.staged = update;
       return;
     }
 
     const state: PendingState = {
       latestMeta,
-      staged: null,
-      compacted: null,
-      lastLegacyCodex: null,
+      staged: update,
       unacknowledged: null,
       inFlight: null,
     };
-    this.applyUpdateToState(state, input.cliType, update);
     this.pending.set(key, state);
     this.addPendingKeyToSession(input.sessionId, key);
   }
@@ -204,7 +142,7 @@ export class UsageTrackingService {
   private async drainPending(state: PendingState): Promise<void> {
     for (;;) {
       if (!state.unacknowledged) {
-        const update = this.buildFinalUpdate(state);
+        const update = state.staged;
         if (!update) return;
         state.unacknowledged = { ...state.latestMeta, update };
         state.staged = null;
@@ -248,49 +186,6 @@ export class UsageTrackingService {
     }
   }
 
-  private applyUpdateToState(
-    state: PendingState,
-    cliType: BuiltinAgentType,
-    update: SessionUsageUpdate
-  ): void {
-    if (cliType === 'codex' && !update.delta && this.isCodexCompaction(update)) {
-      if (state.lastLegacyCodex && !this.isCodexCompaction(state.lastLegacyCodex)) {
-        state.compacted = state.compacted
-          ? mergeUsageUpdate(state.compacted, state.lastLegacyCodex)
-          : state.lastLegacyCodex;
-      }
-      state.lastLegacyCodex = update;
-      state.staged = update;
-      return;
-    }
-    if (cliType === 'codex' && !update.delta) state.lastLegacyCodex = update;
-    else {
-      state.lastLegacyCodex = null;
-      state.compacted = null;
-    }
-    state.staged = update;
-  }
-
-  private buildFinalUpdate(state: PendingState): SessionUsageUpdate | null {
-    if (!state.staged) {
-      return null;
-    }
-    if (!state.compacted) {
-      return state.staged;
-    }
-    return mergeUsageUpdate(state.compacted, state.staged);
-  }
-
-  private isCodexCompaction(update: SessionUsageUpdate): boolean {
-    return (
-      update.usage.inputTokens === 0 &&
-      update.usage.outputTokens === 0 &&
-      update.usage.cacheReadInputTokens === 0 &&
-      (update.usage.cacheCreationInputTokens ?? 0) === 0 &&
-      (update.usage.reasoningOutputTokens ?? 0) === 0
-    );
-  }
-
   private addPendingKeyToSession(sessionId: string, key: PendingKey): void {
     const keys = this.sessionToPendingKeys.get(sessionId);
     if (keys) {
@@ -313,8 +208,7 @@ export class UsageTrackingService {
     const state = this.pending.get(key);
     if (!state) return;
     if (state.inFlight) return;
-    if (state.staged || state.compacted || state.unacknowledged) return;
-    if (state.lastLegacyCodex) return;
+    if (state.staged || state.unacknowledged) return;
 
     this.pending.delete(key);
     this.removePendingKeyFromSession(state.latestMeta.sessionId, key);

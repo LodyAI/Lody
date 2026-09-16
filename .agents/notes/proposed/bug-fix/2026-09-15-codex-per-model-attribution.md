@@ -1,4 +1,4 @@
-# Codex per-model usage attribution
+# Codex usage: native snapshots instead of a model ledger
 
 Status: proposed
 Translation: current
@@ -7,131 +7,66 @@ Translation: current
 
 ## Abstract
 
-Codex thread totals previously had no model attribution, so the usage UI showed an
-opaque `codex:unattributed` bucket. The pinned runtime also emits exact
-per-response usage events; the adapter now attributes those to the resolved
-model, keeps only the unaccounted remainder unattributed, and restores a small
-cumulative sidecar on resume. Review corrections enable raw on new threads,
-persist the native reset cursor, and keep fork history exclusion best effort.
-A resumed thread without that sidecar starts a fresh accounting lifetime at the
-captured native baseline, so persisted history is not re-booked under a new key.
-Cold resume/fork and ambiguous compaction/reroute responses remain unattributed
-because the pinned protocol cannot identify their producing model.
+The initial proposal rebuilt historical per-model usage from raw completions and
+persisted a local sidecar. On 2026-09-16 the user chose native Codex snapshots
+instead: model history and its recovery complexity are not required for total
+usage reporting. The adapter now projects the root native snapshot without
+accumulation, and the CLI no longer compensates native resets. Accurate
+historical model costs and exact fork/reset lifetime accounting are not promised.
 
-## Context
+## Decision
 
-Codex app-server `thread/tokenUsage/updated` carries a cumulative thread total
-without a model field. The adapter previously kept that entire total in
-`codex:unattributed`, so the usage UI could not attribute Codex tokens to the
-model that produced them.
+Per-model history was needed only to preserve model-specific statistics and
+match each historical model to its price across restarts. It is not required
+to show native total usage. The user first rejected session metadata baselines,
+then explicitly chose native snapshots over the entire extra ledger.
 
-## Correction
+```text
+Codex root thread/tokenUsage/updated
+  -> stateless disjoint buckets (codex:unattributed)
+  -> CLI latest snapshot / failed-payload retry
+  -> hosted per-field high-water persistence
+```
 
-Pinned Codex 0.153.4 can emit `rawResponse/completed` for each upstream
-Responses API completion. Its `usage` is exact, not accumulated or replayed, and
-its `responseId` provides idempotency. The adapter now attributes those events
-to the resolved thread/turn model. Any thread total not covered by an exact
-response remains in `codex:unattributed`, so an older runtime or an unresolved
-model still keeps totals correct instead of inventing a model.
+Delete raw-response accounting, model/reroute/compaction bookkeeping, sidecar
+storage, deduplication, history exclusion, native-cache baseline plumbing and
+adapter/CLI reset offsets. Keep ordinary token/cache/reasoning normalization,
+context-window reporting, native lifecycle behavior, payload projection and
+delivery retries. Do not enable experimental raw events solely for accounting.
+Neither selected UI model nor its price is evidence of historical attribution.
 
-The adapter enables `experimentalRawEvents` on new threads. Cold resume and new
-fork listeners in this runtime have no opt-in and use unattributed cumulative
-usage. Compaction can execute on the previous model or a fallback, so its raw
-responses also stay unattributed. Reroute evidence applies only to its next raw
-completion, including completions without usage; later responses stay unattributed.
+## Tradeoffs and rollout
 
-The adapter keeps a small cumulative sidecar under `$CODEX_HOME` and restores
-the native total, reset offset and reset flag with the model ledger. At the user's
-request, `SessionMetadata.usageBaseline` and the fork `thread/started` wait have
-been removed. Native snapshots stay adapter-local; fork uses an already cached
-snapshot without waiting for replay. Fork and similar special operations may
-over/undercount, an accepted tradeoff. The first paid response is never used to
-infer source history. If the sidecar is
-missing on resume, the captured native baseline becomes the start of a fresh
-accounting lifetime and only later increments are reported. The sidecar is not a
-delivery ledger; the CLI still retries its own cumulative snapshot. The CLI no
-longer synthesizes `modelUsage` from the selected UI model for legacy adapters;
-missing attribution is skipped instead.
+- Native resume/fork totals can contain inherited history; counters can reset.
+  Child-thread totals are not added to the root. There is no extra delta.
+- Codex owns native history restoration; old development sidecar files are
+  ignored, not deleted. Session metadata stores no usage baseline.
+- Hosted persistence still merges per-model fields by maximum. Lower native
+  snapshots can leave an older high-water total; these PRs do not change that API.
+- If an experimental per-model version already persisted model rows, switching
+  the same identity to native unattributed history can double count old history
+  across keys. These unmerged PRs do not migrate such development records.
+  Reconciliation would need a separate scoped operation; do not claim it is done.
+- Runtime artifacts still require rebuild/release. Both intentional gitlink
+  changes stay uncommitted; no historical data or sidecar files are removed.
 
-## Limits
+## Review history and evidence
 
-- The sidecar is machine-local. If it is missing on a resumed exact-attribution
-  thread, the adapter starts a fresh lifetime at the captured native baseline and
-  reports only later increments, so historical tokens are neither re-attributed
-  nor re-billed under a new key. Per-model history is then unrecoverable; a durable
-  consumer accounting identity remains the long-term fix.
-- `rawResponse/completed` is an internal app-server event in the pinned runtime.
-  It needs the same version/capability discipline as the generated client types.
-- Subagent threads use their own `thread/settings/updated` model when available;
-  otherwise their exact responses fall back to `codex:unattributed`. Child native
-  totals contain inherited history and reset independently, so only exact child
-  responses join the root ledger; child activity without those events is not counted.
-- Old sidecars without a native cursor are anchored to the captured native replay.
-  Already missing historical usage cannot be reconstructed by this migration.
+Earlier review of adapter `94f51b7` found missing raw opt-in, fork-history
+exclusion and restart/reset failures, plus ambiguous compaction/reroute models.
+Corrections culminated in `9457493`; `c176b2b` removed session metadata
+baselines and fork waiting. Those fixes addressed the now-rejected ledger design,
+not a requirement to retain it. The current change deliberately removes it.
 
-## Evidence
+Validation of native snapshots: 620 adapter tests passed, 27 E2E skipped;
+adapter/examples typechecks and build passed. All 16 CLI usage-delivery tests
+passed, including native reset payloads `[1000, 0, 50]`, coalescing, retry and
+concurrent flushes. Three independent code reviews found no new P0/P1 in the
+snapshot implementation; the development-data migration limit above remains.
+The root full `pnpm check:affected` and documentation checks also passed.
+No paid model completion, deployed cloud reconciliation or real crash test ran.
 
-The metadata/fork simplification was revalidated with 639 adapter tests passing
-and 27 E2E tests skipped, plus adapter/example typechecks and the official build.
-Independent review found no P0/P1 outside the explicitly accepted fork accuracy
-tradeoff. The local native cache and sidecar-loss resume handling remain intact.
-
-### Review and ablation (2026-09-16)
-
-Review of adapter PR [#45](https://github.com/LodyAI/acp-extension-codex/pull/45)
-at `94f51b7` and Lody PR [#736](https://github.com/LodyAI/Lody/pull/736) at
-`bb0052d8` found no P0 and no new P1 in the CLI fallback removal. The adapter
-findings below describe the reviewed revision and motivated the corrections above:
-
-- Pinned `rust-v0.153.4` filters `RawResponseCompleted` unless the thread opts
-  into `experimentalRawEvents`. The adapter never opts in; initialize's
-  `experimentalApi` is insufficient, and native resume/fork listeners use false.
-  Consequently the first fork total also excludes the first new response.
-- A fork opened and resumed before any usage loses its in-memory pending
-  exclusion. A synthetic source-only total of 900 input / 100 output was counted
-  in the resumed child instead of zero.
-- Native-only accounting loses its reset cursor on restart: 1000, reset, 10
-  produces 1010; after restart a native total of 20 still produces 1010, not 1020.
-- Enabling raw events alone cannot fix model attribution: native previous-model
-  inline compaction uses the new turn ID with the previous model. A turn-level
-  model map assigns that response to the new model.
-
-Native source confirms raw completion precedes the corresponding total; adapter
-notification queues serialize the handler. The pre-existing shared subagent
-total/reset state is now isolated from the root cursor. Pending exact root usage
-is persisted until native totals cover it, including a restart that replays a
-reset before the corresponding total was processed. Consumer accounting identity
-limitations remain outside this adapter repair.
-
-One-at-a-time ablations removed the pass-through accounting factory and the
-second model-name trim. Bundled synthetic output, including persisted sidecar
-state, remained identical. Removing response deduplication doubled a repeated
-110-token response to 220, so it was restored. Removing CLI model projection
-exposed model-level contextWindow and unknown fields, so it was retained.
-No further CLI runtime deletion was justified.
-
-Initial ablation validation: esbuild 0.25.12 accounting bundle plus synthetic disjoint
-buckets, duplicate response, model switch, subagent model, native reset, output
-mutation isolation and fork/resume scenarios. Full checks and Vitest were
-attempted but unavailable due to missing workspace dependencies; no real Codex
-session, Windows filesystem or process-crash injection was run. Repository docs
-checks also report the existing oversized CLI agent AGENTS.md.
-
-Repair validation used isolated dependencies with Codex 0.153.4 and Vitest 4.1.11:
-641 tests passed, 27 E2E tests skipped; adapter and examples typechecks and the
-official build passed. Tests cover both old-sidecar migrations, fork replay,
-reset/pending-response restart combinations, child counter isolation, failed
-atomic replacement and the missing-sidecar resume baseline. Independent re-review
-found one remaining P1: a missing sidecar could re-emit historical totals under
-`codex:unattributed`, and the consumer's per-key merge would then double count
-them. The repair now starts a fresh accounting lifetime at the captured native
-baseline when no sidecar exists, so only later increments are reported. No paid
-model completion or real process-crash injection was run. Outer workspace checks
-remain pending; both gitlinks remain uncommitted.
-
-- `src/CodexUsageAccounting.ts`
-- `src/CodexUsageBaselineStore.ts`
-- `src/CodexEventHandler.ts` (`rawResponse/completed`, `thread/settings/updated`,
-  `model/rerouted`)
-- `src/__tests__/CodexACPAgent/token-usage-events.test.ts`
-- `apps/cli/src/agent/agent-client.ts` (no UI-model fallback)
+- [Adapter PR #45](https://github.com/LodyAI/acp-extension-codex/pull/45):
+  `src/CodexUsage.ts`, `src/CodexEventHandler.ts`, token-usage event tests.
+- [Lody PR #736](https://github.com/LodyAI/Lody/pull/736):
+  CLI usage-delivery service/tests and [Spec](../../../../specs/usage-delivery.md).
