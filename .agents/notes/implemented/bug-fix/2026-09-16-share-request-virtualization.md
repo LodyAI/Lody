@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-09-16-share-request-virtualization.zh.md)
 
+PR: [#755](https://github.com/LodyAI/Lody/pull/755)
+
 ## Abstract
 
 Pending share requests lived in the conversation's first virtual row, together

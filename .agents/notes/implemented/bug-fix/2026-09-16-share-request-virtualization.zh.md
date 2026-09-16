@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-09-16-share-request-virtualization.md)
 
+PR: [#755](https://github.com/LodyAI/Lody/pull/755)
+
 ## 摘要
 
 待确认的分享请求原来位于对话第一条虚拟行中，查询订阅和编辑器状态也属于该行。
