@@ -5,26 +5,27 @@ tokens. Product surfaces compose these primitives through
 `@lody/components`; the package does not contain product workflows or platform
 behavior.
 
-| Area                | Responsibility                                                                                                |
-| ------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `src/tokens`        | Semantic color, type, spacing, motion, radius, and elevation tokens                                           |
-| `src/theme`         | Applies light or dark StyleX themes to a subtree                                                              |
-| `src/button`        | Base UI Button behavior and Lody variants, sizes, tones, and shapes                                           |
+| Area                | Responsibility                                                      |
+| ------------------- | ------------------------------------------------------------------- |
+| `src/tokens`        | Semantic color, type, spacing, motion, radius, and elevation tokens |
+| `src/theme`         | Applies light or dark StyleX themes to a subtree                    |
+| `src/button`        | Base UI Button behavior and Lody variants, sizes, tones, and shapes |
 | `src/field`         | Base UI Field composition: label, Input, Textarea, Checkbox, Radio, Switch, Select, Combobox, help, and error |
-| `src/popup`         | The floating surface a list, a menu or a popover opens on, and its tokens                                     |
-| `src/menu`          | Menu, ContextMenu and Menubar: commands on that surface                                                       |
-| `src/popover`       | The same surface holding content rather than rows                                                             |
-| `src/dialog`        | Dialog and AlertDialog: the modal rung, and its tokens                                                        |
-| `src/drawer`        | The same rung, arriving from an edge and draggable back out                                                   |
-| `src/tooltip`       | The inverted chip that names what is under the pointer                                                        |
-| `src/disclosure`    | Tabs, Accordion and Collapsible: a trigger, and the thing it shows                                            |
-| `src/toggle`        | Toggle, ToggleGroup and Toolbar: a control that stays pressed, and the bar holding it                         |
-| `src/feedback`      | Alert, Toast, Progress, Skeleton and Spinner: what the system says back                                       |
-| `src/card`          | The card rung as a component: a block of a page, and its tokens                                               |
-| `src/badge`         | A standing fact about the thing beside it, on no rung at all                                                  |
-| `src/separator`     | The one line the rules allow: between the rows of a list or a table                                           |
-| `src/gallery`       | The token board: every token and primitive state, in both palettes                                            |
-| `stylex-options.ts` | Shared compiler configuration for source-consuming hosts                                                      |
+| `src/popup`         | The floating surface a list, a menu or a popover opens on, and its tokens |
+| `src/menu`          | Menu, ContextMenu and Menubar: commands on that surface             |
+| `src/popover`       | The same surface holding content rather than rows                   |
+| `src/dialog`        | Dialog and AlertDialog: the modal rung, and its tokens               |
+| `src/drawer`        | The same rung, arriving from an edge and draggable back out          |
+| `src/tooltip`       | The inverted chip that names what is under the pointer               |
+| `src/disclosure`    | Tabs, Accordion and Collapsible: a trigger, and the thing it shows   |
+| `src/feedback`      | Alert, Toast, Progress, Skeleton and Spinner: what the system says back |
+| `src/card`          | The card rung as a component: a block of a page, and its tokens      |
+| `src/badge`         | A standing fact about the thing beside it, on no rung at all         |
+| `src/separator`     | The one line the rules allow: between the rows of a list or a table  |
+| `@lody/icons`       | The independent icon set: one 24 grid, four treatments of each drawing, and the icons that move between two states |
+| `playground`        | The icon playground: a standalone Vite page for searching, scaling, recolouring and copying the set |
+| `src/gallery`       | The token board: every token and primitive state, in both palettes  |
+| `stylex-options.ts` | Shared compiler configuration for source-consuming hosts            |
 
 Consumers compile this package's source with `@stylexjs/unplugin` and its exported
 StyleX options. Visual choices use component props. `className` is available for
@@ -84,7 +85,7 @@ const themes = [
       ))}
     </Select.Content>
   </Select.Root>
-</Field.Root>;
+</Field.Root>
 ```
 
 `Combobox` is the same list with a query in front of it. On its own the input is
@@ -103,9 +104,7 @@ had there, through Base UI's `render`:
     <MoreIcon />
   </Menu.Trigger>
   <Menu.Content>
-    <Menu.Item shortcut="⌘R" onClick={rename}>
-      Rename
-    </Menu.Item>
+    <Menu.Item shortcut="⌘R" onClick={rename}>Rename</Menu.Item>
     <Menu.Submenu>
       <Menu.SubmenuTrigger inset>Export</Menu.SubmenuTrigger>
       <Menu.Content>
@@ -113,9 +112,7 @@ had there, through Base UI's `render`:
       </Menu.Content>
     </Menu.Submenu>
     <Menu.Separator />
-    <Menu.Item tone="destructive" onClick={remove}>
-      Delete
-    </Menu.Item>
+    <Menu.Item tone="destructive" onClick={remove}>Delete</Menu.Item>
   </Menu.Content>
 </Menu.Root>
 ```
@@ -273,7 +270,7 @@ way a submenu's chevron is drawn by its row.
 
 The size is stated once, on the strip: a tab's height, its corner and its share
 of the width all follow from the track's. A strip that should take the width on
-offer says `stretch`, which stretches the track _and_ splits it between the tabs
+offer says `stretch`, which stretches the track *and* splits it between the tabs
 — stating only the first would leave a full-width groove with the choices
 huddled at its start. Arrow keys move between tabs without taking one, because a
 tab swaps a panel that may be expensive to build; a surface whose panels are
@@ -315,67 +312,6 @@ padding, so a padded panel is cropped by exactly its own padding under
 holds its prose in such a child; a caller migrating a panel that carried its own
 padding moves it inwards.
 
-A `Toggle` is a control that stays pressed, and it is **not** a `Switch`. A
-switch stores a value in a form: it takes a name, answers to a `Field.Root`, can
-be invalid, and is read as a setting. A toggle says an option is on _right now_
-— bold, wrapped lines, this filter — so it has no name, no validity and no
-message under it. Off it is a ghost `Button`, because that is what it is; on it
-sinks into the well.
-
-That is the family's one real decision, and it is the elevation rules read
-carefully rather than literally. The rules give a stored state ink — but ink is
-what a control that _already sits in a well_ becomes when it is on: a switch's
-off state occupies the well, so on has to leave it. A toggle rests on nothing at
-all, so the well is still free, and sinking into it is the plainest thing this
-system can say about a button that went down and stayed. It also keeps a bar of
-eight from reading as eight primary buttons.
-
-```tsx
-<Toggle size="small" icon pressed={wordWrap} onPressedChange={setWordWrap} aria-label="Wrap lines">
-  <WrapIcon />
-</Toggle>
-```
-
-A `ToggleGroup` is a set of them answering to one value, and it is **not** a
-`Tabs` strip. A strip picks what a person _sees_: it is one control, so it is a
-sunken track with one pill sliding between the choices. A set stores what is
-_on_, and two of its members can be pressed at once — which no sliding pill can
-say — so it has no track and each member sinks on its own. The size and the
-shape are stated once on the set, the way a strip states them for its tabs.
-
-```tsx
-<ToggleGroup multiple wrap size="mini" value={visible} onValueChange={setVisible}>
-  {properties.map((property) => (
-    <Toggle key={property} value={property}>
-      {label(property)}
-    </Toggle>
-  ))}
-</ToggleGroup>
-```
-
-A `Toolbar` is the bar that holds them, and it draws **nothing at all**: no
-fill, no shadow, no radius, not even the line a table draws. It is a row of
-controls on whatever surface the product already had there. What it is for is
-the keyboard — a row of eight icon buttons is eight tab stops unless something
-says otherwise, so the bar is one stop, the arrow keys do the walking, and a
-control that cannot be used is stepped over rather than stopped on.
-
-`Toolbar.Button` is Base UI's, unstyled, the way every trigger in this package
-is: joining the walk is all it does, and what arrives is whatever the surface
-already had there.
-
-```tsx
-<Toolbar.Root aria-label="Format selection">
-  <Toolbar.Group aria-label="Marks">
-    <Toolbar.Button render={<Toggle size="small" icon pressed={bold} aria-label="Bold" />}>
-      <BoldIcon />
-    </Toolbar.Button>
-  </Toolbar.Group>
-  <Toolbar.Separator />
-  <Toolbar.Button render={<Button variant="ghost" size="small" />}>Quote</Toolbar.Button>
-</Toolbar.Root>
-```
-
 `Alert`, `Toast`, `Progress`, `Skeleton` and `Spinner` are one family as well,
 and what they share is a sentence with two halves: what happened, and that it is
 not finished.
@@ -390,9 +326,7 @@ to be answered.
   <Alert.Title>Sync failed</Alert.Title>
   <Alert.Description>The machine did not answer in time.</Alert.Description>
   <Alert.Actions>
-    <Button size="small" onClick={retry}>
-      Retry
-    </Button>
+    <Button size="small" onClick={retry}>Retry</Button>
   </Alert.Actions>
 </Alert.Root>
 ```
@@ -463,13 +397,7 @@ record; the last record draws none.
 const columns: TableColumn<Session>[] = [
   { key: 'name', header: t('sessions.name'), cell: (s) => s.name, width: 220 },
   { key: 'agent', header: t('sessions.agent'), cell: (s) => s.agent },
-  {
-    key: 'turns',
-    header: t('sessions.turns'),
-    cell: (s) => s.turns,
-    numeric: true,
-    sortable: true,
-  },
+  { key: 'turns', header: t('sessions.turns'), cell: (s) => s.turns, numeric: true, sortable: true },
 ];
 
 <Table
@@ -483,12 +411,12 @@ const columns: TableColumn<Session>[] = [
   onRowPress={(session) => open(session.id)}
   maxHeight={320}
   empty={t('sessions.none')}
-/>;
+/>
 ```
 
 How wide a column is, which way it aligns, whether it holds figures, whether the
 table can be ordered by it, what a totals row holds under it — all facts about a
-_column_, and a column written twice (a name in the head, a cell in every row) is
+*column*, and a column written twice (a name in the head, a cell in every row) is
 a fact that can drift. Both surfaces in this repository that drew a table before
 this wrote their column template as a literal `grid-cols-[…]` string in the
 header and again in the row, by hand.
@@ -517,7 +445,7 @@ Everything else follows from having them in one place:
 
 **A table too narrow for its columns becomes a list of records**, each a stack of
 label-and-value lines, with the label being the head's own words. It asks about
-_its own_ width rather than the window's — a table in a 360px side panel on a
+*its own* width rather than the window's — a table in a 360px side panel on a
 27-inch screen is narrow — so it is a container query, and a table whose columns
 must stay a grid says `stack={false}`.
 
@@ -566,12 +494,8 @@ It takes the same `headline` a dialog's title does, because the rules reserve
   </Card.Header>
   <Input placeholder="pnpm install" />
   <Card.Footer>
-    <Button variant="ghost" size="small">
-      Reset
-    </Button>
-    <Button size="small" onClick={save}>
-      Save
-    </Button>
+    <Button variant="ghost" size="small">Reset</Button>
+    <Button size="small" onClick={save}>Save</Button>
   </Card.Footer>
 </Card.Root>
 ```
@@ -585,7 +509,7 @@ the caller's, because what a press does is a product decision.
 
 A `Badge` is a standing fact about the thing beside it, and the one part of this
 system on **no rung**: it sits on a page, a card, a menu row or a modal panel,
-so it takes no background from the ladder. Its tone is a _film_ of that tone
+so it takes no background from the ladder. Its tone is a *film* of that tone
 over whatever is underneath — 12% of `label` for neutral, 22% of its own colour
 for the rest — **and its word carries that tone as well**, as the tone pulled
 halfway to `label`.
@@ -711,16 +635,28 @@ rules allow are recorded in the
 [UI card, badge and separator note](../../.agents/notes/implemented/feature/2026-09-12-ui-card-badge-separator.md);
 the avatar ladder that picks its own letters, the key cap, and the token group
 that carries an inversion across a surface are recorded in the
-[UI avatar and kbd note](../../.agents/notes/implemented/feature/2026-09-13-ui-avatar-kbd.md);
-the well a pressed control sinks into, the set that is not a strip, and the bar
-that draws nothing are recorded in the
-[UI toggle and toolbar note](../../.agents/notes/implemented/feature/2026-09-15-ui-toggle-toolbar.md).
+[UI avatar and kbd note](../../.agents/notes/implemented/feature/2026-09-13-ui-avatar-kbd.md).
 
 Open the gallery with `pnpm storybook` and pick _Design System / UI Gallery_.
 It renders each sample once per palette and reads its values back off the
 rendered nodes, so a token that changes shows its new value there without the
 board being edited. A new token or primitive state lands with its board entry;
 `test/gallery.test.tsx` fails when a token has no entry.
+
+The icon set has a page of its own instead, because the board answers the wrong
+question about it: a token has one value to show, and an icon has 90 drawings
+you need to search, size, recolour and take away. Run
+`pnpm --filter @lody/ui playground` and open the printed URL. It is a Vite
+server over `packages/ui/playground` with no Storybook under it: search the set,
+scale it from 12 to 64, switch the four treatments, recolour it through the
+semantic tones, and stand it on the page, raised, well and accent rungs — the
+accent rung is where you see that a glyph cuts a hole through a mask rather than
+painting its marks the panel's colour. Press an icon for its panel: the drawing
+enlarged on the 24 grid, every size at once, the import line, and `copy svg` for
+the markup a caller would paste. The stateful icons are at the bottom; press one
+to flip it, and turn on _slow motion_ to watch `--lody-icon-t` interpolate
+rather than infer it from the two ends. `playground:build` writes the same page
+to `playground/dist` when it has to be looked at somewhere else.
 
 Run `pnpm --filter @lody/ui typecheck` and `pnpm --filter @lody/ui test` after
 changing a primitive or token.

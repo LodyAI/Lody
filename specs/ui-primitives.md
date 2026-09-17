@@ -328,6 +328,26 @@ requirements. They may add layout or interaction classes when a local constraint
 cannot be expressed by the primitive, such as a 44 px touch target in the Mermaid
 viewer. Those classes must leave the primitive's visual identity under its props.
 
+## Icons
+
+`@lody/icons` owns Lody's icon set independently of `@lody/ui`. `@lody/ui`
+consumes that package rather than owning its drawings. Every icon is on a 24 × 24
+grid with a 20 × 20 live area and a 1.5 stroke with round caps and joins; a
+family shares one skeleton so its members line up in a list.
+An icon states no size and no colour: it fills the box it is given and inherits
+`currentColor`, so the part holding it owns both.
+
+An icon is decoration unless the caller gives it a title, in which case it is
+announced as an image with that name. Where an icon carries a layer model, the
+same drawing has four treatments — outline, duotone, glyph and bulk — and a
+glyph's cut-outs are transparent, so it is correct on any surface. An icon
+without a layer model is outline in every treatment.
+
+A stateful icon is one element with two states and a transition between them.
+Its parts move only by transform, opacity and dash offset, so at rest each state
+is the static drawing, and a host without the transition shows the right state
+at once. Motion respects the reduced-motion preference.
+
 ## Theme behavior
 
 Semantic StyleX tokens provide light and dark values. A theme applies to a subtree

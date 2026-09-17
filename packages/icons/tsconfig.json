@@ -3,5 +3,5 @@
   "compilerOptions": {
     "types": ["node"]
   },
-  "include": ["src/**/*", "test/**/*", "playground/**/*", "stylex-options.ts", "vitest.config.ts"]
+  "include": ["src/**/*", "test/**/*", "stylex-options.ts", "vitest.config.ts"]
 }
