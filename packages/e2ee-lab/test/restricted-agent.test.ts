@@ -174,13 +174,17 @@ describe('P4 restricted LLM Agent', () => {
     expect(intercepted || mutated || claimed || probed).toBe(true);
     expect(JSON.stringify(run.lab.actions())).not.toContain(world.secret);
 
-    // Same record replays model-free in fresh directories.
-    const replay = await replayCollabScenario(run.material);
-    expect(replay.divergence).toBeNull();
-    const replayScriptErrors = replay.outcomes.filter(
-      (outcome) => outcome.error && !outcome.name.startsWith('agent:')
-    );
-    expect(replayScriptErrors.map((o) => o.name)).toEqual(scriptErrors.map((o) => o.name));
+    // Same record replays model-free in three fresh directory sets.
+    const replays = [] as Awaited<ReturnType<typeof replayCollabScenario>>[];
+    for (let runIndex = 0; runIndex < 3; runIndex++) {
+      const entry = await replayCollabScenario(run.material);
+      replays.push(entry);
+      expect(entry.divergence).toBeNull();
+      const replayScriptErrors = entry.outcomes.filter(
+        (outcome) => outcome.error && !outcome.name.startsWith('agent:')
+      );
+      expect(replayScriptErrors.map((o) => o.name)).toEqual(scriptErrors.map((o) => o.name));
+    }
 
     const evidence = process.env.E2EE_AGENT_EVIDENCE;
     if (evidence) {
@@ -194,8 +198,7 @@ describe('P4 restricted LLM Agent', () => {
             marks: run.material.marks,
             hit: { intercepted, mutated, claimed, probed },
             report: run.report,
-            replay: replay.report,
-            divergence: replay.divergence,
+            replays: replays.map((r) => ({ report: r.report, divergence: r.divergence })),
           },
           null,
           2
