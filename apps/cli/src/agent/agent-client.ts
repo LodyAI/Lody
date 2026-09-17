@@ -40,6 +40,9 @@ import {
   getServerNow,
   ACP_INIT_TIMEOUT_MS as DEFAULT_ACP_INIT_TIMEOUT_MS,
   ACP_NEW_SESSION_TIMEOUT_MS as DEFAULT_ACP_NEW_SESSION_TIMEOUT_MS,
+  getDevinSubagentContextId,
+  hasOtherDevinSubagentMeta,
+  parseDevinSubagentTaskMeta,
 } from '@lody/shared';
 import { getLocalControlSocketPath } from '@lody/shared/node/local-ipc';
 import { getLodyMcpHttpEndpoint } from '@/mcp/lody-mcp-http-server';
@@ -626,6 +629,7 @@ export class AgentClient implements acp.Client {
   private supportsFork = false;
   private supportsForkAtTurn = false;
   private lodyExtensionCapabilities: LodyExtensionCapabilities = {};
+  private readonly devinSubagentTaskIds = new Set<string>();
   private worktreeProject?: LodyWorktreeProject;
   private authMethods: acp.AuthMethod[] = [];
   private authenticationRequired = false;
@@ -903,6 +907,28 @@ export class AgentClient implements acp.Client {
       return;
     }
     this.lastSessionUpdateAtMs = Date.now();
+
+    // Devin publishes subagent internals under `cognition.ai/subagent_context`.
+    // Non-tool internals are dropped here, before usage/config/title side
+    // consumers and the transcript see them; tool updates continue so their
+    // edit evidence and permission-requested rows still resolve in history.
+    const devinLifecycle = parseDevinSubagentTaskMeta(params.update._meta);
+    if (devinLifecycle !== null) {
+      this.devinSubagentTaskIds.add(devinLifecycle.taskId);
+    }
+    const devinSubagentOwnerId = getDevinSubagentContextId(params.update._meta);
+    const isDevinSubagentInternal =
+      devinSubagentOwnerId !== null &&
+      this.devinSubagentTaskIds.has(devinSubagentOwnerId) &&
+      !hasOtherDevinSubagentMeta(params.update._meta);
+    if (
+      isDevinSubagentInternal &&
+      params.update.sessionUpdate !== 'tool_call' &&
+      params.update.sessionUpdate !== 'tool_call_update'
+    ) {
+      return;
+    }
+
     if (this.handleUsageUpdate(params.update)) {
       // Usage telemetry is handled outside persisted chat history and remains
       // soft-validated so malformed telemetry cannot break the session stream.
@@ -926,7 +952,7 @@ export class AgentClient implements acp.Client {
       this.completeCodexRetryStatus();
     }
 
-    if (this.handleImageGenerationNotification(notification)) {
+    if (!isDevinSubagentInternal && this.handleImageGenerationNotification(notification)) {
       // handleImageGenerationNotification has already routed the data
       // to onImageGenerationBegin/End. Suppress the raw notification so
       // the inline base64 image never lands in the session history doc — the

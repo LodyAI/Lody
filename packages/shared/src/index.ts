@@ -60,6 +60,7 @@ export * from './acp/codex-raw';
 export * from './acp/claude-code-raw';
 export * from './acp/claude-subagent-task';
 export * from './acp/codex-collab-agent-task';
+export * from './acp/devin-subagent-task';
 export * from './acp/schema';
 export * from './acp/tool-call-history';
 export * from './acp/history-apply';

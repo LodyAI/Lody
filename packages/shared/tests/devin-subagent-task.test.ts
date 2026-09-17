@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   getDevinSubagentContextId,
+  hasOtherDevinSubagentMeta,
   parseDevinSubagentTaskMeta,
 } from '../src/acp/devin-subagent-task';
 
@@ -99,5 +100,21 @@ describe('getDevinSubagentContextId', () => {
     expect(getDevinSubagentContextId({})).toBeNull();
     expect(getDevinSubagentContextId(undefined)).toBeNull();
     expect(getDevinSubagentContextId({ 'cognition.ai/subagent_context': 'nope' })).toBeNull();
+  });
+});
+
+describe('hasOtherDevinSubagentMeta', () => {
+  it('detects lifecycle and unrecognized subagent payloads but not the context tag', () => {
+    expect(
+      hasOtherDevinSubagentMeta({
+        'cognition.ai/subagent_context': { parentAgentId: 'a1' },
+        'cognition.ai/subagent_started': { agentId: 'a2' },
+      })
+    ).toBe(true);
+    expect(
+      hasOtherDevinSubagentMeta({ 'cognition.ai/subagent_context': { parentAgentId: 'a1' } })
+    ).toBe(false);
+    expect(hasOtherDevinSubagentMeta({ 'cognition.ai/turn_stats': {} })).toBe(false);
+    expect(hasOtherDevinSubagentMeta(undefined)).toBe(false);
   });
 });

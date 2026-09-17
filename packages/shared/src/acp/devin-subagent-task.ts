@@ -26,7 +26,6 @@ const DevinSubagentStartedSchema = z.object({
   title: z.string().optional(),
   task: z.string().optional(),
   profile: z.string().optional(),
-  depth: z.number().optional(),
   isBackground: z.boolean().optional(),
   model: z.string().optional(),
 });
@@ -93,3 +92,16 @@ export const getDevinSubagentContextId = (meta: unknown): string | null => {
   if (!parsed.success || parsed.data.parentAgentId === 'root') return null;
   return parsed.data.parentAgentId;
 };
+
+/**
+ * Whether `_meta` carries any `cognition.ai/subagent_*` payload besides the
+ * context tag — the lifecycle markers above or a future key this version does
+ * not know. Such updates must pass through rather than be dropped, so a
+ * malformed or drifted lifecycle row degrades to a visible tool call instead
+ * of silently disappearing.
+ */
+export const hasOtherDevinSubagentMeta = (meta: unknown): boolean =>
+  isRecord(meta) &&
+  Object.keys(meta).some(
+    (key) => key.startsWith('cognition.ai/subagent_') && key !== DEVIN_SUBAGENT_CONTEXT_META_KEY
+  );
