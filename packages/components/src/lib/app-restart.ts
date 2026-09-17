@@ -17,8 +17,8 @@ export function isDesktopAppShell(): boolean {
 /**
  * Quit and start Lody again in a fresh process.
  *
- * @returns `false` when there is no desktop bridge, so the caller can offer a
- *   reload instead rather than a button that silently does nothing.
+ * @returns `false` when the desktop bridge is absent or fails. The caller must
+ *   explain how to quit and reopen the host process manually, never reload.
  */
 export async function restartApp(): Promise<boolean> {
   const services = isDesktopAppShell() ? getIpcServices() : null;

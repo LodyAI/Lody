@@ -58,6 +58,12 @@ outside/Escape dismissal. The writer checks the latch before mutations and after
 asynchronous acquisitions, releasing acquired session/preview stores on rejection.
 This guards new authoring; it cannot undo operations already accepted before the latch.
 
+Recovery also stays process-level when Electron IPC is missing or fails: browser and
+Capacitor users get manual host shutdown/reopen instructions, while failed desktop
+actions show operating-system quit instructions and unlock the controls. No crisis
+recovery path reloads the page. Regression tests cover both failed IPC actions and
+the non-desktop instructions; real device/process recovery remains unverified.
+
 It is, however, a durability WINDOW: nothing re-triggers a flush after a failure, so the
 re-queued document waits for the next doc event and the meta Flock for its next
 subscription callback. A transient failure therefore leaves the last change unpersisted

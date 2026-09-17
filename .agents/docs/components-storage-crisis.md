@@ -26,6 +26,12 @@ renderer PROCESS. This is the whole reason the recovery action is `app.restartAp
 (`app.relaunch()` + `app.quit()` in `app-ipc.ts`) rather than the reload that every
 other crash surface offers.
 
+Browser and Capacitor shells show manual instructions to fully quit and reopen the
+host browser/app (on mobile, close it from the app switcher), with a device restart
+if that does not recover it. They offer no reload action. If desktop restart/quit IPC
+returns false, the dialog stays open, unlocks its actions, and explains manual
+process shutdown through the operating system. It never falls back to page reload.
+
 ## Why the breaker sits under the repo, not at a call site
 
 `IndexedDBStorageAdaptor.loadDoc` opens its transaction `readwrite`, because it may

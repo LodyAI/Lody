@@ -15,12 +15,13 @@ import {
 
 export type StorageCrisisRecoveryViewProps = {
   crisis: StorageCrisisState;
-  /** Desktop can relaunch the process; a browser shell can only reload. */
+  /** Only the desktop bridge can relaunch the process programmatically. */
   isDesktop: boolean;
   onRestart: () => void;
   onQuit: () => void;
   /** A restart or quit is already underway, so both actions are locked. */
   actionPending?: boolean;
+  manualRestartRequired?: boolean;
 };
 
 /**
@@ -34,6 +35,7 @@ export function StorageCrisisRecoveryView({
   onRestart,
   onQuit,
   actionPending = false,
+  manualRestartRequired = false,
 }: StorageCrisisRecoveryViewProps) {
   const { t } = useTranslation();
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -88,8 +90,8 @@ export function StorageCrisisRecoveryView({
                       'Restart Lody. Freeing space is not enough on its own: the local database only reopens in a new app process.'
                     )
                   : t(
-                      'storageCrisis.stepRestartWeb',
-                      'Reload this page. Freeing space is not enough on its own: the local database only reopens on a fresh page load.'
+                      'storageCrisis.stepRestartManually',
+                      'Fully quit and reopen your browser or the app hosting Lody. On mobile, close it from the app switcher before reopening it. Refreshing the page is not enough. If the problem persists, restart your device.'
                     )}
               </li>
             </ol>
@@ -101,26 +103,35 @@ export function StorageCrisisRecoveryView({
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <Button type="button" size="sm" onClick={onRestart} disabled={actionPending}>
-              <RefreshCw className="size-3.5" aria-hidden="true" />
-              {isDesktop
-                ? t('storageCrisis.restart', 'Restart Lody')
-                : t('storageCrisis.reload', 'Reload Lody')}
-            </Button>
-            {isDesktop ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={onQuit}
-                disabled={actionPending}
-              >
-                <LogOut className="size-3.5" aria-hidden="true" />
-                {t('storageCrisis.quit', 'Quit Lody')}
+          {manualRestartRequired ? (
+            <p role="alert" className="text-sm text-destructive">
+              {t(
+                'storageCrisis.bridgeFailed',
+                'Lody could not restart or quit automatically. Fully quit Lody using your operating system, then open it again. If the problem persists, restart your device. Refreshing the page will not fix it.'
+              )}
+            </p>
+          ) : null}
+
+          {isDesktop ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" size="sm" onClick={onRestart} disabled={actionPending}>
+                <RefreshCw className="size-3.5" aria-hidden="true" />
+                {t('storageCrisis.restart', 'Restart Lody')}
               </Button>
-            ) : null}
-          </div>
+              {isDesktop ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={onQuit}
+                  disabled={actionPending}
+                >
+                  <LogOut className="size-3.5" aria-hidden="true" />
+                  {t('storageCrisis.quit', 'Quit Lody')}
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="min-w-0 border-t border-border/60 pt-3">
             <button
@@ -166,7 +177,7 @@ function readCrisisServerSnapshot(): StorageCrisisState | null {
  * succeed from here — every repo write goes to the same dead connection — and
  * each attempt used to produce another toast carrying a raw DOMException. It
  * takes over the screen, dismisses whatever error toasts the first failure
- * already raised, and leaves exactly the two actions that actually recover.
+ * already raised, and offers process-level actions or manual shutdown instructions.
  *
  * It deliberately offers no "clear cache" button: `clear-local-cache.ts` works
  * by deleting IndexedDB databases, which blocks while the runtime holds the
@@ -180,6 +191,7 @@ export function StorageCrisisDialog() {
     readCrisisServerSnapshot
   );
   const [pendingAction, setPendingAction] = useState<'restart' | 'quit' | null>(null);
+  const [manualRestartRequired, setManualRestartRequired] = useState(false);
 
   const active = crisis !== null;
   useEffect(() => {
@@ -194,16 +206,18 @@ export function StorageCrisisDialog() {
     setPendingAction('restart');
     void restartApp().then((ok) => {
       if (ok) return;
-      // No desktop bridge (browser shell, or the bridge itself is gone): a
-      // reload is the only restart available there.
-      if (typeof window !== 'undefined') window.location.reload();
+      setPendingAction(null);
+      setManualRestartRequired(true);
     });
   }, []);
 
   const handleQuit = useCallback(() => {
     setPendingAction('quit');
     void quitApp().then((ok) => {
-      if (!ok) setPendingAction(null);
+      if (!ok) {
+        setPendingAction(null);
+        setManualRestartRequired(true);
+      }
     });
   }, []);
 
@@ -216,6 +230,7 @@ export function StorageCrisisDialog() {
       onRestart={handleRestart}
       onQuit={handleQuit}
       actionPending={pendingAction !== null}
+      manualRestartRequired={manualRestartRequired}
     />
   );
 }

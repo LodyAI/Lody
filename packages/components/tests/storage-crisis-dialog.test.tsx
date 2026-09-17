@@ -48,8 +48,8 @@ beforeEach(async () => {
   await initI18n();
   desktopShell = true;
   dismissAll.mockClear();
-  restartApp.mockClear();
-  quitApp.mockClear();
+  restartApp.mockReset().mockResolvedValue(true);
+  quitApp.mockReset().mockResolvedValue(true);
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -187,15 +187,42 @@ describe('StorageCrisisDialog', () => {
     expect(restartApp).not.toHaveBeenCalled();
   });
 
-  it('offers a reload instead of a quit outside the desktop shell', () => {
+  it.each(['restart', 'quit'] as const)(
+    'explains manual process recovery after failed %s IPC',
+    async (action) => {
+      (action === 'restart' ? restartApp : quitApp).mockResolvedValue(false);
+      render();
+      act(() => {
+        enterStorageCrisis({ kind: 'quota', operation: 'save', detail: 'QuotaExceededError' });
+      });
+      const dialog = document.body.querySelector('[role="alertdialog"]');
+      await act(async () =>
+        findButton(action === 'restart' ? /Restart Lody/ : /Quit Lody/)!.click()
+      );
+      expect(document.body.querySelector('[role="alert"]')?.textContent).toMatch(
+        /Fully quit Lody using your operating system/
+      );
+      expect(document.body.querySelector('[role="alertdialog"]')).toBe(dialog);
+      expect(findButton(/Restart Lody/)?.disabled).toBe(false);
+      expect(findButton(/Quit Lody/)?.disabled).toBe(false);
+      expect(findButton(/Reload Lody/)).toBeUndefined();
+    }
+  );
+
+  it('explains manual process recovery outside the desktop shell', () => {
     desktopShell = false;
     render();
     act(() => {
       enterStorageCrisis({ kind: 'quota', operation: 'save', detail: 'QuotaExceededError' });
     });
 
-    expect(findButton(/Reload Lody/)).toBeDefined();
+    expect(findButton(/Reload Lody/)).toBeUndefined();
+    expect(findButton(/Restart Lody/)).toBeUndefined();
     expect(findButton(/Quit Lody/)).toBeUndefined();
-    expect(document.body.textContent).toMatch(/only reopens on a fresh page load/i);
+    expect(document.body.textContent).toMatch(
+      /Fully quit and reopen your browser or the app hosting Lody/
+    );
+    expect(document.body.textContent).toMatch(/close it from the app switcher/);
+    expect(document.body.textContent).toMatch(/Refreshing the page is not enough/);
   });
 });
