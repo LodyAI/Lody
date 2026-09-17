@@ -14,7 +14,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '../../..');
 
 /**
- * The icon playground: `@lody/ui`'s own page, with no Storybook under it.
+ * The icon playground: the `@lody/icons` package's consumer page, with no
+ * Storybook under it.
  *
  * The board in `src/gallery` is the visual reference — one sample per token,
  * read back off the rendered node. An icon set is the other thing: 75 drawings

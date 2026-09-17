@@ -1,18 +1,22 @@
 import * as stylex from '@stylexjs/stylex';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Icon, type IconVariant } from '../src/icons/icon';
-import { ICONS, ICON_FAMILIES, type IconFamily, type IconName } from '../src/icons/registry';
 import {
   BellRingIcon,
   CheckDrawIcon,
   ChevronToggleIcon,
+  Icon,
+  ICONS,
+  ICON_FAMILIES,
   EyeToggleIcon,
   FolderToggleIcon,
   PlayPauseIcon,
   RefreshTurnIcon,
   SidebarToggleIcon,
   StarToggleIcon,
-} from '../src/icons/stateful';
+  type IconFamily,
+  type IconName,
+  type IconVariant,
+} from '@lody/icons';
 import { ThemeRoot, type ThemeMode } from '../src/theme/theme';
 import { colors, shadow } from '../src/tokens/colors.stylex';
 import { radius, space, text } from '../src/tokens/scales.stylex';
@@ -539,7 +543,7 @@ function Detail({
       </div>
 
       <pre {...stylex.props(styles.code)}>
-        {`import { ${pascal(name)}Icon } from '@lody/ui/icons';\n${jsx}`}
+        {`import { ${pascal(name)}Icon } from '@lody/icons';\n${jsx}`}
       </pre>
 
       <div {...stylex.props(styles.actions)}>
@@ -750,7 +754,7 @@ export function IconPlayground() {
     <div {...stylex.props(styles.barWrap)}>
       <div {...stylex.props(styles.bar)}>
         <span {...stylex.props(styles.barTitle)}>
-          @lody/ui icons <span {...stylex.props(styles.count)}>{matches.length}</span>
+          @lody/icons <span {...stylex.props(styles.count)}>{matches.length}</span>
         </span>
 
         <input

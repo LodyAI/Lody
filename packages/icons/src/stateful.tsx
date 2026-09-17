@@ -1,7 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 import { forwardRef, type CSSProperties, type ReactNode, type SVGProps } from 'react';
-import { appendClassName } from '../internal/class-name';
-import { duration, ease } from '../tokens/scales.stylex';
+import { appendClassName } from './class-name';
 import { ICON_STROKE } from './icon';
 import { ICONS, type IconName } from './registry';
 
@@ -46,8 +45,8 @@ const styles = stylex.create({
     height: '100%',
     flexShrink: 0,
     transitionProperty: T,
-    transitionDuration: { default: duration.slow, [NO_MOTION]: '0ms' },
-    transitionTimingFunction: ease.standard,
+    transitionDuration: { default: '320ms', [NO_MOTION]: '0ms' },
+    transitionTimingFunction: 'cubic-bezier(0.2, 0, 0, 1)',
   },
   centred: { transformBox: 'view-box', transformOrigin: '12px 12px' },
   /*

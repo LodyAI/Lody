@@ -22,7 +22,7 @@ behavior.
 | `src/card`          | The card rung as a component: a block of a page, and its tokens      |
 | `src/badge`         | A standing fact about the thing beside it, on no rung at all         |
 | `src/separator`     | The one line the rules allow: between the rows of a list or a table  |
-| `src/icons`         | The icon set: one 24 grid, four treatments of each drawing, and the icons that move between two states |
+| `@lody/icons`       | The independent icon set: one 24 grid, four treatments of each drawing, and the icons that move between two states |
 | `playground`        | The icon playground: a standalone Vite page for searching, scaling, recolouring and copying the set |
 | `src/gallery`       | The token board: every token and primitive state, in both palettes  |
 | `stylex-options.ts` | Shared compiler configuration for source-consuming hosts            |

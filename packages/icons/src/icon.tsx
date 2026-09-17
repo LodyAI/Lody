@@ -1,6 +1,6 @@
 import * as stylex from '@stylexjs/stylex';
 import { forwardRef, useId, type ComponentProps } from 'react';
-import { appendClassName } from '../internal/class-name';
+import { appendClassName } from './class-name';
 import { ICONS, type IconLayers, type IconMark, type IconName } from './registry';
 
 /**

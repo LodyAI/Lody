@@ -1,0 +1,36 @@
+{
+  "name": "@lody/icons",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": "./src/index.ts",
+    "./icon": "./src/icon.tsx",
+    "./registry": "./src/registry.ts",
+    "./stateful": "./src/stateful.tsx"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "peerDependencies": {
+    "react": "*",
+    "react-dom": "*"
+  },
+  "dependencies": {
+    "@stylexjs/stylex": "0.19.0"
+  },
+  "devDependencies": {
+    "@stylexjs/unplugin": "0.19.0",
+    "@types/node": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "jsdom": "^26.1.0",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "^3.2.4"
+  }
+}

@@ -10,8 +10,8 @@ into one component at a time. Source-consumed: consumers compile it through
   `@source` scanning here. Component props own visual variants, sizes, tones and
   shapes. A caller's `className` may carry layout or interaction constraints
   during migration, never the deleted component's visual design.
-- Depends on React, `@base-ui/react` and `@stylexjs/stylex` only; never on
-  `@lody/components`, `@lody/platform` or a cloud package.
+- Depends on React, `@base-ui/react`, `@stylexjs/stylex` and `@lody/icons`;
+  never on `@lody/components`, `@lody/platform` or a cloud package.
 - No border token exists. Edges are wells, raised shadows, elevation shadows
   and the focus ring. Read `src/tokens/RULES.md` before adding a token or style.
 - A focus or invalid ring is a 2px `box-shadow` composed with the control's own
@@ -83,9 +83,10 @@ into one component at a time. Source-consumed: consumers compile it through
   flex minimum widens a 16px circle. Circle is a person, tile a thing; identity
   colour is a `style`. A `Kbd` is never a menu row's shortcut;
   `Tooltip.Content`'s `kbdOnInvertedTheme` inverts a cap on a chip.
-- Icons are drawn in `src/icons`, never taken from a package, and their surface
-  is `playground/` rather than the board. The grid, the four treatments and the
-  one number a state moves by: [icon rules](src/icons/AGENTS.md).
+- Icons come from `@lody/icons`; `src/icons` is only the compatibility export
+  for older callers. The package's playground is its surface rather than the
+  board. The grid, the four treatments and the one number a state moves by are
+  documented in [the icon rules](../icons/src/AGENTS.md).
 - A forced palette travels to a portalled popup: `ThemeRoot` publishes its mode
   and `Content` re-declares it on the positioner, since a popup mounts outside
   the subtree declaring it — a light panel would otherwise open a dark list.

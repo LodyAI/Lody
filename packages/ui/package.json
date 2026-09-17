@@ -61,6 +61,7 @@
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",
+    "@lody/icons": "workspace:*",
     "@stylexjs/stylex": "0.19.0"
   },
   "devDependencies": {

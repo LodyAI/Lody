@@ -1328,6 +1328,40 @@ importers:
         specifier: '>=4'
         version: 4.3.0
 
+  packages/icons:
+    dependencies:
+      '@stylexjs/stylex':
+        specifier: 0.19.0
+        version: 0.19.0
+    devDependencies:
+      '@stylexjs/unplugin':
+        specifier: 0.19.0
+        version: 0.19.0(unplugin@3.3.0(esbuild@0.28.2)(rolldown@1.1.5)(rollup@4.57.1)(vite@6.4.1(@types/node@24.10.12)(jiti@2.7.0)(lightningcss@1.32.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)))
+      '@types/node':
+        specifier: 'catalog:'
+        version: 24.10.12
+      '@types/react':
+        specifier: 'catalog:'
+        version: 19.2.17
+      '@types/react-dom':
+        specifier: 'catalog:'
+        version: 19.2.3(@types/react@19.2.17)
+      jsdom:
+        specifier: ^26.1.0
+        version: 26.1.0
+      react:
+        specifier: 'catalog:'
+        version: 19.2.0
+      react-dom:
+        specifier: 'catalog:'
+        version: 19.2.0(react@19.2.0)
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.4(@types/debug@4.1.12)(@types/node@24.10.12)(jiti@2.7.0)(jsdom@26.1.0)(lightningcss@1.32.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)
+
   packages/ignore:
     dependencies:
       effect:
@@ -1476,6 +1510,9 @@ importers:
       '@base-ui/react':
         specifier: 1.7.0
         version: 1.7.0(@date-fns/tz@1.4.1)(@types/react@19.2.17)(date-fns@4.1.0)(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      '@lody/icons':
+        specifier: workspace:*
+        version: link:../icons
       '@stylexjs/stylex':
         specifier: 0.19.0
         version: 0.19.0

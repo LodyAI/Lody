@@ -330,9 +330,10 @@ viewer. Those classes must leave the primitive's visual identity under its props
 
 ## Icons
 
-`@lody/ui` draws its own icon set rather than depending on an icon package. Every
-icon is on a 24 × 24 grid with a 20 × 20 live area and a 1.5 stroke with round
-caps and joins; a family shares one skeleton so its members line up in a list.
+`@lody/icons` owns Lody's icon set independently of `@lody/ui`. `@lody/ui`
+consumes that package rather than owning its drawings. Every icon is on a 24 × 24
+grid with a 20 × 20 live area and a 1.5 stroke with round caps and joins; a
+family shares one skeleton so its members line up in a list.
 An icon states no size and no colour: it fills the box it is given and inherits
 `currentColor`, so the part holding it owns both.
 

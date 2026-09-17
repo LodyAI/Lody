@@ -1,14 +1,19 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, test } from 'vitest';
-import { Icon, createIcon, type IconVariant } from '../src/icons/icon';
-import { ICONS, ICON_FAMILIES, ICON_NAMES, type IconName } from '../src/icons/registry';
 import {
   BellRingIcon,
   ChevronToggleIcon,
+  createIcon,
+  Icon,
   IconFrame,
+  ICONS,
+  ICON_FAMILIES,
+  ICON_NAMES,
   SidebarToggleIcon,
-} from '../src/icons/stateful';
-import { SidebarIcon } from '../src/icons/index';
+  SidebarIcon,
+  type IconName,
+  type IconVariant,
+} from '../src/index';
 
 const VARIANTS: IconVariant[] = ['outline', 'duotone', 'glyph', 'bulk'];
 

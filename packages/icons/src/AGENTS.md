@@ -1,9 +1,10 @@
-# `@lody/ui` icons
+# `@lody/icons`
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-The set is drawn here and never taken from a package: `@lody/ui` may depend on
-React, Base UI and StyleX and nothing else. `registry.ts` is the drawing,
+The set is drawn here and never taken from another icon package: `@lody/icons`
+depends on React and StyleX, and never on `@lody/ui` or product packages.
+`registry.ts` is the drawing,
 `icon.tsx` decides which layers a variant draws, `stateful.tsx` holds the icons
 with two states, and `index.ts` names each one as a component.
 
