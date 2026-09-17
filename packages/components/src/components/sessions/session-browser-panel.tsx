@@ -429,7 +429,7 @@ function SessionBrowserPanelController({
         await releaseLocalEndpoint();
         if (sequence !== navigationSequenceRef.current) return;
         commitOpenedAddress(next, null, options?.historyIndex);
-        setPublicNavigationRequest((current) =>
+        setPublicNavigationRequest(
           options?.restore
             ? null
             : { id: ++publicNavigationSequenceRef.current, url: next.logicalUrl }
