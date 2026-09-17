@@ -5298,6 +5298,7 @@ const SessionDetail = ({
                   }
                   onFileDiffClick={handleOpenFileDiffMobileForChat}
                   onFilePathClick={handleOpenFile}
+                  agentFileLinkMenuItems={activeSessionFileActions.buildMarkdownLinkMenuItems}
                   onOpenHtmlFile={handleOpenHtmlFile}
                   onNavigateToComment={handleNavigateToCommentMobile}
                   onCommentReferencesChange={getCommentReferencesChangeHandler(tabSession.id)}
@@ -5932,6 +5933,7 @@ const SessionDetail = ({
       isVisible,
       onFileDiffClick: handleOpenFileDiffForChat,
       onFilePathClick: handleOpenFile,
+      agentFileLinkMenuItems: activeSessionFileActions.buildMarkdownLinkMenuItems,
       onOpenHtmlFile: handleOpenHtmlFile,
       onOpenBrowser: () => handleOpenBrowser(chatSession.id, true),
       onOpenExistingBrowser: () => handleOpenBrowser(chatSession.id, false),

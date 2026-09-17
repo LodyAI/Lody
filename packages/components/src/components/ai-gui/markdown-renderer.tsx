@@ -2,6 +2,7 @@ import {
   type ComponentPropsWithoutRef,
   type CSSProperties,
   type ReactNode,
+  createContext,
   useState,
   useContext,
   useCallback,
@@ -58,8 +59,27 @@ import { createMarkdownMermaidConfig, createMarkdownMermaidPlugin } from './mark
 import { MermaidDiagramViewer } from './mermaid-diagram-viewer';
 import { MermaidFullscreenButton, useMermaidDiagramCanvas } from './use-mermaid-diagram-canvas';
 import { SessionReadonlyContext } from './session-readonly-context';
+import type { MarkdownAgentFileLinkMenuItem } from '@/hooks/use-session-file-actions';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from '@/ui/context-menu';
 
 export { createMarkdownMermaidConfig } from './markdown-mermaid';
+
+/**
+ * Conversation surfaces provide this capability at their boundary. Rendering
+ * Markdown elsewhere (shared pages, file previews) deliberately has no native
+ * file-actions menu.
+ */
+export const AgentFileLinkContextMenuItemsContext = createContext<
+  ((href: string) => readonly MarkdownAgentFileLinkMenuItem[]) | undefined
+>(undefined);
 
 type MarkdownCodeProps = ComponentPropsWithoutRef<'code'> & {
   inline?: boolean;
@@ -936,16 +956,19 @@ const AgentFileLink = ({
   onFilePathClick,
   copyAgentFileLabel,
   openAgentFileLabel,
+  getContextMenuItems,
 }: {
   href: string;
   children: ReactNode;
   onFilePathClick?: (href: string) => void;
   copyAgentFileLabel: string;
   openAgentFileLabel: string;
+  getContextMenuItems?: (href: string) => readonly MarkdownAgentFileLinkMenuItem[];
 }) => {
   const [didCopy, setDidCopy] = useState(false);
   const hasOpenAction = Boolean(onFilePathClick);
   const iconPath = parseMarkdownAgentFileHref(href)?.filePath ?? href;
+  const contextMenuItems = getContextMenuItems?.(href) ?? [];
 
   const handleClick = useCallback(async () => {
     if (onFilePathClick) {
@@ -960,7 +983,7 @@ const AgentFileLink = ({
     window.setTimeout(() => setDidCopy(false), 1200);
   }, [href, onFilePathClick]);
 
-  return (
+  const link = (
     <button
       type="button"
       onClick={() => {
@@ -984,6 +1007,51 @@ const AgentFileLink = ({
       ) : null}
     </button>
   );
+
+  if (contextMenuItems.length === 0) return link;
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{link}</ContextMenuTrigger>
+      <ContextMenuContent className="min-w-[190px]">
+        {contextMenuItems.map((item) => {
+          const ItemIcon = item.icon;
+          if (item.kind === 'submenu') {
+            return (
+              <ContextMenuSub key={item.id}>
+                <ContextMenuSubTrigger icon={<ItemIcon className="h-3.5 w-3.5" />}>
+                  {item.label}
+                </ContextMenuSubTrigger>
+                <ContextMenuSubContent className="min-w-[190px]">
+                  {item.items.map((child) => {
+                    const ChildIcon = child.icon;
+                    return (
+                      <ContextMenuItem
+                        key={child.id}
+                        icon={<ChildIcon className="h-3.5 w-3.5" />}
+                        onSelect={child.run}
+                      >
+                        {child.label}
+                      </ContextMenuItem>
+                    );
+                  })}
+                </ContextMenuSubContent>
+              </ContextMenuSub>
+            );
+          }
+          return (
+            <ContextMenuItem
+              key={item.id}
+              icon={<ItemIcon className="h-3.5 w-3.5" />}
+              onSelect={item.run}
+            >
+              {item.label}
+            </ContextMenuItem>
+          );
+        })}
+      </ContextMenuContent>
+    </ContextMenu>
+  );
 };
 
 function isWorkspaceResourceHref(href: string): boolean {
@@ -1001,11 +1069,13 @@ const createMarkdownComponents = ({
   copyAgentFileLabel,
   openAgentFileLabel,
   onAgentFileLinkClick,
+  getAgentFileLinkContextMenuItems,
   readonly,
 }: {
   copyAgentFileLabel: string;
   openAgentFileLabel: string;
   onAgentFileLinkClick?: (href: string) => void;
+  getAgentFileLinkContextMenuItems?: (href: string) => readonly MarkdownAgentFileLinkMenuItem[];
   readonly: boolean;
 }): Components => ({
   inlineCode: (props: MarkdownCodeProps) => {
@@ -1048,6 +1118,7 @@ const createMarkdownComponents = ({
           onFilePathClick={onAgentFileLinkClick}
           copyAgentFileLabel={copyAgentFileLabel}
           openAgentFileLabel={openAgentFileLabel}
+          getContextMenuItems={getAgentFileLinkContextMenuItems}
         >
           {children}
         </AgentFileLink>
@@ -1159,6 +1230,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   const { t } = useTranslation();
   const resolvedTheme = useResolvedTheme();
   const readonly = useContext(SessionReadonlyContext);
+  const getAgentFileLinkContextMenuItems = useContext(AgentFileLinkContextMenuItemsContext);
   const containerRef = useRef<HTMLDivElement>(null);
   /** Whether this block currently holds search marks that need unwrapping. */
   const markedRef = useRef(false);
@@ -1196,9 +1268,16 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
         copyAgentFileLabel,
         openAgentFileLabel,
         onAgentFileLinkClick,
+        getAgentFileLinkContextMenuItems,
         readonly: readonly !== null,
       }),
-    [copyAgentFileLabel, onAgentFileLinkClick, openAgentFileLabel, readonly]
+    [
+      copyAgentFileLabel,
+      getAgentFileLinkContextMenuItems,
+      onAgentFileLinkClick,
+      openAgentFileLabel,
+      readonly,
+    ]
   );
 
   const rehypePlugins = useMemo(() => (allowHtml ? [rehypeRaw, rehypeSanitize] : []), [allowHtml]);
