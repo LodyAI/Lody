@@ -104,9 +104,23 @@ describe('SessionAgentFileLinkMenuProvider', () => {
       );
       await Promise.resolve();
     });
-    const menu = document.querySelector('[data-slot="context-menu-content"]');
-    if (!menu) throw new Error('Context menu did not render');
+    const openMenus = [...document.querySelectorAll<HTMLElement>('[data-slot="context-menu-content"]')]
+      .filter((menu) => menu.dataset.state === 'open');
+    const menu = openMenus[0];
+    if (openMenus.length !== 1 || !menu) throw new Error('Exactly one context menu must be open');
     return menu;
+  };
+
+  const closeContextMenu = async () => {
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(
+      [...document.querySelectorAll<HTMLElement>('[data-slot="context-menu-content"]')].filter(
+        (menu) => menu.dataset.state === 'open'
+      )
+    ).toHaveLength(0);
   };
 
   it('does not let a remote side Session inherit its local root Session actions', async () => {
@@ -143,6 +157,7 @@ describe('SessionAgentFileLinkMenuProvider', () => {
     if (!rootRegion || !sideRegion) throw new Error('Session regions did not render');
 
     expect((await openContextMenu(rootRegion)).textContent).toContain('Open File');
+    await closeContextMenu();
 
     const sideMenu = await openContextMenu(sideRegion);
     expect(sideMenu.textContent).toBe('Copy Path');
