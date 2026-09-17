@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   LODY_CLAUDE_TASK_LIFECYCLE_RAW_INPUT_KEY,
   mergeSubagentTaskPayload,
+  parseLodyTaskMeta,
   parseSubagentTaskWire,
 } from '../src/acp/claude-subagent-task';
 import type { SubagentTaskPayload } from '../src/ai';
@@ -50,13 +51,48 @@ describe('parseSubagentTaskWire', () => {
   });
 });
 
+describe('parseLodyTaskMeta', () => {
+  it('carries a validated lifecycle event into the task payload', () => {
+    expect(
+      parseLodyTaskMeta({
+        lody: {
+          task: {
+            version: 1,
+            taskId: 'task-meta',
+            kind: 'subagent',
+            status: 'in_progress',
+            event: 'task_updated',
+          },
+        },
+      })
+    ).toMatchObject({ taskId: 'task-meta', status: 'in_progress', event: 'task_updated' });
+  });
+
+  it('rejects an unknown lifecycle event', () => {
+    expect(
+      parseLodyTaskMeta({
+        lody: {
+          task: {
+            version: 1,
+            taskId: 'task-meta',
+            kind: 'subagent',
+            status: 'in_progress',
+            event: 'resume-ish',
+          },
+        },
+      })
+    ).toBeNull();
+  });
+});
+
 describe('mergeSubagentTaskPayload', () => {
-  it('preserves earlier-event fields while later events win', () => {
+  it('preserves task identity and purpose while activity fields advance', () => {
     const started: SubagentTaskPayload = {
       taskId: 'task-1',
       status: 'in_progress',
       event: 'task_started',
       subagentType: 'Explore',
+      actor: 'Explore',
       description: 'Find codex refresh logic',
     };
     const notification: SubagentTaskPayload = {
@@ -64,6 +100,8 @@ describe('mergeSubagentTaskPayload', () => {
       status: 'completed',
       event: 'task_notification',
       summary: 'All done',
+      actor: 'progress-reporter',
+      description: 'Reading files',
     };
 
     expect(mergeSubagentTaskPayload(started, notification)).toEqual({
@@ -72,7 +110,66 @@ describe('mergeSubagentTaskPayload', () => {
       event: 'task_notification',
       summary: 'All done',
       subagentType: 'Explore',
+      actor: 'Explore',
       description: 'Find codex refresh logic',
+    });
+  });
+
+  it('keeps background state sticky across ordinary progress snapshots', () => {
+    const backgrounded: SubagentTaskPayload = {
+      taskId: 'task-bg',
+      status: 'in_progress',
+      taskKind: 'background',
+      isBackgrounded: true,
+      actor: 'Explore',
+      description: 'Audit history writes',
+    };
+
+    expect(
+      mergeSubagentTaskPayload(backgrounded, {
+        taskId: 'task-bg',
+        status: 'in_progress',
+        taskKind: 'subagent',
+        isBackgrounded: false,
+        lastToolName: 'Read',
+      })
+    ).toMatchObject({
+      taskKind: 'background',
+      isBackgrounded: true,
+      actor: 'Explore',
+      description: 'Audit history writes',
+      lastToolName: 'Read',
+    });
+  });
+
+  it('ignores late progress after settlement but permits an explicit resume', () => {
+    const completed: SubagentTaskPayload = {
+      taskId: 'task-resume',
+      status: 'completed',
+      event: 'task_notification',
+      description: 'Implement the fix',
+      summary: 'First pass complete',
+    };
+    const lateProgress: SubagentTaskPayload = {
+      taskId: 'task-resume',
+      status: 'in_progress',
+      event: 'task_progress',
+      lastToolName: 'Read',
+    };
+
+    expect(mergeSubagentTaskPayload(completed, lateProgress)).toEqual(completed);
+    expect(
+      mergeSubagentTaskPayload(completed, {
+        taskId: 'task-resume',
+        status: 'in_progress',
+        event: 'task_updated',
+        summary: 'Resumed for follow-up',
+      })
+    ).toMatchObject({
+      status: 'in_progress',
+      event: 'task_updated',
+      description: 'Implement the fix',
+      summary: 'Resumed for follow-up',
     });
   });
 });

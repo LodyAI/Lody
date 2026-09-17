@@ -66,6 +66,7 @@ const LodyTaskMetaSchema = z.object({
   taskId: z.string().min(1),
   kind: z.enum(['subagent', 'background', 'scheduled']),
   status: z.enum(SUBAGENT_TASK_STATUSES),
+  event: z.enum(SUBAGENT_TASK_EVENTS).optional(),
   description: z.string().optional(),
   actor: z.string().optional(),
   parentTaskId: z.string().optional(),
@@ -90,6 +91,7 @@ export const parseLodyTaskMeta = (meta: unknown): SubagentTaskPayload | null => 
     taskId: task.taskId,
     status: task.status,
     taskKind: task.kind,
+    ...(task.event !== undefined ? { event: task.event } : {}),
     ...(task.actor !== undefined ? { actor: task.actor } : {}),
     ...(task.parentTaskId !== undefined ? { parentTaskId: task.parentTaskId } : {}),
     ...(task.parentToolCallId !== undefined ? { toolUseId: task.parentToolCallId } : {}),
@@ -126,14 +128,32 @@ export const parseSubagentTaskWire = (rawInput: unknown): SubagentTaskPayload | 
 };
 
 /**
- * Merge lifecycle events for the same task. Later events win per field, but
- * fields only present on earlier events (`subagentType`, `description`,
- * `taskType`, `workflowName`) are preserved — the terminal `task_notification`
- * carries neither, so a plain replace would blank out the subagent identity the
- * panel needs after completion. Inputs carry only defined keys (the CLI builds
- * them with set-if-defined), so a shallow spread is a correct field-wise merge.
+ * Merge lifecycle events for the same task while preserving stable identity.
+ * Activity descriptions describe the current tool, not the task's purpose, and
+ * progress snapshots must not turn a background task back into a foreground
+ * subagent. A nonterminal progress event arriving after settlement is stale;
+ * explicit starts/updates remain able to resume the same task (for example,
+ * Codex `resumeAgent`).
  */
 export const mergeSubagentTaskPayload = (
   prev: SubagentTaskPayload,
   incoming: SubagentTaskPayload
-): SubagentTaskPayload => ({ ...prev, ...incoming });
+): SubagentTaskPayload => {
+  const wasSettled = prev.status === 'completed' || prev.status === 'failed';
+  const isNonterminal = incoming.status === 'pending' || incoming.status === 'in_progress';
+  const explicitlyRestarts = incoming.event === 'task_started' || incoming.event === 'task_updated';
+
+  if (wasSettled && isNonterminal && !explicitlyRestarts) return prev;
+
+  const merged = {
+    ...prev,
+    ...incoming,
+    ...(prev.actor !== undefined ? { actor: prev.actor } : {}),
+    ...(prev.description !== undefined ? { description: prev.description } : {}),
+  };
+
+  if (prev.isBackgrounded === true || prev.taskKind === 'background') {
+    return { ...merged, taskKind: 'background', isBackgrounded: true };
+  }
+  return merged;
+};
