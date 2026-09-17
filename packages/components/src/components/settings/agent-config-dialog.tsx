@@ -512,6 +512,16 @@ const BUILTIN_OPTIONS: AgentTypeOption[] = [
   },
   {
     kind: 'builtin',
+    value: 'builtin:pi',
+    label: 'Pi',
+    descriptionKey: 'settings.agent.dialog.option.pi.description',
+    descriptionDefault: 'Lody-managed Pi ACP runtime',
+    cliType: 'builtin',
+    agentType: 'pi',
+    searchKeys: 'pi acp',
+  },
+  {
+    kind: 'builtin',
     value: 'builtin:bub',
     label: 'Bub',
     descriptionKey: 'settings.agent.dialog.option.bub.description',
@@ -1110,7 +1120,8 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           env: formData.env,
         }) ||
         (authRequired && usesProtocolAuthentication)
-      : authRequired && (isManagedBuiltin || usesProtocolAuthentication);
+      : authRequired &&
+        ((isManagedBuiltin && formData.agentType !== 'pi') || usesProtocolAuthentication);
   const builtinRuntimeOverrideKey =
     formData.cliType !== 'builtin'
       ? null
@@ -1136,8 +1147,12 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const customAcpKey = parsedCustomAcp ? formatCustomAcpCommandLine(parsedCustomAcp) : '';
 
   const cacheKey = getAcpCapabilityCacheKey(agentConfigId);
+  const configCapability = machine.acpCapabilities?.[cacheKey];
   const cachedCapabilityAuthority = getAcpCapabilityCacheEntryAuthority(
-    machine.acpCapabilities?.[cacheKey],
+    configCapability?.cliType === formData.cliType &&
+      configCapability.agentType === formData.agentType
+      ? configCapability
+      : undefined,
     formData.runtimeOverrides
   );
   const hasCachedCaps =

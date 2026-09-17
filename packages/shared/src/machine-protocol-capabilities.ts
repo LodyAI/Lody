@@ -8,6 +8,7 @@
 export type MachineProtocolCapabilities = Record<string, number>;
 
 export const MACHINE_PROTOCOL_CAPABILITIES = {
+  builtinPi: 'builtinPi',
   subagentCancellation: 'subagentCancellation',
   acpAuthenticationInteractions: 'acpAuthenticationInteractions',
   localProjectRemoval: 'localProjectRemoval',

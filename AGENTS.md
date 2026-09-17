@@ -41,11 +41,14 @@ Repository map and entry points: [README.md](README.md#repository).
   downloads, read [platform contracts](packages/platform/AGENTS.md).
 - Before changing daemon protocol negotiation, MCP/Role catalogs or their UI
   consumers, per-turn MCP selection, or Role creation/dispatch, read [shared contracts](packages/shared/AGENTS.md).
-- `packages/acp-extension-kimi` stays outside the root pnpm graph in its isolated
+- `packages/acp-extension-kimi` and `packages/acp-extension-pi` stay outside the root pnpm graph in isolated
   submodule workspace; consume only its separately built, checksummed managed-runtime
   artifact and versioned ACP contract. Shared ACP extension contracts belong in the
   public `LodyAI/acp-extension-core` submodule, consumed through the root workspace;
   never duplicate them locally.
+- Pi provider migration requires owner confirmation and the target's `builtinPi`
+  protocol capability. Preserve provider IDs and settings; never convert legacy
+  native session IDs. Contract: [builtin Pi](specs/builtin-pi.md).
 - Viewer packaging/version changes must follow its [rules](packages/code-review-viewer/AGENTS.md).
   Package-scope or cloud/local composition changes require `pnpm check:public-boundary`.
 

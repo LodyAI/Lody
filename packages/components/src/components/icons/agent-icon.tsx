@@ -116,7 +116,8 @@ export function AgentIcon({
   if (cliType === 'registry' && agentType === 'claude-p') {
     return <AnthropicIcon className={cls} />;
   }
-  const raw = REGISTRY_AGENT_ICON_SVGS[agentType];
+  const raw =
+    REGISTRY_AGENT_ICON_SVGS[cliType === 'builtin' && agentType === 'pi' ? 'pi-acp' : agentType];
   if (raw) {
     return (
       <InlineSvg

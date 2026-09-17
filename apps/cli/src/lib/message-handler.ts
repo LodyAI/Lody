@@ -168,9 +168,9 @@ import {
   type AgentRunConfigSelection,
   type LodyOperationItemResult,
   type StoredLodyOperation,
-  CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
   hasPendingUserTurnActivation,
 } from '@lody/shared';
+import { getHostMachineProtocolCapabilities } from '../agent/managed-agent-runtime';
 import { ISession, SessionManager } from '../session/session-manager';
 import { captureCli } from '@/lib/analytics/posthog';
 import { LoroDocumentManager, SessionDocument, subscribeSessionChanges } from './loro/doc';
@@ -3504,7 +3504,7 @@ export class MessageHandler {
         os: process.platform,
         rpcVersion: supportsStreamsRpc ? LORO_STREAMS_RPC_VERSION : undefined,
         supportsLocalProjectHistoryRpc: supportsStreamsRpc,
-        protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        protocolCapabilities: getHostMachineProtocolCapabilities(),
         supportRegistryAgentTypes: this.supportRegistryAgentTypes,
         sessions: [],
       });
@@ -5736,7 +5736,7 @@ export class MessageHandler {
         os: process.platform,
         rpcVersion: supportsStreamsRpc ? LORO_STREAMS_RPC_VERSION : machineMeta?.rpcVersion,
         supportsLocalProjectHistoryRpc: supportsStreamsRpc,
-        protocolCapabilities: CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+        protocolCapabilities: getHostMachineProtocolCapabilities(),
         supportRegistryAgentTypes: this.supportRegistryAgentTypes,
         sessions: machineMeta?.sessions ?? [],
       });

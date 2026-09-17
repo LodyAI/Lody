@@ -21,6 +21,12 @@ import {
   findFreshSessionPresenceState,
   FREE_SESSION_LIMIT_PER_WORKSPACE,
   getServerNow,
+  isLegacyPiProvider,
+  migratePiProvider,
+  machineSupportsProtocolCapability,
+  MACHINE_PROTOCOL_CAPABILITIES,
+  getMachineFlockDocId,
+  machineFlockKeys,
   hashAnalyticsId,
   type SessionStartFailureReason,
   InFlightDedupe,
@@ -54,6 +60,7 @@ import {
 } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import { Button } from '@/ui/button';
+import { PiProviderMigrationCard } from './pi-provider-migration-card';
 
 import {
   type AgentSelection,
@@ -6030,9 +6037,50 @@ function WorkspaceChatLanding({
       </button>
     </div>
   ) : null;
+  const legacyPiProviders = executorConfigs.filter(
+    (config) => isLegacyPiProvider(config) && isOwnVisibleMachine(config.machineId)
+  );
+  const [piMigrationBusy, setPiMigrationBusy] = useState(false);
+  const [piMigrationError, setPiMigrationError] = useState(false);
+  const canMigratePi = legacyPiProviders.every((config) =>
+    machineSupportsProtocolCapability(
+      machines.get(config.machineId),
+      MACHINE_PROTOCOL_CAPABILITIES.builtinPi
+    )
+  );
+  const confirmPiMigration = async () => {
+    if (!runtime || piMigrationBusy || !canMigratePi) return;
+    setPiMigrationBusy(true);
+    setPiMigrationError(false);
+    try {
+      for (const config of legacyPiProviders) {
+        await runtime.writer.flockRowUpdate(
+          getMachineFlockDocId(runtime.workspaceId, config.machineId),
+          machineFlockKeys.agentConfig(config.id),
+          (current) =>
+            isLegacyPiProvider(current) &&
+            current.id === config.id &&
+            current.machineId === config.machineId
+              ? migratePiProvider(current)
+              : undefined
+        );
+      }
+    } catch {
+      setPiMigrationError(true);
+    } finally {
+      setPiMigrationBusy(false);
+    }
+  };
   const composerNoticeNode =
-    sharingReviewNoticeNode || sessionLimitNoticeNode ? (
+    sharingReviewNoticeNode || sessionLimitNoticeNode || legacyPiProviders.length ? (
       <>
+        <PiProviderMigrationCard
+          count={legacyPiProviders.length}
+          busy={piMigrationBusy}
+          error={piMigrationError}
+          canMigrate={canMigratePi}
+          onConfirm={() => void confirmPiMigration()}
+        />
         {sharingReviewNoticeNode}
         {sessionLimitNoticeNode}
       </>
@@ -6067,7 +6115,7 @@ function WorkspaceChatLanding({
         resetKeys={[workspaceId, workspaceSlug, contextType, mobileNewChatOpen]}
       >
         <MobileInlinePickerRowSlot>
-          {sessionLimitNoticeNode}
+          {composerNoticeNode}
           <ChatComposer
             tone={tone}
             variant="session"

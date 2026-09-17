@@ -32,6 +32,7 @@ import {
   getManagedAgentRuntimeManager,
   GROK_ACP_ADAPTER_VERSION,
   KIMI_CODE_VERSION,
+  PI_RUNTIME_VERSION,
   type ManagedRuntimeLaunch,
   type ManagedRuntimeName,
   type ManagedRuntimeProgressCallback,
@@ -119,6 +120,11 @@ export type ResolveBuiltinAuthenticationProcessLaunchInput = ResolveACPSettingIn
 };
 
 export const BuiltinACPSetting: Record<CliType, ACPSetting> = {
+  pi: {
+    packageName: 'acp-extension-pi',
+    version: PI_RUNTIME_VERSION,
+    binName: 'acp-extension-pi',
+  },
   kimi: {
     packageName: '@moonshot-ai/kimi-code',
     version: KIMI_CODE_VERSION,
@@ -180,6 +186,14 @@ const KIMI_CODE_ACP_PATH_RELATIVE_DIR = '.kimi-code/bin';
 const registryAgentsById: Record<string, RegistryAcpAgent> = Object.fromEntries(
   REGISTRY_ACP_AGENTS.map((agent) => [agent.id, agent])
 );
+// Keep existing providers and stored turns runnable until their owner chooses
+// migration. This compatibility entry is deliberately absent from the catalog.
+registryAgentsById['pi-acp'] = {
+  id: 'pi-acp',
+  name: 'Pi ACP (legacy)',
+  version: '0.0.33',
+  distribution: { npx: { package: 'pi-acp@0.0.33' } },
+};
 
 export function resolveBuiltinACPSetting(agentType: string): ResolvedACPSetting {
   if (!isBuiltinAgentType(agentType)) {
@@ -222,6 +236,9 @@ export function getAcpCapabilitySourceVersion(
         return managedRuntimeVersion
           ? `builtin-kimi:${managedRuntimeVersion}`
           : `${BUILTIN_KIMI_CAPABILITY_SOURCE_VERSION}${runtimeOverrideSuffix}`;
+      }
+      if (input.agentType === 'pi') {
+        return `builtin-pi:${managedRuntimeVersion ?? PI_RUNTIME_VERSION}`;
       }
       if (input.agentType === 'grok') {
         return managedRuntimeVersion
@@ -428,6 +445,14 @@ async function resolveBuiltinACPProcessLaunch(
   if (!isManagedBuiltinAgentType(input.agentType)) {
     throw new Error(`Unsupported managed builtin ACP type: ${input.agentType}`);
   }
+  if (input.agentType === 'pi') {
+    const runtime = await resolveManagedRuntimeForLaunch('pi', input);
+    return {
+      command: process.execPath,
+      args: [runtime.command, ...(input.extraArgs ?? [])],
+      capabilitySourceVersion: getAcpCapabilitySourceVersion(input, runtime.version),
+    };
+  }
   if (input.agentType === 'kimi') {
     const overridePath = trimRuntimeOverride(input.runtimeOverrides?.kimiPath);
     const runtime = overridePath
@@ -501,6 +526,13 @@ export async function resolveBuiltinAuthenticationProcessLaunch(
 ): Promise<ResolvedACPProcessLaunch | null> {
   if (input.cliType !== 'builtin' || !isManagedBuiltinAgentType(input.agentType)) {
     throw new Error(`Unsupported builtin authentication type: ${input.agentType}`);
+  }
+
+  if (input.agentType === 'pi') {
+    if (input.action === 'status') return null;
+    throw new Error(
+      'Configure Pi credentials through provider environment variables or Pi settings.'
+    );
   }
 
   if (input.agentType === 'kimi') {

@@ -50,6 +50,12 @@ maintenance commands here.
 
 ## Install ownership
 
+- `package-pi-runtime.mjs` builds a frozen isolated Pi dependency closure, including
+  all supported optional platform packages. Windows Job binaries must be supplied
+  from successful CI for the exact source gitlink. Exclude pnpm installation metadata
+  from artifacts; it includes builder paths and timestamps. Validate the installed
+  closure with the adapter smoke and compare deterministic archive bytes.
+
 - `guard-nested-workspace-install.mjs` runs before a public-root install. If an
   ancestor lockfile already owns public package importers, fail with an explicit
   parent-root instruction; never allow two pnpm virtual stores to write links

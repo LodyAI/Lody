@@ -8,6 +8,7 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import { MessageHandler } from '../src/lib/message-handler';
+import { getHostMachineProtocolCapabilities } from '../src/agent/managed-agent-runtime';
 import type { LoroDocumentManager } from '../src/lib/loro/doc';
 import type { SessionManager } from '../src/session/session-manager';
 import type { Logger } from '../src/utils/logger';
@@ -182,6 +183,7 @@ describe('MessageHandler machine registration', () => {
     // Exhaustive on purpose: registration is where a capability key and its
     // version reach every client, so adding one must be acknowledged here.
     expect(registeredMeta.protocolCapabilities).toEqual({
+      ...(getHostMachineProtocolCapabilities().builtinPi ? { builtinPi: 1 } : {}),
       acpAuthenticationInteractions: 2,
       localProjectRemoval: 1,
       localFileResources: 1,

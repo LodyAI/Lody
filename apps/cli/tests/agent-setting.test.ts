@@ -44,6 +44,33 @@ function getRegistryAgent(agentType: string) {
 }
 
 describe('resolveBuiltinACPSetting', () => {
+  it('keeps legacy Pi runnable outside the catalog until confirmation', () => {
+    expect(REGISTRY_ACP_AGENTS.some((agent) => agent.id === 'pi-acp')).toBe(false);
+    const launch = resolveACPSetting({ cliType: 'registry', agentType: 'pi-acp' });
+    expect(launch.exec.args).toContain('pi-acp@0.0.33');
+  });
+
+  it('launches the downloaded Pi closure with Node and its actual capability version', async () => {
+    const manager = vi.spyOn(managedRuntime, 'getManagedAgentRuntimeManager').mockReturnValue({
+      resolveRuntimeForLaunch: async () => ({
+        runtimeName: 'pi',
+        version: '0.1.0-local',
+        targetVersion: '0.1.0-local',
+        platformArch: 'node',
+        command: '/managed/pi/package/dist/index.js',
+        updateAvailable: false,
+      }),
+    } as ReturnType<typeof managedRuntime.getManagedAgentRuntimeManager>);
+    try {
+      expect(await resolveACPProcessLaunchAsync({ cliType: 'builtin', agentType: 'pi' })).toEqual({
+        command: process.execPath,
+        args: ['/managed/pi/package/dist/index.js'],
+        capabilitySourceVersion: 'builtin-pi:0.1.0-local',
+      });
+    } finally {
+      manager.mockRestore();
+    }
+  });
   it('requires the async launcher for managed builtin runtimes', () => {
     expect(() => resolveBuiltinACPSetting('claude')).toThrow(/resolveACPProcessLaunchAsync/);
     expect(() => resolveBuiltinACPSetting('codex')).toThrow(/resolveACPProcessLaunchAsync/);
@@ -253,6 +280,23 @@ describe('resolveBuiltinACPSetting', () => {
       });
     }
   );
+
+  it('never launches another provider for Pi authentication', async () => {
+    await expect(
+      resolveBuiltinAuthenticationProcessLaunch({
+        cliType: 'builtin',
+        agentType: 'pi',
+        action: 'status',
+      })
+    ).resolves.toBeNull();
+    await expect(
+      resolveBuiltinAuthenticationProcessLaunch({
+        cliType: 'builtin',
+        agentType: 'pi',
+        action: 'login',
+      })
+    ).rejects.toThrow('Configure Pi credentials');
+  });
 
   it('uses Kimi ACP login and skips unsupported status probing', async () => {
     await expect(
