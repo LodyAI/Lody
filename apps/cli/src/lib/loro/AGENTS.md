@@ -4,6 +4,8 @@
 
 ## Mirrors over synced docs tolerate unknown root keys
 
+Before changing persistence, read [Flock recovery](../../../../../specs/flock-checkpoint-recovery.md).
+
 Every synced Mirror must use `ignoreUnknownProperties: true`: otherwise an
 unknown root from a newer peer blocks writes on this client. Regression:
 `packages/shared/tests/session-doc-forward-compat.test.ts`.

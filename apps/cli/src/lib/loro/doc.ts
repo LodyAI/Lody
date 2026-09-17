@@ -280,7 +280,6 @@ class ProxiedWebSocket extends WebSocketOriginal {
 
 (globalThis as unknown as GlobalWithWebSocket).WebSocket = ProxiedWebSocket;
 
-import { PersistCoalescer } from './persist-coalescer';
 import { readTimeoutEnv, withTimeout } from './timeout-utils';
 import { ConcurrentQueue } from '../concurrent-queue';
 import type { CliSqliteRepoStore } from './sqlite-repo-store';
@@ -317,12 +316,7 @@ export interface LoroDocumentManagerOptions {
 }
 
 export type LoroRepoPersistReason =
-  | 'remote-doc-sync'
-  | 'remote-meta-sync'
-  | 'remote-flock-sync'
   | 'session-local-base-ref'
-  /** One flush standing in for several remote sync events; see `scheduleRemoteSyncPersist`. */
-  | 'remote-sync-coalesced'
   | 'session-fork-prepare'
   | 'session-fork-commit'
   | 'session-fork-rollback'
@@ -604,20 +598,8 @@ export class LoroDocumentManager {
     const streamsTransport = await createCliStreamsTransport({
       workspaceId: this.workspaceId,
       tokenProvider: this.streamsTokens.createTokenProvider({ workspaceId: this.workspaceId }),
-      remoteCursorStore: this.sqliteRepoStore.remoteCursorStore,
+      repo: this.repo,
       logger: this.logger,
-      // These resolve as soon as the flush is SCHEDULED, not once it has run —
-      // the transport must not block on local persistence. See
-      // `scheduleRemoteSyncPersist`.
-      onPersistDoc: async () => {
-        this.scheduleRemoteSyncPersist('remote-doc-sync');
-      },
-      onPersistMeta: async () => {
-        this.scheduleRemoteSyncPersist('remote-meta-sync');
-      },
-      onPersistFlockDoc: async () => {
-        this.scheduleRemoteSyncPersist('remote-flock-sync');
-      },
     });
     installStreamsDiagnostics(this.logger);
     const detachStreamsTransportStatusListener = streamsTransport.adapter.onStatusChange(
@@ -744,40 +726,6 @@ export class LoroDocumentManager {
         Date.now() - startedAt
       }ms)`
     );
-  }
-
-  /**
-   * Coalesces the Streams transport's per-sync-event persist requests; see
-   * {@link PersistCoalescer}. Callers that need a real durability barrier
-   * (session fork) keep calling `persistPendingChanges` directly.
-   */
-  private readonly remoteSyncPersist = new PersistCoalescer<LoroRepoPersistReason>({
-    debounceMs: readTimeoutEnv('LODY_LORO_REMOTE_PERSIST_DEBOUNCE_MS', 200),
-    flush: async (reasons) => {
-      const single = reasons.length === 1 ? reasons[0] : undefined;
-      if (!single) {
-        this.logger.debug(
-          `[${this.workspaceId}] Coalescing ${reasons.length} remote sync persists: ${reasons.join(', ')}`
-        );
-      }
-      await this.persistPendingChanges(single ?? 'remote-sync-coalesced');
-    },
-    onError: (error) => {
-      this.logger.debug(
-        `[${this.workspaceId}] Coalesced remote-sync flush failed: ${formatErrorMessage(error)}`
-      );
-    },
-  });
-
-  /**
-   * Ask for a local persist after a remote sync event.
-   *
-   * Deliberately not awaited by the transport callbacks: this is a local durability
-   * barrier, not a correctness one — the data is already in the in-memory CRDT and,
-   * being remote in origin, still in the cloud too.
-   */
-  private scheduleRemoteSyncPersist(reason: LoroRepoPersistReason): void {
-    this.remoteSyncPersist.request(reason);
   }
 
   /**
@@ -1654,8 +1602,6 @@ export class LoroDocumentManager {
     this.machineExistenceWatcher = null;
     this.remoteStreamsStatusUnsubscribe?.();
     this.remoteStreamsStatusUnsubscribe = null;
-    // A coalesced flush may still be waiting out its debounce window.
-    await this.remoteSyncPersist.flushNow();
     await this.destroyRepo({ fast: options.fast });
   }
 

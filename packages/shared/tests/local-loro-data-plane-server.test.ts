@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createRequire } from 'node:module';
 import { LoroDoc } from 'loro-crdt';
 import {
   LocalLoroDataPlaneServer,
@@ -95,6 +96,68 @@ function flockEntriesOf(messages: LocalLoroDataPlaneServerMessage[]): Record<str
 }
 
 describe('LocalLoroDataPlaneServer doc room hydration signals', () => {
+  it('forwards a repaired older Flock key even after its peer frontier was overwritten', async () => {
+    const { LoroRepo } = createRequire(import.meta.url)('loro-repo') as typeof import('loro-repo');
+    const sourceRepo = await LoroRepo.create({ metaDebounceCommitMs: 0 });
+    const targetRepo = await LoroRepo.create({ metaDebounceCommitMs: 0 });
+    const source = sourceRepo.getMeta();
+    const target = targetRepo.getMeta();
+    const record = (key: string, clock: string) => ({
+      version: 0,
+      entries: {
+        [JSON.stringify([key])]: { d: key, c: clock },
+      },
+    });
+    source.importJson(record('overwritten', '1700000000000,2,aa'));
+    source.importJson(record('overwritten', '1700000000000,3,bb'));
+    source.commit();
+    expect(source.version()).not.toEqual(source.inclusiveVersion());
+    const work: Array<() => void | Promise<void>> = [];
+    const server = new LocalLoroDataPlaneServer({
+      workspaceId: WORKSPACE_ID,
+      resolveDoc: async () => new LoroDoc(),
+      resolveFlockDoc: async () => source,
+      scheduler: {
+        scheduleDataWork: (task) => {
+          work.push(task);
+          return () => {};
+        },
+      },
+    });
+    const drain = async () => {
+      for (let task; (task = work.shift());) await task();
+    };
+    await server.handleMessage(
+      {
+        id: 'repair',
+        send: (message) => {
+          if (
+            (message.type === 'joined' || message.type === 'update') &&
+            message.payload?.kind === 'flock-json'
+          ) {
+            void target.importJson(message.payload.bundle);
+          }
+        },
+      },
+      {
+        type: 'join',
+        protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+        workspaceId: WORKSPACE_ID,
+        peerId: 'reader',
+        requestId: 'join',
+        room: { scope: 'flock-doc', flockDocId: 'repair' },
+      }
+    );
+    await drain();
+    source.importJson(record('late-key', '1700000000000,1,aa'));
+    source.commit();
+    await drain();
+    expect(target.get(['late-key'])).toBe('late-key');
+    server.dispose();
+    await sourceRepo.destroy();
+    await targetRepo.destroy();
+  });
+
   it('notifies doc room joins and publishes room status to subscribers', async () => {
     const onDocRoomJoin = vi.fn();
     const onDocRoomLeave = vi.fn();
