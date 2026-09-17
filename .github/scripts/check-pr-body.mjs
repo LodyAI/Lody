@@ -26,27 +26,8 @@ const STRUCTURAL_VIEW_LANGUAGES = new Set([
 ]);
 const CONTEXT_HANDOFF_BEGIN = '<!-- context-handoff:begin -->';
 const CONTEXT_HANDOFF_END = '<!-- context-handoff:end -->';
-const REQUIRED_CONTEXT_HEADINGS = [
-  '### Instructions for reviewing agents',
-  '### Authoring context',
-  '### Original user prompt',
-];
-const REVIEW_INSTRUCTION_FIELDS = [
-  'Review focus',
-  'Decisions to challenge',
-  'Plausible failures / evidence gaps',
-];
-const MAX_REVIEW_INSTRUCTIONS_LENGTH = 1_200;
-const AUTHORING_CONTEXT_FIELDS = [
-  'User goal / directives',
-  'Constraints / non-goals',
-  'Risk-bearing decisions',
-  'Destructive or irreversible behavior',
-  'Deliberately not done or tested',
-  'Unknowns / confidence',
-];
+const REQUIRED_CONTEXT_HEADINGS = ['### Original user prompt'];
 const PLACEHOLDER_ONLY = /^(?:<!--[\s\S]*?-->|\s|N\/?A|TODO|TBD|\(optional\))*$/i;
-const WITHHELD_CONTEXT = /^(?:N\/?A\b|redacted\b)/i;
 
 function parseArgs(argv) {
   const options = {
@@ -96,11 +77,7 @@ function lineIndexesOutsideFences(lines, predicate) {
 
     if (fence) {
       const closing = line.match(/^ {0,3}(`+|~+)[ \t]*$/);
-      if (
-        closing &&
-        closing[1][0] === fence.marker &&
-        closing[1].length >= fence.length
-      ) {
+      if (closing && closing[1][0] === fence.marker && closing[1].length >= fence.length) {
         fence = null;
       }
       continue;
@@ -157,25 +134,6 @@ function isFilledSection(section) {
 
   const withoutComments = section.replace(/<!--[\s\S]*?-->/g, '').trim();
   return Boolean(withoutComments) && !PLACEHOLDER_ONLY.test(withoutComments);
-}
-
-function markdownField(section, field) {
-  const prefix = `- **${field}:**`;
-  const line = section?.split('\n').find((candidate) => candidate.trimStart().startsWith(prefix));
-  if (!line) {
-    return null;
-  }
-
-  return line
-    .trimStart()
-    .slice(prefix.length)
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .trim();
-}
-
-function isCompleteContext(value) {
-  const normalized = value?.replaceAll('`', '').trim() ?? '';
-  return isFilledSection(normalized) && !WITHHELD_CONTEXT.test(normalized);
 }
 
 function extractOriginalUserPrompt(section) {
@@ -282,40 +240,11 @@ export function checkPullRequestBody(body, { changedLines = null } = {}) {
     findings.push('Context handoff must keep <!-- context-handoff:begin/end --> markers.');
   }
 
-  if (contextHeadingCounts.get('### Authoring context') === 1) {
-    const context = sectionBody(text, '### Authoring context');
-    for (const field of AUTHORING_CONTEXT_FIELDS) {
-      const value = markdownField(context, field);
-      if (!isCompleteContext(value)) {
-        findings.push(
-          `Authoring context must fill **${field}** with a meaningful public summary; N/A and redacted values are not accepted.`
-        );
-      }
-    }
-  }
-
   if (contextHeadingCounts.get('### Original user prompt') === 1) {
     const originalPrompt = extractOriginalUserPrompt(sectionBody(text, '### Original user prompt'));
     if (!originalPrompt) {
       findings.push(
         'Original user prompt must contain the triggering prompt inside a fenced code block; the template placeholder does not count.'
-      );
-    }
-  }
-
-  if (contextHeadingCounts.get('### Instructions for reviewing agents') === 1) {
-    const instructions = sectionBody(text, '### Instructions for reviewing agents');
-    for (const field of REVIEW_INSTRUCTION_FIELDS) {
-      if (!isCompleteContext(markdownField(instructions, field))) {
-        findings.push(
-          `Review instructions must fill **${field}** with concise, PR-specific content; N/A and redacted values are not accepted.`
-        );
-      }
-    }
-    const visibleInstructions = instructions.replace(/<!--[\s\S]*?-->/g, '').trim();
-    if (visibleInstructions.length > MAX_REVIEW_INSTRUCTIONS_LENGTH) {
-      findings.push(
-        `Review instructions must stay under ${MAX_REVIEW_INSTRUCTIONS_LENGTH} characters and include only the highest-value review guidance.`
       );
     }
   }
