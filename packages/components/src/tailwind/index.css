@@ -56,6 +56,10 @@
      back onto this scale. */
   --z-image-viewer: 95;
   --z-toast: 100;
+  /* The storage-crisis recovery screen sits above every other surface, toasts
+     included: it exists precisely because the failing writes underneath it keep
+     raising toasts the user can neither act on nor use. */
+  --z-storage-crisis: 110;
 }
 
 /*
