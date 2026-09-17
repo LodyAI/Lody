@@ -7,7 +7,7 @@ Translation: current
 
 ## 摘要
 
-可视化教程增加了交互开发，却没有提供足够可复现的安全证据。改用确定性正常协作程序和一个攻击 Agent，由攻击者在明确调度边界修改后端数据。保留真实本地 Riverrun 与公开加密/同步 API，记录攻击以便无 LLM 重放。这是设计方案，不是已实现的实验室，也不证明恶意服务器无法中断服务。
+可视化教程增加了交互开发，却没有提供足够可复现的安全证据。替代实现已落在 `packages/e2ee-lab`：确定性正常协作、一个仅能使用 AttackLab 能力句柄的攻击 Agent、真实本地 Riverrun，以及无 LLM 重放。本文在审查前仍为 proposed。这不是恶意服务器无法中断服务的证明，也未启用产品 E2EE。
 
 ## 决策与范围
 
@@ -15,7 +15,7 @@ Translation: current
 
 ## 实施计划与唯一任务表
 
-当前状态：P0–P3 已验收；P4 Agent 与 P5 交接未验收。工作目录为已有 `lody-e2ee-core` 检出、`feat-e2ee-core` 分支。不开新长期工作区，不接 Lody 产品，不推送/合并；后续推送必须明确目的地，不能默认使用公开 origin。详细设计仍为 draft，已选方向不等于所有实现细节已获验收。
+当前状态：P0–P5 已在 `feat-e2ee-core` 验收。工作仍在本检出。不开新长期工作区，不接 Lody 产品，不推送/合并；后续推送必须明确目的地，不能默认使用公开 origin。实验室 Spec 仍为 draft；勾选任务表不是数学安全证明。
 
 | 完成 | 阶段           | 交付物                         | 必须通过的门槛                              |
 | ---- | -------------- | ------------------------------ | ------------------------------------------- |
@@ -26,8 +26,8 @@ Translation: current
 | [x]  | P1 常驻协作    | lab 包、真实后端、三副本       | 离线重连与耐久恢复，不是一次性读写          |
 | [x]  | P2 确定性      | 调度器、记录、重放             | 三次新目录重放一致，首分歧可定位            |
 | [x]  | P3 固定攻击    | Spec 场景矩阵、有效裁判        | 真实改库被检验，注入已知缺陷时裁判失败      |
-| [ ]  | P4 Agent       | 受限 API、自由攻击记录         | 隔离自测通过，至少一轮真实 Agent 运行可重放 |
-| [ ]  | P5 交接        | 干净检出验收、旧 demo 删除     | 下述完成定义逐项通过，未通过项显式保留      |
+| [x]  | P4 Agent       | 受限 API、自由攻击记录         | 隔离自测通过，至少一轮真实 Agent 运行可重放 |
+| [x]  | P5 交接        | 干净检出验收、旧 demo 删除     | 下述完成定义逐项通过，未通过项显式保留      |
 
 ### P0：冻结基线，不先删掉证据
 
@@ -96,7 +96,7 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 
 ### 验收命令、证据与完成定义
 
-现有命令可从 P0 使用：`pnpm --filter @lody/e2ee-core check`、`pnpm --filter @lody/e2ee-demo check`；后者在删除旧包前执行。计划新增 `pnpm --filter @lody/e2ee-lab check` 与 README 中的 run/replay 命令，未创建前不当作已存在。另跑公开入口兼容测试、依赖边界检查、格式检查、`pnpm run docs check`；提交前按根 AGENTS 运行仓库检查。
+已落地命令：`pnpm --filter @lody/e2ee-core check`、`pnpm --filter @lody/e2ee-lab check`，以及 README 的 `scenario:collab` / `replay` / CLI。根别名：`pnpm test:e2ee-lab`、`pnpm lab:e2ee`。旧包 `@lody/e2ee-demo` 已删除。另跑公开入口兼容测试、依赖边界检查、格式检查、`pnpm run docs check`；提交前按根 AGENTS 运行仓库检查。
 
 每阶段只记一条总结：SHA/工作树标识、命令、退出码、证据路径、通过的契约、未通过项。原始日志保存在受控运行目录；本文不粘贴长日志或秘密。失败属于环境、模型外限制还是实现缺陷必须说清楚。
 
@@ -190,3 +190,18 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 - `test/matrix.test.ts` 每项含正常对照、攻击输入、预期边界、实际判定：已知缺陷导入器 → `violation`；host 拒签；恶意服务器直写 Riverrun（不以 403 代替客户端检查）；未授权设备；丢 ACK；后端明文扫描；撤权；恢复备份篡改；快照同 offset 冲突；伪造对账纸条；无独立证据的分叉 → `outside-model`；停机 xor sqlite。
 - 证据：同上 lab test 退出 0；`pnpm --filter @lody/e2ee-demo test` 退出 0（41 通过 / 2 跳过浏览器）。
 - 未做 P4 真实 Agent。实验室仍依赖 demo host，P5 再迁删。
+
+### 2026-09-17 — P4 受限 AttackLab 与可重放 Agent 运行验收
+
+- `createAttackLab` 是 Agent/CLI 的 Promise 边界，内部只有一套 Effect 实现。期望明文和客户端目录放在 WeakMap；`observe` 只返回公开事件、genesis hex、后端大小和错误类别。隔离就是这个能力句柄，不是双进程、目录前缀、提示词或 OS 容器。Effect 不是沙箱。
+- 隔离自测：`JSON.stringify(lab)` 为 `{}`；可枚举自有名是八个方法加 `actions`；observe JSON 不含期望明文或 `clientDir`；未知 `eventId` 抛 `invalid-event`；xor 找不到 needle 返回 `{ok:false}`。
+- 真实 Agent 运行：本会话只使用 AttackLab。`exploreAttackLab` 观察、读取 Riverrun、扫描 ASCII，若无泄漏则在 sqlite 头之后 xor 16 字节，再提交错误明文声明。本轮未发现（`confidentiality: pass`）。`replayAttackActions` 无 LLM 重放同一动作日志，公开判定一致。`XAI_API_KEY`/`GROK_API_KEY` 未设置，未调用外部模型。
+- 证据：`test/attack-lab.test.ts`。`pnpm --filter @lody/e2ee-lab check` 与 P5 一并记录。
+
+### 2026-09-17 — P5 交接、旧 demo 删除、README 复现验收
+
+- host/session/device/persist/backup 迁入 `packages/e2ee-lab/src/platform/`。vendor tarball SHA-256 `a1314d8fbfaed381505001342d563993ae1f32c0682d9db8252c6f6eb97a391e`。`git rm -r packages/e2ee-demo`；宿主上残留的 UI 文件服务已删除。根脚本 `lab:e2ee` / `test:e2ee-lab`。线路/兼容字符串 `x-e2ee-demo-*` 与 `e2ee-demo-backup/v2` 仍作为协议常量保留。
+- P0 用例去向：`pin` → `test/host-lifecycle.test.ts` tarball 钉扎；`d0-start` → healthz/重启/CLI SIGTERM/kill-after-commit；`d1-control` → 未加入 POST/DELETE 加上协作 genesis 与矩阵未授权；`d2-invite` → `collab-baseline`；`d3-content` → Loro 协作加 `test/flock.test.ts`；`d4-revoke` / `d5-matrix` → `test/matrix.test.ts` 加 kill-after-commit spawn；Node persist 由同一 `clientDir` 重连覆盖；`d2-browser` / `ui-session` / 浏览器 localStorage 随 UI 删除。
+- 可玩教程 Spec 为 `outdated`。独立 demo 说明摘要记录实验室已替换 demo UI。实验室 Spec 仍为 draft。
+- 证据：`pnpm --filter @lody/e2ee-lab check` 退出 0（10 文件 / 23 测试）。`pnpm --filter @lody/e2ee-core check` 退出 0（35 文件 / 384 测试）。`pnpm run docs check` 退出 0（errors 为空；既有无关 AGENTS 体积警告）。干净检出替代：未 `git reset --hard`、未开额外长期 worktree；README 命令在脏的 `feat-e2ee-core` 工作树、父提交 `ed331f61` 上运行。Node v24.21.0。
+- 限制未变：HPKE `@hpke/core` DHKEM 随机与 Loro/Flock Wasm 随机/时钟仍不可注入；Fiber 中断不会 abort 已进入 `exclusive` 的 `appendCas`；隔离不是 OS 级。未启用产品 E2EE；无 push/PR/merge。

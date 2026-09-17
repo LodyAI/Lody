@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { exportDevice, generateDevice, importDevice } from '../../e2ee-demo/src/device';
+import { exportDevice, generateDevice, importDevice } from './platform/device';
 import { HonestClient } from './actors';
 import { startLabBackend, type LabBackend } from './backend';
 import { liveEntropy, type Entropy } from '@lody/e2ee-core';

@@ -23,12 +23,13 @@ written to the public trace.
 
 ## Backend
 
-The first lab host reuses the official sqlite Riverrun adapter from
-`@lody/e2ee-demo/host`. P5 moves that adapter here and deletes the demo/game UI
-after the scenario matrix covers it.
+The host is `src/platform/host.ts` using official sqlite Riverrun `0.3.0` and
+the vendored continuationOffset streams-crdt tarball. There is no browser UI.
 
 ## Status
 
-P2 replay and P3 fixed-attack matrix are in `test/replay-bytes.test.ts` and
-`test/matrix.test.ts`. The Agent API is P4. See the
+P2 replay is in `test/replay-bytes.test.ts`. P3 fixed-attack matrix is in
+`test/matrix.test.ts`. P4 AttackLab isolation and LLM-free action replay are in
+`test/attack-lab.test.ts`. Isolation is the capability handle only: not an OS
+container, and Effect is not a sandbox. See the
 [implementation note](../../.agents/notes/proposed/testing/2026-09-16-e2ee-adversarial-lab.md).

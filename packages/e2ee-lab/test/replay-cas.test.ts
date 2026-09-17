@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { generateDevice } from '../../e2ee-demo/src/device';
+import { generateDevice } from '../src/platform/device';
 import { HonestClient } from '../src/actors';
 import { startLabBackend, type LabBackend } from '../src/backend';
 import { firstDivergence } from '../src/replay';

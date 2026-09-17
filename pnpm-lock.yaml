@@ -1396,7 +1396,7 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(@types/debug@4.1.12)(@types/node@24.10.12)(jiti@2.7.0)(jsdom@26.1.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)
 
-  packages/e2ee-demo:
+  packages/e2ee-lab:
     dependencies:
       '@lody/e2ee-core':
         specifier: workspace:*
@@ -1412,56 +1412,13 @@ importers:
         version: 0.7.0
       '@loro-dev/streams-crdt':
         specifier: file:./vendor/streams-crdt.tgz
-        version: file:packages/e2ee-demo/vendor/streams-crdt.tgz(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.15.1)
-      loro-crdt:
-        specifier: 'catalog:'
-        version: 1.15.1
-      react:
-        specifier: 'catalog:'
-        version: 19.2.0
-      react-dom:
-        specifier: 'catalog:'
-        version: 19.2.0(react@19.2.0)
-    devDependencies:
-      '@types/node':
-        specifier: 'catalog:'
-        version: 24.10.12
-      '@types/react':
-        specifier: 'catalog:'
-        version: 19.2.17
-      '@types/react-dom':
-        specifier: 'catalog:'
-        version: 19.2.3(@types/react@19.2.17)
-      '@vitejs/plugin-react':
-        specifier: 'catalog:'
-        version: 5.2.0(vite@8.2.2(@types/node@24.10.12)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2))
-      playwright:
-        specifier: 1.58.2
-        version: 1.58.2
-      tsx:
-        specifier: 4.23.13
-        version: 4.23.13
-      typescript:
-        specifier: 'catalog:'
-        version: 5.9.3
-      vite:
-        specifier: 'catalog:'
-        version: 8.2.2(@types/node@24.10.12)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.4(@types/debug@4.1.12)(@types/node@24.10.12)(jiti@2.7.0)(jsdom@26.1.0)(lightningcss@1.33.0)(terser@5.46.0)(tsx@4.23.13)(yaml@2.8.2)
-
-  packages/e2ee-lab:
-    dependencies:
-      '@lody/e2ee-core':
-        specifier: workspace:*
-        version: link:../e2ee-core
-      '@lody/e2ee-demo':
-        specifier: workspace:*
-        version: link:../e2ee-demo
+        version: file:packages/e2ee-lab/vendor/streams-crdt.tgz(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.15.1)
       effect:
         specifier: 'catalog:'
         version: 3.18.4
+      loro-crdt:
+        specifier: 'catalog:'
+        version: 1.15.1
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -3375,8 +3332,8 @@ packages:
       loro-crdt:
         optional: true
 
-  '@loro-dev/streams-crdt@file:packages/e2ee-demo/vendor/streams-crdt.tgz':
-    resolution: {integrity: sha512-nnvaPjBkAaEenwp7edGmXeqDVwEP+cQGlTXIk7xhqq1S4RLXjAeu0quR3ILd4//dwL80+/vnGc5DVgN5nxiLtA==, tarball: file:packages/e2ee-demo/vendor/streams-crdt.tgz}
+  '@loro-dev/streams-crdt@file:packages/e2ee-lab/vendor/streams-crdt.tgz':
+    resolution: {integrity: sha512-nnvaPjBkAaEenwp7edGmXeqDVwEP+cQGlTXIk7xhqq1S4RLXjAeu0quR3ILd4//dwL80+/vnGc5DVgN5nxiLtA==, tarball: file:packages/e2ee-lab/vendor/streams-crdt.tgz}
     version: 0.15.1
     peerDependencies:
       '@loro-dev/flock-wasm': ^0.4.0
@@ -15256,7 +15213,7 @@ snapshots:
       '@loro-dev/flock-wasm': 0.4.3
       loro-crdt: 1.15.1
 
-  '@loro-dev/streams-crdt@file:packages/e2ee-demo/vendor/streams-crdt.tgz(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.15.1)':
+  '@loro-dev/streams-crdt@file:packages/e2ee-lab/vendor/streams-crdt.tgz(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.15.1)':
     dependencies:
       '@loro-dev/streams-client': 0.7.0
     optionalDependencies:

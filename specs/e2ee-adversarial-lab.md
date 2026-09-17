@@ -11,7 +11,7 @@ Use one attacking Agent to explore vulnerabilities. Deterministic programs perfo
 
 This replaces the old demo and game tutorial direction. The target is `packages/e2ee-lab` in this repository and current branch, not a new repository or a permanent temporary-directory checkout. Keep local Node + SQLite Riverrun and real public e2ee-core, streams-crdt, Loro/Flock APIs. Do not mock cryptography, verification, or CRDT merging. No Lody product integration, protocol changes, cloud services, UI, or game.
 
-This is an unimplemented design, not a security acceptance claim. Interface names below are proposals; implementation may refine them without silently changing security boundaries.
+The lab lives in `packages/e2ee-lab`. This spec remains draft: it is not a security acceptance claim or product enablement. Interface names may be refined without silently changing security boundaries.
 
 The selected stack is **TypeScript + Effect**, not a Rust controller. Localized Effect adoption inside e2ee-core is allowed, without rewriting cryptography or the pure ledger wholesale. The [implementation plan](../.agents/notes/proposed/testing/2026-09-16-e2ee-adversarial-lab.md#implementation-plan-and-single-task-tracker) owns task status and evidence; this spec owns acceptance contracts, not a duplicate progress tracker.
 
@@ -162,4 +162,4 @@ Before implementation, inventory missing hooks, randomness/time controls, and is
 
 ## 10. Evidence and validation status
 
-The agreed direction is one attacking Agent with deterministic honest programs, total-order scheduling, and replay. Current inventory confirms SQLite Riverrun `0.3.0` and a locally pinned streams-crdt tarball in the old demo; the new lab is not implemented. This documentation turn ran no security experiments, benchmarks, or formal proofs. P2 should first check barrier/replay invariants with a finite event model; passing that model does not replace real-client acceptance.
+The agreed direction is one attacking Agent with deterministic honest programs, total-order scheduling, and replay. The lab uses official sqlite Riverrun `0.3.0` and the pinned continuationOffset streams-crdt tarball. Evidence and remaining limits live in the implementation note; this spec is still draft and is not a mathematical security proof.

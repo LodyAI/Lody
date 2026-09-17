@@ -7,12 +7,13 @@ Translation: current
 
 ## 摘要
 
-产品 E2EE 接线已暂停。下一步可执行证明是本地独立 demo：在当前
-`feat-e2ee-core` 分支新增 `packages/e2ee-demo`，用 loopback Node 宿主、官方
-SQLite Riverrun（显式数据目录）和隔离浏览器客户端，只通过公开
-`@lody/e2ee-core` 与 streams-crdt API 协作。这不是 Lody 接入、V4 或生产启用。
-npm `streams-crdt@0.15.1` 缺少快照 `continuationOffset`，因此 demo 固定带校验
-的本地 tarball，而不是兄弟源码 alias。
+产品 E2EE 接线已暂停。可执行证明现为本地 `packages/e2ee-lab` 攻防实验室；原先
+`packages/e2ee-demo` UI/游戏交付在 host/session 覆盖迁入实验室后已删除。原始意图：
+在当前 `feat-e2ee-core` 分支做仅本地 demo，用 loopback Node 宿主、官方 SQLite
+Riverrun（显式数据目录）和隔离浏览器客户端，只通过公开 `@lody/e2ee-core` 与
+streams-crdt API 协作。这不是 Lody 接入、V4 或生产启用。npm
+`streams-crdt@0.15.1` 缺少快照 `continuationOffset`，因此固定带校验的本地
+tarball，而不是兄弟源码 alias。
 
 ## 决定与范围
 

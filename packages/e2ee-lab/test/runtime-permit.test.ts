@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { generateDevice } from '../../e2ee-demo/src/device';
+import { generateDevice } from '../src/platform/device';
 import { recordingEntropy } from '../src/entropy';
 import { cleanupLab, labClient, launchLab } from '../src/fixtures';
 import { LabRuntime } from '../src/runtime';

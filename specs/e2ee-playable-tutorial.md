@@ -1,7 +1,11 @@
 # Secret Post Office: one-week playable E2EE tutorial
 
-Status: draft
+Status: outdated
 Translation: current
+
+Superseded by the [deterministic adversarial lab](e2ee-adversarial-lab.md) in
+`packages/e2ee-lab`. The pixel-stage tutorial and `packages/e2ee-demo` UI were
+not shipped.
 
 [中文](e2ee-playable-tutorial.zh.md)
 
@@ -193,7 +197,7 @@ After day 3 add no levels or capabilities. Cut decoration, motion, and explanati
 
 ## 10. Sources, status, and work log
 
-Inspect [demo README](../packages/e2ee-demo/README.md), [ledger specification](e2ee-ledger.zh.md), and [independent demo decision](../.agents/notes/proposed/architecture/2026-09-16-e2ee-independent-demo.md). Semantics follow Lody Security Whitepaper v0.11's identity, comparison, revocation, recovery, and boundaries. This document does not copy private deployment material or change protocol specifications.
+Inspect [lab README](../packages/e2ee-lab/README.md), [ledger specification](e2ee-ledger.zh.md), and [independent demo decision](../.agents/notes/proposed/architecture/2026-09-16-e2ee-independent-demo.md). Semantics follow Lody Security Whitepaper v0.11's identity, comparison, revocation, recovery, and boundaries. This document does not copy private deployment material or change protocol specifications.
 
 Implementation reference baseline: `d20c2f25`. This change records design only; game implementation, model checking, and usability acceptance are not complete. Before full implementation, map A1–A10 to finite UI-state/provenance combinations and end-to-end tests; this is not a cryptographic proof.
 

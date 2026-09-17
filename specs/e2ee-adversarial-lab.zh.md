@@ -11,7 +11,7 @@ Translation: current
 
 本方案替代旧 demo 和游戏教程方向。目标包为当前仓库、当前分支上的 `packages/e2ee-lab`；不新开仓库，不在临时目录长期开发。后端仍是本地 Node + SQLite Riverrun。使用真实 `@lody/e2ee-core`、streams-crdt、Loro/Flock，不模拟签名、加密、验证或 CRDT 合并。不接入 Lody 产品，不改变协议，不增加云服务，不做 UI 或游戏。
 
-本文是待实现设计，不代表已有实现通过安全验收。详细接口名称为建议；实现可微调，但不得悄悄改变安全边界。
+实验室位于 `packages/e2ee-lab`。本文仍为 draft：不是安全验收证明，也不是产品启用。接口名称可微调，但不得悄悄改变安全边界。
 
 技术方向已选择 **TypeScript + Effect**，不再采用 Rust 主控。允许在 e2ee-core 内局部引入 Effect，但不整体改写密码学或纯账本。实施清单和证据统一维护在[实施计划](../.agents/notes/proposed/testing/2026-09-16-e2ee-adversarial-lab.zh.md#实施计划与唯一任务表)，本文定义验收契约，不重复维护进度。
 
@@ -162,4 +162,4 @@ interface AttackLab {
 
 ## 10. 证据与验证状态
 
-设计依据：已确定的单攻击 Agent、正常程序确定性、全序调度和可重放方向。当前清点确认旧 demo 使用 SQLite Riverrun `0.3.0` 和本地 pinned streams-crdt tarball；新实验室尚未实现。本轮只检查文档，没有执行安全实验、性能测试或形式化证明。P2 应先以有限事件模型检查屏障/重放不变量，模型通过也不代替真实客户端验收。
+设计依据：已确定的单攻击 Agent、正常程序确定性、全序调度和可重放方向。实验室使用官方 sqlite Riverrun `0.3.0` 与 pinned continuationOffset streams-crdt tarball。证据与剩余限制见实施说明；本文仍为 draft，不是数学安全证明。

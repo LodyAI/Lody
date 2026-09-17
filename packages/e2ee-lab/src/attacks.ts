@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
-import { CONTROL_STREAM, DEVICE_HEADER } from '../../e2ee-demo/src/protocol';
-import { deviceHex } from '../../e2ee-demo/src/device';
+import { CONTROL_STREAM, DEVICE_HEADER } from './platform/protocol';
+import { deviceHex } from './platform/device';
 import type { HonestClient } from './actors';
 
 export async function appendControlRecord(input: {

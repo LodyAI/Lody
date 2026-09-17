@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { exportDevice, generateDevice } from '../../e2ee-demo/src/device';
+import { exportDevice, generateDevice } from '../src/platform/device';
 import {
   isRecordingEntropy,
   recordingEntropy,
@@ -46,10 +46,10 @@ async function casOnce(input?: {
   await twin.reauth();
   await twin.adoptGenesis(alice.genesisHex!);
   const extra = input?.extras?.extra
-    ? await (await import('../../e2ee-demo/src/device')).importDevice(input.extras.extra)
+    ? await (await import('../src/platform/device')).importDevice(input.extras.extra)
     : await generateDevice();
   const other = input?.extras?.other
-    ? await (await import('../../e2ee-demo/src/device')).importDevice(input.extras.other)
+    ? await (await import('../src/platform/device')).importDevice(input.extras.other)
     : await generateDevice();
   const aliceSubmit = alice.admitDevice(extra, 'personal', false);
   await runtime.whenRequested(1);
@@ -98,7 +98,7 @@ async function lostAckOnce(input?: {
   });
   await alice.createSpace();
   const extra = input?.extra
-    ? await (await import('../../e2ee-demo/src/device')).importDevice(input.extra)
+    ? await (await import('../src/platform/device')).importDevice(input.extra)
     : await generateDevice();
   await fetch(`${host.baseUrl}/v1/failpoints`, {
     method: 'POST',

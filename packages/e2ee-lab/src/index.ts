@@ -34,6 +34,15 @@ export {
   type ScenarioRecord,
 } from './judge';
 export { appendControlRecord, maliciousAppendCas, mutateSqliteBytes } from './attacks';
+export {
+  createAttackLab,
+  replayAttackActions,
+  type AttackAction,
+  type AttackClaim,
+  type AttackLab,
+  type PublicReport,
+  type PublicView,
+} from './attack-lab';
 export { LabRuntime, type ProtocolFrame } from './runtime';
 export {
   prefixedEntropy,

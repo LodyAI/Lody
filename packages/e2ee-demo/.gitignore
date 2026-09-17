@@ -1,7 +1,0 @@
-node_modules/
-dist/
-.e2ee-demo-data/
-playwright-report/
-test-results/
-*.log
-!vendor/*.tgz

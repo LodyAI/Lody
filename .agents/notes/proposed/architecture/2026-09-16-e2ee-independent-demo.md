@@ -7,8 +7,10 @@ Translation: current
 
 ## Abstract
 
-Product E2EE wiring is paused. The next executable proof is a local-only demo:
-`packages/e2ee-demo` on the current `feat-e2ee-core` branch, with a loopback Node
+Product E2EE wiring is paused. The executable proof is now the local
+`packages/e2ee-lab` adversarial lab; the earlier `packages/e2ee-demo` UI/game
+delivery was removed after its host/session coverage moved into the lab. Original
+intent: a local-only demo on the current `feat-e2ee-core` branch, with a loopback Node
 host, official SQLite Riverrun on an explicit data directory, and isolated
 browser clients that consume public `@lody/e2ee-core` and streams-crdt APIs.
 This is not Lody integration, V4, or production enablement. Registry

@@ -7,8 +7,8 @@ import {
   possessionSigningBytes,
   signingBytesForBody,
 } from '@lody/e2ee-core/ledger';
-import { generateDevice } from '../../e2ee-demo/src/device';
-import { fromHex } from '../../e2ee-demo/src/bytes';
+import { generateDevice } from '../src/platform/device';
+import { fromHex } from '../src/platform/bytes';
 import { HonestClient } from '../src/actors';
 import { appendControlRecord } from '../src/attacks';
 import { startLabBackend, type LabBackend } from '../src/backend';

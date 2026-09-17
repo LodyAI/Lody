@@ -6,7 +6,7 @@ import {
   type LabEvent,
   type SchedulerState,
 } from './scheduler';
-import { toHex } from '../../e2ee-demo/src/bytes';
+import { toHex } from './platform/bytes';
 
 export interface ProtocolFrame {
   readonly eventId: string;
@@ -19,10 +19,18 @@ export interface ProtocolFrame {
   readonly responseHex: string;
 }
 
+export type FetchIntercept = {
+  readonly eventId: string;
+  readonly kind: 'drop' | 'replace';
+  readonly status?: number;
+  readonly bodyHex?: string;
+};
+
 export class LabRuntime {
   state: SchedulerState;
   readonly paused = new Set<string>();
   readonly frames: ProtocolFrame[] = [];
+  private readonly intercepts: FetchIntercept[] = [];
   private readonly waiters = new Map<string, () => void>();
   private readonly requestWaiters: Array<{ count: number; resolve: () => void }> = [];
   private readonly mode: 'auto' | 'manual';
@@ -71,6 +79,10 @@ export class LabRuntime {
     this.dispatch();
   }
 
+  intercept(input: FetchIntercept): void {
+    this.intercepts.push(input);
+  }
+
   async gate(actor: string, operation: string, phase: string): Promise<string> {
     const requested = requestEvent(this.state, { actor, operation, phase });
     this.state = requested.state;
@@ -94,8 +106,19 @@ export class LabRuntime {
         eventId = await this.gate(actor, 'submit', 'request-queued');
       }
       const requestHex = cas ? toHex(new Uint8Array(await request.clone().arrayBuffer())) : '';
+      const intercept = eventId
+        ? this.intercepts.find((item) => item.eventId === eventId)
+        : undefined;
       try {
-        const response = await globalThis.fetch(request);
+        if (intercept?.kind === 'drop') {
+          throw new Error('intercept-drop');
+        }
+        const response =
+          intercept?.kind === 'replace'
+            ? new Response(Buffer.from(fromHexBody(intercept.bodyHex ?? '')), {
+                status: intercept.status ?? 200,
+              })
+            : await globalThis.fetch(request);
         if (eventId) {
           const responseHex = toHex(new Uint8Array(await response.clone().arrayBuffer()));
           this.frames.push({
@@ -164,4 +187,13 @@ export class LabRuntime {
 
 function stripSecrets(url: string): string {
   return url.replace(/Bearer%20[0-9a-f]+/gi, 'Bearer').split('?')[0] ?? url;
+}
+
+function fromHexBody(hex: string): Uint8Array {
+  if (hex.length === 0) return new Uint8Array();
+  const bytes = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < bytes.byteLength; i++) {
+    bytes[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  }
+  return bytes;
 }

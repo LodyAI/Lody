@@ -7,7 +7,7 @@ Translation: current
 
 ## Abstract
 
-The visual tutorial adds interaction work without providing sufficiently reproducible security evidence. Replace it with deterministic honest collaborators and one attacking Agent controlling backend mutations at explicit scheduling boundaries. Keep real local Riverrun and public cryptographic/sync APIs; record attacks for LLM-free replay. This is a design proposal, not an implemented lab or proof that malicious servers cannot disrupt service.
+The visual tutorial added interaction work without providing sufficiently reproducible security evidence. The replacement is implemented in `packages/e2ee-lab`: deterministic honest collaborators, one attacking Agent on a capability-only AttackLab, real local Riverrun, and LLM-free replay. This note remains proposed until review. It is not a proof that malicious servers cannot disrupt service, and product E2EE is not enabled.
 
 ## Decision and scope
 
@@ -15,7 +15,7 @@ The [specification](../../../../specs/e2ee-adversarial-lab.md) owns contracts; t
 
 ## Implementation plan and single task tracker
 
-Current state: P0–P3 accepted; P4 Agent and P5 handoff are unaccepted. Work in the existing `lody-e2ee-core` checkout on `feat-e2ee-core`. No new permanent workspace, product integration, push or merge. Any later push needs an explicit destination rather than defaulting to public origin. Detailed design stays draft; selecting a direction does not accept every implementation detail.
+Current state: P0–P5 accepted on `feat-e2ee-core`. Work remains in this checkout. No new permanent workspace, product integration, push or merge. Any later push needs an explicit destination rather than defaulting to public origin. The lab spec stays draft; checking the tracker is not a mathematical security proof.
 
 | Done | Stage                       | Deliverable                                             | Required gate                                                    |
 | ---- | --------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------- |
@@ -26,8 +26,8 @@ Current state: P0–P3 accepted; P4 Agent and P5 handoff are unaccepted. Work in
 | [x]  | P1 Persistent collaboration | Lab package, real backend, three replicas               | Offline/restart durability, not one-shot read/write              |
 | [x]  | P2 Determinism              | Scheduler, recording, replay                            | Three fresh-directory replays; first-divergence detection        |
 | [x]  | P3 Fixed attacks            | Scenario matrix and effective judge                     | Real database mutation; known injected defects fail judging      |
-| [ ]  | P4 Agent                    | Restricted API and exploration trace                    | Isolation checks; at least one real replayable Agent run         |
-| [ ]  | P5 Handoff                  | Clean-checkout acceptance and old-demo removal          | Complete done criteria below; explicit unpassed items            |
+| [x]  | P4 Agent                    | Restricted API and exploration trace                    | Isolation checks; at least one real replayable Agent run         |
+| [x]  | P5 Handoff                  | Clean-checkout acceptance and old-demo removal          | Complete done criteria below; explicit unpassed items            |
 
 ### P0: Freeze the baseline without destroying evidence
 
@@ -96,7 +96,7 @@ P5 runs README and all core/lab checks from a clean checkout. Follow the P0 mapp
 
 ### Commands, evidence and done criteria
 
-Existing P0 commands: `pnpm --filter @lody/e2ee-core check`, `pnpm --filter @lody/e2ee-demo check`; run the latter before deleting the old package. Planned additions are `pnpm --filter @lody/e2ee-lab check` and README run/replay commands, not yet shipped. Also run public-entry compatibility tests, dependency-boundary checks, formatting and `pnpm run docs check`; follow root AGENTS checks before commits.
+Shipped commands: `pnpm --filter @lody/e2ee-core check`, `pnpm --filter @lody/e2ee-lab check`, plus README `scenario:collab` / `replay` / CLI. Root aliases: `pnpm test:e2ee-lab`, `pnpm lab:e2ee`. The old `@lody/e2ee-demo` package is removed. Also run public-entry compatibility tests, dependency-boundary checks, formatting and `pnpm run docs check`; follow root AGENTS checks before commits.
 
 Record one concise stage summary: revision/tree identity, commands, exit codes, evidence paths, satisfied contracts and unpassed items. Raw logs live in controlled run directories, not pasted here with secrets. Distinguish environment problems, model limits and implementation defects.
 
@@ -190,3 +190,18 @@ Implementers choose filenames, service names and test organization without repea
 - `test/matrix.test.ts` records control, attack, expected boundary and verdict: known defective importer → `violation`; host signature reject; malicious-server direct Riverrun write (not a 403 stand-in); unauthorized device; lost ACK; plaintext scan; revoke; recovery-backup tamper; snapshot identity conflict; forged compare note; fork without independent evidence → `outside-model`; stopped-host sqlite XOR.
 - Evidence: same lab test exit 0; `pnpm --filter @lody/e2ee-demo test` exit 0 (41 passed / 2 skipped browser).
 - P4 real Agent is not done. The lab still depends on the demo host until P5.
+
+### 2026-09-17 — P4 restricted AttackLab and replayable Agent run accepted
+
+- `createAttackLab` is the Agent/CLI Promise boundary over one Effect implementation. Expected plaintext and client directories live in a WeakMap; `observe` returns public events, genesis hex, backend size and error categories only. Isolation is this capability handle, not two processes, directory prefixes, prompts, or an OS container. Effect is not a sandbox.
+- Isolation self-test: `JSON.stringify(lab)` is `{}`; enumerable own names are the eight methods plus `actions`; observe JSON contains neither expected plaintext nor `clientDir`; unknown `eventId` throws `invalid-event`; a missing xor needle returns `{ok:false}`.
+- Real Agent run: this session used only AttackLab. `exploreAttackLab` observes, reads Riverrun, scans ASCII, xors 16 bytes after the sqlite header if no leak, then submits a wrong plaintext claim. This round found none (`confidentiality: pass`). `replayAttackActions` replays the recorded log without an LLM and matches the public verdict. `XAI_API_KEY`/`GROK_API_KEY` were unset; no external model was called.
+- Evidence: `test/attack-lab.test.ts`. `pnpm --filter @lody/e2ee-lab check` later recorded with P5.
+
+### 2026-09-17 — P5 handoff, old-demo removal, README reproduce accepted
+
+- Host/session/device/persist/backup moved to `packages/e2ee-lab/src/platform/`. Vendor tarball SHA-256 `a1314d8fbfaed381505001342d563993ae1f32c0682d9db8252c6f6eb97a391e`. `git rm -r packages/e2ee-demo`; leftover UI file serving removed from the host. Root scripts `lab:e2ee` / `test:e2ee-lab`. Wire/compat strings `x-e2ee-demo-*` and `e2ee-demo-backup/v2` stay as protocol constants.
+- P0 test map: `pin` → `test/host-lifecycle.test.ts` tarball pin; `d0-start` → healthz/restart/CLI SIGTERM/kill-after-commit; `d1-control` → unjoined POST/DELETE plus collab genesis and matrix unauthorized; `d2-invite` → `collab-baseline`; `d3-content` → Loro collab plus `test/flock.test.ts`; `d4-revoke` / `d5-matrix` → `test/matrix.test.ts` plus kill-after-commit spawn; Node persist covered by same-`clientDir` reconnect; `d2-browser` / `ui-session` / browser localStorage deleted with the UI.
+- Playable tutorial spec is `outdated`. Independent-demo note abstract records that the lab replaced the demo UI. Lab spec stays draft.
+- Evidence: `pnpm --filter @lody/e2ee-lab check` exit 0 (10 files / 23 tests). `pnpm --filter @lody/e2ee-core check` exit 0 (35 files / 384 tests). `pnpm run docs check` exit 0 (errors empty; pre-existing unrelated AGENTS size warnings). Clean-checkout stand-in: no `git reset --hard` and no extra long-lived worktree; README commands ran on this dirty `feat-e2ee-core` tree at parent `ed331f61`. Node v24.21.0.
+- Limits unchanged: HPKE `@hpke/core` DHKEM entropy and Loro/Flock Wasm entropy/clocks are not injectable; Fiber interrupt does not abort an in-flight `exclusive` `appendCas`; isolation is not OS-level. Product E2EE is not enabled; no push/PR/merge.

@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { startLabBackend } from './backend';
@@ -18,6 +18,7 @@ const host = await startLabBackend({
   port: 0,
   testMode: true,
 });
+writeFileSync(join(dataDir, 'pid'), `${process.pid}\n`);
 console.log(`e2ee-lab listening ${host.baseUrl}`);
 console.log(`riverrun ${host.riverrunUrl}`);
 console.log(`data-dir ${host.dataDir}`);

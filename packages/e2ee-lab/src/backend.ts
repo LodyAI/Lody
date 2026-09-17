@@ -1,2 +1,2 @@
-export { startDemoHost as startLabBackend } from '@lody/e2ee-demo/host';
-export type { RunningDemoHost as LabBackend } from '@lody/e2ee-demo/host';
+export { startDemoHost as startLabBackend } from './platform/host';
+export type { RunningDemoHost as LabBackend } from './platform/host';

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { readLoro, writeLoro } from '../../e2ee-demo/src/content-session';
+import { readLoro, writeLoro } from '../src/platform/content-session';
 import { HonestClient } from '../src/actors';
 import { startLabBackend, type LabBackend } from '../src/backend';
 import { emptyScheduler, recordEvent } from '../src/scheduler';

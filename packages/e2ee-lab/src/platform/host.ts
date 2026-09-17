@@ -1,8 +1,7 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { mkdirSync, writeFileSync, createReadStream, existsSync, statSync } from 'node:fs';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
-import { dirname, extname, isAbsolute, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { isAbsolute, join, resolve } from 'node:path';
 import { startDevServer, type RunningDevServer } from '@loro-dev/sqlite-riverrun';
 import { ContentCipher, Ledger } from '@lody/e2ee-core';
 import { decodeRecord, hashRecord } from '@lody/e2ee-core/ledger';
@@ -31,8 +30,6 @@ import {
   type IssuedCredential,
   type JoinRequestWire,
 } from './protocol';
-
-const here = dirname(fileURLToPath(import.meta.url));
 
 export interface DemoHostOptions {
   readonly dataDir: string;
@@ -78,52 +75,6 @@ function bearer(req: IncomingMessage): string | null {
 
 function pathParts(url: URL): string[] {
   return url.pathname.split('/').filter(Boolean);
-}
-
-const UI_MIME: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.wasm': 'application/wasm',
-  '.svg': 'image/svg+xml',
-  '.json': 'application/json',
-  '.map': 'application/json',
-};
-
-function isApiPath(pathname: string): boolean {
-  return (
-    pathname === '/healthz' ||
-    pathname === '/readyz' ||
-    pathname.startsWith('/v1/') ||
-    pathname.startsWith('/ds/')
-  );
-}
-
-function serveUi(pathname: string, res: ServerResponse): boolean {
-  if (isApiPath(pathname)) return false;
-  const built = join(here, '../dist/ui');
-  const source = join(here, '../index.html');
-  if (existsSync(join(built, 'index.html'))) {
-    const relative = pathname === '/' ? '/index.html' : pathname;
-    const candidate = join(built, relative);
-    if (candidate.startsWith(built) && existsSync(candidate) && statSync(candidate).isFile()) {
-      res.writeHead(200, {
-        'Content-Type': UI_MIME[extname(candidate)] ?? 'application/octet-stream',
-      });
-      createReadStream(candidate).pipe(res);
-      return true;
-    }
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    createReadStream(join(built, 'index.html')).pipe(res);
-    return true;
-  }
-  if (pathname === '/' || pathname === '/index.html') {
-    if (!existsSync(source)) return false;
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    createReadStream(source).pipe(res);
-    return true;
-  }
-  return false;
 }
 
 function unframe(body: Uint8Array): Uint8Array[] {
@@ -603,9 +554,6 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
           return;
         }
 
-        if ((req.method === 'GET' || req.method === 'HEAD') && serveUi(url.pathname, res)) {
-          return;
-        }
         json(res, 404, { error: 'not-found' });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'error';

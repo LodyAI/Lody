@@ -1,7 +1,10 @@
 # 秘密邮局：一周版可玩 E2EE 教程
 
-Status: draft
+Status: outdated
 Translation: current
+
+已被 `packages/e2ee-lab` 的[确定性攻防实验室](e2ee-adversarial-lab.zh.md)替代。
+像素舞台教程与 `packages/e2ee-demo` UI 未交付。
 
 [English](e2ee-playable-tutorial.md)
 
@@ -197,7 +200,7 @@ Translation: current
 
 ## 10. 依据、状态与工作日志
 
-现有可检查输入：[demo README](../packages/e2ee-demo/README.md)、[权限账本规格](e2ee-ledger.zh.md)、[独立 demo 决策](../.agents/notes/proposed/architecture/2026-09-16-e2ee-independent-demo.zh.md)。语义参考 Lody 安全白皮书 v0.11 的身份、对账、撤权、恢复及边界；本文件不复制私有部署材料，也不改变协议规格。
+现有可检查输入：[实验室 README](../packages/e2ee-lab/README.zh.md)、[权限账本规格](e2ee-ledger.zh.md)、[独立 demo 决策](../.agents/notes/proposed/architecture/2026-09-16-e2ee-independent-demo.zh.md)。语义参考 Lody 安全白皮书 v0.11 的身份、对账、撤权、恢复及边界；本文件不复制私有部署材料，也不改变协议规格。
 
 本设计的实现参考基线为 `d20c2f25`。本轮仅记录设计，不声称游戏、模型检查或可用性验收已完成。完整实现前将 A1–A10 映射为有限 UI 状态/来源组合和端到端测试；该映射不等于密码学证明。
 

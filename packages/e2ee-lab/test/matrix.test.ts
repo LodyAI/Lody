@@ -11,14 +11,14 @@ import {
   possessionSigningBytes,
   signingBytesForBody,
 } from '@lody/e2ee-core/ledger';
-import { generateDevice } from '../../e2ee-demo/src/device';
+import { generateDevice } from '../src/platform/device';
 import {
   loroTailOffset,
   putLoroSnapshot,
   sealLoroSnapshot,
   writeLoro,
-} from '../../e2ee-demo/src/content-session';
-import { fromHex, toHex } from '../../e2ee-demo/src/bytes';
+} from '../src/platform/content-session';
+import { fromHex, toHex } from '../src/platform/bytes';
 import { appendControlRecord, maliciousAppendCas, mutateSqliteBytes } from '../src/attacks';
 import { cleanupLab, labClient, launchLab } from '../src/fixtures';
 import {

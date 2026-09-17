@@ -12,13 +12,17 @@
     "check": "pnpm typecheck && pnpm test",
     "scenario:collab": "vitest run test/collab-baseline.test.ts",
     "replay": "vitest run test/replay-bytes.test.ts test/replay-cas.test.ts",
-    "format": "prettier --write src test package.json tsconfig.json README.md README.zh.md AGENTS.md vitest.config.ts",
-    "format:check": "prettier --check src test package.json tsconfig.json README.md README.zh.md AGENTS.md vitest.config.ts"
+    "format": "prettier --write src test vendor/README.md package.json tsconfig.json README.md README.zh.md AGENTS.md vitest.config.ts",
+    "format:check": "prettier --check src test vendor/README.md package.json tsconfig.json README.md README.zh.md AGENTS.md vitest.config.ts"
   },
   "dependencies": {
     "@lody/e2ee-core": "workspace:*",
-    "@lody/e2ee-demo": "workspace:*",
-    "effect": "catalog:"
+    "@loro-dev/flock-wasm": "catalog:",
+    "@loro-dev/sqlite-riverrun": "0.3.0",
+    "@loro-dev/streams-client": "catalog:",
+    "@loro-dev/streams-crdt": "file:./vendor/streams-crdt.tgz",
+    "effect": "catalog:",
+    "loro-crdt": "catalog:"
   },
   "devDependencies": {
     "@types/node": "catalog:",
