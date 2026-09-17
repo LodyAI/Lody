@@ -30,6 +30,14 @@ of unsent local edits. Local-only composition starts no cloud transport.
 
 ## Limits and acceptance
 
+The local Flock plane must relay repaired records from either author, including
+cloud imports whose peer maximum clock does not change. Each (re)join reconciles
+all records in both directions; live updates use exact changed keys and per-link
+record knowledge for echo suppression. LoroDoc causal delta behavior is unchanged.
+Existing v7 JSON payloads remain readable; an older endpoint cannot provide the
+new live-repair guarantee until upgraded. Rejoins cost a full Flock scan/download,
+and exact peer knowledge costs memory proportional to observed records per link.
+
 Wire and snapshot codecs do not change. This does not promise that an old writer
 can safely share a database with a new writer, or that rollback preserves the new
 durability guarantees. It does not repair historical remote snapshots whose

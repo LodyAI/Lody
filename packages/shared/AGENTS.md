@@ -1,5 +1,7 @@
 # Shared contracts
 
+Local Flock sync uses exact records, never clock maxima as completeness proof; see [contract](../../specs/flock-checkpoint-recovery.md).
+
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
 Archive uses `collectSessionArchiveTargets` for contained/opened descendants;

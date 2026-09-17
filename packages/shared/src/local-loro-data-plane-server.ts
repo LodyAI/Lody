@@ -1,4 +1,9 @@
 import { LoroDoc, VersionVector } from 'loro-crdt';
+import {
+  LocalFlockPeerState,
+  type FlockChangeBatch,
+  type FlockRecordSource,
+} from './local-flock-peer-state';
 import type { TransportRoomStatus } from 'loro-repo';
 import {
   base64ToBytes,
@@ -6,14 +11,12 @@ import {
   bytesToBase64,
   chunkFlockBundle,
   createDocUpdateTransferId,
-  decodeFlockVersion,
   DocUpdateChunkAssembler,
   encodeFlockVersion,
   isEmptyFlockBundle,
   LOCAL_LORO_DATA_PLANE_MAX_PAYLOAD_BYTES,
   LOCAL_LORO_DATA_PLANE_PAYLOAD_TOO_LARGE,
   LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
-  mergeFlockVersions,
   roomKey,
   type FlockVersionVector,
   type LocalLoroDataPlaneClientMessage,
@@ -29,17 +32,15 @@ import {
 
 /**
  * Flock-like CRDT (loro-repo Flock). Flock entries are self-contained LWW
- * records, so `exportJson(from)` deltas are independently importable — flock
- * rooms sync incrementally, exactly like doc rooms (per-peer version-vector
- * frontier), just with a JSON version-vector encoding.
+ * records. Join reconciles all records; live changes point-read changed keys.
  */
-export type LocalLoroFlockLike = {
+export type LocalLoroFlockLike = FlockRecordSource & {
   exportJson(from: FlockVersionVector): unknown | Promise<unknown>;
   importJson(bundle: unknown): void | Promise<void>;
-  /** Exclusive/visible flock version vector — the incremental-export baseline. */
+  /** Legacy wire summary, never a proof of key completeness. */
   version(): FlockVersionVector;
   commit?: () => void;
-  subscribe(listener: (batch: { source?: string }) => void): () => void;
+  subscribe(listener: (batch: FlockChangeBatch) => void): () => void;
 };
 
 /**
@@ -144,16 +145,11 @@ type DocSubscriber = {
 };
 
 type FlockSubscriber = {
+  records: LocalFlockPeerState;
   peerId: string;
   connection: LocalLoroDataPlaneServerConnection;
   // See DocSubscriber.latestJoinRequestId.
   latestJoinRequestId: string;
-  // Flock frontier the peer is known to hold — same write-time delta contract
-  // as `lastSentVV`. Advanced by MERGE only (a frontier never regresses):
-  // merged with the flock version captured before each export, and with the
-  // peer's reported version when it uploads. Fail-open: a peer whose frontier
-  // under-reports gets redundant-but-idempotent entries, never a starve.
-  lastSentVersion: FlockVersionVector;
 };
 
 type DocRoomEntry = {
@@ -217,7 +213,7 @@ function syncTaskKey(key: string, peerId: string): string {
  * Transport-agnostic server half of the local Loro data plane. It holds one
  * entry per room (shared across all peers), subscribes to the underlying CRDT
  * once, and syncs each subscribed PEER incrementally from its own frontier
- * (per-peer `lastSentVV` / `lastSentVersion`), so sibling windows multiplexed
+ * (Loro `lastSentVV` / exact Flock records), so sibling windows multiplexed
  * over the same relay socket sync independently and a sender's own ops are
  * never echoed.
  *
@@ -560,7 +556,7 @@ export class LocalLoroDataPlaneServer {
           peerId: message.peerId,
           connection,
           latestJoinRequestId: message.requestId,
-          lastSentVersion: decodeFlockVersion(message.haveVersion),
+          records: new LocalFlockPeerState(),
         });
       }
       this.enqueueJoinReply(connection, key, message.peerId, message.requestId);
@@ -672,15 +668,10 @@ export class LocalLoroDataPlaneServer {
       });
       return;
     }
-    // Advance the sender's frontier with what it reports holding, so the
-    // import-triggered dirty pass exports (near-)nothing back to it. Merge, not
-    // set: a flock frontier never regresses.
+    // Remember only records actually sent by this peer, never its clock summary.
     const subscriber = entry.subscribers.get(message.peerId);
     if (subscriber) {
-      subscriber.lastSentVersion = mergeFlockVersions(
-        subscriber.lastSentVersion,
-        decodeFlockVersion(message.haveVersion)
-      );
+      subscriber.records.remember(message.payload.bundle);
     }
     // Dirty-marking is driven solely by the room's flock subscription: an import
     // that actually changes the flock fires it (source 'import'), and a no-op
@@ -772,7 +763,10 @@ export class LocalLoroDataPlaneServer {
       unsubscribe: () => {},
       subscribers: new Map(),
     };
-    entry.unsubscribe = flock.subscribe(() => this.markRoomDirty(entry));
+    entry.unsubscribe = flock.subscribe((batch) => {
+      for (const subscriber of entry.subscribers.values()) subscriber.records.changed(batch);
+      this.markRoomDirty(entry);
+    });
     return entry;
   }
 
@@ -1140,9 +1134,9 @@ export class LocalLoroDataPlaneServer {
       ];
     }
     const flockSubscriber = subscriber as FlockSubscriber;
-    // Same capture-before-export contract as docs, with merge-only advance.
+    // Preserve the legacy wire summary; exact records decide what to send.
     const have = entry.flock.version();
-    const bundle = await entry.flock.exportJson(flockSubscriber.lastSentVersion);
+    const bundle = await flockSubscriber.records.export(entry.flock);
 
     // exportJson may yield. A newer join can replace this subscriber while the
     // export is running, including on the same connection. Do not send the old
@@ -1161,10 +1155,9 @@ export class LocalLoroDataPlaneServer {
       return [];
     }
 
-    flockSubscriber.lastSentVersion = mergeFlockVersions(flockSubscriber.lastSentVersion, have);
+    flockSubscriber.records.remember(bundle);
     // Report the server's TRUE frontier, like the doc branch does with
-    // `oplogVersion()`. `lastSentVersion` is per-peer down-sync bookkeeping
-    // seeded from the peer's own `haveVersion`; echoing it back would claim the
+    // `oplogVersion()`. Echoing the peer's own `haveVersion` would claim the
     // server holds everything the client holds, poisoning the client's up-sync
     // baseline (`exportJson(from = serverVersion)` would then skip client-ahead
     // entries forever, e.g. after a dropped upload frame).

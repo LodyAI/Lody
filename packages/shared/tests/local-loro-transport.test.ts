@@ -286,7 +286,7 @@ describe('LocalLoroTransportAdapter push+delta sync', () => {
     expect(flockB.get('subtitle')).toBe('world');
   });
 
-  it('rejoin catch-up is incremental: only entries missed while offline are re-sent', async () => {
+  it('rejoin reconciles all Flock records rather than trusting maximum clocks', async () => {
     const harness = new Harness();
     const client = harness.createClient('peer-rejoin');
     const flock = new MemoryFlock();
@@ -306,8 +306,7 @@ describe('LocalLoroTransportAdapter push+delta sync', () => {
     await harness.settle();
 
     expect(flock.get('while-offline')).toBe(2);
-    // The catch-up frames after reconnect must carry ONLY the missed entry —
-    // the client's haveVersion covers everything it already holds.
+    // A clock cannot prove absence of holes: reconnect starts full reconciliation.
     const entriesReSent: string[] = [];
     for (const message of client.received.slice(framesBefore)) {
       if (message.type !== 'joined' && message.type !== 'update') continue;
@@ -316,7 +315,7 @@ describe('LocalLoroTransportAdapter push+delta sync', () => {
       const bundle = message.payload.bundle as { entries?: Record<string, unknown> };
       entriesReSent.push(...Object.keys(bundle.entries ?? {}));
     }
-    expect(entriesReSent).toEqual(['while-offline']);
+    expect(entriesReSent).toEqual(['before', 'while-offline']);
   });
 
   it('routes the meta room to resolveMetaFlock, not resolveFlockDoc("meta")', async () => {

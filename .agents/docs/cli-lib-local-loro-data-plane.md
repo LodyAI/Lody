@@ -28,14 +28,17 @@ Protocol v7, push-only, peer-scoped. A dedicated `lody-loro-data-plane` socket i
 0700 run dir routes persistent connections to per-workspace
 `LocalLoroDataPlaneServer` engines (`@lody/shared`, owned by `LoroDocumentManager`).
 Every message carries `workspaceId` + `peerId` (a per-adapter uuid), and the server
-keys sync state per PEER (`lastSentVV`, flock bundle hash), so multiple windows
+keys sync state per PEER (`lastSentVV`, exact Flock records), so multiple windows
 multiplexed over the one relay socket sync independently and a sender's own ops are
 never echoed back to it.
 
-Doc rooms sync via version-vector deltas in both directions; flock rooms sync via full
-bundles on change. Broadcast passes are coalesced by a queued-pass latch that bounds a
-change burst to one running plus one queued full `exportJson` — never an unbounded
-chain — while still giving a change that lands mid-broadcast its own follow-up pass.
+Doc rooms sync via causal version-vector deltas. Flock rooms reconcile all records
+on (re)join, then point-read changed keys from real Flock events, including cloud
+imports. Each link remembers actual records to suppress echoes; maximum clocks
+are not proof of key completeness. Structural adapters without key events/getEntry
+fall back to full export and exact-record filtering. The queued-pass latch bounds
+a burst to one running plus one queued pass; changes arriving mid-export get a
+follow-up pass. Rejoining discards peer knowledge to recover dropped frames.
 
 All workspace engines share the process-level `local-loro-data-plane-scheduler`
 created in `loro/doc.ts`. Presence and CRDT materialization run through `setImmediate`
@@ -89,6 +92,6 @@ path.
   navigated windows.
 - Renderer adapter: `@lody/shared` `local-loro-transport.ts` — filters inbound frames
   by workspaceId + peerId and treats every (re)join as the reconciliation point,
-  up-syncing its delta from the returned `serverVersion` regardless of the in-memory
+  up-syncing Loro deltas or reconciling Flock records regardless of the in-memory
   dirty flag, so offline writes survive app restarts and dropped frames. Regression
   suite: `packages/shared/tests/local-loro-transport-bug-repro.test.ts`.

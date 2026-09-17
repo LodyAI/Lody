@@ -12,6 +12,7 @@ import {
   type LocalLoroDataPlaneServerMessage,
 } from '../src/local-loro-data-plane';
 import { MemoryFlock } from './helpers/memory-flock';
+import { LocalLoroTransportAdapter } from '../src/local-loro-transport';
 
 const WORKSPACE_ID = 'ws';
 
@@ -96,6 +97,132 @@ function flockEntriesOf(messages: LocalLoroDataPlaneServerMessage[]): Record<str
 }
 
 describe('LocalLoroDataPlaneServer doc room hydration signals', () => {
+  it('reconciles real Flock holes in both directions, forwards cloud imports, and stays quiet afterward', async () => {
+    const { LoroRepo } = createRequire(import.meta.url)('loro-repo') as typeof import('loro-repo');
+    const daemon = await LoroRepo.create({ metaDebounceCommitMs: 0 });
+    const renderer = await LoroRepo.create({ metaDebounceCommitMs: 0 });
+    const a = daemon.getMeta();
+    const b = renderer.getMeta();
+    const put = (flock: typeof a, key: string, clock: number) => {
+      flock.importJson({
+        version: 0,
+        entries: {
+          [JSON.stringify([key])]: {
+            c: `1700000000000,${clock},aa`,
+            d: key,
+          },
+        },
+      });
+      flock.commit();
+    };
+    put(a, 'high', 6);
+    put(b, 'high', 6);
+    put(b, 'offline-before-join', 1);
+    const work: Array<() => void | Promise<void>> = [];
+    const listeners = new Set<(message: LocalLoroDataPlaneServerMessage) => void>();
+    const statusListeners = new Set<(connected: boolean) => void>();
+    let connected = true;
+    let frames = 0;
+    const server = new LocalLoroDataPlaneServer({
+      workspaceId: WORKSPACE_ID,
+      resolveDoc: async () => new LoroDoc(),
+      resolveMetaFlock: async () => a,
+      resolveFlockDoc: async () => a,
+      scheduler: {
+        scheduleDataWork: (task) => {
+          work.push(task);
+          return () => {};
+        },
+      },
+    });
+    const link = {
+      id: 'real-link',
+      send: (message: LocalLoroDataPlaneServerMessage) => {
+        if (!connected) return;
+        frames++;
+        work.push(() => {
+          for (const listener of listeners) listener(message);
+        });
+      },
+    };
+    const adapter = new LocalLoroTransportAdapter({
+      workspaceId: WORKSPACE_ID,
+      peerId: 'real-reader',
+      connection: {
+        isConnected: () => connected,
+        onStatusChange: (listener) => {
+          statusListeners.add(listener);
+          return () => statusListeners.delete(listener);
+        },
+        onMessage: (listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+        send: (message) => {
+          frames++;
+          work.push(() => server.handleMessage(link, message));
+        },
+      },
+    });
+    const drain = async () => {
+      // Only deterministic promise work: no wall-clock sleeps or timer races.
+      for (let i = 0; i < 200; i++) {
+        const task = work.shift();
+        if (task) await task();
+        else await Promise.resolve();
+      }
+      expect(work).toHaveLength(0);
+    };
+    const sub = adapter.joinMetaRoom(b);
+    await drain();
+    expect(a.get(['offline-before-join'])).toBe('offline-before-join');
+    const initial = a.version();
+    // Live repairs must point-read events, not rescan the entire Flock.
+    const exportA = a.exportJson.bind(a);
+    const exportB = b.exportJson.bind(b);
+    a.exportJson = () => {
+      throw new Error('unexpected full live export');
+    };
+    b.exportJson = () => {
+      throw new Error('unexpected full live export');
+    };
+    put(b, 'cloud-to-renderer', 2);
+    await drain();
+    expect(a.get(['cloud-to-renderer'])).toBe('cloud-to-renderer');
+    put(a, 'cloud-to-daemon', 3);
+    await drain();
+    expect(b.get(['cloud-to-daemon'])).toBe('cloud-to-daemon');
+    b.importJson({ version: 0, entries: {
+      '["cloud-to-daemon"]': { c: '1700000000000,4,aa' },
+    } });
+    b.commit();
+    await drain();
+    expect(a.get(['cloud-to-daemon'])).toBeUndefined();
+    expect(a.version()).toEqual(initial);
+    const settledFrames = frames;
+    await drain();
+    expect(frames).toBe(settledFrames);
+    a.exportJson = exportA;
+    b.exportJson = exportB;
+    connected = false;
+    server.handleDisconnect(link.id);
+    for (const listener of statusListeners) listener(false);
+    put(a, 'offline-daemon', 0);
+    put(b, 'offline-renderer', 5);
+    await drain();
+    connected = true;
+    for (const listener of statusListeners) listener(true);
+    await drain();
+    expect(b.get(['offline-daemon'])).toBe('offline-daemon');
+    expect(a.get(['offline-renderer'])).toBe('offline-renderer');
+    expect(a.version()).toEqual(initial);
+    sub.unsubscribe();
+    await adapter.close();
+    server.dispose();
+    await daemon.destroy();
+    await renderer.destroy();
+  });
+
   async function receiveRepairedKey(overwritePeerFrontier: boolean) {
     const { LoroRepo } = createRequire(import.meta.url)('loro-repo') as typeof import('loro-repo');
     const sourceRepo = await LoroRepo.create({ metaDebounceCommitMs: 0 });
@@ -162,10 +289,7 @@ describe('LocalLoroDataPlaneServer doc room hydration signals', () => {
     expect(await receiveRepairedKey(true)).toBe('late-key');
   });
 
-  // Known migration gap: bootstrap may repair aa:1 while aa:2 remains visible.
-  // Remove .fails when the local plane forwards exact changed keys or reconciles
-  // without treating a maximum clock as proof that every older key is present.
-  it.fails('forwards a same-vector repair while the higher peer clock remains visible', async () => {
+  it('forwards a same-vector repair while the higher peer clock remains visible', async () => {
     expect(await receiveRepairedKey(false)).toBe('late-key');
   });
 
@@ -388,20 +512,53 @@ describe('LocalLoroDataPlaneServer flock write-time coalescing', () => {
 
   it('a change landing during a running export still gets its own follow-up pass', async () => {
     const flock = new CountingFlock();
-    flock.exportDelayMs = 10;
-    const server = makeFlockServer(flock);
+    const work: Array<() => void | Promise<void>> = [];
+    const server = new LocalLoroDataPlaneServer({
+      workspaceId: WORKSPACE_ID,
+      resolveDoc: async () => new LoroDoc(),
+      resolveFlockDoc: async () => flock,
+      scheduler: {
+        scheduleDataWork: (task) => {
+          work.push(task);
+          return () => {};
+        },
+      },
+    });
     const { connection, received } = makeConnection();
-    await joinFlockRoom(server, connection);
-
+    await server.handleMessage(connection, {
+      type: 'join',
+      protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+      workspaceId: WORKSPACE_ID,
+      peerId: 'reader',
+      requestId: 'join',
+      room: { scope: 'flock-doc', flockDocId: 'race' },
+    });
+    const drain = async () => {
+      for (let task; (task = work.shift());) await task();
+    };
+    await drain();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const original = flock.exportJson.bind(flock);
+    let blocked = false;
+    flock.exportJson = async (from) => {
+      const captured = await original(from);
+      if (!blocked) {
+        blocked = true;
+        entered.resolve();
+        await release.promise;
+      }
+      return captured;
+    };
     flock.set('first', 1);
-    // Let the first pass START (export in flight)…
-    await settle();
-    // …then land another change mid-export.
+    const flushing = drain();
+    await entered.promise;
     flock.set('second', 2);
-    await new Promise((resolve) => setTimeout(resolve, 60));
-
+    release.resolve();
+    await flushing;
     const entries = flockEntriesOf(received.filter((m) => m.type === 'update'));
     expect(entries['second']).toBe(2);
+    server.dispose();
   });
 });
 
@@ -450,7 +607,7 @@ describe('LocalLoroDataPlaneServer incremental flock sync', () => {
     expect(entries['key-39']).toBe('value-39');
   });
 
-  it('a peer that reports haveVersion gets only the delta on join', async () => {
+  it('does not trust a peer clock summary to skip records on join', async () => {
     const flock = new MemoryFlock();
     flock.set('old', 'seen');
     const haveVersion = JSON.stringify(flock.version());
@@ -476,7 +633,7 @@ describe('LocalLoroDataPlaneServer incremental flock sync', () => {
     await settle();
 
     const entries = flockEntriesOf(received);
-    expect(entries).toEqual({ new: 'unseen' });
+    expect(entries).toEqual({ old: 'seen', new: 'unseen' });
   });
 
   it('discards an async Flock join reply superseded on the same connection', async () => {

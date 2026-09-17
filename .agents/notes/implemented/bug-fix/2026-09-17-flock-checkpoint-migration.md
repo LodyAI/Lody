@@ -49,7 +49,7 @@ import merges into the live Flock, and cursor saving awaits the data barrier.
 This validates IndexedDB recovery, not persistent SQLite checkpoints or recovery
 of records already missing from the remote snapshot and retained stream tail.
 
-## Follow-up review: unresolved local-plane repair propagation
+## Follow-up review: local-plane repair propagation (subsequently fixed below)
 
 The durability checks now reopen storage without destroying/flushing the writer,
 and inject data-save and checkpoint-save failures through the published transport
@@ -66,11 +66,11 @@ prove this case. This is an existing local-protocol limitation, not a regression
 introduced by the persistence helper, but prevents claiming end-to-end repair for
 local-primary readers until their own cloud catch-up repairs them.
 
-The owning local-server suite records this as an explicit `it.fails` regression;
+The initial review recorded this as an explicit `it.fails` regression;
 its green suite result means the known failure reproduced, not that it is fixed.
 Remove that marker only when exact changed-key forwarding or a reconciliation
 path repairs the recipient. Switching to inclusiveVersion does not fix it.
-This review changes tests/evidence only; the production fix is still pending.
+That review changed tests/evidence only; the production fix is recorded below.
 
 Further lifecycle review adds four passing cases: unload/reload preserves the
 checkpoint while rejecting stale handles; purge invalidates another live replica
@@ -79,4 +79,26 @@ named-Flock same-vector tombstones survive reopening and reject stale-record
 replay. The lifecycle case combines unload and purge in one test. These are
 deterministic IndexedDB/Flock tests, not physical crash tests. The two renderer
 suites now pass 31 tests; components typecheck passes. No additional P0/P1 was
-confirmed in these paths. The local-plane repair gap above remains unresolved.
+confirmed in these paths. The local-plane repair gap was still open at that point.
+
+## Local-plane repair implementation
+
+Both local endpoints now track exact per-key records per connection instead of
+filtering Flock exports by maximum peer clocks. Join/rejoin clears that knowledge
+and reconciles all records; the renderer sends an empty legacy haveVersion so an
+old v7 server also provides full catch-up. Live Flock events coalesce changed keys
+and use getEntry point reads, preserving clock, value, metadata and tombstones.
+Structural adapters lacking key events/getEntry use full export plus record
+filtering. Received records suppress echoes; cloud imports are no longer dropped
+by the renderer local-source-only subscription. Failed sends force reconciliation
+on retry. Existing chunking, scheduler and per-peer backpressure remain in place.
+
+The former expected-failure test is now an ordinary passing regression. A real
+Flock test covers both directions, pre-join and offline holes under the same clock
+summary, online cloud imports, no full-table export on live changes, and eventual
+silence. The async-export interleaving test now uses explicit barriers rather than
+sleeps. The four local-plane suites pass 53 tests. JSON wire format stays v7;
+older endpoints cannot offer the new live-repair guarantee until upgraded. Costs:
+full reconciliation on reconnect and per-link memory proportional to observed
+records. This fixes propagation, not missing historical remote snapshots or the
+interim SQLite memory-checkpoint policy.

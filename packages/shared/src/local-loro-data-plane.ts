@@ -11,13 +11,11 @@ import type { TransportRoomStatus } from 'loro-repo';
 // pure CRDT sync plus ephemeral push, so authored user writes no longer cross
 // this socket as commands.
 //
-// **Sync model (2026-07-06 rewrite):** doc rooms AND flock rooms sync via
-// per-peer version-vector deltas. Flock (@loro-dev/flock >= 4) has
-// `exportJson(from)` / `version()`, so the earlier "flock rooms sync via full
-// bundles" design (based on a stale no-delta-API assumption) is gone:
-// `haveVersion`/`serverVersion` carry a JSON-encoded flock version vector for
-// flock rooms (base64 Loro VV for doc rooms), and every flock payload is an
-// incremental bundle. Flock entries are self-contained LWW records (each
+// Doc rooms use causal version-vector deltas. Flock rooms reconcile all records
+// on (re)join, then forward exact changed records: peer maximum clocks cannot
+// prove that older keys are present. The legacy JSON Flock version fields remain
+// on the wire for v7 readers, but new peers do not use them to skip records.
+// Flock entries are self-contained LWW records (each
 // carries its own clock), so a delta bundle is independently importable — an
 // oversized flock delta is CHUNKED into multiple frames instead of failing the
 // room.
@@ -96,8 +94,7 @@ const LocalLoroDataPlaneRoomSchema = z.discriminatedUnion('scope', [
 
 // A `doc-update` carries a Loro update export (delta from the receiver's version
 // vector, or a from-empty export for a first sync). A `flock-json` carries an
-// incremental Flock JSON bundle (`exportJson(from)` — entries newer than the
-// receiver's flock version vector; a from-empty export for a first sync). Flock
+// Flock JSON bundle (exact changed records, or full reconciliation on join). Flock
 // entries are self-contained LWW records, so every bundle — including one chunk
 // of a split oversized delta — is independently importable.
 const LocalLoroDocPayloadSchema = z.object({

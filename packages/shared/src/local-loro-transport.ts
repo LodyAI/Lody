@@ -1,4 +1,9 @@
 import { EphemeralStore, LoroDoc, VersionVector } from 'loro-crdt';
+import {
+  LocalFlockPeerState,
+  type FlockChangeBatch,
+  type FlockRecordSource,
+} from './local-flock-peer-state';
 import type {
   TransportAdapter,
   TransportConnectionStatus,
@@ -13,14 +18,12 @@ import {
   bytesToBase64,
   chunkFlockBundle,
   createDocUpdateTransferId,
-  decodeFlockVersion,
   DocUpdateChunkAssembler,
   encodeFlockVersion,
   isEmptyFlockBundle,
   LOCAL_LORO_DATA_PLANE_MAX_PAYLOAD_BYTES,
   LOCAL_LORO_DATA_PLANE_PAYLOAD_TOO_LARGE,
   LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
-  mergeFlockVersions,
   roomKey,
   sameRoom,
   type FlockVersionVector,
@@ -48,13 +51,13 @@ export type LocalLoroDataPlaneConnection = {
   isConnected: () => boolean;
 };
 
-type FlockLike = {
+type FlockLike = FlockRecordSource & {
   exportJson(from: FlockVersionVector): unknown | Promise<unknown>;
   importJson(bundle: unknown): void | Promise<void>;
-  /** Exclusive/visible flock version vector — the incremental-export baseline. */
+  /** Legacy wire summary, never a proof of key completeness. */
   version(): FlockVersionVector;
   commit?: () => void;
-  subscribe(listener: (batch: { source?: string; by?: string }) => void): () => void;
+  subscribe(listener: (batch: FlockChangeBatch) => void): () => void;
 };
 
 type Deferred<T> = {
@@ -103,10 +106,8 @@ type RoomState = {
   terminalError: string | null;
   // Server's version vector we export up-sync deltas from (doc rooms).
   serverVersion: VersionVector | null;
-  // Server's flock frontier we export up-sync deltas from (flock rooms).
-  // Replaced by the authoritative `joined` frontier, then advanced by server
-  // updates and successful local exports within that join generation.
-  serverFlockVersion: FlockVersionVector | null;
+  // Exact per-key records observed on this link, reset for every rejoin.
+  flockRecords: LocalFlockPeerState;
   // Invalidates async Flock exports started before a newer join request. An old
   // export must never overwrite the authoritative baseline returned on rejoin.
   syncGeneration: number;
@@ -290,7 +291,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       dirty: false,
       terminalError: null,
       serverVersion: null,
-      serverFlockVersion: null,
+      flockRecords: new LocalFlockPeerState(),
       syncGeneration: 0,
       flockFlushChain: Promise.resolve(),
       flockFlushQueued: false,
@@ -338,10 +339,9 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       });
     }
     const flock = state.target as FlockLike;
-    return flock.subscribe((batch: { source?: string }) => {
-      if (batch.source !== 'local') {
-        return;
-      }
+    return flock.subscribe((batch) => {
+      // Cloud imports may repair older keys without advancing a peer clock.
+      state.flockRecords.changed(batch);
       state.dirty = true;
       this.flushLocal(state);
     });
@@ -357,12 +357,13 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
     }
     const requestId = `join:${this.peerId}:${++this.requestSeq}`;
     state.syncGeneration += 1;
+    state.flockRecords = new LocalFlockPeerState();
     state.pendingJoinRequestId = requestId;
-    // Both room kinds report what they already hold, so (re)join catch-up is
-    // always incremental: base64 Loro VV for docs, JSON flock VV for flocks.
+    // Loro VV is causal. Flock maxima cannot prove key completeness; request
+    // full catch-up even from an older server that still filters by this field.
     const haveVersion = state.isDoc
       ? bytesToBase64((state.target as LoroDoc).oplogVersion().encode())
-      : encodeFlockVersion((state.target as FlockLike).version());
+      : encodeFlockVersion({});
     try {
       this.connection.send({
         type: 'join',
@@ -484,6 +485,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       })
       .catch(() => {
         // Stay dirty; a reconnect (or the next local edit) retries.
+        state.flockRecords.retry();
         this.setRoomStatus(state, 'reconnecting');
       });
   }
@@ -491,11 +493,10 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
   private async flushLocalFlockOnce(state: RoomState): Promise<void> {
     const flock = state.target as FlockLike;
     const syncGeneration = state.syncGeneration;
-    // Capture the frontier BEFORE exporting: entries landing in between are
-    // re-sent by the next pass (idempotent) instead of silently skipped.
+    // Preserve the legacy wire summary; exact records decide what to send.
     const have = flock.version();
-    const from = state.serverFlockVersion ?? {};
-    const bundle = await flock.exportJson(from);
+    const records = state.flockRecords;
+    const bundle = await records.export(flock);
     if (
       state.closed ||
       state.terminalError ||
@@ -506,7 +507,6 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       return;
     }
     if (isEmptyFlockBundle(bundle)) {
-      state.serverFlockVersion = mergeFlockVersions(from, have);
       state.dirty = false;
       this.resolveSyncedWaiters(state);
       return;
@@ -530,7 +530,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
         payload: { kind: 'flock-json', bundle: chunk },
       });
     }
-    state.serverFlockVersion = mergeFlockVersions(from, have);
+    records.remember(bundle);
     state.dirty = false;
     this.resolveSyncedWaiters(state);
   }
@@ -618,13 +618,6 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
     }
     if (state.isDoc && message.serverVersion) {
       state.serverVersion = VersionVector.decode(base64ToBytes(message.serverVersion));
-    } else if (!state.isDoc && message.serverVersion) {
-      // The server already holds everything under the frontier it pushed with
-      // this delta — advance our up-sync baseline so we never re-upload it.
-      state.serverFlockVersion = mergeFlockVersions(
-        state.serverFlockVersion ?? {},
-        decodeFlockVersion(message.serverVersion)
-      );
     }
     this.applyPayload(state, message.payload);
   }
@@ -655,11 +648,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       this.flushLocal(state, { force: true });
       return;
     }
-    // A join reply is the authoritative up-sync baseline. Replace the prior
-    // optimistic frontier: a local send may have been silently dropped after
-    // we advanced it, so merge-only would keep claiming the server has entries
-    // it never received (notably lastCanceledTurn).
-    state.serverFlockVersion = serverVersion ? decodeFlockVersion(serverVersion) : {};
+    // Only actual received records establish what this peer holds.
     const receivedBundle = payload && payload.kind === 'flock-json' ? payload.bundle : undefined;
     const syncGeneration = state.syncGeneration;
     void this.reconcileFlockAfterJoin(state, receivedBundle, syncGeneration)
@@ -691,6 +680,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
   ): Promise<void> {
     const flock = state.target as FlockLike;
     if (receivedBundle !== undefined) {
+      state.flockRecords.remember(receivedBundle);
       await flock.importJson(receivedBundle);
       flock.commit?.();
     }
@@ -702,10 +692,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
     ) {
       return;
     }
-    // Mirror of the doc-room reconcile: export the delta the server is missing
-    // relative to its returned frontier — regardless of the in-memory dirty
-    // flag, so offline writes from a previous process run converge here (F5).
-    // An empty delta costs nothing.
+    // Reconcile all records, independent of maximum clocks or the dirty hint.
     this.flushLocalFlock(state);
   }
 
@@ -760,6 +747,7 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       return;
     }
     const flock = state.target as FlockLike;
+    state.flockRecords.remember(payload.bundle);
     void Promise.resolve(flock.importJson(payload.bundle)).then(() => flock.commit?.());
   }
 
