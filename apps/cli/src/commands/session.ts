@@ -24,7 +24,7 @@ import {
   MachineStatusResponseSchema,
   SessionCancelResponseSchema,
   SessionStatusFactory,
-  collectSessionArchiveTargets,
+  readSessionOperationTargets,
   type BillingQuotaAdmission,
   countBillableSessionTurns,
   evaluateBillingQuota,
@@ -63,6 +63,7 @@ import {
   type SessionTurnInputConfig,
   type SessionId,
   type SessionMeta,
+  type SessionOperation,
   type TaskId,
   type WorkspaceId,
 } from '@lody/shared';
@@ -967,47 +968,34 @@ async function checkSessionTurnQuotaAndReadHistory(args: {
   return history;
 }
 
-export async function listChildSessionIds(
+export async function runSessionOperationWithSyncedMetadata(
   manager: LoroDocumentManager,
-  parentSessionId: SessionId
-): Promise<SessionId[]> {
-  return (await listSessionMetasForWorkspace(manager))
-    .filter(
-      (session) => session.parentSessionId === parentSessionId && session.id !== parentSessionId
-    )
-    .map((session) => session.id);
-}
-
-export async function listArchiveDescendantSessionIds(
-  manager: LoroDocumentManager,
-  sessionId: SessionId
-): Promise<SessionId[]> {
-  return collectSessionArchiveTargets(sessionId, await listSessionMetasForWorkspace(manager)).map(
-    (session) => session.id
-  );
-}
-
-export async function archiveSessionWithSyncedMetadata(
-  manager: LoroDocumentManager,
-  sessionId: SessionId
-): Promise<SessionId[]> {
-  await syncWorkspaceMetaForRead(manager, `session.archive:${sessionId}:prewrite`);
-  await resolveSessionMetaOrThrow(manager, sessionId);
-  const childSessionIds = await listArchiveDescendantSessionIds(manager, sessionId);
-  // Each owning machine observes archived state and reconciles its resources.
-  await applySessionAndChildren(sessionId, childSessionIds, (id) =>
-    manager.repo.upsertDocMeta(getSessionRoomId(id), buildSessionArchiveMetaPatch())
-  );
-  await ensureWorkspaceMetaSynced(manager, `session.archive:${sessionId}`);
-  return childSessionIds;
-}
-
-async function applySessionAndChildren(
   sessionId: SessionId,
-  childSessionIds: SessionId[],
-  apply: (sessionId: SessionId) => Promise<void>
-): Promise<void> {
-  await Promise.all([sessionId, ...childSessionIds].map(apply));
+  operation: SessionOperation
+): Promise<SessionId[]> {
+  const reason = `session.${operation}:${sessionId}`;
+  await syncWorkspaceMetaForRead(manager, `${reason}:prewrite`);
+  const targets = await readSessionOperationTargets(manager.repo, sessionId, operation);
+  const [root, ...descendants] = targets;
+  if (operation !== 'archive' && root.isArchived !== true) {
+    throw new Error(`Session ${sessionId} is not archived.`);
+  }
+  // Keep the root discoverable if deleting a child fails. Writes are not a
+  // transaction; each owning machine observes state and reconciles resources.
+  for (const target of operation === 'delete' ? [...targets].reverse() : targets) {
+    const roomId = getSessionRoomId(target.id);
+    if (operation === 'delete') {
+      await manager.repo.deleteDoc(roomId);
+      await manager.cleanSessionDoc(target.id);
+    } else {
+      await manager.repo.upsertDocMeta(
+        roomId,
+        operation === 'archive' ? buildSessionArchiveMetaPatch() : buildSessionRestoreMetaPatch()
+      );
+    }
+  }
+  await ensureWorkspaceMetaSynced(manager, reason);
+  return descendants.map((session) => session.id);
 }
 
 async function syncMachineFlockDocsForRead(
@@ -4400,7 +4388,11 @@ const sessionArchiveCommand = new Command('archive')
         reason: `session.archive:${sessionId}:resolve`,
       });
       await withWorkspaceManager(auth, workspace, async (manager) => {
-        const childSessionIds = await archiveSessionWithSyncedMetadata(manager, sessionId);
+        const childSessionIds = await runSessionOperationWithSyncedMetadata(
+          manager,
+          sessionId,
+          'archive'
+        );
 
         if (options.json) {
           printJson({ ok: true, sessionId, archivedChildSessionIds: childSessionIds });
@@ -4427,17 +4419,16 @@ const sessionRestoreCommand = new Command('restore')
         throw new Error('Missing session ID. Pass one explicitly or set LODY_SESSION_ID.');
       }
 
-      const workspace = await resolveWorkspaceForSessionOrThrow(auth, sessionId, options.workspace);
+      const workspace = await resolveWorkspaceForSessionOrThrow(auth, sessionId, {
+        workspace: options.workspace,
+        reason: `session.restore:${sessionId}:resolve`,
+      });
       await withWorkspaceManager(auth, workspace, async (manager) => {
-        const session = await resolveSessionMetaOrThrow(manager, sessionId);
-        if (session.isArchived !== true) {
-          throw new Error(`Session ${sessionId} is not archived.`);
-        }
-        const childSessionIds = await listChildSessionIds(manager, sessionId);
-        await applySessionAndChildren(sessionId, childSessionIds, (id) =>
-          manager.repo.upsertDocMeta(getSessionRoomId(id), buildSessionRestoreMetaPatch())
+        const childSessionIds = await runSessionOperationWithSyncedMetadata(
+          manager,
+          sessionId,
+          'restore'
         );
-        await ensureWorkspaceMetaSynced(manager, `session.restore:${sessionId}`);
 
         if (options.json) {
           printJson({ ok: true, sessionId, restoredChildSessionIds: childSessionIds });
@@ -4464,21 +4455,16 @@ const sessionDeleteCommand = new Command('delete')
         throw new Error('Missing session ID. Pass one explicitly or set LODY_SESSION_ID.');
       }
 
-      const workspace = await resolveWorkspaceForSessionOrThrow(auth, sessionId, options.workspace);
+      const workspace = await resolveWorkspaceForSessionOrThrow(auth, sessionId, {
+        workspace: options.workspace,
+        reason: `session.delete:${sessionId}:resolve`,
+      });
       await withWorkspaceManager(auth, workspace, async (manager) => {
-        const session = await resolveSessionMetaOrThrow(manager, sessionId);
-        if (session.isArchived !== true) {
-          throw new Error(`Session ${sessionId} is not archived. Archive it before deleting.`);
-        }
-        const childSessionIds = await listChildSessionIds(manager, sessionId);
-
-        // Deleting the doc leaves a deletion marker the owning machine reconciles
-        // its worktree directory against; no machine command is needed.
-        await applySessionAndChildren(sessionId, childSessionIds, async (id) => {
-          await manager.repo.deleteDoc(getSessionRoomId(id));
-          await manager.cleanSessionDoc(id);
-        });
-        await ensureWorkspaceMetaSynced(manager, `session.delete:${sessionId}`);
+        const childSessionIds = await runSessionOperationWithSyncedMetadata(
+          manager,
+          sessionId,
+          'delete'
+        );
 
         if (options.json) {
           printJson({ ok: true, sessionId, deletedChildSessionIds: childSessionIds });

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MachineId, SessionId, WorkspaceId } from '@lody/shared';
+import { getSessionRoomId, type MachineId, type SessionId, type WorkspaceId } from '@lody/shared';
+import type { LoroRepo } from 'loro-repo';
 
 const mocks = vi.hoisted(() => {
   const setTransportAdapter = vi.fn(async () => {});
@@ -14,7 +15,7 @@ const mocks = vi.hoisted(() => {
   const flush = vi.fn(async () => {});
   const destroy = vi.fn(async () => {});
   const reconnect = vi.fn(async () => {});
-  const listDoc = vi.fn(async () => []);
+  const listDoc = vi.fn(async (): ReturnType<LoroRepo['listDoc']> => []);
   const watch = vi.fn(() => ({ unsubscribe: vi.fn() }));
   const joinMetaRoom = vi.fn();
   const remoteCursorDelete = vi.fn(async () => {});
@@ -371,7 +372,8 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     mocks.flush.mockClear();
     mocks.destroy.mockClear();
     mocks.reconnect.mockClear();
-    mocks.listDoc.mockClear();
+    mocks.listDoc.mockReset();
+    mocks.listDoc.mockResolvedValue([]);
     mocks.watch.mockClear();
     mocks.joinMetaRoom.mockReset();
     mocks.remoteCursorDelete.mockClear();
@@ -589,6 +591,67 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     expect(failurePhases).toEqual(['initial', 'recovery']);
 
     await runtime.dispose();
+  });
+
+  it.each([false, true])(
+    'gates operation snapshots on the selected metadata source (local: %s)',
+    async (local) => {
+      const synced = Promise.withResolvers<void>();
+      mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(synced.promise));
+      if (local) {
+        enableElectronLocalDataPlane();
+        vi.stubGlobal('navigator', { onLine: false });
+      }
+      const id = 'source-root' as SessionId;
+      mocks.listDoc.mockResolvedValue([
+        { docId: getSessionRoomId(id), meta: { id }, exists: true },
+      ]);
+      const runtime = await createWorkspaceRuntime({
+        workspaceSlug: 'workspace',
+        workspaceId: 'workspace-1' as WorkspaceId,
+        apiBaseUrl: 'https://api.example.test',
+        token: 'auth-token',
+      });
+      try {
+        for (const operation of ['archive', 'restore', 'delete'] as const) {
+          await expect(runtime.readSessionOperationTargets(id, operation)).rejects.toThrow(
+            'Session metadata is still loading'
+          );
+        }
+        synced.resolve();
+        await flushPromises();
+        for (const operation of ['archive', 'restore', 'delete'] as const) {
+          await expect(runtime.readSessionOperationTargets(id, operation)).resolves.toEqual([
+            { id },
+          ]);
+        }
+        if (local) expect(mocks.streamsTransportConstructors).not.toHaveBeenCalled();
+      } finally {
+        await runtime.dispose();
+      }
+      await expect(runtime.readSessionOperationTargets(id, 'archive')).rejects.toThrow(
+        'Runtime disposed'
+      );
+    }
+  );
+
+  it('rejects a snapshot if its runtime is disposed while the query is pending', async () => {
+    mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      token: 'auth-token',
+    });
+    await flushPromises();
+    const query = Promise.withResolvers<Awaited<ReturnType<LoroRepo['listDoc']>>>();
+    mocks.listDoc.mockReturnValueOnce(query.promise);
+    const id = 'disposed-root' as SessionId;
+    const result = runtime.readSessionOperationTargets(id, 'archive');
+    const rejected = expect(result).rejects.toThrow('Runtime disposed');
+    await runtime.dispose();
+    query.resolve([{ docId: getSessionRoomId(id), meta: { id }, exists: true }]);
+    await rejected;
   });
 
   it('delays ACP capability refresh until meta and presence stay synced', async () => {

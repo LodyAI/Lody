@@ -2,8 +2,9 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-Archive uses `collectSessionArchiveTargets` for contained/opened descendants;
-restore/delete retain containment-only targets. See [relations](../../specs/session-relations.md).
+Discover archive/restore/delete targets from one ready Repo snapshot, never UI caches.
+Archive uses `collectSessionArchiveTargets`; restore/delete keep direct containment.
+Exact deletion bypasses discovery. See [relations](../../specs/session-relations.md).
 
 ## Session history
 

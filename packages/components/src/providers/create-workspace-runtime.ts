@@ -34,6 +34,7 @@ import {
   isMachineDocRoomId,
   isSessionDocRoomId,
   isLoroRepoDocDeleted,
+  readSessionOperationTargets,
   MACHINE_DOC_PREFIX,
   readMachineFlockRowsFromFlock,
   SESSION_DOC_PREFIX,
@@ -4616,6 +4617,16 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     repo,
     codeCollabFileIndexCache,
     writer: workspaceWriter,
+    readSessionOperationTargets: async (sessionId, operation) => {
+      if (disposePromise) throw new Error('Runtime disposed');
+      // This flag follows the selected meta transport: local on Desktop,
+      // cloud otherwise. UI hydration and cloud availability are not this gate.
+      if (!initialMetaSyncCompleted) throw new Error('Session metadata is still loading');
+      const targets = await readSessionOperationTargets(repo, sessionId, operation);
+      if (disposePromise) throw new Error('Runtime disposed');
+      if (!initialMetaSyncCompleted) throw new Error('Session metadata is still loading');
+      return targets;
+    },
     prepareSessionTarget: (sessionId, machineId) =>
       targetRouter.prepareSessionTarget(sessionId, machineId),
     resolveMachineTargetPlane: (machineId, options) =>

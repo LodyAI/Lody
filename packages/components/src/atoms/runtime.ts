@@ -24,6 +24,8 @@ import type {
   SessionDocMeta,
   SessionTurnInputConfig,
   SessionId,
+  SessionMeta,
+  SessionOperation,
   TaskId,
   TaskDocInput,
   TaskDocState,
@@ -172,6 +174,11 @@ export type WorkspaceRuntime = {
    */
   readonly workspaceId: WorkspaceId;
   readonly repo: LoroRepo;
+  /** Read targets from the ready metadata source, independently of UI projection. */
+  readSessionOperationTargets: (
+    sessionId: SessionId,
+    operation: SessionOperation
+  ) => Promise<[SessionMeta, ...SessionMeta[]]>;
   /** Workspace-owned, scoped LRU for owner-session file-index Flock resources. */
   readonly codeCollabFileIndexCache: CodeCollabFileIndexCache;
   /**

@@ -4,6 +4,23 @@ Binding rules for this directory live in [AGENTS.md](AGENTS.md); this file keeps
 the reasoning behind them so the rules can stay short. It explains only the hooks
 that carry an invariant — the directory itself is the list of hooks.
 
+| Area                   | Entry point                                                                                | Responsibility                                              |
+| ---------------------- | ------------------------------------------------------------------------------------------ | ----------------------------------------------------------- |
+| Session lifecycle      | [`use-session-actions.ts`](use-session-actions.ts)                                         | Bind operation targets and writes to one workspace runtime. |
+| Workspace catalogs     | [`use-agent-role-schema-reconciliation.ts`](use-agent-role-schema-reconciliation.ts)       | Reconcile owned Roles after matching runtime probes.        |
+| Conversation rendering | [`use-sticky-scroll.ts`](use-sticky-scroll.ts), [`use-session-doc.ts`](use-session-doc.ts) | Coordinate viewport ownership and history publication.      |
+
+## Session lifecycle
+
+`use-session-actions.ts` reads archive, restore, and archived-root deletion targets
+through `WorkspaceRuntime.readSessionOperationTargets`. The runtime owns source
+readiness and the Repo snapshot; the hook checks runtime identity before writing
+through its captured writer. UI projection lag cannot change the target set.
+Later-created Sessions fall outside that snapshot, and accepted writes are not
+rolled back after a later failure. Exact deletion and ordinary Tab close bypass
+discovery. The [relation Spec](../../../../specs/session-relations.md) owns cascade
+and failure semantics.
+
 ## Default conversation draft
 
 `use-empty-session-draft.ts` materializes the empty conversation URL sentinel only

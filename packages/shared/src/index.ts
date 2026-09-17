@@ -50,6 +50,7 @@ export * from './project';
 export * from './time-sync';
 export * from './session-status-machine';
 export * from './session-archive-targets';
+export * from './session-operation-targets';
 export * from './session-orchestration';
 export * from './electron-ipc';
 export * from './loro-server-auth';
