@@ -120,10 +120,11 @@ describe('signed content envelope', () => {
           subtle: crypto.subtle,
           getRandomValues(array) {
             const next = queue.shift();
-            if (!next || next.byteLength !== array.byteLength) {
+            const view = new Uint8Array(array.buffer, array.byteOffset, array.byteLength);
+            if (!next || next.byteLength !== view.byteLength) {
               throw new Error('entropy-mismatch');
             }
-            array.set(next);
+            view.set(next);
             return array;
           },
         }

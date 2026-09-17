@@ -14,7 +14,8 @@
  * Ownership:
  * - Entropy / Clock / TimerSchedule / CryptoPlatform: this module
  * - SignatureVerifyExecutor: sequential default here; Node worker adapter is
- *   opt-in via `@lody/e2ee-core/ledger-node`
+ *   opt-in via `@lody/e2ee-core/ledger-node`. Only factory-created executors
+ *   are accepted; caller-supplied boolean verdicts are not.
  * - Storage / streams: existing `LedgerStore` / `LedgerStream` ports
  * - Live authority: caller policy (`ContentPolicy`, admission `mayWriteDocument`)
  *

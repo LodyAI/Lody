@@ -9,6 +9,7 @@ import {
   createSequentialSignatureVerify,
   hashRecordBytes,
   headAttestationSigningBytes,
+  isTrustedSignatureVerifyExecutor,
   recordSigningBytes,
   sequentialSignatureVerify,
   snapshotSigningBytes,
@@ -243,6 +244,9 @@ export class Ledger {
   }): Promise<Ledger> {
     const anchor = checkHash(input.anchor);
     if (input.records.length === 0) fail('genesis-mismatch', 0);
+    if (input.executor && !isTrustedSignatureVerifyExecutor(input.executor)) {
+      fail('invalid-operation');
+    }
     const executor =
       input.executor ??
       (input.pointCache

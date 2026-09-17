@@ -224,14 +224,28 @@ export function verifySignature(
   }
 }
 
+const trustedSignatureVerifiers = new WeakSet<SignatureVerifyExecutor>();
+
+export function isTrustedSignatureVerifyExecutor(executor: SignatureVerifyExecutor): boolean {
+  return trustedSignatureVerifiers.has(executor);
+}
+
+/** Only sequential/Node factories may call this. Do not re-export from the package. */
+export function trustSignatureVerifyExecutor<T extends SignatureVerifyExecutor>(executor: T): T {
+  trustedSignatureVerifiers.add(executor);
+  return executor;
+}
+
 export function createSequentialSignatureVerify(
   cache: SigningPointCache = liveSigningPointCache
 ): SignatureVerifyExecutor {
-  return {
-    async verify(jobs: readonly SignatureJob[]): Promise<boolean[]> {
-      return jobs.map((job) => verifySignature(job.pk, job.msg, job.sig, cache));
-    },
-  };
+  return trustSignatureVerifyExecutor(
+    Object.freeze({
+      async verify(jobs: readonly SignatureJob[]): Promise<boolean[]> {
+        return jobs.map((job) => verifySignature(job.pk, job.msg, job.sig, cache));
+      },
+    })
+  );
 }
 
 export const sequentialSignatureVerify: SignatureVerifyExecutor = createSequentialSignatureVerify();

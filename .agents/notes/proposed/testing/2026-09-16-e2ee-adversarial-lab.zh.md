@@ -15,19 +15,19 @@ Translation: current
 
 ## 实施计划与唯一任务表
 
-当前状态：P0–P5 已在 `feat-e2ee-core` 验收。工作仍在本检出。不开新长期工作区，不接 Lody 产品，不推送/合并；后续推送必须明确目的地，不能默认使用公开 origin。实验室 Spec 仍为 draft；勾选任务表不是数学安全证明。
+当前状态：对 `58a3f698` 的审查发现 P1 阻断。正在修复 C1/C2/P1–P3；P4 Agent 与 P5 总目标仍不勾选。无 push/merge。实验室 Spec 仍为 draft。
 
 | 完成 | 阶段           | 交付物                         | 必须通过的门槛                              |
 | ---- | -------------- | ------------------------------ | ------------------------------------------- |
 | [x]  | P0 基线        | 版本、备份、迁移清单、现状结果 | 用户未提交工作可恢复，回归覆盖有去向        |
-| [x]  | C1 显式依赖    | 纯计算边界、能力接口、兼容草图 | E1–E3，真实验签一致，随机/时钟来源完整      |
-| [x]  | C2 Effect 试点 | 唯一 submit/resume 实现        | E4–E7，CAS/丢 ACK/中断/重启正确             |
+| [ ]  | C1 显式依赖    | 纯计算边界、能力接口、兼容草图 | E1–E3，真实验签一致，随机/时钟来源完整      |
+| [ ]  | C2 Effect 试点 | 唯一 submit/resume 实现        | E4–E7，CAS/丢 ACK/中断/重启正确             |
 | [x]  | C3 其余流程    | 分钥、恢复、准入与资源管理     | E3–E6，权限重查与原始截止不回退             |
-| [x]  | P1 常驻协作    | lab 包、真实后端、三副本       | 离线重连与耐久恢复，不是一次性读写          |
-| [x]  | P2 确定性      | 调度器、记录、重放             | 三次新目录重放一致，首分歧可定位            |
-| [x]  | P3 固定攻击    | Spec 场景矩阵、有效裁判        | 真实改库被检验，注入已知缺陷时裁判失败      |
-| [x]  | P4 Agent       | 受限 API、自由攻击记录         | 隔离自测通过，至少一轮真实 Agent 运行可重放 |
-| [x]  | P5 交接        | 干净检出验收、旧 demo 删除     | 下述完成定义逐项通过，未通过项显式保留      |
+| [ ]  | P1 常驻协作    | lab 包、真实后端、三副本       | 离线重连与耐久恢复，不是一次性读写          |
+| [ ]  | P2 确定性      | 调度器、记录、重放             | 三次新目录重放一致，首分歧可定位            |
+| [ ]  | P3 固定攻击    | Spec 场景矩阵、有效裁判        | 真实改库被检验，注入已知缺陷时裁判失败      |
+| [ ]  | P4 Agent       | 受限 API、自由攻击记录         | 隔离自测通过，至少一轮真实 Agent 运行可重放 |
+| [ ]  | P5 交接        | 干净检出验收、旧 demo 删除     | 下述完成定义逐项通过，未通过项显式保留      |
 
 ### P0：冻结基线，不先删掉证据
 
@@ -262,3 +262,14 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 
 - `replace` 成 HTTP 502 时客户端为 `unknown`；resume（手动模式第二次许可）提交成功，不会出现本地假成功。`truncate` 先打真实 CAS 再只回 1 字节；客户端仍能靠读回看到提交（`committed`，或 `unknown` 再 resume）。不用空 200 响应（会让 streams 客户端挂起）。
 - 证据：`pnpm --filter @lody/e2ee-lab check` 退出 0（10 文件 / 40 测试）。Wasm 物理时钟、Fiber/`exclusive` 中断、OS 隔离仍未注入。未启用产品 E2EE。无 push/PR/merge。
+
+### 2026-09-17 — 审查 P1：取消勾选；修验签、错误、裁判、重放、矩阵、内容门控
+
+- 对 `58a3f698` 的审查不是验收。已取消 C1、C2、P1–P5。P4 仍是脚本探索，不是 Agent。
+- `Ledger.verify` 只接受工厂授信的 executor（`createSequentialSignatureVerify` / Node 适配器）。`{verify: async jobs => jobs.map(() => true)}` 为 `invalid-operation`；伪造签名仍失败。
+- 无 pending 时 `resume()` 抛 `LedgerError`（`invalid-operation`），不是 FiberFailure。内层 `exclusive` 使用 `runPromiseThrow`。
+- Content 测试的 `getRandomValues` 经 `Uint8Array` 视图写入。
+- AttackLab `finish` 不再把 `forged-accepted` / `cursor-overrun` 声明当违规；宿主已关为 `unavailable`。公开动作日志脱敏声明证据；`harnessReplayActions` 供重放保留。
+- 重放比较 `responseHex`。恶意服务器 append 使用 Riverrun 当前 tail；若没写入，矩阵为 `harness-error`。
+- 门控覆盖会改写的 `/ds/`（内容 POST），不只 `/append-cas`。会话保留 Loro 副本，不再写完即 free。
+- P4 Agent 仍不勾选。

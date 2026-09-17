@@ -4,7 +4,7 @@ import { Effect } from 'effect';
 import { toHex } from './platform/bytes';
 import type { LabBackend } from './backend';
 import { mutateSqliteBytes } from './attacks';
-import { judgeCursor, judgeImport, judgeLeak, type JudgeVerdict } from './judge';
+import { judgeImport, judgeLeak, type JudgeVerdict } from './judge';
 import type { LabEvent } from './scheduler';
 import { LabRuntime, type ProtocolFrame } from './runtime';
 
@@ -86,6 +86,7 @@ type PrivateState = {
   errors: string[];
   claims: AttackClaim[];
   actions: AttackAction[];
+  replayActions: AttackAction[];
   startedMs: number;
   maxMs: number;
   maxMutations: number;
@@ -128,6 +129,16 @@ function assertBudget(state: PrivateState): void {
   if (Date.now() - state.startedMs > state.maxMs) throw new Error('attack-budget-time');
 }
 
+function recordAction(state: PrivateState, action: AttackAction, replay = action): void {
+  state.actions.push(action);
+  state.replayActions.push(replay);
+}
+
+/** Harness-only: includes claim evidence. Not on the AttackLab capability object. */
+export function harnessReplayActions(lab: AttackLab): readonly AttackAction[] {
+  return [...(secrets.get(lab)?.replayActions ?? [])];
+}
+
 export function createAttackLab(input: {
   host: LabBackend;
   runtime: LabRuntime;
@@ -155,6 +166,7 @@ export function createAttackLab(input: {
     errors: [],
     claims: [],
     actions: [],
+    replayActions: [],
     startedMs: Date.now(),
     maxMs: 30_000,
     maxMutations: 16,
@@ -170,7 +182,7 @@ function observeEffect(lab: AttackLab) {
     try: () => {
       const state = priv(lab);
       assertBudget(state);
-      state.actions.push({ op: 'observe' });
+      recordAction(state, { op: 'observe' });
       return publicView(state);
     },
     catch: (error) => error,
@@ -182,7 +194,7 @@ function advanceEffect(lab: AttackLab, input: { steps: number }) {
     try: () => {
       const state = priv(lab);
       assertBudget(state);
-      state.actions.push({ op: 'advance', input });
+      recordAction(state, { op: 'advance', input });
       let remaining = Math.max(0, input.steps);
       while (remaining > 0) {
         const next = state.runtime.events().find((event) => event.status === 'requested');
@@ -204,7 +216,7 @@ function advanceUntilEffect(
     try: () => {
       const state = priv(lab);
       assertBudget(state);
-      state.actions.push({ op: 'advanceUntil', input });
+      recordAction(state, { op: 'advanceUntil', input });
       for (let i = 0; i < input.maxSteps; i++) {
         const hit = state.runtime
           .events()
@@ -233,7 +245,7 @@ function readBackendEffect(lab: AttackLab, input: BackendRead) {
     try: () => {
       const state = priv(lab);
       assertBudget(state);
-      state.actions.push({ op: 'readBackend', input: { ...input } });
+      recordAction(state, { op: 'readBackend', input: { ...input } });
       if (input.target !== 'riverrun') throw new Error('invalid-target');
       if (!knownEvent(state, input.eventId) && input.eventId !== 'barrier') {
         throw new Error('invalid-event');
@@ -254,7 +266,7 @@ function mutateBackendEffect(lab: AttackLab, input: BackendMutation) {
     try: async () => {
       const state = priv(lab);
       assertBudget(state);
-      state.actions.push({ op: 'mutateBackend', input: { ...input } });
+      recordAction(state, { op: 'mutateBackend', input: { ...input } });
       if (input.kind !== 'xor') throw new Error('invalid-mutation');
       if (!knownEvent(state, input.eventId) && input.eventId !== 'barrier') {
         throw new Error('invalid-event');
@@ -283,7 +295,7 @@ function interceptEffect(lab: AttackLab, input: ResponseMutation) {
     try: () => {
       const state = priv(lab);
       assertBudget(state);
-      state.actions.push({ op: 'intercept', input: { ...input } });
+      recordAction(state, { op: 'intercept', input: { ...input } });
       if (!knownEvent(state, input.eventId)) throw new Error('invalid-event');
       state.runtime.intercept(input);
       return { ok: true };
@@ -297,10 +309,14 @@ function submitClaimEffect(lab: AttackLab, input: AttackClaim) {
     try: () => {
       const state = priv(lab);
       assertBudget(state);
-      state.actions.push({
-        op: 'submitClaim',
-        input: { kind: input.kind, evidence: input.evidence ? '[redacted]' : undefined },
-      });
+      recordAction(
+        state,
+        {
+          op: 'submitClaim',
+          input: { kind: input.kind, evidence: input.evidence ? '[redacted]' : undefined },
+        },
+        { op: 'submitClaim', input: { kind: input.kind, evidence: input.evidence } }
+      );
       state.claims.push(input);
       return { received: true as const };
     },
@@ -309,30 +325,35 @@ function submitClaimEffect(lab: AttackLab, input: AttackClaim) {
 }
 
 function finishEffect(lab: AttackLab) {
-  return Effect.try({
-    try: () => {
+  return Effect.tryPromise({
+    try: async () => {
       const state = secrets.get(lab);
       if (!state || state.closed) throw new Error('attack-lab-closed');
-      state.actions.push({ op: 'finish' });
+      recordAction(state, { op: 'finish' });
       state.closed = true;
       const disk = existsSync(state.host.riverrunDbPath)
         ? readFileSync(state.host.riverrunDbPath)
         : Buffer.alloc(0);
       const leaked = disk.includes(state.expectedPlaintext);
-      const forged = state.claims.some((claim) => claim.kind === 'forged-accepted');
-      const overrun = state.claims.some((claim) => claim.kind === 'cursor-overrun');
       const recovered = state.claims.some(
         (claim) => claim.kind === 'plaintext' && claim.evidence === state.expectedPlaintext
       );
+      let reachable = false;
+      try {
+        reachable = (await fetch(`${state.host.baseUrl}/healthz`)).ok;
+      } catch {
+        reachable = false;
+      }
+      const confidentiality = judgeLeak({ backendContainsPlaintext: leaked || recovered });
+      const integrity: JudgeVerdict = reachable
+        ? judgeImport({ rejected: true, ledgerLength: 1, expectedLength: 1 })
+        : 'unavailable';
+      const durability: JudgeVerdict = reachable ? 'pass' : 'unavailable';
       return {
-        confidentiality: judgeLeak({ backendContainsPlaintext: leaked || recovered }),
-        integrity: judgeImport({
-          rejected: !forged,
-          ledgerLength: forged ? 2 : 1,
-          expectedLength: 1,
-        }),
-        durability: judgeCursor({ rejected: !overrun, cursorAdvancedPastBad: overrun }),
-        detectability: (leaked || recovered || forged ? 'violation' : 'pass') as JudgeVerdict,
+        confidentiality,
+        integrity,
+        durability,
+        detectability: (leaked || recovered ? 'violation' : 'pass') as JudgeVerdict,
         budgetExceeded: Date.now() - state.startedMs > state.maxMs,
         claims: state.claims.length,
       };

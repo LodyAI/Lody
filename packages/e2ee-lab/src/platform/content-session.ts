@@ -38,6 +38,8 @@ export interface ContentClient {
   currentEpoch(): number;
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
   random?(label: string, length: number): Uint8Array;
+  loroDoc?: LoroDoc | null;
+  flockDoc?: Flock | null;
 }
 
 export function bindLoroPeer(doc: LoroDoc, session: ContentClient): LoroDoc {
@@ -99,8 +101,13 @@ function provider(session: ContentClient, resource: string, model: 'loro' | 'flo
   });
 }
 
+function sessionLoro(session: ContentClient): LoroDoc {
+  if (!session.loroDoc) session.loroDoc = bindLoroPeer(new LoroDoc(), session);
+  return session.loroDoc;
+}
+
 export async function writeLoro(session: ContentClient, text: string): Promise<void> {
-  const doc = bindLoroPeer(new LoroDoc(), session);
+  const doc = sessionLoro(session);
   const crdt = new StreamsCrdt({
     streamUrl: `${session.baseUrl}/ds/${session.genesisHex}/${LORO_STREAM}`,
     adapter: createLoroDocAdapter(doc),
@@ -116,14 +123,16 @@ export async function writeLoro(session: ContentClient, text: string): Promise<v
   if (!created.ok) {
     /* already exists */
   }
-  doc.getText('text').insert(0, text);
-  doc.commit();
+  const current = doc.getText('text').toString();
+  if (!current.includes(text)) {
+    doc.getText('text').insert(current.length, text);
+    doc.commit();
+  }
   const appended = await crdt.appendWriteOnly();
   if (!appended.ok) {
     throw new Error(`loro-append-failed:${JSON.stringify(appended)}`);
   }
   await crdt.close();
-  doc.free();
 }
 
 export async function readLoro(session: ContentClient): Promise<string> {

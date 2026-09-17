@@ -100,12 +100,15 @@ export class LabRuntime {
     return async (input, init) => {
       const request = new Request(input, init);
       const url = request.url;
-      const cas = url.includes('/append-cas');
+      const method = request.method.toUpperCase();
+      const mutating = method !== 'GET' && method !== 'HEAD';
+      const labPath = url.includes('/ds/') || url.includes('/append-cas');
+      const content = url.includes('/loro') || url.includes('/flock');
       let eventId: string | undefined;
-      if (cas) {
-        eventId = await this.gate(actor, 'submit', 'request-queued');
+      if (mutating && labPath) {
+        eventId = await this.gate(actor, content ? 'content' : 'submit', 'request-queued');
       }
-      const requestHex = cas ? toHex(new Uint8Array(await request.clone().arrayBuffer())) : '';
+      const requestHex = eventId ? toHex(new Uint8Array(await request.clone().arrayBuffer())) : '';
       const intercept = eventId
         ? this.intercepts.find((item) => item.eventId === eventId)
         : undefined;
@@ -135,7 +138,7 @@ export class LabRuntime {
           this.frames.push({
             eventId,
             actor,
-            operation: 'submit',
+            operation: content ? 'content' : 'submit',
             phase: 'request-queued',
             url: stripSecrets(url),
             requestHex,
@@ -148,7 +151,7 @@ export class LabRuntime {
             this.complete(eventId);
             eventId = undefined;
           }
-          eventId = await this.gate(actor, 'submit', 'ack-queued');
+          eventId = await this.gate(actor, content ? 'content' : 'submit', 'ack-queued');
         }
         return response;
       } catch (error) {
@@ -156,7 +159,7 @@ export class LabRuntime {
           this.frames.push({
             eventId,
             actor,
-            operation: 'submit',
+            operation: content ? 'content' : 'submit',
             phase: 'request-queued',
             url: stripSecrets(url),
             requestHex,

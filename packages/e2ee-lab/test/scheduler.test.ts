@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { firstDivergence } from '../src/replay';
+import { firstDivergence, firstReplayDivergence } from '../src/replay';
 import { exploreSubmitInterleavings } from '../src/model';
 import {
   advanceTime,
@@ -103,5 +103,23 @@ describe('lab scheduler', () => {
     expect(divergence?.index).toBe(0);
     expect(divergence?.expected).toBe('alice');
     expect(divergence?.actual).toBe('bob');
+  });
+
+  it('detects mutated protocol response bytes', () => {
+    const frame = {
+      eventId: 'e1',
+      actor: 'alice',
+      operation: 'submit',
+      phase: 'request-queued',
+      url: '/control',
+      requestHex: 'aa',
+      responseStatus: 200,
+      responseHex: 'bb',
+    };
+    const divergence = firstReplayDivergence(
+      { events: [], entropy: [], frames: [frame] },
+      { events: [], entropy: [], frames: [{ ...frame, responseHex: '00' }] }
+    );
+    expect(divergence?.field).toBe('frame.response');
   });
 });

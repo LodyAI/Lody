@@ -2,7 +2,7 @@ import { availableParallelism } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import type { SignatureJob, SignatureVerifyExecutor } from '../capabilities';
-import { verifySignature } from './crypto';
+import { trustSignatureVerifyExecutor, verifySignature } from './crypto';
 
 export type SigJob = SignatureJob;
 
@@ -70,9 +70,11 @@ export async function verifyJobsParallel(jobs: readonly SigJob[]): Promise<boole
 
 /** Opt-in Node adapter. Ledger.verify is sequential unless this executor is passed. */
 export function createNodeSignatureVerifyExecutor(): SignatureVerifyExecutor {
-  return {
-    verify(jobs) {
-      return verifyJobsParallel(jobs);
-    },
-  };
+  return trustSignatureVerifyExecutor(
+    Object.freeze({
+      verify(jobs: readonly SignatureJob[]) {
+        return verifyJobsParallel(jobs);
+      },
+    })
+  );
 }

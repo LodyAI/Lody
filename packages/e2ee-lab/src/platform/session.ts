@@ -1,5 +1,6 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { LoroDoc } from 'loro-crdt';
 import { StreamsClient } from '@loro-dev/streams-client';
 import { Ledger } from '@lody/e2ee-core';
 import {
@@ -83,6 +84,7 @@ export class DemoSession {
   readonly now: () => number;
   readonly testMode: boolean;
   canWriteDocument = false;
+  loroDoc: LoroDoc | null = null;
   private ledgerClient: LedgerClient | null = null;
 
   constructor(private readonly options: SessionOptions) {

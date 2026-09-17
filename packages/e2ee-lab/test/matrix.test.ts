@@ -92,30 +92,6 @@ describe('P3 Spec §7 matrix', () => {
       }),
     });
 
-    const malicious = await maliciousAppendCas({
-      riverrunUrl: host.riverrunUrl,
-      genesisHex: alice.genesisHex!,
-      record: forged,
-    });
-    let clientRejected = false;
-    let length = genesisLen;
-    try {
-      length = (await alice.readLedger()).length;
-    } catch {
-      clientRejected = true;
-      length = genesisLen;
-    }
-    rows.push({
-      name: 'tamper-signature-malicious-server',
-      control: 'client verify, not host 403',
-      attack: `direct riverrun append status=${malicious.status}`,
-      expected: 'pass',
-      actual: judgeCursor({
-        rejected: clientRejected || length === genesisLen,
-        cursorAdvancedPastBad: length > genesisLen,
-      }),
-    });
-
     const bob = await labClient({ host, account: 'bob' });
     const join = await bob.requestJoin(alice.genesisHex!);
     await alice.approveJoin(join);
@@ -250,6 +226,32 @@ describe('P3 Spec §7 matrix', () => {
       actual: judgeFork({ independentEvidence: false, displayedChecked: false }),
     });
 
+    const malicious = await maliciousAppendCas({
+      riverrunUrl: host.riverrunUrl,
+      genesisHex: alice.genesisHex!,
+      record: forged,
+    });
+    let clientRejected = false;
+    let length = genesisLen;
+    try {
+      length = (await alice.readLedger()).length;
+    } catch {
+      clientRejected = true;
+      length = genesisLen;
+    }
+    rows.push({
+      name: 'tamper-signature-malicious-server',
+      control: 'client verify, not host 403',
+      attack: `direct riverrun append status=${malicious.status}`,
+      expected: 'pass',
+      actual: malicious.ok
+        ? judgeCursor({
+            rejected: clientRejected || length === genesisLen,
+            cursorAdvancedPastBad: length > genesisLen,
+          })
+        : 'harness-error',
+    });
+
     const dataDir = host.dataDir;
     const dbPath = host.riverrunDbPath;
     const needle = alice.genesis!.subarray(0, 12);
@@ -282,7 +284,6 @@ describe('P3 Spec §7 matrix', () => {
     expect(rows.map((row) => row.name)).toEqual([
       'known-defect-skip-verify',
       'tamper-signature-host',
-      'tamper-signature-malicious-server',
       'unauthorized-device',
       'lost-ack-resume',
       'ciphertext-confidentiality',
@@ -291,6 +292,7 @@ describe('P3 Spec §7 matrix', () => {
       'snapshot-identity-conflict',
       'forged-compare-note',
       'fork-without-independent-evidence',
+      'tamper-signature-malicious-server',
       'sqlite-mutation',
     ]);
   });

@@ -4,6 +4,7 @@ import { generateDevice } from '../src/platform/device';
 import { toHex } from '../src/platform/bytes';
 import {
   createAttackLab,
+  harnessReplayActions,
   replayAttackActions,
   type AttackAction,
   type AttackLab,
@@ -25,7 +26,7 @@ const ATTACK_METHODS = [
   'submitClaim',
 ];
 
-/** Capability-only explorer: observe, scan ciphertext, mutate, claim, finish. */
+/** Scripted explorer (not a P4 Agent). Observe, scan, xor, claim, finish. */
 async function exploreAttackLab(lab: AttackLab) {
   const view = await lab.observe();
   const disk = await lab.readBackend({ target: 'riverrun', eventId: 'barrier' });
@@ -78,6 +79,26 @@ describe('P4 AttackLab isolation', () => {
       })
     ).resolves.toEqual({ ok: false });
     expect(JSON.stringify(lab.actions())).not.toContain(secret);
+  });
+
+  it('does not treat unsupported claims as violations', async () => {
+    const runtime = new LabRuntime({ mode: 'auto' });
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice', runtime });
+    await alice.createSpace();
+    const lab = createAttackLab({
+      host,
+      runtime,
+      clientDirs: [alice.clientDir],
+      expectedPlaintext: 'none',
+      genesisHex: alice.genesisHex,
+    });
+    await lab.submitClaim({ kind: 'forged-accepted' });
+    await lab.submitClaim({ kind: 'cursor-overrun' });
+    const report = await lab.finish();
+    expect(report.integrity).toBe('pass');
+    expect(report.durability).toBe('pass');
+    expect(report.confidentiality).toBe('pass');
   });
 });
 
@@ -275,7 +296,10 @@ describe('P4 recorded agent exploration', () => {
       expectedPlaintext: replaySecret,
       genesisHex: replayAlice.genesisHex,
     });
-    const replayed = await replayAttackActions(replayLab, first.actions as AttackAction[]);
+    const replayed = await replayAttackActions(
+      replayLab,
+      harnessReplayActions(lab) as AttackAction[]
+    );
     expect(replayed.confidentiality).toBe(first.report.confidentiality);
     expect(replayed.budgetExceeded).toBe(false);
   });

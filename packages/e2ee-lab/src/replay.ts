@@ -85,8 +85,19 @@ export function firstReplayDivergence(
         actual: right?.eventId ?? 'missing',
       };
     }
+    if (left.eventId !== right.eventId) {
+      return { index, field: 'frame.eventId', expected: left.eventId, actual: right.eventId };
+    }
     if (left.requestHex !== right.requestHex) {
-      return { index, field: 'frame.request', expected: left.eventId, actual: right.eventId };
+      return { index, field: 'frame.request', expected: left.requestHex, actual: right.requestHex };
+    }
+    if (left.responseHex !== right.responseHex) {
+      return {
+        index,
+        field: 'frame.response',
+        expected: left.responseHex,
+        actual: right.responseHex,
+      };
     }
     if (left.responseStatus !== right.responseStatus) {
       return {

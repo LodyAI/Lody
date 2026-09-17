@@ -8,7 +8,6 @@ import {
   parseRecoveryFile,
   sealRecoveryBackup,
   type Entropy,
-  type SignatureVerifyExecutor,
 } from '@lody/e2ee-core';
 import { createBoundedStreamsFetch } from '@lody/e2ee-core/streams';
 import {
@@ -133,20 +132,27 @@ describe('E2 explicit verify executor', () => {
     );
     const chain = [...records, forgedRecord];
 
-    let jobsSeen = 0;
-    const recording: SignatureVerifyExecutor = {
-      async verify(jobs) {
-        jobsSeen += jobs.length;
-        return sequentialSignatureVerify.verify(jobs);
-      },
-    };
     try {
-      await Ledger.verify({ anchor: created.anchor, records: chain, executor: recording });
+      await Ledger.verify({
+        anchor: created.anchor,
+        records: chain,
+        executor: sequentialSignatureVerify,
+      });
       throw new Error('forged-proof-accepted-recording');
     } catch (error) {
       expectCode(error, 'bad-proof');
     }
-    expect(jobsSeen).toBeGreaterThan(0);
+
+    try {
+      await Ledger.verify({
+        anchor: created.anchor,
+        records: chain,
+        executor: { verify: async (jobs) => jobs.map(() => true) },
+      });
+      throw new Error('untrusted-executor-accepted');
+    } catch (error) {
+      expectCode(error, 'invalid-operation');
+    }
 
     const previous = process.env.LODY_E2EE_VERIFY_WORKERS;
     process.env.LODY_E2EE_VERIFY_WORKERS = '8';

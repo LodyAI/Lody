@@ -2,6 +2,7 @@ import { Effect } from 'effect';
 import { describe, expect, it } from 'vitest';
 import {
   LedgerClient,
+  LedgerError,
   MAX_LEDGER_READ_PAGE_RECORDS,
   MemoryLedgerStore,
   MemoryLedgerStream,
@@ -102,6 +103,17 @@ describe('L5 CAS and unknown results', () => {
     expect(resumed.ledger.length).toBe(2);
     expect(a.store.journal?.pending).toBeNull();
     expect(stream.records[0]).toEqual(record);
+  });
+
+  it('resume without pending throws LedgerError, not FiberFailure', async () => {
+    const { a } = await clients();
+    try {
+      await a.client.resume();
+      throw new Error('resume-without-pending');
+    } catch (error) {
+      expect(error).toBeInstanceOf(LedgerError);
+      expect((error as LedgerError).code).toBe('invalid-operation');
+    }
   });
 
   it('returns unsupported without CAS enqueue and does not invent a new signature', async () => {

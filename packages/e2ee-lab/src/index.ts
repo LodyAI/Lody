@@ -36,6 +36,7 @@ export {
 export { appendControlRecord, maliciousAppendCas, mutateSqliteBytes } from './attacks';
 export {
   createAttackLab,
+  harnessReplayActions,
   replayAttackActions,
   type AttackAction,
   type AttackClaim,

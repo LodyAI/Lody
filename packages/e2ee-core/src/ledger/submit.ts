@@ -366,7 +366,7 @@ export class LedgerClient {
   private runEffect(requested?: Uint8Array): Effect.Effect<LedgerSubmitResult, unknown> {
     // Promise LedgerStore is the adapter boundary. One runtime at submit/resume.
     return tryCall(() =>
-      this.store.exclusive((tx) => Effect.runPromise(this.submitSteps(tx, requested)))
+      this.store.exclusive((tx) => runPromiseThrow(this.submitSteps(tx, requested)))
     );
   }
 

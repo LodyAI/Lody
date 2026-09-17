@@ -15,19 +15,19 @@ The [specification](../../../../specs/e2ee-adversarial-lab.md) owns contracts; t
 
 ## Implementation plan and single task tracker
 
-Current state: P0–P5 accepted on `feat-e2ee-core`. Work remains in this checkout. No new permanent workspace, product integration, push or merge. Any later push needs an explicit destination rather than defaulting to public origin. The lab spec stays draft; checking the tracker is not a mathematical security proof.
+Current state: review of `58a3f698` found P1 blockers. C1/C2/P1–P3 are being repaired; P4 Agent and P5 full-goal acceptance stay unchecked. No push or merge. The lab spec stays draft.
 
 | Done | Stage                       | Deliverable                                             | Required gate                                                    |
 | ---- | --------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------- |
 | [x]  | P0 Baseline                 | Versions, backup, migration inventory, baseline results | Recoverable user work and regression migration map               |
-| [x]  | C1 Explicit dependencies    | Pure boundary, ports, compatibility sketch              | E1–E3; real verification parity; complete entropy/time inventory |
-| [x]  | C2 Effect pilot             | Single submit/resume implementation                     | E4–E7; CAS/lost ACK/interruption/restart                         |
+| [ ]  | C1 Explicit dependencies    | Pure boundary, ports, compatibility sketch              | E1–E3; real verification parity; complete entropy/time inventory |
+| [ ]  | C2 Effect pilot             | Single submit/resume implementation                     | E4–E7; CAS/lost ACK/interruption/restart                         |
 | [x]  | C3 Remaining workflows      | Delivery, recovery, admission, resources                | E3–E6; live authority and original expiry preserved              |
-| [x]  | P1 Persistent collaboration | Lab package, real backend, three replicas               | Offline/restart durability, not one-shot read/write              |
-| [x]  | P2 Determinism              | Scheduler, recording, replay                            | Three fresh-directory replays; first-divergence detection        |
-| [x]  | P3 Fixed attacks            | Scenario matrix and effective judge                     | Real database mutation; known injected defects fail judging      |
-| [x]  | P4 Agent                    | Restricted API and exploration trace                    | Isolation checks; at least one real replayable Agent run         |
-| [x]  | P5 Handoff                  | Clean-checkout acceptance and old-demo removal          | Complete done criteria below; explicit unpassed items            |
+| [ ]  | P1 Persistent collaboration | Lab package, real backend, three replicas               | Offline/restart durability, not one-shot read/write              |
+| [ ]  | P2 Determinism              | Scheduler, recording, replay                            | Three fresh-directory replays; first-divergence detection        |
+| [ ]  | P3 Fixed attacks            | Scenario matrix and effective judge                     | Real database mutation; known injected defects fail judging      |
+| [ ]  | P4 Agent                    | Restricted API and exploration trace                    | Isolation checks; at least one real replayable Agent run         |
+| [ ]  | P5 Handoff                  | Clean-checkout acceptance and old-demo removal          | Complete done criteria below; explicit unpassed items            |
 
 ### P0: Freeze the baseline without destroying evidence
 
@@ -262,3 +262,14 @@ Implementers choose filenames, service names and test organization without repea
 
 - `replace` with HTTP 502 leaves the client `unknown`; resume (second permit in manual mode) commits without a false local success. `truncate` fetches the real CAS then returns a 1-byte body; the client still observes the commit by read-back (`committed` or `unknown` then resume). Empty 200 bodies are not used (they can hang the streams client).
 - Evidence: `pnpm --filter @lody/e2ee-lab check` exit 0 (10 files / 40 tests). Wasm physical clocks, Fiber/`exclusive` interrupt, and OS isolation remain uninjected. Not product E2EE. No push/PR/merge.
+
+### 2026-09-17 — Review P1s: uncheck stages; fix verify, errors, judge, replay, matrix, content gate
+
+- Review of `58a3f698` is not acceptance. Unchecked C1, C2, P1–P5. P4 remains a scripted explorer, not an Agent.
+- `Ledger.verify` accepts only factory-trusted executors (`createSequentialSignatureVerify` / Node adapter). `{verify: async jobs => jobs.map(() => true)}` is `invalid-operation`; forged signatures still fail.
+- `resume()` without pending throws `LedgerError` (`invalid-operation`), not FiberFailure. Inner `exclusive` uses `runPromiseThrow`.
+- Content test `getRandomValues` writes through a `Uint8Array` view.
+- AttackLab `finish` ignores `forged-accepted` / `cursor-overrun` claims; closed host is `unavailable`. Public actions redact claim evidence; `harnessReplayActions` keeps it for replay.
+- Replay compares `responseHex`. Malicious-server append uses the live Riverrun tail offset; matrix is `harness-error` if the append did not land.
+- Gated fetch covers mutating `/ds/` (content POST), not only `/append-cas`. Session keeps a Loro replica instead of free-after-write.
+- P4 Agent is still unchecked.
