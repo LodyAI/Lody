@@ -252,3 +252,8 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 - 已加入成员把自己 `setRole` 成 admin 被拒绝，已认证角色仍是 `member`。
 - 非所有者设备上传已接纳的 Loro 快照。所有者 bootstrap（GET `/snapshot` 或 `/bootstrap`）。该设备被撤后，所有者仍能 bootstrap 同一明文。线上快照字节不是明文。
 - 证据：`pnpm --filter @lody/e2ee-lab check` 退出 0（10 文件 / 35 测试）。Wasm 物理时钟、Fiber/`exclusive` 中断、OS 隔离仍未注入。未启用产品 E2EE。无 push/PR/merge。
+
+### 2026-09-17 — 伪造加入、访客写、跨 Org Loro 替换
+
+- 翻转过的加入请求签名不会被接纳，成员数仍为 1。访客 `canWriteDocument` 为 false，`writeLoro` 抛错。把 Org A 的 Loro 流字节经 Riverrun 抄到 Org B，不会变成 Org B 明文。
+- 证据：`pnpm --filter @lody/e2ee-lab check` 退出 0（10 文件 / 38 测试）。Wasm 物理时钟、Fiber/`exclusive` 中断、OS 隔离仍未注入。未启用产品 E2EE。无 push/PR/merge。

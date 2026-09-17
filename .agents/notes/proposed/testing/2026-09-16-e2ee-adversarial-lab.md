@@ -252,3 +252,8 @@ Implementers choose filenames, service names and test organization without repea
 - A joined member `setRole` to admin is rejected; authenticated role stays `member`.
 - A non-owner device uploads an admitted Loro snapshot. Owner bootstraps it (GET `/snapshot` or `/bootstrap`). After that device is revoked, the owner still bootstraps the same plaintext. Snapshot bytes on the wire are not plaintext.
 - Evidence: `pnpm --filter @lody/e2ee-lab check` exit 0 (10 files / 35 tests). Wasm physical clocks, Fiber/`exclusive` interrupt, and OS isolation remain uninjected. Not product E2EE. No push/PR/merge.
+
+### 2026-09-17 — Forged join, guest write, cross-Org Loro substitution
+
+- Flipped join-request signature is not admitted; member count stays 1. A guest's `canWriteDocument` is false and `writeLoro` throws. Copying Org A Loro stream bytes onto Org B via Riverrun does not surface as Org B plaintext.
+- Evidence: `pnpm --filter @lody/e2ee-lab check` exit 0 (10 files / 38 tests). Wasm physical clocks, Fiber/`exclusive` interrupt, and OS isolation remain uninjected. Not product E2EE. No push/PR/merge.

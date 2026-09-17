@@ -8,9 +8,10 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { cleanupLab, labClient, launchLab, tempDir } from '../src/fixtures';
 import { startLabBackend } from '../src/backend';
-import { CONTROL_STREAM, MAX_LEASE_MS } from '../src/platform/protocol';
+import { CONTROL_STREAM, LORO_STREAM, MAX_LEASE_MS } from '../src/platform/protocol';
 import { exportDevice, generateDevice } from '../src/platform/device';
-import { toHex } from '../src/platform/bytes';
+import { fromHex, toHex } from '../src/platform/bytes';
+import { maliciousAppendCas } from '../src/attacks';
 import { LoroDoc } from 'loro-crdt';
 import { InMemoryRemoteCursorStore } from '@loro-dev/streams-crdt/loro';
 import {
@@ -145,6 +146,58 @@ describe('lab host lifecycle', () => {
     ).rejects.toThrow();
     const member = (await alice.readLedger()).state.members.get(toHex(admitted.membershipId));
     expect(member?.role).toBe('member');
+  });
+
+  it('rejects a join request with a flipped signature', async () => {
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice' });
+    const bob = await labClient({ host, account: 'bob' });
+    await alice.createSpace();
+    const join = await bob.requestJoin(alice.genesisHex!);
+    const signature = fromHex(join.signature);
+    signature[0] = (signature[0] ?? 0) ^ 0xff;
+    await expect(alice.approveJoin({ ...join, signature: toHex(signature) })).rejects.toThrow();
+    expect((await alice.readLedger()).state.members.size).toBe(1);
+  });
+
+  it('rejects content writes from a guest', async () => {
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice' });
+    const bob = await labClient({ host, account: 'bob' });
+    await alice.createSpace();
+    const join = await bob.requestJoin(alice.genesisHex!);
+    expect((await alice.approveJoin(join, 'guest')).status).toBe('committed');
+    await bob.readLedger();
+    expect(bob.canWriteDocument).toBe(false);
+    await expect(writeLoro(bob, 'guest-write')).rejects.toThrow();
+  });
+
+  it('does not import another Org Loro ciphertext as local plaintext', async () => {
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice' });
+    const bob = await labClient({ host, account: 'bob' });
+    await alice.createSpace();
+    await alice.readLedger();
+    await writeLoro(alice, 'org-a-secret');
+    await bob.createSpace();
+    await bob.readLedger();
+    await writeLoro(bob, 'org-b-ok');
+    const loro = await alice.fetch(`/ds/${alice.genesisHex}/${LORO_STREAM}`);
+    const loroBytes = new Uint8Array(await loro.arrayBuffer());
+    await maliciousAppendCas({
+      riverrunUrl: host.riverrunUrl,
+      genesisHex: bob.genesisHex!,
+      record: loroBytes,
+      expectedOffset: '-1',
+      stream: LORO_STREAM,
+    });
+    let text = '';
+    try {
+      text = await readLoro(bob);
+    } catch {
+      text = '';
+    }
+    expect(text).not.toContain('org-a-secret');
   });
 
   it('bootstraps an admitted snapshot after the author is revoked', async () => {
