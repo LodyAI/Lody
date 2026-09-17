@@ -9,6 +9,7 @@ import {
   type AttackAction,
   type AttackLab,
 } from '../src/attack-lab';
+import { maliciousAppendCas, riverrunNextOffset, riverrunRecordCount } from '../src/attacks';
 import { cleanupLab, labClient, launchLab } from '../src/fixtures';
 import { LabRuntime } from '../src/runtime';
 
@@ -159,6 +160,37 @@ describe('P4 AttackLab isolation', () => {
     expect(report.confidentiality).toBe('pass');
     expect(report.integrity).toBe('unavailable');
     expect(report.durability).toBe('unavailable');
+  });
+
+  it('does not pass default finish integrity just because healthz is up', async () => {
+    const runtime = new LabRuntime({ mode: 'auto' });
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice', runtime });
+    await alice.createSpace();
+    const lab = createAttackLab({
+      host,
+      runtime,
+      clientDirs: [alice.clientDir],
+      expectedPlaintext: 'none',
+      genesisHex: alice.genesisHex,
+      expectedLength: 1,
+    });
+    await lab.observe();
+    const extra = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
+    const beforeOff = await riverrunNextOffset(host.riverrunUrl, alice.genesisHex!);
+    const landed = await maliciousAppendCas({
+      riverrunUrl: host.riverrunUrl,
+      genesisHex: alice.genesisHex!,
+      record: extra,
+    });
+    expect(landed.ok).toBe(true);
+    const afterOff = await riverrunNextOffset(host.riverrunUrl, alice.genesisHex!);
+    expect(afterOff).not.toBe(beforeOff);
+    const health = await fetch(`${host.baseUrl}/healthz`);
+    expect(health.ok).toBe(true);
+    expect(await health.text()).toBe('ok');
+    const report = await lab.finish();
+    expect(report.integrity).not.toBe('pass');
   });
 });
 

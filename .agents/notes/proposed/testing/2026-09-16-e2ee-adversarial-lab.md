@@ -276,7 +276,7 @@ Implementers choose filenames, service names and test organization without repea
 
 ### 2026-09-17 — Measured judge, persist-phase gates, harness replay; P4 still blocked
 
-- `finish()` integrity/durability use `inspectHonest` (real `readLedger` length) or framed control-stream count. `forged-accepted` / `cursor-overrun` claims do not force `violation`. Host down after sqlite xor is `unavailable`; xor without the expected plaintext is not a confidentiality `violation`.
+- `finish()` integrity/durability use `inspectHonest` (real `readLedger` length) or Riverrun control-stream count/offset vs a captured baseline. Unauthenticated host GET is not used. Failed backend measure is `harness-error`, not pass. `forged-accepted` / `cursor-overrun` claims do not force `violation`. Host down after sqlite xor is `unavailable`.
 - Official replay uses `harnessReplayActions` (claim evidence kept). Public `actions()` still redact. Replaying only the public log of a plaintext claim is `pass` and is not treated as the official verdict.
 - Manual mode records `document-persisted`, `cursor-persisted`, and `import` and waits for permits. Write path keeps a Loro replica.
 - P4 Agent: `runRestrictedAgent` chose `observe` / `readBackend` / `finish` via OpenRouter `openai/gpt-4o-mini` (not `exploreAttackLab` xor-at-offset). Harness replay matched `pass`. Quota/key errors throw. Isolation still hides secrets.

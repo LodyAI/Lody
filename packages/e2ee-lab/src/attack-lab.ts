@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { Effect } from 'effect';
 import { toHex } from './platform/bytes';
 import type { LabBackend } from './backend';
-import { mutateSqliteBytes } from './attacks';
+import { mutateSqliteBytes, riverrunNextOffset, riverrunRecordCount } from './attacks';
 import { CONTROL_STREAM } from './platform/protocol';
 import { judgeCursor, judgeImport, judgeLeak, type JudgeVerdict } from './judge';
 import type { LabEvent } from './scheduler';
@@ -84,6 +84,7 @@ export interface HonestInspect {
   cursor?: string | null;
   baselineCursor?: string | null;
   importFailed?: boolean;
+  unmeasured?: boolean;
 }
 
 type PrivateState = {
@@ -94,6 +95,9 @@ type PrivateState = {
   genesisHex: string | null;
   inspectHonest?: () => Promise<HonestInspect>;
   expectedLength: number;
+  baselineCount?: number;
+  baselineOffset?: string;
+  baselinePromise?: Promise<void>;
   errors: string[];
   claims: AttackClaim[];
   actions: AttackAction[];
@@ -140,7 +144,32 @@ function assertBudget(state: PrivateState): void {
   if (Date.now() - state.startedMs > state.maxMs) throw new Error('attack-budget-time');
 }
 
+async function captureBaseline(state: PrivateState): Promise<void> {
+  if (!state.genesisHex) return;
+  if (!state.baselinePromise) {
+    state.baselinePromise = (async () => {
+      try {
+        const counted = await riverrunRecordCount(
+          state.host.riverrunUrl,
+          state.genesisHex!,
+          CONTROL_STREAM
+        );
+        state.baselineCount = counted.ok ? counted.count : 0;
+        state.baselineOffset = await riverrunNextOffset(
+          state.host.riverrunUrl,
+          state.genesisHex!,
+          CONTROL_STREAM
+        );
+      } catch {
+        state.baselineCount = 0;
+      }
+    })();
+  }
+  await state.baselinePromise;
+}
+
 async function measureHonest(state: PrivateState): Promise<HonestInspect> {
+  await captureBaseline(state);
   if (state.inspectHonest) {
     try {
       const snapshot = await state.inspectHonest();
@@ -158,27 +187,33 @@ async function measureHonest(state: PrivateState): Promise<HonestInspect> {
     }
   }
   if (!state.genesisHex) {
-    return { ledgerLength: state.expectedLength, expectedLength: state.expectedLength };
-  }
-  const response = await fetch(`${state.host.baseUrl}/ds/${state.genesisHex}/${CONTROL_STREAM}`);
-  if (!response.ok) {
     return {
-      ledgerLength: state.expectedLength,
+      ledgerLength: 0,
       expectedLength: state.expectedLength,
-      importFailed: true,
+      unmeasured: true,
     };
   }
-  const body = new Uint8Array(await response.arrayBuffer());
-  const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
-  let count = 0;
-  let start = 0;
-  while (body.byteLength - start >= 4) {
-    const length = view.getUint32(start, false);
-    if (length <= 0 || start + 4 + length > body.byteLength) break;
-    count += 1;
-    start += 4 + length;
+  const counted = await riverrunRecordCount(
+    state.host.riverrunUrl,
+    state.genesisHex,
+    CONTROL_STREAM
+  );
+  if (!counted.ok) {
+    return {
+      ledgerLength: 0,
+      expectedLength: state.expectedLength,
+      unmeasured: true,
+    };
   }
-  return { ledgerLength: count, expectedLength: state.expectedLength };
+  const offset = await riverrunNextOffset(state.host.riverrunUrl, state.genesisHex, CONTROL_STREAM);
+  const baseline = state.baselineCount ?? state.expectedLength;
+  const grew =
+    counted.count > baseline ||
+    (state.baselineOffset !== undefined && offset !== state.baselineOffset);
+  return {
+    ledgerLength: grew ? Math.max(counted.count, baseline + 1) : counted.count,
+    expectedLength: baseline,
+  };
 }
 
 function recordAction(state: PrivateState, action: AttackAction, replay = action): void {
@@ -234,10 +269,11 @@ export function createAttackLab(input: {
 }
 
 function observeEffect(lab: AttackLab) {
-  return Effect.try({
-    try: () => {
+  return Effect.tryPromise({
+    try: async () => {
       const state = priv(lab);
       assertBudget(state);
+      await captureBaseline(state);
       recordAction(state, { op: 'observe' });
       return publicView(state);
     },
@@ -405,16 +441,22 @@ function finishEffect(lab: AttackLab) {
       let durability: JudgeVerdict = 'unavailable';
       if (reachable) {
         const measured = await measureHonest(state);
-        const rejected = measured.importFailed || measured.ledgerLength <= measured.expectedLength;
-        integrity = judgeImport({
-          rejected,
-          ledgerLength: measured.ledgerLength,
-          expectedLength: measured.expectedLength,
-        });
-        durability = judgeCursor({
-          rejected,
-          cursorAdvancedPastBad: measured.ledgerLength > measured.expectedLength,
-        });
+        if (measured.unmeasured) {
+          integrity = 'harness-error';
+          durability = 'harness-error';
+        } else {
+          const rejected =
+            measured.importFailed === true || measured.ledgerLength <= measured.expectedLength;
+          integrity = judgeImport({
+            rejected,
+            ledgerLength: measured.ledgerLength,
+            expectedLength: measured.expectedLength,
+          });
+          durability = judgeCursor({
+            rejected,
+            cursorAdvancedPastBad: measured.ledgerLength > measured.expectedLength,
+          });
+        }
       }
       return {
         confidentiality,

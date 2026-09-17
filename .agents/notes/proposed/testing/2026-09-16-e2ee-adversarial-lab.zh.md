@@ -276,7 +276,7 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 
 ### 2026-09-17 — 实测裁判、落盘阶段门控、harness 重放；P4 仍阻断
 
-- `finish()` 的完整性/耐久用 `inspectHonest`（真实 `readLedger` 长度）或控制流分帧计数。`forged-accepted` / `cursor-overrun` 声明不再强制 `violation`。sqlite xor 后宿主关闭为 `unavailable`；磁盘上没有期望明文则保密性不是 `violation`。
+- `finish()` 的完整性/耐久用 `inspectHonest`（真实 `readLedger` 长度）或 Riverrun 控制流计数/offset 相对基线。不用未认证的宿主 GET。后端测不到则为 `harness-error`，不是 pass。`forged-accepted` / `cursor-overrun` 声明不再强制 `violation`。sqlite xor 后宿主关闭为 `unavailable`。
 - 正式重放使用 `harnessReplayActions`（保留声明证据）。公开 `actions()` 仍脱敏。只重放公开日志里的明文声明得到 `pass`，不作为正式判定。
 - 手动模式记录 `document-persisted`、`cursor-persisted`、`import` 并等待许可。写路径保留 Loro 副本。
 - P4 Agent：`runRestrictedAgent` 经 OpenRouter `openai/gpt-4o-mini` 选择 `observe` / `readBackend` / `finish`（不是 `exploreAttackLab` 定点 xor）。harness 重放判定同为 `pass`。额度/密钥错误会失败。隔离仍隐藏秘密。
