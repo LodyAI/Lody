@@ -77,4 +77,5 @@ have no equivalent library validation and are unaffected.
 
 ## Integration
 
+- [Lody PR #776](https://github.com/LodyAI/Lody/pull/776)
 - Follows [running DSH with Lody's bundled Node](2026-09-16-dsh-bundled-node-runtime.md)

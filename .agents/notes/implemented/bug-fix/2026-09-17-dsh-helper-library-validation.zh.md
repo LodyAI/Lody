@@ -69,4 +69,5 @@ Apple 文档中的例外清单推断，而非在 Lody 的产物上观察到；�
 
 ## 集成
 
+- [Lody PR #776](https://github.com/LodyAI/Lody/pull/776)
 - 承接[使用 Lody 内置 Node 运行 DSH](2026-09-16-dsh-bundled-node-runtime.zh.md)
