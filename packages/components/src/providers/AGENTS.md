@@ -38,6 +38,10 @@ and update only decision fields through HistoryWriter; never replace a rendered 
 
 ## Workspace runtime
 
+- Meta/named Flock Streams progress uses repo-owned replica checkpoints; old
+  independent cursor databases are for LoroDoc only. Recovery bypass/delete must
+  target the current replica checkpoint. See [recovery contract](../../../../specs/flock-checkpoint-recovery.md).
+
 - Background Session prefetch must never acquire a UI Session store or create a
   Mirror. Its disposable worker owns raw Doc import/export and a separate,
   rebuildable snapshot cache. Keep one worker task per renderer, terminate before

@@ -177,6 +177,9 @@ vi.mock('loro-repo', () => ({
       transportRooms: mocks.transportRooms,
       joinMetaRoom: mocks.joinMetaRoom,
       flush: mocks.flush,
+      getMeta: () => ({}),
+      getReplicaCheckpointStore: () => ({ delete: mocks.remoteCursorDelete }),
+      supportsReplicaCheckpoints: () => true,
       destroy: mocks.destroy,
       reconnect: mocks.reconnect,
       listDoc: mocks.listDoc,
@@ -191,7 +194,8 @@ vi.mock('loro-repo/storage/indexeddb', () => ({
   },
 }));
 
-vi.mock('loro-repo/transport/streams', () => ({
+vi.mock('loro-repo/transport/streams', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('loro-repo/transport/streams')>()),
   StreamsTransportAdapter: class StreamsTransportAdapter {
     constructor(readonly options: unknown) {
       mocks.streamsTransportConstructors(options);

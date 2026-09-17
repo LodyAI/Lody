@@ -9,6 +9,8 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 import { SqliteRepoStore } from 'loro-repo/storage/sqlite';
+import { LoroRepo } from 'loro-repo';
+import { createCliStreamsPersistence } from './streams-persistence';
 
 import {
   AliasedRemoteCursorStore,
@@ -71,6 +73,87 @@ afterEach(async () => {
 });
 
 describe('SQLite Loro repo store', () => {
+  it('replays legacy progress while preserving durable Meta and named Flock repairs', async () => {
+    const { sqliteStore } = await createTempSqliteCursorStore();
+    const cursor = createCursor('https://streams.invalid/meta');
+    await sqliteStore.cursorStore.save(cursor);
+    const repo = await LoroRepo.create({
+      storageAdapter: sqliteStore.storage,
+      metaDebounceCommitMs: 0,
+    });
+    const persistence = createCliStreamsPersistence(repo);
+    const named = await repo.openFlockDoc('named');
+    const record = (key: string, clock: number) => ({
+      version: 0,
+      entries: {
+        [JSON.stringify([key])]: { d: key, c: `1700000000000,${clock},aa` },
+      },
+    });
+    for (const flock of [repo.getMeta(), named.flock]) {
+      flock.importJson(record('B', 2));
+      flock.commit();
+    }
+    await repo.flush();
+    for (const flock of [repo.getMeta(), named.flock]) {
+      const before = flock.version();
+      flock.importJson(record('A', 1));
+      flock.commit();
+      expect(flock.version()).toEqual(before);
+    }
+    const checkpoint = persistence.cursorStoreFor({ kind: 'meta', flock: repo.getMeta() });
+    expect(await checkpoint.load(cursor.streamUrl)).toBeNull();
+    expect(await persistence.documentRemoteCursorStore.load(cursor.streamUrl)).toBeNull();
+    if (!persistence.persistMeta || !persistence.persistFlockDoc)
+      throw new Error('Missing durability barriers');
+    await persistence.persistMeta(repo.getMeta());
+    await persistence.persistFlockDoc('named', named.flock);
+    await checkpoint.save(cursor);
+    // Independent reader sees the persisted repairs before shutdown flushes.
+    const reader = await LoroRepo.create({
+      storageAdapter: sqliteStore.storage,
+      metaDebounceCommitMs: 0,
+    });
+    expect(reader.getMeta().get(['A'])).toBe('A');
+    expect((await reader.openFlockDoc('named')).flock.get(['A'])).toBe('A');
+    expect(
+      await persistence
+        .cursorStoreFor({ kind: 'meta', flock: reader.getMeta() })
+        .load(cursor.streamUrl)
+    ).toBeNull();
+    expect(await checkpoint.load(cursor.streamUrl)).toEqual(cursor);
+    await reader.destroy();
+    await repo.destroy();
+  });
+
+  it('does not resolve the CLI durability barrier until SQLite has accepted the data', async () => {
+    const { sqliteStore } = await createTempSqliteCursorStore();
+    const save = sqliteStore.storage.save.bind(sqliteStore.storage);
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    sqliteStore.storage.save = async (payload) => {
+      entered.resolve();
+      await release.promise;
+      await save(payload);
+    };
+    const repo = await LoroRepo.create({
+      storageAdapter: sqliteStore.storage,
+      metaDebounceCommitMs: 0,
+    });
+    const persistence = createCliStreamsPersistence(repo);
+    repo.getMeta().set(['local'], 'keep');
+    if (!persistence.persistMeta) throw new Error('Missing Meta durability barrier');
+    let completed = false;
+    const barrier = persistence.persistMeta(repo.getMeta()).then(() => {
+      completed = true;
+    });
+    await entered.promise;
+    expect(completed).toBe(false);
+    release.resolve();
+    await barrier;
+    expect((await sqliteStore.storage.loadMeta?.())?.get(['local'])).toBe('keep');
+    await repo.destroy();
+  });
+
   it('saves, loads, and deletes remote cursors in SQLite', async () => {
     const { cursorStore, tempDir } = await createTempSqliteCursorStore();
     const cursor = createCursor(`${LEGACY_LORO_STREAMS_BASE_URL}/ds/lody/workspace:meta`);

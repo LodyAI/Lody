@@ -200,6 +200,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "fake-indexeddb": "6.2.5",
     "@lody/configs": "workspace:*",
     "@playwright/test": "^1.58.2",
     "@radix-ui/react-avatar": "^1.1.10",
