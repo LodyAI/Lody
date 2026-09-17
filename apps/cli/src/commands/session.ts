@@ -1713,10 +1713,24 @@ export function resolveEffectiveSessionChatDispatchConfig(args: {
   target: Pick<SessionMeta, 'cliType' | 'agentType'>;
   capability?: AcpCapabilityCacheEntry;
 }): ResolvedTurnDispatchConfig {
+  const previous = args.inheritedDispatchConfig;
+  // Inherit run selectors only. Task tool consent belongs to this caller's turn.
+  // The probe's options describe its current model, so they cannot establish
+  // that old options are safe to carry across an explicit model switch.
+  const inherited = previous
+    ? {
+        modeId: previous.modeId,
+        modelId: previous.modelId,
+        configOptionValues:
+          args.dispatchConfig.modelId && args.dispatchConfig.modelId !== previous.modelId
+            ? undefined
+            : previous.configOptionValues,
+      }
+    : undefined;
   return withBuiltinDefaultTurnMode(
     mergeTurnDispatchConfig(
       args.dispatchConfig,
-      filterCompatibleInheritedTurnConfig(args.inheritedDispatchConfig, args.capability)
+      filterCompatibleInheritedTurnConfig(inherited, args.capability)
     ),
     args.target,
     args.capability

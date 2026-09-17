@@ -61,6 +61,7 @@ Parent instructions apply.
 - Chat follow-ups with no mode/model/config inherit those fields from the target
   Session's last user turn that recorded a model (else its last matching turn).
   Explicit CLI overrides still win; drop incompatible inherited selectors.
+  Never inherit Task tool consent; an explicit model change drops inherited options.
   Builtin default mode fills only a still-empty mode.
   ([note](../../../../.agents/notes/implemented/bug-fix/2026-09-17-chat-follow-up-inherits-target-run-config.md))
 - `lody_session_create_options` publishes valid run-config values per agent config and stays

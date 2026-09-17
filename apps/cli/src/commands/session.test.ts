@@ -904,6 +904,74 @@ describe('session command helpers', () => {
     ).toMatchObject({ modeId: 'agent-auto-review' });
   });
 
+  it.each([undefined, false, true])(
+    'takes Task tool consent only from the chat caller (%s)',
+    (taskToolsEnabled) => {
+      const target = createSessionMeta();
+      const inheritedDispatchConfig = resolveTurnDispatchDefaultsFromHistory(
+        [
+          createHistoryEntry({
+            role: 'user',
+            inputConfig: {
+              prompt: 'previous',
+              cliType: target.cliType,
+              agentType: target.agentType,
+              modelId: 'model-a',
+              taskToolsEnabled: true,
+            },
+          }),
+        ],
+        target
+      );
+      const result = resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: { taskToolsEnabled },
+        inheritedDispatchConfig,
+        target,
+        capability: createAcpCapability(),
+      });
+      expect(result.modelId).toBe('model-a');
+      expect(result.taskToolsEnabled).toBe(taskToolsEnabled);
+    }
+  );
+
+  it('drops old-model options on a model switch while preserving explicit options', () => {
+    const capability: AcpCapabilityCacheEntry = {
+      ...createAcpCapability(),
+      models: [
+        { modelId: 'model-a', name: 'A' },
+        { modelId: 'model-b', name: 'B' },
+      ],
+      configOptions: [{ id: 'fast', name: 'Fast', type: 'boolean', currentValue: true }],
+    };
+    const inheritedDispatchConfig = {
+      modelId: 'model-a',
+      modeId: 'default',
+      configOptionValues: { fast: true },
+    };
+    const resolve = (
+      dispatchConfig: Parameters<
+        typeof resolveEffectiveSessionChatDispatchConfig
+      >[0]['dispatchConfig']
+    ) =>
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig,
+        inheritedDispatchConfig,
+        target: createSessionMeta(),
+        capability,
+      });
+    expect(resolve({ modelId: 'model-b' })).toEqual({
+      modelId: 'model-b',
+      modeId: 'default',
+      configOptionValues: undefined,
+      taskToolsEnabled: undefined,
+    });
+    expect(resolve({ modelId: 'model-a' }).configOptionValues).toEqual({ fast: true });
+    expect(resolve({}).configOptionValues).toEqual({ fast: true });
+    expect(
+      resolve({ modelId: 'model-b', configOptionValues: { fast: false } }).configOptionValues
+    ).toEqual({ fast: false });
+  });
+
   it('filters frozen inherited config against the resolved target agent kind', () => {
     const frozenInput = {
       cliType: 'builtin' as const,

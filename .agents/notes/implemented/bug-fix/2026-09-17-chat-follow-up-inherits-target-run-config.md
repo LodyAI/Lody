@@ -35,8 +35,17 @@ apply. A prior model-less follow-up must not hide an earlier selected model. Exp
 capability no longer offers are dropped rather than failing the follow-up. Builtin default mode
 applies only when both the request and the inherited turn left mode empty.
 
-`taskToolsEnabled` stays a requester freeze on the MCP path: the parent still passes it
-explicitly, so it is not taken from the child. Semantic `runConfig` remains create-only.
+`taskToolsEnabled` comes only from the current caller; chat inheritance explicitly selects
+mode/model/options and excludes historical consent even when the caller omits it. Semantic
+`runConfig` remains create-only. Review correction: the initial generic merge did inherit
+historical consent when omitted, contrary to the intended boundary.
+
+An explicit model change drops all inherited config options, retaining inherited mode and
+the caller's explicit options. The capability probe describes its current model, so it cannot
+prove that old reasoning/Fast values work on the new model. Dropping the old option map is
+conservative and also resets model-independent options; selecting the same model retains them.
+
+PR: [#771](https://github.com/LodyAI/Lody/pull/771).
 
 ## Alternatives
 
@@ -51,3 +60,5 @@ Unit tests cover history walk (skip assistant and other-agent turns, prefer the 
 model, fall back to a mode-only turn) and merge (omitted fields inherit, explicit model keeps
 inherited mode/options, incompatible inherited model/mode are dropped, builtin default mode fills
 only an empty mode). Live parent-to-child MCP chat is not exercised in this change.
+Regression tests reproduce the two review findings before the fix and cover omitted/false/true
+caller consent, model changes, same-model inheritance, and explicit replacement options.

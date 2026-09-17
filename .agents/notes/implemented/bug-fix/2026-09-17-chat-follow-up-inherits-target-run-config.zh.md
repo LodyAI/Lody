@@ -30,8 +30,15 @@ chat 路径既没有复制创建轮配置，也没有复制最近一次选择。
 CLI `--model`/`--mode`/`--config-option` 仍校验并优先。当前能力不再提供的继承选择器直接丢弃，
 而不是让 follow-up 失败。内置默认 mode 只在请求和继承 turn 都没有 mode 时补上。
 
-`taskToolsEnabled` 仍是 MCP 路径上的请求方冻结：父会话会显式传入，因此不从子会话读取。语义
-`runConfig` 仍然只用于创建。
+`taskToolsEnabled` 只来自本次调用方；chat 继承明确限定 mode/model/options，即使调用方省略
+权限也不读取历史授权。语义 `runConfig` 仍只用于创建。评审纠正：最初的通用合并在调用方
+省略权限时确实会继承历史授权，与预期边界不符。
+
+显式切换模型时丢弃全部继承配置选项，保留继承的 mode 和本次明确填写的选项。
+能力探测只描述探测时的模型，无法证明旧 reasoning/Fast 值适用于新模型。
+丢弃整个旧选项映射较保守，也会重置与模型无关的选项；明确选择同一模型时继续继承。
+
+PR：[#771](https://github.com/LodyAI/Lody/pull/771)。
 
 ## 备选
 
@@ -44,3 +51,4 @@ CLI `--model`/`--mode`/`--config-option` 仍校验并优先。当前能力不再
 单元测试覆盖历史回溯（跳过 assistant 和其他 agent、优先最近一次记录的模型、退回仅有 mode 的
 turn）以及合并（省略字段继承、显式模型保留继承的 mode/options、不兼容的继承模型/mode 被丢弃、
 内置默认 mode 只填空 mode）。本次不包含真实的父到子 MCP chat。
+回归测试先复现两条评审问题，再覆盖调用方权限省略/false/true、换模型、同模型继承和显式替换选项。
