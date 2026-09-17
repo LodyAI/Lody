@@ -129,6 +129,11 @@ this page is the full text of the rules summarised there.
   shared close replaces only the still-current URL choice with an open neighbour
   or `empty` (materialized into a local draft); this narrow invalidation never reopens the parent or mirrors selection
   into React state. The old broad `shouldClearSessionUrlTab` normalizer remains dead.
+  In-conversation created-Session cards can carry only the child Session id. When that id is
+  already a known tab in the mounted workspace, navigation stays local; a closed target goes
+  through the lifecycle-aware reopen action and waits for its open metadata projection before
+  selection instead of routing through the child root URL or letting stale close metadata
+  redirect the explicit request to an open sibling.
   Promotion keeps its `pendingDraftChildSessionIds` entry
   as a draft→child resolution alias through the send window. The ABSENT value
   means "no explicit choice" and is reserved for external entries: the session

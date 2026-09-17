@@ -245,6 +245,8 @@ import {
 } from '@/lib/session-tab-url';
 import {
   getSessionNavigationLocation,
+  resolveCurrentWorkspaceTabNavigation,
+  resolveSessionTabRestoreNavigation,
   type SessionNavigationTarget,
 } from '@/lib/session-navigation';
 import { getSessionDetailInitialTabState } from '@/lib/session-detail-initial-state';
@@ -1007,6 +1009,13 @@ const SessionDetail = ({
     () => new Set()
   );
   const [tabOrder, setTabOrderState] = useState<string[]>(() => readStoredTabOrder(sessionId));
+  const tabRestoreNavigationRequestIdRef = useRef(0);
+  const [pendingTabRestoreNavigation, setPendingTabRestoreNavigation] = useState<{
+    requestId: number;
+    tabSessionId: SessionId;
+    sourceUrlTab: string | undefined;
+    writeCompleted: boolean;
+  } | null>(null);
   const detailLoadStartMsRef = useRef(getPerformanceNowMs());
   const fireDetailNotFoundOnce = useFireOncePerKey<SessionId>();
 
@@ -1141,6 +1150,10 @@ const SessionDetail = ({
   const orderedSessionTabIds = useMemo(
     () => allOrderedSessionTabIds.filter((id) => !closedConversationIds.has(id)),
     [allOrderedSessionTabIds, closedConversationIds]
+  );
+  const allOrderedSessionTabIdSet = useMemo(
+    () => new Set(allOrderedSessionTabIds),
+    [allOrderedSessionTabIds]
   );
 
   const handleSessionTabReorder = useCallback(
@@ -2390,20 +2403,50 @@ const SessionDetail = ({
 
   const handleTabRestore = useCallback(
     async (tabSessionId: SessionId) => {
+      const requestId = ++tabRestoreNavigationRequestIdRef.current;
+      setPendingTabRestoreNavigation({
+        requestId,
+        tabSessionId,
+        sourceUrlTab: router.state.location.search.tab,
+        writeCompleted: false,
+      });
       captureSessionDetailEvent('session/tab_restore_requested', {
         tab_session_id: tabSessionId,
       });
       try {
         await reopenSessionTab(tabSessionId);
-        if (router.state.location.search.tab === urlTab)
-          navigateToSessionTab(tabSessionId, { push: true });
+        setPendingTabRestoreNavigation((current) =>
+          current?.requestId === requestId ? { ...current, writeCompleted: true } : current
+        );
       } catch (error) {
+        setPendingTabRestoreNavigation((current) =>
+          current?.requestId === requestId ? null : current
+        );
         console.error('Failed to reopen session tab', error);
         toast.error(t('sessions.tabReopenFailed', 'Could not reopen this tab'));
       }
     },
-    [captureSessionDetailEvent, reopenSessionTab, navigateToSessionTab, router, urlTab, t]
+    [captureSessionDetailEvent, reopenSessionTab, router, t]
   );
+
+  useEffect(() => {
+    if (!pendingTabRestoreNavigation) return;
+    const resolution = resolveSessionTabRestoreNavigation(
+      pendingTabRestoreNavigation.tabSessionId,
+      pendingTabRestoreNavigation.sourceUrlTab,
+      urlTab,
+      pendingTabRestoreNavigation.writeCompleted,
+      closedConversationIds
+    );
+    if (resolution.kind === 'wait') return;
+
+    setPendingTabRestoreNavigation((current) =>
+      current?.requestId === pendingTabRestoreNavigation.requestId ? null : current
+    );
+    if (resolution.kind === 'navigate') {
+      navigateToSessionTab(resolution.tabSessionId, { push: true });
+    }
+  }, [closedConversationIds, navigateToSessionTab, pendingTabRestoreNavigation, urlTab]);
 
   // Navigate back to session list.
   const handleBackToList = useCallback(() => {
@@ -3571,12 +3614,22 @@ const SessionDetail = ({
   );
   const handleNavigateSession = useCallback(
     (target: SessionNavigationTarget) => {
-      const location = getSessionNavigationLocation(target);
-      if (location.sessionId === sessionId) {
-        handleSessionTabSelect(target.tabSessionId ?? target.sessionId);
+      const currentTabNavigation = resolveCurrentWorkspaceTabNavigation(
+        target,
+        sessionId,
+        allOrderedSessionTabIdSet,
+        closedConversationIds
+      );
+      if (currentTabNavigation) {
+        if (currentTabNavigation.shouldReopen) {
+          void handleTabRestore(currentTabNavigation.tabSessionId);
+        } else {
+          handleSessionTabSelect(currentTabNavigation.tabSessionId);
+        }
         return;
       }
 
+      const location = getSessionNavigationLocation(target);
       if (!workspaceSlug) return;
       void router.navigate({
         to: '/$workspaceName/sessions/$sessionId',
@@ -3584,7 +3637,15 @@ const SessionDetail = ({
         search: { tab: location.tab },
       });
     },
-    [handleSessionTabSelect, router, sessionId, workspaceSlug]
+    [
+      allOrderedSessionTabIdSet,
+      closedConversationIds,
+      handleSessionTabSelect,
+      handleTabRestore,
+      router,
+      sessionId,
+      workspaceSlug,
+    ]
   );
 
   // When a viewer tab is selected, activate the viewer surface for the current session.
