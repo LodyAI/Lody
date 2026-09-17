@@ -680,7 +680,11 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       // same recovery contract every other frame this transport sends already
       // has (see the F5b regression case), not a gap introduced here.
       if (message.status === 'disconnected' || message.status === 'error') {
-        this.rejoinRoom(state);
+        // The server has invalidated this room, so a queued reply for the
+        // pending request can no longer arrive. This is distinct from a
+        // routine reconnect sweep: supersede that doomed attempt immediately
+        // instead of waiting for its deadline before recovery can begin.
+        this.rejoinRoom(state, { supersedePending: true });
       }
       return;
     }

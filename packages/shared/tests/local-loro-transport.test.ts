@@ -176,6 +176,47 @@ describe('LocalLoroTransportAdapter push+delta sync', () => {
     expect(subscription.status).toBe('joined');
   });
 
+  it('immediately supersedes an unanswered join after a terminal room status', () => {
+    const sent: LocalLoroDataPlaneClientMessage[] = [];
+    const listeners = new Set<(message: LocalLoroDataPlaneServerMessage) => void>();
+    const adapter = new LocalLoroTransportAdapter({
+      workspaceId: 'ws',
+      peerId: 'terminal-status-peer',
+      connection: {
+        send: (message) => sent.push(message),
+        onMessage: (listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+        onStatusChange: () => () => {},
+        isConnected: () => true,
+      },
+    });
+    adapter.joinDocRoom('doc-invalidated-before-reply', new LoroDoc());
+    const firstJoin = sent[0];
+    if (firstJoin?.type !== 'join') throw new Error('initial_join_not_sent');
+
+    // The server has dropped the queued reply while invalidating the room. A
+    // normal reconnect must not renew a live attempt, but this terminal status
+    // proves the request is unrecoverable and must start a replacement now.
+    for (const listener of listeners) {
+      listener({
+        type: 'room-status',
+        protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+        workspaceId: 'ws',
+        peerId: 'terminal-status-peer',
+        room: { scope: 'doc', docId: 'doc-invalidated-before-reply' },
+        status: 'disconnected',
+      });
+    }
+
+    expect(sent).toHaveLength(2);
+    expect(sent[1]?.type).toBe('join');
+    expect(
+      (sent[1] as Extract<LocalLoroDataPlaneClientMessage, { type: 'join' }>).requestId
+    ).not.toBe(firstJoin.requestId);
+  });
+
   it('turns a synchronous join send failure into a reconnectable error', () => {
     const adapter = new LocalLoroTransportAdapter({
       workspaceId: 'ws',
