@@ -58,6 +58,11 @@ Parent instructions apply.
   target for daemon replay, and `session_create({ operationId, resume: true })` recovers it without
   the prompt. Completion is delivered automatically — no public wait tool — and legacy `wait=true`
   is a temporary adapter new callers must not use.
+- Chat follow-ups with no mode/model/config inherit those fields from the target
+  Session's last user turn that recorded a model (else its last matching turn).
+  Explicit CLI overrides still win; drop incompatible inherited selectors.
+  Builtin default mode fills only a still-empty mode.
+  ([note](../../../../.agents/notes/implemented/bug-fix/2026-09-17-chat-follow-up-inherits-target-run-config.md))
 - `lody_session_create_options` publishes valid run-config values per agent config and stays
   sparse by default (online Machines, one agent config, the current local project, no GitHub
   fetch), expanding only through explicit query inputs.

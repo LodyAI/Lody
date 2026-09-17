@@ -53,6 +53,8 @@ import {
   resolveRenameArgs,
   resolvePromptCandidate,
   resolveTurnDispatchConfigFromInputConfig,
+  resolveTurnDispatchDefaultsFromHistory,
+  resolveEffectiveSessionChatDispatchConfig,
   resolveLocalProjectBranchForCreate,
   resolveLocalProjectCreateGitContext,
   resolveLocalProjectRefOrThrow,
@@ -731,6 +733,175 @@ describe('session command helpers', () => {
         currentSession
       )
     ).toBeUndefined();
+  });
+
+  it('inherits chat follow-up run config from the last target turn that recorded a model', () => {
+    const agent = { cliType: 'builtin' as const, agentType: 'codex' };
+    const history = [
+      createHistoryEntry({
+        id: 'turn-1',
+        role: 'user',
+        inputConfig: {
+          prompt: 'first',
+          cliType: 'builtin',
+          agentType: 'codex',
+          modeId: 'plan',
+          modelId: 'model-a',
+          configOptionValues: { approval_policy: 'never' },
+        },
+      }),
+      createHistoryEntry({ id: 'assistant-1', role: 'assistant' }),
+      createHistoryEntry({
+        id: 'turn-2',
+        role: 'user',
+        inputConfig: {
+          prompt: 'follow-up without a model',
+          cliType: 'builtin',
+          agentType: 'codex',
+          modeId: 'agent-auto-review',
+        },
+      }),
+    ];
+
+    expect(resolveTurnDispatchDefaultsFromHistory(history, agent)).toEqual({
+      modeId: 'plan',
+      modelId: 'model-a',
+      configOptionValues: { approval_policy: 'never' },
+    });
+    expect(
+      resolveTurnDispatchDefaultsFromHistory(
+        [
+          ...history,
+          createHistoryEntry({
+            id: 'turn-3',
+            role: 'user',
+            inputConfig: {
+              prompt: 'later selected model',
+              cliType: 'builtin',
+              agentType: 'codex',
+              modeId: 'default',
+              modelId: 'model-a',
+              configOptionValues: { approval_policy: 'on-request' },
+            },
+          }),
+        ],
+        agent
+      )
+    ).toEqual({
+      modeId: 'default',
+      modelId: 'model-a',
+      configOptionValues: { approval_policy: 'on-request' },
+    });
+    expect(
+      resolveTurnDispatchDefaultsFromHistory(
+        [
+          createHistoryEntry({
+            id: 'turn-claude',
+            role: 'user',
+            inputConfig: {
+              prompt: 'other agent',
+              cliType: 'builtin',
+              agentType: 'claude',
+              modelId: 'ignored',
+            },
+          }),
+          ...history,
+        ],
+        agent
+      )
+    ).toEqual({
+      modeId: 'plan',
+      modelId: 'model-a',
+      configOptionValues: { approval_policy: 'never' },
+    });
+    expect(
+      resolveTurnDispatchDefaultsFromHistory(
+        [
+          createHistoryEntry({
+            id: 'mode-only',
+            role: 'user',
+            inputConfig: {
+              prompt: 'mode only',
+              cliType: 'builtin',
+              agentType: 'codex',
+              modeId: 'plan',
+            },
+          }),
+        ],
+        agent
+      )
+    ).toEqual({ modeId: 'plan' });
+    expect(resolveTurnDispatchDefaultsFromHistory([], agent)).toBeUndefined();
+  });
+
+  it('fills omitted chat follow-up selectors from the target turn and keeps explicit overrides', () => {
+    const target = createSessionMeta();
+    const capability: AcpCapabilityCacheEntry = {
+      ...createAcpCapability(),
+      modes: [
+        { id: 'default', name: 'Default' },
+        { id: 'plan', name: 'Plan' },
+        { id: 'agent-auto-review', name: 'Auto' },
+      ],
+    };
+    const inherited = {
+      modeId: 'plan',
+      modelId: 'model-a',
+      configOptionValues: { approval_policy: 'never' },
+    };
+
+    expect(
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: {},
+        inheritedDispatchConfig: inherited,
+        target,
+        capability,
+      })
+    ).toMatchObject(inherited);
+
+    expect(
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: { modelId: 'model-a' },
+        inheritedDispatchConfig: inherited,
+        target,
+        capability,
+      })
+    ).toMatchObject(inherited);
+
+    expect(
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: { modeId: 'default' },
+        inheritedDispatchConfig: inherited,
+        target,
+        capability,
+      })
+    ).toMatchObject({
+      modeId: 'default',
+      modelId: 'model-a',
+      configOptionValues: { approval_policy: 'never' },
+    });
+
+    expect(
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: {},
+        inheritedDispatchConfig: {
+          modeId: 'plan',
+          modelId: 'retired-model',
+          configOptionValues: { approval_policy: 'never' },
+        },
+        target,
+        capability: createAcpCapability(),
+      })
+    ).toMatchObject({
+      configOptionValues: { approval_policy: 'never' },
+    });
+
+    expect(
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: {},
+        target,
+      })
+    ).toMatchObject({ modeId: 'agent-auto-review' });
   });
 
   it('filters frozen inherited config against the resolved target agent kind', () => {

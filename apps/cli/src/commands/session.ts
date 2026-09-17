@@ -1377,8 +1377,8 @@ export type ResolvedTurnDispatchConfig = {
    * only becomes concrete ACP ids once the target agent's capabilities are
    * known. Resolved by `applyAgentRunConfigSelection` before validation.
    *
-   * Session creation only: `sendSessionChatResult` does not resolve it, because
-   * a follow-up turn keeps the settings the session was created with.
+   * Session creation only. Chat follow-ups do not resolve it: omitted
+   * mode/model/options inherit from the target Session's last recorded turn.
    */
   runConfig?: AgentRunConfigSelection;
 };
@@ -1646,7 +1646,7 @@ async function readAgentAcpCapability(args: {
 
 export function resolveTurnDispatchConfigFromInputConfig(
   inputConfig: SessionTurnInputConfig | undefined,
-  agentConfig: AgentConfigMeta
+  agentConfig: Pick<AgentConfigMeta, 'cliType' | 'agentType'>
 ): ResolvedTurnDispatchConfig | undefined {
   if (
     inputConfig?.cliType !== agentConfig.cliType ||
@@ -1666,13 +1666,15 @@ export function resolveTurnDispatchConfigFromInputConfig(
   };
 }
 
-async function resolveSessionTurnDispatchDefaults(
-  manager: LoroDocumentManager,
-  sessionId: SessionId,
-  agentConfig: AgentConfigMeta
-): Promise<ResolvedTurnDispatchConfig | undefined> {
-  const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
-  const history = readSessionHistory(sessionDoc.sessionData.history);
+/**
+ * Last matching user turn that recorded a model, else the last matching turn.
+ * A model-less follow-up must not hide an earlier selected model.
+ */
+export function resolveTurnDispatchDefaultsFromHistory(
+  history: readonly Pick<SessionHistoryInput, 'role' | 'inputConfig'>[],
+  agent: Pick<AgentConfigMeta, 'cliType' | 'agentType'>
+): ResolvedTurnDispatchConfig | undefined {
+  let fallback: ResolvedTurnDispatchConfig | undefined;
   for (let index = history.length - 1; index >= 0; index -= 1) {
     const entry = history[index];
     if (entry?.role !== 'user') {
@@ -1680,13 +1682,45 @@ async function resolveSessionTurnDispatchDefaults(
     }
     const defaults = resolveTurnDispatchConfigFromInputConfig(
       entry.inputConfig as SessionTurnInputConfig | undefined,
-      agentConfig
+      agent
     );
-    if (defaults) {
+    if (!defaults) {
+      continue;
+    }
+    if (defaults.modelId) {
       return defaults;
     }
+    fallback ??= defaults;
   }
-  return undefined;
+  return fallback;
+}
+
+async function resolveSessionTurnDispatchDefaults(
+  manager: LoroDocumentManager,
+  sessionId: SessionId,
+  agentConfig: Pick<AgentConfigMeta, 'cliType' | 'agentType'>
+): Promise<ResolvedTurnDispatchConfig | undefined> {
+  const sessionDoc = await manager.getOrCreateSessionDoc(sessionId);
+  return resolveTurnDispatchDefaultsFromHistory(
+    readSessionHistory(sessionDoc.sessionData.history),
+    agentConfig
+  );
+}
+
+export function resolveEffectiveSessionChatDispatchConfig(args: {
+  dispatchConfig: ResolvedTurnDispatchConfig;
+  inheritedDispatchConfig?: ResolvedTurnDispatchConfig;
+  target: Pick<SessionMeta, 'cliType' | 'agentType'>;
+  capability?: AcpCapabilityCacheEntry;
+}): ResolvedTurnDispatchConfig {
+  return withBuiltinDefaultTurnMode(
+    mergeTurnDispatchConfig(
+      args.dispatchConfig,
+      filterCompatibleInheritedTurnConfig(args.inheritedDispatchConfig, args.capability)
+    ),
+    args.target,
+    args.capability
+  );
 }
 
 function buildStructuredWaitError(
@@ -3218,27 +3252,6 @@ export async function sendSessionChatResult(
     sessionId,
     requester,
   });
-  const mayApplyBuiltinDefault =
-    Boolean(getBuiltinDefaultModeId(session.cliType, session.agentType)) &&
-    !dispatchConfig.modeId &&
-    typeof dispatchConfig.configOptionValues?.mode !== 'string';
-  const capability =
-    dispatchConfig.modeId ||
-    dispatchConfig.modelId ||
-    dispatchConfig.configOptionValues ||
-    mayApplyBuiltinDefault
-      ? await readAgentAcpCapability({
-          manager,
-          workspaceId: workspace.id as WorkspaceId,
-          machineId: session.machineId,
-          agentConfigId: session.agentConfigId,
-        })
-      : undefined;
-  if (dispatchConfig.modeId || dispatchConfig.modelId || dispatchConfig.configOptionValues) {
-    validateTurnModeAndModel(dispatchConfig, capability);
-    validateTurnConfigOptionValues(dispatchConfig.configOptionValues, capability);
-  }
-  const effectiveDispatchConfig = withBuiltinDefaultTurnMode(dispatchConfig, session, capability);
 
   await syncDocForRead(
     manager,
@@ -3254,6 +3267,43 @@ export async function sendSessionChatResult(
         sessionDoc,
         userTurnId: orchestration?.userTurnId,
       });
+  const historyForDefaults =
+    quotaHistory ?? (await readSessionHistory(sessionDoc.sessionData.history));
+  const inheritedDispatchConfig = resolveTurnDispatchDefaultsFromHistory(
+    historyForDefaults,
+    session
+  );
+  const mayApplyBuiltinDefault =
+    Boolean(getBuiltinDefaultModeId(session.cliType, session.agentType)) &&
+    !dispatchConfig.modeId &&
+    typeof dispatchConfig.configOptionValues?.mode !== 'string' &&
+    inheritedDispatchConfig?.modeId === undefined &&
+    typeof inheritedDispatchConfig?.configOptionValues?.mode !== 'string';
+  const capability =
+    dispatchConfig.modeId ||
+    dispatchConfig.modelId ||
+    dispatchConfig.configOptionValues ||
+    inheritedDispatchConfig?.modeId !== undefined ||
+    inheritedDispatchConfig?.modelId !== undefined ||
+    inheritedDispatchConfig?.configOptionValues !== undefined ||
+    mayApplyBuiltinDefault
+      ? await readAgentAcpCapability({
+          manager,
+          workspaceId: workspace.id as WorkspaceId,
+          machineId: session.machineId,
+          agentConfigId: session.agentConfigId,
+        })
+      : undefined;
+  if (dispatchConfig.modeId || dispatchConfig.modelId || dispatchConfig.configOptionValues) {
+    validateTurnModeAndModel(dispatchConfig, capability);
+    validateTurnConfigOptionValues(dispatchConfig.configOptionValues, capability);
+  }
+  const effectiveDispatchConfig = resolveEffectiveSessionChatDispatchConfig({
+    dispatchConfig,
+    inheritedDispatchConfig,
+    target: session,
+    capability,
+  });
   const userTurn = await appendUserPromptHistory({
     sessionDoc,
     prompt,
