@@ -21,7 +21,7 @@ export interface ProtocolFrame {
 
 export type FetchIntercept = {
   readonly eventId: string;
-  readonly kind: 'drop' | 'replace';
+  readonly kind: 'drop' | 'replace' | 'delay' | 'duplicate';
   readonly status?: number;
   readonly bodyHex?: string;
 };
@@ -113,6 +113,9 @@ export class LabRuntime {
         if (intercept?.kind === 'drop') {
           throw new Error('intercept-drop');
         }
+        if (intercept?.kind === 'duplicate') {
+          await globalThis.fetch(request.clone());
+        }
         const response =
           intercept?.kind === 'replace'
             ? new Response(Buffer.from(fromHexBody(intercept.bodyHex ?? '')), {
@@ -131,6 +134,13 @@ export class LabRuntime {
             responseStatus: response.status,
             responseHex,
           });
+        }
+        if (intercept?.kind === 'delay') {
+          if (eventId) {
+            this.complete(eventId);
+            eventId = undefined;
+          }
+          eventId = await this.gate(actor, 'submit', 'ack-queued');
         }
         return response;
       } catch (error) {

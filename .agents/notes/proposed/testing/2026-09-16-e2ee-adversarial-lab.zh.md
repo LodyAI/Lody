@@ -211,3 +211,9 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 - `fa7cb978` 工作树干净。未 `git reset --hard`、未开第二棵 worktree，重跑 README 命令。
 - `pnpm --filter @lody/e2ee-lab check` 退出 0（10 文件 / 23 测试）。`scenario:collab` 退出 0。`replay` 退出 0（4 测试）。CLI `--data-dir` 在 loopback 监听，`/healthz` 返回 `200 ok`，SIGTERM 退出。`pnpm --filter @lody/e2ee-core check` 退出 0（35 文件 / 384 测试）。
 - 仍未启用产品 E2EE。无 push/PR/merge。
+
+### 2026-09-17 — Spec §5 intercept/未满足与 15 分钟截止
+
+- `advanceUntil` 在阶段未出现时返回 `unmet: true`。拦截种类为 `drop | replace | delay | duplicate`。drop 表现为丢 ACK（`status: unknown`）；delay 把 CAS 回执留到第二次调度许可，不用墙上时钟 sleep。duplicate 把 CAS 请求发两次。重放按记录的拦截种类执行，不再一律当成 drop。
+- 15 分钟凭证截止：把注入的客户端时钟推到 `issuedAt + MAX_LEASE_MS` 后，后续控制读取被拒绝（`now == expires` 视为过期）。
+- 证据：`pnpm --filter @lody/e2ee-lab check` 退出 0（10 文件 / 27 测试）。HPKE/Wasm 随机、Fiber/`exclusive` 中断、OS 隔离仍未注入。未启用产品 E2EE。无 push/PR/merge。

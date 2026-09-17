@@ -16,6 +16,7 @@ export interface PublicView {
   readonly genesisHex: string | null;
   readonly backendBytes: number;
   readonly errors: readonly string[];
+  readonly unmet?: boolean;
 }
 
 export interface PublicReport {
@@ -54,7 +55,7 @@ export interface BackendMutation {
 
 export interface ResponseMutation {
   readonly eventId: string;
-  readonly kind: 'drop' | 'replace';
+  readonly kind: 'drop' | 'replace' | 'delay' | 'duplicate';
   readonly status?: number;
   readonly bodyHex?: string;
 }
@@ -215,13 +216,13 @@ function advanceUntilEffect(
           );
         if (hit) {
           state.runtime.permit(hit.eventId);
-          return publicView(state);
+          return { ...publicView(state), unmet: false };
         }
         const next = state.runtime.events().find((event) => event.status === 'requested');
         if (!next) break;
         state.runtime.permit(next.eventId);
       }
-      return publicView(state);
+      return { ...publicView(state), unmet: true };
     },
     catch: (error) => error,
   });
@@ -377,7 +378,7 @@ export async function replayAttackActions(
       case 'intercept':
         await lab.intercept({
           eventId: String(action.input?.eventId ?? ''),
-          kind: action.input?.kind === 'replace' ? 'replace' : 'drop',
+          kind: interceptKind(action.input?.kind),
           status: action.input?.status as number | undefined,
           bodyHex: action.input?.bodyHex as string | undefined,
         });
@@ -397,6 +398,13 @@ export async function replayAttackActions(
   }
   if (!report) report = await lab.finish();
   return report;
+}
+
+function interceptKind(kind: unknown): ResponseMutation['kind'] {
+  if (kind === 'replace' || kind === 'delay' || kind === 'duplicate' || kind === 'drop') {
+    return kind;
+  }
+  return 'drop';
 }
 
 function fromHex(hex: string): Uint8Array {

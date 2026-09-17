@@ -211,3 +211,9 @@ Implementers choose filenames, service names and test organization without repea
 - Working tree at `fa7cb978` was clean. Re-ran README commands without `git reset --hard` or a second worktree.
 - `pnpm --filter @lody/e2ee-lab check` exit 0 (10 files / 23 tests). `scenario:collab` exit 0. `replay` exit 0 (4 tests). CLI `--data-dir` listened on loopback, `/healthz` returned `200 ok`, SIGTERM exited. `pnpm --filter @lody/e2ee-core check` exit 0 (35 files / 384 tests).
 - Still not product E2EE. No push/PR/merge.
+
+### 2026-09-17 — Spec §5 intercept/unmet and 15-minute cutoff
+
+- `advanceUntil` now returns `unmet: true` when the phase never appears. Intercept kinds are `drop | replace | delay | duplicate`. Drop is a lost ACK (`status: unknown`); delay holds the CAS acknowledgement until a second scheduler permit, with no wall-clock sleep. Duplicate sends the CAS request twice. Replay passes the recorded intercept kind through instead of collapsing everything to drop.
+- 15-minute credential cutoff: advancing the injected client clock to `issuedAt + MAX_LEASE_MS` rejects later control reads (`now == expires` is expired).
+- Evidence: `pnpm --filter @lody/e2ee-lab check` exit 0 (10 files / 27 tests). HPKE/Wasm entropy, Fiber/`exclusive` interrupt, and OS isolation remain uninjected. Not product E2EE. No push/PR/merge.

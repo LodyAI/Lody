@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { cleanupLab, labClient, launchLab, tempDir } from '../src/fixtures';
 import { startLabBackend } from '../src/backend';
-import { CONTROL_STREAM } from '../src/platform/protocol';
+import { CONTROL_STREAM, MAX_LEASE_MS } from '../src/platform/protocol';
 
 afterEach(() => cleanupLab());
 
@@ -50,6 +50,16 @@ describe('lab host lifecycle', () => {
     expect(deleted.status === 401 || deleted.status === 403).toBe(true);
     expect(before.headers.get('stream-next-offset')).toBe(after.headers.get('stream-next-offset'));
     expect((await alice.readLedger()).length).toBe(1);
+  });
+
+  it('rejects control writes after the original 15-minute lease', async () => {
+    let now = 1_700_000_000_000;
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice', now: () => now });
+    await alice.createSpace();
+    expect((await alice.readLedger()).length).toBe(1);
+    now += MAX_LEASE_MS;
+    await expect(alice.readLedger()).rejects.toThrow();
   });
 
   it('restarts on the same data directory', async () => {

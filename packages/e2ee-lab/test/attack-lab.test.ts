@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { writeLoro } from '../src/platform/content-session';
+import { generateDevice } from '../src/platform/device';
 import { toHex } from '../src/platform/bytes';
 import {
   createAttackLab,
@@ -77,6 +78,76 @@ describe('P4 AttackLab isolation', () => {
       })
     ).resolves.toEqual({ ok: false });
     expect(JSON.stringify(lab.actions())).not.toContain(secret);
+  });
+});
+
+describe('P4 AttackLab intercept and advanceUntil', () => {
+  it('reports unmet when the requested phase never appears', async () => {
+    const runtime = new LabRuntime({ mode: 'auto' });
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice', runtime });
+    await alice.createSpace();
+    const lab = createAttackLab({
+      host,
+      runtime,
+      clientDirs: [alice.clientDir],
+      expectedPlaintext: 'none',
+      genesisHex: alice.genesisHex,
+    });
+    const view = await lab.advanceUntil({ phase: 'no-such-phase', maxSteps: 2 });
+    expect(view.unmet).toBe(true);
+    await lab.finish();
+  });
+
+  it('drops a queued CAS through intercept without an LLM', async () => {
+    const runtime = new LabRuntime({ mode: 'manual' });
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice', runtime });
+    await alice.createSpace();
+    const lab = createAttackLab({
+      host,
+      runtime,
+      clientDirs: [alice.clientDir],
+      expectedPlaintext: 'none',
+      genesisHex: alice.genesisHex,
+    });
+    const admit = alice.admitDevice(await generateDevice(), 'personal', false);
+    await runtime.whenRequested(1);
+    const queued = runtime.events().find((event) => event.status === 'requested');
+    expect(queued).toBeDefined();
+    await lab.intercept({ eventId: queued!.eventId, kind: 'drop' });
+    runtime.permit(queued!.eventId);
+    expect((await admit).status).toBe('unknown');
+    const report = await lab.finish();
+    expect(report.budgetExceeded).toBe(false);
+  });
+
+  it('delays CAS acknowledgement until a second permit', async () => {
+    const runtime = new LabRuntime({ mode: 'manual' });
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice', runtime });
+    await alice.createSpace();
+    const lab = createAttackLab({
+      host,
+      runtime,
+      clientDirs: [alice.clientDir],
+      expectedPlaintext: 'none',
+      genesisHex: alice.genesisHex,
+    });
+    const admit = alice.admitDevice(await generateDevice(), 'personal', false);
+    await runtime.whenRequested(1);
+    const queued = runtime.events().find((event) => event.status === 'requested');
+    expect(queued).toBeDefined();
+    await lab.intercept({ eventId: queued!.eventId, kind: 'delay' });
+    runtime.permit(queued!.eventId);
+    await runtime.whenRequested(1);
+    const ack = runtime
+      .events()
+      .find((event) => event.phase === 'ack-queued' && event.status === 'requested');
+    expect(ack).toBeDefined();
+    runtime.permit(ack!.eventId);
+    expect((await admit).status).toBe('committed');
+    await lab.finish();
   });
 });
 

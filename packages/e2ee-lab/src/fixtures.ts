@@ -49,6 +49,7 @@ export async function labClient(input: {
   entropy?: Entropy;
   device?: string;
   clientDir?: string;
+  now?: () => number;
 }): Promise<HonestClient> {
   const device = input.device ? await importDevice(input.device) : await generateDevice();
   const client = new HonestClient({
@@ -57,6 +58,7 @@ export async function labClient(input: {
     account: input.account,
     testMode: true,
     device,
+    now: input.now,
     entropy: prefixedEntropy(input.account, input.entropy ?? liveEntropy),
     fetch: input.runtime?.gatedFetch(input.account),
   });
