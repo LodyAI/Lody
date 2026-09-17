@@ -278,5 +278,5 @@ Implementers choose filenames, service names and test organization without repea
 
 - `finish()` integrity/durability use `inspectHonest` (real `readLedger` length) or framed control-stream count. `forged-accepted` / `cursor-overrun` claims do not force `violation`. Host down after sqlite xor is `unavailable`; xor without the expected plaintext is not a confidentiality `violation`.
 - Official replay uses `harnessReplayActions` (claim evidence kept). Public `actions()` still redact. Replaying only the public log of a plaintext claim is `pass` and is not treated as the official verdict.
-- Manual mode records `document-persisted`, `cursor-persisted`, and `import` and waits for permits. Write path keeps a Loro replica. P4 Agent remains unchecked: `XAI_API_KEY`/`GROK_API_KEY` unset; `exploreAttackLab` is not the Agent.
+- Manual mode records `document-persisted`, `cursor-persisted`, and `import` and waits for permits. Write path keeps a Loro replica. P4 Agent remains unchecked: `XAI_API_KEY`/`GROK_API_KEY` unset; `OPENAI_API_KEY` returned 429 `credit_balance_exhausted`. `runRestrictedAgent` is the non-canned loop; no model-chosen trace completed. `exploreAttackLab` is not the Agent.
 - Evidence: lab check 10 files / 46 tests; core tests excluding 10k 34/384; `tsgo --noEmit` twice exit 0. Not product E2EE. No push.

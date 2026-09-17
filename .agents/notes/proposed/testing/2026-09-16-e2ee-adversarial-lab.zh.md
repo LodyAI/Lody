@@ -278,5 +278,5 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 
 - `finish()` 的完整性/耐久用 `inspectHonest`（真实 `readLedger` 长度）或控制流分帧计数。`forged-accepted` / `cursor-overrun` 声明不再强制 `violation`。sqlite xor 后宿主关闭为 `unavailable`；磁盘上没有期望明文则保密性不是 `violation`。
 - 正式重放使用 `harnessReplayActions`（保留声明证据）。公开 `actions()` 仍脱敏。只重放公开日志里的明文声明得到 `pass`，不作为正式判定。
-- 手动模式记录 `document-persisted`、`cursor-persisted`、`import` 并等待许可。写路径保留 Loro 副本。P4 Agent 仍不勾选：`XAI_API_KEY`/`GROK_API_KEY` 未设置；`exploreAttackLab` 不是 Agent。
+- 手动模式记录 `document-persisted`、`cursor-persisted`、`import` 并等待许可。写路径保留 Loro 副本。P4 Agent 仍不勾选：`XAI_API_KEY`/`GROK_API_KEY` 未设置；`OPENAI_API_KEY` 返回 429 `credit_balance_exhausted`。`runRestrictedAgent` 是非罐头循环，没有完成模型选步。`exploreAttackLab` 不是 Agent。
 - 证据：lab check 10 文件 / 46 测试；core 排除 10k 为 34/384；`tsgo --noEmit` 两次退出 0。未启用产品 E2EE。无 push。
