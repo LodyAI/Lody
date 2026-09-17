@@ -73,7 +73,7 @@ function RequestCards({
   return (
     <>
       {requests
-        ?.filter((request) => ['pending', 'confirmed', 'published'].includes(request.status))
+        ?.filter((request) => ['pending', 'confirmed'].includes(request.status))
         .map((request) => (
           <RequestCard
             key={request.requestId}
@@ -157,6 +157,7 @@ export function SessionShareConsent({
   onDeny: () => void;
 }) {
   const { t } = useTranslation();
+  if (published) return null;
   return (
     <section
       className="my-3 flex flex-col gap-2 rounded-md border border-border bg-card p-3"
@@ -187,14 +188,6 @@ export function SessionShareConsent({
         <p role="status" className="text-xs">
           {t('sharing.request.publishing', 'Publishing automatically…')}
           {management.phase === 'uploading' ? ` ${management.progress}%` : ''}
-        </p>
-      )}
-      {published && (
-        <p role="status" className="text-sm">
-          {t(
-            'sharing.request.delivered',
-            'Published. The agent can now receive the complete link.'
-          )}
         </p>
       )}
       {(management.error || failed) && (
