@@ -161,9 +161,19 @@ describe('AgentClient Devin subagent ingress classification', () => {
         _meta: context('root'),
       })
     );
+    // Tagged tool updates must keep flowing — they carry permission-requested
+    // rows and edit evidence that the applier still needs.
+    await client.sessionUpdate(
+      devinNotification({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: 'sub-tool-1',
+        status: 'completed',
+        _meta: context('agent-1'),
+      })
+    );
 
-    // Only the lifecycle row and the root-tagged chunk pass through.
-    expect(onUpdateMessage).toHaveBeenCalledTimes(2);
+    // The lifecycle row, root chunk, and tagged tool update pass through.
+    expect(onUpdateMessage).toHaveBeenCalledTimes(3);
     expect(onContextWindowUsageUpdate).not.toHaveBeenCalled();
   });
 

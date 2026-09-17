@@ -915,11 +915,14 @@ export class AgentClient implements acp.Client {
     // Register only a lifecycle row that can itself materialize as a task —
     // a malformed marker on a non-tool update must not make the applier's
     // fail-open (no task row → keep internals visible) unreachable.
+    const isToolUpdate =
+      params.update.sessionUpdate === 'tool_call' ||
+      params.update.sessionUpdate === 'tool_call_update';
     const devinLifecycle = parseDevinSubagentTaskMeta(params.update._meta);
     if (
       devinLifecycle !== null &&
-      (params.update.sessionUpdate === 'tool_call' ||
-        params.update.sessionUpdate === 'tool_call_update') &&
+      isToolUpdate &&
+      'toolCallId' in params.update &&
       params.update.toolCallId.length > 0
     ) {
       this.devinSubagentTaskIds.add(devinLifecycle.taskId);
@@ -929,11 +932,7 @@ export class AgentClient implements acp.Client {
       devinSubagentOwnerId !== null &&
       this.devinSubagentTaskIds.has(devinSubagentOwnerId) &&
       !hasOtherDevinSubagentMeta(params.update._meta);
-    if (
-      isDevinSubagentInternal &&
-      params.update.sessionUpdate !== 'tool_call' &&
-      params.update.sessionUpdate !== 'tool_call_update'
-    ) {
+    if (isDevinSubagentInternal && !isToolUpdate) {
       return;
     }
 

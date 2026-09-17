@@ -70,6 +70,12 @@ leave the approved row pending forever); an `agentId` is unique per session rath
 across turns (reuse would merge a new subagent into an old task row); and `loadSession` replays
 lifecycle markers before the tagged updates they own — until a marker re-arrives, the client's
 known-id set is empty, so resumed-session internals briefly pass through instead of dropping.
+Registration is a proxy for materialization: a marker row later rejected for invalid `content`
+still registers the id, so that owner's internals drop at ingress while the applier's fail-open
+is unreachable — a compound-malformed edge left as accepted drift risk. Two pre-existing gaps
+this change inherits rather than creates: an `in_progress` task row spins forever if the agent
+dies without `subagent_completed` (no reconcile exists for any provider), and `transcript.md`
+export drops `subagent_task` items entirely (the JSON export keeps them verbatim).
 
 ## Validation
 

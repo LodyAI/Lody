@@ -61,7 +61,11 @@ internal 而丢弃。`subagentControl`（取消控制面）不在本 PR 范围�
 `tool_call_update` 的 id 一致（不一致会让已批准的工具行永远 pending）；`agentId` 在会话内
 唯一而非跨 turn 复用（复用会把新 subagent 合并进旧任务行）；`loadSession` 重放时生命周期
 标记先于其拥有的 tagged 更新到达——标记未重新到达前 client 的已知 id 集合为空，恢复会话的
-内部更新会短暂直通而非丢弃。
+内部更新会短暂直通而非丢弃。登记只是物化的近似：标记行若随后因 `content` 非法被拒，id 仍已
+登记，该 owner 的内部更新会在 ingress 被丢弃而 applier 的 fail-open 无法兜底——属复合畸形
+输入，留作已接受的漂移风险。另有两个继承自既有代码、非本改动引入的缺口：agent 崩溃未发
+`subagent_completed` 时 `in_progress` 任务行永久转圈（所有 provider 均无 reconcile），以及
+`transcript.md` 导出完全丢弃 `subagent_task` 项（JSON 导出原样保留）。
 
 ## 验证
 

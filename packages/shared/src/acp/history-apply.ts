@@ -1111,8 +1111,8 @@ export const buildMessageContentFromNotification = (
         parseLodyTaskMeta((update as ToolCallUpdateWithMeta)._meta) ??
         parseDevinSubagentTaskMeta((update as ToolCallUpdateWithMeta)._meta) ??
         parseSubagentTaskWire(update.rawInput);
-      const devinSubagentId = getDevinSubagentContextId((update as ToolCallUpdateWithMeta)._meta);
       if (subagentTask) {
+        const devinSubagentId = getDevinSubagentContextId((update as ToolCallUpdateWithMeta)._meta);
         return [
           {
             type: 'subagent_task',
