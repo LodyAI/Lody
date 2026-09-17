@@ -173,19 +173,28 @@ describe('buildChatVirtualRows per-turn row identity', () => {
   });
 });
 
-it('exposes copying during streaming and invalidates only when availability changes', () => {
+it('keeps a live footer without copying and invalidates when availability changes', () => {
   const item = wrap(makeMessage('stream-copy', 'assistant', [text('partial')], false));
   const args = { items: [item], lastAssistantMessageId: 'stream-copy', expansionVersion: 0 };
   const before = buildChatVirtualRows(args);
-  expect(before.some((row) => row.type === 'assistant' && row.content.kind === 'footer')).toBe(
-    false
+  expect(before).toContainEqual(
+    expect.objectContaining({
+      content: expect.objectContaining({ kind: 'footer', isLive: true }),
+    })
   );
   const withCopy = buildChatVirtualRows({ ...args, copyContextAvailable: true });
-  expect(withCopy.some((row) => row.type === 'assistant' && row.content.kind === 'footer')).toBe(
-    true
+  expect(withCopy).toContainEqual(
+    expect.objectContaining({
+      content: expect.objectContaining({ kind: 'footer', isLive: true }),
+    })
   );
   const unchanged = buildChatVirtualRows({ ...args, copyContextAvailable: true });
   expect(unchanged.every((row, index) => row === withCopy[index])).toBe(true);
+
+  const displaced = buildChatVirtualRows({ ...args, lastAssistantMessageId: 'newer-turn' });
+  expect(displaced.some((row) => row.type === 'assistant' && row.content.kind === 'footer')).toBe(
+    false
+  );
 });
 
 /* The live duration label is bound to ONE row by `isLive`. That bound is only as

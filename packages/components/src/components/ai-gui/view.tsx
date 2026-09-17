@@ -830,13 +830,16 @@ const shouldRenderAssistantFooter = ({
   fileDiffs,
   assistantActions,
   showDuration,
+  isLive,
 }: {
   message: SessionHistoryParsed;
   renderEntries: readonly AssistantMessageRenderItem[];
   fileDiffs: readonly AssistantEditedFileEntry[];
   assistantActions?: AssistantMessageAction[];
   showDuration: boolean;
+  isLive: boolean;
 }): boolean => {
+  if (isLive) return true;
   if ((assistantActions?.length ?? 0) > 0) return true;
   if (message.finished !== true) return false;
   const visibleContentItems = renderEntries.map((entry) => entry.content);
@@ -1201,6 +1204,7 @@ export const buildChatVirtualRows = ({
         fileDiffs,
         assistantActions: scopedAssistantActions,
         showDuration: showDurationInFooter,
+        isLive: isLastAssistantMessage && message.finished !== true,
       })
     ) {
       assistantRows.push({
@@ -3892,6 +3896,7 @@ export const AssistantTurnFooter = ({
   const durationMs = resolveSessionHistoryDurationMs(message);
   const durationLabel =
     durationMs === null ? '' : formatDurationCompact(durationMs, durationUnitLabels);
+  const liveDurationVisible = isLive && !isMobile;
   const showFinishedMetadata = message.finished === true;
   const showStreamingContextCopy = !showFinishedMetadata && !!copyContext;
   /* Mobile: no completion timestamp — model meta + Worked-for already carry
@@ -3917,6 +3922,7 @@ export const AssistantTurnFooter = ({
     hasCopyableText ||
     completionTimestampLabel.length > 0 ||
     (durationLabel.length > 0 && (isMobile || showDuration)) ||
+    liveDurationVisible ||
     hasTurnConfigInfo;
   const showActionBar = hasActionBarContent || onFork !== undefined || !!copyContext;
 
@@ -3950,13 +3956,15 @@ export const AssistantTurnFooter = ({
           }
         />
       ) : null}
-      {(showFinishedMetadata || !!copyContext) && showActionBar ? (
+      {(showFinishedMetadata || !!copyContext || isLive) && showActionBar ? (
         <div
           className={cn(
             'flex flex-wrap items-center justify-start text-[11px] text-muted-foreground',
             isMobile ? 'min-h-6 gap-1' : 'min-h-7 gap-2',
             !isMobile && 'opacity-0 transition-opacity duration-150 focus-within:opacity-100',
-            !isMobile && (isTurnHovered || (showFinishedMetadata && isForking)) && 'opacity-100'
+            !isMobile &&
+              (isLive || isTurnHovered || (showFinishedMetadata && isForking)) &&
+              'opacity-100'
           )}
           data-assistant-turn-actions
         >
@@ -4064,6 +4072,11 @@ export const AssistantTurnFooter = ({
           ) : null}
           {showFinishedMetadata && completionTimestampLabel ? (
             <span className="tabular-nums">{completionTimestampLabel}</span>
+          ) : null}
+          {liveDurationVisible ? (
+            <span className="font-mono tabular-nums" data-assistant-turn-duration>
+              <LiveTurnDurationLabel message={message} />
+            </span>
           ) : null}
           {showFinishedMetadata && !isMobile && showDuration && durationLabel ? (
             <>

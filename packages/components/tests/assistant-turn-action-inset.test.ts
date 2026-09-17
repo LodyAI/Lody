@@ -250,3 +250,91 @@ describe('mobile assistant-turn duration slot', () => {
     container.remove();
   });
 });
+
+describe('desktop assistant-turn duration', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('shows and updates the live duration while the latest turn is running', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-10T03:00:00.000Z'));
+    await initI18n('en');
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    const message = {
+      id: 'assistant-turn-desktop-live',
+      role: 'assistant',
+      timestamp: '2026-09-10T02:59:55.000Z',
+      finished: false,
+      items: [{ type: 'text', text: 'Still working.' }],
+    } as unknown as SessionHistoryParsed;
+
+    await act(async () => {
+      root.render(
+        createElement(
+          ForceDesktopLayoutProvider,
+          null,
+          createElement(AssistantTurnFooter, {
+            message,
+            sessionId: 'session-desktop-live' as SessionId,
+            showDuration: false,
+            isLive: true,
+            isTurnHovered: false,
+          })
+        )
+      );
+    });
+
+    const duration = () => container.querySelector('[data-assistant-turn-duration]')?.textContent;
+    expect(duration()).toBe('Worked for 5s');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_100);
+    });
+    expect(duration()).toBe('Worked for 7s');
+    expect(
+      container.querySelector('[data-assistant-turn-actions]')?.classList.contains('opacity-100')
+    ).toBe(true);
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it('does not render a live duration for an unfinished turn that is no longer current', async () => {
+    await initI18n('en');
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    const message = {
+      id: 'assistant-turn-desktop-stale',
+      role: 'assistant',
+      timestamp: '2026-09-10T02:00:00.000Z',
+      finished: false,
+      items: [{ type: 'text', text: 'Interrupted.' }],
+    } as unknown as SessionHistoryParsed;
+
+    await act(async () => {
+      root.render(
+        createElement(
+          ForceDesktopLayoutProvider,
+          null,
+          createElement(AssistantTurnFooter, {
+            message,
+            sessionId: 'session-desktop-stale' as SessionId,
+            showDuration: false,
+            isLive: false,
+            isTurnHovered: false,
+          })
+        )
+      );
+    });
+
+    expect(container.querySelector('[data-assistant-turn-duration]')).toBeNull();
+    expect(container.querySelector('[data-assistant-turn-actions]')).toBeNull();
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+});
