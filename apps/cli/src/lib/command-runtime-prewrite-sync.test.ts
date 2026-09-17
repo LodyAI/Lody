@@ -11,7 +11,7 @@ it('does not suggest --offline when a prewrite metadata sync fails', async () =>
 
   const error = await syncWorkspaceMetaForRead(
     manager,
-    'session.restore:session-1:prewrite'
+    'session.restore:session-1:prewrite',
   ).catch((caught: unknown) => caught);
 
   expect(error).toBeInstanceOf(WorkspaceSyncUnavailableError);
