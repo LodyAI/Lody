@@ -79,9 +79,14 @@ export class SessionRelationLifecyclePage {
   async permanentlyDeleteRelationRoot(resources: SessionRelationLifecycleResources): Promise<void> {
     await this.openArchive();
     const archived = this.page.locator(`[data-id="archive-session:${resources.rootSessionId}"]`);
+    // The opened Sessions nest under the root row, so the delete action must
+    // be scoped to the root's own row to stay unique.
+    const archivedRow = this.page.locator(
+      `div[data-session-depth]:has([data-id="archive-session:${resources.rootSessionId}"])`
+    );
     await expect(archived).toBeVisible();
-    await archived.hover();
-    await this.page.getByRole('button', { name: /^(Delete permanently|永久删除)$/u }).click();
+    await archivedRow.hover();
+    await archivedRow.getByRole('button', { name: /^(Delete permanently|永久删除)$/u }).click();
     const dialog = this.page.getByRole('dialog', {
       name: /^(Delete permanently\?|确认永久删除？)$/u,
     });
