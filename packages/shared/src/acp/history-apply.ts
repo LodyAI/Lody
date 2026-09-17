@@ -1322,7 +1322,7 @@ class NotificationOnHistoryApplier {
   private readonly toolCallEntryIndexById = new Map<string, number | null>();
   // Subagent tasks receive future lifecycle events that must merge into the item
   // where the task first appeared (keyed by `taskId`).
-  private readonly subagentTaskEntryIndexById = new Map<string, number>();
+  private readonly subagentTaskEntryIndexById = new Map<string, number | null>();
   private readonly touchedAssistantEntryIndices = new Set<number>();
   private changed = false;
 
@@ -1468,8 +1468,10 @@ class NotificationOnHistoryApplier {
   }
 
   private resolveSubagentTaskEntryIndex(taskId: string): number | undefined {
-    const cached = this.subagentTaskEntryIndexById.get(taskId);
-    if (cached !== undefined) return cached;
+    if (this.subagentTaskEntryIndexById.has(taskId)) {
+      const cached = this.subagentTaskEntryIndexById.get(taskId);
+      return cached === null ? undefined : cached;
+    }
 
     for (let i = this.history.length - 1; i >= 0; i--) {
       const items = this.readEntryItems(i);
@@ -1479,6 +1481,7 @@ class NotificationOnHistoryApplier {
       }
     }
 
+    this.subagentTaskEntryIndexById.set(taskId, null);
     return undefined;
   }
 

@@ -1081,5 +1081,32 @@ describe('acp history apply', () => {
       const items = (history[0] as { items?: MessageContent[] }).items ?? [];
       expect(items).toContainEqual({ type: 'text', text: 'new-protocol' });
     });
+
+    it('keeps a completed task terminal when a started row replays late', () => {
+      const history = applyNotificationOnHistory(
+        [],
+        [
+          started('agent-1'),
+          makeNotification({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'agent-1',
+            status: 'completed',
+            _meta: {
+              'cognition.ai/subagent_completed': { agentId: 'agent-1', summary: 'done' },
+            },
+          }),
+          started('agent-1'),
+        ]
+      );
+      const items = (history[0] as { items?: MessageContent[] }).items ?? [];
+      expect(items).toEqual([
+        expect.objectContaining({
+          type: 'subagent_task',
+          taskId: 'agent-1',
+          status: 'completed',
+          summary: 'done',
+        }),
+      ]);
+    });
   });
 });

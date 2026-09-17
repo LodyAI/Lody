@@ -47,6 +47,22 @@ const DevinSubagentContextSchema = z.object({
 export const parseDevinSubagentTaskMeta = (meta: unknown): SubagentTaskPayload | null => {
   if (!isRecord(meta)) return null;
 
+  // Terminal wins when a row carries both markers, so a collapsed
+  // start+complete update never strands the task in `in_progress`.
+  const completed = DevinSubagentCompletedSchema.safeParse(meta[DEVIN_SUBAGENT_COMPLETED_META_KEY]);
+  if (completed.success) {
+    const c = completed.data;
+    const failed = c.success === false;
+    return {
+      taskId: c.agentId,
+      status: failed ? 'failed' : 'completed',
+      taskKind: 'subagent',
+      event: 'task_notification',
+      ...(c.summary !== undefined ? { summary: c.summary } : {}),
+      ...(failed && c.summary !== undefined ? { error: c.summary } : {}),
+    };
+  }
+
   const started = DevinSubagentStartedSchema.safeParse(meta[DEVIN_SUBAGENT_STARTED_META_KEY]);
   if (started.success) {
     const s = started.data;
@@ -60,20 +76,6 @@ export const parseDevinSubagentTaskMeta = (meta: unknown): SubagentTaskPayload |
       ...(s.profile !== undefined ? { subagentType: s.profile } : {}),
       ...(s.model !== undefined ? { modelId: s.model } : {}),
       ...(s.isBackground !== undefined ? { isBackgrounded: s.isBackground } : {}),
-    };
-  }
-
-  const completed = DevinSubagentCompletedSchema.safeParse(meta[DEVIN_SUBAGENT_COMPLETED_META_KEY]);
-  if (completed.success) {
-    const c = completed.data;
-    const failed = c.success === false;
-    return {
-      taskId: c.agentId,
-      status: failed ? 'failed' : 'completed',
-      taskKind: 'subagent',
-      event: 'task_notification',
-      ...(c.summary !== undefined ? { summary: c.summary } : {}),
-      ...(failed && c.summary !== undefined ? { error: c.summary } : {}),
     };
   }
 
@@ -94,14 +96,15 @@ export const getDevinSubagentContextId = (meta: unknown): string | null => {
 };
 
 /**
- * Whether `_meta` carries any `cognition.ai/subagent_*` payload besides the
+ * Whether `_meta` carries any `cognition.ai/subagent*` payload besides the
  * context tag — the lifecycle markers above or a future key this version does
- * not know. Such updates must pass through rather than be dropped, so a
- * malformed or drifted lifecycle row degrades to a visible tool call instead
- * of silently disappearing.
+ * not know (`subagent_started`, `subagent_completed`, control/list surfaces
+ * such as `subagentControl` or `subagents/*`). Such updates must pass through
+ * rather than be dropped, so a malformed or drifted lifecycle row degrades to
+ * a visible tool call instead of silently disappearing.
  */
 export const hasOtherDevinSubagentMeta = (meta: unknown): boolean =>
   isRecord(meta) &&
   Object.keys(meta).some(
-    (key) => key.startsWith('cognition.ai/subagent_') && key !== DEVIN_SUBAGENT_CONTEXT_META_KEY
+    (key) => key.startsWith('cognition.ai/subagent') && key !== DEVIN_SUBAGENT_CONTEXT_META_KEY
   );

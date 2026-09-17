@@ -57,11 +57,18 @@ Claude/Codex 任务面板现状一致。经权限批准的 subagent 工具会以
 internal 而丢弃。`subagentControl`（取消控制面）不在本 PR 范围；任务面板的 cancel 按钮问题
 先于本改动存在，且非 Devin 独有。
 
+另有三个依赖 Devin 私有协议、代码内无法证实的假设：权限请求的 `toolCallId` 与后续带标记
+`tool_call_update` 的 id 一致（不一致会让已批准的工具行永远 pending）；`agentId` 在会话内
+唯一而非跨 turn 复用（复用会把新 subagent 合并进旧任务行）；`loadSession` 重放时生命周期
+标记先于其拥有的 tagged 更新到达——标记未重新到达前 client 的已知 id 集合为空，恢复会话的
+内部更新会短暂直通而非丢弃。
+
 ## 验证
 
 parser 契约测试钉住抓包到的 wire 形状；applier 测试覆盖丢弃、未知 owner 的 fail-open、
-权限行合并、嵌套 `parentTaskId`、未识别标记直通；管线测试证明 started 行能穿过历史过滤
-并落为 `subagent_task`。shared 与 CLI typecheck 均通过。未验证：抓包握手与生命周期序列之
-外的真实 Devin 流量，以及 Devin 的 `subagents/*` 控制方法。
+权限行合并、嵌套 `parentTaskId`、终态单调性、未识别标记直通；ingress 测试证明 tagged 非
+tool 更新不会到达 `onUpdateMessage` 与用量计量；管线测试证明 started 行能穿过历史过滤并
+落为 `subagent_task`。shared 与 CLI typecheck 均通过。未验证：抓包握手与生命周期序列之外
+的真实 Devin 流量，以及 Devin 的 `subagents/*` 控制方法。
 
 PR: https://github.com/LodyAI/Lody/pull/767 （关闭 #765）

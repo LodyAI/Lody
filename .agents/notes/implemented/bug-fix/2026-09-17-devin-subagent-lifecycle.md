@@ -64,12 +64,21 @@ can still be classified as internal and dropped. The devin-gated cancel control
 (`subagentControl`) is out of scope; the task panel's cancel affordance predates this change and
 is not Devin-specific.
 
+Three assumptions ride on Devin's private protocol and are unverifiable from code: the
+permission request's `toolCallId` equals the tagged `tool_call_update`'s id (a mismatch would
+leave the approved row pending forever); an `agentId` is unique per session rather than reused
+across turns (reuse would merge a new subagent into an old task row); and `loadSession` replays
+lifecycle markers before the tagged updates they own — until a marker re-arrives, the client's
+known-id set is empty, so resumed-session internals briefly pass through instead of dropping.
+
 ## Validation
 
 Parser contract tests pin the captured wire shapes; applier tests cover suppression,
-fail-open on unknown owners, the permission-row merge, nested `parentTaskId`, and pass-through
-for unrecognized markers; a pipeline test proves the started row survives history filtering and
-lands as a `subagent_task`. Shared and CLI typechecks pass. Not verified: real Devin traffic
-beyond the captured handshake and lifecycle sequence, and Devin's `subagents/*` control methods.
+fail-open on unknown owners, the permission-row merge, nested `parentTaskId`, terminal-status
+monotonicity, and pass-through for unrecognized markers; an ingress test proves tagged non-tool
+updates never reach `onUpdateMessage` or the usage meter; a pipeline test proves the started
+row survives history filtering and lands as a `subagent_task`. Shared and CLI typechecks pass.
+Not verified: real Devin traffic beyond the captured handshake and lifecycle sequence, and
+Devin's `subagents/*` control methods.
 
 PR: https://github.com/LodyAI/Lody/pull/767 (closes #765)

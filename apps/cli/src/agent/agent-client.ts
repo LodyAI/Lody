@@ -912,8 +912,16 @@ export class AgentClient implements acp.Client {
     // Non-tool internals are dropped here, before usage/config/title side
     // consumers and the transcript see them; tool updates continue so their
     // edit evidence and permission-requested rows still resolve in history.
+    // Register only a lifecycle row that can itself materialize as a task —
+    // a malformed marker on a non-tool update must not make the applier's
+    // fail-open (no task row → keep internals visible) unreachable.
     const devinLifecycle = parseDevinSubagentTaskMeta(params.update._meta);
-    if (devinLifecycle !== null) {
+    if (
+      devinLifecycle !== null &&
+      (params.update.sessionUpdate === 'tool_call' ||
+        params.update.sessionUpdate === 'tool_call_update') &&
+      params.update.toolCallId.length > 0
+    ) {
       this.devinSubagentTaskIds.add(devinLifecycle.taskId);
     }
     const devinSubagentOwnerId = getDevinSubagentContextId(params.update._meta);
@@ -952,7 +960,7 @@ export class AgentClient implements acp.Client {
       this.completeCodexRetryStatus();
     }
 
-    if (!isDevinSubagentInternal && this.handleImageGenerationNotification(notification)) {
+    if (this.handleImageGenerationNotification(notification)) {
       // handleImageGenerationNotification has already routed the data
       // to onImageGenerationBegin/End. Suppress the raw notification so
       // the inline base64 image never lands in the session history doc — the
@@ -2238,6 +2246,7 @@ export class AgentClient implements acp.Client {
     });
 
     this.acpSessionId = sessionResponse.sessionId;
+    this.devinSubagentTaskIds.clear();
     this.logger.debug(
       `[${this.options.sessionId}] ACP session id set: ${sessionResponse.sessionId}`
     );
@@ -2308,6 +2317,7 @@ export class AgentClient implements acp.Client {
   adoptPreparedSession(sessionResponse: acp.NewSessionResponse): void {
     this.applySessionResponseState(sessionResponse);
     this.acpSessionId = sessionResponse.sessionId;
+    this.devinSubagentTaskIds.clear();
     this.authenticationRequired = false;
     this.logger.debug(
       `[${this.options.sessionId}] Adopted replacement ACP session: ${sessionResponse.sessionId}`

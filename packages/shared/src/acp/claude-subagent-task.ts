@@ -132,8 +132,20 @@ export const parseSubagentTaskWire = (rawInput: unknown): SubagentTaskPayload | 
  * carries neither, so a plain replace would blank out the subagent identity the
  * panel needs after completion. Inputs carry only defined keys (the CLI builds
  * them with set-if-defined), so a shallow spread is a correct field-wise merge.
+ * Terminal status is monotone: a replayed or reordered non-terminal event must
+ * never resurrect a finished task (reconnect tails replay older notifications),
+ * so terminal `status`/`event` survive a non-terminal merge.
  */
 export const mergeSubagentTaskPayload = (
   prev: SubagentTaskPayload,
   incoming: SubagentTaskPayload
-): SubagentTaskPayload => ({ ...prev, ...incoming });
+): SubagentTaskPayload => {
+  const merged = { ...prev, ...incoming };
+  const prevTerminal = prev.status === 'completed' || prev.status === 'failed';
+  const incomingTerminal = incoming.status === 'completed' || incoming.status === 'failed';
+  if (prevTerminal && !incomingTerminal) {
+    merged.status = prev.status;
+    merged.event = prev.event;
+  }
+  return merged;
+};
