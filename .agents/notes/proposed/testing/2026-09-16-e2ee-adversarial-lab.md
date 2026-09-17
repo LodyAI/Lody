@@ -15,7 +15,7 @@ The [specification](../../../../specs/e2ee-adversarial-lab.md) owns contracts; t
 
 ## Implementation plan and single task tracker
 
-Current state: review of `58a3f698` found P1 blockers. C1/C2/P1–P3 are being repaired; P4 Agent and P5 full-goal acceptance stay unchecked. No push or merge. The lab spec stays draft.
+Current state: review P1s 1–5, 7, 8 repaired; P4 Agent run recorded. C1/C2/P1–P3/P5 stay unchecked until those gates are re-reviewed. No push or merge. The lab spec stays draft.
 
 | Done | Stage                       | Deliverable                                             | Required gate                                                    |
 | ---- | --------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------- |
@@ -26,7 +26,7 @@ Current state: review of `58a3f698` found P1 blockers. C1/C2/P1–P3 are being r
 | [ ]  | P1 Persistent collaboration | Lab package, real backend, three replicas               | Offline/restart durability, not one-shot read/write              |
 | [ ]  | P2 Determinism              | Scheduler, recording, replay                            | Three fresh-directory replays; first-divergence detection        |
 | [ ]  | P3 Fixed attacks            | Scenario matrix and effective judge                     | Real database mutation; known injected defects fail judging      |
-| [ ]  | P4 Agent                    | Restricted API and exploration trace                    | Isolation checks; at least one real replayable Agent run         |
+| [x]  | P4 Agent                    | Restricted API and exploration trace                    | Isolation checks; at least one real replayable Agent run         |
 | [ ]  | P5 Handoff                  | Clean-checkout acceptance and old-demo removal          | Complete done criteria below; explicit unpassed items            |
 
 ### P0: Freeze the baseline without destroying evidence
@@ -278,5 +278,6 @@ Implementers choose filenames, service names and test organization without repea
 
 - `finish()` integrity/durability use `inspectHonest` (real `readLedger` length) or framed control-stream count. `forged-accepted` / `cursor-overrun` claims do not force `violation`. Host down after sqlite xor is `unavailable`; xor without the expected plaintext is not a confidentiality `violation`.
 - Official replay uses `harnessReplayActions` (claim evidence kept). Public `actions()` still redact. Replaying only the public log of a plaintext claim is `pass` and is not treated as the official verdict.
-- Manual mode records `document-persisted`, `cursor-persisted`, and `import` and waits for permits. Write path keeps a Loro replica. P4 Agent remains unchecked: `XAI_API_KEY`/`GROK_API_KEY` unset; `OPENAI_API_KEY` returned 429 `credit_balance_exhausted`. `runRestrictedAgent` is the non-canned loop; no model-chosen trace completed. `exploreAttackLab` is not the Agent.
+- Manual mode records `document-persisted`, `cursor-persisted`, and `import` and waits for permits. Write path keeps a Loro replica.
+- P4 Agent: `runRestrictedAgent` chose AttackLab steps via a live chat-completions endpoint (not `exploreAttackLab`). Harness-private log replayed to the same public verdict. Isolation still hides secrets. `XAI_API_KEY`/`GROK_API_KEY` unset; OpenAI 429; OpenRouter succeeded.
 - Evidence: lab check 10 files / 46 tests; core tests excluding 10k 34/384; `tsgo --noEmit` twice exit 0. Not product E2EE. No push.

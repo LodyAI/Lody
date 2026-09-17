@@ -9,19 +9,65 @@ export type AgentStep = {
   evidence?: string;
 };
 
+export type AgentEndpoint = {
+  url: string;
+  key: string;
+  model: string;
+};
+
+export function resolveAgentEndpoint(
+  env: NodeJS.ProcessEnv = process.env
+): AgentEndpoint | undefined {
+  if (env.XAI_API_KEY) {
+    return { url: 'https://api.x.ai/v1/chat/completions', key: env.XAI_API_KEY, model: 'grok-4' };
+  }
+  if (env.GROK_API_KEY) {
+    return { url: 'https://api.x.ai/v1/chat/completions', key: env.GROK_API_KEY, model: 'grok-4' };
+  }
+  if (env.OPENROUTER_KEY) {
+    return {
+      url: 'https://openrouter.ai/api/v1/chat/completions',
+      key: env.OPENROUTER_KEY,
+      model: 'openai/gpt-4o-mini',
+    };
+  }
+  if (env.GROQ_KEY) {
+    return {
+      url: 'https://api.groq.com/openai/v1/chat/completions',
+      key: env.GROQ_KEY,
+      model: 'llama-3.1-8b-instant',
+    };
+  }
+  if (env.DEEPSEEK_API_KEY) {
+    return {
+      url: 'https://api.deepseek.com/chat/completions',
+      key: env.DEEPSEEK_API_KEY,
+      model: 'deepseek-chat',
+    };
+  }
+  if (env.OPENAI_API_KEY) {
+    return {
+      url: 'https://api.openai.com/v1/chat/completions',
+      key: env.OPENAI_API_KEY,
+      model: 'gpt-4o-mini',
+    };
+  }
+  return undefined;
+}
+
 async function chooseStep(
   view: PublicView,
   diskHexPrefix: string,
-  key: string
+  endpoint: AgentEndpoint
 ): Promise<AgentStep> {
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+  const response = await fetch(endpoint.url, {
     method: 'POST',
     headers: {
-      authorization: `Bearer ${key}`,
+      authorization: `Bearer ${endpoint.key}`,
       'content-type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'gpt-4o-mini',
+      model: endpoint.model,
       temperature: 0,
       response_format: { type: 'json_object' },
       messages: [
@@ -65,11 +111,14 @@ async function chooseStep(
 }
 
 /** LLM-chosen AttackLab steps. Not the canned xor-at-offset explorer. */
-export async function runRestrictedAgent(lab: AttackLab, key: string): Promise<PublicReport> {
+export async function runRestrictedAgent(
+  lab: AttackLab,
+  endpoint: AgentEndpoint
+): Promise<PublicReport> {
   let view = await lab.observe();
   let disk = await lab.readBackend({ target: 'riverrun', eventId: 'barrier' });
   for (let step = 0; step < 4; step++) {
-    const choice = await chooseStep(view, toHex(disk.subarray(0, 32)), key);
+    const choice = await chooseStep(view, toHex(disk.subarray(0, 32)), endpoint);
     if (choice.op === 'finish') break;
     if (choice.op === 'observe') {
       view = await lab.observe();

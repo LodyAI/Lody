@@ -7,7 +7,7 @@ import {
   replayAttackActions,
   type AttackAction,
 } from '../src/attack-lab';
-import { runRestrictedAgent } from '../src/restricted-agent';
+import { resolveAgentEndpoint, runRestrictedAgent } from '../src/restricted-agent';
 import { cleanupLab, labClient, launchLab } from '../src/fixtures';
 import { LabRuntime } from '../src/runtime';
 
@@ -15,9 +15,9 @@ afterEach(() => cleanupLab());
 
 describe('P4 restricted LLM Agent', () => {
   it('runs a model-chosen AttackLab trace and replays it without an LLM', async () => {
-    const key = process.env.OPENAI_API_KEY;
-    if (!key) {
-      throw new Error('OPENAI_API_KEY unset; P4 Agent run blocked');
+    const endpoint = resolveAgentEndpoint();
+    if (!endpoint) {
+      throw new Error('no model key; P4 Agent run blocked');
     }
     const runtime = new LabRuntime({ mode: 'auto' });
     const host = await launchLab();
@@ -43,17 +43,11 @@ describe('P4 restricted LLM Agent', () => {
         }
       },
     });
-    let report;
-    try {
-      report = await runRestrictedAgent(lab, key);
-    } catch (error) {
-      const text = String(error);
-      if (/agent-llm-429|insufficient_quota|credit_balance_exhausted/.test(text)) {
-        expect(text).toMatch(/429|insufficient_quota|credit_balance_exhausted/);
-        return;
-      }
-      throw error;
-    }
+    const report = await runRestrictedAgent(lab, endpoint);
+    const recorded = harnessReplayActions(lab);
+    expect(recorded.some((action) => action.op === 'observe')).toBe(true);
+    expect(recorded.some((action) => action.op === 'finish')).toBe(true);
+    expect(recorded.length).toBeGreaterThanOrEqual(3);
     expect(JSON.stringify(lab.actions())).not.toContain(secret);
     expect(['pass', 'violation', 'unavailable']).toContain(report.confidentiality);
 

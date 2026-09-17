@@ -15,7 +15,7 @@ Translation: current
 
 ## 实施计划与唯一任务表
 
-当前状态：对 `58a3f698` 的审查发现 P1 阻断。正在修复 C1/C2/P1–P3；P4 Agent 与 P5 总目标仍不勾选。无 push/merge。实验室 Spec 仍为 draft。
+当前状态：审查 P1 的 1–5、7、8 已修；P4 Agent 运行已记录。C1/C2/P1–P3/P5 在门槛复审前不勾选。无 push/merge。实验室 Spec 仍为 draft。
 
 | 完成 | 阶段           | 交付物                         | 必须通过的门槛                              |
 | ---- | -------------- | ------------------------------ | ------------------------------------------- |
@@ -26,7 +26,7 @@ Translation: current
 | [ ]  | P1 常驻协作    | lab 包、真实后端、三副本       | 离线重连与耐久恢复，不是一次性读写          |
 | [ ]  | P2 确定性      | 调度器、记录、重放             | 三次新目录重放一致，首分歧可定位            |
 | [ ]  | P3 固定攻击    | Spec 场景矩阵、有效裁判        | 真实改库被检验，注入已知缺陷时裁判失败      |
-| [ ]  | P4 Agent       | 受限 API、自由攻击记录         | 隔离自测通过，至少一轮真实 Agent 运行可重放 |
+| [x]  | P4 Agent       | 受限 API、自由攻击记录         | 隔离自测通过，至少一轮真实 Agent 运行可重放 |
 | [ ]  | P5 交接        | 干净检出验收、旧 demo 删除     | 下述完成定义逐项通过，未通过项显式保留      |
 
 ### P0：冻结基线，不先删掉证据
@@ -278,5 +278,6 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 
 - `finish()` 的完整性/耐久用 `inspectHonest`（真实 `readLedger` 长度）或控制流分帧计数。`forged-accepted` / `cursor-overrun` 声明不再强制 `violation`。sqlite xor 后宿主关闭为 `unavailable`；磁盘上没有期望明文则保密性不是 `violation`。
 - 正式重放使用 `harnessReplayActions`（保留声明证据）。公开 `actions()` 仍脱敏。只重放公开日志里的明文声明得到 `pass`，不作为正式判定。
-- 手动模式记录 `document-persisted`、`cursor-persisted`、`import` 并等待许可。写路径保留 Loro 副本。P4 Agent 仍不勾选：`XAI_API_KEY`/`GROK_API_KEY` 未设置；`OPENAI_API_KEY` 返回 429 `credit_balance_exhausted`。`runRestrictedAgent` 是非罐头循环，没有完成模型选步。`exploreAttackLab` 不是 Agent。
+- 手动模式记录 `document-persisted`、`cursor-persisted`、`import` 并等待许可。写路径保留 Loro 副本。
+- P4 Agent：`runRestrictedAgent` 经 live chat-completions 选择 AttackLab 步骤（不是 `exploreAttackLab`）。harness 私有日志重放到同一公开判定。隔离仍隐藏秘密。`XAI_API_KEY`/`GROK_API_KEY` 未设置；OpenAI 429；OpenRouter 成功。
 - 证据：lab check 10 文件 / 46 测试；core 排除 10k 为 34/384；`tsgo --noEmit` 两次退出 0。未启用产品 E2EE。无 push。
