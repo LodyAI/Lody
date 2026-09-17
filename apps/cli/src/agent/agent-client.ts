@@ -1628,6 +1628,18 @@ export class AgentClient implements acp.Client {
       : undefined;
   }
 
+  /**
+   * Devin CLI keeps its subagent lifecycle/attribution notifications behind a
+   * private `cognition.ai/*` capability bit; without it, subagents surface only
+   * as instantly-completed `run_subagent`/`read_subagent` tool calls. See
+   * `devin-subagent-task.ts` for the matching `_meta` readers.
+   */
+  private getDevinClientCapabilitiesMeta(): Record<string, unknown> | undefined {
+    return this.options.agentConfig?.agentType === 'devin'
+      ? { 'cognition.ai/subagentSupport': true }
+      : undefined;
+  }
+
   private getSessionStartMeta(forkSessionTurnId?: string) {
     const clientIdentifier = this.getGrokClientIdentifier();
     const lody = {
@@ -1733,6 +1745,7 @@ export class AgentClient implements acp.Client {
     const connection = new acp.ClientSideConnection(() => this, stream);
     this.connection = connection;
     const grokClientIdentifier = this.getGrokClientIdentifier();
+    const devinClientCapabilitiesMeta = this.getDevinClientCapabilitiesMeta();
     this.worktreeProject = undefined;
     this.logger.debug(
       `[${this.options.sessionId}] Starting ACP client (workdir=${workdir} resumeSessionId=${
@@ -1809,6 +1822,9 @@ export class AgentClient implements acp.Client {
               elicitation: {
                 form: {},
               },
+              ...(devinClientCapabilitiesMeta !== undefined
+                ? { _meta: devinClientCapabilitiesMeta }
+                : {}),
             },
           }),
           startupAbort

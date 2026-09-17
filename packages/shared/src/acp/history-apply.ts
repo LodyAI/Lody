@@ -22,6 +22,7 @@ import {
   mergeSubagentTaskPayload,
 } from './claude-subagent-task';
 import { parseCodexCollabAgentTasks } from './codex-collab-agent-task';
+import { getDevinSubagentContextId, parseDevinSubagentTaskMeta } from './devin-subagent-task';
 
 type StoredToolCallContent = NonNullable<Extract<MessageContent, { type: 'tool_call' }>['content']>;
 type ToolCallMessage = Extract<MessageContent, { type: 'tool_call' }>;
@@ -1067,6 +1068,19 @@ export const buildMessageContentFromNotification = (
   message: AcpSessionNotification
 ): MessageContent[] => {
   const { update } = message;
+  // Devin tags every update a subagent produced with `cognition.ai/subagent_context`.
+  // Those internals aggregate into the task panel via the lifecycle rows below, so
+  // they stay out of the transcript. The check runs before the switch except on
+  // tool_call rows, whose lifecycle markers must be read first (a nested
+  // subagent's own lifecycle row is itself context-tagged).
+  const devinSubagentId = getDevinSubagentContextId((update as ToolCallUpdateWithMeta)._meta);
+  if (
+    devinSubagentId !== null &&
+    update.sessionUpdate !== 'tool_call' &&
+    update.sessionUpdate !== 'tool_call_update'
+  ) {
+    return [];
+  }
   switch (update.sessionUpdate) {
     case 'user_message_chunk':
     case 'config_option_update':
@@ -1104,9 +1118,19 @@ export const buildMessageContentFromNotification = (
       // item instead of persisting a tool_call; the applier merges by taskId.
       const subagentTask =
         parseLodyTaskMeta((update as ToolCallUpdateWithMeta)._meta) ??
+        parseDevinSubagentTaskMeta((update as ToolCallUpdateWithMeta)._meta) ??
         parseSubagentTaskWire(update.rawInput);
       if (subagentTask) {
-        return [{ type: 'subagent_task', ...subagentTask }];
+        return [
+          {
+            type: 'subagent_task',
+            ...(devinSubagentId !== null ? { parentTaskId: devinSubagentId } : {}),
+            ...subagentTask,
+          },
+        ];
+      }
+      if (devinSubagentId !== null) {
+        return [];
       }
 
       const codexCollabTasks = parseCodexCollabAgentTasks(update.title, update.rawInput);
