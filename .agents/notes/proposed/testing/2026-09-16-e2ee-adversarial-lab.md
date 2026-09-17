@@ -246,3 +246,9 @@ Implementers choose filenames, service names and test organization without repea
 
 - Lab `publishEpoch` then `recoverEpochHistory` restores epochs 0 and 1 from the latest key. After revoking the extra device, both owner and revoked client still read epoch-0 Loro text (delivered keys are not taken back). The revoked client cannot append. Owner then writes epoch-1 content and still reads both epochs.
 - Evidence: `pnpm --filter @lody/e2ee-lab check` exit 0 (10 files / 33 tests). Wasm physical clocks, Fiber/`exclusive` interrupt, and OS isolation remain uninjected. Not product E2EE. No push/PR/merge.
+
+### 2026-09-17 — Role escalation rejected; snapshot bootstrap survives author revoke
+
+- A joined member `setRole` to admin is rejected; authenticated role stays `member`.
+- A non-owner device uploads an admitted Loro snapshot. Owner bootstraps it (GET `/snapshot` or `/bootstrap`). After that device is revoked, the owner still bootstraps the same plaintext. Snapshot bytes on the wire are not plaintext.
+- Evidence: `pnpm --filter @lody/e2ee-lab check` exit 0 (10 files / 35 tests). Wasm physical clocks, Fiber/`exclusive` interrupt, and OS isolation remain uninjected. Not product E2EE. No push/PR/merge.

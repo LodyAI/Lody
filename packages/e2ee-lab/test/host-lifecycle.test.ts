@@ -10,9 +10,16 @@ import { cleanupLab, labClient, launchLab, tempDir } from '../src/fixtures';
 import { startLabBackend } from '../src/backend';
 import { CONTROL_STREAM, MAX_LEASE_MS } from '../src/platform/protocol';
 import { exportDevice, generateDevice } from '../src/platform/device';
+import { toHex } from '../src/platform/bytes';
 import { LoroDoc } from 'loro-crdt';
 import { InMemoryRemoteCursorStore } from '@loro-dev/streams-crdt/loro';
-import { readLoro, syncLoroWithCursor, writeLoro } from '../src/platform/content-session';
+import {
+  bootstrapLoroFromSnapshot,
+  readLoro,
+  syncLoroWithCursor,
+  uploadLoroSnapshot,
+  writeLoro,
+} from '../src/platform/content-session';
 
 afterEach(() => cleanupLab());
 
@@ -123,6 +130,48 @@ describe('lab host lifecycle', () => {
     await writeLoro(alice, 'epoch-one');
     expect(await readLoro(alice)).toContain('epoch-zero');
     expect(await readLoro(alice)).toContain('epoch-one');
+  });
+
+  it('rejects a member promoting itself to admin', async () => {
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice' });
+    const bob = await labClient({ host, account: 'bob' });
+    await alice.createSpace();
+    const join = await bob.requestJoin(alice.genesisHex!);
+    const admitted = await alice.approveJoin(join);
+    expect(admitted.status).toBe('committed');
+    await expect(
+      bob.submit({ type: 'setRole', membershipId: admitted.membershipId, role: 'admin' })
+    ).rejects.toThrow();
+    const member = (await alice.readLedger()).state.members.get(toHex(admitted.membershipId));
+    expect(member?.role).toBe('member');
+  });
+
+  it('bootstraps an admitted snapshot after the author is revoked', async () => {
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice' });
+    await alice.createSpace();
+    await alice.readLedger();
+    const tablet = await generateDevice();
+    expect((await alice.admitDevice(tablet, 'personal', false)).status).toBe('committed');
+    await alice.deliverEpochKey(tablet, 0);
+    const writer = await labClient({
+      host,
+      account: 'alice',
+      device: await exportDevice(tablet),
+    });
+    await writer.adoptGenesis(alice.genesisHex!);
+    await writer.readLedger();
+    const frames = await writer.readKeyFrames();
+    await writer.receiveEpochKey(alice.device, 0, frames[0]!);
+    await uploadLoroSnapshot(writer, 'snap-from-tablet');
+    expect((await bootstrapLoroFromSnapshot(alice, 'snap-from-tablet')).text).toContain(
+      'snap-from-tablet'
+    );
+    expect((await alice.revokeDevice(tablet.publicKey)).status).toBe('committed');
+    expect((await bootstrapLoroFromSnapshot(alice, 'snap-from-tablet')).text).toContain(
+      'snap-from-tablet'
+    );
   });
 
   it('rejects a delayed content write after the device is revoked', async () => {

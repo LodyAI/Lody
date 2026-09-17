@@ -246,3 +246,9 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 
 - 实验室 `publishEpoch` 后 `recoverEpochHistory` 从最新密钥恢复 epoch 0 和 1。撤掉额外设备后，所有者和被撤客户端仍能读 epoch-0 Loro 文本（已分发密钥不收回）。被撤客户端不能追加。所有者再写 epoch-1 内容，两个 epoch 都仍可读。
 - 证据：`pnpm --filter @lody/e2ee-lab check` 退出 0（10 文件 / 33 测试）。Wasm 物理时钟、Fiber/`exclusive` 中断、OS 隔离仍未注入。未启用产品 E2EE。无 push/PR/merge。
+
+### 2026-09-17 — 拒绝角色提升；作者撤权后快照仍可 bootstrap
+
+- 已加入成员把自己 `setRole` 成 admin 被拒绝，已认证角色仍是 `member`。
+- 非所有者设备上传已接纳的 Loro 快照。所有者 bootstrap（GET `/snapshot` 或 `/bootstrap`）。该设备被撤后，所有者仍能 bootstrap 同一明文。线上快照字节不是明文。
+- 证据：`pnpm --filter @lody/e2ee-lab check` 退出 0（10 文件 / 35 测试）。Wasm 物理时钟、Fiber/`exclusive` 中断、OS 隔离仍未注入。未启用产品 E2EE。无 push/PR/merge。
