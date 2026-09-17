@@ -10,7 +10,9 @@ import { cleanupLab, labClient, launchLab, tempDir } from '../src/fixtures';
 import { startLabBackend } from '../src/backend';
 import { CONTROL_STREAM, MAX_LEASE_MS } from '../src/platform/protocol';
 import { exportDevice, generateDevice } from '../src/platform/device';
-import { writeLoro } from '../src/platform/content-session';
+import { LoroDoc } from 'loro-crdt';
+import { InMemoryRemoteCursorStore } from '@loro-dev/streams-crdt/loro';
+import { syncLoroWithCursor, writeLoro } from '../src/platform/content-session';
 
 afterEach(() => cleanupLab());
 
@@ -52,6 +54,42 @@ describe('lab host lifecycle', () => {
     expect(deleted.status === 401 || deleted.status === 403).toBe(true);
     expect(before.headers.get('stream-next-offset')).toBe(after.headers.get('stream-next-offset'));
     expect((await alice.readLedger()).length).toBe(1);
+  });
+
+  it('recovers Loro text after a crash between document persist and cursor save', async () => {
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice' });
+    await alice.createSpace();
+    await alice.readLedger();
+    await writeLoro(alice, 'durable-after-cursor-crash');
+    const memory = new InMemoryRemoteCursorStore();
+    let failCursor = true;
+    let snapshot: Uint8Array | undefined;
+    const store = {
+      load: (streamUrl: string) => memory.load(streamUrl),
+      save: async (cursor: Parameters<InMemoryRemoteCursorStore['save']>[0]) => {
+        if (failCursor) throw new Error('cursor-crash');
+        await memory.save(cursor);
+      },
+    };
+    await expect(
+      syncLoroWithCursor(alice, store, async (doc) => {
+        snapshot = doc.export({ mode: 'snapshot' });
+      })
+    ).rejects.toThrow('cursor-crash');
+    expect(snapshot).toBeDefined();
+    const restored = new LoroDoc();
+    restored.import(snapshot!);
+    expect(restored.getText('text').toString()).toContain('durable-after-cursor-crash');
+    restored.free();
+    failCursor = false;
+    let recovered: Uint8Array | undefined;
+    const first = await syncLoroWithCursor(alice, store, async (doc) => {
+      recovered = doc.export({ mode: 'snapshot' });
+    });
+    expect(first).toContain('durable-after-cursor-crash');
+    const second = await syncLoroWithCursor(alice, store, undefined, recovered);
+    expect(second).toBe(first);
   });
 
   it('rejects a delayed content write after the device is revoked', async () => {

@@ -236,3 +236,8 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 - ContentCipher 的 messageId/nonce 使用注入的 `getRandomValues`。实验室通过闭包调用 `session.random` 填充 `content-csprng:<n>`（先前拆出未绑定方法导致 sealing 失败）。同一 16 字节 messageId + 24 字节 nonce 得到相同信封（`test/content.test.ts`）。生产仍用实时 WebCrypto。
 - 恶意服务器把 Loro 流字节抄到 Flock 流后，不会作为 Flock 明文出现（不含 `cross-secret`）。
 - 证据：`pnpm --filter @lody/e2ee-core exec vitest run test/content.test.ts` 退出 0（13 测试）。`pnpm --filter @lody/e2ee-lab check` 退出 0（10 文件 / 31 测试）。Wasm 物理时钟、Fiber/`exclusive` 中断、OS 隔离仍未注入。未启用产品 E2EE。无 push/PR/merge。
+
+### 2026-09-17 — 先持久化文档再写 cursor；崩溃后幂等追赶
+
+- 真实 Riverrun：`beforeRemoteCursorSave` 导出 Loro 快照后 cursor `save` 抛错。从旧 cursor 重启能从服务器恢复 `durable-after-cursor-crash`。第二次同步恢复该快照和已保存 cursor，文本一致（重复导入幂等）。空文档配已推进 cursor 不能作为恢复，符合 streams-crdt cursor 契约。
+- 证据：`pnpm --filter @lody/e2ee-lab check` 退出 0（10 文件 / 32 测试）。Wasm 物理时钟、Fiber/`exclusive` 中断、OS 隔离仍未注入。未启用产品 E2EE。无 push/PR/merge。

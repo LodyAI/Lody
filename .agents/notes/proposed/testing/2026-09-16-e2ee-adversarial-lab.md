@@ -236,3 +236,8 @@ Implementers choose filenames, service names and test organization without repea
 - ContentCipher messageId/nonce take an injected `getRandomValues`. Lab fills `content-csprng:<n>` through a closure over `session.random` (unbound method extraction was the earlier sealing failure). Same 16-byte messageId + 24-byte nonce reproduce identical envelopes (`test/content.test.ts`). Production still uses live WebCrypto.
 - Malicious-server copy of Loro stream bytes onto the Flock stream does not surface as Flock plaintext (`cross-secret` absent).
 - Evidence: `pnpm --filter @lody/e2ee-core exec vitest run test/content.test.ts` exit 0 (13 tests). `pnpm --filter @lody/e2ee-lab check` exit 0 (10 files / 31 tests). Wasm physical clocks, Fiber/`exclusive` interrupt, and OS isolation remain uninjected. Not product E2EE. No push/PR/merge.
+
+### 2026-09-17 — Document persist before cursor; crash then idempotent catch-up
+
+- Real Riverrun: `beforeRemoteCursorSave` exports the Loro snapshot, then cursor `save` throws. Restart from a stale cursor recovers `durable-after-cursor-crash` from the server. A second sync restores that snapshot plus the saved cursor; the text matches (duplicate import is idempotent). An empty doc plus an advanced cursor is not a valid resume, matching the streams-crdt cursor contract.
+- Evidence: `pnpm --filter @lody/e2ee-lab check` exit 0 (10 files / 32 tests). Wasm physical clocks, Fiber/`exclusive` interrupt, and OS isolation remain uninjected. Not product E2EE. No push/PR/merge.

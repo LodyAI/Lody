@@ -6,6 +6,7 @@ import {
   StreamsCrdt,
   createLoroDocAdapter,
   type PayloadProtectionContext,
+  type RemoteCursorStore,
 } from '@loro-dev/streams-crdt/loro';
 import {
   StreamsCrdt as FlockStreamsCrdt,
@@ -200,6 +201,45 @@ export async function readFlock(
   const value = String((flock.get([...path]) as { value?: string } | undefined)?.value ?? '');
   await crdt.close();
   return value;
+}
+
+export async function syncLoroWithCursor(
+  session: ContentClient,
+  remoteCursorStore: RemoteCursorStore,
+  beforeRemoteCursorSave?: (doc: LoroDoc) => Promise<void>,
+  restoreSnapshot?: Uint8Array
+): Promise<string> {
+  const doc = bindLoroPeer(new LoroDoc(), session);
+  if (restoreSnapshot) doc.import(restoreSnapshot);
+  const crdt = new StreamsCrdt({
+    streamUrl: `${session.baseUrl}/ds/${session.genesisHex}/${LORO_STREAM}`,
+    adapter: createLoroDocAdapter(doc),
+    remoteCursorStore,
+    beforeRemoteCursorSave: beforeRemoteCursorSave
+      ? async () => {
+          await beforeRemoteCursorSave(doc);
+        }
+      : undefined,
+    payloadProtectionRequired: true,
+    e2ee: {
+      provider: provider(session, 'loro', 'loro'),
+      readPolicy: 'encrypted-only',
+      writePolicy: 'encrypt',
+    },
+    fetch: (input, init) => session.fetch(input, init),
+  });
+  try {
+    const created = await crdt.createStream();
+    if (!created.ok) {
+      /* already exists */
+    }
+    const synced = await crdt.sync();
+    if (!synced.ok) throw new Error(`loro-sync-failed:${JSON.stringify(synced)}`);
+    return doc.getText('text').toString();
+  } finally {
+    await crdt.close();
+    doc.free();
+  }
 }
 
 export async function syncLoro(session: ContentClient): Promise<LoroDoc> {
