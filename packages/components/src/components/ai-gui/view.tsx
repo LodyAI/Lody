@@ -14,7 +14,6 @@ import {
   useContext,
   useEffect,
   useImperativeHandle,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -1295,9 +1294,6 @@ export const SessionChatStreamView = forwardRef<
     const shouldShowAgentActivity = Boolean(agentActivityLabel);
     const [assistantExpansionVersion, setAssistantExpansionVersion] = useState(0);
     const [hoveredAssistantMessageId, setHoveredAssistantMessageId] = useState<string | null>(null);
-    const pendingExpandedGroupRowKeyRef = useRef<string | null>(null);
-    const groupExpansionAutoScrollSuppressedRef = useRef(false);
-    const releaseGroupExpansionSuppressionRef = useRef(false);
     /**
      * An outline jump in flight. Declared here, beside the other suppression
      * state, because `autoScrollSuppressedRef` below reads it — see
@@ -1314,7 +1310,6 @@ export const SessionChatStreamView = forwardRef<
       () => ({
         get current() {
           return (
-            groupExpansionAutoScrollSuppressedRef.current ||
             messageSelection !== null ||
             pendingOutlineJumpRef.current !== null ||
             Boolean(suppressStickyAutoScrollRef?.current)
@@ -1333,10 +1328,10 @@ export const SessionChatStreamView = forwardRef<
             [groupKey]: expanded,
           },
         });
-        if (expanded) {
-          pendingExpandedGroupRowKeyRef.current = `assistant:${messageId}:${groupKey}:header`;
-          groupExpansionAutoScrollSuppressedRef.current = true;
-        }
+        // Toggling must not scroll: the header stays where the reader clicked
+        // and the rows open or fold beneath it. useStickyScroll keeps a
+        // non-following reader from being pulled to the end by the commit's
+        // observer deliveries; a reader following the tail is left there.
         setAssistantExpansionVersion((version) => version + 1);
       },
       []
@@ -1351,10 +1346,6 @@ export const SessionChatStreamView = forwardRef<
             [segmentKey]: expanded,
           },
         });
-        if (expanded) {
-          pendingExpandedGroupRowKeyRef.current = `assistant:${messageId}:${segmentKey}:worked-header`;
-          groupExpansionAutoScrollSuppressedRef.current = true;
-        }
         setAssistantExpansionVersion((version) => version + 1);
       },
       []
@@ -1423,25 +1414,6 @@ export const SessionChatStreamView = forwardRef<
       [leadingRowCount]
     );
 
-    useLayoutEffect(() => {
-      const rowKey = pendingExpandedGroupRowKeyRef.current;
-      if (!rowKey) return undefined;
-
-      const rowIndex = virtualRows.findIndex((row) => row.key === rowKey);
-      if (rowIndex === -1) {
-        pendingExpandedGroupRowKeyRef.current = null;
-        groupExpansionAutoScrollSuppressedRef.current = false;
-        return undefined;
-      }
-
-      pendingExpandedGroupRowKeyRef.current = null;
-      // Descendant layout effects run before this parent effect, so Virtua has
-      // committed and measured the expanded row set when this call runs.
-      scrollRowToTop(rowIndex);
-      releaseGroupExpansionSuppressionRef.current = true;
-      return undefined;
-    }, [scrollRowToTop, virtualRows]);
-
     // Whether this render reaches the virtualized branch below. A session whose
     // document is still being acquired renders the empty sentinel and returns
     // before `Virtualizer` mounts, yet every hook above that return has already
@@ -1468,15 +1440,6 @@ export const SessionChatStreamView = forwardRef<
       onAtBottomChange,
       skipNextViewportResizeAutoScrollRef,
       suppressAutoScrollRef: autoScrollSuppressedRef,
-    });
-
-    // useStickyScroll's layout effect runs before this one in hook order and
-    // consumes the suppression for the expansion commit. Release it at the end
-    // of that same commit instead of guessing when Virtua settles with a timer.
-    useLayoutEffect(() => {
-      if (!releaseGroupExpansionSuppressionRef.current) return;
-      releaseGroupExpansionSuppressionRef.current = false;
-      groupExpansionAutoScrollSuppressedRef.current = false;
     });
 
     // ---- Outline rail ------------------------------------------------------

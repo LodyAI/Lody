@@ -82,8 +82,9 @@ File-by-file ownership and coverage pointers: [README.md](README.md).
   explicit in-memory, rail-relative data; it never persists or uploads.
 - `scrollRowToTop` is the only row-index-to-scroll conversion: it adds
   `leadingRowCount` and compensates viewport top padding so reads and writes use
-  one coordinate space. Group expansion, outline jumps, search, and imperative
-  scrolling all use it; do not call `vlistRef.scrollToIndex` elsewhere.
+  one coordinate space. Outline jumps, search, and imperative scrolling use it;
+  do not call `vlistRef.scrollToIndex` elsewhere. Group toggles never scroll —
+  expansion reveals rows in place.
 - Far jumps start from estimated offsets. After scroll settles, reissue the same
   jump until it is within `OUTLINE_JUMP_TOLERANCE_PX`, bounded by
   `OUTLINE_JUMP_MAX_CORRECTIONS`. Wheel, touch, or key input cancels correction
