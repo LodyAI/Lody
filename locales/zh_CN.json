@@ -3078,6 +3078,7 @@
   "workspace.invitations.cancelError": "取消邀请失败",
   "workspace.invitations.cancelled": "已取消",
   "workspace.invitations.copyLink": "复制链接",
+  "workspace.invitations.copied": "已复制！",
   "workspace.invitations.description": "将邀请链接分享给被邀请的成员",
   "workspace.invitations.pending": "待加入",
   "workspace.invitations.rejected": "已拒绝",

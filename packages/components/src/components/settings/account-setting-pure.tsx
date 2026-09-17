@@ -237,6 +237,7 @@ export function AccountSettingsPure({
   const [userToDelete, setUserToDelete] = useState<string | null>(null);
   const [inviting, setInviting] = useState(false);
   const [pendingInvitations, setPendingInvitations] = useState(initialPendingInvitations);
+  const [copiedInvitationId, setCopiedInvitationId] = useState<string | null>(null);
   const [cancellingInvitationIds, setCancellingInvitationIds] = useState<Set<string>>(
     () => new Set()
   );
@@ -914,11 +915,29 @@ export function AccountSettingsPure({
                     size="sm"
                     className="h-7 text-xs text-muted-foreground hover:text-foreground"
                     onClick={() => {
-                      void onCopyInviteLink(getInviteLink(invitation));
+                      void (async () => {
+                        try {
+                          await onCopyInviteLink(getInviteLink(invitation));
+                          setCopiedInvitationId(invitation.id);
+                          window.setTimeout(() => {
+                            setCopiedInvitationId((current) =>
+                              current === invitation.id ? null : current
+                            );
+                          }, 1500);
+                        } catch {
+                          // The parent surfaces clipboard failures to the user.
+                        }
+                      })();
                     }}
                   >
-                    <Copy className="mr-1 h-3 w-3" />
-                    {t('workspace.invitations.copyLink')}
+                    {copiedInvitationId === invitation.id ? (
+                      <Check className="mr-1 h-3 w-3" />
+                    ) : (
+                      <Copy className="mr-1 h-3 w-3" />
+                    )}
+                    {copiedInvitationId === invitation.id
+                      ? t('workspace.invitations.copied')
+                      : t('workspace.invitations.copyLink')}
                   </Button>
                   {hasAdminPermission && (
                     <Button

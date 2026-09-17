@@ -3078,6 +3078,7 @@
   "workspace.invitations.cancelError": "Failed to cancel invitation",
   "workspace.invitations.cancelled": "Cancelled",
   "workspace.invitations.copyLink": "Copy Link",
+  "workspace.invitations.copied": "Copied!",
   "workspace.invitations.description": "Share the invitation links with the invited members",
   "workspace.invitations.pending": "Pending",
   "workspace.invitations.rejected": "Rejected",
