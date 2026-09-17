@@ -35,10 +35,12 @@ confirmation; unrelated machines and other builtin providers remain unaffected.
 
 ## Verification limits
 
-The landing hides the migration card while any eligible machine lacks `builtinPi`,
-so it does not occupy composer space with an unavailable action. The notice wrapper
-uses the same eligibility condition; migration progress and retry feedback remain
-available once supported. This presentation change does not relax migration checks.
+The landing filters legacy providers by their own machine's `builtinPi` capability.
+The card count, visibility and confirmed write loop use that supported subset, so
+one outdated machine does not block others. Unsupported providers remain unchanged
+and become eligible for a later confirmation when their machine updates. With no
+supported providers, both the card and its otherwise empty notice wrapper are hidden.
+Migration progress and retry feedback remain available for supported providers.
 
 Focused launch, migration, authentication and protocol tests cover local behavior.
 Packaging smoke uses the official CLI with a local synthetic model. It does not prove

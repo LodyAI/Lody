@@ -6064,18 +6064,19 @@ function WorkspaceChatLanding({
   );
   const [piMigrationBusy, setPiMigrationBusy] = useState(false);
   const [piMigrationError, setPiMigrationError] = useState(false);
-  const canMigratePi = legacyPiProviders.every((config) =>
+  const migratablePiProviders = legacyPiProviders.filter((config) =>
     machineSupportsProtocolCapability(
       machines.get(config.machineId),
       MACHINE_PROTOCOL_CAPABILITIES.builtinPi
     )
   );
+  const canMigratePi = migratablePiProviders.length > 0;
   const confirmPiMigration = async () => {
     if (!runtime || piMigrationBusy || !canMigratePi) return;
     setPiMigrationBusy(true);
     setPiMigrationError(false);
     try {
-      for (const config of legacyPiProviders) {
+      for (const config of migratablePiProviders) {
         await runtime.writer.flockRowUpdate(
           getMachineFlockDocId(runtime.workspaceId, config.machineId),
           machineFlockKeys.agentConfig(config.id),
@@ -6094,10 +6095,10 @@ function WorkspaceChatLanding({
     }
   };
   const composerNoticeNode =
-    sharingReviewNoticeNode || sessionLimitNoticeNode || (legacyPiProviders.length && canMigratePi) ? (
+    sharingReviewNoticeNode || sessionLimitNoticeNode || canMigratePi ? (
       <>
         <PiProviderMigrationCard
-          count={legacyPiProviders.length}
+          count={migratablePiProviders.length}
           busy={piMigrationBusy}
           error={piMigrationError}
           canMigrate={canMigratePi}
