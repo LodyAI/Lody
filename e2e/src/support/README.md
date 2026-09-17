@@ -22,7 +22,7 @@
 | `pages/project-reopen-page.ts`                       | Two-project switching and duplicate catalog identity checks                |
 | `pages/session-queue-page.ts`                        | Queued follow-up removal and ordered ACP dispatch evidence                 |
 | `pages/session-management-page.ts`                   | Session metadata, Archive restore, history, and deletion                   |
-| `pages/session-relation-lifecycle-page.ts`           | Containment deletion, provenance, worktree, and hydration isolation        |
+| `pages/session-relation-lifecycle-page.ts`           | Archive cascade, containment deletion, provenance, and hydration isolation |
 | `pages/session-read-state-page.ts`                   | Unread state, sidebar navigation, and two-Session cleanup                  |
 | `pages/session-fork-page.ts`                         | Native ACP fork, origin, worktree, and source isolation                    |
 | `pages/session-goal-page.ts`                         | Goal state machine, Session isolation, revisit, Archive, and wire evidence |

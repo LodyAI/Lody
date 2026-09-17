@@ -51,11 +51,14 @@ When('用户归档并永久删除 opener Session', async function (this: LodyWor
   );
 });
 
-Then('child Tab 被删除而 opened Sessions 和 worktree 保留', async function (this: LodyWorld) {
-  await this.sessionRelationLifecyclePage!.expectDanglingProvenanceAndCleanup(
-    this.sessionRelationLifecycleResources!
-  );
-});
+Then(
+  'child Tab 被删除而 opened Sessions 保留 dangling 溯源并可独立清理',
+  async function (this: LodyWorld) {
+    await this.sessionRelationLifecyclePage!.expectDanglingProvenanceAndCleanup(
+      this.sessionRelationLifecycleResources!
+    );
+  }
+);
 
 Then(
   'metadata 未完成 hydration 时精确删除 empty child Tab 仍成功',

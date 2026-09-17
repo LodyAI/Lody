@@ -56,15 +56,24 @@ export class SessionRelationLifecyclePage {
   async archiveRelationRoot(resources: SessionRelationLifecycleResources): Promise<void> {
     await this.openRowMenu(this.activeRowById(resources.rootSessionId));
     await this.page.getByRole('menuitem', { name: /^(Archive Session|归档会话)$/u }).click();
-    await expect(this.activeRowById(resources.rootSessionId)).toBeHidden({ timeout: 30_000 });
-    await expect(this.activeRowById(resources.openedSessionId)).toBeVisible();
-    await expect(this.activeRowById(resources.openedFromTabSessionId)).toBeVisible();
+    // Archive follows containment and precise opened-by links, so the whole
+    // relation tree leaves the active sidebar together.
+    for (const sessionId of [
+      resources.rootSessionId,
+      resources.openedSessionId,
+      resources.openedFromTabSessionId,
+    ]) {
+      await expect(this.activeRowById(sessionId)).toBeHidden({ timeout: 30_000 });
+    }
     await expect
       .poll(() => this.readArchiveStates(resources), {
         timeout: 30_000,
         intervals: [50, 100, 250, 500],
       })
-      .toEqual({ root: true, tab: true, opened: false, openedFromTab: false });
+      .toEqual({ root: true, tab: true, opened: true, openedFromTab: true });
+    // Archiving closes the tree's work: each archived Session keeps its
+    // ordinary runtime shutdown and worktree reclamation.
+    await this.expectOpenedResourcesReleased(resources);
   }
 
   async permanentlyDeleteRelationRoot(resources: SessionRelationLifecycleResources): Promise<void> {
@@ -78,17 +87,17 @@ export class SessionRelationLifecyclePage {
     });
     await dialog.getByRole('button', { name: /^(Delete|删除)$/u }).click();
     await expect(archived).toBeHidden({ timeout: 30_000 });
+    // Archived-root deletion keeps its containment scope: the opened Sessions
+    // stay archived and listed rather than being removed with the root.
     await expect
       .poll(() => this.readExistingSessionIds(resources), {
         timeout: 30_000,
         intervals: [50, 100, 250, 500],
       })
       .toEqual([resources.openedFromTabSessionId, resources.openedSessionId].sort());
-
-    expect(existsSync(resources.openedWorktreePath)).toBe(true);
-    expect(existsSync(resources.openedFromTabWorktreePath)).toBe(true);
-    expect(isProcessAlive(resources.openedAgentPid)).toBe(true);
-    expect(isProcessAlive(resources.openedFromTabAgentPid)).toBe(true);
+    for (const sessionId of [resources.openedSessionId, resources.openedFromTabSessionId]) {
+      await expect(this.page.locator(`[data-id="archive-session:${sessionId}"]`)).toBeVisible();
+    }
   }
 
   async expectDanglingProvenanceAndCleanup(
@@ -103,25 +112,17 @@ export class SessionRelationLifecyclePage {
       await expect(this.page).toHaveURL(this.sessionRoutePatternFor(sessionId));
     }
 
+    // The survivors are already archived, so each is deleted directly from its
+    // own Session route without another archive round-trip.
     for (const sessionId of [resources.openedSessionId, resources.openedFromTabSessionId]) {
-      await this.archiveAndDeleteByRoute(sessionId);
+      await this.deleteArchivedByRoute(sessionId);
     }
     await expect
-      .poll(
-        () => ({
-          openedWorktree: existsSync(resources.openedWorktreePath),
-          openedFromTabWorktree: existsSync(resources.openedFromTabWorktreePath),
-          openedAgent: isProcessAlive(resources.openedAgentPid),
-          openedFromTabAgent: isProcessAlive(resources.openedFromTabAgentPid),
-        }),
-        { timeout: 60_000, intervals: [50, 100, 250, 500, 1_000] }
-      )
-      .toEqual({
-        openedWorktree: false,
-        openedFromTabWorktree: false,
-        openedAgent: false,
-        openedFromTabAgent: false,
-      });
+      .poll(() => this.readExistingSessionIds(resources), {
+        timeout: 30_000,
+        intervals: [50, 100, 250, 500],
+      })
+      .toEqual([]);
   }
 
   async expectColdHydrationExactDelete(): Promise<void> {
@@ -309,14 +310,7 @@ export class SessionRelationLifecyclePage {
     }, targetIds);
   }
 
-  private async archiveAndDeleteByRoute(sessionId: string): Promise<void> {
-    await this.openSessionRouteById(sessionId);
-    await this.page
-      .getByRole('button', { name: /^(More actions|更多操作)$/u })
-      .last()
-      .click();
-    await this.page.getByRole('menuitem', { name: /^(Archive session|归档会话)$/u }).click();
-    await expect(this.page).toHaveURL(/#\/local\/chat(?:\?.*)?$/u, { timeout: 30_000 });
+  private async deleteArchivedByRoute(sessionId: string): Promise<void> {
     await this.openSessionRouteById(sessionId);
     await this.page
       .getByRole('button', { name: /^(More actions|更多操作)$/u })
@@ -328,6 +322,27 @@ export class SessionRelationLifecyclePage {
     });
     await dialog.getByRole('button', { name: /^(Delete permanently|永久删除)$/u }).click();
     await expect(this.page).toHaveURL(/#\/local\/chat(?:\?.*)?$/u, { timeout: 30_000 });
+  }
+
+  private async expectOpenedResourcesReleased(
+    resources: SessionRelationLifecycleResources
+  ): Promise<void> {
+    await expect
+      .poll(
+        () => ({
+          openedWorktree: existsSync(resources.openedWorktreePath),
+          openedFromTabWorktree: existsSync(resources.openedFromTabWorktreePath),
+          openedAgent: isProcessAlive(resources.openedAgentPid),
+          openedFromTabAgent: isProcessAlive(resources.openedFromTabAgentPid),
+        }),
+        { timeout: 60_000, intervals: [50, 100, 250, 500, 1_000] }
+      )
+      .toEqual({
+        openedWorktree: false,
+        openedFromTabWorktree: false,
+        openedAgent: false,
+        openedFromTabAgent: false,
+      });
   }
 
   private async installMetadataScanBarrier(): Promise<void> {
