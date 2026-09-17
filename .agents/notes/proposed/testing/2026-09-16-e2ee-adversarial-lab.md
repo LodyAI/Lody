@@ -223,3 +223,10 @@ Implementers choose filenames, service names and test organization without repea
 - Production `sealEpochEnvelope` / `KeyEnvelopeCipher.seal` still omit `ekm`, so `@hpke/core` uses live WebCrypto `generateKeyPair`. Tests may pass Entropy; 32 bytes labeled `hpke-dhkem-ikm` go to the library's documented `ekm` DeriveKeyPair hook. Same IKM produces identical frames and still opens; a different IKM does not. Not a crypto rewrite and not a global WebCrypto patch.
 - AttackLab `duplicate` intercept: first CAS commits, ledger length 2.
 - Evidence: `pnpm --filter @lody/e2ee-core exec vitest run --exclude test/ledger-long-chain.test.ts` exit 0 (34 files / 382 tests). `pnpm --filter @lody/e2ee-lab check` exit 0 (10 files / 28 tests). Loro/Flock Wasm entropy/clocks, Fiber/`exclusive` interrupt, and OS isolation remain uninjected. Not product E2EE. No push/PR/merge.
+
+### 2026-09-17 — Loro/Flock peer IDs from Entropy; delayed upload after revoke
+
+- Lab `writeLoro` / `writeFlock` bind peer IDs through library `setPeerId` / `new Flock(id)` using Entropy labels `loro-peer-id` (8-byte bigint, zero becomes 1) and `flock-peer-id` (hex). Wasm physical clocks are still library-internal. ContentCipher nonces stay live WebCrypto (a trial injected platform broke payload sealing).
+- `deliverEpochKey` passes session Entropy into `sealEpochEnvelope` so HPKE IKM is labeled when the lab supplies it.
+- Delayed content write after `admitDevice` + key delivery + revoke is rejected by the host (`test/host-lifecycle.test.ts`).
+- Evidence: `pnpm --filter @lody/e2ee-lab check` exit 0 (10 files / 30 tests). Fiber/`exclusive` interrupt and OS isolation remain uninjected by E6 / capability-handle isolation. Not product E2EE. No push/PR/merge.

@@ -9,6 +9,8 @@ import { pathToFileURL } from 'node:url';
 import { cleanupLab, labClient, launchLab, tempDir } from '../src/fixtures';
 import { startLabBackend } from '../src/backend';
 import { CONTROL_STREAM, MAX_LEASE_MS } from '../src/platform/protocol';
+import { exportDevice, generateDevice } from '../src/platform/device';
+import { writeLoro } from '../src/platform/content-session';
 
 afterEach(() => cleanupLab());
 
@@ -50,6 +52,28 @@ describe('lab host lifecycle', () => {
     expect(deleted.status === 401 || deleted.status === 403).toBe(true);
     expect(before.headers.get('stream-next-offset')).toBe(after.headers.get('stream-next-offset'));
     expect((await alice.readLedger()).length).toBe(1);
+  });
+
+  it('rejects a delayed content write after the device is revoked', async () => {
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice' });
+    await alice.createSpace();
+    await alice.readLedger();
+    const tablet = await generateDevice();
+    expect((await alice.admitDevice(tablet, 'personal', false)).status).toBe('committed');
+    await alice.deliverEpochKey(tablet, 0);
+    const writer = await labClient({
+      host,
+      account: 'alice',
+      device: await exportDevice(tablet),
+    });
+    await writer.adoptGenesis(alice.genesisHex!);
+    await writer.readLedger();
+    const frames = await writer.readKeyFrames();
+    await writer.receiveEpochKey(alice.device, 0, frames[0]!);
+    await writeLoro(writer, 'before-revoke');
+    expect((await alice.revokeDevice(tablet.publicKey)).status).toBe('committed');
+    await expect(writeLoro(writer, 'after-revoke')).rejects.toThrow();
   });
 
   it('rejects control writes after the original 15-minute lease', async () => {

@@ -223,3 +223,10 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 - 生产路径 `sealEpochEnvelope` / `KeyEnvelopeCipher.seal` 仍省略 `ekm`，`@hpke/core` 使用实时 WebCrypto `generateKeyPair`。测试可传入 Entropy；32 字节标签 `hpke-dhkem-ikm` 交给库文档中的 `ekm` DeriveKeyPair 钩子。同一 IKM 得到相同帧且仍能打开；不同 IKM 不同。不是重写密码学，也不是全局 WebCrypto patch。
 - AttackLab `duplicate` 拦截：第一次 CAS 提交成功，账本长度为 2。
 - 证据：`pnpm --filter @lody/e2ee-core exec vitest run --exclude test/ledger-long-chain.test.ts` 退出 0（34 文件 / 382 测试）。`pnpm --filter @lody/e2ee-lab check` 退出 0（10 文件 / 28 测试）。Loro/Flock Wasm 随机/时钟、Fiber/`exclusive` 中断、OS 隔离仍未注入。未启用产品 E2EE。无 push/PR/merge。
+
+### 2026-09-17 — 用 Entropy 绑定 Loro/Flock peer ID；撤权后延迟上传
+
+- 实验室 `writeLoro` / `writeFlock` 通过库的 `setPeerId` / `new Flock(id)` 绑定 peer ID，Entropy 标签为 `loro-peer-id`（8 字节 bigint，0 变为 1）和 `flock-peer-id`（hex）。Wasm 物理时钟仍是库内部。ContentCipher nonce 仍用实时 WebCrypto（试注入 platform 会弄坏 payload sealing）。
+- `deliverEpochKey` 把会话 Entropy 传入 `sealEpochEnvelope`，实验室提供时 HPKE IKM 带标签。
+- `admitDevice` + 分钥 + 撤权后的延迟内容写被宿主拒绝（`test/host-lifecycle.test.ts`）。
+- 证据：`pnpm --filter @lody/e2ee-lab check` 退出 0（10 文件 / 30 测试）。Fiber/`exclusive` 中断与 OS 隔离仍按 E6 / 能力句柄隔离不注入。未启用产品 E2EE。无 push/PR/merge。

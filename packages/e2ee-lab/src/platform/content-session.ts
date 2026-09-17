@@ -36,6 +36,24 @@ export interface ContentClient {
   canWriteDocument: boolean;
   currentEpoch(): number;
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
+  random?(label: string, length: number): Uint8Array;
+}
+
+export function bindLoroPeer(doc: LoroDoc, session: ContentClient): LoroDoc {
+  if (session.random) {
+    const bytes = session.random('loro-peer-id', 8);
+    const id = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getBigUint64(
+      0,
+      false
+    );
+    doc.setPeerId(id === 0n ? 1n : id);
+  }
+  return doc;
+}
+
+function boundFlock(session: ContentClient, fallback: string): Flock {
+  if (!session.random) return new Flock(fallback);
+  return new Flock(toHex(session.random('flock-peer-id', 8)));
 }
 
 function provider(session: ContentClient, resource: string, model: 'loro' | 'flock') {
@@ -62,7 +80,7 @@ function provider(session: ContentClient, resource: string, model: 'loro' | 'flo
 }
 
 export async function writeLoro(session: ContentClient, text: string): Promise<void> {
-  const doc = new LoroDoc();
+  const doc = bindLoroPeer(new LoroDoc(), session);
   const crdt = new StreamsCrdt({
     streamUrl: `${session.baseUrl}/ds/${session.genesisHex}/${LORO_STREAM}`,
     adapter: createLoroDocAdapter(doc),
@@ -89,7 +107,7 @@ export async function writeLoro(session: ContentClient, text: string): Promise<v
 }
 
 export async function readLoro(session: ContentClient): Promise<string> {
-  const doc = new LoroDoc();
+  const doc = bindLoroPeer(new LoroDoc(), session);
   const crdt = new StreamsCrdt({
     streamUrl: `${session.baseUrl}/ds/${session.genesisHex}/${LORO_STREAM}`,
     adapter: createLoroDocAdapter(doc),
@@ -115,7 +133,7 @@ export async function writeFlock(
   value: string,
   path: readonly string[] = ['private', 'note']
 ): Promise<void> {
-  const flock = new Flock('writer');
+  const flock = boundFlock(session, 'writer');
   const crdt = new FlockStreamsCrdt({
     streamUrl: `${session.baseUrl}/ds/${session.genesisHex}/${FLOCK_STREAM}`,
     adapter: createFlockAdapter(flock),
@@ -145,7 +163,7 @@ export async function readFlock(
   session: ContentClient,
   path: readonly string[] = ['private', 'note']
 ): Promise<string> {
-  const flock = new Flock('reader');
+  const flock = boundFlock(session, 'reader');
   const crdt = new FlockStreamsCrdt({
     streamUrl: `${session.baseUrl}/ds/${session.genesisHex}/${FLOCK_STREAM}`,
     adapter: createFlockAdapter(flock),
@@ -166,7 +184,7 @@ export async function readFlock(
 }
 
 export async function syncLoro(session: ContentClient): Promise<LoroDoc> {
-  const doc = new LoroDoc();
+  const doc = bindLoroPeer(new LoroDoc(), session);
   const crdt = new StreamsCrdt({
     streamUrl: `${session.baseUrl}/ds/${session.genesisHex}/${LORO_STREAM}`,
     adapter: createLoroDocAdapter(doc),
@@ -324,7 +342,7 @@ export async function loroTailOffset(session: ContentClient): Promise<string> {
 }
 
 export async function uploadLoroSnapshot(session: ContentClient, text: string): Promise<void> {
-  const doc = new LoroDoc();
+  const doc = bindLoroPeer(new LoroDoc(), session);
   const crdt = new StreamsCrdt({
     streamUrl: `${session.baseUrl}/ds/${session.genesisHex}/${LORO_STREAM}`,
     adapter: createLoroDocAdapter(doc),
@@ -382,7 +400,7 @@ export async function bootstrapLoroFromSnapshot(
 ): Promise<{ text: string; fetches: string[] }> {
   const fetches: string[] = [];
   await assertSnapshotCiphertext(session, expected);
-  const doc = new LoroDoc();
+  const doc = bindLoroPeer(new LoroDoc(), session);
   const crdt = new StreamsCrdt({
     streamUrl: `${session.baseUrl}/ds/${session.genesisHex}/${LORO_STREAM}`,
     adapter: createLoroDocAdapter(doc),

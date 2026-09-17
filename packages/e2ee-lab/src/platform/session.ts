@@ -102,7 +102,7 @@ export class DemoSession {
     return headers;
   }
 
-  private random(label: string, length: number): Uint8Array {
+  random(label: string, length: number): Uint8Array {
     const bytes = new Uint8Array(length);
     (this.options.entropy ?? liveEntropy).fill(label, bytes);
     return bytes;
@@ -389,6 +389,7 @@ export class DemoSession {
       recipientEncryptionKey: recipient.enc,
       epochKey: key,
       sign: (bytes) => this.device.sign(bytes),
+      entropy: this.options.entropy,
     });
     const client = new StreamsClient({
       url: this.streamUrl(KEYS_STREAM),

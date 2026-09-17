@@ -19,9 +19,13 @@
  * - Live authority: caller policy (`ContentPolicy`, admission `mayWriteDocument`)
  *
  * Uninjected (documented gaps, not replay-closed):
- * - Loro/Flock peer IDs and Wasm clocks belong to those libraries
+ * - Loro/Flock Wasm physical clocks belong to those libraries
  * - noble-ed25519 `hashes.sha512` is pinned at module init and is not a
  *   public verification bypass
+ *
+ * Lab clients bind Loro/Flock peer IDs from Entropy (`loro-peer-id` /
+ * `flock-peer-id`) through the library `setPeerId` / constructor. That is not
+ * a Wasm clock hook.
  *
  * HPKE DHKEM: production `seal` omits `ekm` so `@hpke/core` uses WebCrypto
  * `generateKeyPair`. Tests may pass Entropy; IKM is filled as
