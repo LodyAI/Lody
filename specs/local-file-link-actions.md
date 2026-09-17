@@ -28,6 +28,9 @@ configured path launchers, and Reveal in Finder (or the host's file manager).
 The path handed to the clipboard or OS excludes a Markdown line/column suffix; ordinary left
 click retains that suffix for in-app preview navigation. Browser, mobile, remote,
 and unresolved-local contexts offer Copy Path only.
+Each rendered conversation surface resolves that capability from its own Session.
+An opened, child, or side Session never inherits its opener's workspace, machine,
+or native file actions.
 
 Native mobile offers Share file in the binary notice and file menu. It exports
 the complete authorized preview bytes into an isolated app-cache file and opens

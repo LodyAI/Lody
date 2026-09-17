@@ -127,7 +127,6 @@ import {
 } from '@lody/shared';
 import { useIsMobile } from '../../hooks/use-mobile';
 import { useStableCallback } from '@/hooks/use-stable-callback';
-import type { SessionFileActions } from '@/hooks/use-session-file-actions';
 import { useAppCapability } from '@/lib/app-platform';
 import { SessionShareDialog } from '@/components/sharing/session-share-dialog';
 import { useSessionShareStatus } from '@/hooks/use-session-share-management';
@@ -168,7 +167,6 @@ import SessionChatStream, {
   type MessageFileDiffEntriesByTurn,
   type SessionChatStreamHandle,
 } from '../ai-gui';
-import { AgentFileLinkContextMenuItemsContext } from '../ai-gui/markdown-renderer';
 import { MessageSendStatusContext } from '../ai-gui/message-send-status-context';
 import { format, formatDistanceToNow } from 'date-fns';
 import type { Locale } from 'date-fns';
@@ -248,6 +246,7 @@ import {
 import { ReviewAgentSetupDialog } from './auto-review-info';
 import { AutoReviewStatus } from './auto-review-status';
 import { useAutoReview } from '@/hooks/use-auto-review';
+import { SessionAgentFileLinkMenuProvider } from './session-agent-file-link-menu';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { SessionRelationCard } from '@/components/shared/session-relation-card';
 import {
@@ -1689,8 +1688,6 @@ interface SessionChatInterfaceProps {
   hideHeader?: boolean;
   onFileDiffClick?: (turnId: string, filePath: string) => void;
   onFilePathClick?: (filePath: string) => void;
-  /** Native Markdown file-link actions supplied by the owning session surface. */
-  agentFileLinkMenuItems?: SessionFileActions['buildMarkdownLinkMenuItems'];
   /** Opens an agent-uploaded HTML source path directly in rendered file preview. */
   onOpenHtmlFile?: (filePath: string) => void;
   messageFileDiffEntriesByTurn?: MessageFileDiffEntriesByTurn;
@@ -1882,7 +1879,6 @@ export const SessionChatInterface = memo(
       hideHeader = false,
       onFileDiffClick,
       onFilePathClick,
-      agentFileLinkMenuItems,
       onOpenHtmlFile,
       messageFileDiffEntriesByTurn,
       headerActionsSlot,
@@ -5942,9 +5938,7 @@ export const SessionChatInterface = memo(
                       {/* Key forces remount on session change, preventing scroll state bleed between sessions */}
                       <MessageSendStatusContext.Provider value={sendingMessageIds}>
                         <MessageSelectionContext.Provider value={shareSelection.context}>
-                          <AgentFileLinkContextMenuItemsContext.Provider
-                            value={agentFileLinkMenuItems}
-                          >
+                          <SessionAgentFileLinkMenuProvider session={session}>
                             <SessionChatStream
                               key={session.id}
                               ref={chatStreamRef}
@@ -5988,7 +5982,7 @@ export const SessionChatInterface = memo(
                               suppressStickyAutoScrollRef={suppressStickyAutoScrollRef}
                               outlineOverlayRoot={outlineOverlayRoot}
                             />
-                          </AgentFileLinkContextMenuItemsContext.Provider>
+                          </SessionAgentFileLinkMenuProvider>
                         </MessageSelectionContext.Provider>
                       </MessageSendStatusContext.Provider>
                     </ErrorBoundary>
