@@ -16,8 +16,8 @@ import {
   type WindowBadgeInput
 } from '@lody/shared/electron-ipc'
 import { getIpcServiceDeps } from '../ipc-service-deps'
-import { parseDevbarControlInput } from '../../services/devbar-control'
-import { getDevbarConfig, getDevbarMetrics, setDevbarControl } from '../../services/devbar-service'
+import { parseDevbarControlInput } from '../../services/devbar/control'
+import { getDevbarConfig, getDevbarMetrics, setDevbarControl } from '../../services/devbar/service'
 import { setMenuLanguage } from '../../menu'
 import { localFileActionError } from '../../services/local-file-action-error'
 import { hasPathLauncher, launchLocalPath } from '../../services/local-path-launcher-service'

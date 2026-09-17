@@ -6,15 +6,15 @@ import {
   createDevbarAuth,
   isAllowedDevbarRequestOrigin,
   parseDevbarControlInput
-} from './main/services/devbar-control.ts'
-import { summarizeDevbarMetrics } from './main/services/devbar-metrics.ts'
-import { createDevbarViewState } from './main/services/devbar-json-render.ts'
-import { handleDevbarLocalRoute } from './main/services/devbar-local-routes.ts'
-import { DevbarRecording } from './main/services/devbar-recording.ts'
-import { createClsTracker } from './renderer/src/devbar-cls.ts'
-import { createLongTaskBuffer } from './renderer/src/devbar-long-tasks.ts'
-import { isDevbarDeepLink } from './renderer/src/devbar-deep-link.ts'
-import { devbarSampleRoute } from './renderer/src/devbar-route.ts'
+} from './main/services/devbar/control.ts'
+import { summarizeDevbarMetrics } from './main/services/devbar/metrics.ts'
+import { createDevbarViewState } from './main/services/devbar/json-render.ts'
+import { handleDevbarLocalRoute } from './main/services/devbar/local-routes.ts'
+import { DevbarRecording } from './main/services/devbar/recording.ts'
+import { createClsTracker } from './renderer/src/devbar/cls.ts'
+import { createLongTaskBuffer } from './renderer/src/devbar/long-tasks.ts'
+import { isDevbarDeepLink } from './renderer/src/devbar/deep-link.ts'
+import { devbarSampleRoute } from './renderer/src/devbar/route.ts'
 
 void test('environment activation remains an explicit automation override', () => {
   assert.deepEqual(initialDevbarControl('true'), { enabled: true, agentAccess: true })

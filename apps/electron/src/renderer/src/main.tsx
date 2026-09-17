@@ -21,7 +21,7 @@ import { ErrorBoundary } from '@/components/error-boundary'
 import { authClient, completeElectronAuthCallback, isElectronAuthCallbackActive } from './auth'
 import { installNativeTabBehavior } from './native-tab-behavior'
 import { createRendererErrorReporting, type RendererFatalScope } from './renderer-error-reporting'
-import { DesktopDevbar } from './desktop-devbar'
+import { DesktopDevbar } from './devbar/index'
 
 // Desktop windows should not Tab-cycle a focus ring through the whole UI like a web page.
 installNativeTabBehavior()

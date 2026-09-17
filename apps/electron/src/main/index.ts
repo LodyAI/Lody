@@ -31,7 +31,7 @@ import {
   configureDevbarDiagnostics,
   startDevbarDevframeService,
   stopDevbarDevframeService
-} from './services/devbar-service'
+} from './services/devbar/service'
 import { GlobalShortcutsService } from './services/global-shortcuts-service'
 import { WindowsTrayService } from './services/windows-tray-service'
 import {

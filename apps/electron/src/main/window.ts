@@ -25,8 +25,8 @@ import { formatUnknownError, normalizeExternalHttpUrl } from './utils'
 import { describeDeepLinkForAuthDebug } from './auth-debug'
 import { resolveMainWindowRuntimePolicy } from './window-runtime-policy'
 import { serializePreferredSystemLanguagesArgument } from '../system-language-argument'
-import { isDevbarRendererEnabled } from './services/devbar-service'
-import { devbarRendererEntry } from './services/devbar-control'
+import { isDevbarRendererEnabled } from './services/devbar/service'
+import { devbarRendererEntry } from './services/devbar/control'
 import {
   clearMountWatchdog,
   clearUnresponsiveWatchdog,

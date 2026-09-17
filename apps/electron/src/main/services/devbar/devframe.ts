@@ -10,11 +10,11 @@ import { createServer } from 'node:http'
 import { defineDevframe, defineRpcFunction } from 'devframe'
 import { DevbarRendererSampleSchema, DevbarSnapshotSchema } from '@lody/shared/devbar'
 import { z } from 'zod'
-import pkg from '../../../package.json' with { type: 'json' }
-import { createDevbarAuth, isAllowedDevbarRequestOrigin } from './devbar-control'
-import { handleDevbarLocalRoute } from './devbar-local-routes'
-import { createDevbarViewState, DEVBAR_VIEW_SPEC } from './devbar-json-render'
-import { DevbarRecording } from './devbar-recording'
+import pkg from '../../../../package.json' with { type: 'json' }
+import { createDevbarAuth, isAllowedDevbarRequestOrigin } from './control'
+import { handleDevbarLocalRoute } from './local-routes'
+import { createDevbarViewState, DEVBAR_VIEW_SPEC } from './json-render'
+import { DevbarRecording } from './recording'
 
 const DEVBAR_ID = 'lody-devbar'
 const DEVBAR_DOCK_ID = 'lody-main-thread'

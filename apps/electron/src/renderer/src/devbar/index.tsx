@@ -1,11 +1,11 @@
 import type { DevbarRendererSample } from '@lody/shared/devbar'
 import { useEffect, useRef, useState, type JSX } from 'react'
 import { getIpcServices, onIpcEvent } from '@lody/components/lib/electron-ipc-client'
-import { createClsTracker } from './devbar-cls'
-import { isDevbarDeepLink } from './devbar-deep-link'
-import { devbarSampleRoute } from './devbar-route'
-import { createLongTaskBuffer, type LongTaskEntryLike } from './devbar-long-tasks'
-import './desktop-devbar.css'
+import { createClsTracker } from './cls'
+import { isDevbarDeepLink } from './deep-link'
+import { devbarSampleRoute } from './route'
+import { createLongTaskBuffer, type LongTaskEntryLike } from './long-tasks'
+import './index.css'
 
 type AppServices = NonNullable<ReturnType<typeof getIpcServices>>['app']
 type Metrics = Awaited<ReturnType<AppServices['getDevbarMetrics']>>

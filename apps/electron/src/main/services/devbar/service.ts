@@ -1,12 +1,10 @@
 import { app } from 'electron'
 import { randomBytes } from 'node:crypto'
-import { desktopInstallationProfile } from '../platform'
-import { initialDevbarControl, type DevbarControlInput } from './devbar-control'
-import { summarizeDevbarMetrics } from './devbar-metrics'
+import { desktopInstallationProfile } from '../../platform'
+import { initialDevbarControl, type DevbarControlInput } from './control'
+import { summarizeDevbarMetrics } from './metrics'
 
-type DevbarRuntime = Awaited<
-  ReturnType<(typeof import('./devbar-devframe'))['startDevbarDevframe']>
->
+type DevbarRuntime = Awaited<ReturnType<(typeof import('./devframe'))['startDevbarDevframe']>>
 type DevbarMetrics = ReturnType<typeof summarizeDevbarMetrics>
 
 interface DevbarConfig {
@@ -60,7 +58,7 @@ export function isDevbarRendererEnabled(): boolean {
 }
 
 async function createDevbarRuntime(): Promise<DevbarRuntime> {
-  const { startDevbarDevframe } = await import('./devbar-devframe')
+  const { startDevbarDevframe } = await import('./devframe')
   let rendererOrigin: string | undefined
   try {
     rendererOrigin = process.env.ELECTRON_RENDERER_URL
