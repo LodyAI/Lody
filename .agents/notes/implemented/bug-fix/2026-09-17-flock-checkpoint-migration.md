@@ -71,3 +71,12 @@ its green suite result means the known failure reproduced, not that it is fixed.
 Remove that marker only when exact changed-key forwarding or a reconciliation
 path repairs the recipient. Switching to inclusiveVersion does not fix it.
 This review changes tests/evidence only; the production fix is still pending.
+
+Further lifecycle review adds four passing cases: unload/reload preserves the
+checkpoint while rejecting stale handles; purge invalidates another live replica
+generation; an older checkpoint saved last retains both replicas data; Meta and
+named-Flock same-vector tombstones survive reopening and reject stale-record
+replay. The lifecycle case combines unload and purge in one test. These are
+deterministic IndexedDB/Flock tests, not physical crash tests. The two renderer
+suites now pass 31 tests; components typecheck passes. No additional P0/P1 was
+confirmed in these paths. The local-plane repair gap above remains unresolved.

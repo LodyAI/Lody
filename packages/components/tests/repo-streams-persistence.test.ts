@@ -41,6 +41,107 @@ async function open(dbName = 'migration', storage = new IndexedDBStorageAdaptor(
 }
 
 describe('renderer Streams replica persistence', () => {
+  it.each(['meta', 'named'] as const)(
+    'persists a same-vector %s tombstone so replaying older data cannot resurrect it',
+    async (kind) => {
+      const repo = await open('tombstone');
+      const load = async (owner: LoroRepo) =>
+        kind === 'meta' ? owner.getMeta() : (await owner.openFlockDoc('named')).flock;
+      const flock = await load(repo);
+      const stale = {
+        version: 0,
+        entries: { '["A"]': { d: 'old', c: '1699999999999,0,aa' } },
+      };
+      flock.importJson(stale);
+      flock.importJson(record('B', 2));
+      await repo.flush();
+      const before = flock.version();
+      flock.importJson({ version: 0, entries: { '["A"]': { c: '1700000000000,1,aa' } } });
+      expect(flock.version()).toEqual(before);
+      if (kind === 'meta') await repo.persistMetaNow();
+      else await repo.persistFlockDocNow('named', flock);
+      const recovered = await load(await open('tombstone'));
+      recovered.importJson(stale);
+      expect(recovered.get(['A'])).toBeUndefined();
+      expect(recovered.get(['B'])).toBe('B');
+    }
+  );
+
+  it('keeps unloaded checkpoints recoverable but invalidates purged generations across live replicas', async () => {
+    const first = await open('lifecycle');
+    const original = (await first.openFlockDoc('named')).flock;
+    original.importJson(record('A', 1));
+    await first.persistFlockDocNow('named', original);
+    const originalStore = first.getReplicaCheckpointStore({
+      kind: 'flock',
+      flockDocId: 'named',
+      flock: original,
+    });
+    await originalStore.save(cursor);
+    await first.unloadFlockDoc('named');
+    await expect(originalStore.load(cursor.streamUrl)).rejects.toThrow();
+    const reloaded = (await first.openFlockDoc('named')).flock;
+    expect(reloaded).not.toBe(original);
+    expect(reloaded.get(['A'])).toBe('A');
+    expect(
+      await first
+        .getReplicaCheckpointStore({
+          kind: 'flock',
+          flockDocId: 'named',
+          flock: reloaded,
+        })
+        .load(cursor.streamUrl)
+    ).toEqual(cursor);
+
+    const concurrent = await open('lifecycle');
+    const concurrentFlock = (await concurrent.openFlockDoc('named')).flock;
+    const concurrentStore = concurrent.getReplicaCheckpointStore({
+      kind: 'flock',
+      flockDocId: 'named',
+      flock: concurrentFlock,
+    });
+    await first.purgeFlockDoc('named');
+    await expect(concurrentStore.save({ ...cursor, nextOffset: '99' })).rejects.toThrow();
+    const fresh = (await first.openFlockDoc('named')).flock;
+    expect(fresh.get(['A'])).toBeUndefined();
+    expect(
+      await first
+        .getReplicaCheckpointStore({
+          kind: 'flock',
+          flockDocId: 'named',
+          flock: fresh,
+        })
+        .load(cursor.streamUrl)
+    ).toBeNull();
+  });
+
+  it('retains both replicas data when an older checkpoint finishes last', async () => {
+    const older = await open('overlap');
+    const newer = await open('overlap');
+    const oldStore = older.getReplicaCheckpointStore({ kind: 'meta', flock: older.getMeta() });
+    const newStore = newer.getReplicaCheckpointStore({ kind: 'meta', flock: newer.getMeta() });
+    older.getMeta().importJson(record('A', 1));
+    await older.persistMetaNow();
+    newer.getMeta().importJson(record('B', 2));
+    await newer.persistMetaNow();
+    await newStore.save({ ...cursor, nextOffset: '200' });
+    expect(await oldStore.load(cursor.streamUrl)).toBeNull();
+    await oldStore.save({ ...cursor, nextOffset: '100' });
+    const recovered = await open('overlap');
+    expect(recovered.getMeta().get(['A'])).toBe('A');
+    expect(recovered.getMeta().get(['B'])).toBe('B');
+    expect(
+      (
+        await recovered
+          .getReplicaCheckpointStore({
+            kind: 'meta',
+            flock: recovered.getMeta(),
+          })
+          .load(cursor.streamUrl)
+      )?.nextOffset
+    ).toBe('100');
+  });
+
   it.each(
     (['meta', 'named'] as const).flatMap((kind) =>
       (['none', 'data', 'checkpoint'] as const).map((failure) => ({ kind, failure }))
