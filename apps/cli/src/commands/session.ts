@@ -1467,12 +1467,32 @@ export function resolveTurnDispatchConfig(args: {
   };
 }
 
+function findTurnConfigOptionByCategory(
+  capability: AcpCapabilityCacheEntry | undefined,
+  category: 'mode' | 'model'
+): AcpConfigOptionSummary | undefined {
+  return capability?.configOptions?.find((option) => option.category === category);
+}
+
+function getTurnSelectorConfigOptionValue(
+  values: Record<string, string | boolean> | undefined,
+  capability: AcpCapabilityCacheEntry | undefined,
+  category: 'mode' | 'model'
+): string | undefined {
+  const optionId = findTurnConfigOptionByCategory(capability, category)?.id ?? category;
+  const value = values?.[optionId];
+  return typeof value === 'string' ? value : undefined;
+}
+
 export function withBuiltinDefaultTurnMode(
   config: ResolvedTurnDispatchConfig,
   target: Pick<SessionMeta, 'cliType' | 'agentType'>,
   capability?: AcpCapabilityCacheEntry
 ): ResolvedTurnDispatchConfig {
-  if (config.modeId || typeof config.configOptionValues?.mode === 'string') {
+  if (
+    config.modeId ||
+    getTurnSelectorConfigOptionValue(config.configOptionValues, capability, 'mode')
+  ) {
     return config;
   }
   const modeId = getBuiltinDefaultModeId(target.cliType, target.agentType);
@@ -1550,6 +1570,41 @@ export function validateTurnConfigOptionValues(
   }
 }
 
+function validateModelDependentTurnConfigOptionValues(
+  values: Record<string, string | boolean> | undefined,
+  capability: AcpCapabilityCacheEntry | undefined,
+  targetModelId: string | undefined
+): ReadonlySet<string> {
+  const validatedIds = new Set<string>();
+  if (!values || !capability || !targetModelId) {
+    return validatedIds;
+  }
+  const probedModelId = findTurnConfigOptionByCategory(capability, 'model')?.currentValue;
+  const optionsById = new Map(
+    (capability.configOptions ?? []).map((option) => [option.id, option])
+  );
+  for (const [id, value] of Object.entries(values)) {
+    const option = optionsById.get(id);
+    const isEffort = isAcpThoughtLevelConfigOption(option ?? { id }) || id === 'effort';
+    if (isEffort) {
+      const efforts = capability.modelReasoningEfforts?.[targetModelId];
+      if (efforts !== undefined) {
+        if (typeof value !== 'string' || !efforts.includes(value)) {
+          throw new Error(
+            `Invalid reasoning effort for model ${targetModelId}: ${String(value)}. Allowed values: ${efforts.join(', ')}.`
+          );
+        }
+        validatedIds.add(id);
+      } else if (targetModelId !== probedModelId) {
+        validatedIds.add(id);
+      }
+    } else if (isAcpFastModeConfigId(id) && targetModelId !== probedModelId) {
+      validatedIds.add(id);
+    }
+  }
+  return validatedIds;
+}
+
 export function filterCompatibleTurnConfigOptionValues(
   values: Record<string, string | boolean> | undefined,
   capability: AcpCapabilityCacheEntry | undefined,
@@ -1571,7 +1626,7 @@ export function filterCompatibleTurnConfigOptionValues(
         const isEffort = isAcpThoughtLevelConfigOption(option ?? { id }) || id === 'effort';
         if (isEffort) {
           const efforts = capability.modelReasoningEfforts?.[targetModelId];
-          if (efforts) return typeof value === 'string' && efforts.includes(value);
+          if (efforts !== undefined) return typeof value === 'string' && efforts.includes(value);
         }
         // A different (or unknown) probe model cannot invalidate the target's
         // recorded controls. Without per-model data, preserve them for runtime.
@@ -1736,13 +1791,23 @@ export function resolveEffectiveSessionChatDispatchConfig(args: {
   capability?: AcpCapabilityCacheEntry;
 }): ResolvedTurnDispatchConfig {
   const previous = args.inheritedDispatchConfig;
+  const explicitModeOption = getTurnSelectorConfigOptionValue(
+    args.dispatchConfig.configOptionValues,
+    args.capability,
+    'mode'
+  );
+  const explicitModelOption = getTurnSelectorConfigOptionValue(
+    args.dispatchConfig.configOptionValues,
+    args.capability,
+    'model'
+  );
   // Inherit run selectors only. Task tool consent belongs to this caller's turn.
   // The probe's options describe its current model, so they cannot establish
   // that old options are safe to carry across an explicit model switch.
   const inherited = previous
     ? {
-        modeId: previous.modeId,
-        modelId: previous.modelId,
+        modeId: explicitModeOption ? undefined : previous.modeId,
+        modelId: explicitModelOption ? undefined : previous.modelId,
         configOptionValues:
           args.dispatchConfig.modelId && args.dispatchConfig.modelId !== previous.modelId
             ? undefined
@@ -1757,11 +1822,26 @@ export function resolveEffectiveSessionChatDispatchConfig(args: {
       compatible.modelId
     );
   }
-  return withBuiltinDefaultTurnMode(
+  const effective = withBuiltinDefaultTurnMode(
     mergeTurnDispatchConfig(args.dispatchConfig, compatible),
     args.target,
     args.capability
   );
+  validateTurnModeAndModel(args.dispatchConfig, args.capability);
+  const targetModelId =
+    effective.modelId ??
+    getTurnSelectorConfigOptionValue(effective.configOptionValues, args.capability, 'model');
+  const validatedIds = validateModelDependentTurnConfigOptionValues(
+    args.dispatchConfig.configOptionValues,
+    args.capability,
+    targetModelId
+  );
+  validateTurnConfigOptionValues(
+    args.dispatchConfig.configOptionValues,
+    args.capability,
+    validatedIds
+  );
+  return effective;
 }
 
 function buildStructuredWaitError(
@@ -3335,10 +3415,6 @@ export async function sendSessionChatResult(
           agentConfigId: session.agentConfigId,
         })
       : undefined;
-  if (dispatchConfig.modeId || dispatchConfig.modelId || dispatchConfig.configOptionValues) {
-    validateTurnModeAndModel(dispatchConfig, capability);
-    validateTurnConfigOptionValues(dispatchConfig.configOptionValues, capability);
-  }
   const effectiveDispatchConfig = resolveEffectiveSessionChatDispatchConfig({
     dispatchConfig,
     inheritedDispatchConfig,

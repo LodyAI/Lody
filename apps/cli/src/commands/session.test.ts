@@ -985,6 +985,104 @@ describe('session command helpers', () => {
     }
   );
 
+  it('validates explicit options against the inherited or explicitly selected model', () => {
+    const capability: AcpCapabilityCacheEntry = {
+      ...createAcpCapability(),
+      modelReasoningEfforts: { 'model-a': ['medium'], 'model-b': ['xhigh'] },
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'model-a',
+          options: [
+            { value: 'model-a', name: 'A' },
+            { value: 'model-b', name: 'B' },
+          ],
+        },
+        {
+          id: 'reasoning_effort',
+          name: 'Effort',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: 'medium',
+          options: [{ value: 'medium', name: 'Medium' }],
+        },
+      ],
+    };
+    const resolve = (configOptionValues: Record<string, string>) =>
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: { configOptionValues },
+        inheritedDispatchConfig: { modelId: 'model-b' },
+        target: createSessionMeta(),
+        capability,
+      });
+
+    expect(resolve({ reasoning_effort: 'xhigh' })).toMatchObject({
+      modelId: 'model-b',
+      configOptionValues: { reasoning_effort: 'xhigh' },
+    });
+    expect(() => resolve({ reasoning_effort: 'medium' })).toThrow(
+      'Invalid reasoning effort for model model-b'
+    );
+    expect(resolve({ model: 'model-b', reasoning_effort: 'xhigh' })).toMatchObject({
+      modelId: undefined,
+      configOptionValues: { model: 'model-b', reasoning_effort: 'xhigh' },
+    });
+  });
+
+  it('lets explicit selector config options replace inherited top-level selectors', () => {
+    const capability: AcpCapabilityCacheEntry = {
+      ...createAcpCapability(),
+      modes: [
+        { id: 'default', name: 'Default' },
+        { id: 'plan', name: 'Plan' },
+      ],
+      models: [
+        { modelId: 'model-a', name: 'A' },
+        { modelId: 'model-b', name: 'B' },
+      ],
+      configOptions: [
+        {
+          id: 'mode',
+          name: 'Mode',
+          category: 'mode',
+          type: 'select',
+          currentValue: 'default',
+          options: [
+            { value: 'default', name: 'Default' },
+            { value: 'plan', name: 'Plan' },
+          ],
+        },
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'model-a',
+          options: [
+            { value: 'model-a', name: 'A' },
+            { value: 'model-b', name: 'B' },
+          ],
+        },
+      ],
+    };
+    expect(
+      resolveEffectiveSessionChatDispatchConfig({
+        dispatchConfig: { configOptionValues: { mode: 'plan', model: 'model-b' } },
+        inheritedDispatchConfig: { modeId: 'default', modelId: 'model-a' },
+        target: createSessionMeta(),
+        capability,
+      })
+    ).toEqual({
+      modeId: undefined,
+      modelId: undefined,
+      configOptionValues: { mode: 'plan', model: 'model-b' },
+      taskToolsEnabled: undefined,
+    });
+  });
+
   it('drops old-model options on a model switch while preserving explicit options', () => {
     const capability: AcpCapabilityCacheEntry = {
       ...createAcpCapability(),

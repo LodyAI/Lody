@@ -53,6 +53,11 @@ When the probe describes a different or unknown model, its option list cannot re
 the recorded effort/Fast controls. Without per-model evidence, preserve those controls
 for runtime validation; ordinary options still use the snapshot compatibility filter.
 
+Explicit option validation also runs after the effective model is resolved. This lets a raw
+`--config-option` effort use an inherited model's per-model effort list instead of the probe
+snapshot. Explicit config options in the mode/model categories suppress inherited top-level
+selectors, matching the runtime rule that a top-level selector otherwise takes precedence.
+
 ## Alternatives
 
 Copying the requester's model would send the parent's model onto a child that may use a different
@@ -70,3 +75,5 @@ Regression tests reproduce the two review findings before the fix and cover omit
 caller consent, model changes, same-model inheritance, and explicit replacement options.
 Additional regressions cover target-only valid effort, probe-only invalid effort, missing
 per-model data, and Fast absent from the probe's option list.
+The final regressions cover explicit effort with an inherited model, invalid effort rejection,
+an explicit model option selecting the validation target, and mode/model option precedence.
