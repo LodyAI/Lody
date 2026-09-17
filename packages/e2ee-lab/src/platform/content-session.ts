@@ -56,14 +56,33 @@ function boundFlock(session: ContentClient, fallback: string): Flock {
   return new Flock(toHex(session.random('flock-peer-id', 8)));
 }
 
+function contentPlatform(session: ContentClient): Pick<Crypto, 'subtle' | 'getRandomValues'> {
+  if (!session.random) return crypto;
+  const fill = (label: string, length: number) => session.random!(label, length);
+  return {
+    subtle: crypto.subtle,
+    getRandomValues<T extends ArrayBufferView>(array: T): T {
+      const view =
+        array instanceof Uint8Array
+          ? array
+          : new Uint8Array(array.buffer, array.byteOffset, array.byteLength);
+      view.set(fill(`content-csprng:${view.byteLength}`, view.byteLength));
+      return array;
+    },
+  };
+}
+
 function provider(session: ContentClient, resource: string, model: 'loro' | 'flock') {
   if (!session.genesisHex || !session.device) throw new Error('no-space');
   return createStreamsContentProvider({
-    cipher: new ContentCipher({
-      authorize(header) {
-        return header.device;
+    cipher: new ContentCipher(
+      {
+        authorize(header) {
+          return header.device;
+        },
       },
-    }),
+      contentPlatform(session)
+    ),
     genesis: session.genesisHex,
     resource,
     model,

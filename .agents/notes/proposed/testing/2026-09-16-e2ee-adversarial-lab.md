@@ -230,3 +230,9 @@ Implementers choose filenames, service names and test organization without repea
 - `deliverEpochKey` passes session Entropy into `sealEpochEnvelope` so HPKE IKM is labeled when the lab supplies it.
 - Delayed content write after `admitDevice` + key delivery + revoke is rejected by the host (`test/host-lifecycle.test.ts`).
 - Evidence: `pnpm --filter @lody/e2ee-lab check` exit 0 (10 files / 30 tests). Fiber/`exclusive` interrupt and OS isolation remain uninjected by E6 / capability-handle isolation. Not product E2EE. No push/PR/merge.
+
+### 2026-09-17 — ContentCipher nonce injection and cross-document substitution
+
+- ContentCipher messageId/nonce take an injected `getRandomValues`. Lab fills `content-csprng:<n>` through a closure over `session.random` (unbound method extraction was the earlier sealing failure). Same 16-byte messageId + 24-byte nonce reproduce identical envelopes (`test/content.test.ts`). Production still uses live WebCrypto.
+- Malicious-server copy of Loro stream bytes onto the Flock stream does not surface as Flock plaintext (`cross-secret` absent).
+- Evidence: `pnpm --filter @lody/e2ee-core exec vitest run test/content.test.ts` exit 0 (13 tests). `pnpm --filter @lody/e2ee-lab check` exit 0 (10 files / 31 tests). Wasm physical clocks, Fiber/`exclusive` interrupt, and OS isolation remain uninjected. Not product E2EE. No push/PR/merge.

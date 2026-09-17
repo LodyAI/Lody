@@ -25,7 +25,8 @@
  *
  * Lab clients bind Loro/Flock peer IDs from Entropy (`loro-peer-id` /
  * `flock-peer-id`) through the library `setPeerId` / constructor. That is not
- * a Wasm clock hook.
+ * a Wasm clock hook. ContentCipher messageId/nonce use an injected
+ * `getRandomValues` filled as `content-csprng:<n>` (bound to the session).
  *
  * HPKE DHKEM: production `seal` omits `ekm` so `@hpke/core` uses WebCrypto
  * `generateKeyPair`. Tests may pass Entropy; IKM is filled as

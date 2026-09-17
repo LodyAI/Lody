@@ -230,3 +230,9 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 - `deliverEpochKey` 把会话 Entropy 传入 `sealEpochEnvelope`，实验室提供时 HPKE IKM 带标签。
 - `admitDevice` + 分钥 + 撤权后的延迟内容写被宿主拒绝（`test/host-lifecycle.test.ts`）。
 - 证据：`pnpm --filter @lody/e2ee-lab check` 退出 0（10 文件 / 30 测试）。Fiber/`exclusive` 中断与 OS 隔离仍按 E6 / 能力句柄隔离不注入。未启用产品 E2EE。无 push/PR/merge。
+
+### 2026-09-17 — ContentCipher nonce 注入与跨文档替换
+
+- ContentCipher 的 messageId/nonce 使用注入的 `getRandomValues`。实验室通过闭包调用 `session.random` 填充 `content-csprng:<n>`（先前拆出未绑定方法导致 sealing 失败）。同一 16 字节 messageId + 24 字节 nonce 得到相同信封（`test/content.test.ts`）。生产仍用实时 WebCrypto。
+- 恶意服务器把 Loro 流字节抄到 Flock 流后，不会作为 Flock 明文出现（不含 `cross-secret`）。
+- 证据：`pnpm --filter @lody/e2ee-core exec vitest run test/content.test.ts` 退出 0（13 测试）。`pnpm --filter @lody/e2ee-lab check` 退出 0（10 文件 / 31 测试）。Wasm 物理时钟、Fiber/`exclusive` 中断、OS 隔离仍未注入。未启用产品 E2EE。无 push/PR/merge。

@@ -111,6 +111,41 @@ describe('signed content envelope', () => {
     );
   });
 
+  it('reproduces messageId and nonce from an injected random platform', async () => {
+    function scripted(messageId: Uint8Array, nonce: Uint8Array) {
+      const queue = [messageId, nonce];
+      return new ContentCipher(
+        { authorize: () => alicePublic },
+        {
+          subtle: crypto.subtle,
+          getRandomValues(array) {
+            const next = queue.shift();
+            if (!next || next.byteLength !== array.byteLength) {
+              throw new Error('entropy-mismatch');
+            }
+            array.set(next);
+            return array;
+          },
+        }
+      );
+    }
+    const messageId = new Uint8Array(16).fill(3);
+    const nonce = new Uint8Array(24).fill(4);
+    const input = {
+      scope,
+      author,
+      epochKey,
+      signingKey: alice.privateKey,
+      plaintext: encoder.encode('replay-me'),
+    };
+    const first = await scripted(new Uint8Array(messageId), new Uint8Array(nonce)).seal(input);
+    const second = await scripted(new Uint8Array(messageId), new Uint8Array(nonce)).seal(input);
+    expect(first).toEqual(second);
+    expect(decoder.decode((await cipher().open(scope, epochKey, first)).plaintext)).toBe(
+      'replay-me'
+    );
+  });
+
   it('binds Org, epoch, resource and purpose to the caller expectation and derived key', async () => {
     const wire = await seal(encoder.encode('secret'));
     const alternatives: ContentScope[] = [

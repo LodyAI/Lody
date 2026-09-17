@@ -35,12 +35,14 @@ export async function maliciousAppendCas(input: {
   genesisHex: string;
   record: Uint8Array;
   expectedOffset?: string;
+  stream?: string;
 }): Promise<{ ok: boolean; status: number; body: string }> {
   const framed = new Uint8Array(4 + input.record.length);
   new DataView(framed.buffer).setUint32(0, input.record.length, false);
   framed.set(input.record, 4);
+  const stream = input.stream ?? CONTROL_STREAM;
   const response = await fetch(
-    `${input.riverrunUrl.replace(/\/$/, '')}/ds/${input.genesisHex}/${CONTROL_STREAM}/append-cas`,
+    `${input.riverrunUrl.replace(/\/$/, '')}/ds/${input.genesisHex}/${stream}/append-cas`,
     {
       method: 'POST',
       headers: {
