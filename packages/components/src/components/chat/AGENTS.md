@@ -43,6 +43,10 @@ Index and rationale: [README.md](README.md).
 - Every landing branch exposes ONE unfiltered hidden file input and one
   `onAttachmentAddClick`; selected files are split by MIME into the image and file
   draft hooks, exactly like paste and drop.
+- Paste routes through `selectPastedClipboardFiles`: clipboard text beats an image
+  the source app rendered beside it (unnamed or `image.<ext>`); named images and
+  non-image files still attach. Contract:
+  [paste precedence](../../../../../specs/composer-paste-precedence.md).
 
 ## Invariants
 

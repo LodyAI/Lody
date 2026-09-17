@@ -667,6 +667,8 @@
   "completeEmail.signedInAs": "Signed in as",
   "completeEmail.title": "Add your email",
   "completeEmail.updateFailed": "Unable to update email. Please try again.",
+  "composer.pastedRichTextAsText": "Pasted as text.",
+  "composer.pastedRichTextAttachImage": "Attach image instead",
   "composer.pastedTextEditorLabel": "Edit pasted text",
   "composer.pastedTextInlineLabel": "[Pasted {{charCount}} chars]",
   "composer.pastedTextOpen": "View pasted text",

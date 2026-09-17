@@ -249,7 +249,7 @@ import {
   shouldSubmitOnEnterForMobileKeyboardAction,
 } from '@/lib/mobile-keyboard-action';
 import { getChatComposerPromptPlaceholderKey } from '@/lib/chat-composer-placeholder';
-import { splitImageAndFileAttachments } from '@/lib/file-drop';
+import { selectPastedClipboardFiles, splitImageAndFileAttachments } from '@/lib/file-drop';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
 import { createMachinePairing } from '@/lib/cli-api-key';
@@ -2766,6 +2766,18 @@ function WorkspaceChatLanding({
     void handleSubmit();
   };
 
+  const attachPastedFiles = useCallback(
+    (files: File[]) => {
+      const { images, attachments } = splitImageAndFileAttachments(files);
+      if (images.length > 0) {
+        addFiles(images);
+      }
+      if (attachments.length > 0) {
+        addFileAttachments(attachments);
+      }
+    },
+    [addFileAttachments, addFiles]
+  );
   const handlePromptPaste = useCallback(
     (event: ClipboardEvent<HTMLTextAreaElement>) => {
       const text = event.clipboardData.getData('text/plain');
@@ -2791,31 +2803,41 @@ function WorkspaceChatLanding({
 
       if (text && shouldCapturePastedTextDraft(text)) {
         event.preventDefault();
-        if (insertLargePastedTextAtSelection(text)) {
-          return;
-        }
+        insertLargePastedTextAtSelection(text);
       }
 
-      const pastedFiles = Array.from(event.clipboardData.items)
+      const clipboardFiles = Array.from(event.clipboardData.items)
         .filter((item) => item.kind === 'file')
         .map((item) => item.getAsFile())
         .filter((file): file is File => file !== null);
+      // A Word or PowerPoint copy carries a picture of the selection beside the
+      // text, so attaching every clipboard file turned those pastes into a
+      // screenshot of themselves.
+      const { files: pastedFiles, renderedImages } = selectPastedClipboardFiles({
+        text,
+        files: clipboardFiles,
+      });
+
+      if (renderedImages.length > 0) {
+        toast(t('composer.pastedRichTextAsText', 'Pasted as text.'), {
+          // One id, so pasting repeatedly replaces the hint instead of stacking it.
+          id: 'composer-pasted-rich-text-as-text',
+          action: {
+            label: t('composer.pastedRichTextAttachImage', 'Attach image instead'),
+            onClick: () => attachPastedFiles(renderedImages),
+          },
+        });
+      }
 
       if (pastedFiles.length > 0) {
         event.preventDefault();
-        const { images, attachments } = splitImageAndFileAttachments(pastedFiles);
-        if (images.length > 0) {
-          addFiles(images);
-        }
-        if (attachments.length > 0) {
-          addFileAttachments(attachments);
-        }
+        attachPastedFiles(pastedFiles);
         return;
       }
 
       handleImagePromptPaste(event);
     },
-    [addFileAttachments, addFiles, handleImagePromptPaste, insertLargePastedTextAtSelection, t]
+    [attachPastedFiles, handleImagePromptPaste, insertLargePastedTextAtSelection, t]
   );
   const handleImageDrop = useCallback(
     (files: File[]) => {

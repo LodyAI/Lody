@@ -625,17 +625,33 @@ describe('SessionChatInputArea submission feedback', () => {
   });
 
   /** jsdom has no ClipboardEvent, and React only reads `clipboardData`. */
-  function createPasteEvent(text: string) {
+  function createPasteEvent(text: string, files: File[] = []) {
     const event = new Event('paste', { bubbles: true, cancelable: true });
     Object.defineProperty(event, 'clipboardData', {
       value: {
         getData: (type: string) => (type === 'text/plain' ? text : ''),
-        items: [],
-        files: [],
+        items: files.map((file) => ({ kind: 'file', type: file.type, getAsFile: () => file })),
+        files,
       },
     });
     return event;
   }
+
+  it('leaves a rich-text paste to the browser instead of attaching its bitmap', async () => {
+    const textarea = await renderComposer({ onSendMessage: async () => true });
+    // A Word or PowerPoint copy carries a picture of the selection beside the
+    // text; consuming the paste for that picture dropped the text entirely.
+    const event = createPasteEvent('Quarterly plan', [
+      new File(['png'], 'image.png', { type: 'image/png' }),
+    ]);
+
+    await act(async () => {
+      textarea.dispatchEvent(event);
+    });
+
+    expect(event.defaultPrevented).toBe(false);
+    expect(textarea.value).toBe('focus regression draft');
+  });
 
   describe('oversize pastes', () => {
     let errors: string[] = [];

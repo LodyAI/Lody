@@ -146,7 +146,7 @@ import {
 } from '@/lib/mobile-keyboard-action';
 import { useCodeCollabSessionFileProvider } from '@/hooks/use-code-collab-session-file-provider';
 import { useCodeCollabRequestedRole } from '@/hooks/use-code-collab-requested-role';
-import { splitImageAndFileAttachments } from '@/lib/file-drop';
+import { selectPastedClipboardFiles, splitImageAndFileAttachments } from '@/lib/file-drop';
 import { SessionUsagePopover } from './session-usage-popover';
 import type { MachineRateLimits } from '@/lib/session-usage';
 
@@ -1621,6 +1621,23 @@ export const SessionChatInputArea = memo(
         userInput,
       ]
     );
+    const attachPastedFiles = useCallback(
+      (files: File[]) => {
+        // Images route through the image path (which auto-degrades oversize
+        // ones); everything else is a file attachment.
+        const { images: pastedImages, attachments: pastedAttachments } =
+          splitImageAndFileAttachments(files);
+        const images = disableImageUpload ? [] : pastedImages;
+        const attachments = disableImageUpload ? files : pastedAttachments;
+        if (images.length > 0) {
+          handleAddFiles(images, 'paste');
+        }
+        if (attachments.length > 0) {
+          enqueueFileAttachments(attachments);
+        }
+      },
+      [disableImageUpload, enqueueFileAttachments, handleAddFiles]
+    );
     const handlePaste = useCallback(
       (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
         if (isArchived) {
@@ -1649,42 +1666,40 @@ export const SessionChatInputArea = memo(
 
         if (text && shouldCapturePastedTextDraft(text)) {
           event.preventDefault();
-          if (insertLargePastedTextAtSelection(text)) {
-            return;
-          }
+          insertLargePastedTextAtSelection(text);
         }
 
-        const pastedFiles = Array.from(event.clipboardData.items)
+        const clipboardFiles = Array.from(event.clipboardData.items)
           .filter((item) => item.kind === 'file')
           .map((item) => item.getAsFile())
           .filter((item): item is File => item !== null);
+        // A Word or PowerPoint copy carries a picture of the selection beside
+        // the text, so attaching every clipboard file turned those pastes into
+        // a screenshot of themselves.
+        const { files: pastedFiles, renderedImages } = selectPastedClipboardFiles({
+          text,
+          files: clipboardFiles,
+        });
+
+        if (renderedImages.length > 0) {
+          toast(t('composer.pastedRichTextAsText', 'Pasted as text.'), {
+            // One id, so pasting repeatedly replaces the hint instead of stacking it.
+            id: 'composer-pasted-rich-text-as-text',
+            action: {
+              label: t('composer.pastedRichTextAttachImage', 'Attach image instead'),
+              onClick: () => attachPastedFiles(renderedImages),
+            },
+          });
+        }
 
         if (pastedFiles.length === 0) {
           return;
         }
 
         event.preventDefault();
-        // Images route through the image path (which auto-degrades oversize
-        // ones); everything else is a file attachment.
-        const { images: pastedImages, attachments: pastedAttachments } =
-          splitImageAndFileAttachments(pastedFiles);
-        const images = disableImageUpload ? [] : pastedImages;
-        const attachments = disableImageUpload ? pastedFiles : pastedAttachments;
-        if (images.length > 0) {
-          handleAddFiles(images, 'paste');
-        }
-        if (attachments.length > 0) {
-          enqueueFileAttachments(attachments);
-        }
+        attachPastedFiles(pastedFiles);
       },
-      [
-        disableImageUpload,
-        enqueueFileAttachments,
-        handleAddFiles,
-        insertLargePastedTextAtSelection,
-        isArchived,
-        t,
-      ]
+      [attachPastedFiles, insertLargePastedTextAtSelection, isArchived, t]
     );
     const handleImageDrop = useCallback(
       (files: File[]) => {

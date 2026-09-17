@@ -667,6 +667,8 @@
   "completeEmail.signedInAs": "当前登录账号",
   "completeEmail.title": "添加邮箱",
   "completeEmail.updateFailed": "更新邮箱失败，请重试。",
+  "composer.pastedRichTextAsText": "已按文本粘贴。",
+  "composer.pastedRichTextAttachImage": "改为附加图片",
   "composer.pastedTextEditorLabel": "编辑已粘贴文本",
   "composer.pastedTextInlineLabel": "[已粘贴 {{charCount}} 字符]",
   "composer.pastedTextOpen": "查看已粘贴文本",
