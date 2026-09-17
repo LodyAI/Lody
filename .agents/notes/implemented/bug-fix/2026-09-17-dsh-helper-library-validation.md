@@ -35,8 +35,12 @@ dlopen(.../@koromix/koffi-darwin-arm64/darwin_arm64/koffi.node, 0x0001):
 ```
 
 One failed loader entry fails the whole plugin tree, DSH exits, and the host surfaces
-`ACP connection closed` with no actionable cause. Under the previous launch the user's
-own Node had neither the hardened runtime nor a Team ID, so the same binding loaded.
+`ACP connection closed` with no actionable cause. Under the previous launch the same
+binding loaded, and not because the user's Node was unhardened: an upstream Node 22.23.1
+is signed with the hardened runtime under Team `HX7739G8FX` and carries
+`com.apple.security.cs.disable-library-validation` itself. Every general-purpose Node
+runtime must, because loading third-party addons is its job. Adopting DSH's runtime meant
+adopting that requirement without the entitlement that satisfies it.
 
 The exception belongs on nested binaries only, so it is a second build resource rather
 than a new key in `entitlements.mac.plist`. `app-builder-lib` applies
@@ -67,7 +71,10 @@ The failure and the fix were confirmed on the installed signed build (0.95.0, Te
 | Same Helper re-signed with this note's inherit plist | valid `initialize`, empty stderr |
 
 The third control copied the app bundle, re-signed only the nested helper with the
-committed `entitlements.mac.inherit.plist`, and left the installed app untouched.
+committed `entitlements.mac.inherit.plist`, and left the installed app untouched. The
+first control is not an unhardened baseline: that Node is hardened and Team-ID-signed and
+already ships `disable-library-validation`, so the three rows isolate the entitlement as
+the only variable that decides whether the load succeeds.
 
 Limits: no full packaged, signed and notarized release was produced here, so
 notarization acceptance of the entitlement is expected from Apple's documented exception

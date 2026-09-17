@@ -33,8 +33,11 @@ dlopen(.../@koromix/koffi-darwin-arm64/darwin_arm64/koffi.node, 0x0001):
 ```
 
 一个 loader entry 失败会让整棵插件树失败，DSH 退出，宿主只剩下 `ACP connection closed`
-这个无从下手的表象。在之前的启动方式下，用户自己的 Node 既没有 hardened runtime 也没有
-团队 ID，所以同一份绑定可以正常加载。
+这个无从下手的表象。在之前的启动方式下同一份绑定能正常加载，但原因并不是用户的 Node 没有
+加固：上游的 Node 22.23.1 同样启用 hardened runtime、签名团队为 `HX7739G8FX`，而它自己
+就带着 `com.apple.security.cs.disable-library-validation`。任何通用 Node 运行时都必须
+带，因为加载第三方原生模块本就是它的职责。改用 Lody 自己的运行时跑 DSH，等于接下了这个要求，
+却没有接下满足它的那个 entitlement。
 
 这个例外只应加在嵌套二进制上，所以它是一份新的构建资源，而不是往
 `entitlements.mac.plist` 里加一个 key。`app-builder-lib` 会把 `entitlementsInherit`
@@ -60,7 +63,9 @@ helper，这是本次修复真实的代价。
 | 同一 Helper 用本记录的 inherit plist 重新签名 | 返回合法 `initialize`，stderr 为空 |
 
 第三组对照复制了应用包，只对其中嵌套的 helper 用已提交的
-`entitlements.mac.inherit.plist` 重新签名，未改动已安装的应用。
+`entitlements.mac.inherit.plist` 重新签名，未改动已安装的应用。第一组并不是"未加固"的
+基线：那个 Node 同样加固、同样有团队签名，并且本身就带
+`disable-library-validation`，所以三行数据把 entitlement 隔离成了决定加载成败的唯一变量。
 
 限制：这里没有产出完整的打包、签名并公证的发布件，所以公证是否接受该 entitlement 只是依据
 Apple 文档中的例外清单推断，而非在 Lody 的产物上观察到；也没有自动检查守护这份 plist。只验证
