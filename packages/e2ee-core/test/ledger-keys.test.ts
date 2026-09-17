@@ -131,6 +131,70 @@ describe('P3 key delivery and history unwrap', () => {
     });
     expect(opened).toEqual(k0);
 
+    const ikm = random(32);
+    const entropy = {
+      fill(label: string, bytes: Uint8Array) {
+        if (label !== 'hpke-dhkem-ikm' || bytes.byteLength !== ikm.byteLength) {
+          throw new Error(`entropy-mismatch:${label}`);
+        }
+        bytes.set(ikm);
+        return bytes;
+      },
+    };
+    const sealedA = await sealEpochEnvelope({
+      state: admitted.ledger.state,
+      genesis: created.anchor,
+      epoch: 0,
+      sender: owner.publicKey,
+      recipient: phone.publicKey,
+      recipientEncryptionKey: phone.enc,
+      epochKey: k0,
+      sign: (bytes) => owner.sign(bytes),
+      entropy,
+    });
+    const sealedB = await sealEpochEnvelope({
+      state: admitted.ledger.state,
+      genesis: created.anchor,
+      epoch: 0,
+      sender: owner.publicKey,
+      recipient: phone.publicKey,
+      recipientEncryptionKey: phone.enc,
+      epochKey: k0,
+      sign: (bytes) => owner.sign(bytes),
+      entropy,
+    });
+    expect(sealedA).toEqual(sealedB);
+    const otherIkm = random(32);
+    const sealedC = await sealEpochEnvelope({
+      state: admitted.ledger.state,
+      genesis: created.anchor,
+      epoch: 0,
+      sender: owner.publicKey,
+      recipient: phone.publicKey,
+      recipientEncryptionKey: phone.enc,
+      epochKey: k0,
+      sign: (bytes) => owner.sign(bytes),
+      entropy: {
+        fill(label, bytes) {
+          if (label !== 'hpke-dhkem-ikm') throw new Error(`entropy-mismatch:${label}`);
+          bytes.set(otherIkm);
+          return bytes;
+        },
+      },
+    });
+    expect(sealedC).not.toEqual(sealedA);
+    expect(
+      await openEpochEnvelope({
+        state: admitted.ledger.state,
+        genesis: created.anchor,
+        epoch: 0,
+        sender: owner.publicKey,
+        recipient: phone.publicKey,
+        recipientKeyPair: phone.dh,
+        frame: sealedA,
+      })
+    ).toEqual(k0);
+
     const revoked = await append(admitted.ledger, owner, {
       type: 'revokeDevice',
       target: phone.publicKey,

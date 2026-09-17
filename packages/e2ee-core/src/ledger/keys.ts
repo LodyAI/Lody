@@ -165,6 +165,8 @@ export async function sealEpochEnvelope(input: {
   recipientEncryptionKey: Uint8Array;
   epochKey: Uint8Array;
   sign(bytes: Uint8Array): Promise<Uint8Array>;
+  /** Test/lab only. Production omits this and uses live DHKEM keygen. */
+  entropy?: Entropy;
 }): Promise<Uint8Array> {
   if (!canSendEpoch(input.state, input.sender)) fail('unauthorized');
   if (!canReceiveEpoch(input.state, input.recipient)) fail('unauthorized');
@@ -176,7 +178,15 @@ export async function sealEpochEnvelope(input: {
   if (input.epochKey.byteLength !== 32) fail('invalid-operation');
   const aad = envelopeAad(input);
   const recipientPublicKey = await suite.kem.deserializePublicKey(input.recipientEncryptionKey);
-  const sealed = await suite.seal({ recipientPublicKey, info: hpkeInfo }, input.epochKey, aad);
+  const sealed = await suite.seal(
+    {
+      recipientPublicKey,
+      info: hpkeInfo,
+      ...(input.entropy ? { ekm: input.entropy.fill('hpke-dhkem-ikm', new Uint8Array(32)) } : {}),
+    },
+    input.epochKey,
+    aad
+  );
   if (sealed.enc.byteLength !== 32 || sealed.ct.byteLength !== 48) fail('invalid-operation');
   const unsigned = concat([aad, new Uint8Array(sealed.enc), new Uint8Array(sealed.ct)]);
   const message = concat([envelopeSigDomain, unsigned]);

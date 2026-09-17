@@ -149,6 +149,29 @@ describe('P4 AttackLab intercept and advanceUntil', () => {
     expect((await admit).status).toBe('committed');
     await lab.finish();
   });
+
+  it('duplicates a CAS request and still commits the first delivery', async () => {
+    const runtime = new LabRuntime({ mode: 'manual' });
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice', runtime });
+    await alice.createSpace();
+    const lab = createAttackLab({
+      host,
+      runtime,
+      clientDirs: [alice.clientDir],
+      expectedPlaintext: 'none',
+      genesisHex: alice.genesisHex,
+    });
+    const admit = alice.admitDevice(await generateDevice(), 'personal', false);
+    await runtime.whenRequested(1);
+    const queued = runtime.events().find((event) => event.status === 'requested');
+    expect(queued).toBeDefined();
+    await lab.intercept({ eventId: queued!.eventId, kind: 'duplicate' });
+    runtime.permit(queued!.eventId);
+    expect((await admit).status).toBe('committed');
+    expect((await alice.readLedger()).length).toBe(2);
+    await lab.finish();
+  });
 });
 
 describe('P4 recorded agent exploration', () => {

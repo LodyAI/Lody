@@ -217,3 +217,9 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 - `advanceUntil` 在阶段未出现时返回 `unmet: true`。拦截种类为 `drop | replace | delay | duplicate`。drop 表现为丢 ACK（`status: unknown`）；delay 把 CAS 回执留到第二次调度许可，不用墙上时钟 sleep。duplicate 把 CAS 请求发两次。重放按记录的拦截种类执行，不再一律当成 drop。
 - 15 分钟凭证截止：把注入的客户端时钟推到 `issuedAt + MAX_LEASE_MS` 后，后续控制读取被拒绝（`now == expires` 视为过期）。
 - 证据：`pnpm --filter @lody/e2ee-lab check` 退出 0（10 文件 / 27 测试）。HPKE/Wasm 随机、Fiber/`exclusive` 中断、OS 隔离仍未注入。未启用产品 E2EE。无 push/PR/merge。
+
+### 2026-09-17 — 经库 ekm 注入 HPKE DHKEM IKM
+
+- 生产路径 `sealEpochEnvelope` / `KeyEnvelopeCipher.seal` 仍省略 `ekm`，`@hpke/core` 使用实时 WebCrypto `generateKeyPair`。测试可传入 Entropy；32 字节标签 `hpke-dhkem-ikm` 交给库文档中的 `ekm` DeriveKeyPair 钩子。同一 IKM 得到相同帧且仍能打开；不同 IKM 不同。不是重写密码学，也不是全局 WebCrypto patch。
+- AttackLab `duplicate` 拦截：第一次 CAS 提交成功，账本长度为 2。
+- 证据：`pnpm --filter @lody/e2ee-core exec vitest run --exclude test/ledger-long-chain.test.ts` 退出 0（34 文件 / 382 测试）。`pnpm --filter @lody/e2ee-lab check` 退出 0（10 文件 / 28 测试）。Loro/Flock Wasm 随机/时钟、Fiber/`exclusive` 中断、OS 隔离仍未注入。未启用产品 E2EE。无 push/PR/merge。

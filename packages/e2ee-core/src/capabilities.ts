@@ -19,10 +19,14 @@
  * - Live authority: caller policy (`ContentPolicy`, admission `mayWriteDocument`)
  *
  * Uninjected (documented gaps, not replay-closed):
- * - `@hpke/core` DHKEM ephemeral keygen uses WebCrypto internally
  * - Loro/Flock peer IDs and Wasm clocks belong to those libraries
  * - noble-ed25519 `hashes.sha512` is pinned at module init and is not a
  *   public verification bypass
+ *
+ * HPKE DHKEM: production `seal` omits `ekm` so `@hpke/core` uses WebCrypto
+ * `generateKeyPair`. Tests may pass Entropy; IKM is filled as
+ * `hpke-dhkem-ikm` (32 bytes) and supplied to the library `ekm` hook.
+ * Algorithms stay RFC 9180 DeriveKeyPair; this is not a crypto rewrite.
  */
 
 export interface Entropy {

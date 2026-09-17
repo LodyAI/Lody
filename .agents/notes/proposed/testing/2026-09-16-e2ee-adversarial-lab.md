@@ -217,3 +217,9 @@ Implementers choose filenames, service names and test organization without repea
 - `advanceUntil` now returns `unmet: true` when the phase never appears. Intercept kinds are `drop | replace | delay | duplicate`. Drop is a lost ACK (`status: unknown`); delay holds the CAS acknowledgement until a second scheduler permit, with no wall-clock sleep. Duplicate sends the CAS request twice. Replay passes the recorded intercept kind through instead of collapsing everything to drop.
 - 15-minute credential cutoff: advancing the injected client clock to `issuedAt + MAX_LEASE_MS` rejects later control reads (`now == expires` is expired).
 - Evidence: `pnpm --filter @lody/e2ee-lab check` exit 0 (10 files / 27 tests). HPKE/Wasm entropy, Fiber/`exclusive` interrupt, and OS isolation remain uninjected. Not product E2EE. No push/PR/merge.
+
+### 2026-09-17 — HPKE DHKEM IKM injection via library ekm
+
+- Production `sealEpochEnvelope` / `KeyEnvelopeCipher.seal` still omit `ekm`, so `@hpke/core` uses live WebCrypto `generateKeyPair`. Tests may pass Entropy; 32 bytes labeled `hpke-dhkem-ikm` go to the library's documented `ekm` DeriveKeyPair hook. Same IKM produces identical frames and still opens; a different IKM does not. Not a crypto rewrite and not a global WebCrypto patch.
+- AttackLab `duplicate` intercept: first CAS commits, ledger length 2.
+- Evidence: `pnpm --filter @lody/e2ee-core exec vitest run --exclude test/ledger-long-chain.test.ts` exit 0 (34 files / 382 tests). `pnpm --filter @lody/e2ee-lab check` exit 0 (10 files / 28 tests). Loro/Flock Wasm entropy/clocks, Fiber/`exclusive` interrupt, and OS isolation remain uninjected. Not product E2EE. No push/PR/merge.

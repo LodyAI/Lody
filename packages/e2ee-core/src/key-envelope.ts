@@ -10,6 +10,7 @@ import {
   WebCryptoControl,
 } from './wire';
 import type { ContentAuthor } from './content';
+import type { Entropy } from './capabilities';
 
 export interface KeyRecipient {
   readonly kind: 'device' | 'recovery';
@@ -173,7 +174,8 @@ export class KeyEnvelopeCipher {
   async seal(
     context: KeyEnvelopeContext,
     epochKey: Uint8Array,
-    signingKey: CryptoKey
+    signingKey: CryptoKey,
+    entropy?: Entropy
   ): Promise<Uint8Array> {
     const aad = header(context);
     const frozen = parseHeader(aad);
@@ -185,7 +187,16 @@ export class KeyEnvelopeCipher {
         fromHex(authority.recipientEncryptionKey)
       );
       // Base mode only: a fresh ephemeral KEM key for each single-shot invocation.
-      const sealed = await this.suite.seal({ recipientPublicKey, info }, secret, aad);
+      // Production omits ekm (live generateKeyPair). Tests may pass 32-byte IKM.
+      const sealed = await this.suite.seal(
+        {
+          recipientPublicKey,
+          info,
+          ...(entropy ? { ekm: entropy.fill('hpke-dhkem-ikm', new Uint8Array(32)) } : {}),
+        },
+        secret,
+        aad
+      );
       invariant(sealed.enc.byteLength === 32 && sealed.ct.byteLength === 48, 'invalid-hpke-output');
       const prefix = new Uint8Array(2);
       new DataView(prefix.buffer).setUint16(0, aad.length);
