@@ -6094,7 +6094,7 @@ function WorkspaceChatLanding({
     }
   };
   const composerNoticeNode =
-    sharingReviewNoticeNode || sessionLimitNoticeNode || legacyPiProviders.length ? (
+    sharingReviewNoticeNode || sessionLimitNoticeNode || (legacyPiProviders.length && canMigratePi) ? (
       <>
         <PiProviderMigrationCard
           count={legacyPiProviders.length}

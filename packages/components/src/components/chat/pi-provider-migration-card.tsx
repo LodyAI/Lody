@@ -15,7 +15,7 @@ export function PiProviderMigrationCard({
   onConfirm: () => void;
 }) {
   const { t } = useTranslation();
-  if (!count) return null;
+  if (!count || !canMigrate) return null;
   return (
     <section
       className="mb-3 rounded-lg border bg-background p-4 text-sm"
@@ -28,14 +28,6 @@ export function PiProviderMigrationCard({
           'Switch your existing Pi providers to the built-in version managed by Lody. Names, credentials and settings are kept. Start a new chat after upgrading; old Pi sessions cannot be resumed by the new adapter.'
         )}
       </p>
-      {!canMigrate && (
-        <p className="mt-2 text-muted-foreground">
-          {t(
-            'chat.piMigration.upgradeMachine',
-            'Update Lody on the providers’ machines before migrating.'
-          )}
-        </p>
-      )}
       {error && (
         <p role="alert" className="mt-2 text-destructive">
           {t(

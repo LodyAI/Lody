@@ -35,6 +35,11 @@ confirmation; unrelated machines and other builtin providers remain unaffected.
 
 ## Verification limits
 
+The landing hides the migration card while any eligible machine lacks `builtinPi`,
+so it does not occupy composer space with an unavailable action. The notice wrapper
+uses the same eligibility condition; migration progress and retry feedback remain
+available once supported. This presentation change does not relax migration checks.
+
 Focused launch, migration, authentication and protocol tests cover local behavior.
 Packaging smoke uses the official CLI with a local synthetic model. It does not prove
 commercial-provider quality or Windows runtime behavior on this macOS host.
