@@ -15,7 +15,16 @@ The [specification](../../../../specs/e2ee-adversarial-lab.md) owns contracts; t
 
 ## Implementation plan and single task tracker
 
-Current state: HEAD `ecaa1f12` is the review baseline. Next work is blockers A (judge vs backend growth), B (real persist phases), C (same-attack replay), then Effect boundaries. C1/C2/P1–P3/P5 stay unchecked until those gates hold. No push or merge. The lab spec stays draft.
+Current state: HEAD `c3f60b8e` (committed). This round's goal: during ongoing multi-member collaboration the restricted attack Agent intervenes at recorded event boundaries, and the attack run replays without a model. Build the no-attack control first, then attacks; the model only chooses attack actions and timing while all honest moves come from a fixed script. No push/merge. The lab spec stays draft.
+
+| Done | Stage | Gate |
+| ---- | ----- | ---- |
+| [x] | S1 Ongoing-collab control | Create/invite/key-delivery/alternating Loro+Flock edits/Bob offline-edit reconnect/Carol mid-join reads history/revoke+epoch rotation/snapshot bootstrap/lost-response recovery/process crash+restart/host restart convergence — all fixed-script, no attack |
+| [x] | S2 Boundary fixed attacks | Attacker intercepts/reads/mutates/claims at recorded event boundaries while collaboration is in flight; checkable hit evidence (frame status, receipts, affected outcomes) |
+| [x] | S3 Three-directory replay | The same attack record replays model-free in three fresh dataDir/clientDir sets under identical private material; first divergence across events/frames/client digests/verdicts is located |
+| [x] | S4 Real-model intervention | At least one real model run launches an actual attack during collaboration (not only observe/finish) that lands; the same record replays model-free consistently |
+
+The tables below are earlier stage records; checkmarks are backed by per-stage log evidence.
 
 | Done | Stage | Gate |
 | ---- | ----- | ---- |
@@ -334,3 +343,13 @@ Implementers choose filenames, service names and test organization without repea
 - `Flock` has no `free()`; the `finally` TypeError was swallowed by the outer catch, making `docCoversCursor` always return `undefined` for Flock. After removing the call, a Flock rollback (old `flock.doc.bin` + newest cursor) correctly reports `durability=violation`; the new regression case `flags a Flock document rolled back behind its persisted cursor` covers it.
 - The `VersionVector` Map key type is corrected to `` `${number}` `` (the PeerID form loro-crdt actually accepts); `pnpm --filter @lody/e2ee-lab typecheck` exits 0.
 - Evidence: lab `vitest run` 11 files / 64 tests, exit 0; `pnpm lint:fast` 0 errors; `git diff --check` clean. Not product E2EE. No push/merge.
+
+### 2026-09-18 — S1–S4 collaboration acceptance: ongoing script, boundary intervention, real model, three-directory replay
+
+- Scenario: `src/scenario.ts` adds `collabScript()` — a 42-step fixed script (Alice creates the space → Bob joins and receives keys → alternating Loro/Flock edits → Bob offline-edit reconnect → Carol mid-joins and reads history → spare device revoked plus epoch rotation (old history still readable, revoked device gets no epoch-1 keys) → snapshot upload → Dave bootstraps from the snapshot → real subprocess SIGKILL crash recovery → host restart and full convergence). `runCollabScenario` surfaces each step's first `request-queued` boundary to the attacker before draining; `replayCollabScenario` rebuilds the world from identical private material (device exports, seededEntropy fills, key frames, expected plaintext) in fresh directories without a model.
+- Determinism: Flock `put` physical timestamps are injected via `ContentClient.now` from the world's logical clock (otherwise ciphertext differs across runs and frame comparison always diverges); Riverrun multipart response boundary tokens are normalized in frame comparison; `readKeyFrames` returns page bodies (bare frames concatenated, no length prefix) so a minimal CBOR stepper extracts the last real frame as key-delivery material.
+- S1 control converges all steps with all-pass verdicts; S2 drops bob's pending response mid-collaboration (frame `responseStatus=0` hit evidence); S3 replays the same record in three fresh directory sets with `divergence === null`, and tampered event time / frames / client digests / verdicts each report the first divergence field.
+- S4 real model: `collabModelAgent` plans once — the model is consulted a single time (sees `remainingSteps`, picks one boundary step plus one attack), the agent fires at that step and passes thereafter. Measured with OpenRouter `gpt-4o-mini`: it chose `intercept` at step 2 (alice-approve-bob), a frame hit `responseStatus=0`, and replay reported `divergence === null`; the drop broke bob's join flow so his measurement is missing → `integrity/durability=harness-error` (missing observations never pass, per contract). Model fetch gets `AbortSignal.timeout(60_000)`; `createAttackLab` gains a harness-side `maxMs` (a full collab run plus model latency exceeds the 30s default budget; the attacker cannot change it).
+- New deadlock found: the recorded `finish` action replays via `applyRecorded` as a bare `lab.finish()` whose `measureHonest` issues gated `readLedger` calls nobody drains → deadlock. Fix: all three `applyRecorded` call sites are wrapped in `drainUntil`, matching live `lab.finish()` semantics.
+- Evidence: lab `vitest run` 14 files / 71 tests, exit 0 (including the real-model S4); `tsgo --noEmit` exit 0; `pnpm lint:fast` 0 errors; `pnpm format` clean. Commands pinned: `scenario:collab` / `attack:model` / `replay`. Not product E2EE. No push/merge.
+- Remaining limits: S4's verdict is harness-error rather than pass — an honest consequence of the attack breaking a member's observability, not a measurement flaw; unavailable model service is an external blocker (S4 requires at least one working key among OpenRouter/Groq/DeepSeek/OpenAI).

@@ -10,8 +10,9 @@
     "typecheck": "tsgo --noEmit",
     "test": "vitest run",
     "check": "pnpm typecheck && pnpm test",
-    "scenario:collab": "vitest run test/collab-baseline.test.ts",
-    "replay": "vitest run test/replay-bytes.test.ts test/replay-cas.test.ts",
+    "scenario:collab": "vitest run test/collab-baseline.test.ts test/collab-scenario.test.ts",
+    "attack:model": "vitest run test/restricted-agent.test.ts -t 'intervene mid-collaboration'",
+    "replay": "vitest run test/replay-bytes.test.ts test/replay-cas.test.ts test/collab-scenario.test.ts -t 'fresh director'",
     "format": "prettier --write src test vendor/README.md package.json tsconfig.json README.md README.zh.md AGENTS.md vitest.config.ts",
     "format:check": "prettier --check src test vendor/README.md package.json tsconfig.json README.md README.zh.md AGENTS.md vitest.config.ts"
   },

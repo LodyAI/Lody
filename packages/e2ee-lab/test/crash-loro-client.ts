@@ -4,38 +4,49 @@ import { HonestClient } from '../src/actors';
 import { startLabBackend } from '../src/backend';
 import { exportDevice, importDevice } from '../src/platform/device';
 import { loroWriter, readLoro, writeLoro } from '../src/platform/content-session';
+import { fromHex } from '../src/platform/bytes';
+import { prefixedEntropy, seededEntropy } from '../src/entropy';
 
 const dataDir = process.env.LAB_DATA_DIR;
+const baseUrl = process.env.LAB_BASE_URL;
 const clientDir = process.env.LAB_CLIENT_DIR;
 const marker = process.env.LAB_MARKER;
 const text = process.env.LAB_TEXT ?? 'crash-text';
 const crashAt = process.env.LAB_CRASH_AT;
 const deviceJson = process.env.LAB_DEVICE;
 const genesisHex = process.env.LAB_GENESIS;
+const seedHex = process.env.LAB_SEED;
+const epochKeysJson = process.env.LAB_EPOCH_KEYS;
+const mode = process.env.LAB_MODE;
 
-if (!dataDir || !clientDir || !marker) {
+if (!clientDir || !marker || (!dataDir && !baseUrl)) {
   throw new Error('crash-loro-env');
 }
 
-const host = await startLabBackend({
-  dataDir,
-  host: '127.0.0.1',
-  port: 0,
-  testMode: true,
-});
+// Shared-space mode joins a running scenario host; legacy mode owns its host.
+const host = baseUrl
+  ? undefined
+  : await startLabBackend({ dataDir: dataDir!, host: '127.0.0.1', port: 0, testMode: true });
 const device = deviceJson ? await importDevice(deviceJson) : undefined;
+const entropy = seedHex ? prefixedEntropy('crash', seededEntropy(fromHex(seedHex))) : undefined;
 const alice = new HonestClient({
-  baseUrl: host.baseUrl,
+  baseUrl: baseUrl ?? host!.baseUrl,
   clientDir,
-  account: 'alice',
+  account: baseUrl ? 'crash' : 'alice',
   testMode: true,
   device,
+  entropy,
 });
 await alice.start();
 if (genesisHex) {
   await alice.adoptGenesis(genesisHex);
 } else {
   await alice.createSpace();
+}
+if (epochKeysJson) {
+  for (const [epoch, key] of Object.entries(JSON.parse(epochKeysJson) as Record<string, string>)) {
+    alice.epochKeys.set(Number(epoch), fromHex(key));
+  }
 }
 await alice.readLedger();
 writeFileSync(
@@ -45,7 +56,20 @@ writeFileSync(
     device: await exportDevice(alice.device),
   })
 );
-if (genesisHex) {
+if (mode === 'recover') {
+  const recovered = await readLoro(alice);
+  writeFileSync(marker, JSON.stringify({ status: 'completed', text: recovered }));
+} else if (genesisHex && !dataDir) {
+  // Shared-space write: sync history first so the persisted document carries
+  // the full content, then crash mid-write after the cursor lands.
+  await readLoro(alice);
+  if (crashAt) {
+    alice.crashAt = crashAt as typeof alice.crashAt;
+    alice.crashMarker = marker;
+  }
+  await writeLoro(alice, text);
+  writeFileSync(marker, JSON.stringify({ status: 'completed' }));
+} else if (genesisHex) {
   // Restarted client: verify the persisted document/cursor recover the text.
   const recovered = await readLoro(alice);
   writeFileSync(marker, JSON.stringify({ status: 'completed', text: recovered }));
@@ -75,4 +99,4 @@ if (genesisHex) {
   writeFileSync(marker, JSON.stringify({ status: 'completed', text: recovered }));
 }
 alice.close();
-await host.close();
+await host?.close();

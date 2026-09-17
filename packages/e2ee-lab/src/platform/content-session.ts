@@ -44,6 +44,8 @@ export interface ContentClient {
   currentEpoch(): number;
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
   random?(label: string, length: number): Uint8Array;
+  /** Deterministic wall-clock hook for Flock physicalTime when provided. */
+  now?: () => number;
   loroDoc?: LoroDoc | null;
   flockDoc?: Flock | null;
   runtime?: LabRuntime;
@@ -278,7 +280,7 @@ export async function writeFlock(
   if (!created.ok) {
     /* already exists */
   }
-  flock.put([...path], { value });
+  flock.put([...path], { value }, session.now?.());
   if (session.clientDir) persistFlockDocument(session.clientDir, flock);
   const appended = await crdt.appendWriteOnly();
   if (!appended.ok) {

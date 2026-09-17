@@ -1,4 +1,5 @@
-import type { AttackLab, PublicReport, PublicView } from './attack-lab';
+import type { AttackAction, AttackLab, PublicReport, PublicView } from './attack-lab';
+import type { AgentTurn, CollabAgent } from './scenario';
 import { toHex } from './platform/bytes';
 
 export type AgentStep = {
@@ -75,6 +76,7 @@ async function chooseStep(
 ): Promise<AgentStep> {
   const response = await fetch(endpoint.url, {
     method: 'POST',
+    signal: AbortSignal.timeout(60_000),
     headers: {
       authorization: `Bearer ${endpoint.key}`,
       'content-type': 'application/json',
@@ -178,4 +180,134 @@ export async function runRestrictedAgent(
     }
   }
   return lab.finish();
+}
+
+type CollabPlan = {
+  step?: string;
+  op?: 'intercept' | 'readBackend' | 'submitClaim' | 'pass';
+  kind?: string;
+  status?: number;
+  bodyHex?: string;
+  evidence?: string;
+};
+
+/**
+ * One-shot attack plan. The model is consulted once and picks both the timing
+ * (a step from `remainingSteps`) and the attack; the concrete pending event is
+ * resolved at fire time from the public view. This keeps model latency out of
+ * the per-step loop while the model still chooses action and boundary.
+ */
+async function chooseCollabPlan(turn: AgentTurn, endpoint: AgentEndpoint): Promise<CollabPlan> {
+  const response = await fetch(endpoint.url, {
+    method: 'POST',
+    signal: AbortSignal.timeout(60_000),
+    headers: {
+      authorization: `Bearer ${endpoint.key}`,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: endpoint.model,
+      temperature: 0,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content:
+            'You attack an E2EE collaboration while honest members keep working. ' +
+            'Pick ONE boundary from "remainingSteps" and ONE attack that runs when ' +
+            'that step starts. Return JSON: ' +
+            '{"step":"<name>","op":"intercept","kind":"drop|replace|delay|duplicate|truncate","status":502,"bodyHex":"..."} ' +
+            '| {"step":"<name>","op":"submitClaim","evidence":"..."} ' +
+            '| {"step":"<name>","op":"readBackend"}. ' +
+            'intercept drops or replaces the pending response of an honest member ' +
+            'at that boundary; prefer it over the other ops. ' +
+            'Never guess plaintext or keys.',
+        },
+        {
+          role: 'user',
+          content: JSON.stringify({
+            step: turn.stepName,
+            remainingSteps: turn.remainingSteps,
+            requested: turn.view.events.filter((event) => event.status === 'requested'),
+            genesisHex: turn.view.genesisHex,
+            backendBytes: turn.view.backendBytes,
+            errors: turn.view.errors,
+          }),
+        },
+      ],
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`agent-llm-${response.status}:${await response.text()}`);
+  }
+  const body = (await response.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+  const raw = body.choices?.[0]?.message?.content;
+  if (!raw) throw new Error('agent-llm-empty');
+  try {
+    return JSON.parse(raw) as CollabPlan;
+  } catch {
+    return { op: 'pass' };
+  }
+}
+
+const INTERCEPT_KINDS = new Set(['drop', 'replace', 'delay', 'duplicate', 'truncate']);
+
+function planAction(turn: AgentTurn, plan: CollabPlan): AttackAction | 'pass' | 'wait' {
+  if (plan.op === 'intercept') {
+    if (!INTERCEPT_KINDS.has(plan.kind ?? '')) return 'pass';
+    const pending = turn.view.events.find((event) => event.status === 'requested');
+    if (!pending) return 'wait';
+    return {
+      op: 'intercept',
+      input: {
+        eventId: pending.eventId,
+        kind: plan.kind,
+        status: plan.status,
+        bodyHex: plan.bodyHex,
+      },
+    };
+  }
+  if (plan.op === 'submitClaim') {
+    return { op: 'submitClaim', input: { kind: 'plaintext', evidence: plan.evidence } };
+  }
+  if (plan.op === 'readBackend') {
+    return { op: 'readBackend', input: { eventId: 'barrier' } };
+  }
+  return 'pass';
+}
+
+/**
+ * Real-model attacker for the ongoing-collaboration scenario. The model plans
+ * once — one LLM call chooses the boundary step and the attack — then the
+ * agent fires it at the chosen step (or the next step that exposes a matching
+ * pending event). Every honest step stays deterministic.
+ */
+export function collabModelAgent(endpoint: AgentEndpoint): CollabAgent {
+  let plan: CollabPlan | null = null;
+  let planStep = -1;
+  let fired = false;
+  let attempts = 0;
+  return {
+    act: async (turn) => {
+      if (fired) return 'pass';
+      if (!plan) {
+        if (attempts >= 3) return 'pass';
+        attempts += 1;
+        const choice = await chooseCollabPlan(turn, endpoint);
+        const offset = turn.remainingSteps.indexOf(choice.step ?? '');
+        const attackable =
+          choice.op === 'intercept' || choice.op === 'readBackend' || choice.op === 'submitClaim';
+        if (offset < 0 || !attackable) return 'pass';
+        plan = choice;
+        planStep = turn.step + offset;
+      }
+      if (turn.step < planStep) return 'pass';
+      const action = planAction(turn, plan);
+      if (action === 'wait') return 'pass';
+      fired = true;
+      return action;
+    },
+  };
 }

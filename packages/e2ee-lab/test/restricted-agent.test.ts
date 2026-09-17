@@ -9,7 +9,17 @@ import {
   replayAttackActions,
 } from '../src/attack-lab';
 import { writeFileSync } from 'node:fs';
-import { listAgentEndpoints, runRestrictedAgentWithFallback } from '../src/restricted-agent';
+import {
+  collabModelAgent,
+  listAgentEndpoints,
+  runRestrictedAgentWithFallback,
+} from '../src/restricted-agent';
+import {
+  collabScript,
+  createCollabWorld,
+  replayCollabScenario,
+  runCollabScenario,
+} from '../src/scenario';
 import { cleanupLab, labClient, launchLab } from '../src/fixtures';
 import { isRecordingEntropy, recordingEntropy, replayEntropy } from '../src/entropy';
 import { LabRuntime } from '../src/runtime';
@@ -97,4 +107,100 @@ describe('P4 restricted LLM Agent', () => {
       );
     }
   }, 90_000);
+
+  it('lets a real model intervene mid-collaboration and replays it model-free', async () => {
+    const endpoints = listAgentEndpoints();
+    if (endpoints.length === 0) {
+      throw new Error('no model key; real-Agent collab run blocked');
+    }
+    // Probe endpoints once so a dead key does not silently pass as 'pass'.
+    let agent: ReturnType<typeof collabModelAgent> | undefined;
+    let endpointUsed: (typeof endpoints)[number] | undefined;
+    let probeError: unknown;
+    for (const endpoint of endpoints) {
+      const candidate = collabModelAgent(endpoint);
+      try {
+        await candidate.act({
+          step: 0,
+          stepName: 'probe',
+          turn: 0,
+          remainingSteps: collabScript().map((step) => step.name),
+          view: { events: [], genesisHex: null, backendBytes: 0, errors: [] },
+          readBackend: async () => new Uint8Array(),
+        });
+        agent = candidate;
+        endpointUsed = endpoint;
+        break;
+      } catch (error) {
+        probeError = error;
+      }
+    }
+    if (!agent || !endpointUsed) {
+      throw new Error(`model endpoints unavailable: ${String(probeError)}`);
+    }
+
+    const world = await createCollabWorld({ mode: 'manual' });
+    const run = await runCollabScenario({
+      world,
+      agent,
+      maxTurnsPerStep: 2,
+      maxActions: 24,
+    });
+    // The honest program stayed deterministic; only attack-side errors are
+    // allowed (a failed agent turn or a step the attack broke).
+    const scriptErrors = run.outcomes.filter(
+      (outcome) => outcome.error && !outcome.name.startsWith('agent:')
+    );
+    const attackActions = run.material.actions.filter(
+      (action) =>
+        action.op === 'intercept' ||
+        action.op === 'mutateBackend' ||
+        action.op === 'readBackend' ||
+        action.op === 'submitClaim'
+    );
+    // A real attack, chosen while collaboration was in flight — not just
+    // observe/finish at the end.
+    expect(attackActions.length).toBeGreaterThan(0);
+    const attackIndex = run.material.actions.findIndex((action) => action === attackActions[0]);
+    expect(run.material.marks[attackIndex]).toBeLessThan(collabScript().length);
+    // Hit evidence: an intercepted response (status 0 / replaced body), a
+    // landed backend mutation, or a submitted claim.
+    const intercepted = run.material.frames.some((frame) => frame.responseStatus === 0);
+    const mutated = run.material.actions.some(
+      (action) => action.op === 'mutateBackend' && action.input?.receipt === true
+    );
+    const claimed = run.material.actions.some((action) => action.op === 'submitClaim');
+    const probed = run.material.actions.some((action) => action.op === 'readBackend');
+    expect(intercepted || mutated || claimed || probed).toBe(true);
+    expect(JSON.stringify(run.lab.actions())).not.toContain(world.secret);
+
+    // Same record replays model-free in fresh directories.
+    const replay = await replayCollabScenario(run.material);
+    expect(replay.divergence).toBeNull();
+    const replayScriptErrors = replay.outcomes.filter(
+      (outcome) => outcome.error && !outcome.name.startsWith('agent:')
+    );
+    expect(replayScriptErrors.map((o) => o.name)).toEqual(scriptErrors.map((o) => o.name));
+
+    const evidence = process.env.E2EE_AGENT_EVIDENCE;
+    if (evidence) {
+      writeFileSync(
+        evidence,
+        `${JSON.stringify(
+          {
+            host: new URL(endpointUsed.url).host,
+            model: endpointUsed.model,
+            attackOps: attackActions.map((action) => action.op),
+            marks: run.material.marks,
+            hit: { intercepted, mutated, claimed, probed },
+            report: run.report,
+            replay: replay.report,
+            divergence: replay.divergence,
+          },
+          null,
+          2
+        )}\n`
+      );
+    }
+  }, 300_000);
 });

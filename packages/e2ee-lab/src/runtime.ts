@@ -34,6 +34,10 @@ export class LabRuntime {
   readonly paused = new Set<string>();
   readonly frames: ProtocolFrame[] = [];
   private readonly intercepts: FetchIntercept[] = [];
+  private readonly pendingIntercepts: {
+    match: (event: LabEvent) => boolean;
+    intercept: Omit<FetchIntercept, 'eventId'>;
+  }[] = [];
   private readonly waiters = new Map<string, { resolve: () => void; reject: (e: Error) => void }>();
   private readonly requestWaiters: Array<{
     count: number;
@@ -106,6 +110,14 @@ export class LabRuntime {
     this.intercepts.push(input);
   }
 
+  /** Attach an intercept to the next requested event matching `match`. */
+  interceptWhen(
+    match: (event: LabEvent) => boolean,
+    intercept: Omit<FetchIntercept, 'eventId'>
+  ): void {
+    this.pendingIntercepts.push({ match, intercept });
+  }
+
   /** Reject every pending gate and request waiter. Idempotent teardown. */
   close(): void {
     if (this.closed) return;
@@ -133,6 +145,12 @@ export class LabRuntime {
     this.state = requested.state;
     this.flushRequestWaiters();
     const eventId = requested.event.eventId;
+    const armed = this.pendingIntercepts.findIndex((item) => item.match(requested.event));
+    if (armed >= 0) {
+      const matched = this.pendingIntercepts[armed]!;
+      this.pendingIntercepts.splice(armed, 1);
+      this.intercepts.push({ ...matched.intercept, eventId });
+    }
     const ready = new Promise<void>((resolve, reject) => {
       this.waiters.set(eventId, { resolve, reject });
     });

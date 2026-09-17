@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { liveEntropy, type Entropy } from '@lody/e2ee-core';
 
 export interface EntropyFill {
@@ -40,6 +41,36 @@ export function replayEntropy(script: readonly EntropyFill[]): Entropy {
         );
       }
       bytes.set(next.bytes);
+      return bytes;
+    },
+  };
+}
+
+/**
+ * Test-only deterministic entropy for subprocesses that cannot report fills
+ * back (e.g. SIGKILLed crash clients). The seed is private replay material.
+ */
+export function seededEntropy(seed: Uint8Array): Entropy {
+  const seen = new Map<string, number>();
+  return {
+    fill(label, bytes) {
+      const index = seen.get(label) ?? 0;
+      seen.set(label, index + 1);
+      let offset = 0;
+      let block = 0;
+      while (offset < bytes.byteLength) {
+        const digest = createHash('sha256')
+          .update(seed)
+          .update(label)
+          .update(String(index))
+          .update(String(bytes.byteLength))
+          .update(String(block))
+          .digest();
+        block += 1;
+        const take = Math.min(digest.byteLength, bytes.byteLength - offset);
+        bytes.set(digest.subarray(0, take), offset);
+        offset += take;
+      }
       return bytes;
     },
   };

@@ -15,7 +15,16 @@ Translation: current
 
 ## 实施计划与唯一任务表
 
-当前状态：HEAD `ecaa1f12` 为审查基线。下一步关闭阻断 A（裁判对后端增长误报）、B（真实落盘阶段）、C（同一攻击重放），再补 Effect 边界。C1/C2/P1–P3/P5 在门槛成立前不勾选。无 push/merge。实验室 Spec 仍为 draft。
+当前状态：HEAD `c3f60b8e`（已提交）。本轮目标：多人持续协作期间受限攻击 Agent 在指定事件边界介入、攻击过程可独立重放。先补无攻击对照，再接攻击；模型只决定攻击动作与时机，诚实端动作全部由固定脚本驱动。无 push/merge。实验室 Spec 仍为 draft。
+
+| 完成 | 阶段 | 门槛 |
+| ---- | ---- | ---- |
+| [x] | S1 持续协作对照 | 建空间/邀请/分钥/双方持续编辑 Loro+Flock/Bob 离线编辑重连/Carol 中途加入读历史/撤权+换代/快照 bootstrap/丢响应恢复/进程崩溃重启/宿主重启收敛，全部固定脚本、无攻击通过 |
+| [x] | S2 边界介入固定攻击 | 攻击者在协作进行中的已登记事件边界 intercept/readBackend/mutateBackend/submitClaim；命中证据可查（帧状态、回执、受影响结果） |
+| [x] | S3 三目录无模型重放 | 同一攻击记录在三个全新 dataDir/clientDir 中按相同私有材料重放；事件、帧、客户端摘要、判定首分歧可定位 |
+| [x] | S4 真实模型介入 | 至少一轮真实模型在协作进行中发起实际攻击（非仅 observe/finish）且命中；同一记录无模型重放一致 |
+
+下表为此前阶段记录，勾选项见各阶段日志证据。
 
 | 完成 | 阶段 | 门槛 |
 | ---- | ---- | ---- |
@@ -334,3 +343,13 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 - `Flock` 没有 `free()`，`finally` 中的 TypeError 被外层 catch 吞掉使 `docCoversCursor` 恒为 `undefined`；删除该调用后 Flock 回滚（旧 `flock.doc.bin` + 新 cursor）正确判 `durability=violation`，新增回归用例 `flags a Flock document rolled back behind its persisted cursor`。
 - `VersionVector` 构造的 Map 键类型修正为 `${number}`（loro-crdt PeerID 的实际接受类型），`pnpm --filter @lody/e2ee-lab typecheck` 退出 0。
 - 证据：lab `vitest run` 11 文件 / 64 测试退出 0；`pnpm lint:fast` 0 错误；`git diff --check` 干净。未启用产品 E2EE。无 push/merge。
+
+### 2026-09-18 — S1–S4 协作验收：持续协作脚本、边界介入、真实模型、三目录重放
+
+- 场景：`src/scenario.ts` 新增 `collabScript()` 42 步固定脚本（Alice 建空间→Bob 加入分钥→双方 Loro/Flock 持续编辑→Bob 离线编辑重连→Carol 中途加入读历史→撤权 spare 设备+epoch 换代（旧历史仍可读、被撤权设备拿不到新代密钥）→快照上传→Dave 快照 bootstrap 继续同步→子进程 SIGKILL 崩溃恢复→宿主重启全量收敛）。`runCollabScenario` 每步把首个 `request-queued` 边界暴露给攻击者后才放行；`replayCollabScenario` 用相同私有材料（设备导出、seededEntropy fills、密钥帧、明文期望）在全新目录无模型重放。
+- 确定性：Flock `put` 的物理时间戳经 `ContentClient.now` 注入世界逻辑时钟（否则两次运行密文不同、帧比较必分歧）；Riverrun multipart 响应的随机 boundary token 在帧比较中规范化；`readKeyFrames` 返回页体（裸帧串联、无长度前缀），用最小 CBOR 步进器切出最后一帧作分钥材料。
+- S1 对照全脚本收敛、判定全 pass；S2 固定 drop 命中 bob 的 pending 响应（帧 `responseStatus=0` 命中证据）；S3 同一记录三目录重放 `divergence === null`，篡改事件 time/帧/客户端摘要/verdict 各报首个分歧字段。
+- S4 真实模型：`collabModelAgent` 一次性规划——模型只在第一轮被咨询一次（看到 `remainingSteps` 后选一个介入步骤+一个攻击），agent 在该步触发并从此 pass。实测 openrouter `gpt-4o-mini` 选 `intercept`@step 2（alice-approve-bob），帧 `responseStatus=0` 命中，重放 `divergence === null`；拦截打断 bob 加入流使该客户端观测缺失 → `integrity/durability=harness-error`（缺观测不判 pass，符合契约）。模型 fetch 加 `AbortSignal.timeout(60_000)`；`createAttackLab` 增加 harness 侧 `maxMs`（协作全程+模型延迟超出 30s 默认预算；攻击者不可改）。
+- 新发现死锁：记录的 `finish` 动作在重放中经 `applyRecorded` 裸调 `lab.finish()`，其 `measureHonest` 发 gated `readLedger` 无人放行 → 死锁。修法：`applyRecorded` 三处调用点统一包 `drainUntil`，与 live `lab.finish()` 语义一致。
+- 证据：lab `vitest run` 14 文件 / 71 测试退出 0（含真实模型 S4）；`tsgo --noEmit` 退出 0；`pnpm lint:fast` 0 错误；`pnpm format` 干净。命令固化：`scenario:collab` / `attack:model` / `replay`。未启用产品 E2EE。无 push/merge。
+- 剩余限制：S4 判定为 harness-error 而非 pass——这是被攻击打断后的诚实观测结论，不是测量缺陷；模型服务端不可用属外部阻塞（本环境 OpenRouter/Groq/DeepSeek/OpenAI 密钥至少一个可用时 S4 才能跑）。

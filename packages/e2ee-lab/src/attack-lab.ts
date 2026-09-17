@@ -111,7 +111,7 @@ type PrivateState = {
   runtime: LabRuntime;
   clientDirs: readonly string[];
   expectedPlaintext: string;
-  genesisHex: string | null;
+  genesisHex: () => string | null;
   inspectHonest?: () => Promise<HonestInspect>;
   expectedLength: number;
   errors: string[];
@@ -144,7 +144,7 @@ function publicView(state: PrivateState): PublicView {
       phase: event.phase,
       status: event.status,
     })),
-    genesisHex: state.genesisHex,
+    genesisHex: state.genesisHex(),
     backendBytes: existsSync(state.host.riverrunDbPath)
       ? readFileSync(state.host.riverrunDbPath).byteLength
       : 0,
@@ -246,10 +246,7 @@ function docCoversCursor(
       version = doc.oplogVersion();
       const claimedVector = new VersionVector(
         new Map(
-          Object.entries(claimed).map(([peer, counter]) => [
-            peer as `${number}`,
-            counter as number,
-          ])
+          Object.entries(claimed).map(([peer, counter]) => [peer as `${number}`, counter as number])
         )
       );
       const order = version.compare(claimedVector);
@@ -420,9 +417,13 @@ export function createAttackLab(input: {
   runtime: LabRuntime;
   clientDirs: readonly string[];
   expectedPlaintext: string;
-  genesisHex?: string | null;
+  /** Static value, or a getter when the space is created after the lab. */
+  genesisHex?: string | null | (() => string | null);
   expectedLength?: number;
   inspectHonest?: () => Promise<HonestInspect>;
+  /** Harness-set attacker wall-clock budget; the attacker cannot extend it. */
+  maxMs?: number;
+  maxMutations?: number;
 }): AttackLab {
   const lab: AttackLab = {
     observe: () => Effect.runPromise(observeEffect(lab)),
@@ -440,7 +441,10 @@ export function createAttackLab(input: {
     runtime: input.runtime,
     clientDirs: input.clientDirs.map((dir) => resolve(dir)),
     expectedPlaintext: input.expectedPlaintext,
-    genesisHex: input.genesisHex ?? null,
+    genesisHex:
+      typeof input.genesisHex === 'function'
+        ? input.genesisHex
+        : () => (input.genesisHex as string | null | undefined) ?? null,
     inspectHonest: input.inspectHonest,
     expectedLength: input.expectedLength ?? 1,
     errors: [],
@@ -448,8 +452,8 @@ export function createAttackLab(input: {
     actions: [],
     replayActions: [],
     startedMs: Date.now(),
-    maxMs: 30_000,
-    maxMutations: 16,
+    maxMs: input.maxMs ?? 30_000,
+    maxMutations: input.maxMutations ?? 16,
     mutations: 0,
     closed: false,
     hostClosed: false,
@@ -663,6 +667,71 @@ export interface ReplayOutcome {
   readonly divergence: Divergence | null;
 }
 
+/**
+ * Apply one recorded attack action against a lab. Returns the report when the
+ * action is `finish`. Shared by replayAttackActions and scenario drivers so
+ * recorded actions execute through the same single implementation.
+ */
+export async function applyAttackAction(
+  lab: AttackLab,
+  action: AttackAction
+): Promise<PublicReport | undefined> {
+  switch (action.op) {
+    case 'observe':
+      await lab.observe();
+      return undefined;
+    case 'advance':
+      await lab.advance({ steps: Number(action.input?.steps ?? 1) });
+      return undefined;
+    case 'advanceUntil':
+      await lab.advanceUntil({
+        actor: action.input?.actor as string | undefined,
+        phase: String(action.input?.phase ?? 'request-queued'),
+        maxSteps: Number(action.input?.maxSteps ?? 8),
+      });
+      return undefined;
+    case 'readBackend':
+      await lab.readBackend({
+        target: 'riverrun',
+        eventId: String(action.input?.eventId ?? 'barrier'),
+      });
+      return undefined;
+    case 'mutateBackend': {
+      const result = await lab.mutateBackend({
+        eventId: String(action.input?.eventId ?? 'barrier'),
+        kind: 'xor',
+        needleHex: String(action.input?.needleHex ?? ''),
+        xor: Number(action.input?.xor ?? 0xff),
+      });
+      const receipt = action.input?.receipt;
+      if (receipt !== undefined && result.ok !== receipt) {
+        throw new Error(
+          `replay-divergence:mutateBackend:${String(action.input?.needleHex)}:expected:${String(receipt)}:actual:${result.ok}`
+        );
+      }
+      return undefined;
+    }
+    case 'intercept':
+      await lab.intercept({
+        eventId: String(action.input?.eventId ?? ''),
+        kind: interceptKind(action.input?.kind),
+        status: action.input?.status as number | undefined,
+        bodyHex: action.input?.bodyHex as string | undefined,
+      });
+      return undefined;
+    case 'submitClaim':
+      await lab.submitClaim({
+        kind: (action.input?.kind as AttackClaim['kind']) ?? 'plaintext',
+        evidence: action.input?.evidence as string | undefined,
+      });
+      return undefined;
+    case 'finish':
+      return lab.finish();
+    default:
+      throw new Error(`unknown-action:${action.op}`);
+  }
+}
+
 export async function replayAttackActions(
   lab: AttackLab,
   actions: readonly AttackAction[],
@@ -675,61 +744,7 @@ export async function replayAttackActions(
 ): Promise<ReplayOutcome> {
   let report: PublicReport | undefined;
   for (const action of actions) {
-    switch (action.op) {
-      case 'observe':
-        await lab.observe();
-        break;
-      case 'advance':
-        await lab.advance({ steps: Number(action.input?.steps ?? 1) });
-        break;
-      case 'advanceUntil':
-        await lab.advanceUntil({
-          actor: action.input?.actor as string | undefined,
-          phase: String(action.input?.phase ?? 'request-queued'),
-          maxSteps: Number(action.input?.maxSteps ?? 8),
-        });
-        break;
-      case 'readBackend':
-        await lab.readBackend({
-          target: 'riverrun',
-          eventId: String(action.input?.eventId ?? 'barrier'),
-        });
-        break;
-      case 'mutateBackend': {
-        const result = await lab.mutateBackend({
-          eventId: String(action.input?.eventId ?? 'barrier'),
-          kind: 'xor',
-          needleHex: String(action.input?.needleHex ?? ''),
-          xor: Number(action.input?.xor ?? 0xff),
-        });
-        const receipt = action.input?.receipt;
-        if (receipt !== undefined && result.ok !== receipt) {
-          throw new Error(
-            `replay-divergence:mutateBackend:${String(action.input?.needleHex)}:expected:${String(receipt)}:actual:${result.ok}`
-          );
-        }
-        break;
-      }
-      case 'intercept':
-        await lab.intercept({
-          eventId: String(action.input?.eventId ?? ''),
-          kind: interceptKind(action.input?.kind),
-          status: action.input?.status as number | undefined,
-          bodyHex: action.input?.bodyHex as string | undefined,
-        });
-        break;
-      case 'submitClaim':
-        await lab.submitClaim({
-          kind: (action.input?.kind as AttackClaim['kind']) ?? 'plaintext',
-          evidence: action.input?.evidence as string | undefined,
-        });
-        break;
-      case 'finish':
-        report = await lab.finish();
-        break;
-      default:
-        throw new Error(`unknown-action:${action.op}`);
-    }
+    report = (await applyAttackAction(lab, action)) ?? report;
   }
   if (!report) report = await lab.finish();
   let divergence: Divergence | null = null;
