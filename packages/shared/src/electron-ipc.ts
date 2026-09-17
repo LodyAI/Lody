@@ -402,6 +402,20 @@ export const ElectronAuthCallbackSessionSchema = z
 
 export type ElectronAuthCallbackSession = z.infer<typeof ElectronAuthCallbackSessionSchema>;
 
+export type ElectronLoginState = {
+  revision: number;
+  attemptId: string | null;
+  phase: 'idle' | 'waiting' | 'exchanging' | 'authenticated' | 'error';
+  session: ElectronAuthCallbackSession | null;
+  error:
+    | 'browser_open_failed'
+    | 'authorization_expired'
+    | 'exchange_failed'
+    | 'exchange_timeout'
+    | 'restart_required'
+    | null;
+};
+
 export type ElectronUpdaterPhase =
   | 'idle'
   | 'checking'

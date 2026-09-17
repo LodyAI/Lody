@@ -31,6 +31,15 @@ instance.
 an OSS build that has already been prepared. It deliberately skips rebuilding
 and should not be used as the normal development command.
 
+### Cloud browser login
+
+Cloud composition uses a main-process login coordinator; the OSS composition never
+starts it. System callbacks settle independently of renderer lifetime, and windows
+subscribe to revisioned login snapshots. Organization hydration is separately
+retryable and cannot sign the user out. See the
+[login contract](../../specs/desktop-browser-login.md) and
+[decision](../../.agents/notes/implemented/architecture/2026-09-17-desktop-login-coordinator.md).
+
 ### Desktop performance bar
 
 Devbar ships in Dev, Staging, and Prod builds and is off at each launch. In the

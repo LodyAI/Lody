@@ -8,7 +8,11 @@ import dns from 'node:dns'
 import { writeHeapSnapshot } from 'node:v8'
 import icon from '../../resources/icon.png?asset'
 import macIcon from '../../build/icon-mac.padded.png?asset'
-import { acquireSingleInstanceLock, registerOpenUrlHandler } from './deep-link'
+import {
+  acquireSingleInstanceLock,
+  initializeAuthDeepLinks,
+  registerOpenUrlHandler
+} from './deep-link'
 import { registerLodyProtocolClient } from './protocol-client'
 import { registerIpcServices } from './ipc/register-services'
 import {
@@ -17,7 +21,12 @@ import {
   reloadMainWindowForDevbar,
   setMainWindowProductReloadTarget
 } from './window'
-import { getMainWindow, setAppQuitting, setWindowsTrayAvailable } from './window-state'
+import {
+  getMainWindow,
+  productWindows,
+  setAppQuitting,
+  setWindowsTrayAvailable
+} from './window-state'
 import { CliService } from './services/cli-service'
 import { applyPendingDesktopLocalReset } from './services/local-reset-service'
 import { TerminalRelay } from './services/terminal-relay'
@@ -209,12 +218,39 @@ if (hasSingleInstanceLock) {
       isDefaultProtocolClient: app.isDefaultProtocolClient(LODY_PROTOCOL),
       protocol: LODY_PROTOCOL
     })
-    const authService = new AuthService()
+    const authService = new AuthService(
+      (state) => {
+        // Only redacted lifecycle data goes to diagnostics, never the session.
+        console.info('[Auth] login transition', {
+          attemptId: state.attemptId,
+          phase: state.phase,
+          error: state.error
+        })
+        for (const window of productWindows) {
+          if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+            try {
+              window.webContents.send('auth.loginState', state)
+            } catch {
+              // A closing renderer cannot roll back the authoritative result.
+              console.warn('[Auth] Login state delivery failed; snapshot remains available')
+            }
+          }
+        }
+      },
+      () => {
+        void cliService.restartAutoStart().catch(() => console.warn('[Auth] CLI restart failed'))
+      }
+    )
     const cliService = new CliService({
       resolveBootstrapSession: async () => {
         return await authService.getBootstrapSession()
       }
     })
+    if (!isLocalPlatform()) {
+      initializeAuthDeepLinks(async (token) => {
+        await authService.login.complete(token)
+      })
+    }
     const terminalRelay = new TerminalRelay(getLocalTerminalSocketPath(mainPlatformKind))
     const loroDataPlaneRelay = new LoroDataPlaneRelay(
       getLocalLoroDataPlaneSocketPath(mainPlatformKind)

@@ -1,14 +1,13 @@
-import { app } from 'electron'
+import { app, shell } from 'electron'
 import { authClient } from '../auth'
+import { DesktopLogin } from './desktop-login'
+import { isLocalPlatform } from '../platform'
 import {
   ElectronAuthCallbackSessionSchema,
   isDevEmailPasswordLoginEnabled,
-  type ElectronAuthCallbackInput,
-  type ElectronAuthCallbackSession,
+  type ElectronLoginState,
   type ElectronDevEmailPasswordSignInInput
 } from '@lody/shared/electron-ipc'
-
-const AUTH_CALLBACK_TIMEOUT_MS = 25_000
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -406,6 +405,51 @@ export type BootstrapSession = {
 }
 
 export class AuthService {
+  readonly login: DesktopLogin
+
+  constructor(
+    onLoginState: (state: ElectronLoginState) => void = () => {},
+    onAuthenticated: () => void = () => {}
+  ) {
+    this.login = new DesktopLogin({
+      openBrowser: async (query) => {
+        const url = new URL('/login', import.meta.env.VITE_SITE_URL || 'https://lody.ai')
+        url.search = new URLSearchParams(query).toString()
+        await shell.openExternal(url.toString(), { activate: true })
+      },
+      exchange: async (body, signal) =>
+        await this.enqueueAuthOperation(async () => {
+          signal.throwIfAborted()
+          const response = await authClient.$fetch('/electron/token', {
+            method: 'POST',
+            body,
+            signal,
+            throw: true
+          })
+          signal.throwIfAborted()
+          const record =
+            isRecord(response) && isRecord(response.data) ? response.data : asRecord(response)
+          const { token } = readSessionFromResponse(response)
+          const session = ElectronAuthCallbackSessionSchema.parse({
+            session: { ...(asRecord(record?.session) ?? {}), token },
+            user: record?.user
+          })
+          this.authGeneration += 1
+          this.rememberSessionToken(session.session.token)
+          this.lastResolvedSessionResponse = session
+          return session
+        }),
+      publish: onLoginState,
+      authenticated: () => onAuthenticated()
+    })
+  }
+
+  async startLogin(): Promise<void> {
+    if (isLocalPlatform()) throw new Error('Cloud authentication is unavailable in local mode')
+    if (this.login.getState().phase === 'exchanging') return
+    this.authGeneration += 1
+    await this.login.start()
+  }
   // The desktop renderer holds the working Better Auth session token in its own
   // localStorage (lody_auth_token) and passes it as a bearer on every auth IPC.
   // The main process has no other handle on it: under @better-auth/electron the
@@ -417,7 +461,6 @@ export class AuthService {
   private lastKnownSessionToken: string | null = null
   private authOperation: Promise<void> = Promise.resolve()
   private authGeneration = 0
-  private activeAuthAbortController: AbortController | null = null
 
   // Offline identity authority (specs/local-first-two-plane.md): the last
   // session response that actually resolved a user this run. Served when the
@@ -442,54 +485,6 @@ export class AuthService {
     return await result
   }
 
-  async completeCallback(input: ElectronAuthCallbackInput): Promise<ElectronAuthCallbackSession> {
-    const generation = ++this.authGeneration
-    this.lastResolvedSessionResponse = null
-    this.activeAuthAbortController?.abort()
-    return await this.enqueueAuthOperation(async () => {
-      if (generation !== this.authGeneration) {
-        throw new Error('Authentication callback was superseded')
-      }
-      const abortController = new AbortController()
-      this.activeAuthAbortController = abortController
-      const timeoutId = setTimeout(() => abortController.abort(), AUTH_CALLBACK_TIMEOUT_MS)
-      let response: Awaited<ReturnType<typeof authClient.authenticate>>
-      try {
-        response = await authClient.authenticate({
-          ...input,
-          fetchOptions: { signal: abortController.signal }
-        })
-      } finally {
-        clearTimeout(timeoutId)
-        if (this.activeAuthAbortController === abortController) {
-          this.activeAuthAbortController = null
-        }
-      }
-      const data = isRecord(response) && isRecord(response.data) ? response.data : response
-      const record = asRecord(data)
-      const { token } = readSessionFromResponse(response)
-      const user = asRecord(record?.user)
-
-      if (!token || !user || !readNonEmptyString(user.id)) {
-        throw new Error('Authentication callback did not return a complete session')
-      }
-      if (generation !== this.authGeneration) {
-        throw new Error('Authentication callback was superseded')
-      }
-
-      const session = ElectronAuthCallbackSessionSchema.parse({
-        session: {
-          ...(asRecord(record?.session) ?? {}),
-          token
-        },
-        user
-      })
-      this.rememberSessionToken(session.session.token)
-      this.lastResolvedSessionResponse = session
-      return session
-    })
-  }
-
   async signInWithDevEmailPassword(input: ElectronDevEmailPasswordSignInInput): Promise<unknown> {
     if (
       !isDevEmailPasswordLoginEnabled({
@@ -501,7 +496,7 @@ export class AuthService {
 
     const generation = ++this.authGeneration
     this.lastResolvedSessionResponse = null
-    this.activeAuthAbortController?.abort()
+    this.login.cancel()
     return await this.enqueueAuthOperation(async () => {
       if (generation !== this.authGeneration) {
         throw new Error('Dev email/password login was superseded')
@@ -517,7 +512,7 @@ export class AuthService {
   async signOut(): Promise<void> {
     this.authGeneration += 1
     this.lastResolvedSessionResponse = null
-    this.activeAuthAbortController?.abort()
+    this.login.cancel()
     await this.enqueueAuthOperation(async () => {
       try {
         await authClient.signOut()

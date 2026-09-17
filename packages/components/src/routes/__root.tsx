@@ -43,7 +43,6 @@ import { StableSessionProvider } from '../providers/stable-session-provider';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { resolveDesktopCheckoutReturnDeepLinkPath } from '@/lib/desktop-checkout-return-deep-link';
 import { resolveDesktopGitHubInstallDeepLinkPath } from '@/lib/desktop-github-install-deep-link';
-import { readElectronAuthCallbackToken } from '@/lib/electron-oauth';
 import { LodyPostHogProvider } from '../providers/posthog-provider';
 import { AppLaunchAnalyticsTracker } from '@/components/app-launch-analytics-tracker';
 import { ShortcutAnalyticsTracker } from '@/components/commands/shortcut-analytics-tracker';
@@ -65,7 +64,6 @@ import { getLocalPlatformProvider } from '../providers/local-platform-provider';
 import { LocalPlatformAuthProvider } from '../providers/local-platform-auth-provider';
 import { CloudPlatformProvider } from '../providers/cloud-platform-provider';
 
-const CODE_VERIFIER_NOT_FOUND_MESSAGE = 'code verifier not found';
 const PENDING_MACHINE_PAIRING_KEY = 'lody:pending-machine-pairing-request';
 
 export const Route = createRootRouteWithContext<RouterContext>()({
@@ -380,11 +378,6 @@ function RootOutletBoundary() {
   );
 }
 
-function isCodeVerifierNotFoundError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.toLowerCase().includes(CODE_VERIFIER_NOT_FOUND_MESSAGE);
-}
-
 /**
  * Navigate to a resolved path that may carry a query string (e.g.
  * `/acme/settings/billing?checkout=success`). TanStack Router's `to` does not
@@ -404,11 +397,9 @@ function navigateToResolvedPath(navigate: ReturnType<typeof useNavigate>, path: 
 }
 
 function DesktopDeepLinkRouter() {
-  const { desktopAuth } = useRouter().options.context;
   const location = useLocation();
   const navigate = useNavigate();
   const postHog = usePostHog();
-  const setElectronSignInInProgress = useSetAtom(electronDeepLinkSignInInProgressAtom);
   const localMachineId = useAtomValue(localMachineIdAtom);
   const currentUser = useAtomValue(userAtom);
   const { isAuthenticated: isConvexAuthenticated, isLoading: isConvexAuthLoading } =
@@ -476,8 +467,6 @@ function DesktopDeepLinkRouter() {
       return undefined;
     }
     return onIpcEvent('app.deepLink', (url) => {
-      const authCallbackToken = readElectronAuthCallbackToken(url);
-      const isAuthCallback = authCallbackToken != null;
       const invitePath = resolveDesktopInviteDeepLinkPath(url);
       const machinePairingRequestId = readDesktopMachinePairingRequestId(url);
       const openLocalProjectPath = resolveDesktopOpenLocalProjectDeepLinkPath(
@@ -485,71 +474,18 @@ function DesktopDeepLinkRouter() {
         location.pathname
       );
       capturePostHogEvent(postHog, 'auth/electron_deep_link_received', {
-        deep_link_kind: isAuthCallback
-          ? 'auth_callback'
-          : invitePath
-            ? 'invite_open'
-            : machinePairingRequestId
-              ? 'machine_pairing'
-              : openLocalProjectPath
-                ? 'open_local_project'
-                : 'other',
-        is_auth_callback: isAuthCallback,
-        has_auth_payload: isAuthCallback,
-        auth_payload_chars: authCallbackToken?.length ?? 0,
+        deep_link_kind: invitePath
+          ? 'invite_open'
+          : machinePairingRequestId
+            ? 'machine_pairing'
+            : openLocalProjectPath
+              ? 'open_local_project'
+              : 'other',
       });
 
       if (machinePairingRequestId) {
         window.sessionStorage.setItem(PENDING_MACHINE_PAIRING_KEY, machinePairingRequestId);
         setPendingMachinePairingRequestId(machinePairingRequestId);
-        return;
-      }
-
-      // The browser handed the auth token back. Flag the sign-in as in progress
-      // so the login page shows a spinner immediately and the root invalidation
-      // effect does not mistake the resolving window for an expired session.
-      if (authCallbackToken != null) {
-        setElectronSignInInProgress(true);
-        void (async () => {
-          try {
-            if (!desktopAuth) {
-              throw new Error('Electron auth coordinator is unavailable');
-            }
-            await desktopAuth.completeCallback(authCallbackToken);
-          } catch (error) {
-            const recovered = isCodeVerifierNotFoundError(error);
-            capturePostHogEvent(postHog, 'auth/electron_auth_callback_exchange_failed', {
-              error_signature: recovered ? 'code_verifier_not_found' : 'other',
-              recovered,
-            });
-
-            if (!recovered) {
-              return;
-            }
-
-            const currentPath =
-              typeof window === 'undefined' ? location.pathname : getAppCurrentPathWithSearch();
-            const currentLoginRedirect =
-              typeof window === 'undefined'
-                ? null
-                : new URLSearchParams(window.location.search).get('redirect');
-            const search =
-              location.pathname === '/login'
-                ? currentLoginRedirect
-                  ? { redirect: currentLoginRedirect, expired: '1' }
-                  : { expired: '1' }
-                : { redirect: currentPath, expired: '1' };
-            void navigate({
-              to: '/login',
-              search,
-              replace: true,
-            });
-          } finally {
-            if (!desktopAuth?.isCallbackActive()) {
-              setElectronSignInInProgress(false);
-            }
-          }
-        })();
         return;
       }
 
@@ -592,7 +528,7 @@ function DesktopDeepLinkRouter() {
 
       navigateToResolvedPath(navigate, targetPath);
     });
-  }, [desktopAuth, location.pathname, navigate, postHog, setElectronSignInInProgress]);
+  }, [location.pathname, navigate, postHog]);
 
   return null;
 }

@@ -18,7 +18,7 @@ import { getIpcServices } from '@lody/components/lib/electron-ipc-client'
 import { Provider } from 'jotai'
 
 import { ErrorBoundary } from '@/components/error-boundary'
-import { authClient, completeElectronAuthCallback, isElectronAuthCallbackActive } from './auth'
+import { authClient } from './auth'
 import { installNativeTabBehavior } from './native-tab-behavior'
 import { createRendererErrorReporting, type RendererFatalScope } from './renderer-error-reporting'
 import { DesktopDevbar } from './devbar/index'
@@ -148,10 +148,6 @@ try {
   if (devbar?.enabled) document.documentElement.setAttribute('data-desktop-devbar', '')
   const router = createRouter({
     authClient,
-    desktopAuth: {
-      completeCallback: completeElectronAuthCallback,
-      isCallbackActive: isElectronAuthCallbackActive
-    },
     history: usesHashHistory ? createHashHistory() : undefined
   })
   if (isSessionWindow() && !sessionStorage.getItem('lody:windowFocusConsumed')) {
