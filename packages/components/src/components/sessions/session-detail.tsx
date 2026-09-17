@@ -1013,6 +1013,7 @@ const SessionDetail = ({
   const [pendingTabRestoreNavigation, setPendingTabRestoreNavigation] = useState<{
     requestId: number;
     tabSessionId: SessionId;
+    sourceSessionId: SessionId;
     sourceUrlTab: string | undefined;
     writeCompleted: boolean;
   } | null>(null);
@@ -2407,6 +2408,7 @@ const SessionDetail = ({
       setPendingTabRestoreNavigation({
         requestId,
         tabSessionId,
+        sourceSessionId: sessionId,
         sourceUrlTab: router.state.location.search.tab,
         writeCompleted: false,
       });
@@ -2426,13 +2428,15 @@ const SessionDetail = ({
         toast.error(t('sessions.tabReopenFailed', 'Could not reopen this tab'));
       }
     },
-    [captureSessionDetailEvent, reopenSessionTab, router, t]
+    [captureSessionDetailEvent, reopenSessionTab, router, sessionId, t]
   );
 
   useEffect(() => {
     if (!pendingTabRestoreNavigation) return;
     const resolution = resolveSessionTabRestoreNavigation(
       pendingTabRestoreNavigation.tabSessionId,
+      pendingTabRestoreNavigation.sourceSessionId,
+      sessionId,
       pendingTabRestoreNavigation.sourceUrlTab,
       urlTab,
       pendingTabRestoreNavigation.writeCompleted,
@@ -2446,7 +2450,13 @@ const SessionDetail = ({
     if (resolution.kind === 'navigate') {
       navigateToSessionTab(resolution.tabSessionId, { push: true });
     }
-  }, [closedConversationIds, navigateToSessionTab, pendingTabRestoreNavigation, urlTab]);
+  }, [
+    closedConversationIds,
+    navigateToSessionTab,
+    pendingTabRestoreNavigation,
+    sessionId,
+    urlTab,
+  ]);
 
   // Navigate back to session list.
   const handleBackToList = useCallback(() => {

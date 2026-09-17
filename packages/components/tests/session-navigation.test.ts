@@ -169,6 +169,8 @@ describe('resolveSessionTabRestoreNavigation', () => {
     expect(
       resolveSessionTabRestoreNavigation(
         sessionId('child-c'),
+        sessionId('root-session'),
+        sessionId('root-session'),
         'session:child-b',
         'session:child-b',
         true,
@@ -181,6 +183,8 @@ describe('resolveSessionTabRestoreNavigation', () => {
     expect(
       resolveSessionTabRestoreNavigation(
         sessionId('child-c'),
+        sessionId('root-session'),
+        sessionId('root-session'),
         'session:child-b',
         'session:child-b',
         true,
@@ -193,8 +197,24 @@ describe('resolveSessionTabRestoreNavigation', () => {
     expect(
       resolveSessionTabRestoreNavigation(
         sessionId('child-c'),
+        sessionId('root-session'),
+        sessionId('root-session'),
         'session:child-b',
         'session:child-a',
+        true,
+        new Set()
+      )
+    ).toEqual({ kind: 'cancel' });
+  });
+
+  it('cancels a delayed restore across tabless Session routes', () => {
+    expect(
+      resolveSessionTabRestoreNavigation(
+        sessionId('child-c'),
+        sessionId('session-a'),
+        sessionId('session-b'),
+        undefined,
+        undefined,
         true,
         new Set()
       )

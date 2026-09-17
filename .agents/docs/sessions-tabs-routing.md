@@ -134,6 +134,8 @@ this page is the full text of the rules summarised there.
   through the lifecycle-aware reopen action and waits for its open metadata projection before
   selection instead of routing through the child root URL or letting stale close metadata
   redirect the explicit request to an open sibling.
+  The pending request is keyed by its source Session as well as its URL tab value, so
+  switching between two tabless Session routes cancels the old request.
   Promotion keeps its `pendingDraftChildSessionIds` entry
   as a draft→child resolution alias through the send window. The ABSENT value
   means "no explicit choice" and is reserved for external entries: the session

@@ -45,11 +45,14 @@ export type SessionTabRestoreNavigationResolution =
  */
 export const resolveSessionTabRestoreNavigation = (
   tabSessionId: SessionId,
+  sourceSessionId: SessionId,
+  currentSessionId: SessionId,
   sourceUrlTab: string | undefined,
   currentUrlTab: string | undefined,
   writeCompleted: boolean,
   closedTabSessionIds: ReadonlySet<string>
 ): SessionTabRestoreNavigationResolution => {
+  if (currentSessionId !== sourceSessionId) return { kind: 'cancel' };
   if (currentUrlTab !== sourceUrlTab) return { kind: 'cancel' };
   if (!writeCompleted || closedTabSessionIds.has(tabSessionId)) return { kind: 'wait' };
   return { kind: 'navigate', tabSessionId };

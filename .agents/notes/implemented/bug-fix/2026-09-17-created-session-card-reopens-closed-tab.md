@@ -27,7 +27,8 @@ is closed or historically archived, the shared reopen action restores it before 
 URL selects it. The reopen write can settle before its metadata projection reaches the
 mounted workspace, so selection is held as a request keyed by the exact child id. The
 request navigates only after that id is no longer closed; a newer user navigation cancels
-the pending selection.
+the pending selection. The request also records its source Session, because comparing only
+`urlTab` would let a delayed restore cross from a tabless Session A into tabless Session B.
 
 Routing every card through the child root URL was rejected. That route can discover
 the parent, but it cannot express the user's reopen intent and correctly loses to the
