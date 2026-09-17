@@ -462,6 +462,7 @@ function CloudAccountSettings({ surface }: { surface: AccountSettingsSurface }) 
     } catch (error) {
       console.error('Failed to copy link:', error);
       toast.error(t('workspace.invite.linkCopyError', 'Failed to copy invite link'));
+      throw error;
     }
   };
 
