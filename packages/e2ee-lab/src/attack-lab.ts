@@ -4,7 +4,8 @@ import { Effect } from 'effect';
 import { toHex } from './platform/bytes';
 import type { LabBackend } from './backend';
 import { mutateSqliteBytes } from './attacks';
-import { judgeImport, judgeLeak, type JudgeVerdict } from './judge';
+import { CONTROL_STREAM } from './platform/protocol';
+import { judgeCursor, judgeImport, judgeLeak, type JudgeVerdict } from './judge';
 import type { LabEvent } from './scheduler';
 import { LabRuntime, type ProtocolFrame } from './runtime';
 
@@ -77,12 +78,22 @@ export interface AttackLab {
   actions(): readonly AttackAction[];
 }
 
+export interface HonestInspect {
+  ledgerLength: number;
+  expectedLength: number;
+  cursor?: string | null;
+  baselineCursor?: string | null;
+  importFailed?: boolean;
+}
+
 type PrivateState = {
   host: LabBackend;
   runtime: LabRuntime;
   clientDirs: readonly string[];
   expectedPlaintext: string;
   genesisHex: string | null;
+  inspectHonest?: () => Promise<HonestInspect>;
+  expectedLength: number;
   errors: string[];
   claims: AttackClaim[];
   actions: AttackAction[];
@@ -129,6 +140,47 @@ function assertBudget(state: PrivateState): void {
   if (Date.now() - state.startedMs > state.maxMs) throw new Error('attack-budget-time');
 }
 
+async function measureHonest(state: PrivateState): Promise<HonestInspect> {
+  if (state.inspectHonest) {
+    try {
+      const snapshot = await state.inspectHonest();
+      return {
+        ledgerLength: snapshot.ledgerLength,
+        expectedLength: snapshot.expectedLength,
+        importFailed: snapshot.importFailed === true,
+      };
+    } catch {
+      return {
+        ledgerLength: state.expectedLength,
+        expectedLength: state.expectedLength,
+        importFailed: true,
+      };
+    }
+  }
+  if (!state.genesisHex) {
+    return { ledgerLength: state.expectedLength, expectedLength: state.expectedLength };
+  }
+  const response = await fetch(`${state.host.baseUrl}/ds/${state.genesisHex}/${CONTROL_STREAM}`);
+  if (!response.ok) {
+    return {
+      ledgerLength: state.expectedLength,
+      expectedLength: state.expectedLength,
+      importFailed: true,
+    };
+  }
+  const body = new Uint8Array(await response.arrayBuffer());
+  const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
+  let count = 0;
+  let start = 0;
+  while (body.byteLength - start >= 4) {
+    const length = view.getUint32(start, false);
+    if (length <= 0 || start + 4 + length > body.byteLength) break;
+    count += 1;
+    start += 4 + length;
+  }
+  return { ledgerLength: count, expectedLength: state.expectedLength };
+}
+
 function recordAction(state: PrivateState, action: AttackAction, replay = action): void {
   state.actions.push(action);
   state.replayActions.push(replay);
@@ -145,6 +197,8 @@ export function createAttackLab(input: {
   clientDirs: readonly string[];
   expectedPlaintext: string;
   genesisHex?: string | null;
+  expectedLength?: number;
+  inspectHonest?: () => Promise<HonestInspect>;
 }): AttackLab {
   const lab: AttackLab = {
     observe: () => Effect.runPromise(observeEffect(lab)),
@@ -163,6 +217,8 @@ export function createAttackLab(input: {
     clientDirs: input.clientDirs.map((dir) => resolve(dir)),
     expectedPlaintext: input.expectedPlaintext,
     genesisHex: input.genesisHex ?? null,
+    inspectHonest: input.inspectHonest,
+    expectedLength: input.expectedLength ?? 1,
     errors: [],
     claims: [],
     actions: [],
@@ -345,10 +401,21 @@ function finishEffect(lab: AttackLab) {
         reachable = false;
       }
       const confidentiality = judgeLeak({ backendContainsPlaintext: leaked || recovered });
-      const integrity: JudgeVerdict = reachable
-        ? judgeImport({ rejected: true, ledgerLength: 1, expectedLength: 1 })
-        : 'unavailable';
-      const durability: JudgeVerdict = reachable ? 'pass' : 'unavailable';
+      let integrity: JudgeVerdict = 'unavailable';
+      let durability: JudgeVerdict = 'unavailable';
+      if (reachable) {
+        const measured = await measureHonest(state);
+        const rejected = measured.importFailed || measured.ledgerLength <= measured.expectedLength;
+        integrity = judgeImport({
+          rejected,
+          ledgerLength: measured.ledgerLength,
+          expectedLength: measured.expectedLength,
+        });
+        durability = judgeCursor({
+          rejected,
+          cursorAdvancedPastBad: measured.ledgerLength > measured.expectedLength,
+        });
+      }
       return {
         confidentiality,
         integrity,

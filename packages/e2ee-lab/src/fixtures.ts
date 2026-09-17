@@ -61,6 +61,7 @@ export async function labClient(input: {
     now: input.now,
     entropy: prefixedEntropy(input.account, input.entropy ?? liveEntropy),
     fetch: input.runtime?.gatedFetch(input.account),
+    runtime: input.runtime,
   });
   await client.start();
   return client;

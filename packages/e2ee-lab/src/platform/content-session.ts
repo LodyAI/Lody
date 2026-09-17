@@ -19,6 +19,7 @@ import { asArrayBuffer, toHex } from './bytes';
 import { FLOCK_STREAM, LORO_STREAM } from './protocol';
 import type { DemoDevice } from './device';
 import { deviceHex } from './device';
+import type { LabRuntime } from '../runtime';
 
 function requestUrl(input: object): string {
   const value = input as { href?: unknown; url?: unknown };
@@ -40,6 +41,22 @@ export interface ContentClient {
   random?(label: string, length: number): Uint8Array;
   loroDoc?: LoroDoc | null;
   flockDoc?: Flock | null;
+  runtime?: LabRuntime;
+}
+
+async function withPhase<T>(
+  session: ContentClient,
+  operation: string,
+  phase: string,
+  work: () => Promise<T>
+): Promise<T> {
+  if (!session.runtime) return work();
+  const eventId = await session.runtime.gate(session.account, operation, phase);
+  try {
+    return await work();
+  } finally {
+    session.runtime.complete(eventId);
+  }
 }
 
 export function bindLoroPeer(doc: LoroDoc, session: ContentClient): LoroDoc {
@@ -123,15 +140,18 @@ export async function writeLoro(session: ContentClient, text: string): Promise<v
   if (!created.ok) {
     /* already exists */
   }
-  const current = doc.getText('text').toString();
-  if (!current.includes(text)) {
-    doc.getText('text').insert(current.length, text);
-    doc.commit();
-  }
+  await withPhase(session, 'content', 'document-persisted', async () => {
+    const current = doc.getText('text').toString();
+    if (!current.includes(text)) {
+      doc.getText('text').insert(current.length, text);
+      doc.commit();
+    }
+  });
   const appended = await crdt.appendWriteOnly();
   if (!appended.ok) {
     throw new Error(`loro-append-failed:${JSON.stringify(appended)}`);
   }
+  await withPhase(session, 'content', 'cursor-persisted', async () => undefined);
   await crdt.close();
 }
 
@@ -149,9 +169,10 @@ export async function readLoro(session: ContentClient): Promise<string> {
     },
     fetch: (input, init) => session.fetch(input, init),
   });
-  const synced = await crdt.sync();
+  const synced = await withPhase(session, 'content', 'import', async () => crdt.sync());
   if (!synced.ok) throw new Error(`loro-sync-failed:${JSON.stringify(synced)}`);
   const text = doc.getText('text').toString();
+  await withPhase(session, 'content', 'cursor-persisted', async () => undefined);
   await crdt.close();
   doc.free();
   return text;

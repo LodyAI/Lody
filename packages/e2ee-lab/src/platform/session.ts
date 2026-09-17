@@ -48,6 +48,7 @@ export interface SessionOptions {
   readonly entropy?: Entropy;
   /** Test/lab fetch hook. Defaults to global fetch. */
   readonly fetch?: typeof globalThis.fetch;
+  readonly runtime?: import('../runtime').LabRuntime;
 }
 
 function wireNote(note: ComparisonNote): ComparisonWire {
@@ -85,6 +86,7 @@ export class DemoSession {
   readonly testMode: boolean;
   canWriteDocument = false;
   loroDoc: LoroDoc | null = null;
+  readonly runtime?: import('../runtime').LabRuntime;
   private ledgerClient: LedgerClient | null = null;
 
   constructor(private readonly options: SessionOptions) {
@@ -93,6 +95,7 @@ export class DemoSession {
     this.account = options.account;
     this.now = options.now ?? (() => Date.now());
     this.testMode = options.testMode === true;
+    this.runtime = options.runtime;
     mkdirSync(this.clientDir, { recursive: true, mode: 0o700 });
   }
 

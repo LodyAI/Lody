@@ -92,6 +92,11 @@ describe('P4 AttackLab isolation', () => {
       clientDirs: [alice.clientDir],
       expectedPlaintext: 'none',
       genesisHex: alice.genesisHex,
+      expectedLength: 1,
+      inspectHonest: async () => ({
+        ledgerLength: (await alice.readLedger()).length,
+        expectedLength: 1,
+      }),
     });
     await lab.submitClaim({ kind: 'forged-accepted' });
     await lab.submitClaim({ kind: 'cursor-overrun' });
@@ -99,6 +104,61 @@ describe('P4 AttackLab isolation', () => {
     expect(report.integrity).toBe('pass');
     expect(report.durability).toBe('pass');
     expect(report.confidentiality).toBe('pass');
+  });
+
+  it('scores integrity from measured client ledger length', async () => {
+    const runtime = new LabRuntime({ mode: 'auto' });
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice', runtime });
+    await alice.createSpace();
+    expect((await alice.admitDevice(await generateDevice(), 'personal', false)).status).toBe(
+      'committed'
+    );
+    const lab = createAttackLab({
+      host,
+      runtime,
+      clientDirs: [alice.clientDir],
+      expectedPlaintext: 'none',
+      genesisHex: alice.genesisHex,
+      expectedLength: 1,
+      inspectHonest: async () => ({
+        ledgerLength: (await alice.readLedger()).length,
+        expectedLength: 1,
+      }),
+    });
+    const report = await lab.finish();
+    expect((await alice.readLedger()).length).toBe(2);
+    expect(report.integrity).toBe('violation');
+  });
+
+  it('marks a stopped host unavailable without treating xor as a plaintext leak', async () => {
+    const runtime = new LabRuntime({ mode: 'auto' });
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice', runtime });
+    await alice.createSpace();
+    await alice.readLedger();
+    await writeLoro(alice, 'hidden-not-on-disk');
+    const lab = createAttackLab({
+      host,
+      runtime,
+      clientDirs: [alice.clientDir],
+      expectedPlaintext: 'hidden-not-on-disk',
+      genesisHex: alice.genesisHex,
+      inspectHonest: async () => ({
+        ledgerLength: (await alice.readLedger()).length,
+        expectedLength: 1,
+      }),
+    });
+    const disk = await lab.readBackend({ target: 'riverrun', eventId: 'barrier' });
+    await lab.mutateBackend({
+      eventId: 'barrier',
+      kind: 'xor',
+      needleHex: toHex(disk.subarray(0, 16)),
+    });
+    const report = await lab.finish();
+    expect(report.confidentiality).toBe('pass');
+    expect(report.integrity).toBe('unavailable');
+    expect(report.durability).toBe('unavailable');
   });
 });
 
@@ -302,5 +362,74 @@ describe('P4 recorded agent exploration', () => {
     );
     expect(replayed.confidentiality).toBe(first.report.confidentiality);
     expect(replayed.budgetExceeded).toBe(false);
+  });
+
+  it('replays harness-private plaintext evidence to the same verdict', async () => {
+    const runtime = new LabRuntime({ mode: 'auto' });
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice', runtime });
+    await alice.createSpace();
+    await alice.readLedger();
+    const secret = `claim-${toHex(crypto.getRandomValues(new Uint8Array(8)))}`;
+    await writeLoro(alice, secret);
+    const lab = createAttackLab({
+      host,
+      runtime,
+      clientDirs: [alice.clientDir],
+      expectedPlaintext: secret,
+      genesisHex: alice.genesisHex,
+      inspectHonest: async () => ({
+        ledgerLength: (await alice.readLedger()).length,
+        expectedLength: 1,
+      }),
+    });
+    await lab.submitClaim({ kind: 'plaintext', evidence: secret });
+    const original = await lab.finish();
+    expect(original.confidentiality).toBe('violation');
+    expect(JSON.stringify(lab.actions())).not.toContain(secret);
+    expect(JSON.stringify(harnessReplayActions(lab))).toContain(secret);
+
+    const replayRuntime = new LabRuntime({ mode: 'auto' });
+    const replayHost = await launchLab();
+    const replayAlice = await labClient({
+      host: replayHost,
+      account: 'alice',
+      runtime: replayRuntime,
+    });
+    await replayAlice.createSpace();
+    await replayAlice.readLedger();
+    await writeLoro(replayAlice, secret);
+    const replayLab = createAttackLab({
+      host: replayHost,
+      runtime: replayRuntime,
+      clientDirs: [replayAlice.clientDir],
+      expectedPlaintext: secret,
+      genesisHex: replayAlice.genesisHex,
+    });
+    const replayed = await replayAttackActions(
+      replayLab,
+      harnessReplayActions(lab) as AttackAction[]
+    );
+    expect(replayed.confidentiality).toBe(original.confidentiality);
+
+    const publicHost = await launchLab();
+    const publicAlice = await labClient({
+      host: publicHost,
+      account: 'alice',
+      runtime: new LabRuntime({ mode: 'auto' }),
+    });
+    await publicAlice.createSpace();
+    await publicAlice.readLedger();
+    await writeLoro(publicAlice, secret);
+    const publicLab = createAttackLab({
+      host: publicHost,
+      runtime: new LabRuntime({ mode: 'auto' }),
+      clientDirs: [publicAlice.clientDir],
+      expectedPlaintext: secret,
+      genesisHex: publicAlice.genesisHex,
+    });
+    const publicOnly = await replayAttackActions(publicLab, lab.actions() as AttackAction[]);
+    expect(publicOnly.confidentiality).toBe('pass');
+    expect(original.confidentiality).toBe('violation');
   });
 });

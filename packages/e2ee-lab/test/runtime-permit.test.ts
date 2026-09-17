@@ -62,5 +62,10 @@ describe('P2 permit runtime', () => {
     } finally {
       clearInterval(drain);
     }
+    const phases = runtime.events().map((event) => event.phase);
+    expect(phases).toContain('request-queued');
+    expect(phases).toContain('document-persisted');
+    expect(phases).toContain('cursor-persisted');
+    expect(phases).toContain('import');
   });
 });
