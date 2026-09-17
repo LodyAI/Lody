@@ -279,5 +279,5 @@ Implementers choose filenames, service names and test organization without repea
 - `finish()` integrity/durability use `inspectHonest` (real `readLedger` length) or framed control-stream count. `forged-accepted` / `cursor-overrun` claims do not force `violation`. Host down after sqlite xor is `unavailable`; xor without the expected plaintext is not a confidentiality `violation`.
 - Official replay uses `harnessReplayActions` (claim evidence kept). Public `actions()` still redact. Replaying only the public log of a plaintext claim is `pass` and is not treated as the official verdict.
 - Manual mode records `document-persisted`, `cursor-persisted`, and `import` and waits for permits. Write path keeps a Loro replica.
-- P4 Agent: `runRestrictedAgent` chose AttackLab steps via a live chat-completions endpoint (not `exploreAttackLab`). Harness-private log replayed to the same public verdict. Isolation still hides secrets. `XAI_API_KEY`/`GROK_API_KEY` unset; OpenAI 429; OpenRouter succeeded.
+- P4 Agent: `runRestrictedAgent` chose `observe` / `readBackend` / `finish` via OpenRouter `openai/gpt-4o-mini` (not `exploreAttackLab` xor-at-offset). Harness replay matched `pass`. Quota/key errors throw. Isolation still hides secrets.
 - Evidence: lab check 10 files / 46 tests; core tests excluding 10k 34/384; `tsgo --noEmit` twice exit 0. Not product E2EE. No push.

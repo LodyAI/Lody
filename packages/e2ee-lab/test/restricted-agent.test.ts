@@ -7,7 +7,8 @@ import {
   replayAttackActions,
   type AttackAction,
 } from '../src/attack-lab';
-import { resolveAgentEndpoint, runRestrictedAgent } from '../src/restricted-agent';
+import { writeFileSync } from 'node:fs';
+import { listAgentEndpoints, runRestrictedAgentWithFallback } from '../src/restricted-agent';
 import { cleanupLab, labClient, launchLab } from '../src/fixtures';
 import { LabRuntime } from '../src/runtime';
 
@@ -15,8 +16,8 @@ afterEach(() => cleanupLab());
 
 describe('P4 restricted LLM Agent', () => {
   it('runs a model-chosen AttackLab trace and replays it without an LLM', async () => {
-    const endpoint = resolveAgentEndpoint();
-    if (!endpoint) {
+    const endpoints = listAgentEndpoints();
+    if (endpoints.length === 0) {
       throw new Error('no model key; P4 Agent run blocked');
     }
     const runtime = new LabRuntime({ mode: 'auto' });
@@ -43,7 +44,7 @@ describe('P4 restricted LLM Agent', () => {
         }
       },
     });
-    const report = await runRestrictedAgent(lab, endpoint);
+    const { report, endpoint } = await runRestrictedAgentWithFallback(lab, endpoints);
     const recorded = harnessReplayActions(lab);
     expect(recorded.some((action) => action.op === 'observe')).toBe(true);
     expect(recorded.some((action) => action.op === 'finish')).toBe(true);
@@ -74,5 +75,23 @@ describe('P4 restricted LLM Agent', () => {
     );
     expect(replayed.confidentiality).toBe(report.confidentiality);
     expect(replayed.integrity).toBe(report.integrity);
+    const evidence = process.env.E2EE_AGENT_EVIDENCE;
+    if (evidence) {
+      writeFileSync(
+        evidence,
+        `${JSON.stringify(
+          {
+            host: new URL(endpoint.url).host,
+            model: endpoint.model,
+            actions: recorded.map((action) => action.op),
+            publicOps: lab.actions().map((action) => action.op),
+            original: report,
+            replayed,
+          },
+          null,
+          2
+        )}\n`
+      );
+    }
   }, 90_000);
 });

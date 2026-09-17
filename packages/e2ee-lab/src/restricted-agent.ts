@@ -15,44 +15,57 @@ export type AgentEndpoint = {
   model: string;
 };
 
-export function resolveAgentEndpoint(
-  env: NodeJS.ProcessEnv = process.env
-): AgentEndpoint | undefined {
+export function listAgentEndpoints(env: NodeJS.ProcessEnv = process.env): AgentEndpoint[] {
+  const endpoints: AgentEndpoint[] = [];
   if (env.XAI_API_KEY) {
-    return { url: 'https://api.x.ai/v1/chat/completions', key: env.XAI_API_KEY, model: 'grok-4' };
+    endpoints.push({
+      url: 'https://api.x.ai/v1/chat/completions',
+      key: env.XAI_API_KEY,
+      model: 'grok-4',
+    });
   }
   if (env.GROK_API_KEY) {
-    return { url: 'https://api.x.ai/v1/chat/completions', key: env.GROK_API_KEY, model: 'grok-4' };
+    endpoints.push({
+      url: 'https://api.x.ai/v1/chat/completions',
+      key: env.GROK_API_KEY,
+      model: 'grok-4',
+    });
   }
   if (env.OPENROUTER_KEY) {
-    return {
+    endpoints.push({
       url: 'https://openrouter.ai/api/v1/chat/completions',
       key: env.OPENROUTER_KEY,
       model: 'openai/gpt-4o-mini',
-    };
+    });
   }
   if (env.GROQ_KEY) {
-    return {
+    endpoints.push({
       url: 'https://api.groq.com/openai/v1/chat/completions',
       key: env.GROQ_KEY,
       model: 'llama-3.1-8b-instant',
-    };
+    });
   }
   if (env.DEEPSEEK_API_KEY) {
-    return {
+    endpoints.push({
       url: 'https://api.deepseek.com/chat/completions',
       key: env.DEEPSEEK_API_KEY,
       model: 'deepseek-chat',
-    };
+    });
   }
   if (env.OPENAI_API_KEY) {
-    return {
+    endpoints.push({
       url: 'https://api.openai.com/v1/chat/completions',
       key: env.OPENAI_API_KEY,
       model: 'gpt-4o-mini',
-    };
+    });
   }
-  return undefined;
+  return endpoints;
+}
+
+export function resolveAgentEndpoint(
+  env: NodeJS.ProcessEnv = process.env
+): AgentEndpoint | undefined {
+  return listAgentEndpoints(env)[0];
 }
 
 async function chooseStep(
@@ -108,6 +121,26 @@ async function chooseStep(
     return { op: 'finish' };
   }
   return parsed;
+}
+
+export async function runRestrictedAgentWithFallback(
+  lab: AttackLab,
+  endpoints: readonly AgentEndpoint[] = listAgentEndpoints()
+): Promise<{ report: PublicReport; endpoint: AgentEndpoint }> {
+  if (endpoints.length === 0) throw new Error('no model key; P4 Agent run blocked');
+  let last: unknown;
+  for (const endpoint of endpoints) {
+    try {
+      return { report: await runRestrictedAgent(lab, endpoint), endpoint };
+    } catch (error) {
+      last = error;
+      const text = String(error);
+      if (!/agent-llm-(401|403|404|429)|insufficient_quota|credit_balance_exhausted/.test(text)) {
+        throw error;
+      }
+    }
+  }
+  throw last instanceof Error ? last : new Error('agent-llm-unavailable');
 }
 
 /** LLM-chosen AttackLab steps. Not the canned xor-at-offset explorer. */
