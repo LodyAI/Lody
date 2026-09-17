@@ -13,6 +13,8 @@ Pi credentials remain on the execution machine or in the existing provider envir
 
 Registry generation excludes `pi-acp` from new-provider discovery. Existing registry
 providers remain runnable until their owner explicitly confirms the chat landing card.
+Startup must not auto-create builtin Pi while the same machine has a legacy Pi
+provider; after confirmed migration the existing same-ID builtin row is reused.
 Migration requires a target daemon advertising `builtinPi` version 1, changes the
 same provider row to `builtin/pi`, and preserves its ID, machine, name, environment,
 prompt and other fields. Deleted or already changed rows are not recreated or overwritten.

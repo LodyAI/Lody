@@ -237,6 +237,15 @@ export class Lody {
         );
         continue;
       }
+      // Keep the legacy row as the sole Pi provider until its owner confirms
+      // migration. Check legacy first so a completed migration is then caught
+      // by the builtin lookup below, rather than creating a second provider.
+      if (
+        cliType === 'pi' &&
+        (await this.documentManager.hasAgentConfig('registry', 'pi-acp', this.machineId))
+      ) {
+        continue;
+      }
       const has = await this.documentManager.hasAgentConfig('builtin', cliType, this.machineId);
       if (!has) {
         await this.documentManager.createAgentConfig(

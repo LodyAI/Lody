@@ -29,6 +29,9 @@ interactive login method. See [the draft Spec](../../../../specs/builtin-pi.md).
 The daemon computes `builtinPi` from the actual Node version and platform, not the
 shared static capability map, so supported older CLI hosts cannot migrate into an
 unlaunchable runtime.
+Builtin auto-registration checks for legacy Pi on the synced target machine before
+checking for builtin Pi. This avoids creating a second durable provider before
+confirmation; unrelated machines and other builtin providers remain unaffected.
 
 ## Verification limits
 

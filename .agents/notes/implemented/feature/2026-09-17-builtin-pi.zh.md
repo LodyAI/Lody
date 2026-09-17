@@ -22,6 +22,8 @@ Landing 卡片只在所有者确认且目标 daemon 能力匹配后升级已有 
 不增加工作区 meta 标记，不改写历史。认证仍由执行机器管理，Pi 没有内置交互登录方法。
 daemon 按实际 Node 版本和平台计算 `builtinPi`，不使用共享静态能力声明，避免旧版
 Node 上的 CLI 将配置迁移成无法启动的运行时。
+内置 Provider 自动注册在目标机器完成同步后先检查旧 Pi，再检查 builtin Pi，避免确认
+迁移前创建第二个持久 Provider；不影响其他机器或其他内置 Provider。
 详见[草案 Spec](../../../../specs/builtin-pi.zh.md)。
 
 ## 验证限制
