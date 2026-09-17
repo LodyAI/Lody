@@ -289,6 +289,13 @@ function buildOfflineHint(error: unknown): WorkspaceSyncUnavailableError {
   });
 }
 
+function buildPrewriteSyncError(error: unknown): WorkspaceSyncUnavailableError {
+  return new WorkspaceSyncUnavailableError({
+    message: `${formatErrorMessage(error)} Retry after checking network connectivity; no changes were written.`,
+    cause: error,
+  });
+}
+
 export async function syncWorkspaceMetaForRead(
   manager: Pick<LoroDocumentManager, 'syncMetaOrThrow'>,
   reason: string
@@ -296,7 +303,7 @@ export async function syncWorkspaceMetaForRead(
   try {
     await manager.syncMetaOrThrow({ reason });
   } catch (error) {
-    throw buildOfflineHint(error);
+    throw reason.endsWith(':prewrite') ? buildPrewriteSyncError(error) : buildOfflineHint(error);
   }
 }
 
