@@ -21,7 +21,7 @@ export interface ProtocolFrame {
 
 export type FetchIntercept = {
   readonly eventId: string;
-  readonly kind: 'drop' | 'replace' | 'delay' | 'duplicate';
+  readonly kind: 'drop' | 'replace' | 'delay' | 'duplicate' | 'truncate';
   readonly status?: number;
   readonly bodyHex?: string;
 };
@@ -116,12 +116,20 @@ export class LabRuntime {
         if (intercept?.kind === 'duplicate') {
           await globalThis.fetch(request.clone());
         }
-        const response =
+        let response =
           intercept?.kind === 'replace'
             ? new Response(Buffer.from(fromHexBody(intercept.bodyHex ?? '')), {
                 status: intercept.status ?? 200,
               })
             : await globalThis.fetch(request);
+        if (intercept?.kind === 'truncate') {
+          const bytes = new Uint8Array(await response.clone().arrayBuffer());
+          const keep = Math.min(1, bytes.byteLength);
+          response = new Response(Buffer.from(bytes.subarray(0, keep)), {
+            status: response.status,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
         if (eventId) {
           const responseHex = toHex(new Uint8Array(await response.clone().arrayBuffer()));
           this.frames.push({

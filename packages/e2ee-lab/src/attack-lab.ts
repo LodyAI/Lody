@@ -55,7 +55,7 @@ export interface BackendMutation {
 
 export interface ResponseMutation {
   readonly eventId: string;
-  readonly kind: 'drop' | 'replace' | 'delay' | 'duplicate';
+  readonly kind: 'drop' | 'replace' | 'delay' | 'duplicate' | 'truncate';
   readonly status?: number;
   readonly bodyHex?: string;
 }
@@ -401,7 +401,13 @@ export async function replayAttackActions(
 }
 
 function interceptKind(kind: unknown): ResponseMutation['kind'] {
-  if (kind === 'replace' || kind === 'delay' || kind === 'duplicate' || kind === 'drop') {
+  if (
+    kind === 'replace' ||
+    kind === 'delay' ||
+    kind === 'duplicate' ||
+    kind === 'drop' ||
+    kind === 'truncate'
+  ) {
     return kind;
   }
   return 'drop';

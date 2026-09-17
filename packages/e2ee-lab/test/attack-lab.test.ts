@@ -172,6 +172,67 @@ describe('P4 AttackLab intercept and advanceUntil', () => {
     expect((await alice.readLedger()).length).toBe(2);
     await lab.finish();
   });
+
+  it('replaces a CAS ACK without committing on the client', async () => {
+    const runtime = new LabRuntime({ mode: 'manual' });
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice', runtime });
+    await alice.createSpace();
+    const lab = createAttackLab({
+      host,
+      runtime,
+      clientDirs: [alice.clientDir],
+      expectedPlaintext: 'none',
+      genesisHex: alice.genesisHex,
+    });
+    const admit = alice.admitDevice(await generateDevice(), 'personal', false);
+    await runtime.whenRequested(1);
+    const queued = runtime.events().find((event) => event.status === 'requested');
+    expect(queued).toBeDefined();
+    await lab.intercept({
+      eventId: queued!.eventId,
+      kind: 'replace',
+      status: 502,
+      bodyHex: '7b226572726f72223a227265706c616365227d',
+    });
+    runtime.permit(queued!.eventId);
+    expect((await admit).status).toBe('unknown');
+    const resumed = alice.resume();
+    await runtime.whenRequested(1);
+    const retry = runtime.events().find((event) => event.status === 'requested');
+    expect(retry).toBeDefined();
+    runtime.permit(retry!.eventId);
+    expect((await resumed).status).toBe('committed');
+    await lab.finish();
+  });
+
+  it('truncates a real CAS ACK and still observes the commit by read-back', async () => {
+    const runtime = new LabRuntime({ mode: 'manual' });
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice', runtime });
+    await alice.createSpace();
+    const lab = createAttackLab({
+      host,
+      runtime,
+      clientDirs: [alice.clientDir],
+      expectedPlaintext: 'none',
+      genesisHex: alice.genesisHex,
+    });
+    const extra = await generateDevice();
+    const admit = alice.admitDevice(extra, 'personal', false);
+    await runtime.whenRequested(1);
+    const queued = runtime.events().find((event) => event.status === 'requested');
+    expect(queued).toBeDefined();
+    await lab.intercept({ eventId: queued!.eventId, kind: 'truncate' });
+    runtime.permit(queued!.eventId);
+    const status = (await admit).status;
+    expect(status === 'unknown' || status === 'committed').toBe(true);
+    if (status === 'unknown') {
+      expect((await alice.resume()).status).toBe('committed');
+    }
+    expect((await alice.readLedger()).state.devices.has(toHex(extra.publicKey))).toBe(true);
+    await lab.finish();
+  });
 });
 
 describe('P4 recorded agent exploration', () => {

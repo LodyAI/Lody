@@ -257,3 +257,8 @@ Implementers choose filenames, service names and test organization without repea
 
 - Flipped join-request signature is not admitted; member count stays 1. A guest's `canWriteDocument` is false and `writeLoro` throws. Copying Org A Loro stream bytes onto Org B via Riverrun does not surface as Org B plaintext.
 - Evidence: `pnpm --filter @lody/e2ee-lab check` exit 0 (10 files / 38 tests). Wasm physical clocks, Fiber/`exclusive` interrupt, and OS isolation remain uninjected. Not product E2EE. No push/PR/merge.
+
+### 2026-09-17 — Intercept replace and truncated CAS ACK
+
+- `replace` with HTTP 502 leaves the client `unknown`; resume (second permit in manual mode) commits without a false local success. `truncate` fetches the real CAS then returns a 1-byte body; the client still observes the commit by read-back (`committed` or `unknown` then resume). Empty 200 bodies are not used (they can hang the streams client).
+- Evidence: `pnpm --filter @lody/e2ee-lab check` exit 0 (10 files / 40 tests). Wasm physical clocks, Fiber/`exclusive` interrupt, and OS isolation remain uninjected. Not product E2EE. No push/PR/merge.

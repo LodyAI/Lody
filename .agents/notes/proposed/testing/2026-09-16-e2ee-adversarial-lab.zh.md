@@ -257,3 +257,8 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 
 - 翻转过的加入请求签名不会被接纳，成员数仍为 1。访客 `canWriteDocument` 为 false，`writeLoro` 抛错。把 Org A 的 Loro 流字节经 Riverrun 抄到 Org B，不会变成 Org B 明文。
 - 证据：`pnpm --filter @lody/e2ee-lab check` 退出 0（10 文件 / 38 测试）。Wasm 物理时钟、Fiber/`exclusive` 中断、OS 隔离仍未注入。未启用产品 E2EE。无 push/PR/merge。
+
+### 2026-09-17 — 拦截 replace 与截断 CAS ACK
+
+- `replace` 成 HTTP 502 时客户端为 `unknown`；resume（手动模式第二次许可）提交成功，不会出现本地假成功。`truncate` 先打真实 CAS 再只回 1 字节；客户端仍能靠读回看到提交（`committed`，或 `unknown` 再 resume）。不用空 200 响应（会让 streams 客户端挂起）。
+- 证据：`pnpm --filter @lody/e2ee-lab check` 退出 0（10 文件 / 40 测试）。Wasm 物理时钟、Fiber/`exclusive` 中断、OS 隔离仍未注入。未启用产品 E2EE。无 push/PR/merge。
