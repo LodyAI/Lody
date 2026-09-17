@@ -118,13 +118,14 @@ function applyDecoded(
   recordHash: Hash,
   position: number,
   expectedAnchor?: Hash,
-  proofsChecked = false
+  proofsChecked = false,
+  cache?: SigningPointCache
 ): InternalState {
   if (decoded.body.type === 'genesis') {
     if (position !== 0) fail('genesis-mismatch', position);
     if (expectedAnchor && !bytesEqual(recordHash, expectedAnchor)) fail('wrong-anchor', position);
     if (state) fail('genesis-mismatch', position);
-    return applyGenesis(decoded.body.fields, recordHash);
+    return applyGenesis(decoded.body.fields, recordHash, cache);
   }
   if (!state) fail('genesis-mismatch', position);
   if (position === 0) fail('genesis-mismatch', position);
@@ -134,8 +135,8 @@ function applyDecoded(
     fail('wrong-parent', position);
   }
   withPosition(position, () => {
-    if (!proofsChecked) verifyOperationProofs(state.genesis, ordinary.operation);
-    applyOperation(state, ordinary.signer, ordinary.operation);
+    if (!proofsChecked) verifyOperationProofs(state.genesis, ordinary.operation, cache);
+    applyOperation(state, ordinary.signer, ordinary.operation, cache);
   });
   state.hashes.push(recordHash);
   return state;
@@ -145,18 +146,21 @@ function applyRecord(
   state: InternalState | undefined,
   recordBytes: Uint8Array,
   position: number,
-  expectedAnchor?: Hash
+  expectedAnchor?: Hash,
+  cache?: SigningPointCache
 ): InternalState {
-  const record = decodeRecord(recordBytes);
+  const record = decodeRecord(recordBytes, cache);
   withPosition(position, () => {
     assertSignature(
       record.body.fields.signer,
       recordSigningBytes(record.bodyBytes),
-      record.signature
+      record.signature,
+      'bad-signature',
+      cache
     );
   });
   const recordHash = hashRecordBytes(record.recordBytes);
-  return applyDecoded(state, record, recordHash, position, expectedAnchor, false);
+  return applyDecoded(state, record, recordHash, position, expectedAnchor, false, cache);
 }
 
 async function verifyJobs(
@@ -263,7 +267,7 @@ export class Ledger {
     const outerCodes: Array<'bad-signature' | 'bad-proof'> = [];
     for (let position = 0; position < records.length; position++) {
       try {
-        const record = decodeRecord(records[position]!);
+        const record = decodeRecord(records[position]!, input.pointCache);
         decoded.push(record);
         hashes.push(hashRecordBytes(record.recordBytes));
         outerJobs.push({
@@ -302,7 +306,8 @@ export class Ledger {
         hashes[position]!,
         position,
         position === 0 ? anchor : undefined,
-        true
+        true,
+        input.pointCache
       );
     }
     if (!state) fail('genesis-mismatch', 0);
@@ -312,7 +317,7 @@ export class Ledger {
     return new Ledger(state);
   }
 
-  async extend(suffix: readonly Uint8Array[]): Promise<Ledger> {
+  async extend(suffix: readonly Uint8Array[], cache?: SigningPointCache): Promise<Ledger> {
     if (suffix.length === 0) return this;
     const next = cloneState(this.internal);
     const records = suffix.map((record, offset) => {
@@ -320,18 +325,25 @@ export class Ledger {
       return copyBytes(record);
     });
     for (let offset = 0; offset < records.length; offset++) {
-      applyRecord(next, records[offset]!, this.length + offset);
+      applyRecord(next, records[offset]!, this.length + offset, undefined, cache);
     }
     return new Ledger(next);
   }
 
-  prepare(operation: Operation, signerPublicKey: SigningPublicKey): Proposal {
-    const signer = checkSigningPublicKey(signerPublicKey);
-    const bodyBytes = encodeOrdinaryBody({
-      previousHash: this.head,
-      signer,
-      operation,
-    });
+  prepare(
+    operation: Operation,
+    signerPublicKey: SigningPublicKey,
+    cache?: SigningPointCache
+  ): Proposal {
+    const signer = checkSigningPublicKey(signerPublicKey, cache);
+    const bodyBytes = encodeOrdinaryBody(
+      {
+        previousHash: this.head,
+        signer,
+        operation,
+      },
+      cache
+    );
     return Object.freeze({
       signer,
       operation,
@@ -341,15 +353,22 @@ export class Ledger {
     });
   }
 
-  async finalize(proposal: Proposal, signature: Signature): Promise<Uint8Array> {
+  async finalize(
+    proposal: Proposal,
+    signature: Signature,
+    cache?: SigningPointCache
+  ): Promise<Uint8Array> {
     if (!bytesEqual(proposal.previousHash, this.head)) fail('wrong-parent');
     const recordBytes = encodeSignedRecord(proposal.bodyBytes, signature);
-    await this.extend([recordBytes]);
+    await this.extend([recordBytes], cache);
     return recordBytes;
   }
 
-  prepareSnapshot(endorserPublicKey: SigningPublicKey): SnapshotProposal {
-    const signer = checkSigningPublicKey(endorserPublicKey);
+  prepareSnapshot(
+    endorserPublicKey: SigningPublicKey,
+    cache?: SigningPointCache
+  ): SnapshotProposal {
+    const signer = checkSigningPublicKey(endorserPublicKey, cache);
     assertEndorserEligible(this.internal, signer);
     const bodyBytes = encodeSnapshotBody(this.internal, signer);
     return Object.freeze({
@@ -365,10 +384,17 @@ export class Ledger {
 
   static async finalizeSnapshot(
     proposal: SnapshotProposal,
-    signature: Signature
+    signature: Signature,
+    cache?: SigningPointCache
   ): Promise<Uint8Array> {
-    checkSigningPublicKey(proposal.signer);
-    assertSignature(proposal.signer, proposal.signingBytes, checkSignature(signature));
+    checkSigningPublicKey(proposal.signer, cache);
+    assertSignature(
+      proposal.signer,
+      proposal.signingBytes,
+      checkSignature(signature),
+      'bad-signature',
+      cache
+    );
     return encodeSignedSnapshot(proposal.bodyBytes, signature);
   }
 
@@ -376,26 +402,42 @@ export class Ledger {
     trust: SnapshotTrust;
     snapshot: Uint8Array;
     suffix?: readonly Uint8Array[];
+    pointCache?: SigningPointCache;
   }): Promise<Ledger> {
     const genesis = checkHash(input.trust.genesis);
-    const endorser = checkSigningPublicKey(input.trust.endorser);
+    const endorser = checkSigningPublicKey(input.trust.endorser, input.pointCache);
     const attestedHead = checkHash(input.trust.head);
     const headSignature = checkSignature(input.trust.headSignature);
     if (!(input.snapshot instanceof Uint8Array)) fail('canonical');
-    assertSignature(endorser, headAttestationSigningBytes(genesis, attestedHead), headSignature);
-    const decoded = decodeSignedSnapshot(copyBytes(input.snapshot));
+    assertSignature(
+      endorser,
+      headAttestationSigningBytes(genesis, attestedHead),
+      headSignature,
+      'bad-signature',
+      input.pointCache
+    );
+    const decoded = decodeSignedSnapshot(copyBytes(input.snapshot), input.pointCache);
     if (!bytesEqual(decoded.genesis, genesis)) fail('wrong-anchor');
     if (!bytesEqual(decoded.signer, endorser)) fail('wrong-anchor');
     if (!bytesEqual(decoded.head, attestedHead)) fail('wrong-anchor');
-    assertSignature(decoded.signer, snapshotSigningBytes(decoded.bodyBytes), decoded.signature);
+    assertSignature(
+      decoded.signer,
+      snapshotSigningBytes(decoded.bodyBytes),
+      decoded.signature,
+      'bad-signature',
+      input.pointCache
+    );
     const ledger = new Ledger(decoded.state);
     const suffix = input.suffix ?? [];
     if (suffix.length === 0) return ledger;
-    return ledger.extend(suffix);
+    return ledger.extend(suffix, input.pointCache);
   }
 
-  comparisonNote(localDevicePublicKey: SigningPublicKey): ComparisonNote {
-    const noteSigner = checkSigningPublicKey(localDevicePublicKey);
+  comparisonNote(
+    localDevicePublicKey: SigningPublicKey,
+    cache?: SigningPointCache
+  ): ComparisonNote {
+    const noteSigner = checkSigningPublicKey(localDevicePublicKey, cache);
     return Object.freeze({
       genesis: copyBytes(this.internal.genesis),
       length: this.length,
@@ -408,8 +450,12 @@ export class Ledger {
   static compareNotes(
     local: ComparisonNote,
     remote: ComparisonNote,
-    opts: { originalEndorser: SigningPublicKey }
+    opts: { originalEndorser: SigningPublicKey; pointCache?: SigningPointCache }
   ): Comparison {
-    return compareNotes(local, remote, checkSigningPublicKey(opts.originalEndorser));
+    return compareNotes(
+      local,
+      remote,
+      checkSigningPublicKey(opts.originalEndorser, opts.pointCache)
+    );
   }
 }

@@ -22,16 +22,37 @@ export interface ScenarioRecord {
   readonly actual: JudgeVerdict;
 }
 
-/** Integrity of an honest import. A defective importer that accepts invalid bytes is a violation. */
+/**
+ * Integrity of an honest import. Backend extra bytes are diagnostic only.
+ * `ledgerLength > expectedLength` is not by itself a client integrity loss.
+ */
 export function judgeImport(input: {
   rejected: boolean;
   ledgerLength: number;
   expectedLength: number;
 }): JudgeVerdict {
-  if (!input.rejected && input.ledgerLength > input.expectedLength) return 'violation';
   if (input.rejected && input.ledgerLength === input.expectedLength) return 'pass';
-  if (!input.rejected && input.ledgerLength === input.expectedLength) return 'pass';
+  if (!input.rejected && input.ledgerLength >= input.expectedLength) return 'pass';
   return 'harness-error';
+}
+
+/** Client-verified facts only. Missing observation is not a pass. */
+export function judgeClientIntegrity(input: {
+  observed: boolean;
+  acceptedUnauthorized: boolean;
+}): JudgeVerdict {
+  if (!input.observed) return 'harness-error';
+  return input.acceptedUnauthorized ? 'violation' : 'pass';
+}
+
+export function judgeClientDurability(input: {
+  observed: boolean;
+  cursorAheadOfDocument: boolean;
+  lostDurableData: boolean;
+}): JudgeVerdict {
+  if (!input.observed) return 'harness-error';
+  if (input.cursorAheadOfDocument || input.lostDurableData) return 'violation';
+  return 'pass';
 }
 
 export function judgeLeak(input: { backendContainsPlaintext: boolean }): JudgeVerdict {

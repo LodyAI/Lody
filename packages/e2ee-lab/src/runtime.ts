@@ -1,4 +1,6 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import {
+  canPermitEvent,
   completeEvent,
   emptyScheduler,
   permitEvent,
@@ -27,17 +29,25 @@ export type FetchIntercept = {
 };
 
 export class LabRuntime {
+  private static readonly live = new Set<LabRuntime>();
   state: SchedulerState;
   readonly paused = new Set<string>();
   readonly frames: ProtocolFrame[] = [];
   private readonly intercepts: FetchIntercept[] = [];
-  private readonly waiters = new Map<string, () => void>();
-  private readonly requestWaiters: Array<{ count: number; resolve: () => void }> = [];
+  private readonly waiters = new Map<string, { resolve: () => void; reject: (e: Error) => void }>();
+  private readonly requestWaiters: Array<{
+    count: number;
+    resolve: () => void;
+    reject: (e: Error) => void;
+  }> = [];
+  private readonly gateContext = new AsyncLocalStorage<string>();
   private readonly mode: 'auto' | 'manual';
+  private closed = false;
 
   constructor(options?: { mode?: 'auto' | 'manual'; time?: number }) {
     this.mode = options?.mode ?? 'auto';
     this.state = emptyScheduler(options?.time ?? 0);
+    LabRuntime.live.add(this);
   }
 
   events(): readonly LabEvent[] {
@@ -55,16 +65,29 @@ export class LabRuntime {
 
   permitActor(actor: string): void {
     const event = this.state.events.find(
-      (row) => row.actor === actor && row.status === 'requested'
+      (row) => row.actor === actor && canPermitEvent(this.state, row.eventId)
     );
     if (!event) throw new Error(`no-requested:${actor}`);
     this.permit(event.eventId);
   }
 
+  /** Permit the first requested event the scheduler allows. Returns its id. */
+  permitNext(): string | null {
+    const next = this.state.events.find(
+      (event) =>
+        event.status === 'requested' &&
+        !this.paused.has(event.actor) &&
+        canPermitEvent(this.state, event.eventId)
+    );
+    if (!next) return null;
+    this.permit(next.eventId);
+    return next.eventId;
+  }
+
   whenRequested(count: number): Promise<void> {
     if (this.requestedCount() >= count) return Promise.resolve();
-    return new Promise((resolve) => {
-      this.requestWaiters.push({ count, resolve });
+    return new Promise((resolve, reject) => {
+      this.requestWaiters.push({ count, resolve, reject });
     });
   }
 
@@ -83,17 +106,58 @@ export class LabRuntime {
     this.intercepts.push(input);
   }
 
+  /** Reject every pending gate and request waiter. Idempotent teardown. */
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    LabRuntime.live.delete(this);
+    const error = new Error('runtime-closed');
+    const waiters = [...this.waiters.values()];
+    this.waiters.clear();
+    for (const waiter of waiters) waiter.reject(error);
+    for (const waiter of this.requestWaiters.splice(0)) waiter.reject(error);
+  }
+
+  static closeAll(): void {
+    for (const runtime of [...LabRuntime.live]) runtime.close();
+  }
+
   async gate(actor: string, operation: string, phase: string): Promise<string> {
-    const requested = requestEvent(this.state, { actor, operation, phase });
+    if (this.closed) throw new Error('runtime-closed');
+    const requested = requestEvent(this.state, {
+      actor,
+      operation,
+      phase,
+      parent: this.gateContext.getStore(),
+    });
     this.state = requested.state;
     this.flushRequestWaiters();
     const eventId = requested.event.eventId;
-    const ready = new Promise<void>((resolve) => {
-      this.waiters.set(eventId, resolve);
+    const ready = new Promise<void>((resolve, reject) => {
+      this.waiters.set(eventId, { resolve, reject });
     });
     this.dispatch();
     await ready;
     return eventId;
+  }
+
+  /**
+   * Gate `work` on an explicit permit. A phase nested inside a permitted
+   * phase is a child event: it is visible to the scheduler and needs its own
+   * permit, which may be granted only while its parent chain is permitted.
+   */
+  async phase<T>(
+    actor: string,
+    operation: string,
+    phase: string,
+    work: () => Promise<T>
+  ): Promise<T> {
+    const eventId = await this.gate(actor, operation, phase);
+    try {
+      return await this.gateContext.run(eventId, work);
+    } finally {
+      this.complete(eventId);
+    }
   }
 
   gatedFetch(actor: string): typeof globalThis.fetch {
@@ -101,17 +165,25 @@ export class LabRuntime {
       const request = new Request(input, init);
       const url = request.url;
       const method = request.method.toUpperCase();
-      const mutating = method !== 'GET' && method !== 'HEAD';
       const labPath = url.includes('/ds/') || url.includes('/append-cas');
       const content = url.includes('/loro') || url.includes('/flock');
-      let eventId: string | undefined;
-      if (mutating && labPath) {
-        eventId = await this.gate(actor, content ? 'content' : 'submit', 'request-queued');
-      }
-      const requestHex = eventId ? toHex(new Uint8Array(await request.clone().arrayBuffer())) : '';
-      const intercept = eventId
-        ? this.intercepts.find((item) => item.eventId === eventId)
-        : undefined;
+      const reading = method === 'GET' || method === 'HEAD';
+      const operation = reading ? 'read' : content ? 'content' : 'submit';
+      if (!labPath) return globalThis.fetch(request);
+      const requestId = await this.gate(actor, operation, 'request-queued');
+      const requestHex = toHex(new Uint8Array(await request.clone().arrayBuffer()));
+      const intercept = this.intercepts.find((item) => item.eventId === requestId);
+      const frame = (status: number, responseHex: string): ProtocolFrame => ({
+        eventId: requestId,
+        actor,
+        operation,
+        phase: 'request-queued',
+        url: stripSecrets(url),
+        requestHex,
+        responseStatus: status,
+        responseHex,
+      });
+      let outcome: { response: Response } | { error: unknown };
       try {
         if (intercept?.kind === 'drop') {
           throw new Error('intercept-drop');
@@ -133,44 +205,22 @@ export class LabRuntime {
             headers: { 'content-type': 'application/json' },
           });
         }
-        if (eventId) {
-          const responseHex = toHex(new Uint8Array(await response.clone().arrayBuffer()));
-          this.frames.push({
-            eventId,
-            actor,
-            operation: content ? 'content' : 'submit',
-            phase: 'request-queued',
-            url: stripSecrets(url),
-            requestHex,
-            responseStatus: response.status,
-            responseHex,
-          });
-        }
-        if (intercept?.kind === 'delay') {
-          if (eventId) {
-            this.complete(eventId);
-            eventId = undefined;
-          }
-          eventId = await this.gate(actor, content ? 'content' : 'submit', 'ack-queued');
-        }
-        return response;
+        this.frames.push(
+          frame(response.status, toHex(new Uint8Array(await response.clone().arrayBuffer())))
+        );
+        outcome = { response };
       } catch (error) {
-        if (eventId) {
-          this.frames.push({
-            eventId,
-            actor,
-            operation: content ? 'content' : 'submit',
-            phase: 'request-queued',
-            url: stripSecrets(url),
-            requestHex,
-            responseStatus: 0,
-            responseHex: '',
-          });
-        }
-        throw error;
-      } finally {
-        if (eventId) this.complete(eventId);
+        this.frames.push(frame(0, ''));
+        outcome = { error };
       }
+      const current = this.state.events.find((event) => event.eventId === requestId);
+      if (current?.status === 'permitted') this.complete(requestId);
+      // Success and failure alike become a pending result that crosses its
+      // own deliver boundary before reaching the caller.
+      const deliverId = await this.gate(actor, operation, 'deliver');
+      this.complete(deliverId);
+      if ('error' in outcome) throw outcome.error;
+      return outcome.response;
     };
   }
 
@@ -188,18 +238,20 @@ export class LabRuntime {
   }
 
   private dispatch(): void {
-    if (this.state.events.some((event) => event.status === 'permitted')) {
-      const permitted = this.state.events.find((event) => event.status === 'permitted')!;
-      const waiter = this.waiters.get(permitted.eventId);
+    for (const event of this.state.events) {
+      if (event.status !== 'permitted') continue;
+      const waiter = this.waiters.get(event.eventId);
       if (waiter) {
-        this.waiters.delete(permitted.eventId);
-        waiter();
+        this.waiters.delete(event.eventId);
+        waiter.resolve();
       }
-      return;
     }
     if (this.mode !== 'auto') return;
     const next = this.state.events.find(
-      (event) => event.status === 'requested' && !this.paused.has(event.actor)
+      (event) =>
+        event.status === 'requested' &&
+        !this.paused.has(event.actor) &&
+        canPermitEvent(this.state, event.eventId)
     );
     if (!next) return;
     this.permit(next.eventId);

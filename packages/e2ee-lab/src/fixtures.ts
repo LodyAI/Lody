@@ -6,10 +6,12 @@ import { HonestClient } from './actors';
 import { startLabBackend, type LabBackend } from './backend';
 import { liveEntropy, type Entropy } from '@lody/e2ee-core';
 import { prefixedEntropy } from './entropy';
-import type { LabRuntime } from './runtime';
+import { LabRuntime } from './runtime';
+import { canPermitEvent, type LabEvent } from './scheduler';
 
 const dirs: string[] = [];
 const hosts: LabBackend[] = [];
+const clients: HonestClient[] = [];
 
 export function trackDir(dir: string): string {
   dirs.push(dir);
@@ -21,6 +23,14 @@ export function tempDir(prefix: string): string {
 }
 
 export async function cleanupLab(): Promise<void> {
+  LabRuntime.closeAll();
+  while (clients.length > 0) {
+    try {
+      clients.pop()!.close();
+    } catch {
+      /* already closed */
+    }
+  }
   while (hosts.length > 0) {
     try {
       await hosts.pop()!.close();
@@ -64,15 +74,67 @@ export async function labClient(input: {
     runtime: input.runtime,
   });
   await client.start();
+  clients.push(client);
   return client;
 }
 
 export async function snapshotDevices(
-  clients: Record<string, HonestClient>
+  targets: Record<string, HonestClient>
 ): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
-  for (const [name, client] of Object.entries(clients)) {
+  for (const [name, client] of Object.entries(targets)) {
     out[name] = await exportDevice(client.device);
   }
   return out;
+}
+
+/**
+ * Permit eligible non-matching events until a `match` event is requested and
+ * runnable; returns it without permitting so the caller controls its timing.
+ */
+export async function permitUntil(
+  runtime: LabRuntime,
+  match: (event: LabEvent) => boolean,
+  maxSteps = 512
+): Promise<LabEvent> {
+  for (let step = 0; step < maxSteps; step++) {
+    const eligible = runtime
+      .events()
+      .filter(
+        (event) =>
+          event.status === 'requested' &&
+          !runtime.paused.has(event.actor) &&
+          canPermitEvent(runtime.state, event.eventId)
+      );
+    const hit = eligible.find(match);
+    if (hit) return hit;
+    const next = eligible.find((event) => !match(event));
+    if (next) {
+      runtime.permit(next.eventId);
+      continue;
+    }
+    const requested = runtime.events().filter((e) => e.status === 'requested').length;
+    await runtime.whenRequested(requested + 1);
+  }
+  throw new Error('permit-until-exhausted');
+}
+
+/** Permit every eligible event on a timer until the returned stop runs. */
+export function drainRuntime(runtime: LabRuntime): () => void {
+  const timer = setInterval(() => {
+    let guard = 0;
+    while (runtime.permitNext() !== null && guard++ < 1024) {
+      /* keep pumping while work produces new requests */
+    }
+  }, 0);
+  return () => clearInterval(timer);
+}
+
+export async function drainUntil<T>(runtime: LabRuntime, work: Promise<T>): Promise<T> {
+  const stop = drainRuntime(runtime);
+  try {
+    return await work;
+  } finally {
+    stop();
+  }
 }

@@ -15,7 +15,16 @@ The [specification](../../../../specs/e2ee-adversarial-lab.md) owns contracts; t
 
 ## Implementation plan and single task tracker
 
-Current state: review P1s 1–5, 7, 8 repaired; P4 Agent run recorded. C1/C2/P1–P3/P5 stay unchecked until those gates are re-reviewed. No push or merge. The lab spec stays draft.
+Current state: HEAD `ecaa1f12` is the review baseline. Next work is blockers A (judge vs backend growth), B (real persist phases), C (same-attack replay), then Effect boundaries. C1/C2/P1–P3/P5 stay unchecked until those gates hold. No push or merge. The lab spec stays draft.
+
+| Done | Stage | Gate |
+| ---- | ----- | ---- |
+| [ ] | A Judge observations | Legal admitDevice is not a violation; backend extra + client reject is not client integrity loss; missing client facts → harness-error |
+| [ ] | B Real persist | document-persisted writes doc bytes; cursor-persisted writes cursor after doc; crash/restart does not skip unread data |
+| [ ] | C Same-attack replay | Successful xor needle hits again under restored private material; mutated receipt/bytes report first divergence |
+| [ ] | Effect compose | One submit/delivery Effect; Promise wrap only; cancel does not drop pending |
+| [ ] | Schedule delivery | Reads/writes/persist/result delivery wait for permits; waiters cleared on pause/cancel |
+| [ ] | Cache/env | Per-instance SigningPointCache; undocumented clocks/Wasm listed as replay limits |
 
 | Done | Stage                       | Deliverable                                             | Required gate                                                    |
 | ---- | --------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------- |
@@ -281,3 +290,47 @@ Implementers choose filenames, service names and test organization without repea
 - Manual mode records `document-persisted`, `cursor-persisted`, and `import` and waits for permits. Write path keeps a Loro replica.
 - P4 Agent: `runRestrictedAgent` chose `observe` / `readBackend` / `finish` via OpenRouter `openai/gpt-4o-mini` (not `exploreAttackLab` xor-at-offset). Harness replay matched `pass`. Quota/key errors throw. Isolation still hides secrets.
 - Evidence: lab check 10 files / 46 tests; core tests excluding 10k 34/384; `tsgo --noEmit` twice exit 0. Not product E2EE. No push.
+
+### 2026-09-17 — Three blockers closed: client-observed judging, four-point crash matrix, private-state replay
+
+- Starting tree: three failures on `ecaa1f12` — `attacks.test.ts` judged backend growth as a violation, `runtime-permit.test.ts` deadlocked the manual permit loop, `restricted-agent.test.ts` replay returned `harness-error`.
+- Blocker A (judge): `judgeImport` reflects honest import behavior only; backend record growth is diagnostic. `defectiveAcceptInvalid` expresses "defective importer accepted an invalid record" → violation; rejected invalid records → pass; backend growth alone → no violation. End to end, `finish()` integrity/durability inputs come only from `inspectHonest` client observation; missing observation is `harness-error`.
+- Blocker B (persistence): `test/crash-loro-client.ts` child plus a `host-lifecycle.test.ts` four-point matrix; `process.kill(pid,'SIGKILL')` kills at `after-import`/`after-document`/`before-cursor`/`after-cursor`; restart with the same directory and device recovers document and cursor consistently. `after-import` semantics corrected: streams-crdt `appendWriteOnly` never saves the remote cursor, so the crash sits inside `beforeRemoteCursorSave` before document persistence; the restarted client re-imports the unpersisted update from the backend instead of skipping past it on an ahead cursor.
+- Blocker C (exact replay): replay restores the same device secrets (`exportDevice`) and `replayEntropy(recorded.fills)` so genesis and ciphertext match byte-for-byte; `mutateBackend` needles hit real ciphertext slices, not the sqlite file header. Public actions carry no keys or plaintext; replay never calls the model; divergent receipts, protocol bytes, or client state report the first differing field.
+- Permit deadlock root cause and fix: streams-crdt calls `remoteCursorStore.save` inside an already-permitted `import` phase, so the nested `cursor-persisted` gate could never be permitted. Instead of relaxing the one-permitted-event invariant, `AsyncLocalStorage` lets nested `phase()`/`gatedFetch()` inherit the parent permit with an `owned` flag so only the owner completes; AttackLab advance loops no longer request a permit while an event is still permitted.
+- Evidence: lab `vitest run` 11 files / 56 tests, exit 0.
+
+### 2026-09-17 — Effect interruption propagation and cache isolation (E1)
+
+- `submit`/`delivery` keep a single Effect implementation; Promise is only an entry wrapper. `runPromiseThrow(effect, signal)` forwards the `runPromiseExit` interruption signal into the inner runtime inside `store.exclusive`; `tryCall` receives the Effect-provided signal.
+- `delivery` wraps remote `put`/`read` in `abortable`: the remote call itself is not cancellable, but the local wait is interruptible and releases the outbox lock; exact pending bytes are persisted first and retries reconcile by read-back without re-encrypting. New cases: mid-CAS interruption keeps pending and `resume` commits the same bytes; mid-put interruption keeps the outbox frame and releases the lock.
+- Cache isolation: the `SigningPointCache` parameter is threaded through every verification path — `Ledger.verify`/`extend`/`verifySnapshot`/`prepare`/`finalize`/`prepareSnapshot`/`finalizeSnapshot`/`comparisonNote`/`compareNotes` and the decode/validate functions in schema/snapshot/policy/keys/submit-decision; `LedgerClient` construction plus `open`/`openFromSnapshot`/`openJournal` accept `pointCache`. Lab `DemoSession` and `startDemoHost` each hold an instance-scoped cache, so no mutable cache state is shared across experiments. A new `capabilities-boundary.test.ts` case proves `extend` consumes the injected cache on the synchronous path and a disabled cache changes neither verdicts nor error semantics.
+- Remaining limits: Wasm physical clocks stay inside the libraries; the legacy control log (`wire.ts`) and default callers that pass no `pointCache` still share `liveSigningPointCache` (pure memoization, cannot change verdicts); Promise entrypoints accept no AbortSignal. Not product E2EE. No push/merge.
+- Evidence: `pnpm --filter @lody/e2ee-core exec vitest run` 35 files / 389 tests, exit 0; lab 11 files / 56 tests, exit 0; `tsgo --noEmit` exit 0 for both packages.
+
+### 2026-09-17 — Runtime waiter teardown and formatting cleanup
+
+- `LabRuntime` gains `close()`/`closeAll()`: `gate`/`whenRequested` waiters left over in manual mode are rejected with `runtime-closed` instead of pending forever; `gate` throws immediately once closed. `cleanupLab` runs `closeAll` before closing clients and hosts.
+- A new `runtime-permit.test.ts` case proves a pending gate and `whenRequested` both reject on close.
+- Evidence: lab `vitest run` 11 files / 57 tests, exit 0; `tsgo --noEmit` exit 0 for both packages; `pnpm lint:fast` 0 errors; lab prettier check clean. Inside `pnpm check` core/lab are green, but `apps/cli` `worktree-gc.test.ts` fails on `/var` vs `/private/var` path normalization — a pre-existing issue unrelated to this task. Not product E2EE. No push/merge.
+
+### 2026-09-17 — Review P1 fixes: missing observation cannot pass, explicit child scheduling, replay divergence wired in
+
+- Judge: `HonestInspect` now carries measured facts only (`verifiedRecords`/`rejectedRecords`/`unverifiedAccepted`/`cursorAhead`/`durableLoss`). `inspectClient(client, host)` is the default measurement factory: a real `readLedger` count, `riverrunRecordCount` vs the client count for rejected records, re-verification of every persisted journal record via `Ledger.verify` (a stored record failing verification is a client-side unauthorized acceptance), and cursor/document consistency against the Riverrun tail for cursor-ahead and durable-data loss. `finish()` only reports pass when the required facts exist; a throwing callback, `unmeasured: true`, or a ledger-length-only result is `harness-error`. `lostDurableData` is no longer hard-coded false.
+- Scheduling: the nested-permit inheritance was removed. `LabEvent.parent` records parentage, and nested `phase`/`gatedFetch`/`deliver` calls become child events needing their own permit; the invariant is now "the permitted set lies on a single ancestor chain" (`canPermitEvent` only tolerates permitted ancestors of the target). `/ds/` GET/HEAD reads are gated too (`read` operation), and a `deliver` gate stands between response arrival and delivery; the attacker can intervene at any phase boundary. `permitUntil`/`drainRuntime`/`drainUntil` helpers only permit runnable, unpaused events instead of spinning on `permit-busy`.
+- Replay: `replayAttackActions` returns `{report, divergence}` and actually verifies — expected events (including `time` and `parent`), protocol frames, `ClientDigest`s (ledger record count + sha256 over genesis and records + a normalized cursor that strips the per-run port and wall clock), each verdict field, and the previously added ciphertext-mutation receipts; any mismatch reports the first divergent field. `harnessReplayMaterial(lab)` asynchronously exports the full private bundle; public `actions()` stay redacted. The restricted-agent acceptance asserts `divergence === null`.
+- Counterexamples re-measured: throwing/unmeasured/partial observation → `harness-error`; an unauthorized manual GET blocks and produces a `read` event; permitting only `import` leaves `cursor-persisted` queued as a separate child event; shifting event `time` reports `time`, a mutated frame response reports `frame.response`, a tampered client digest reports `client.ledgerHead`, and a flipped verdict reports `verdict.confidentiality`.
+- Evidence: lab `vitest run` 11 files / 61 tests, exit 0; `tsgo --noEmit` exit 0; `pnpm lint:fast` 0 errors; `pnpm format` clean. Not product E2EE. No push/merge.
+
+### 2026-09-17 — Review round 2: cursor bound to persisted document, failures cross the deliver gate
+
+- Cursor binding: `cursorFacts` no longer only checks document existence and `nextOffset ≤ tail`; the new `docCoversCursor` loads the persisted document and requires its version to cover the cursor's `serverLowerBoundVersion` (Loro via `oplogVersion().compare()` returning ≥ 0 — note `VersionVector` Map keys must be string-form PeerIDs; Flock via `inclusiveVersion()` compared per-peer on `physicalTime`/`logicalCounter`). Rolling the document back to a valid older snapshot while keeping the newest cursor fails coverage → `ahead=true` → durability `violation`; an undecidable check yields `ahead=undefined` → `harness-error`, not pass. `ClientDigest` gains `loroDoc`/`flockDoc` sha256 digests of persisted bytes, so the same rollback produces a `client.loroDoc` replay divergence.
+- Failure delivery: `gatedFetch` now runs "execute → record frame → complete(request) → deliver gate → return/throw". `intercept-drop`, network errors, and success responses alike become a pending result first; the caller cannot observe the failure until the `deliver` event is permitted, so the attacker controls failure delivery timing too.
+- Counterexamples re-measured: v1 document + v2 cursor → `durability=violation` (was pass); manual mode with only `request-queued` permitted and a drop intercept → the read stays unsettled while the `deliver` event sits `requested`, then resolves as `stream-read-unknown` after the permit.
+- Evidence: lab `vitest run` 11 files / 63 tests, exit 0; `tsgo --noEmit` exit 0; `pnpm lint:fast` 0 errors; `git diff --check` clean. Not product E2EE. No push/merge.
+
+### 2026-09-17 — Review round 3: Flock coverage check fixed and type corrected
+
+- `Flock` has no `free()`; the `finally` TypeError was swallowed by the outer catch, making `docCoversCursor` always return `undefined` for Flock. After removing the call, a Flock rollback (old `flock.doc.bin` + newest cursor) correctly reports `durability=violation`; the new regression case `flags a Flock document rolled back behind its persisted cursor` covers it.
+- The `VersionVector` Map key type is corrected to `` `${number}` `` (the PeerID form loro-crdt actually accepts); `pnpm --filter @lody/e2ee-lab typecheck` exits 0.
+- Evidence: lab `vitest run` 11 files / 64 tests, exit 0; `pnpm lint:fast` 0 errors; `git diff --check` clean. Not product E2EE. No push/merge.

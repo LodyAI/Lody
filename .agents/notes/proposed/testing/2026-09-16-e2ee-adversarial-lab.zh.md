@@ -15,7 +15,16 @@ Translation: current
 
 ## 实施计划与唯一任务表
 
-当前状态：审查 P1 的 1–5、7、8 已修；P4 Agent 运行已记录。C1/C2/P1–P3/P5 在门槛复审前不勾选。无 push/merge。实验室 Spec 仍为 draft。
+当前状态：HEAD `ecaa1f12` 为审查基线。下一步关闭阻断 A（裁判对后端增长误报）、B（真实落盘阶段）、C（同一攻击重放），再补 Effect 边界。C1/C2/P1–P3/P5 在门槛成立前不勾选。无 push/merge。实验室 Spec 仍为 draft。
+
+| 完成 | 阶段 | 门槛 |
+| ---- | ---- | ---- |
+| [ ] | A 裁判观测 | 合法 admitDevice 不是 violation；后端多写且客户端拒绝不是客户端完整性失守；缺观测 → harness-error |
+| [ ] | B 真实落盘 | document-persisted 写出文档字节；cursor-persisted 在文档之后写游标；崩溃重启不跳过未读数据 |
+| [ ] | C 同一攻击重放 | 成功 xor 的 needle 在恢复的私有材料下仍命中；改回执/字节会报首次分歧 |
+| [ ] | Effect 组合 | 一套 submit/delivery Effect；Promise 仅包装；取消不丢 pending |
+| [ ] | 调度交付 | 读/写/落盘/结果交付等待许可；暂停/取消清理 waiter |
+| [ ] | 缓存/环境 | 按实例 SigningPointCache；未注入的时钟/Wasm 列为重放限制 |
 
 | 完成 | 阶段           | 交付物                         | 必须通过的门槛                              |
 | ---- | -------------- | ------------------------------ | ------------------------------------------- |
@@ -281,3 +290,47 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 - 手动模式记录 `document-persisted`、`cursor-persisted`、`import` 并等待许可。写路径保留 Loro 副本。
 - P4 Agent：`runRestrictedAgent` 经 OpenRouter `openai/gpt-4o-mini` 选择 `observe` / `readBackend` / `finish`（不是 `exploreAttackLab` 定点 xor）。harness 重放判定同为 `pass`。额度/密钥错误会失败。隔离仍隐藏秘密。
 - 证据：lab check 10 文件 / 46 测试；core 排除 10k 为 34/384；`tsgo --noEmit` 两次退出 0。未启用产品 E2EE。无 push。
+
+### 2026-09-17 — 三个阻断项关闭：客户端观测裁判、四点崩溃矩阵、私有材料精确重放
+
+- 起始工作树：`ecaa1f12` 上三个失败 —— `attacks.test.ts` 裁判把后端增长当失守、`runtime-permit.test.ts` 手动许可死锁、`restricted-agent.test.ts` 重放 `harness-error`。
+- 阻断 A（裁判）：`judgeImport` 只依据诚实导入行为；后端记录增长仅作诊断。`defectiveAcceptInvalid` 表达"缺陷导入器接受非法记录"→ violation；客户端拒绝非法记录 → pass；仅后端增长 → 不报 violation。端到端：`finish()` 完整性/耐久输入只来自 `inspectHonest` 的客户端观测，缺观测为 `harness-error`。
+- 阻断 B（持久化）：`test/crash-loro-client.ts` 子进程 + `host-lifecycle.test.ts` 四点矩阵，`process.kill(pid,'SIGKILL')` 在 `after-import`/`after-document`/`before-cursor`/`after-cursor` 真实杀死进程；同目录同设备重启后文档与游标一致。修正 `after-import` 语义：streams-crdt 的 `appendWriteOnly` 不落 remote cursor，崩溃点设在 `beforeRemoteCursorSave` 钩内、文档持久化之前；重启从后端重新导入未落盘更新，游标不超前一跳数据。
+- 阻断 C（精确重放）：回放恢复相同设备私钥（`exportDevice`）与 `replayEntropy(recorded.fills)`，genesis/密文逐字节一致，`mutateBackend` 的 needle 命中真实密文切片而非 sqlite 文件头。公开动作无私钥/明文；回放不调模型；回执、协议字节或客户端状态不同报首个分歧字段。
+- 调度死锁根因与修法：streams-crdt 在已许可的 `import` 阶段内调 `remoteCursorStore.save`，嵌套 `cursor-persisted` gate 永远拿不到许可。不放宽单许可不变量，用 `AsyncLocalStorage` 让嵌套 `phase()`/`gatedFetch()` 继承父事件许可并以 `owned` 标记只让所有者 complete；AttackLab advance 循环在事件 permitted 期间不再请求新许可。
+- 证据：lab `vitest run` 11 文件 / 56 测试退出 0。
+
+### 2026-09-17 — Effect 中断贯通与缓存隔离（E1）
+
+- `submit`/`delivery` 保持单一 Effect 实现，Promise 只是入口包装。`runPromiseThrow(effect, signal)` 把 `runPromiseExit` 的中断 signal 传入 `store.exclusive` 回调内的内部 runtime；`tryCall` 改为接收 Effect 提供的 signal。
+- `delivery` 对远端 `put`/`read` 用 `abortable` 包装：远端调用本身不可取消，但本地等待可中断并释放 outbox 锁；pending 精确字节先落盘，重试只读回确认，不重复加密。新增用例：CAS 中途中断保留 pending、resume 提交同一字节；put 中途中断保留 outbox 帧并释放锁。
+- 缓存隔离：`SigningPointCache` 参数贯通全部验签路径 —— `Ledger.verify`/`extend`/`verifySnapshot`/`prepare`/`finalize`/`prepareSnapshot`/`finalizeSnapshot`/`comparisonNote`/`compareNotes`，以及 schema/snapshot/policy/keys/submit-decision 的解码与校验函数；`LedgerClient` 构造与 `open`/`openFromSnapshot`/`openJournal` 接受 `pointCache`。实验室 `DemoSession` 与 `startDemoHost` 各持实例级缓存，实验间不共享可变缓存。`capabilities-boundary.test.ts` 新用例证明 `extend` 同步路径消费注入缓存且禁用缓存不改变结论与错误语义。
+- 剩余限制：Wasm 物理时钟仍属库内部；legacy 控制日志（`wire.ts`）与未传 `pointCache` 的默认调用仍共享 `liveSigningPointCache`（纯记忆化，不改变验签结论）；Promise 入口本身不接受 AbortSignal。未启用产品 E2EE。无 push/merge。
+- 证据：`pnpm --filter @lody/e2ee-core exec vitest run` 35 文件 / 389 测试退出 0；lab 11 文件 / 56 测试退出 0；两包 `tsgo --noEmit` 退出 0。
+
+### 2026-09-17 — Runtime 等待者清理与格式收尾
+
+- `LabRuntime` 新增 `close()`/`closeAll()`：手动模式遗留的 `gate`/`whenRequested` 等待者被 `runtime-closed` 拒绝，不再永远挂起；`gate` 在关闭后直接抛错。`cleanupLab` 先 `closeAll` 再关客户端与宿主。
+- `runtime-permit.test.ts` 新增用例验证挂起 gate 与 whenRequested 均在 close 时拒绝。
+- 证据：lab `vitest run` 11 文件 / 57 测试退出 0；`tsgo --noEmit` 两包退出 0；`pnpm lint:fast` 0 错误；lab prettier 检查通过。`pnpm check` 中 core/lab 全绿，但 `apps/cli` 的 `worktree-gc.test.ts` 因 `/var` 与 `/private/var` 路径规范化差异失败（与本任务无关的既有问题）。未启用产品 E2EE。无 push/merge。
+
+### 2026-09-17 — 复审 P1 修复：观测缺失不得通过、显式子事件调度、重放接入完整差异核验
+
+- 裁判：`HonestInspect` 改为纯测量事实（`verifiedRecords`/`rejectedRecords`/`unverifiedAccepted`/`cursorAhead`/`durableLoss`）。`inspectClient(client, host)` 是默认采集工厂：真实 `readLedger` 计数、后端 `riverrunRecordCount` 对比得出拒绝数、打开客户端 `ledger.sqlite` journal 用 `Ledger.verify` 重验每条持久记录（验不过即客户端接受了未授权状态）、游标/文档文件一致性与 Riverrun tail 对比得出游标超前与持久数据丢失。`finish()` 只在这些事实齐备时判 pass；回调抛异常、`unmeasured: true`、或只回账本长度均为 `harness-error`。`lostDurableData` 不再写死 false。
+- 调度：撤销"嵌套阶段继承父许可"。`LabEvent.parent` 记录父子关系，嵌套 `phase`/`gatedFetch`/`deliver` 成为需要独立许可的子事件；不变量改为"permitted 集合必须落在一条祖先链上"（`canPermitEvent` 只允许目标事件的祖先处于 permitted）。`/ds/` 的 GET/HEAD 读也进入门控（`read` 操作），响应返回前另有 `deliver` 关卡；攻击者可在任意阶段边界介入。`permitUntil`/`drainRuntime`/`drainUntil` 辅助只放行可许可且未暂停的事件，不再忙等 `permit-busy`。
+- 重放：`replayAttackActions` 返回 `{report, divergence}` 并真正接入核验 —— 期望事件（含 `time` 与 `parent`）、协议帧、`ClientDigest`（ledger 记录数 + genesis+records 的 sha256 + 规范化游标，剔除每次运行不同的端口与墙钟）、逐项 verdict、以及此前已有的密文修改回执，任一不一致报首个分歧字段。`harnessReplayMaterial(lab)` 异步导出完整私有材料；公开 `actions()` 仍脱敏。restricted-agent 验收改为断言 `divergence === null`。
+- 反例实测：观测抛异常/unmeasured/部分观测 → `harness-error`；manual 未授权 GET 阻塞且产生 `read` 事件；只放行 `import` 时 `cursor-persisted` 作为子事件独立排队；改事件 `time` 报 `time`、改帧响应报 `frame.response`、改客户端摘要报 `client.ledgerHead`、改 verdict 报 `verdict.confidentiality`。
+- 证据：lab `vitest run` 11 文件 / 61 测试退出 0；`tsgo --noEmit` 退出 0；`pnpm lint:fast` 0 错误；`pnpm format` 通过。未启用产品 E2EE。无 push/merge。
+
+### 2026-09-17 — 复审第二轮：游标与持久化文档绑定、失败结果同样经过 deliver 关卡
+
+- 游标绑定：`cursorFacts` 不再只检查文档存在与 `nextOffset ≤ tail`，新增 `docCoversCursor` —— 加载持久化文档，要求文档版本覆盖 cursor 的 `serverLowerBoundVersion`（Loro 用 `oplogVersion().compare()` 需返回 ≥0，注意 `VersionVector` 的 Map 键必须是字符串形式 PeerID；Flock 用 `inclusiveVersion()` 逐 peer 比较 `physicalTime`/`logicalCounter`）。文档回滚为有效旧 snapshot 而保留新 cursor → 版本覆盖失败 → `ahead=true` → durability `violation`；无法判定时 `ahead=undefined` → `harness-error` 而非 pass。`ClientDigest` 增加 `loroDoc`/`flockDoc` 持久字节 sha256，同一回滚在重放中产生 `client.loroDoc` 分歧。
+- 失败交付：`gatedFetch` 重构为"执行 → 记录帧 → complete(request) → deliver 关卡 → 返回/抛出"。`intercept-drop`、网络异常与成功响应一样先形成待交付结果，`deliver` 事件未获许可前调用方拿不到错误；攻击者可以控制失败结果的交付时机。
+- 反例实测：v1 文档 + v2 游标 → `durability=violation`（此前 pass）；manual 模式只放行 `request-queued` + drop 拦截 → 读调用保持未决、`deliver` 事件 `requested`，放行后才以 `stream-read-unknown` 送达。
+- 证据：lab `vitest run` 11 文件 / 63 测试退出 0；`tsgo --noEmit` 退出 0；`pnpm lint:fast` 0 错误；`git diff --check` 干净。未启用产品 E2EE。无 push/merge。
+
+### 2026-09-17 — 复审第三轮：Flock 覆盖检查修复与类型修正
+
+- `Flock` 没有 `free()`，`finally` 中的 TypeError 被外层 catch 吞掉使 `docCoversCursor` 恒为 `undefined`；删除该调用后 Flock 回滚（旧 `flock.doc.bin` + 新 cursor）正确判 `durability=violation`，新增回归用例 `flags a Flock document rolled back behind its persisted cursor`。
+- `VersionVector` 构造的 Map 键类型修正为 `${number}`（loro-crdt PeerID 的实际接受类型），`pnpm --filter @lody/e2ee-lab typecheck` 退出 0。
+- 证据：lab `vitest run` 11 文件 / 64 测试退出 0；`pnpm lint:fast` 0 错误；`git diff --check` 干净。未启用产品 E2EE。无 push/merge。

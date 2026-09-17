@@ -23,7 +23,7 @@ async function main() {
   await timed('verify-current-1', () => Ledger.verify({ anchor: created.anchor, records }));
   await timed('verify-current-2', () => Ledger.verify({ anchor: created.anchor, records }));
 
-  const decoded = await timed('decode-all', () => records.map(decodeRecord));
+  const decoded = await timed('decode-all', () => records.map((record) => decodeRecord(record)));
   await timed('hash-all-async', async () => {
     for (const record of records) await hashRecord(record);
   });

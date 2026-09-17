@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Effect } from 'effect';
+import { Effect, Exit } from 'effect';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LedgerError } from '../src/ledger';
 import {
@@ -190,6 +190,50 @@ describe('K1 durable epoch-key delivery', () => {
     ).toBe('observed');
     expect(remoteA.get(id)).toEqual(frame);
     expect(remoteB.get(id)).toEqual(frame);
+  });
+
+  it('interruption during remote put keeps the persisted frame and releases the outbox', async () => {
+    const outbox = new MemoryLedgerKeyOutbox();
+    const remote = new Map<string, Uint8Array>();
+    let putBegan!: () => void;
+    const began = new Promise<void>((resolve) => (putBegan = resolve));
+    let releasePut!: () => void;
+    let blocked = true;
+    const delivery = new LedgerKeyDelivery(outbox, {
+      put: async (putId, body) => {
+        putBegan();
+        if (!blocked) {
+          remote.set(putId, new Uint8Array(body));
+          return;
+        }
+        await new Promise<void>((resolve) => {
+          releasePut = resolve;
+        });
+        remote.set(putId, new Uint8Array(body));
+      },
+      read: async (readId) => remote.get(readId) ?? null,
+    });
+    const id = deliveryId();
+    const frame = random(112);
+    const controller = new AbortController();
+    const run = Effect.runPromiseExit(
+      delivery.sendEffect(id, frame, () => {}),
+      {
+        signal: controller.signal,
+      }
+    );
+    await began;
+    controller.abort();
+    const exit = await run;
+    expect(Exit.isFailure(exit)).toBe(true);
+    // Exact bytes were persisted before the remote wait; the lock is released.
+    expect(outbox.frames.get(id)).toEqual(frame);
+    blocked = false;
+    releasePut();
+
+    // Retry without re-supplying bytes reconciles by read-back of the same frame.
+    expect(await delivery.send(id, undefined, () => {})).toBe('observed');
+    expect(remote.get(id)).toEqual(frame);
   });
 
   it('re-checks authorization after save and does not put if the second check fails', async () => {

@@ -6,6 +6,7 @@ import {
   joinKey,
   keyId,
   type Hash,
+  type SigningPointCache,
   type SigningPublicKey,
 } from './crypto';
 import { fail } from './error';
@@ -132,8 +133,12 @@ export function publicState(state: InternalState): OrgState {
   });
 }
 
-function claimSigning(state: InternalState, key: SigningPublicKey): string {
-  const id = keyId(checkSigningPublicKey(key));
+function claimSigning(
+  state: InternalState,
+  key: SigningPublicKey,
+  cache?: SigningPointCache
+): string {
+  const id = keyId(checkSigningPublicKey(key, cache));
   if (state.usedSigningKeys.has(id) || state.devices.has(id)) fail('replay');
   return id;
 }
@@ -198,13 +203,18 @@ function markRotation(state: InternalState): void {
   state.epoch = { ...state.epoch, rotationRequired: true };
 }
 
-export function verifyOperationProofs(genesis: Hash, operation: Operation): void {
+export function verifyOperationProofs(
+  genesis: Hash,
+  operation: Operation,
+  cache?: SigningPointCache
+): void {
   if (operation.type === 'admitMember') {
     assertSignature(
       operation.request.signingPublicKey,
       joinRequestSigningBytes(genesis, operation.request),
       operation.request.signature,
-      'bad-proof'
+      'bad-proof',
+      cache
     );
     return;
   }
@@ -219,13 +229,18 @@ export function verifyOperationProofs(genesis: Hash, operation: Operation): void
         canManage: operation.canManage,
       }),
       operation.possessionSignature,
-      'bad-proof'
+      'bad-proof',
+      cache
     );
   }
 }
 
-export function applyGenesis(fields: GenesisFields, recordHash: Hash): InternalState {
-  const signerId = keyId(checkSigningPublicKey(fields.signer));
+export function applyGenesis(
+  fields: GenesisFields,
+  recordHash: Hash,
+  cache?: SigningPointCache
+): InternalState {
+  const signerId = keyId(checkSigningPublicKey(fields.signer, cache));
   const encId = keyId(checkEncryptionPublicKey(fields.encryptionPublicKey));
   const membershipId = copyBytes(fields.membershipId);
   const userId = copyBytes(fields.userId);
@@ -271,7 +286,8 @@ export function applyGenesis(fields: GenesisFields, recordHash: Hash): InternalS
 export function applyOperation(
   state: InternalState,
   signer: SigningPublicKey,
-  operation: Operation
+  operation: Operation,
+  cache?: SigningPointCache
 ): void {
   switch (operation.type) {
     case 'admitMember': {
@@ -283,7 +299,7 @@ export function applyOperation(
       if (state.usedMembershipIds.has(membershipHex)) fail('replay');
       if (state.userIndex.has(userHex)) fail('replay');
       if (state.closedJoins.has(join)) fail('replay');
-      const signHex = claimSigning(state, operation.request.signingPublicKey);
+      const signHex = claimSigning(state, operation.request.signingPublicKey, cache);
       const encHex = claimEnc(state, operation.request.encryptionPublicKey);
       state.usedMembershipIds.add(membershipHex);
       state.closedJoins.add(join);
@@ -338,7 +354,7 @@ export function applyOperation(
         if (operation.kind !== 'personal') fail('unauthorized');
         if (member.role !== 'owner' && member.role !== 'admin') fail('unauthorized');
       }
-      const signHex = claimSigning(state, operation.signingPublicKey);
+      const signHex = claimSigning(state, operation.signingPublicKey, cache);
       const encHex = claimEnc(state, operation.encryptionPublicKey);
       state.usedSigningKeys.add(signHex);
       state.usedEncKeys.add(encHex);

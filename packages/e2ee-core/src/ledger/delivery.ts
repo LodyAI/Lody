@@ -71,7 +71,7 @@ export class LedgerKeyDelivery {
   ): Effect.Effect<'observed' | 'unknown', unknown> {
     if (!/^[0-9a-f]{32}$/.test(id)) fail('canonical');
     return Effect.tryPromise({
-      try: () =>
+      try: (signal) =>
         this.outbox.exclusive(async (tx) => {
           const saved = await tx.load(id);
           if (saved && frame && !bytesEqual(saved, frame)) fail('replay');
@@ -79,16 +79,23 @@ export class LedgerKeyDelivery {
           if (!bytes) fail('invalid-operation');
           await authorize(bytes);
           if (!saved) await tx.save(id, bytes);
+          // remote.put/read are not cancellable server-side; aborting the local
+          // wait releases the outbox lock and the next send reconciles by read-back.
           await authorize(bytes);
+          throwIfAborted(signal);
           try {
-            await this.remote.put(id, copyBytes(bytes));
-          } catch {
+            await abortable(this.remote.put(id, copyBytes(bytes)), signal);
+          } catch (error) {
+            throwIfAborted(signal);
+            void error;
             /* lost ACK: read back */
           }
           let observed: Uint8Array | null;
           try {
-            observed = await this.remote.read(id);
-          } catch {
+            observed = await abortable(this.remote.read(id), signal);
+          } catch (error) {
+            throwIfAborted(signal);
+            void error;
             return 'unknown';
           }
           if (!observed || !bytesEqual(observed, bytes)) return 'unknown';
@@ -97,4 +104,30 @@ export class LedgerKeyDelivery {
       catch: (error) => error,
     });
   }
+}
+
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason instanceof Error ? signal.reason : new Error('interrupted');
+}
+
+function throwIfAborted(signal: AbortSignal): void {
+  if (signal.aborted) throw abortReason(signal);
+}
+
+function abortable<A>(promise: Promise<A>, signal: AbortSignal): Promise<A> {
+  if (signal.aborted) return Promise.reject(abortReason(signal));
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(abortReason(signal));
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      }
+    );
+  });
 }

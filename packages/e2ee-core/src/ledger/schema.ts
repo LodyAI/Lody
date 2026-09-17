@@ -34,6 +34,7 @@ import {
   type EncryptionPublicKey,
   type Hash,
   type Signature,
+  type SigningPointCache,
   type SigningPublicKey,
 } from './crypto';
 import { fail } from './error';
@@ -194,14 +195,15 @@ function encodeJoinRequest(request: JoinRequest): CborValue {
   ];
 }
 
-function decodeJoinRequest(value: CborValue): JoinRequest {
+function decodeJoinRequest(value: CborValue, cache?: SigningPointCache): JoinRequest {
   const parts = asArray(value, 'invalid-operation');
   if (parts.length !== 6) fail('invalid-operation');
   return {
     requestId: checkRequestId(asExactBytes(parts[0]!, REQUEST_ID_BYTES, 'invalid-operation')),
     userId: checkUserId(asExactBytes(parts[1]!, USER_ID_BYTES, 'invalid-operation')),
     signingPublicKey: checkSigningPublicKey(
-      asExactBytes(parts[2]!, SIGNING_KEY_BYTES, 'invalid-key')
+      asExactBytes(parts[2]!, SIGNING_KEY_BYTES, 'invalid-key'),
+      cache
     ),
     encryptionPublicKey: checkEncryptionPublicKey(
       asExactBytes(parts[3]!, ENCRYPTION_KEY_BYTES, 'invalid-key')
@@ -247,7 +249,7 @@ function encodeOperation(operation: Operation): CborValue {
   return fail('unknown-operation');
 }
 
-function decodeOperation(value: CborValue): Operation {
+function decodeOperation(value: CborValue, cache?: SigningPointCache): Operation {
   const parts = asArray(value, 'unknown-operation');
   if (parts.length === 0) fail('unknown-operation');
   const tag = asUint(parts[0]!, 'unknown-operation');
@@ -259,7 +261,7 @@ function decodeOperation(value: CborValue): Operation {
         membershipId: checkMembershipId(
           asExactBytes(parts[1]!, MEMBERSHIP_ID_BYTES, 'invalid-operation')
         ),
-        request: decodeJoinRequest(parts[2]!),
+        request: decodeJoinRequest(parts[2]!, cache),
       };
     }
     case OP_REMOVE_MEMBER: {
@@ -287,7 +289,8 @@ function decodeOperation(value: CborValue): Operation {
         type: 'admitDevice',
         kind: decodeKind(parts[1]!),
         signingPublicKey: checkSigningPublicKey(
-          asExactBytes(parts[2]!, SIGNING_KEY_BYTES, 'invalid-key')
+          asExactBytes(parts[2]!, SIGNING_KEY_BYTES, 'invalid-key'),
+          cache
         ),
         encryptionPublicKey: checkEncryptionPublicKey(
           asExactBytes(parts[3]!, ENCRYPTION_KEY_BYTES, 'invalid-key')
@@ -300,7 +303,10 @@ function decodeOperation(value: CborValue): Operation {
       if (parts.length !== 2) fail('invalid-operation');
       return {
         type: 'revokeDevice',
-        target: checkSigningPublicKey(asExactBytes(parts[1]!, SIGNING_KEY_BYTES, 'invalid-key')),
+        target: checkSigningPublicKey(
+          asExactBytes(parts[1]!, SIGNING_KEY_BYTES, 'invalid-key'),
+          cache
+        ),
       };
     }
     case OP_TRANSFER_OWNER: {
@@ -330,8 +336,8 @@ function decodeOperation(value: CborValue): Operation {
   }
 }
 
-export function encodeGenesisBody(fields: GenesisFields): Uint8Array {
-  checkSigningPublicKey(fields.signer);
+export function encodeGenesisBody(fields: GenesisFields, cache?: SigningPointCache): Uint8Array {
+  checkSigningPublicKey(fields.signer, cache);
   checkUserId(fields.userId);
   checkMembershipId(fields.membershipId);
   checkEncryptionPublicKey(fields.encryptionPublicKey);
@@ -346,9 +352,9 @@ export function encodeGenesisBody(fields: GenesisFields): Uint8Array {
   ]);
 }
 
-export function encodeOrdinaryBody(fields: OrdinaryFields): Uint8Array {
+export function encodeOrdinaryBody(fields: OrdinaryFields, cache?: SigningPointCache): Uint8Array {
   checkHash(fields.previousHash);
-  checkSigningPublicKey(fields.signer);
+  checkSigningPublicKey(fields.signer, cache);
   return encodeCbor([
     copyBytes(fields.previousHash),
     copyBytes(fields.signer),
@@ -367,14 +373,17 @@ export function signingBytesForBody(bodyBytes: Uint8Array): Uint8Array {
   return recordSigningBytes(bodyBytes);
 }
 
-function decodeBody(value: CborValue): Body {
+function decodeBody(value: CborValue, cache?: SigningPointCache): Body {
   const parts = asArray(value);
   if (parts.length === 6 && typeof parts[0] === 'number') {
     if (parts[0] !== PROTOCOL_VERSION) fail('unknown-version');
     return {
       type: 'genesis',
       fields: {
-        signer: checkSigningPublicKey(asExactBytes(parts[1]!, SIGNING_KEY_BYTES, 'invalid-key')),
+        signer: checkSigningPublicKey(
+          asExactBytes(parts[1]!, SIGNING_KEY_BYTES, 'invalid-key'),
+          cache
+        ),
         userId: checkUserId(asExactBytes(parts[2]!, USER_ID_BYTES, 'canonical')),
         membershipId: checkMembershipId(asExactBytes(parts[3]!, MEMBERSHIP_ID_BYTES, 'canonical')),
         encryptionPublicKey: checkEncryptionPublicKey(
@@ -389,8 +398,11 @@ function decodeBody(value: CborValue): Body {
       type: 'ordinary',
       fields: {
         previousHash: checkHash(asExactBytes(parts[0], HASH_BYTES)),
-        signer: checkSigningPublicKey(asExactBytes(parts[1]!, SIGNING_KEY_BYTES, 'invalid-key')),
-        operation: decodeOperation(parts[2]!),
+        signer: checkSigningPublicKey(
+          asExactBytes(parts[1]!, SIGNING_KEY_BYTES, 'invalid-key'),
+          cache
+        ),
+        operation: decodeOperation(parts[2]!, cache),
       },
     };
   }
@@ -410,22 +422,28 @@ function bodyBytesFromRecord(record: Uint8Array, bodyValue: CborValue): Uint8Arr
   return encodeCanonical(bodyValue);
 }
 
-export function decodeRecord(recordBytes: Uint8Array): DecodedRecord {
+export function decodeRecord(recordBytes: Uint8Array, cache?: SigningPointCache): DecodedRecord {
   const stable = copyBytes(recordBytes);
   const root = asArray(decodeCbor(stable, true));
   if (root.length !== 2) fail('canonical');
   const bodyValue = root[0]!;
   const signature = checkSignature(asExactBytes(root[1]!, SIGNATURE_BYTES, 'canonical'));
   return {
-    body: decodeBody(bodyValue),
+    body: decodeBody(bodyValue, cache),
     bodyBytes: bodyBytesFromRecord(stable, bodyValue),
     signature,
     recordBytes: stable,
   };
 }
 
-export function encodeRecord(body: Body, signature: Signature): Uint8Array {
+export function encodeRecord(
+  body: Body,
+  signature: Signature,
+  cache?: SigningPointCache
+): Uint8Array {
   const bodyBytes =
-    body.type === 'genesis' ? encodeGenesisBody(body.fields) : encodeOrdinaryBody(body.fields);
+    body.type === 'genesis'
+      ? encodeGenesisBody(body.fields, cache)
+      : encodeOrdinaryBody(body.fields, cache);
   return encodeSignedRecord(bodyBytes, signature);
 }

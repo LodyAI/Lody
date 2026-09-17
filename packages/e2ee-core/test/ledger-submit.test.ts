@@ -1,4 +1,4 @@
-import { Effect } from 'effect';
+import { Effect, Exit } from 'effect';
 import { describe, expect, it } from 'vitest';
 import {
   LedgerClient,
@@ -332,6 +332,46 @@ describe('C2 Promise/Effect single implementation', () => {
     expect(storeB.journal?.pending).toEqual(record);
     expect(streamA.records).toEqual([]);
     expect(streamB.records).toEqual([]);
+  });
+
+  it('interruption during CAS keeps the persisted pending bytes for resume', async () => {
+    const owner = await ed25519();
+    const created = await signGenesis(owner);
+    const phone = await ed25519();
+    const record = (
+      await append(
+        created.ledger,
+        owner,
+        await admitDeviceOp(created.anchor, phone, 'personal', true)
+      )
+    ).record;
+    const stream = new MemoryLedgerStream();
+    const store = new MemoryLedgerStore();
+    const client = await LedgerClient.open(created.record, store, stream);
+    const gate = deferred();
+    const reachedCas = deferred();
+    const original = stream.appendCas.bind(stream);
+    stream.appendCas = (offset, bytes) => {
+      reachedCas.resolve();
+      stream.inflight = gate.promise;
+      return original(offset, bytes);
+    };
+    const controller = new AbortController();
+    const run = Effect.runPromiseExit(client.submitEffect(new Uint8Array(record)), {
+      signal: controller.signal,
+    });
+    await reachedCas.promise;
+    controller.abort();
+    const exit = await run;
+    expect(Exit.isSuccess(exit)).toBe(false);
+    // The exact pending bytes were persisted before the interrupted CAS.
+    expect(store.journal?.pending).toEqual(record);
+    expect(stream.records).toEqual([]);
+    gate.resolve();
+    const resumed = await client.resume();
+    expect(resumed.status).toBe('committed');
+    expect(stream.records).toEqual([record]);
+    expect(store.journal?.pending).toBeNull();
   });
 });
 

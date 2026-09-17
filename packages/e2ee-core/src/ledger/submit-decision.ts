@@ -1,4 +1,5 @@
 import { bytesEqual } from './cbor';
+import type { SigningPointCache } from './crypto';
 import { fail } from './error';
 import { decodeRecord } from './schema';
 
@@ -32,8 +33,8 @@ export function classifyUnresolvedSubmit(input: {
   return 'unknown';
 }
 
-export function ordinaryPreviousHash(record: Uint8Array): Uint8Array {
-  const decoded = decodeRecord(record);
+export function ordinaryPreviousHash(record: Uint8Array, cache?: SigningPointCache): Uint8Array {
+  const decoded = decodeRecord(record, cache);
   if (decoded.body.type !== 'ordinary') fail('genesis-mismatch');
   return decoded.body.fields.previousHash;
 }

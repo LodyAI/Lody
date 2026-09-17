@@ -1,3 +1,4 @@
+import { writeFileSync } from 'node:fs';
 import { Flock } from '@loro-dev/flock-wasm';
 import { LoroDoc } from 'loro-crdt';
 import { StreamsClient } from '@loro-dev/streams-client';
@@ -6,13 +7,10 @@ import {
   StreamsCrdt,
   createLoroDocAdapter,
   type PayloadProtectionContext,
+  type RemoteCursor,
   type RemoteCursorStore,
 } from '@loro-dev/streams-crdt/loro';
-import {
-  StreamsCrdt as FlockStreamsCrdt,
-  createFlockAdapter,
-  InMemoryRemoteCursorStore as FlockCursorStore,
-} from '@loro-dev/streams-crdt/flock';
+import { StreamsCrdt as FlockStreamsCrdt, createFlockAdapter } from '@loro-dev/streams-crdt/flock';
 import { ContentCipher } from '@lody/e2ee-core';
 import { createStreamsContentProvider } from '@lody/e2ee-core/streams-content';
 import { asArrayBuffer, toHex } from './bytes';
@@ -20,6 +18,13 @@ import { FLOCK_STREAM, LORO_STREAM } from './protocol';
 import type { DemoDevice } from './device';
 import { deviceHex } from './device';
 import type { LabRuntime } from '../runtime';
+import {
+  FileRemoteCursorStore,
+  loadFlockDocument,
+  loadLoroDocumentBytes,
+  persistFlockDocument,
+  persistLoroDocument,
+} from './persist';
 
 function requestUrl(input: object): string {
   const value = input as { href?: unknown; url?: unknown };
@@ -42,6 +47,10 @@ export interface ContentClient {
   loroDoc?: LoroDoc | null;
   flockDoc?: Flock | null;
   runtime?: LabRuntime;
+  readonly clientDir?: string;
+  /** Lab crash points. SIGKILL, not a normal-exit finalizer. */
+  crashAt?: 'after-import' | 'after-document' | 'before-cursor' | 'after-cursor';
+  crashMarker?: string;
 }
 
 async function withPhase<T>(
@@ -51,12 +60,7 @@ async function withPhase<T>(
   work: () => Promise<T>
 ): Promise<T> {
   if (!session.runtime) return work();
-  const eventId = await session.runtime.gate(session.account, operation, phase);
-  try {
-    return await work();
-  } finally {
-    session.runtime.complete(eventId);
-  }
+  return session.runtime.phase(session.account, operation, phase, work);
 }
 
 export function bindLoroPeer(doc: LoroDoc, session: ContentClient): LoroDoc {
@@ -118,17 +122,71 @@ function provider(session: ContentClient, resource: string, model: 'loro' | 'flo
   });
 }
 
+function crashNow(session: ContentClient): never {
+  if (session.crashMarker) writeFileSync(session.crashMarker, session.crashAt ?? 'crash');
+  process.kill(process.pid, 'SIGKILL');
+  throw new Error('crash-failed');
+}
+
 function sessionLoro(session: ContentClient): LoroDoc {
-  if (!session.loroDoc) session.loroDoc = bindLoroPeer(new LoroDoc(), session);
+  if (!session.loroDoc) {
+    const doc = bindLoroPeer(new LoroDoc(), session);
+    const saved = session.clientDir ? loadLoroDocumentBytes(session.clientDir) : null;
+    if (saved) doc.import(saved);
+    session.loroDoc = doc;
+  }
   return session.loroDoc;
+}
+
+function sessionFlock(session: ContentClient): Flock {
+  if (!session.flockDoc) {
+    const peer = session.random ? toHex(session.random('flock-peer-id', 8)) : session.account;
+    const saved = session.clientDir ? loadFlockDocument(session.clientDir, peer) : null;
+    session.flockDoc = saved ?? boundFlock(session, peer);
+  }
+  return session.flockDoc;
+}
+
+function gatedCursorStore(session: ContentClient, inner: RemoteCursorStore): RemoteCursorStore {
+  return {
+    load: (streamUrl) => inner.load(streamUrl),
+    save: async (cursor) => {
+      await withPhase(session, 'content', 'cursor-persisted', async () => {
+        if (session.crashAt === 'before-cursor') crashNow(session);
+        await inner.save(cursor);
+        if (session.crashAt === 'after-cursor') crashNow(session);
+      });
+    },
+  };
+}
+
+function loroCursorStore(session: ContentClient): RemoteCursorStore {
+  const inner = session.clientDir
+    ? new FileRemoteCursorStore(session.clientDir, 'loro')
+    : new InMemoryRemoteCursorStore();
+  return gatedCursorStore(session, inner);
+}
+
+function flockCursorStore(session: ContentClient): RemoteCursorStore {
+  const inner = session.clientDir
+    ? new FileRemoteCursorStore(session.clientDir, 'flock')
+    : new InMemoryRemoteCursorStore();
+  return gatedCursorStore(session, inner);
 }
 
 export async function writeLoro(session: ContentClient, text: string): Promise<void> {
   const doc = sessionLoro(session);
+  const streamUrl = `${session.baseUrl}/ds/${session.genesisHex}/${LORO_STREAM}`;
+  const cursorStore = loroCursorStore(session);
   const crdt = new StreamsCrdt({
-    streamUrl: `${session.baseUrl}/ds/${session.genesisHex}/${LORO_STREAM}`,
+    streamUrl,
     adapter: createLoroDocAdapter(doc),
+    remoteCursorStore: cursorStore,
     payloadProtectionRequired: true,
+    beforeRemoteCursorSave: async () => {
+      if (!session.clientDir) return;
+      persistLoroDocument(session.clientDir, doc);
+    },
     e2ee: {
       provider: provider(session, 'loro', 'loro'),
       readPolicy: 'encrypted-only',
@@ -146,22 +204,38 @@ export async function writeLoro(session: ContentClient, text: string): Promise<v
       doc.getText('text').insert(current.length, text);
       doc.commit();
     }
+    if (session.clientDir) persistLoroDocument(session.clientDir, doc);
+    if (session.crashAt === 'after-document') crashNow(session);
   });
   const appended = await crdt.appendWriteOnly();
   if (!appended.ok) {
     throw new Error(`loro-append-failed:${JSON.stringify(appended)}`);
   }
-  await withPhase(session, 'content', 'cursor-persisted', async () => undefined);
+  const value = 'value' in appended ? appended.value : undefined;
+  if (session.clientDir && value && 'nextOffset' in value && typeof value.nextOffset === 'string') {
+    await cursorStore.save({
+      streamUrl,
+      nextOffset: value.nextOffset,
+      serverLowerBoundVersion:
+        (value.localVersion as RemoteCursor['serverLowerBoundVersion']) ?? {},
+      updatedAtMs: Date.now(),
+    });
+  }
   await crdt.close();
 }
 
 export async function readLoro(session: ContentClient): Promise<string> {
-  const doc = bindLoroPeer(new LoroDoc(), session);
+  const doc = sessionLoro(session);
+  const cursorStore = loroCursorStore(session);
   const crdt = new StreamsCrdt({
     streamUrl: `${session.baseUrl}/ds/${session.genesisHex}/${LORO_STREAM}`,
     adapter: createLoroDocAdapter(doc),
-    remoteCursorStore: new InMemoryRemoteCursorStore(),
+    remoteCursorStore: cursorStore,
     payloadProtectionRequired: true,
+    beforeRemoteCursorSave: async () => {
+      if (session.crashAt === 'after-import') crashNow(session);
+      if (session.clientDir) persistLoroDocument(session.clientDir, doc);
+    },
     e2ee: {
       provider: provider(session, 'loro', 'loro'),
       readPolicy: 'encrypted-only',
@@ -171,10 +245,9 @@ export async function readLoro(session: ContentClient): Promise<string> {
   });
   const synced = await withPhase(session, 'content', 'import', async () => crdt.sync());
   if (!synced.ok) throw new Error(`loro-sync-failed:${JSON.stringify(synced)}`);
+  if (session.clientDir) persistLoroDocument(session.clientDir, doc);
   const text = doc.getText('text').toString();
-  await withPhase(session, 'content', 'cursor-persisted', async () => undefined);
   await crdt.close();
-  doc.free();
   return text;
 }
 
@@ -183,11 +256,17 @@ export async function writeFlock(
   value: string,
   path: readonly string[] = ['private', 'note']
 ): Promise<void> {
-  const flock = boundFlock(session, 'writer');
+  const flock = sessionFlock(session);
+  const streamUrl = `${session.baseUrl}/ds/${session.genesisHex}/${FLOCK_STREAM}`;
+  const cursorStore = flockCursorStore(session);
   const crdt = new FlockStreamsCrdt({
-    streamUrl: `${session.baseUrl}/ds/${session.genesisHex}/${FLOCK_STREAM}`,
+    streamUrl,
     adapter: createFlockAdapter(flock),
+    remoteCursorStore: cursorStore,
     payloadProtectionRequired: true,
+    beforeRemoteCursorSave: async () => {
+      if (session.clientDir) persistFlockDocument(session.clientDir, flock);
+    },
     e2ee: {
       provider: provider(session, 'flock', 'flock'),
       readPolicy: 'encrypted-only',
@@ -200,11 +279,27 @@ export async function writeFlock(
     /* already exists */
   }
   flock.put([...path], { value });
+  if (session.clientDir) persistFlockDocument(session.clientDir, flock);
   const appended = await crdt.appendWriteOnly();
   if (!appended.ok) {
     throw new Error(
       `flock-append-failed:${'result' in appended ? JSON.stringify(appended.result) : ''}`
     );
+  }
+  const result = 'value' in appended ? appended.value : undefined;
+  if (
+    session.clientDir &&
+    result &&
+    'nextOffset' in result &&
+    typeof result.nextOffset === 'string'
+  ) {
+    await cursorStore.save({
+      streamUrl,
+      nextOffset: result.nextOffset,
+      serverLowerBoundVersion:
+        (result.localVersion as RemoteCursor['serverLowerBoundVersion']) ?? {},
+      updatedAtMs: Date.now(),
+    });
   }
   await crdt.close();
 }
@@ -213,12 +308,15 @@ export async function readFlock(
   session: ContentClient,
   path: readonly string[] = ['private', 'note']
 ): Promise<string> {
-  const flock = boundFlock(session, 'reader');
+  const flock = sessionFlock(session);
   const crdt = new FlockStreamsCrdt({
     streamUrl: `${session.baseUrl}/ds/${session.genesisHex}/${FLOCK_STREAM}`,
     adapter: createFlockAdapter(flock),
-    remoteCursorStore: new FlockCursorStore(),
+    remoteCursorStore: flockCursorStore(session),
     payloadProtectionRequired: true,
+    beforeRemoteCursorSave: async () => {
+      if (session.clientDir) persistFlockDocument(session.clientDir, flock);
+    },
     e2ee: {
       provider: provider(session, 'flock', 'flock'),
       readPolicy: 'encrypted-only',
@@ -228,6 +326,7 @@ export async function readFlock(
   });
   const synced = await crdt.sync();
   if (!synced.ok) throw new Error('flock-sync-failed');
+  if (session.clientDir) persistFlockDocument(session.clientDir, flock);
   const value = String((flock.get([...path]) as { value?: string } | undefined)?.value ?? '');
   await crdt.close();
   return value;

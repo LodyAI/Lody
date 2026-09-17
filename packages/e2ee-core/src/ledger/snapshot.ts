@@ -28,6 +28,7 @@ import {
   snapshotStateDigest,
   type Hash,
   type Signature,
+  type SigningPointCache,
   type SigningPublicKey,
 } from './crypto';
 import { fail } from './error';
@@ -244,7 +245,8 @@ function importAuthState(
   genesis: Hash,
   length: number,
   head: Hash,
-  signer: SigningPublicKey
+  signer: SigningPublicKey,
+  cache?: SigningPointCache
 ): InternalState {
   const fields = asArray(auth);
   if (fields.length !== 11) fail('canonical');
@@ -278,7 +280,7 @@ function importAuthState(
   for (const row of asArray(fields[2]!)) {
     const tuple = asArray(row);
     if (tuple.length !== 5) fail('canonical');
-    const signPub = checkSigningPublicKey(asExactBytes(tuple[0]!, SIGNING_KEY_BYTES));
+    const signPub = checkSigningPublicKey(asExactBytes(tuple[0]!, SIGNING_KEY_BYTES), cache);
     if (lastDevice && compareBytes(lastDevice, signPub) >= 0) fail('canonical');
     lastDevice = signPub;
     const membershipId = asExactBytes(tuple[1]!, MEMBERSHIP_ID_BYTES);
@@ -306,7 +308,7 @@ function importAuthState(
   for (const row of asArray(fields[9]!)) {
     const tuple = asArray(row);
     if (tuple.length !== 2) fail('canonical');
-    const first = checkSigningPublicKey(asExactBytes(tuple[0]!, SIGNING_KEY_BYTES));
+    const first = checkSigningPublicKey(asExactBytes(tuple[0]!, SIGNING_KEY_BYTES), cache);
     const requestId = asExactBytes(tuple[1]!, REQUEST_ID_BYTES);
     if (lastJoinFirst) {
       const cmp = compareBytes(lastJoinFirst, first);
@@ -385,7 +387,10 @@ function importAuthState(
   return state;
 }
 
-export function decodeSignedSnapshot(bytes: Uint8Array): {
+export function decodeSignedSnapshot(
+  bytes: Uint8Array,
+  cache?: SigningPointCache
+): {
   bodyBytes: Uint8Array;
   signature: Signature;
   genesis: Hash;
@@ -402,10 +407,10 @@ export function decodeSignedSnapshot(bytes: Uint8Array): {
   const genesis = checkHash(asExactBytes(body[1]!, HASH_BYTES));
   const length = asUint(body[2]!);
   const head = checkHash(asExactBytes(body[3]!, HASH_BYTES));
-  const signer = checkSigningPublicKey(asExactBytes(body[4]!, SIGNING_KEY_BYTES));
+  const signer = checkSigningPublicKey(asExactBytes(body[4]!, SIGNING_KEY_BYTES), cache);
   const signature = asExactBytes(root[1]!, SIGNATURE_BYTES);
   const bodyBytes = encodeSnapshotCbor(body);
-  const state = importAuthState(body[5]!, genesis, length, head, signer);
+  const state = importAuthState(body[5]!, genesis, length, head, signer, cache);
   return { bodyBytes, signature, genesis, length, head, signer, state };
 }
 

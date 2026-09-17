@@ -2,6 +2,7 @@ export { startLabBackend, type LabBackend } from './backend';
 export { HonestClient, type HonestClientOptions } from './actors';
 export {
   advanceTime,
+  canPermitEvent,
   completeEvent,
   emptyScheduler,
   isRunnable,
@@ -37,12 +38,18 @@ export { appendControlRecord, maliciousAppendCas, mutateSqliteBytes } from './at
 export {
   createAttackLab,
   harnessReplayActions,
+  harnessReplayMaterial,
+  inspectClient,
   replayAttackActions,
   type AttackAction,
   type AttackClaim,
   type AttackLab,
+  type ClientDigest,
+  type HonestInspect,
   type PublicReport,
   type PublicView,
+  type ReplayMaterial as AttackReplayMaterial,
+  type ReplayOutcome,
 } from './attack-lab';
 export { LabRuntime, type ProtocolFrame } from './runtime';
 export {

@@ -15,6 +15,7 @@ import {
   concat,
   keyId,
   type Hash,
+  type SigningPointCache,
   type SigningPublicKey,
 } from './crypto';
 import { fail } from './error';
@@ -167,11 +168,12 @@ export async function sealEpochEnvelope(input: {
   sign(bytes: Uint8Array): Promise<Uint8Array>;
   /** Test/lab only. Production omits this and uses live DHKEM keygen. */
   entropy?: Entropy;
+  cache?: SigningPointCache;
 }): Promise<Uint8Array> {
   if (!canSendEpoch(input.state, input.sender)) fail('unauthorized');
   if (!canReceiveEpoch(input.state, input.recipient)) fail('unauthorized');
-  checkSigningPublicKey(input.sender);
-  checkSigningPublicKey(input.recipient);
+  checkSigningPublicKey(input.sender, input.cache);
+  checkSigningPublicKey(input.recipient, input.cache);
   checkEncryptionPublicKey(input.recipientEncryptionKey);
   const expectedEnc = input.state.devices.get(keyId(input.recipient))?.encryptionPublicKey;
   if (!expectedEnc || !bytesEqual(expectedEnc, input.recipientEncryptionKey)) fail('unauthorized');
@@ -191,7 +193,7 @@ export async function sealEpochEnvelope(input: {
   const unsigned = concat([aad, new Uint8Array(sealed.enc), new Uint8Array(sealed.ct)]);
   const message = concat([envelopeSigDomain, unsigned]);
   const signature = await input.sign(message);
-  await assertSignature(input.sender, message, signature);
+  await assertSignature(input.sender, message, signature, 'bad-signature', input.cache);
   return concat([unsigned, signature]);
 }
 
@@ -203,6 +205,7 @@ export async function openEpochEnvelope(input: {
   recipient: SigningPublicKey;
   recipientKeyPair: CryptoKeyPair;
   frame: Uint8Array;
+  cache?: SigningPointCache;
 }): Promise<Uint8Array> {
   if (!canReceiveEpoch(input.state, input.recipient)) fail('unauthorized');
   if (input.epoch !== input.state.epoch.number) fail('invalid-operation');
@@ -213,7 +216,7 @@ export async function openEpochEnvelope(input: {
   const signature = input.frame.subarray(aad.byteLength + 80);
   if (!bytesEqual(input.frame.subarray(0, aad.byteLength), aad)) fail('canonical');
   const message = concat([envelopeSigDomain, input.frame.subarray(0, -64)]);
-  await assertSignature(input.sender, message, signature);
+  await assertSignature(input.sender, message, signature, 'bad-signature', input.cache);
   const local = new Uint8Array(
     await suite.kem.serializePublicKey(input.recipientKeyPair.publicKey)
   );

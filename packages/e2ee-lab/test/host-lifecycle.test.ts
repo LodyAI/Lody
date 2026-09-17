@@ -138,8 +138,8 @@ describe('lab host lifecycle', () => {
     const alice = await labClient({ host, account: 'alice' });
     const bob = await labClient({ host, account: 'bob' });
     await alice.createSpace();
-    const join = await bob.requestJoin(alice.genesisHex!);
-    const admitted = await alice.approveJoin(join);
+    const joinReq = await bob.requestJoin(alice.genesisHex!);
+    const admitted = await alice.approveJoin(joinReq);
     expect(admitted.status).toBe('committed');
     await expect(
       bob.submit({ type: 'setRole', membershipId: admitted.membershipId, role: 'admin' })
@@ -153,10 +153,10 @@ describe('lab host lifecycle', () => {
     const alice = await labClient({ host, account: 'alice' });
     const bob = await labClient({ host, account: 'bob' });
     await alice.createSpace();
-    const join = await bob.requestJoin(alice.genesisHex!);
-    const signature = fromHex(join.signature);
+    const joinReq = await bob.requestJoin(alice.genesisHex!);
+    const signature = fromHex(joinReq.signature);
     signature[0] = (signature[0] ?? 0) ^ 0xff;
-    await expect(alice.approveJoin({ ...join, signature: toHex(signature) })).rejects.toThrow();
+    await expect(alice.approveJoin({ ...joinReq, signature: toHex(signature) })).rejects.toThrow();
     expect((await alice.readLedger()).state.members.size).toBe(1);
   });
 
@@ -165,8 +165,8 @@ describe('lab host lifecycle', () => {
     const alice = await labClient({ host, account: 'alice' });
     const bob = await labClient({ host, account: 'bob' });
     await alice.createSpace();
-    const join = await bob.requestJoin(alice.genesisHex!);
-    expect((await alice.approveJoin(join, 'guest')).status).toBe('committed');
+    const joinReq = await bob.requestJoin(alice.genesisHex!);
+    expect((await alice.approveJoin(joinReq, 'guest')).status).toBe('committed');
     await bob.readLedger();
     expect(bob.canWriteDocument).toBe(false);
     await expect(writeLoro(bob, 'guest-write')).rejects.toThrow();
@@ -304,11 +304,84 @@ describe('lab host lifecycle', () => {
     await new Promise<void>((resolve) => child.on('exit', () => resolve()));
   });
 
+  for (const crashAt of [
+    'after-import',
+    'after-document',
+    'before-cursor',
+    'after-cursor',
+  ] as const) {
+    it(`recovers document and cursor after client SIGKILL at ${crashAt}`, async () => {
+      const dataDir = tempDir(`e2ee-lab-crash-${crashAt}-host-`);
+      const clientDir = tempDir(`e2ee-lab-crash-${crashAt}-alice-`);
+      const marker = join(tempDir(`e2ee-lab-crash-${crashAt}-mark-`), 'marker');
+      const text = `crash-${crashAt}`;
+      const crash = spawn(
+        process.execPath,
+        ['--import', tsxLoader, join(here, 'crash-loro-client.ts')],
+        {
+          cwd: join(here, '..'),
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: {
+            ...process.env,
+            LAB_DATA_DIR: dataDir,
+            LAB_CLIENT_DIR: clientDir,
+            LAB_MARKER: marker,
+            LAB_TEXT: text,
+            LAB_CRASH_AT: crashAt,
+          },
+        }
+      );
+      let crashErr = '';
+      crash.stderr?.on('data', (chunk) => {
+        crashErr += String(chunk);
+      });
+      const exit = await new Promise<{ code: number | null; signal: string | null }>((resolve) =>
+        crash.on('exit', (code, signal) => resolve({ code, signal }))
+      );
+      expect(exit.signal, crashErr).toBe('SIGKILL');
+      expect(readFileSync(marker, 'utf8')).toBe(crashAt);
+      const identity = JSON.parse(readFileSync(join(clientDir, 'crash-identity.json'), 'utf8')) as {
+        genesisHex: string;
+        device: string;
+      };
+      const restartMarker = `${marker}.restart`;
+      const restart = spawn(
+        process.execPath,
+        ['--import', tsxLoader, join(here, 'crash-loro-client.ts')],
+        {
+          cwd: join(here, '..'),
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: {
+            ...process.env,
+            LAB_DATA_DIR: dataDir,
+            LAB_CLIENT_DIR: clientDir,
+            LAB_MARKER: restartMarker,
+            LAB_TEXT: text,
+            LAB_GENESIS: identity.genesisHex,
+            LAB_DEVICE: identity.device,
+          },
+        }
+      );
+      let restartErr = '';
+      restart.stderr?.on('data', (chunk) => {
+        restartErr += String(chunk);
+      });
+      const restartExit = await new Promise<number | null>((resolve) =>
+        restart.on('exit', (code) => resolve(code))
+      );
+      expect(restartExit, restartErr).toBe(0);
+      const recovered = JSON.parse(readFileSync(restartMarker, 'utf8')) as { text: string };
+      expect(recovered.text).toContain(text);
+      // after-import crashes before persisting the imported ':tail' record; the
+      // saved cursor must not skip it on restart.
+      if (crashAt === 'after-import') expect(recovered.text).toContain(':tail');
+    }, 90_000);
+  }
+
   it('recovers ledger head after kill-after-commit', async () => {
     const dir = tempDir('e2ee-lab-kill-');
     const first = await spawnLab(dir);
     const { HonestClient } = await import('../src/actors');
-    const { generateDevice } = await import('../src/platform/device');
     const alice = new HonestClient({
       baseUrl: first.baseUrl,
       clientDir: tempDir('e2ee-lab-kill-alice-'),
@@ -346,8 +419,6 @@ describe('lab host lifecycle', () => {
 async function spawnLab(
   dataDir: string
 ): Promise<{ baseUrl: string; child: ReturnType<typeof spawn> }> {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const tsxLoader = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
   const child = spawn(
     process.execPath,
     ['--import', tsxLoader, join(here, '../src/cli.ts'), '--data-dir', dataDir],

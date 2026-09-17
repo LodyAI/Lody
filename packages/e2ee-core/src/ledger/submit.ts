@@ -1,7 +1,7 @@
 import { Effect } from 'effect';
 import { runPromiseThrow } from '../effect-run';
 import { copyBytes, bytesEqual } from './cbor';
-import { hashRecord, type Hash } from './crypto';
+import { hashRecord, type Hash, type SigningPointCache } from './crypto';
 import { fail } from './error';
 import { Ledger } from './ledger';
 import { decodeRecord } from './schema';
@@ -108,7 +108,8 @@ export class LedgerClient {
     genesisRecord: Uint8Array | null,
     anchor: Hash,
     private readonly store: LedgerStore,
-    private readonly stream: LedgerStream
+    private readonly stream: LedgerStream,
+    private readonly pointCache?: SigningPointCache
   ) {
     if (!(anchor instanceof Uint8Array)) fail('canonical');
     if (genesisRecord !== null && !(genesisRecord instanceof Uint8Array)) fail('canonical');
@@ -120,12 +121,13 @@ export class LedgerClient {
   static async open(
     genesisRecord: Uint8Array,
     store: LedgerStore,
-    stream: LedgerStream
+    stream: LedgerStream,
+    pointCache?: SigningPointCache
   ): Promise<LedgerClient> {
     const record = copyBytes(genesisRecord);
     const anchor = await hashRecord(record);
-    await Ledger.verify({ anchor, records: [record] });
-    return new LedgerClient(record, anchor, store, stream);
+    await Ledger.verify({ anchor, records: [record], pointCache });
+    return new LedgerClient(record, anchor, store, stream, pointCache);
   }
 
   static async openFromSnapshot(input: {
@@ -133,11 +135,23 @@ export class LedgerClient {
     snapshot: Uint8Array;
     store: LedgerStore;
     stream: LedgerStream;
+    pointCache?: SigningPointCache;
   }): Promise<LedgerClient> {
     const snapshot = copyBytes(input.snapshot);
     const trust = copyTrust(input.trust);
-    const incoming = await Ledger.verifySnapshot({ trust, snapshot, suffix: [] });
-    const client = new LedgerClient(null, trust.genesis, input.store, input.stream);
+    const incoming = await Ledger.verifySnapshot({
+      trust,
+      snapshot,
+      suffix: [],
+      pointCache: input.pointCache,
+    });
+    const client = new LedgerClient(
+      null,
+      trust.genesis,
+      input.store,
+      input.stream,
+      input.pointCache
+    );
     await input.store.exclusive(async (tx) => {
       const loaded = await tx.load();
       if (loaded) {
@@ -148,15 +162,26 @@ export class LedgerClient {
                 trust: loaded.snapshotTrust,
                 snapshot: loaded.snapshot,
                 suffix: loaded.records,
+                pointCache: input.pointCache,
               })
             : loaded.records.length === 0
               ? fail('genesis-mismatch')
-              : await Ledger.verify({ anchor: loaded.genesis, records: loaded.records });
+              : await Ledger.verify({
+                  anchor: loaded.genesis,
+                  records: loaded.records,
+                  pointCache: input.pointCache,
+                });
         if (incoming.length < existing.length) fail('replay');
         if (incoming.length === existing.length) {
           if (!bytesEqual(incoming.head, existing.head)) fail('replay');
-          const incomingDigest = incoming.comparisonNote(trust.endorser).stateDigest;
-          const existingDigest = existing.comparisonNote(trust.endorser).stateDigest;
+          const incomingDigest = incoming.comparisonNote(
+            trust.endorser,
+            input.pointCache
+          ).stateDigest;
+          const existingDigest = existing.comparisonNote(
+            trust.endorser,
+            input.pointCache
+          ).stateDigest;
           if (!bytesEqual(incomingDigest, existingDigest)) fail('replay');
           if (loaded.snapshot && !bytesEqual(loaded.snapshot, snapshot)) fail('replay');
           return;
@@ -178,9 +203,10 @@ export class LedgerClient {
   static async openJournal(
     genesis: Hash,
     store: LedgerStore,
-    stream: LedgerStream
+    stream: LedgerStream,
+    pointCache?: SigningPointCache
   ): Promise<LedgerClient> {
-    const client = new LedgerClient(null, genesis, store, stream);
+    const client = new LedgerClient(null, genesis, store, stream, pointCache);
     await store.exclusive(async (tx) => {
       const loaded = await tx.load();
       if (!loaded) fail('invalid-operation');
@@ -232,10 +258,15 @@ export class LedgerClient {
             trust: journal.snapshotTrust,
             snapshot: journal.snapshot,
             suffix: journal.records,
+            pointCache: this.pointCache,
           })
         : journal.records.length === 0
           ? fail('genesis-mismatch')
-          : await Ledger.verify({ anchor: this.anchor, records: journal.records });
+          : await Ledger.verify({
+              anchor: this.anchor,
+              records: journal.records,
+              pointCache: this.pointCache,
+            });
     return { journal, ledger };
   }
 
@@ -258,7 +289,7 @@ export class LedgerClient {
       let records = [...session.journal.records];
       for (let i = 0; i < fresh.length; i += MAX_LEDGER_READ_PAGE_RECORDS) {
         const slice = fresh.slice(i, i + MAX_LEDGER_READ_PAGE_RECORDS);
-        ledger = await ledger.extend(slice);
+        ledger = await ledger.extend(slice, this.pointCache);
         records = [...records, ...slice];
       }
       return { ledger, records };
@@ -291,7 +322,7 @@ export class LedgerClient {
           continue;
         }
         if (snapshotMode) {
-          const decoded = decodeRecord(record);
+          const decoded = decodeRecord(record, this.pointCache);
           if (decoded.body.type === 'genesis') {
             if (wasBound) fail('wrong-parent');
             skippedUnknown = true;
@@ -355,7 +386,7 @@ export class LedgerClient {
   /** Same implementation as `submit`. Promise methods are thin runPromise wrappers. */
   submitEffect(record: Uint8Array): Effect.Effect<LedgerSubmitResult, unknown> {
     if (!(record instanceof Uint8Array)) fail('canonical');
-    decodeRecord(record);
+    decodeRecord(record, this.pointCache);
     return this.runEffect(copyBytes(record));
   }
 
@@ -364,9 +395,10 @@ export class LedgerClient {
   }
 
   private runEffect(requested?: Uint8Array): Effect.Effect<LedgerSubmitResult, unknown> {
-    // Promise LedgerStore is the adapter boundary. One runtime at submit/resume.
-    return tryCall(() =>
-      this.store.exclusive((tx) => runPromiseThrow(this.submitSteps(tx, requested)))
+    // Promise LedgerStore is the adapter boundary. One runtime at submit/resume;
+    // the interruption signal is forwarded so the inner fiber is not detached.
+    return tryCall((signal) =>
+      this.store.exclusive((tx) => runPromiseThrow(this.submitSteps(tx, requested), signal))
     );
   }
 
@@ -378,7 +410,7 @@ export class LedgerClient {
       const session = yield* tryCall(() => this.load(tx));
       const retrying = session.journal.pending !== null;
       const wire = selectSubmitWire(session.journal.pending, requested);
-      const previousHash = ordinaryPreviousHash(wire);
+      const previousHash = ordinaryPreviousHash(wire, this.pointCache);
       yield* tryCall(() => this.refresh(tx, session));
 
       const reconcile = (): Effect.Effect<LedgerSubmitResult | undefined, unknown> =>
@@ -394,7 +426,7 @@ export class LedgerClient {
 
       const prior = yield* reconcile();
       if (prior) return prior;
-      yield* tryCall(() => session.ledger.extend([wire]));
+      yield* tryCall(() => session.ledger.extend([wire], this.pointCache));
       yield* Effect.uninterruptible(tryCall(() => this.save(tx, session, wire)));
       const cas = yield* appendCas(this.stream, session.journal.offset, wire);
       yield* tryCall(() => this.refresh(tx, session));
@@ -409,7 +441,7 @@ export class LedgerClient {
   }
 }
 
-function tryCall<A>(fn: () => Promise<A>): Effect.Effect<A, unknown> {
+function tryCall<A>(fn: (signal: AbortSignal) => Promise<A>): Effect.Effect<A, unknown> {
   return Effect.tryPromise({ try: fn, catch: (error) => error });
 }
 

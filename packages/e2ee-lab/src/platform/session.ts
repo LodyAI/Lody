@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { LoroDoc } from 'loro-crdt';
+import type { Flock } from '@loro-dev/flock-wasm';
 import { StreamsClient } from '@loro-dev/streams-client';
 import { Ledger } from '@lody/e2ee-core';
 import {
@@ -18,6 +19,7 @@ import {
   sealEpochEnvelope,
   sealHistoryPacket,
   signingBytesForBody,
+  SigningPointCache,
   type ComparisonNote,
   type JoinRequest,
   type Operation,
@@ -86,8 +88,14 @@ export class DemoSession {
   readonly testMode: boolean;
   canWriteDocument = false;
   loroDoc: LoroDoc | null = null;
+  flockDoc: Flock | null = null;
+  crashAt?: 'after-import' | 'after-document' | 'before-cursor' | 'after-cursor';
+  crashMarker?: string;
   readonly runtime?: import('../runtime').LabRuntime;
   private ledgerClient: LedgerClient | null = null;
+  // Per-session verification cache: no mutable cache state shared across runs.
+  private readonly pointCache = new SigningPointCache();
+  private closed = false;
 
   constructor(private readonly options: SessionOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, '');
@@ -137,6 +145,14 @@ export class DemoSession {
     } catch {
       this.epochKeys = new Map();
     }
+  }
+
+  close(): void {
+    this.closed = true;
+    this.ledgerClient = null;
+    this.loroDoc?.free();
+    this.loroDoc = null;
+    this.flockDoc = null;
   }
 
   async start(): Promise<void> {
@@ -190,7 +206,7 @@ export class DemoSession {
         retry: { maxAttempts: 0 },
       })
     );
-    this.ledgerClient = await LedgerClient.open(this.genesis, store, stream);
+    this.ledgerClient = await LedgerClient.open(this.genesis, store, stream, this.pointCache);
     return this.ledgerClient;
   }
 
@@ -213,13 +229,16 @@ export class DemoSession {
     const secret = this.random('epoch-secret', 32);
     this.userId = this.random('user-id', 32);
     this.membershipId = this.random('membership-id', 16);
-    const body = encodeGenesisBody({
-      signer: this.device.publicKey,
-      userId: this.userId,
-      membershipId: this.membershipId,
-      encryptionPublicKey: this.device.enc,
-      epochCommitment: await commitEpochKey(new Uint8Array(32), 0, secret),
-    });
+    const body = encodeGenesisBody(
+      {
+        signer: this.device.publicKey,
+        userId: this.userId,
+        membershipId: this.membershipId,
+        encryptionPublicKey: this.device.enc,
+        epochCommitment: await commitEpochKey(new Uint8Array(32), 0, secret),
+      },
+      this.pointCache
+    );
     this.genesis = encodeSignedRecord(body, await this.device.sign(signingBytesForBody(body)));
     this.genesisHex = toHex(await hashRecord(this.genesis));
     this.epochKeys.set(0, secret);
@@ -247,7 +266,7 @@ export class DemoSession {
     if (!this.device) throw new Error('not-started');
     const client = await this.openLedger();
     const ledger = await client.read();
-    const proposal = ledger.prepare(operation, this.device.publicKey);
+    const proposal = ledger.prepare(operation, this.device.publicKey, this.pointCache);
     const record = encodeSignedRecord(
       proposal.bodyBytes,
       await this.device.sign(proposal.signingBytes)
@@ -395,6 +414,7 @@ export class DemoSession {
       epochKey: key,
       sign: (bytes) => this.device.sign(bytes),
       entropy: this.options.entropy,
+      cache: this.pointCache,
     });
     const client = new StreamsClient({
       url: this.streamUrl(KEYS_STREAM),
@@ -425,6 +445,7 @@ export class DemoSession {
       recipient: this.device.publicKey,
       recipientKeyPair: this.device.encryption,
       frame,
+      cache: this.pointCache,
     });
     this.epochKeys.set(epoch, key);
     this.persistEpochs();
@@ -516,16 +537,17 @@ export class DemoSession {
     remote: ComparisonWire
   ): Promise<{ kind: string; independent?: boolean; source: 'independent' }> {
     const ledger = await this.readLedger();
-    const local = ledger.comparisonNote(this.device.publicKey);
+    const local = ledger.comparisonNote(this.device.publicKey, this.pointCache);
     return { ...this.finishCompare(local, parseNote(remote)), source: 'independent' };
   }
 
   private finishCompare(local: ComparisonNote, remote: ComparisonNote) {
     if (!this.genesis) throw new Error('no-space');
-    const decoded = decodeRecord(this.genesis);
+    const decoded = decodeRecord(this.genesis, this.pointCache);
     if (decoded.body.type !== 'genesis') throw new Error('not-genesis');
     return Ledger.compareNotes(local, remote, {
       originalEndorser: decoded.body.fields.signer,
+      pointCache: this.pointCache,
     });
   }
 

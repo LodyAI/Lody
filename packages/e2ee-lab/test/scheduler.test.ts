@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { firstDivergence, firstReplayDivergence } from '../src/replay';
+import { judgeClientDurability, judgeClientIntegrity } from '../src/judge';
 import { exploreSubmitInterleavings } from '../src/model';
 import {
   advanceTime,
@@ -121,5 +122,39 @@ describe('lab scheduler', () => {
       { events: [], entropy: [], frames: [{ ...frame, responseHex: '00' }] }
     );
     expect(divergence?.field).toBe('frame.response');
+  });
+});
+
+describe('client integrity/durability judge', () => {
+  it('does not treat missing observation or backend growth as a client pass/fail', () => {
+    expect(judgeClientIntegrity({ observed: false, acceptedUnauthorized: false })).toBe(
+      'harness-error'
+    );
+    expect(judgeClientIntegrity({ observed: true, acceptedUnauthorized: false })).toBe('pass');
+    expect(judgeClientIntegrity({ observed: true, acceptedUnauthorized: true })).toBe('violation');
+  });
+
+  it('flags cursor-ahead and lost durable data only from client facts', () => {
+    expect(
+      judgeClientDurability({
+        observed: true,
+        cursorAheadOfDocument: false,
+        lostDurableData: false,
+      })
+    ).toBe('pass');
+    expect(
+      judgeClientDurability({
+        observed: true,
+        cursorAheadOfDocument: true,
+        lostDurableData: false,
+      })
+    ).toBe('violation');
+    expect(
+      judgeClientDurability({
+        observed: false,
+        cursorAheadOfDocument: true,
+        lostDurableData: false,
+      })
+    ).toBe('harness-error');
   });
 });

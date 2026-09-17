@@ -6,7 +6,14 @@ import {
   replayEntropy,
   type EntropyFill,
 } from '../src/entropy';
-import { cleanupLab, labClient, launchLab, snapshotDevices } from '../src/fixtures';
+import {
+  cleanupLab,
+  drainUntil,
+  labClient,
+  launchLab,
+  permitUntil,
+  snapshotDevices,
+} from '../src/fixtures';
 import { firstReplayDivergence, type ReplayMaterial } from '../src/replay';
 import { LabRuntime } from '../src/runtime';
 
@@ -51,14 +58,23 @@ async function casOnce(input?: {
   const other = input?.extras?.other
     ? await (await import('../src/platform/device')).importDevice(input.extras.other)
     : await generateDevice();
+  runtime.pause('twin');
   const aliceSubmit = alice.admitDevice(extra, 'personal', false);
-  await runtime.whenRequested(1);
   const twinSubmit = twin.admitDevice(other, 'personal', false);
-  await runtime.whenRequested(2);
-  runtime.permitActor('alice');
-  const aliceResult = await aliceSubmit;
-  runtime.permitActor('twin');
-  const twinResult = await twinSubmit;
+  const casRequest =
+    (actor: string) => (event: { actor: string; operation: string; phase: string }) =>
+      event.actor === actor && event.operation === 'submit' && event.phase === 'request-queued';
+  const aliceCas = await permitUntil(runtime, casRequest('alice'));
+  runtime.pause('alice');
+  runtime.resumeActor('twin');
+  const twinCas = await permitUntil(runtime, casRequest('twin'));
+  runtime.pause('twin');
+  runtime.resumeActor('alice');
+  runtime.permit(aliceCas.eventId);
+  const aliceResult = await drainUntil(runtime, aliceSubmit);
+  runtime.resumeActor('twin');
+  runtime.permit(twinCas.eventId);
+  const twinResult = await drainUntil(runtime, twinSubmit);
   expect(aliceResult.status).toBe('committed');
   expect(twinResult.status).toBe('conflict');
   const devices = await snapshotDevices({ alice });
@@ -71,7 +87,7 @@ async function casOnce(input?: {
     devices,
     extras: { extra: await exportDevice(extra), other: await exportDevice(other) },
     entropy: fills,
-    winner: (await alice.readLedger()).head,
+    winner: (await drainUntil(runtime, alice.readLedger())).head,
   };
 }
 

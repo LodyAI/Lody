@@ -6,6 +6,8 @@ export interface LabEvent {
   readonly actor: string;
   readonly operation: string;
   readonly phase: string;
+  /** Enclosing event for nested phases; children need their own permit. */
+  readonly parent?: string;
   readonly status: 'requested' | 'permitted' | 'completed';
 }
 
@@ -25,7 +27,7 @@ export function emptyScheduler(time = 0): SchedulerState {
 
 export function requestEvent(
   state: SchedulerState,
-  input: { actor: string; operation: string; phase: string }
+  input: { actor: string; operation: string; phase: string; parent?: string }
 ): { state: SchedulerState; event: LabEvent } {
   const event: LabEvent = {
     eventId: `e${state.nextId}`,
@@ -34,6 +36,7 @@ export function requestEvent(
     actor: input.actor,
     operation: input.operation,
     phase: input.phase,
+    parent: input.parent,
     status: 'requested',
   };
   return {
@@ -58,6 +61,35 @@ export function recordEvent(
   return { event, state: completed };
 }
 
+function ancestorIds(state: SchedulerState, event: LabEvent): Set<string> {
+  const ids = new Set<string>();
+  let cursor = event.parent;
+  while (cursor !== undefined) {
+    if (ids.has(cursor)) break;
+    ids.add(cursor);
+    cursor = state.events.find((row) => row.eventId === cursor)?.parent;
+  }
+  return ids;
+}
+
+/**
+ * Whether a requested event may run now. At most one permitted root chain is
+ * allowed: every currently permitted event must be an ancestor of the target,
+ * and the target's parent (if any) must already be permitted or completed.
+ */
+export function canPermitEvent(state: SchedulerState, eventId: string): boolean {
+  const target = state.events.find((event) => event.eventId === eventId);
+  if (!target || target.status !== 'requested') return false;
+  if (target.parent !== undefined) {
+    const parent = state.events.find((event) => event.eventId === target.parent);
+    if (!parent || parent.status === 'requested') return false;
+  }
+  const ancestors = ancestorIds(state, target);
+  return state.events.every(
+    (event) => event.status !== 'permitted' || ancestors.has(event.eventId)
+  );
+}
+
 export function permitEvent(
   state: SchedulerState,
   eventId: string
@@ -65,9 +97,7 @@ export function permitEvent(
   const index = state.events.findIndex((event) => event.eventId === eventId);
   const current = state.events[index];
   if (!current || current.status !== 'requested') throw new Error('event-not-requested');
-  if (state.events.some((event) => event.status === 'permitted')) {
-    throw new Error('permit-busy');
-  }
+  if (!canPermitEvent(state, eventId)) throw new Error('permit-busy');
   const event: LabEvent = { ...current, status: 'permitted' };
   const events = state.events.slice();
   events[index] = event;

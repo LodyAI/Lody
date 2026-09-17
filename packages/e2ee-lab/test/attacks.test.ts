@@ -12,7 +12,7 @@ import { fromHex } from '../src/platform/bytes';
 import { HonestClient } from '../src/actors';
 import { appendControlRecord } from '../src/attacks';
 import { startLabBackend, type LabBackend } from '../src/backend';
-import { judgeImport } from '../src/judge';
+import { defectiveAcceptInvalid, judgeImport } from '../src/judge';
 
 const dirs: string[] = [];
 const hosts: LabBackend[] = [];
@@ -30,8 +30,11 @@ afterEach(async () => {
 
 describe('P3 judge and real control tamper', () => {
   it('marks a known defective importer as a violation', () => {
+    expect(defectiveAcceptInvalid({ invalidRecord: true, accepted: true })).toBe('violation');
+    expect(defectiveAcceptInvalid({ invalidRecord: true, accepted: false })).toBe('pass');
+    // Backend growth alone is diagnostic, not client integrity loss.
     expect(judgeImport({ rejected: true, ledgerLength: 1, expectedLength: 1 })).toBe('pass');
-    expect(judgeImport({ rejected: false, ledgerLength: 2, expectedLength: 1 })).toBe('violation');
+    expect(judgeImport({ rejected: false, ledgerLength: 2, expectedLength: 1 })).toBe('pass');
   });
 
   it('rejects a tampered signature on the real backend without advancing the cursor', async () => {

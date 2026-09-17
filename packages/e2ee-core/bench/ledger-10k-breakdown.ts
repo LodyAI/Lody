@@ -36,8 +36,8 @@ async function main() {
   const full2 = await timed('full-verify-2', () =>
     Ledger.verify({ anchor: created.anchor, records })
   );
-  const decodeMs = await timed('decode-all', () => records.map(decodeRecord));
-  const decoded = records.map(decodeRecord);
+  const decodeMs = await timed('decode-all', () => records.map((record) => decodeRecord(record)));
+  const decoded = records.map((record) => decodeRecord(record));
   const hashMs = await timed('hash-all', () => {
     for (const record of records) hashRecordBytes(record);
   });

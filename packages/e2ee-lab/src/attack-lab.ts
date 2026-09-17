@@ -1,13 +1,21 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { Effect } from 'effect';
 import { toHex } from './platform/bytes';
 import type { LabBackend } from './backend';
 import { mutateSqliteBytes, riverrunNextOffset, riverrunRecordCount } from './attacks';
-import { CONTROL_STREAM } from './platform/protocol';
-import { judgeCursor, judgeImport, judgeLeak, type JudgeVerdict } from './judge';
-import type { LabEvent } from './scheduler';
+import { CONTROL_STREAM, FLOCK_STREAM, LORO_STREAM } from './platform/protocol';
+import { judgeClientDurability, judgeClientIntegrity, judgeLeak, type JudgeVerdict } from './judge';
+import { canPermitEvent, type LabEvent } from './scheduler';
+import { firstReplayDivergence, type Divergence } from './replay';
 import { LabRuntime, type ProtocolFrame } from './runtime';
+import { Ledger } from '@lody/e2ee-core/ledger';
+import { SqliteLedgerStore } from '@lody/e2ee-core/ledger-node';
+import { LoroDoc, VersionVector } from 'loro-crdt';
+import { Flock } from '@loro-dev/flock-wasm';
+import type { HonestClient } from './actors';
+import { flockCursorPath, flockDocPath, loroCursorPath, loroDocPath } from './platform/persist';
 
 export interface PublicView {
   readonly events: readonly Pick<
@@ -78,11 +86,22 @@ export interface AttackLab {
   actions(): readonly AttackAction[];
 }
 
+/**
+ * Measured client facts only — never security conclusions. Missing fields are
+ * unmeasured observations, not passes.
+ */
 export interface HonestInspect {
-  ledgerLength: number;
-  expectedLength: number;
-  cursor?: string | null;
-  baselineCursor?: string | null;
+  /** Verified records the client holds after a real read. */
+  verifiedRecords?: number;
+  /** Backend control-stream records the client fetched but refused to verify. */
+  rejectedRecords?: number;
+  /** Client-held journal records that fail re-verification (defective accept). */
+  unverifiedAccepted?: number;
+  /** Persisted cursor recorded progress beyond durable state. */
+  cursorAhead?: boolean;
+  /** Durable document/cursor data missing or inconsistent. */
+  durableLoss?: boolean;
+  /** Live import/verify of remote state failed. */
   importFailed?: boolean;
   unmeasured?: boolean;
 }
@@ -95,9 +114,6 @@ type PrivateState = {
   genesisHex: string | null;
   inspectHonest?: () => Promise<HonestInspect>;
   expectedLength: number;
-  baselineCount?: number;
-  baselineOffset?: string;
-  baselinePromise?: Promise<void>;
   errors: string[];
   claims: AttackClaim[];
   actions: AttackAction[];
@@ -144,76 +160,161 @@ function assertBudget(state: PrivateState): void {
   if (Date.now() - state.startedMs > state.maxMs) throw new Error('attack-budget-time');
 }
 
-async function captureBaseline(state: PrivateState): Promise<void> {
-  if (!state.genesisHex) return;
-  if (!state.baselinePromise) {
-    state.baselinePromise = (async () => {
+/**
+ * Real client measurement: live verified read, journal re-verification through
+ * `Ledger.verify`, and document/cursor file consistency. Returns measured
+ * facts; `finish` derives the verdicts.
+ */
+export function inspectClient(
+  client: HonestClient,
+  host: LabBackend
+): () => Promise<HonestInspect> {
+  return async () => {
+    const genesisHex = client.genesisHex;
+    if (!genesisHex) return { unmeasured: true };
+    const facts: HonestInspect = {};
+    try {
+      facts.verifiedRecords = (await client.readLedger()).length;
+    } catch {
+      facts.importFailed = true;
+    }
+    const counted = await riverrunRecordCount(host.riverrunUrl, genesisHex, CONTROL_STREAM);
+    if (counted.ok && facts.verifiedRecords !== undefined) {
+      facts.rejectedRecords = Math.max(0, counted.count - facts.verifiedRecords);
+    }
+    // Re-verify every record the client durably holds; a stored record that
+    // fails verification is a client-side unauthorized acceptance.
+    const store = new SqliteLedgerStore(join(client.clientDir, 'ledger.sqlite'));
+    let journal: { genesis: Uint8Array; records: readonly Uint8Array[] } | null = null;
+    try {
+      journal = await store.exclusive((tx) => tx.load());
+    } catch {
+      journal = null;
+    }
+    if (journal && journal.records.length > 0) {
       try {
-        const counted = await riverrunRecordCount(
-          state.host.riverrunUrl,
-          state.genesisHex!,
-          CONTROL_STREAM
-        );
-        state.baselineCount = counted.ok ? counted.count : 0;
-        state.baselineOffset = await riverrunNextOffset(
-          state.host.riverrunUrl,
-          state.genesisHex!,
-          CONTROL_STREAM
-        );
+        await Ledger.verify({ anchor: journal.genesis, records: journal.records });
+        facts.unverifiedAccepted = 0;
       } catch {
-        state.baselineCount = 0;
+        facts.unverifiedAccepted = journal.records.length;
       }
-    })();
+    } else {
+      // Nothing durably held means nothing was accepted — still a fact.
+      facts.unverifiedAccepted = 0;
+    }
+    facts.durableLoss =
+      (facts.verifiedRecords !== undefined && facts.verifiedRecords > 0 && !journal) ||
+      (await cursorFacts(client.clientDir, host, genesisHex)).loss;
+    facts.cursorAhead = (await cursorFacts(client.clientDir, host, genesisHex)).ahead;
+    return facts;
+  };
+}
+
+/**
+ * Does the persisted document still cover every version the cursor claims to
+ * have consumed? A document rolled back to an older snapshot while keeping the
+ * latest cursor fails this check. Returns undefined when it cannot be decided.
+ */
+function docCoversCursor(
+  docPath: string,
+  kind: string,
+  claimed: Record<string, unknown>
+): boolean | undefined {
+  try {
+    const bytes = readFileSync(docPath);
+    if (kind === FLOCK_STREAM) {
+      const version = Flock.fromFile(new Uint8Array(bytes), 'inspector').inclusiveVersion();
+      for (const [peer, entry] of Object.entries(claimed)) {
+        const seen = version[peer];
+        const want = entry as { physicalTime?: number; logicalCounter?: number } | undefined;
+        if (
+          !seen ||
+          typeof want?.physicalTime !== 'number' ||
+          typeof want?.logicalCounter !== 'number' ||
+          seen.physicalTime < want.physicalTime ||
+          (seen.physicalTime === want.physicalTime && seen.logicalCounter < want.logicalCounter)
+        ) {
+          return false;
+        }
+      }
+      return true;
+    }
+    const doc = new LoroDoc();
+    let version: VersionVector | undefined;
+    try {
+      doc.import(new Uint8Array(bytes));
+      version = doc.oplogVersion();
+      const claimedVector = new VersionVector(
+        new Map(
+          Object.entries(claimed).map(([peer, counter]) => [
+            peer as `${number}`,
+            counter as number,
+          ])
+        )
+      );
+      const order = version.compare(claimedVector);
+      claimedVector.free();
+      return order !== undefined && order >= 0;
+    } finally {
+      version?.free();
+      doc.free();
+    }
+  } catch {
+    return undefined;
   }
-  await state.baselinePromise;
+}
+
+async function cursorFacts(
+  clientDir: string,
+  host: LabBackend,
+  genesisHex: string
+): Promise<{ ahead: boolean | undefined; loss: boolean }> {
+  let ahead: boolean | undefined = false;
+  let loss = false;
+  for (const kind of [LORO_STREAM, FLOCK_STREAM] as const) {
+    const cursorPath = kind === 'flock' ? flockCursorPath(clientDir) : loroCursorPath(clientDir);
+    const docPath = kind === 'flock' ? flockDocPath(clientDir) : loroDocPath(clientDir);
+    if (!existsSync(cursorPath)) continue;
+    if (!existsSync(docPath)) {
+      loss = true;
+      continue;
+    }
+    let cursor: {
+      streamUrl?: string;
+      nextOffset?: string;
+      serverLowerBoundVersion?: Record<string, unknown>;
+    };
+    try {
+      cursor = JSON.parse(readFileSync(cursorPath, 'utf8')) as typeof cursor;
+    } catch {
+      loss = true;
+      continue;
+    }
+    // The cursor must be bound to the persisted document: rolling the document
+    // back to an older valid snapshot while keeping this cursor is a violation.
+    const covered = docCoversCursor(docPath, kind, cursor.serverLowerBoundVersion ?? {});
+    if (covered === false) ahead = true;
+    else if (covered === undefined) ahead = undefined;
+    const stream = cursor.streamUrl?.split('/').filter(Boolean).pop() ?? kind;
+    try {
+      const tail = await riverrunNextOffset(host.riverrunUrl, genesisHex, stream);
+      if (cursor.nextOffset !== undefined && BigInt(cursor.nextOffset) > BigInt(tail)) {
+        ahead = true;
+      }
+    } catch {
+      ahead = undefined;
+    }
+  }
+  return { ahead, loss };
 }
 
 async function measureHonest(state: PrivateState): Promise<HonestInspect> {
-  await captureBaseline(state);
-  if (state.inspectHonest) {
-    try {
-      const snapshot = await state.inspectHonest();
-      return {
-        ledgerLength: snapshot.ledgerLength,
-        expectedLength: snapshot.expectedLength,
-        importFailed: snapshot.importFailed === true,
-      };
-    } catch {
-      return {
-        ledgerLength: state.expectedLength,
-        expectedLength: state.expectedLength,
-        importFailed: true,
-      };
-    }
+  if (!state.inspectHonest) return { unmeasured: true };
+  try {
+    return await state.inspectHonest();
+  } catch {
+    return { unmeasured: true };
   }
-  if (!state.genesisHex) {
-    return {
-      ledgerLength: 0,
-      expectedLength: state.expectedLength,
-      unmeasured: true,
-    };
-  }
-  const counted = await riverrunRecordCount(
-    state.host.riverrunUrl,
-    state.genesisHex,
-    CONTROL_STREAM
-  );
-  if (!counted.ok) {
-    return {
-      ledgerLength: 0,
-      expectedLength: state.expectedLength,
-      unmeasured: true,
-    };
-  }
-  const offset = await riverrunNextOffset(state.host.riverrunUrl, state.genesisHex, CONTROL_STREAM);
-  const baseline = state.baselineCount ?? state.expectedLength;
-  const grew =
-    counted.count > baseline ||
-    (state.baselineOffset !== undefined && offset !== state.baselineOffset);
-  return {
-    ledgerLength: grew ? Math.max(counted.count, baseline + 1) : counted.count,
-    expectedLength: baseline,
-  };
 }
 
 function recordAction(state: PrivateState, action: AttackAction, replay = action): void {
@@ -224,6 +325,94 @@ function recordAction(state: PrivateState, action: AttackAction, replay = action
 /** Harness-only: includes claim evidence. Not on the AttackLab capability object. */
 export function harnessReplayActions(lab: AttackLab): readonly AttackAction[] {
   return [...(secrets.get(lab)?.replayActions ?? [])];
+}
+
+/** Harness-private digest of one honest client's durable state. */
+export interface ClientDigest {
+  readonly ledgerRecords: number | null;
+  readonly ledgerHead: string | null;
+  readonly loroDoc: string | null;
+  readonly flockDoc: string | null;
+  readonly loroCursor: string | null;
+  readonly flockCursor: string | null;
+}
+
+/**
+ * Canonical cursor digest: protocol-meaningful fields only. `streamUrl` is
+ * reduced to its path (the port is per-run) and wall-clock fields are dropped.
+ */
+function cursorDigest(path: string): string | null {
+  let raw: string;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch {
+    return null;
+  }
+  try {
+    const cursor = JSON.parse(raw) as Record<string, unknown>;
+    const url = typeof cursor.streamUrl === 'string' ? new URL(cursor.streamUrl) : null;
+    return JSON.stringify({
+      path: url?.pathname ?? null,
+      nextOffset: cursor.nextOffset ?? null,
+      serverLowerBoundVersion: cursor.serverLowerBoundVersion ?? null,
+    });
+  } catch {
+    return 'unparseable';
+  }
+}
+
+async function clientStateDigest(dir: string): Promise<ClientDigest> {
+  let journal: { genesis: Uint8Array; records: readonly Uint8Array[] } | null = null;
+  try {
+    const store = new SqliteLedgerStore(join(dir, 'ledger.sqlite'));
+    journal = await store.exclusive((tx) => tx.load());
+  } catch {
+    journal = null;
+  }
+  const hash = createHash('sha256');
+  if (journal) {
+    hash.update(journal.genesis);
+    for (const record of journal.records) hash.update(record);
+  }
+  const fileDigest = (path: string): string | null => {
+    try {
+      return createHash('sha256').update(readFileSync(path)).digest('hex');
+    } catch {
+      return null;
+    }
+  };
+  return {
+    ledgerRecords: journal ? journal.records.length : null,
+    ledgerHead: journal ? hash.digest('hex') : null,
+    loroDoc: fileDigest(loroDocPath(dir)),
+    flockDoc: fileDigest(flockDocPath(dir)),
+    loroCursor: cursorDigest(loroCursorPath(dir)),
+    flockCursor: cursorDigest(flockCursorPath(dir)),
+  };
+}
+
+export interface ReplayMaterial {
+  readonly actions: readonly AttackAction[];
+  readonly events: readonly LabEvent[];
+  readonly frames: readonly ProtocolFrame[];
+  readonly clients: readonly ClientDigest[];
+}
+
+/**
+ * Harness-only replay bundle: actions with claim evidence plus the scheduler
+ * events, protocol frames, and honest-client state digests the run produced.
+ * Never exposed to the attacker.
+ */
+export async function harnessReplayMaterial(lab: AttackLab): Promise<ReplayMaterial> {
+  const state = secrets.get(lab);
+  const clients: ClientDigest[] = [];
+  for (const dir of state?.clientDirs ?? []) clients.push(await clientStateDigest(dir));
+  return {
+    actions: [...(state?.replayActions ?? [])],
+    events: [...(state?.runtime.events() ?? [])],
+    frames: [...(state?.runtime.frames ?? [])],
+    clients,
+  };
 }
 
 export function createAttackLab(input: {
@@ -273,7 +462,6 @@ function observeEffect(lab: AttackLab) {
     try: async () => {
       const state = priv(lab);
       assertBudget(state);
-      await captureBaseline(state);
       recordAction(state, { op: 'observe' });
       return publicView(state);
     },
@@ -288,10 +476,7 @@ function advanceEffect(lab: AttackLab, input: { steps: number }) {
       assertBudget(state);
       recordAction(state, { op: 'advance', input });
       let remaining = Math.max(0, input.steps);
-      while (remaining > 0) {
-        const next = state.runtime.events().find((event) => event.status === 'requested');
-        if (!next) break;
-        state.runtime.permit(next.eventId);
+      while (remaining > 0 && state.runtime.permitNext() !== null) {
         remaining -= 1;
       }
       return publicView(state);
@@ -316,15 +501,14 @@ function advanceUntilEffect(
             (event) =>
               event.phase === input.phase &&
               event.status === 'requested' &&
-              (input.actor === undefined || event.actor === input.actor)
+              (input.actor === undefined || event.actor === input.actor) &&
+              canPermitEvent(state.runtime.state, event.eventId)
           );
         if (hit) {
           state.runtime.permit(hit.eventId);
           return { ...publicView(state), unmet: false };
         }
-        const next = state.runtime.events().find((event) => event.status === 'requested');
-        if (!next) break;
-        state.runtime.permit(next.eventId);
+        if (state.runtime.permitNext() === null) break;
       }
       return { ...publicView(state), unmet: true };
     },
@@ -376,6 +560,12 @@ function mutateBackendEffect(lab: AttackLab, input: BackendMutation) {
       state.mutations += 1;
       const ok = mutateSqliteBytes(path, needle, input.xor ?? 0xff);
       if (!ok) state.errors.push('mutation-miss');
+      // Harness-only replay record: the receipt is compared on replay so a
+      // needle that misses a different ciphertext is a divergence, not a pass.
+      state.replayActions[state.replayActions.length - 1] = {
+        op: 'mutateBackend',
+        input: { ...input, receipt: ok },
+      };
       return { ok };
     },
     catch: (error) => error,
@@ -441,22 +631,18 @@ function finishEffect(lab: AttackLab) {
       let durability: JudgeVerdict = 'unavailable';
       if (reachable) {
         const measured = await measureHonest(state);
-        if (measured.unmeasured) {
-          integrity = 'harness-error';
-          durability = 'harness-error';
-        } else {
-          const rejected =
-            measured.importFailed === true || measured.ledgerLength <= measured.expectedLength;
-          integrity = judgeImport({
-            rejected,
-            ledgerLength: measured.ledgerLength,
-            expectedLength: measured.expectedLength,
-          });
-          durability = judgeCursor({
-            rejected,
-            cursorAdvancedPastBad: measured.ledgerLength > measured.expectedLength,
-          });
-        }
+        integrity = judgeClientIntegrity({
+          observed: !measured.unmeasured && measured.unverifiedAccepted !== undefined,
+          acceptedUnauthorized: (measured.unverifiedAccepted ?? 0) > 0,
+        });
+        durability = judgeClientDurability({
+          observed:
+            !measured.unmeasured &&
+            measured.cursorAhead !== undefined &&
+            measured.durableLoss !== undefined,
+          cursorAheadOfDocument: measured.cursorAhead === true,
+          lostDurableData: measured.durableLoss === true,
+        });
       }
       return {
         confidentiality,
@@ -471,10 +657,22 @@ function finishEffect(lab: AttackLab) {
   });
 }
 
+export interface ReplayOutcome {
+  readonly report: PublicReport;
+  /** First divergent event/entropy/frame/verdict, or null on an exact replay. */
+  readonly divergence: Divergence | null;
+}
+
 export async function replayAttackActions(
   lab: AttackLab,
-  actions: readonly AttackAction[]
-): Promise<PublicReport> {
+  actions: readonly AttackAction[],
+  expected?: {
+    events?: readonly LabEvent[];
+    frames?: readonly ProtocolFrame[];
+    clients?: readonly ClientDigest[];
+    report?: PublicReport;
+  }
+): Promise<ReplayOutcome> {
   let report: PublicReport | undefined;
   for (const action of actions) {
     switch (action.op) {
@@ -497,14 +695,21 @@ export async function replayAttackActions(
           eventId: String(action.input?.eventId ?? 'barrier'),
         });
         break;
-      case 'mutateBackend':
-        await lab.mutateBackend({
+      case 'mutateBackend': {
+        const result = await lab.mutateBackend({
           eventId: String(action.input?.eventId ?? 'barrier'),
           kind: 'xor',
           needleHex: String(action.input?.needleHex ?? ''),
           xor: Number(action.input?.xor ?? 0xff),
         });
+        const receipt = action.input?.receipt;
+        if (receipt !== undefined && result.ok !== receipt) {
+          throw new Error(
+            `replay-divergence:mutateBackend:${String(action.input?.needleHex)}:expected:${String(receipt)}:actual:${result.ok}`
+          );
+        }
         break;
+      }
       case 'intercept':
         await lab.intercept({
           eventId: String(action.input?.eventId ?? ''),
@@ -527,7 +732,70 @@ export async function replayAttackActions(
     }
   }
   if (!report) report = await lab.finish();
-  return report;
+  let divergence: Divergence | null = null;
+  const state = secrets.get(lab);
+  if (expected?.events) {
+    divergence = firstReplayDivergence(
+      { events: expected.events, frames: [], entropy: [] },
+      { events: state?.runtime.events() ?? [], frames: [], entropy: [] }
+    );
+  }
+  if (!divergence && expected?.frames) {
+    divergence = firstReplayDivergence(
+      { events: [], frames: expected.frames, entropy: [] },
+      { events: [], frames: state?.runtime.frames ?? [], entropy: [] }
+    );
+  }
+  if (!divergence && expected?.clients) {
+    const actualClients: ClientDigest[] = [];
+    for (const dir of state?.clientDirs ?? []) actualClients.push(await clientStateDigest(dir));
+    const count = Math.max(expected.clients.length, actualClients.length);
+    for (let index = 0; index < count && !divergence; index++) {
+      const expectedClient = expected.clients[index];
+      const actualClient = actualClients[index];
+      if (!expectedClient || !actualClient) {
+        divergence = {
+          index,
+          field: 'client',
+          expected: expectedClient ? 'present' : 'missing',
+          actual: actualClient ? 'present' : 'missing',
+        };
+        break;
+      }
+      for (const key of [
+        'ledgerRecords',
+        'ledgerHead',
+        'loroDoc',
+        'flockDoc',
+        'loroCursor',
+        'flockCursor',
+      ] as const) {
+        if (expectedClient[key] !== actualClient[key]) {
+          divergence = {
+            index,
+            field: `client.${key}`,
+            expected: String(expectedClient[key]),
+            actual: String(actualClient[key]),
+          };
+          break;
+        }
+      }
+    }
+  }
+  if (!divergence && expected?.report) {
+    for (const field of ['confidentiality', 'integrity', 'durability', 'detectability'] as const) {
+      if (report[field] !== expected.report[field]) {
+        divergence = {
+          index: 0,
+          field: `verdict.${field}`,
+          expected: String(expected.report[field]),
+          actual: String(report[field]),
+        };
+        break;
+      }
+    }
+  }
+  return { report, divergence };
 }
 
 function interceptKind(kind: unknown): ResponseMutation['kind'] {

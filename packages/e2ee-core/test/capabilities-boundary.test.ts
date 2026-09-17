@@ -104,6 +104,45 @@ describe('E1 pure ledger boundary', () => {
       }
     }
   });
+
+  it('threads the injected cache through extend/prepare/finalize without changing verdicts', async () => {
+    const owner = await ed25519();
+    const created = await signGenesis(owner);
+    const isolated = new SigningPointCache({ maxEntries: 16 });
+    const other = new SigningPointCache({ maxEntries: 16 });
+    const disabled = new SigningPointCache({ enabled: false });
+    const verified = await Ledger.verify({
+      anchor: created.anchor,
+      records: [created.record],
+      pointCache: isolated,
+    });
+
+    const phone = await ed25519();
+    const operation = await admitDeviceOp(created.anchor, phone, 'personal', false);
+    const proposal = verified.prepare(operation, owner.publicKey, isolated);
+    const record = encodeSignedRecord(proposal.bodyBytes, await owner.sign(proposal.signingBytes));
+
+    // Synchronous apply path consumes the injected instance, not the process default.
+    const extended = await verified.extend([record], other);
+    expect(extended.length).toBe(2);
+    expect(extended.state.devices.size).toBe(2);
+    expect(other.size).toBeGreaterThan(0);
+
+    const extendedDisabled = await verified.extend([record], disabled);
+    expect(extendedDisabled.head).toEqual(extended.head);
+    expect(disabled.size).toBe(0);
+
+    const forged = new Uint8Array(record);
+    forged[forged.byteLength - 1] = (forged[forged.byteLength - 1] ?? 0) ^ 0xff;
+    for (const cache of [disabled, isolated, other]) {
+      try {
+        await verified.extend([forged], cache);
+        throw new Error('forged-accepted');
+      } catch (error) {
+        expectCode(error, 'bad-signature', 1);
+      }
+    }
+  });
 });
 
 describe('E2 explicit verify executor', () => {

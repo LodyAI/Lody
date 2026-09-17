@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { isAbsolute, join, resolve } from 'node:path';
 import { startDevServer, type RunningDevServer } from '@loro-dev/sqlite-riverrun';
 import { ContentCipher, Ledger } from '@lody/e2ee-core';
-import { decodeRecord, hashRecord } from '@lody/e2ee-core/ledger';
+import { decodeRecord, hashRecord, SigningPointCache } from '@lody/e2ee-core/ledger';
 import { SqliteSnapshotPublicationStore } from '@lody/e2ee-core/node-snapshot-publication-store';
 import {
   CONTENT_SNAPSHOT_ADMISSION_WINDOW_MS,
@@ -121,6 +121,8 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
   });
 
   const ledgers = new Map<string, Ledger>();
+  // Host-scoped verification cache: no mutable cache state shared across runs.
+  const pointCache = new SigningPointCache();
 
   async function loadLedger(genesisHex: string): Promise<Ledger> {
     const cached = ledgers.get(genesisHex);
@@ -129,7 +131,7 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
     if (!space) throw new Error('unknown-space');
     const genesis = space.genesis;
     const anchor = await hashRecord(genesis);
-    let ledger = await Ledger.verify({ anchor, records: [genesis] });
+    let ledger = await Ledger.verify({ anchor, records: [genesis], pointCache });
     const client = new StreamsClient({
       url: `${riverrun.baseUrl}/ds/${encodeURIComponent(genesisHex)}/${CONTROL_STREAM}`,
       retry: { maxAttempts: 0 },
@@ -141,7 +143,7 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
       const body = response.result.payload.body;
       if (body.byteLength > 0) {
         for (const record of unframe(new Uint8Array(body))) {
-          ledger = await ledger.extend([record]);
+          ledger = await ledger.extend([record], pointCache);
         }
       }
       offset = response.result.nextOffset;
@@ -295,7 +297,7 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
             return;
           }
           const genesis = fromHex(payload.genesis);
-          const decoded = decodeRecord(genesis);
+          const decoded = decodeRecord(genesis, pointCache);
           if (decoded.body.type !== 'genesis') {
             json(res, 400, { error: 'not-genesis' });
             return;
@@ -305,7 +307,7 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
             return;
           }
           const genesisHex = toHex(await hashRecord(genesis));
-          await Ledger.verify({ anchor: fromHex(genesisHex), records: [genesis] });
+          await Ledger.verify({ anchor: fromHex(genesisHex), records: [genesis], pointCache });
           const bucket = await fetch(`${riverrun.baseUrl}/ds/${encodeURIComponent(genesisHex)}`, {
             method: 'PUT',
           });
@@ -320,7 +322,7 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
           meta.bindCredential(credential.token, genesisHex);
           ledgers.set(
             genesisHex,
-            await Ledger.verify({ anchor: fromHex(genesisHex), records: [genesis] })
+            await Ledger.verify({ anchor: fromHex(genesisHex), records: [genesis], pointCache })
           );
           json(res, 200, { genesisHex, ownerDeviceHex: credential.deviceHex });
           return;
@@ -424,7 +426,7 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
               return;
             }
             const record = records[0]!;
-            const decoded = decodeRecord(record);
+            const decoded = decodeRecord(record, pointCache);
             if (decoded.body.type !== 'ordinary') {
               json(res, 400, { error: 'not-ordinary' });
               return;
