@@ -45,8 +45,8 @@ Workflow-file security constraints live in
   handoff block and its markers. Use `Closes #123` when merging the PR should
   close the Issue and `Refs #123` only when it must stay open. A bare `#123` or
   full Lody Issue URL in `## Related issue` defaults to `Closes #123`.
-- Before opening a pull request, an Agent asks its user to publish the
-  authoring conversation and places the public link in the optional
+- Before opening a fork-based pull request, an Agent asks its user to publish
+  the authoring conversation and places the public link in the optional
   `### Shared conversation` section, deleting it when no shareable
   conversation exists. The Agent may request publication through its tools,
   but only the user confirms it; never invent a share URL.

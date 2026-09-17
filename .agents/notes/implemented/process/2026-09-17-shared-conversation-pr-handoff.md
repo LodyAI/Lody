@@ -11,8 +11,8 @@ The pull request Context handoff no longer asks authoring Agents to fill nine
 per-field summaries and review checklists. It keeps the verbatim original
 prompt as the required evidence and adds an optional `### Shared conversation`
 slot for a public link to the published Lody conversation, which carries the
-complete authoring context when it exists. An Agent must ask its user to
-publish the conversation before opening a pull request; publication always
+complete authoring context when it exists. For a fork-based pull request an
+Agent asks its user to publish the conversation first; publication always
 requires the user's confirmation in the app.
 
 ## Decision
@@ -37,16 +37,16 @@ Agents the rule targets; the Agent-facing obligation lives in
 Publication follows [conversation sharing](../../../../specs/session-sharing.md):
 an Agent may request it through its tools, but only the user confirms in the
 authenticated app. The scoped rule therefore reads "ask the user before opening
-the PR" rather than prescribing an automatic publish step, and it forbids
-inventing a share URL.
+a fork-based PR" — the handoff block is external-only, so same-repository work
+never prompts for a share — and it forbids inventing a share URL.
 
 ## Enforcement
 
 `check-pr-body.mjs` leaves `### Shared conversation` unvalidated; inside the
 context-handoff markers only `### Original user prompt` remains required. The
-per-field validators were removed with their sections. Same-repository PRs
-remain outside automated enforcement, but the authoring rule still binds their
-Agents.
+per-field validators were removed with their sections. Same-repository PRs sit
+outside automated enforcement, and the publish-request rule targets only
+fork-based PRs as well.
 
 ## Verification
 
