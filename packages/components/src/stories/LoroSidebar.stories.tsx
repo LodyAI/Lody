@@ -10,7 +10,10 @@ import type {
 import { LoroSidebar } from '@/components/loro-sidebar';
 import { LocalProjectItem } from '@/components/loro-app-sidebar';
 import { SidebarSectionHeader } from '@/components/sidebar-row-shared';
-import { buildSidebarOpenerRowResolver } from '@/components/sessions/session-list-rows';
+import {
+  buildSessionListRows,
+  buildSidebarOpenerRowResolver,
+} from '@/components/sessions/session-list-rows';
 import { SessionList } from '@/components/session-list';
 import type { SessionListProps } from '@/components/session-list';
 import type {
@@ -830,8 +833,8 @@ const demoProjects: LocalProjectMeta[] = [
 
 // A couple of local-project sessions so the single-line local row is exercised:
 // one running inside a worktree (shows the FolderTree mode icon) and one plain
-// local session (no mode icon). Live status is empty in the story, so the leading
-// status slot stays empty here.
+// local session (no mode icon). The first session stays live so the collapsed
+// project row demonstrates its aggregate running indicator.
 const demoLocalSessions: SessionMeta[] = [
   {
     id: 'local-sess-worktree' as SessionId,
@@ -844,6 +847,7 @@ const demoLocalSessions: SessionMeta[] = [
     branchName: 'feat/persistence-refactor',
     isWorktree: true,
     lastMessageAt: NOW - 3 * 60 * 60 * 1000,
+    lastReadAt: NOW - 3 * 60 * 60 * 1000,
   },
   // Independent Session opened by an agent running inside a CHILD TAB of
   // `local-sess-worktree`. Its precise opener is the Tab (`demoChildTabSession`
@@ -859,6 +863,7 @@ const demoLocalSessions: SessionMeta[] = [
     title: 'Opened from a child tab',
     openedBySessionId: 'local-sess-child-tab' as SessionId,
     lastMessageAt: NOW - 25 * 60 * 1000,
+    lastReadAt: NOW - 25 * 60 * 1000,
   },
   // Independent Sessions the first one opened through the `lody_session_create`
   // MCP tool: they indent under it, but keep their own lifecycle and row.
@@ -873,6 +878,7 @@ const demoLocalSessions: SessionMeta[] = [
     openedBySessionId: 'local-sess-worktree' as SessionId,
     isWorktree: true,
     lastMessageAt: NOW - 2 * 60 * 60 * 1000,
+    lastReadAt: NOW - 2 * 60 * 60 * 1000,
   },
   {
     id: 'local-sess-opened-docs' as SessionId,
@@ -884,6 +890,7 @@ const demoLocalSessions: SessionMeta[] = [
     title: 'Update the persistence docs',
     openedBySessionId: 'local-sess-worktree' as SessionId,
     lastMessageAt: NOW - 90 * 60 * 1000,
+    lastReadAt: NOW - 90 * 60 * 1000,
   },
   {
     id: 'local-sess-plain' as SessionId,
@@ -895,6 +902,7 @@ const demoLocalSessions: SessionMeta[] = [
     title: 'Tidy up logging output',
     isWorktree: false,
     lastMessageAt: NOW - 26 * 60 * 60 * 1000,
+    lastReadAt: NOW - 26 * 60 * 60 * 1000,
   },
 ];
 
@@ -914,7 +922,22 @@ const demoChildTabSession: SessionMeta = {
   title: 'Child tab: try the alternative fix',
   parentSessionId: 'local-sess-worktree' as SessionId,
   lastMessageAt: NOW - 40 * 60 * 1000,
+  lastReadAt: NOW - 40 * 60 * 1000,
 };
+
+const demoRemoteSessions: SessionMeta[] = [
+  {
+    id: 'remote-sess-running' as SessionId,
+    machineId: 'machine-remote' as MachineId,
+    createdAt: new Date(NOW - 20 * 60 * 1000).toISOString(),
+    userId: 'user-demo',
+    cliType: 'builtin',
+    agentType: 'claude',
+    title: 'Run checks on the remote machine',
+    lastMessageAt: NOW - 20 * 60 * 1000,
+    lastReadAt: NOW - 20 * 60 * 1000,
+  },
+];
 
 /** Mirrors `allActiveSessions`: sidebar rows PLUS the child Tabs they hide. */
 const demoResolveOpenerRowId = buildSidebarOpenerRowResolver([
@@ -922,9 +945,28 @@ const demoResolveOpenerRowId = buildSidebarOpenerRowResolver([
   demoChildTabSession,
 ]);
 
+type ProjectStoryOptions = {
+  localProjectLiveSessionStatuses?: ReadonlyMap<string, SessionStatus>;
+  localProjectChildSessionsByParent?: Map<string, SessionMeta[]>;
+  localProjectSessions?: SessionMeta[];
+  localProjects?: LocalProjectMeta[];
+  localProjectSessionsById?: ReadonlyMap<string, SessionMeta[]>;
+  remoteProjectSessions?: SessionMeta[];
+  initiallyCollapseRemoteProject?: boolean;
+  initiallyCollapseLocalProjects?: boolean;
+};
+
 function ProductionLikeTopContent({
   chatSessions,
   githubWorktreeCount,
+  localProjectLiveSessionStatuses = EMPTY_LIVE_SESSION_STATUSES,
+  localProjectChildSessionsByParent = new Map(),
+  localProjectSessions = demoLocalSessions,
+  localProjects = demoProjects,
+  localProjectSessionsById,
+  remoteProjectSessions = [],
+  initiallyCollapseRemoteProject = false,
+  initiallyCollapseLocalProjects = true,
   selectedSessionId,
   onSelectSession,
   onArchiveSession,
@@ -940,13 +982,17 @@ function ProductionLikeTopContent({
   onNew: (repoFullName?: string) => void;
   chatsCollapsed: boolean;
   onToggleChatsCollapsed: () => void;
-}) {
+} & ProjectStoryOptions) {
   const isMobile = useIsMobile();
   const [localProjectsCollapsed, setLocalProjectsCollapsed] = useState(false);
   const [githubCollapsed, setGithubCollapsed] = useState(false);
   const projectCollapseStates = useMemo(
-    () => Object.fromEntries(demoProjects.map((p) => [`${demoMachineId}:${p.id}`, true])),
-    []
+    () =>
+      Object.fromEntries([
+        ...localProjects.map((p) => [`${demoMachineId}:${p.id}`, initiallyCollapseLocalProjects]),
+        ...(initiallyCollapseRemoteProject ? [['machine-remote:proj-lody', true]] : []),
+      ]),
+    [initiallyCollapseRemoteProject, initiallyCollapseLocalProjects, localProjects]
   );
   const [collapsedProjects, setCollapsedProjects] =
     useState<Record<string, boolean>>(projectCollapseStates);
@@ -982,7 +1028,7 @@ function ProductionLikeTopContent({
           <SidebarSectionHeader
             label="Local Projects"
             collapsed={localProjectsCollapsed}
-            count={demoProjects.length}
+            count={localProjects.length}
             isMobile={isMobile}
             toggleLabel="Toggle"
             onToggleCollapsed={() => setLocalProjectsCollapsed((v) => !v)}
@@ -998,9 +1044,12 @@ function ProductionLikeTopContent({
           />
           {localProjectsCollapsed ? null : (
             <div className="space-y-1">
-              {demoProjects.map((project) => {
+              {localProjects.map((project) => {
                 const key = `${demoMachineId}:${project.id}`;
                 const collapsed = collapsedProjects[key] ?? false;
+                const projectSessions =
+                  localProjectSessionsById?.get(project.id) ??
+                  (project.id === ('proj-lody' as LocalProjectId) ? localProjectSessions : []);
                 return (
                   <LocalProjectItem
                     key={project.id}
@@ -1010,21 +1059,24 @@ function ProductionLikeTopContent({
                     canRemoveProject
                     collapsed={collapsed}
                     isSelected={false}
-                    sessionsForProject={
-                      project.id === ('proj-lody' as LocalProjectId) ? demoLocalSessions : []
-                    }
-                    childSessionsByParent={new Map()}
-                    liveSessionStatuses={EMPTY_LIVE_SESSION_STATUSES}
+                    sessionsForProject={projectSessions}
+                    childSessionsByParent={localProjectChildSessionsByParent}
+                    liveSessionStatuses={localProjectLiveSessionStatuses}
                     formattedPath={project.rootPath}
                     defaultSessionTitle="Untitled"
                     selectedSessionId={null}
                     removeProjectLabel="Remove folder"
+                    newChatLabel="New chat in this project"
                     archiveTooltipLabel="Archive"
                     archiveActionLabel="Archive"
                     archiveConfirmLabel="Confirm"
                     isMobile={isMobile}
                     toggleLabel="Toggle"
                     onNavigateProject={() => {}}
+                    onNewChatInProject={() => {}}
+                    onOpenProjectSettings={() => {}}
+                    onRevealProject={() => {}}
+                    onArchiveProjectChats={() => {}}
                     onNavigateSession={() => {}}
                     onArchive={() => {}}
                     collapsedOpenedBySessionIds={collapsedOpenedBySessionIds}
@@ -1064,19 +1116,23 @@ function ProductionLikeTopContent({
                   canRemoveProject
                   collapsed={collapsed}
                   isSelected={false}
-                  sessionsForProject={[] as SessionMeta[]}
-                  childSessionsByParent={new Map()}
-                  liveSessionStatuses={EMPTY_LIVE_SESSION_STATUSES}
+                  sessionsForProject={remoteProjectSessions}
+                  childSessionsByParent={localProjectChildSessionsByParent}
+                  liveSessionStatuses={localProjectLiveSessionStatuses}
                   formattedPath={project.rootPath}
                   defaultSessionTitle="Untitled"
                   selectedSessionId={null}
                   removeProjectLabel="Remove folder"
+                  newChatLabel="New chat in this project"
                   archiveTooltipLabel="Archive"
                   archiveActionLabel="Archive"
                   archiveConfirmLabel="Confirm"
                   isMobile={isMobile}
                   toggleLabel="Toggle"
                   onNavigateProject={() => {}}
+                  onNewChatInProject={() => {}}
+                  onOpenProjectSettings={() => {}}
+                  onArchiveProjectChats={() => {}}
                   onNavigateSession={() => {}}
                   onArchive={() => {}}
                   collapsedOpenedBySessionIds={collapsedOpenedBySessionIds}
@@ -1105,7 +1161,7 @@ function ProductionLikeTopContent({
   );
 }
 
-function WithProjectsLayout(args: Parameters<typeof LoroSidebar>[0]) {
+function WithProjectsLayout(args: Parameters<typeof LoroSidebar>[0] & ProjectStoryOptions) {
   const baseSessionListProps = args.sessionListProps ?? demoTaskListProps;
   const [activeNav, setActiveNav] = useState<LoroSidebarNavKey>(args.activeNav ?? 'home');
   const [workspaceId, setWorkspaceId] = useState(args.currentWorkspaceId);
@@ -1166,6 +1222,7 @@ function WithProjectsLayout(args: Parameters<typeof LoroSidebar>[0]) {
       currentWorkspaceId={workspaceId}
       topContent={
         <ProductionLikeTopContent
+          {...args}
           chatSessions={chatSessions}
           githubWorktreeCount={repos.length}
           selectedSessionId={selectedSessionId}
@@ -1267,6 +1324,108 @@ export const WithProjects: Story = {
   render: (args) => <WithProjectsLayout {...args} />,
   args: {
     ...Default.args!,
+  },
+};
+
+type ActivityCounts = [permission: number, unread: number, active: number];
+
+function projectActivityFixture(
+  [permission, unread, active]: ActivityCounts,
+  {
+    project = demoProjects[0]!,
+    repoFullName = 'loro-dev/lody',
+    prefix = 'activity',
+    initializing = false,
+    overlapUnreadActive = false,
+  } = {}
+) {
+  const baseSession: SessionMeta = {
+    ...demoLocalSessions[0]!,
+    project: { kind: 'local', localProjectId: project.id },
+    lastReadAt: NOW,
+  };
+  const liveSessionStatuses = new Map<string, SessionStatus>();
+  const sessions = Object.entries({ permission, unread, active }).flatMap(([status, count]) =>
+    Array.from({ length: count }, (_, index): SessionMeta => {
+      const id = `${prefix}-${status}-${index}` as SessionId;
+      const activeStatus = initializing || index % 2 ? 'initializing' : 'running';
+      if (status !== 'unread' || overlapUnreadActive)
+        liveSessionStatuses.set(id, {
+          type: status === 'permission' ? 'requestPermission' : activeStatus,
+        });
+      return {
+        ...baseSession,
+        id,
+        title: `${status} ${index + 1}`,
+        lastReadAt: status === 'unread' ? 0 : NOW,
+      };
+    })
+  );
+  if (!sessions.length) sessions.push({ ...baseSession, id: `${prefix}-idle` as SessionId });
+  return {
+    project,
+    repoFullName,
+    sessions,
+    liveSessionStatuses,
+    rows: buildSessionListRows(
+      sessions.map((session) => ({
+        ...session,
+        project: { kind: 'github', repoFullName, branch: 'demo' },
+      })),
+      { scope: 'my', currentUserId: 'user-demo', defaultTitle: '', liveSessionStatuses }
+    ),
+  };
+}
+
+const activityCases: Array<[string, ActivityCounts, boolean?, boolean?]> = [
+  ['Permission', [1, 0, 0]],
+  ['Permission x2', [2, 0, 0]],
+  ['Initializing', [0, 0, 1], true],
+  ['Permission and overlap', [1, 1, 0], false, true],
+  ['Unread and active', [0, 1, 1]],
+  ['Mixed remainder', [1, 1, 1]],
+];
+const activityFixtures = activityCases.map(([name, counts, initializing, overlapUnreadActive], i) =>
+  projectActivityFixture(counts, {
+    project: { ...demoProjects[0]!, id: `activity-${i}` as LocalProjectId, name },
+    prefix: `activity-${i}`,
+    repoFullName: `demo/${name.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-')}`,
+    initializing,
+    overlapUnreadActive,
+  })
+);
+const githubActivityFixtures = activityFixtures.filter(
+  ({ project }) => project.name === 'Permission and overlap'
+);
+
+/** The collapsed project rows use the real sidebar layout across all project types. */
+export const CollapsedProjectActivity: Story = {
+  render: (args) => (
+    <WithProjectsLayout
+      {...args}
+      localProjects={activityFixtures.map((fixture) => fixture.project)}
+      localProjectSessionsById={new Map(activityFixtures.map((f) => [f.project.id, f.sessions]))}
+      localProjectLiveSessionStatuses={
+        new Map([
+          ...activityFixtures.flatMap((f) => [...f.liveSessionStatuses]),
+          ['remote-sess-running', { type: 'running' }],
+        ])
+      }
+      remoteProjectSessions={demoRemoteSessions}
+      initiallyCollapseLocalProjects
+      initiallyCollapseRemoteProject
+    />
+  ),
+  args: {
+    ...Default.args!,
+    sessionListProps: {
+      ...demoTaskListProps,
+      repos: githubActivityFixtures.map(({ repoFullName }) => ({ repoFullName, collapsed: true })),
+      sessions: [
+        ...demoTaskListProps.sessions.filter((session) => !session.repoFullName),
+        ...githubActivityFixtures.flatMap((fixture) => fixture.rows),
+      ],
+    },
   },
 };
 
