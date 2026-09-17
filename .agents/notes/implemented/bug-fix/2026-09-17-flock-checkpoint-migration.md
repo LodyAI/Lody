@@ -48,3 +48,26 @@ tests, and the components typecheck passes. Source inspection confirms snapshot
 import merges into the live Flock, and cursor saving awaits the data barrier.
 This validates IndexedDB recovery, not persistent SQLite checkpoints or recovery
 of records already missing from the remote snapshot and retained stream tail.
+
+## Follow-up review: unresolved local-plane repair propagation
+
+The durability checks now reopen storage without destroying/flushing the writer,
+and inject data-save and checkpoint-save failures through the published transport
+for both Meta and named Flock. Nine persistence tests pass: failed data writes do
+not advance recovered progress, failed checkpoint writes preserve saved data, and
+retry repairs the missing key even though it is already present in memory.
+
+A separate real-Wasm server reproducer confirms an unresolved migration gap:
+server and local reader first contain B at peer aa clock 2; bootstrap later adds
+A at aa clock 1 to the server. Its version remains aa:2, so the local server exports
+against lastSentVersion aa:2 and emits no repair. The reader still lacks A.
+The earlier regression covered only a disappeared peer frontier and does not
+prove this case. This is an existing local-protocol limitation, not a regression
+introduced by the persistence helper, but prevents claiming end-to-end repair for
+local-primary readers until their own cloud catch-up repairs them.
+
+The owning local-server suite records this as an explicit `it.fails` regression;
+its green suite result means the known failure reproduced, not that it is fixed.
+Remove that marker only when exact changed-key forwarding or a reconciliation
+path repairs the recipient. Switching to inclusiveVersion does not fix it.
+This review changes tests/evidence only; the production fix is still pending.

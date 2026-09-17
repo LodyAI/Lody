@@ -28,15 +28,26 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 async function open(dbName = 'migration', storage = new IndexedDBStorageAdaptor({ dbName })) {
-  const repo = await LoroRepo.create({ storageAdapter: storage, metaDebounceCommitMs: 0 });
+  const repo = await LoroRepo.create({
+    storageAdapter: storage,
+    metaDebounceCommitMs: 0,
+    metaPersistDebounceMs: 60_000,
+    docPersistDebounceMs: 60_000,
+    metaCompactionByteThreshold: 0,
+    flockDocCompactionByteThreshold: 0,
+  });
   repos.push(repo);
   return repo;
 }
 
 describe('renderer Streams replica persistence', () => {
-  it.each(['meta', 'named'] as const)(
-    'bootstraps %s through the published transport, merges local data, then resumes after restart',
-    async (kind) => {
+  it.each(
+    (['meta', 'named'] as const).flatMap((kind) =>
+      (['none', 'data', 'checkpoint'] as const).map((failure) => ({ kind, failure }))
+    )
+  )(
+    'recovers $kind through the published transport with $failure failure, without shutdown flush',
+    async ({ kind, failure }) => {
       const server = await open('remote');
       server.getMeta().importJson(record('A', 1));
       server.getMeta().importJson(record('B', 2));
@@ -73,22 +84,44 @@ describe('renderer Streams replica persistence', () => {
       });
       const load = async (repo: LoroRepo) =>
         kind === 'meta' ? repo.getMeta() : (await repo.openFlockDoc('migration-named')).flock;
-      const transportFor = (repo: LoroRepo) =>
-        new StreamsTransportAdapter({
+      let rejectWrites = false;
+      const transportFor = (repo: LoroRepo) => {
+        const persistence = createRendererStreamsPersistence(repo, {
+          shouldBypassMetaLoad: () => false,
+        });
+        return new StreamsTransportAdapter({
           baseUrl: 'https://checkpoint.invalid',
           bucketId: 'bucket',
           auth: 'synthetic-test',
-          persistence: createRendererStreamsPersistence(repo, {
-            shouldBypassMetaLoad: () => false,
-          }),
+          persistence: {
+            ...persistence,
+            cursorStoreFor: (target) => {
+              const store = persistence.cursorStoreFor(target);
+              return {
+                ...store,
+                save: (value) =>
+                  rejectWrites && failure === 'checkpoint'
+                    ? Promise.reject(new Error('checkpoint unavailable'))
+                    : store.save(value),
+              };
+            },
+          },
         });
-      const first = await open('transport-migration');
+      };
+      const storage = new IndexedDBStorageAdaptor({ dbName: 'transport-migration' });
+      const save = storage.save.bind(storage);
+      storage.save = (payload) =>
+        rejectWrites && failure === 'data'
+          ? Promise.reject(new Error('data unavailable'))
+          : save(payload);
+      const first = await open('transport-migration', storage);
       const flock = await load(first);
       flock.importJson(record('B', 2));
       flock.importJson({
         version: 0,
         entries: { '["local"]': { d: 'unsent', c: '1700000000000,1,bb' } },
       });
+      await first.flush();
       const initialVersion = flock.version();
       const sync = (transport: StreamsTransportAdapter, target: typeof flock) =>
         kind === 'meta'
@@ -96,16 +129,35 @@ describe('renderer Streams replica persistence', () => {
           : transport.syncFlockDoc('migration-named', target);
       const transport = transportFor(first);
       try {
+        if (failure !== 'none') {
+          rejectWrites = true;
+          expect((await sync(transport, flock)).ok).toBe(false);
+          const interrupted = await open('transport-migration');
+          const interruptedFlock = await load(interrupted);
+          expect(interruptedFlock.get(['local'])).toBe('unsent');
+          expect(interruptedFlock.get(['A'])).toBe(failure === 'data' ? undefined : 'A');
+          const target =
+            kind === 'meta'
+              ? ({ kind: 'meta', flock: interruptedFlock } as const)
+              : ({
+                  kind: 'flock',
+                  flockDocId: 'migration-named',
+                  flock: interruptedFlock,
+                } as const);
+          const streamUrl = `https://checkpoint.invalid/ds/bucket/${kind === 'meta' ? 'repo-meta' : 'flock%3Amigration-named'}`;
+          expect(await interrupted.getReplicaCheckpointStore(target).load(streamUrl)).toBeNull();
+          rejectWrites = false;
+        }
         expect((await sync(transport, flock)).ok).toBe(true);
         expect(flock.version()).toEqual(initialVersion);
         expect(flock.get(['A'])).toBe('A');
         expect(flock.get(['local'])).toBe('unsent');
         expect(requests.some((url) => url.pathname.endsWith('/bootstrap'))).toBe(true);
       } finally {
+        rejectWrites = false;
         await transport.close();
       }
-      await first.destroy();
-      repos.splice(repos.indexOf(first), 1);
+      // No destroy/flush on the writer: recovery must rely on the sync barrier.
       const restarted = await open('transport-migration');
       const restored = await load(restarted);
       expect(restored.get(['A'])).toBe('A');

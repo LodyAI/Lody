@@ -96,7 +96,7 @@ function flockEntriesOf(messages: LocalLoroDataPlaneServerMessage[]): Record<str
 }
 
 describe('LocalLoroDataPlaneServer doc room hydration signals', () => {
-  it('forwards a repaired older Flock key even after its peer frontier was overwritten', async () => {
+  async function receiveRepairedKey(overwritePeerFrontier: boolean) {
     const { LoroRepo } = createRequire(import.meta.url)('loro-repo') as typeof import('loro-repo');
     const sourceRepo = await LoroRepo.create({ metaDebounceCommitMs: 0 });
     const targetRepo = await LoroRepo.create({ metaDebounceCommitMs: 0 });
@@ -109,9 +109,8 @@ describe('LocalLoroDataPlaneServer doc room hydration signals', () => {
       },
     });
     source.importJson(record('overwritten', '1700000000000,2,aa'));
-    source.importJson(record('overwritten', '1700000000000,3,bb'));
+    if (overwritePeerFrontier) source.importJson(record('overwritten', '1700000000000,3,bb'));
     source.commit();
-    expect(source.version()).not.toEqual(source.inclusiveVersion());
     const work: Array<() => void | Promise<void>> = [];
     const server = new LocalLoroDataPlaneServer({
       workspaceId: WORKSPACE_ID,
@@ -152,10 +151,22 @@ describe('LocalLoroDataPlaneServer doc room hydration signals', () => {
     source.importJson(record('late-key', '1700000000000,1,aa'));
     source.commit();
     await drain();
-    expect(target.get(['late-key'])).toBe('late-key');
+    const received = target.get(['late-key']);
     server.dispose();
     await sourceRepo.destroy();
     await targetRepo.destroy();
+    return received;
+  }
+
+  it('forwards a repaired older Flock key even after its peer frontier was overwritten', async () => {
+    expect(await receiveRepairedKey(true)).toBe('late-key');
+  });
+
+  // Known migration gap: bootstrap may repair aa:1 while aa:2 remains visible.
+  // Remove .fails when the local plane forwards exact changed keys or reconciles
+  // without treating a maximum clock as proof that every older key is present.
+  it.fails('forwards a same-vector repair while the higher peer clock remains visible', async () => {
+    expect(await receiveRepairedKey(false)).toBe('late-key');
   });
 
   it('notifies doc room joins and publishes room status to subscribers', async () => {
