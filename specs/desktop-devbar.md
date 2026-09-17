@@ -64,7 +64,9 @@ a deep link never grants the capability by itself.
 Metrics refresh approximately once a second while visible. Disabled diagnostics
 perform no sampling or network listening; hidden windows pause animation callbacks
 and process polling. Unavailable metrics and CPU warm-up show a dash. Measurements
-remain in memory, with no telemetry or persistence.
+remain in memory, with no telemetry or persistence. A Devbar failure degrades to
+no diagnostics rather than affecting the application: Hub request errors answer
+HTTP errors, and a renderer failure removes only the bar.
 
 ## Devframe Hub
 
@@ -116,9 +118,9 @@ build. CPU profile capture remains a separate privileged phase.
 
 ## Evidence
 
-- [Renderer](../apps/electron/src/renderer/src/desktop-devbar.tsx)
-- [Devframe definition](../apps/electron/src/main/services/devbar-devframe.ts)
-- [Main service](../apps/electron/src/main/services/devbar-service.ts)
+- [Renderer](../apps/electron/src/renderer/src/devbar/index.tsx)
+- [Devframe definition](../apps/electron/src/main/services/devbar/devframe.ts)
+- [Main service](../apps/electron/src/main/services/devbar/service.ts)
 - [Shared diagnostic contract](../packages/shared/src/devbar.ts)
 - [Deterministic tests](../apps/electron/src/devbar.test.mjs)
 - [Devframe bridge decision](../.agents/notes/implemented/architecture/2026-09-16-devbar-devframe-bridge.md)

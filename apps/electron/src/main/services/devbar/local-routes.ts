@@ -224,6 +224,55 @@ function send(response: ServerResponse, status: number, contentType: string, bod
   response.end(body)
 }
 
+export type DevbarRequestForward = (
+  request: IncomingMessage,
+  response: ServerResponse,
+  next: (error?: unknown) => void
+) => void
+
+/**
+ * The loopback server's request listener. The main process exits on
+ * uncaughtException, so a throwing route or Hub middleware must never escape
+ * here: it degrades to 500 instead of taking the app down.
+ */
+export function createDevbarRequestListener(options: {
+  isAllowedOrigin: (requestOrigin: string | undefined) => boolean
+  snapshot: () => DevbarSnapshot
+  /** Resolves the Hub middleware per request; undefined while it starts. */
+  forward: () => DevbarRequestForward | undefined
+}): (request: IncomingMessage, response: ServerResponse) => void {
+  return (request, response) => {
+    try {
+      const requestOrigin = request.headers.origin
+      if (!options.isAllowedOrigin(requestOrigin)) {
+        response.statusCode = 403
+        response.end('Origin not allowed')
+        return
+      }
+      if (requestOrigin) {
+        response.setHeader('Access-Control-Allow-Origin', requestOrigin)
+        response.setHeader('Vary', 'Origin')
+      }
+      response.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
+      if (handleDevbarLocalRoute(request, response, options.snapshot)) return
+      const forward = options.forward()
+      if (!forward) {
+        response.statusCode = 503
+        response.end('Lody DevTools is starting')
+        return
+      }
+      forward(request, response, (error) => {
+        response.statusCode = error ? 500 : 404
+        response.end(error instanceof Error ? error.message : 'Not found')
+      })
+    } catch (error) {
+      console.error('[Devbar] Request handler failed', error)
+      if (!response.headersSent) response.statusCode = 500
+      response.end()
+    }
+  }
+}
+
 /**
  * Lody-owned loopback routes served alongside the Hub on the same origin:
  * the custom-render dock module and the metrics snapshot it polls. Neither

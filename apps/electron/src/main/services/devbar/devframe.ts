@@ -12,7 +12,7 @@ import { DevbarRendererSampleSchema, DevbarSnapshotSchema } from '@lody/shared/d
 import { z } from 'zod'
 import pkg from '../../../../package.json' with { type: 'json' }
 import { createDevbarAuth, isAllowedDevbarRequestOrigin } from './control'
-import { handleDevbarLocalRoute } from './local-routes'
+import { createDevbarRequestListener } from './local-routes'
 import { createDevbarViewState, DEVBAR_VIEW_SPEC } from './json-render'
 import { DevbarRecording } from './recording'
 
@@ -37,13 +37,13 @@ async function listenOnAvailablePort(server: Server): Promise<number> {
   for (let port = DEVBAR_PORT_RANGE[0]; port <= DEVBAR_PORT_RANGE[1]; port++) {
     try {
       await new Promise<void>((resolve, reject) => {
-        const onError = (error: NodeJS.ErrnoException): void => {
-          server.off('listening', onListening)
-          reject(error)
-        }
-        const onListening = (): void => {
+        function onListening(): void {
           server.off('error', onError)
           resolve()
+        }
+        function onError(error: NodeJS.ErrnoException): void {
+          server.off('listening', onListening)
+          reject(error)
         }
         server.once('error', onError)
         server.once('listening', onListening)
@@ -224,30 +224,20 @@ export async function startDevbarDevframe(
 
   let hub: HubInstance | undefined
   let origin: string | undefined
-  const server = createServer((request, response) => {
-    const requestOrigin = request.headers.origin
-    if (origin && !isAllowedDevbarRequestOrigin(requestOrigin, origin, options.rendererOrigin)) {
-      response.statusCode = 403
-      response.end('Origin not allowed')
-      return
-    }
-    if (requestOrigin) {
-      response.setHeader('Access-Control-Allow-Origin', requestOrigin)
-      response.setHeader('Vary', 'Origin')
-    }
-    response.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
-    if (handleDevbarLocalRoute(request, response, () => recording.snapshot())) return
-    if (!hub) {
-      response.statusCode = 503
-      response.end('Lody DevTools is starting')
-      return
-    }
-    hub.nodeMiddleware(request, response, (error) => {
-      response.statusCode = error ? 500 : 404
-      response.end(error instanceof Error ? error.message : 'Not found')
+  const server = createServer(
+    createDevbarRequestListener({
+      isAllowedOrigin: (requestOrigin) =>
+        !origin || isAllowedDevbarRequestOrigin(requestOrigin, origin, options.rendererOrigin),
+      snapshot: () => recording.snapshot(),
+      forward: () => hub?.nodeMiddleware.bind(hub)
     })
-  })
+  )
   const port = await listenOnAvailablePort(server)
+  // Once listen succeeds the retry-loop 'error' listener is gone; a server
+  // 'error' with no listener would surface as a fatal uncaughtException.
+  server.on('error', (error) => {
+    console.error('[Devbar] Hub server error', error)
+  })
   origin = `http://127.0.0.1:${port}`
 
   try {

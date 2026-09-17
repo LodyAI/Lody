@@ -145,12 +145,17 @@ function resolveMainRendererTarget(
 ): ReloadTarget {
   const rendererEntry = devbarRendererEntry(devbarEnabled, auxiliary)
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    // The dev server keeps index.html on plain history paths; only the Devbar
+    // entry loads as <entry>.html#/<route> since it runs hash history on http.
+    const path =
+      rendererEntry === 'index.html'
+        ? initialPath
+        : initialPath === '/'
+          ? rendererEntry
+          : `${rendererEntry}#${initialPath}`
     return {
       type: 'url',
-      url: new URL(
-        initialPath === '/' ? rendererEntry : `${rendererEntry}#${initialPath}`,
-        process.env['ELECTRON_RENDERER_URL']
-      ).toString()
+      url: new URL(path, process.env['ELECTRON_RENDERER_URL']).toString()
     }
   }
   return {

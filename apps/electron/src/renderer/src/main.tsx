@@ -178,7 +178,13 @@ try {
           <RouterProvider router={router} />
         </Provider>
       </ErrorBoundary>
-      {devbar?.enabled && <DesktopDevbar />}
+      {devbar?.enabled && (
+        // A diagnostics footer must never take the app down with it: a crash
+        // here degrades to no bar, not to the fatal renderer path.
+        <ErrorBoundary name="DesktopDevbar" fallbackRender={() => null}>
+          <DesktopDevbar />
+        </ErrorBoundary>
+      )}
     </>
   )
 } catch (error) {

@@ -9,7 +9,10 @@ import {
 } from './main/services/devbar/control.ts'
 import { summarizeDevbarMetrics } from './main/services/devbar/metrics.ts'
 import { createDevbarViewState } from './main/services/devbar/json-render.ts'
-import { handleDevbarLocalRoute } from './main/services/devbar/local-routes.ts'
+import {
+  createDevbarRequestListener,
+  handleDevbarLocalRoute
+} from './main/services/devbar/local-routes.ts'
 import { DevbarRecording } from './main/services/devbar/recording.ts'
 import { createClsTracker } from './renderer/src/devbar/cls.ts'
 import { createLongTaskBuffer } from './renderer/src/devbar/long-tasks.ts'
@@ -347,6 +350,60 @@ void test('lody loopback routes serve the dock renderer module and the live snap
   assert.equal(opaque.handled, true)
   assert.equal(opaque.response.statusCode, 403)
   assert.equal(get('/__lody/dock-renderer.mjs', 'GET', 'http://127.0.0.1:9765').handled, true)
+})
+
+void test('devbar request listener isolates Hub middleware failures as 500', () => {
+  const respond = () => ({
+    statusCode: 0,
+    headersSent: false,
+    headers: {},
+    body: undefined,
+    setHeader(key, value) {
+      this.headers[key.toLowerCase()] = value
+    },
+    end(body) {
+      this.body = body
+    }
+  })
+  const request = () => ({ method: 'GET', url: '/devframe/unknown', headers: {} })
+  const base = { isAllowedOrigin: () => true, snapshot: () => ({}) }
+
+  // While the Hub is still starting, non-local requests wait politely.
+  const pending = createDevbarRequestListener({ ...base, forward: () => undefined })
+  const warming = respond()
+  pending(request(), warming)
+  assert.equal(warming.statusCode, 503)
+
+  // A synchronously throwing middleware is an HTTP 500, never a process crash.
+  const throwing = createDevbarRequestListener({
+    ...base,
+    forward: () => () => {
+      throw new Error('hub exploded')
+    }
+  })
+  const crashed = respond()
+  throwing(request(), crashed)
+  assert.equal(crashed.statusCode, 500)
+  const afterCrash = respond()
+  throwing(request(), afterCrash)
+  assert.equal(afterCrash.statusCode, 500)
+
+  const missing = createDevbarRequestListener({
+    ...base,
+    forward: () => (_req, _res, next) => next()
+  })
+  const notFound = respond()
+  missing(request(), notFound)
+  assert.equal(notFound.statusCode, 404)
+
+  const denied = createDevbarRequestListener({
+    ...base,
+    isAllowedOrigin: () => false,
+    forward: () => undefined
+  })
+  const forbidden = respond()
+  denied(request(), forbidden)
+  assert.equal(forbidden.statusCode, 403)
 })
 
 void test('devbar samples record the hash-history route, not the HTML entry path', () => {

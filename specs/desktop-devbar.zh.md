@@ -46,6 +46,8 @@ Long Task 证明 renderer 主线程至少阻塞 50 ms，但不包含 JavaScript 
 
 指标在窗口可见时约每秒刷新一次。禁用时不采样也不监听网络；窗口隐藏时暂停动画回调
 和进程轮询。不可用指标和 CPU 预热显示破折号。测量仅保存在内存，不产生遥测或持久化。
+Devbar 故障降级为无诊断而不影响应用本身：Hub 请求错误以 HTTP 错误作答，渲染端故障
+只移除该底栏。
 
 ## Devframe Hub
 
@@ -84,9 +86,9 @@ Hub 启动失败时主窗口保留普通 renderer，并在 Settings 中显示错
 
 ## 证据
 
-- [Renderer](../apps/electron/src/renderer/src/desktop-devbar.tsx)
-- [Devframe definition](../apps/electron/src/main/services/devbar-devframe.ts)
-- [Main service](../apps/electron/src/main/services/devbar-service.ts)
+- [Renderer](../apps/electron/src/renderer/src/devbar/index.tsx)
+- [Devframe definition](../apps/electron/src/main/services/devbar/devframe.ts)
+- [Main service](../apps/electron/src/main/services/devbar/service.ts)
 - [共享诊断契约](../packages/shared/src/devbar.ts)
 - [确定性测试](../apps/electron/src/devbar.test.mjs)
 - [Devframe bridge 决策](../.agents/notes/implemented/architecture/2026-09-16-devbar-devframe-bridge.zh.md)

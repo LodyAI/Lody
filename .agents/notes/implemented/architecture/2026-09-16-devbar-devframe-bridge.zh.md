@@ -37,3 +37,12 @@ Electron 主进程产物是 CommonJS，而 Devframe 1.0 仅提供 ESM。因此 D
 ## 结果与验证
 
 Electron 与 shared package 类型检查通过。确定性 Devbar 测试覆盖运行时与二级 capability gate、浏览器 Origin 边界、renderer 入口、指标、CLS 窗口、有界 Long Task 历史、汇总记录和深链接选择。包含 Devframe 主进程 bundle 的 Electron 应用构建成功；对构建产物的 smoke 会启动服务、读取 connection metadata，并通过 loopback Origin gate 完成 MCP initialize handshake。本次没有验证跨平台打包启动、广泛的 MCP 客户端互操作或 CPU Profile。
+
+## 附录：故障隔离（2026-09-17）
+
+默认关闭的边界同样适用于启用路径内部的故障。主进程在 uncaughtException 时会退出，
+因此 loopback 请求监听器（`createDevbarRequestListener`）把抛异常的路由或 Hub
+中间件收敛为 HTTP 500；HTTP server 在 listen 成功后保留常驻 `error` 监听器。关闭
+Hub 不再能让禁用或退出路径 reject，渲染端底栏挂载在专用 `ErrorBoundary` 内，崩溃时
+渲染为空。Devbar 故障降级为无诊断，而不是拖垮应用。确定性测试覆盖该监听器的
+500/503/404/403 分支。

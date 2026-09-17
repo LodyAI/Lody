@@ -82,3 +82,15 @@ Devframe in the main bundle. A built-output smoke starts the server, fetches its
 connection metadata, and completes the MCP initialize handshake through the
 loopback Origin gate. This is not a packaged cross-platform launch, broad MCP-client
 interoperability test, or CPU-profile validation.
+
+## Addendum: failure containment (2026-09-17)
+
+The disabled-by-default boundary now also holds for failures inside the opt-in
+path. The main process exits on uncaughtException, so the loopback request
+listener (`createDevbarRequestListener`) catches a throwing route or Hub
+middleware into an HTTP 500, and the HTTP server keeps a permanent `error`
+listener after listen succeeds. Closing the Hub can no longer reject the disable
+or quit path, and the renderer bar mounts inside a dedicated `ErrorBoundary`
+that renders nothing on crash. A Devbar failure degrades to no diagnostics
+instead of taking the application down. The deterministic suite covers the
+listener's 500/503/404/403 branches.

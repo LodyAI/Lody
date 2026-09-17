@@ -100,7 +100,11 @@ export async function stopDevbarDevframeService(): Promise<void> {
   devframeStart = null
   const runtime = devframeRuntime
   devframeRuntime = null
-  await runtime?.close()
+  // A failed close must not turn "disable Devbar" or quit into a rejection:
+  // the runtime is already dropped and the socket dies with the process.
+  await runtime
+    ?.close()
+    .catch((error) => console.error('[Devbar] Failed to stop Devframe bridge', error))
 }
 
 export async function setDevbarControl(next: DevbarControlInput): Promise<{
