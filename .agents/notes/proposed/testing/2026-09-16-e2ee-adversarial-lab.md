@@ -205,3 +205,9 @@ Implementers choose filenames, service names and test organization without repea
 - Playable tutorial spec is `outdated`. Independent-demo note abstract records that the lab replaced the demo UI. Lab spec stays draft.
 - Evidence: `pnpm --filter @lody/e2ee-lab check` exit 0 (10 files / 23 tests). `pnpm --filter @lody/e2ee-core check` exit 0 (35 files / 384 tests). `pnpm run docs check` exit 0 (errors empty; pre-existing unrelated AGENTS size warnings). Clean-checkout stand-in: no `git reset --hard` and no extra long-lived worktree; README commands ran on this dirty `feat-e2ee-core` tree at parent `ed331f61`. Node v24.21.0.
 - Limits unchanged: HPKE `@hpke/core` DHKEM entropy and Loro/Flock Wasm entropy/clocks are not injectable; Fiber interrupt does not abort an in-flight `exclusive` `appendCas`; isolation is not OS-level. Product E2EE is not enabled; no push/PR/merge.
+
+### 2026-09-17 — P5 clean-tree README reproduce
+
+- Working tree at `fa7cb978` was clean. Re-ran README commands without `git reset --hard` or a second worktree.
+- `pnpm --filter @lody/e2ee-lab check` exit 0 (10 files / 23 tests). `scenario:collab` exit 0. `replay` exit 0 (4 tests). CLI `--data-dir` listened on loopback, `/healthz` returned `200 ok`, SIGTERM exited. `pnpm --filter @lody/e2ee-core check` exit 0 (35 files / 384 tests).
+- Still not product E2EE. No push/PR/merge.

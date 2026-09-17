@@ -205,3 +205,9 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 - 可玩教程 Spec 为 `outdated`。独立 demo 说明摘要记录实验室已替换 demo UI。实验室 Spec 仍为 draft。
 - 证据：`pnpm --filter @lody/e2ee-lab check` 退出 0（10 文件 / 23 测试）。`pnpm --filter @lody/e2ee-core check` 退出 0（35 文件 / 384 测试）。`pnpm run docs check` 退出 0（errors 为空；既有无关 AGENTS 体积警告）。干净检出替代：未 `git reset --hard`、未开额外长期 worktree；README 命令在脏的 `feat-e2ee-core` 工作树、父提交 `ed331f61` 上运行。Node v24.21.0。
 - 限制未变：HPKE `@hpke/core` DHKEM 随机与 Loro/Flock Wasm 随机/时钟仍不可注入；Fiber 中断不会 abort 已进入 `exclusive` 的 `appendCas`；隔离不是 OS 级。未启用产品 E2EE；无 push/PR/merge。
+
+### 2026-09-17 — P5 干净工作树 README 复现
+
+- `fa7cb978` 工作树干净。未 `git reset --hard`、未开第二棵 worktree，重跑 README 命令。
+- `pnpm --filter @lody/e2ee-lab check` 退出 0（10 文件 / 23 测试）。`scenario:collab` 退出 0。`replay` 退出 0（4 测试）。CLI `--data-dir` 在 loopback 监听，`/healthz` 返回 `200 ok`，SIGTERM 退出。`pnpm --filter @lody/e2ee-core check` 退出 0（35 文件 / 384 测试）。
+- 仍未启用产品 E2EE。无 push/PR/merge。
