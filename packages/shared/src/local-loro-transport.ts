@@ -560,20 +560,19 @@ export class LocalLoroTransportAdapter implements TransportAdapter {
       return;
     }
     state.flockFlushQueued = true;
-    state.flockFlushChain = state.flockFlushChain
-      .then(() => {
-        state.flockFlushQueued = false;
-        return this.flushLocalFlockOnce(state);
-      })
-      .catch((error) => {
-        // Stay dirty; a reconnect (or the next local edit) retries.
-        this.failRecoverably(state, 'flush', error);
+    state.flockFlushChain = state.flockFlushChain.then(() => {
+      state.flockFlushQueued = false;
+      const syncGeneration = state.syncGeneration;
+      return this.flushLocalFlockOnce(state, syncGeneration).catch((error) => {
+        // An export can finish after disconnect/rejoin. Only the generation
+        // that started this flush may turn the room into a recoverable error.
+        this.failRecoverably(state, 'flush', error, syncGeneration);
       });
+    });
   }
 
-  private async flushLocalFlockOnce(state: RoomState): Promise<void> {
+  private async flushLocalFlockOnce(state: RoomState, syncGeneration: number): Promise<void> {
     const flock = state.target as FlockLike;
-    const syncGeneration = state.syncGeneration;
     // Capture the frontier BEFORE exporting: entries landing in between are
     // re-sent by the next pass (idempotent) instead of silently skipped.
     const have = flock.version();

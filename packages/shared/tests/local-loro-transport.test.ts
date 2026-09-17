@@ -291,6 +291,85 @@ describe('LocalLoroTransportAdapter push+delta sync', () => {
     expect(subscription.status).toBe('joined');
   });
 
+  it('ignores a stale Flock flush failure after a replacement join', async () => {
+    const sent: LocalLoroDataPlaneClientMessage[] = [];
+    const listeners = new Set<(message: LocalLoroDataPlaneServerMessage) => void>();
+    let onLocalChange: ((batch: { source?: string }) => void) | undefined;
+    let rejectOldExport: ((reason?: unknown) => void) | undefined;
+    let signalOldExportStarted: (() => void) | undefined;
+    const oldExportStarted = new Promise<void>((resolve) => {
+      signalOldExportStarted = resolve;
+    });
+    let deferAndRejectNextExport = false;
+    const adapter = new LocalLoroTransportAdapter({
+      workspaceId: 'ws',
+      peerId: 'stale-flush-peer',
+      connection: {
+        send: (message) => sent.push(message),
+        onMessage: (listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+        onStatusChange: () => () => {},
+        isConnected: () => true,
+      },
+    });
+    const flock = {
+      exportJson: () => {
+        if (!deferAndRejectNextExport) return [];
+        deferAndRejectNextExport = false;
+        return new Promise<never>((_resolve, reject) => {
+          rejectOldExport = reject;
+          signalOldExportStarted?.();
+        });
+      },
+      importJson: () => {},
+      version: () => ({}),
+      subscribe: (listener: (batch: { source?: string }) => void) => {
+        onLocalChange = listener;
+        return () => {
+          onLocalChange = undefined;
+        };
+      },
+    };
+    const subscription = adapter.joinMetaRoom(flock);
+    const deliverLatestJoin = () => {
+      const join = sent
+        .filter(
+          (message): message is Extract<LocalLoroDataPlaneClientMessage, { type: 'join' }> =>
+            message.type === 'join'
+        )
+        .at(-1);
+      if (!join) throw new Error('join_not_sent');
+      for (const listener of listeners) {
+        listener({
+          type: 'joined',
+          protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+          workspaceId: 'ws',
+          peerId: 'stale-flush-peer',
+          requestId: join.requestId,
+          room: { scope: 'meta' },
+        });
+      }
+    };
+    deliverLatestJoin();
+    await subscription.firstSyncedWithRemote;
+
+    deferAndRejectNextExport = true;
+    onLocalChange?.({ source: 'local' });
+    // The export is now pending under the old generation. Supersede it with a
+    // fully successful join before delivering its rejection.
+    await oldExportStarted;
+    await subscription.rejoin();
+    deliverLatestJoin();
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+    expect(subscription.status).toBe('joined');
+
+    rejectOldExport?.(new Error('old_export_failed'));
+    for (let index = 0; index < 8; index += 1) await Promise.resolve();
+    expect(subscription.status).toBe('joined');
+  });
+
   it('first-sync pulls existing server doc state to a fresh client', async () => {
     const harness = new Harness();
     insert(harness.serverDoc('doc-1'), 0, 'hello');
