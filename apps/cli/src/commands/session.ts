@@ -44,6 +44,8 @@ import {
   isMachineDocRoomId,
   isSessionDocRoomId,
   hasAgentRunConfigSelection,
+  isAcpFastModeConfigId,
+  isAcpThoughtLevelConfigOption,
   resolveAgentRunConfigSelection,
   resolveBaseBranchPreference,
   resolveProjectGitHubRepo,
@@ -1550,15 +1552,35 @@ export function validateTurnConfigOptionValues(
 
 export function filterCompatibleTurnConfigOptionValues(
   values: Record<string, string | boolean> | undefined,
-  capability: AcpCapabilityCacheEntry | undefined
+  capability: AcpCapabilityCacheEntry | undefined,
+  targetModelId?: string
 ): Record<string, string | boolean> | undefined {
-  if (!values || !capability?.configOptions) {
+  if (!values || !capability) {
     return undefined;
   }
-  const optionsById = new Map(capability.configOptions.map((option) => [option.id, option]));
+  const optionsById = new Map(
+    (capability.configOptions ?? []).map((option) => [option.id, option])
+  );
+  const probedModelId = capability.configOptions?.find(
+    (option) => option.category === 'model'
+  )?.currentValue;
   const compatible = Object.fromEntries(
     Object.entries(values).filter(([id, value]) => {
       const option = optionsById.get(id);
+      if (targetModelId) {
+        const isEffort = isAcpThoughtLevelConfigOption(option ?? { id }) || id === 'effort';
+        if (isEffort) {
+          const efforts = capability.modelReasoningEfforts?.[targetModelId];
+          if (efforts) return typeof value === 'string' && efforts.includes(value);
+        }
+        // A different (or unknown) probe model cannot invalidate the target's
+        // recorded controls. Without per-model data, preserve them for runtime.
+        if (targetModelId !== probedModelId) {
+          if (isEffort) return typeof value === 'string';
+          if (isAcpFastModeConfigId(id))
+            return typeof value === 'boolean' || value === 'on' || value === 'off';
+        }
+      }
       return option !== undefined && validateConfigOptionValue(option, value) === undefined;
     })
   );
@@ -1727,11 +1749,16 @@ export function resolveEffectiveSessionChatDispatchConfig(args: {
             : previous.configOptionValues,
       }
     : undefined;
+  const compatible = filterCompatibleInheritedTurnConfig(inherited, args.capability);
+  if (compatible) {
+    compatible.configOptionValues = filterCompatibleTurnConfigOptionValues(
+      inherited?.configOptionValues,
+      args.capability,
+      compatible.modelId
+    );
+  }
   return withBuiltinDefaultTurnMode(
-    mergeTurnDispatchConfig(
-      args.dispatchConfig,
-      filterCompatibleInheritedTurnConfig(inherited, args.capability)
-    ),
+    mergeTurnDispatchConfig(args.dispatchConfig, compatible),
     args.target,
     args.capability
   );

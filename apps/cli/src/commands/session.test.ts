@@ -934,6 +934,57 @@ describe('session command helpers', () => {
     }
   );
 
+  it.each(['xhigh', 'medium'])(
+    'checks inherited effort %s against the inherited model',
+    (effort) => {
+      const capability: AcpCapabilityCacheEntry = {
+        ...createAcpCapability(),
+        models: [{ modelId: 'model-b', name: 'B' }],
+        modelReasoningEfforts: { 'model-b': ['xhigh'] },
+        configOptions: [
+          {
+            id: 'model',
+            name: 'Model',
+            category: 'model',
+            type: 'select',
+            currentValue: 'model-a',
+            options: [
+              { value: 'model-a', name: 'A' },
+              { value: 'model-b', name: 'B' },
+            ],
+          },
+          {
+            id: 'reasoning_effort',
+            name: 'Effort',
+            category: 'thought_level',
+            type: 'select',
+            currentValue: 'medium',
+            options: [{ value: 'medium', name: 'Medium' }],
+          },
+        ],
+      };
+      const resolve = (cache: AcpCapabilityCacheEntry) =>
+        resolveEffectiveSessionChatDispatchConfig({
+          dispatchConfig: {},
+          target: createSessionMeta(),
+          capability: cache,
+          inheritedDispatchConfig: {
+            modelId: 'model-b',
+            configOptionValues: { reasoning_effort: effort, fast: true, unknown: 'value' },
+          },
+        });
+      expect(resolve(capability).configOptionValues).toEqual(
+        effort === 'xhigh' ? { reasoning_effort: 'xhigh', fast: true } : { fast: true }
+      );
+      expect(
+        resolve({ ...capability, modelReasoningEfforts: undefined }).configOptionValues
+      ).toEqual({ reasoning_effort: effort, fast: true });
+      expect(resolve({ ...capability, configOptions: [] }).configOptionValues).toEqual(
+        effort === 'xhigh' ? { reasoning_effort: 'xhigh', fast: true } : { fast: true }
+      );
+    }
+  );
+
   it('drops old-model options on a model switch while preserving explicit options', () => {
     const capability: AcpCapabilityCacheEntry = {
       ...createAcpCapability(),

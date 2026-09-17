@@ -40,6 +40,11 @@ CLI `--model`/`--mode`/`--config-option` 仍校验并优先。当前能力不再
 
 PR：[#771](https://github.com/LodyAI/Lody/pull/771)。
 
+不填模型的 follow-up 还有一处评审纠正：继承的 effort 必须用继承模型的
+`modelReasoningEfforts` 校验，支持列表为空也有效。探测模型不同或未知时，不能用它的
+选项表拒绝历史记录的 effort/Fast。缺少对应模型的能力证据时保留这些控制值，由运行时
+校验；普通选项仍按快照过滤。
+
 ## 备选
 
 复制请求方的模型会把父会话的模型套到可能使用不同 agent 的子会话上。要求 MCP 调用方传入
@@ -52,3 +57,5 @@ PR：[#771](https://github.com/LodyAI/Lody/pull/771)。
 turn）以及合并（省略字段继承、显式模型保留继承的 mode/options、不兼容的继承模型/mode 被丢弃、
 内置默认 mode 只填空 mode）。本次不包含真实的父到子 MCP chat。
 回归测试先复现两条评审问题，再覆盖调用方权限省略/false/true、换模型、同模型继承和显式替换选项。
+新增回归覆盖仅目标模型支持的 effort、仅探测模型支持的无效 effort、缺少逐模型数据，
+以及探测选项表中没有 Fast 的情况。

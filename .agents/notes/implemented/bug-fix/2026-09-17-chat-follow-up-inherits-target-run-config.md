@@ -47,6 +47,12 @@ conservative and also resets model-independent options; selecting the same model
 
 PR: [#771](https://github.com/LodyAI/Lody/pull/771).
 
+Review correction for omitted-model follow-ups: inherited effort is checked against
+`modelReasoningEfforts` for the inherited model, including an empty supported list.
+When the probe describes a different or unknown model, its option list cannot reject
+the recorded effort/Fast controls. Without per-model evidence, preserve those controls
+for runtime validation; ordinary options still use the snapshot compatibility filter.
+
 ## Alternatives
 
 Copying the requester's model would send the parent's model onto a child that may use a different
@@ -62,3 +68,5 @@ inherited mode/options, incompatible inherited model/mode are dropped, builtin d
 only an empty mode). Live parent-to-child MCP chat is not exercised in this change.
 Regression tests reproduce the two review findings before the fix and cover omitted/false/true
 caller consent, model changes, same-model inheritance, and explicit replacement options.
+Additional regressions cover target-only valid effort, probe-only invalid effort, missing
+per-model data, and Fast absent from the probe's option list.
