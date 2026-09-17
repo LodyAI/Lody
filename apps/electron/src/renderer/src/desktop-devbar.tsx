@@ -26,6 +26,15 @@ function readHeapUsage(): number | null {
   }
 }
 
+function DevbarMetric(props: { label: string; value: string; title: string }): JSX.Element {
+  return (
+    <span className="desktop-devbar-metric" title={props.title}>
+      <span className="desktop-devbar-metric-label">{props.label}</span>
+      <span className="desktop-devbar-metric-value">{props.value}</span>
+    </span>
+  )
+}
+
 export function DesktopDevbar(): JSX.Element {
   const [metrics, setMetrics] = useState<Metrics>(null)
   const [fps, setFps] = useState<number | null>(null)
@@ -233,28 +242,44 @@ export function DesktopDevbar(): JSX.Element {
         }}
       >
         <span className="desktop-devbar-status" data-status={devframeStatus} aria-hidden="true" />
-        DEVBAR
+        Devbar
       </button>
       <span className="desktop-devbar-metrics">
-        <span title="Renderer animation-frame callbacks per second; not GPU presentation rate">
-          FPS {fps ?? '—'}
-        </span>
-        <span title="Renderer main thread blocked by long tasks during the last sample interval">
-          Blk {longTaskDuration == null ? '—' : `${longTaskDuration.toFixed(0)}ms`}
-        </span>
-        <span title="Renderer maximum layout-shift session window, excluding recent input">
-          CLS {cls == null ? '—' : cls.toFixed(3)}
-        </span>
-        <span title="Sum of Electron process resident working sets; excludes external CLI/agents and may double-count shared pages">
-          RSS {memory(metrics?.rss)}
-        </span>
-        <span title="Sum of Electron process CPU usage">CPU {percent(metrics?.cpu)}</span>
-        <span title="Current renderer JS heap reported by Chromium, not total app memory or other worker heaps (M = MiB)">
-          Heap {heap == null ? '—' : `${heapPrecise ? '' : '~'}${memory(heap, 'M')}`}
-        </span>
-        <span title="GPU process: CPU usage and resident working set (M = MiB), not GPU hardware utilization or VRAM">
-          GPU {percent(metrics?.gpuCpu)} {memory(metrics?.gpuRss, 'M')}
-        </span>
+        <DevbarMetric
+          label="FPS"
+          value={fps == null ? '—' : String(fps)}
+          title="Renderer animation-frame callbacks per second; not GPU presentation rate"
+        />
+        <DevbarMetric
+          label="Blk"
+          value={longTaskDuration == null ? '—' : `${longTaskDuration.toFixed(0)}ms`}
+          title="Renderer main thread blocked by long tasks during the last sample interval"
+        />
+        <DevbarMetric
+          label="CLS"
+          value={cls == null ? '—' : cls.toFixed(3)}
+          title="Renderer maximum layout-shift session window, excluding recent input"
+        />
+        <DevbarMetric
+          label="RSS"
+          value={memory(metrics?.rss)}
+          title="Sum of Electron process resident working sets; excludes external CLI/agents and may double-count shared pages"
+        />
+        <DevbarMetric
+          label="CPU"
+          value={percent(metrics?.cpu)}
+          title="Sum of Electron process CPU usage"
+        />
+        <DevbarMetric
+          label="Heap"
+          value={heap == null ? '—' : `${heapPrecise ? '' : '~'}${memory(heap, 'M')}`}
+          title="Current renderer JS heap reported by Chromium, not total app memory or other worker heaps (M = MiB)"
+        />
+        <DevbarMetric
+          label="GPU"
+          value={`${percent(metrics?.gpuCpu)} ${memory(metrics?.gpuRss, 'M')}`}
+          title="GPU process: CPU usage and resident working set (M = MiB), not GPU hardware utilization or VRAM"
+        />
       </span>
     </footer>
   )

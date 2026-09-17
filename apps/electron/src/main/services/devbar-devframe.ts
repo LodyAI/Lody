@@ -283,8 +283,8 @@ export async function startDevbarDevframe(
           windowTitle: 'Lody DevTools'
         },
         dockPreferences: {
-          defaultMode: 'edge',
-          defaultPosition: 'right',
+          defaultMode: 'float',
+          defaultPosition: 'bottom',
           maxVisibleItems: 8
         }
       }),
