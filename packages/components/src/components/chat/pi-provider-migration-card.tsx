@@ -18,7 +18,7 @@ export function PiProviderMigrationCard({
   if (!count) return null;
   return (
     <section
-      className="rounded-lg border bg-background p-4 text-sm"
+      className="mb-3 rounded-lg border bg-background p-4 text-sm"
       aria-label={t('chat.piMigration.title', 'Upgrade Pi providers')}
     >
       <p className="font-medium">{t('chat.piMigration.title', 'Upgrade Pi providers')}</p>
