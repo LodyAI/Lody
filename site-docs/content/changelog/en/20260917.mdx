@@ -1,0 +1,22 @@
+---
+title: '20260917'
+version: 0.94.1
+date: 2026-09-17
+description: Improve DeepSeek Harness, local agents, session sharing, and session recovery.
+---
+
+Version 0.94.1
+
+### ✨ New Features
+
+- Return approved session-share results directly to MCP agents.
+- Launch Devin from the local CLI.
+- Close and recover workspace-shared sessions more reliably.
+
+### 🐛 Fixes & Improvements
+
+- Fix DeepSeek Harness startup with some Node versions by running it with Lody's bundled Node.
+- Fix an occasional blank iOS screen after the app resumes from the background.
+- Improve interruption, recovery, background prefetch, and streaming behavior to reduce lost drafts and whole-conversation failures.
+- Improve share requests, provider settings, error recovery, and archive behavior.
+- Fix tool-input JSON being misread as Markdown math.
