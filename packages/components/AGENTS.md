@@ -58,7 +58,9 @@ at cache-clear level; local file routes must never silently fall back to cloud.
   wrapping `LoroRepo.create`'s adaptor, never at a call site. Once latched it fails
   closed on reads too, never falls back to an in-memory repo, and never retries:
   recovery is `restartApp()`, not a reload. Raw IndexedDB DOMException text must not
-  reach a toast.
+  reach a toast. The writer must also reject before authoring in memory and recheck
+  after acquiring a doc/store; cached handles bypass the adapter. The recovery
+  screen must own modal focus and pointer interaction even over an existing dialog.
 
 ## Scoped rules
 

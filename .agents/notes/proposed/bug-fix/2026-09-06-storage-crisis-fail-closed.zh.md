@@ -37,9 +37,15 @@ room，也开 `readwrite` 事务，因此会话创建是在**读路径**上就�
 `StorageCrisisError`，因此即便是第一次失败，原始引擎文案也到不了 toast。机制说明见
 [storage crisis](../../../docs/components-storage-crisis.md)（英文）。
 
-我们核实过 loro-repo 在 save 失败时不会丢数据：`persistDocUpdate` 会把 `docPersistedVersions`
-回滚并把文档重新入队，`MetaPersister` 也只在 `save()` 成功之后才推进 `lastPersistedVersion`。
-所以这是一个失败表现的正确性与体验问题，不是持久性缺陷。
+`persistDocUpdate` 会把 `docPersistedVersions` 回滚并把文档重新入队，`MetaPersister`
+也只在 `save()` 成功之后才推进 `lastPersistedVersion`。这只能把待保存数据留在内存，
+不等于已经落盘。单向熔断会阻止腾出空间后的 flush，重启仍可能丢失未保存且未同步的数据。
+恢复文案明确说明这个限制；本阶段没有实现待保存数据的抢救。
+
+审查复现了两个缺口：普通遮罩在已有 Radix 模态框后无法交互，缓存 Flock 句柄的修改也能
+绕过适配器。恢复界面改用共享模态框和 portal 接管焦点，禁止外部点击与 Escape 关闭。
+writer 在修改前及异步获取文档后检查熔断状态；拒绝时释放已获取的 session/preview store。
+这能阻止新编辑，不能撤销熔断前已经接受的操作。
 
 但它确实是一个**持久性窗口**问题：失败后没有任何东西会重新触发 flush，重新入队的文档要等下一次
 doc event，meta Flock 要等下一次订阅回调。因此一次瞬时失败会让最后一次改动一直不落盘，直到用户
@@ -89,6 +95,12 @@ loro-repo 时再优先读 `code`，那时才能配上真正能验证它的测试
 事务会丢掉期间追加的 update。修复方案是泛化已有的 compare-then-write 辅助函数，而不是简单拆开。
 
 ## 验证
+
+审查修复在隔离依赖环境中通过了 35 项针对性测试（含新增的 8 项模态框/异步获取回归测试），
+并用真实 Radix 验证焦点与指针交互，用真实 loro-repo/Flock 加 fake IndexedDB 注入配额故障。
+故障后 writer 拒绝，缓存目录内容不变。无关 UI 辅助模块使用替身，这不等于完整应用测试。
+当前工作树缺少依赖，完整 `pnpm check` 与 `pnpm format` 无法运行；修改文件已用 Oxfmt 格式化。
+docs check 仍报告缺失 ACP 子模块造成的 28 个既有失效链接。以下全分支验证记录早于本次修复。
 
 438 个文件共 3216 个 components 测试（新增 27 个，覆盖分类、cause 链遍历、环状 cause 链能终止、
 读失败关闭、内层 adaptor 没有的可选方法不被对外声明，以及恢复界面的操作），91 个 Electron 测试，

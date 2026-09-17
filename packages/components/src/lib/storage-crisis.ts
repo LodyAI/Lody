@@ -146,6 +146,11 @@ export function getStorageCrisisState(): StorageCrisisState | null {
   return crisisState;
 }
 
+/** Check before authoring in memory, including after acquiring a cached doc. */
+export function assertStorageWritable(operation: string): void {
+  if (crisisState) throw new StorageCrisisError(crisisState.kind, operation);
+}
+
 export function subscribeToStorageCrisis(listener: () => void): () => void {
   listeners.add(listener);
   return () => {

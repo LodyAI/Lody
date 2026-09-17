@@ -61,6 +61,19 @@ and runtime dispose depends on it.
 The latch is one-way for the page lifetime and the FIRST failure wins, so the recovery
 screen keeps naming the original cause rather than the last symptom.
 
+## Cached documents and recovery interaction
+
+The adapter cannot stop edits to cached CRDT handles. `WorkspaceWriter` checks the
+same latch before starting a mutation and again after awaiting doc/store acquisition,
+before changing memory. A rejected acquisition-time edit releases the acquired store.
+This blocks new authoring, not work already accepted before the failure or remote imports.
+Failed saves remain queued in memory; that is not durable storage, and restarting can
+lose changes that were neither saved nor synced. Freeing space does not clear this latch.
+
+The recovery screen uses the shared Radix modal and portal, with outside interaction
+and Escape dismissal disabled. This moves focus away from underlying inputs and lets
+the recovery buttons work even when another modal already disables body pointer events.
+
 ## Classification
 
 `classifyStorageFailure` walks the `cause` chain, because loro-repo's `createError()`

@@ -4177,7 +4177,7 @@
   "storageCrisis.stepFreeSpace": "Free up disk space on this device — empty the trash, or delete large files you no longer need.",
   "storageCrisis.stepRestartDesktop": "Restart Lody. Freeing space is not enough on its own: the local database only reopens in a new app process.",
   "storageCrisis.stepRestartWeb": "Reload this page. Freeing space is not enough on its own: the local database only reopens on a fresh page load.",
-  "storageCrisis.syncedWorkSafe": "Work that already synced is unaffected and comes back after the restart.",
+  "storageCrisis.syncedWorkSafe": "Work that already synced is unaffected. Changes that were neither saved nor synced may be lost when you restart.",
   "storageCrisis.restart": "Restart Lody",
   "storageCrisis.reload": "Reload Lody",
   "storageCrisis.quit": "Quit Lody",

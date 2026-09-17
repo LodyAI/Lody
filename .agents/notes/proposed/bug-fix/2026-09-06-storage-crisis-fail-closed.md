@@ -35,7 +35,7 @@ process, so freeing disk space and reloading both fail to recover it.
 
 ## Decisions and findings
 
-Shipped in [LodyAI/Lody#438](https://github.com/LodyAI/Lody/pull/438), Phase 1 of the
+Implemented in [LodyAI/Lody#438](https://github.com/LodyAI/Lody/pull/438), Phase 1 of the
 issue; the filesystem-only **Manage storage** panel it describes as Phase 2 is not built,
 so the issue stays open.
 
@@ -45,10 +45,18 @@ session creation. It re-throws every classified failure as `StorageCrisisError`,
 engine text cannot reach a toast even on the first failure. The mechanism is explained
 in [storage crisis](../../../docs/components-storage-crisis.md).
 
-We verified that loro-repo does not lose data when a save fails: `persistDocUpdate`
-rolls `docPersistedVersions` back and re-queues the document, and `MetaPersister`
-advances `lastPersistedVersion` only after `save()` resolves. So this is a UX and
-correctness-of-failure problem, not a durability bug.
+`persistDocUpdate` rolls `docPersistedVersions` back and re-queues the document,
+and `MetaPersister` advances `lastPersistedVersion` only after `save()` resolves.
+This retains pending data in memory, not on disk. The one-way latch prevents later
+flushes even after space is freed; restarting can lose work not already saved or synced.
+The recovery copy explicitly warns about this limit; this phase does not rescue pending data.
+
+Review reproduced two gaps: a plain overlay was inaccessible behind an existing
+Radix modal, and cached Flock handles accepted mutations without consulting the adapter.
+The recovery view now uses the shared modal/portal with trapped focus and disabled
+outside/Escape dismissal. The writer checks the latch before mutations and after
+asynchronous acquisitions, releasing acquired session/preview stores on rejection.
+This guards new authoring; it cannot undo operations already accepted before the latch.
 
 It is, however, a durability WINDOW: nothing re-triggers a flush after a failure, so the
 re-queued document waits for the next doc event and the meta Flock for its next
@@ -108,6 +116,15 @@ appended in between. The fix generalizes the existing compare-then-write helper 
 separating them naively.
 
 ## Verification
+
+The review fixes were checked in an isolated dependency harness: 35 targeted tests
+(including eight new modal/acquisition regressions), real Radix focus/pointer interaction,
+and real loro-repo/Flock with fake IndexedDB quota injection. The cached catalog remains
+unchanged and the writer rejects after failure. Unrelated UI helpers were stubbed; this
+is not a full application test. Full `pnpm check` and `pnpm format` are blocked in this
+checkout by missing workspace dependencies; changed files were formatted with Oxfmt.
+Docs check still reports the 28 pre-existing links into absent ACP submodules.
+The earlier branch-wide verification below predates these review fixes.
 
 3216 component tests across 438 files (27 new, covering classification, cause-chain
 walking, a cyclic chain terminating, fail-closed reads, optional adapter methods not being
