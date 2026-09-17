@@ -241,3 +241,8 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 
 - 真实 Riverrun：`beforeRemoteCursorSave` 导出 Loro 快照后 cursor `save` 抛错。从旧 cursor 重启能从服务器恢复 `durable-after-cursor-crash`。第二次同步恢复该快照和已保存 cursor，文本一致（重复导入幂等）。空文档配已推进 cursor 不能作为恢复，符合 streams-crdt cursor 契约。
 - 证据：`pnpm --filter @lody/e2ee-lab check` 退出 0（10 文件 / 32 测试）。Wasm 物理时钟、Fiber/`exclusive` 中断、OS 隔离仍未注入。未启用产品 E2EE。无 push/PR/merge。
+
+### 2026-09-17 — 换代、历史解包、撤权后仍可读历史
+
+- 实验室 `publishEpoch` 后 `recoverEpochHistory` 从最新密钥恢复 epoch 0 和 1。撤掉额外设备后，所有者和被撤客户端仍能读 epoch-0 Loro 文本（已分发密钥不收回）。被撤客户端不能追加。所有者再写 epoch-1 内容，两个 epoch 都仍可读。
+- 证据：`pnpm --filter @lody/e2ee-lab check` 退出 0（10 文件 / 33 测试）。Wasm 物理时钟、Fiber/`exclusive` 中断、OS 隔离仍未注入。未启用产品 E2EE。无 push/PR/merge。

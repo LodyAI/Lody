@@ -241,3 +241,8 @@ Implementers choose filenames, service names and test organization without repea
 
 - Real Riverrun: `beforeRemoteCursorSave` exports the Loro snapshot, then cursor `save` throws. Restart from a stale cursor recovers `durable-after-cursor-crash` from the server. A second sync restores that snapshot plus the saved cursor; the text matches (duplicate import is idempotent). An empty doc plus an advanced cursor is not a valid resume, matching the streams-crdt cursor contract.
 - Evidence: `pnpm --filter @lody/e2ee-lab check` exit 0 (10 files / 32 tests). Wasm physical clocks, Fiber/`exclusive` interrupt, and OS isolation remain uninjected. Not product E2EE. No push/PR/merge.
+
+### 2026-09-17 — Epoch rotation, history unwrap, historical reads after revoke
+
+- Lab `publishEpoch` then `recoverEpochHistory` restores epochs 0 and 1 from the latest key. After revoking the extra device, both owner and revoked client still read epoch-0 Loro text (delivered keys are not taken back). The revoked client cannot append. Owner then writes epoch-1 content and still reads both epochs.
+- Evidence: `pnpm --filter @lody/e2ee-lab check` exit 0 (10 files / 33 tests). Wasm physical clocks, Fiber/`exclusive` interrupt, and OS isolation remain uninjected. Not product E2EE. No push/PR/merge.

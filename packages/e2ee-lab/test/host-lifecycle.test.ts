@@ -12,7 +12,7 @@ import { CONTROL_STREAM, MAX_LEASE_MS } from '../src/platform/protocol';
 import { exportDevice, generateDevice } from '../src/platform/device';
 import { LoroDoc } from 'loro-crdt';
 import { InMemoryRemoteCursorStore } from '@loro-dev/streams-crdt/loro';
-import { syncLoroWithCursor, writeLoro } from '../src/platform/content-session';
+import { readLoro, syncLoroWithCursor, writeLoro } from '../src/platform/content-session';
 
 afterEach(() => cleanupLab());
 
@@ -90,6 +90,39 @@ describe('lab host lifecycle', () => {
     expect(first).toContain('durable-after-cursor-crash');
     const second = await syncLoroWithCursor(alice, store, undefined, recovered);
     expect(second).toBe(first);
+  });
+
+  it('rotates the epoch, recovers history, and keeps historical reads after revoke', async () => {
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice' });
+    await alice.createSpace();
+    await alice.readLedger();
+    await writeLoro(alice, 'epoch-zero');
+    const tablet = await generateDevice();
+    expect((await alice.admitDevice(tablet, 'personal', false)).status).toBe('committed');
+    await alice.deliverEpochKey(tablet, 0);
+    const writer = await labClient({
+      host,
+      account: 'alice',
+      device: await exportDevice(tablet),
+    });
+    await writer.adoptGenesis(alice.genesisHex!);
+    await writer.readLedger();
+    const frames = await writer.readKeyFrames();
+    await writer.receiveEpochKey(alice.device, 0, frames[0]!);
+    expect(await readLoro(writer)).toContain('epoch-zero');
+    expect((await alice.publishEpoch()).status).toBe('committed');
+    const history = await alice.recoverEpochHistory();
+    expect(history.size).toBe(2);
+    expect(history.has(0)).toBe(true);
+    expect(history.has(1)).toBe(true);
+    expect((await alice.revokeDevice(tablet.publicKey)).status).toBe('committed');
+    expect(await readLoro(alice)).toContain('epoch-zero');
+    expect(await readLoro(writer)).toContain('epoch-zero');
+    await expect(writeLoro(writer, 'after-revoke')).rejects.toThrow();
+    await writeLoro(alice, 'epoch-one');
+    expect(await readLoro(alice)).toContain('epoch-zero');
+    expect(await readLoro(alice)).toContain('epoch-one');
   });
 
   it('rejects a delayed content write after the device is revoked', async () => {
