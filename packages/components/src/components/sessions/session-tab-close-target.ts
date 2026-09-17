@@ -1,3 +1,5 @@
+import { EMPTY_SESSION_TAB_ID } from '@/lib/session-tab-url';
+
 export type SessionTabFocusRegion = 'conversation' | 'side-panel';
 
 export type SessionTabCloseTarget =
@@ -10,8 +12,6 @@ export function getSessionTabCloseTarget({
   sidePanelOpen,
   activeSidePanelTabId,
   activeConversationTabId,
-  parentConversationTabId,
-  conversationTabCount,
 }: {
   focusRegion: SessionTabFocusRegion;
   sidePanelOpen: boolean;
@@ -21,13 +21,14 @@ export function getSessionTabCloseTarget({
   conversationTabCount: number;
 }): SessionTabCloseTarget | null {
   if (focusRegion === 'side-panel' && sidePanelOpen) {
-    return activeSidePanelTabId ? { kind: 'side-panel', tabId: activeSidePanelTabId } : null;
+    if (activeSidePanelTabId) return { kind: 'side-panel', tabId: activeSidePanelTabId };
+    return activeConversationTabId === EMPTY_SESSION_TAB_ID ? { kind: 'landing' } : null;
   }
-  if (activeConversationTabId !== parentConversationTabId) {
+  if (activeConversationTabId !== EMPTY_SESSION_TAB_ID) {
     return { kind: 'conversation', tabId: activeConversationTabId };
   }
-  if (conversationTabCount === 1) {
-    return { kind: 'landing' };
+  if (sidePanelOpen && activeSidePanelTabId) {
+    return { kind: 'side-panel', tabId: activeSidePanelTabId };
   }
-  return null;
+  return { kind: 'landing' };
 }

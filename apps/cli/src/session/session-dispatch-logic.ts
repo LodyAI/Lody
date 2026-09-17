@@ -106,6 +106,7 @@ export function shouldWatchSession(snapshot: SessionWatchSnapshot): boolean {
   if (hasPendingUserTurnActivation(meta)) {
     return true;
   }
+  if (Object.keys(meta.steerTurnStatuses ?? {}).length > 0) return true;
 
   if ((meta.messageQueueUpdatedAt ?? 0) > (meta.messageQueueCheckedAt ?? 0)) {
     return true;
@@ -264,8 +265,8 @@ export function resolveSessionCancelAction(
  * 1. **New status field** (`entry.status`): 'pending', 'seen', or 'processing'.
  *    Lifecycle: `pending` → `seen` → `processing` → `handled`.
  *    `pending_apply` is guide intent and is deliberately not dispatched here,
- *    unless `latestUserMsgId` explicitly names it — that is a guide the agent
- *    refused, re-aimed at ordinary dispatch.
+ *    unless an exact-id refused-steer activation (or legacy latest pointer)
+ *    explicitly returns it to ordinary dispatch.
  *
  * 2. **Legacy read field** (`entry.read === false`): Older sessions without the
  *    `status` field.
@@ -294,6 +295,8 @@ export function findNextDispatchableUserTurn(
     if (isImportedAcpReplayUserTurn(entry, meta)) {
       continue;
     }
+    // Applied guidance is already consumed, including across a daemon restart.
+    if (entry.inputConfig?._lodyDeliveryKind === 'steer') continue;
     // Recovery already surfaced a delivery failure for this exact activation.
     // A history payload that arrives after the bounded wait must not resurrect
     // the failed turn when an unrelated signal opens the room later.
@@ -308,16 +311,13 @@ export function findNextDispatchableUserTurn(
       if (entry.status === 'pending' || entry.status === 'seen' || entry.status === 'processing') {
         return entry;
       }
-      // `pending_apply` is steer intent, not a dispatch request — with one
-      // exception: a steer the agent refused gets the dispatch pointer re-aimed
-      // at it (`SessionExecutionService.requeueUndeliveredSteer`, or the Web
-      // client's own promotion). That pointer is a later and more explicit
-      // signal than the status, and honoring it here is what lets the message
-      // run after a restart even if the status flip never reached this machine.
+      // The activation can arrive before the history status change. Only a
+      // proven refusal (or a legacy producer promotion) authorizes that guide
+      // to run as an ordinary turn.
       if (
         entry.status === 'pending_apply' &&
-        entry.id === meta.latestUserMsgId &&
-        entry.id !== meta.lastHandledUserMsgId
+        (meta.steerTurnStatuses?.[entry.id] === 'pending' ||
+          (entry.id === meta.latestUserMsgId && entry.id !== meta.lastHandledUserMsgId))
       ) {
         return entry;
       }

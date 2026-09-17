@@ -85,6 +85,18 @@ function normalizePath(p) {
   return String(p).replace(/\\/g, '/');
 }
 
+const WINDOWS_ROOTED_PATH_RE = /^[A-Za-z]:[\\/]/;
+
+// Parity with `toHostSeparators` in ../worktree-paths.ts: a path derived from a host
+// path keeps that host's separator, so a Windows machine never gets `C:/Users/...`.
+function isWindowsStyleHostPath(hostPath) {
+  return WINDOWS_ROOTED_PATH_RE.test(hostPath) || String(hostPath).includes('\\');
+}
+
+function toHostSeparators(joined, hostPath) {
+  return isWindowsStyleHostPath(hostPath) ? joined.replace(/\//g, '\\') : joined;
+}
+
 function normalizeLocalProjectPathForRepoId(p) {
   const normalized = normalizePath(String(p).trim());
   if (normalized === '/' || /^[A-Za-z]:\/$/.test(normalized)) {
@@ -94,13 +106,19 @@ function normalizeLocalProjectPathForRepoId(p) {
 }
 
 function getLodyReposBaseDir(homeDir) {
-  return `${normalizePath(homeDir)}/${getInstallationProfile().dataDirectoryName}/repos`;
+  return toHostSeparators(
+    `${normalizePath(homeDir)}/${getInstallationProfile().dataDirectoryName}/repos`,
+    homeDir
+  );
 }
 
 function getWorktreeHostPath(repoId, sessionId, homeDir) {
   assertSafeSessionId(sessionId);
   if (homeDir) {
-    return `${getLodyReposBaseDir(homeDir)}/${repoId}/worktrees/${sessionId}`;
+    return toHostSeparators(
+      `${normalizePath(getLodyReposBaseDir(homeDir))}/${repoId}/worktrees/${sessionId}`,
+      homeDir
+    );
   }
   return `~/${getInstallationProfile().dataDirectoryName}/repos/${repoId}/worktrees/${sessionId}`;
 }

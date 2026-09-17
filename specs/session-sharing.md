@@ -31,7 +31,11 @@ automatic sanitization.
 
 Task-proposal notices are the exception: capture removes their complete display
 blocks and metadata before attachment reads, and readers reject unfiltered proposals.
-Subagent execution records and opaque tool/text content remain unchanged.
+Subagent execution records and opaque tool/text content remain unchanged, except
+that capture replaces known `#access=v1.<64 lowercase hex>` capability fragments
+with `#access=omitted`, including in tool outputs. Live history and the URL returned
+to an agent remain intact. This prevents later exports from republishing prior
+share credentials; it is not general secret detection.
 
 A versioned manifest describes conversations, their relationships, immutable
 history objects and copied attachments. The rollout switch
@@ -86,8 +90,10 @@ or deleting their account or workspace disables access. A replacement membership
 does not revive an old share. Reset does not rebind ownership or membership.
 
 The link is `/s/<shareId>#access=v1.<secret>`, using a random 32-byte bearer.
-Only its hash belongs in the control plane; the raw secret stays device-local and
-travels to the share API only in an Authorization header. An update preserves it.
+The control plane stores its hash and, for approved MCP delivery, recipient-encrypted
+ciphertext. It never receives the raw secret. The raw credential travels to the
+share API only in an Authorization header and to the requesting agent after local
+decryption. An update preserves it.
 Reset rotates it; revoke disables every deployment. Neither operation can recall
 bytes already downloaded.
 
@@ -145,17 +151,47 @@ builder, range selection, budget rules and result notices. It is a readable
 export, not a lossless serialization of every stored tool field. It does not
 include original workspace or agent identities in added export metadata.
 
-MCP may request publication but may not approve it. A pending card in the
-authenticated app requires human confirmation before the client prepares and
-publishes the copy. A tool-return flag or history text is not approval.
-The tool echoes the caller's `requestId` for retries and returns `shareRequestId`
-separately as the server record identity. Closing the editor discards upload
-credentials: an unpublished request must then be abandoned and recreated with a
-new retry key; an ordinary draft must be revoked before preparing another copy.
-The client revokes a stale draft as part of the next publish, not when the dialog
-opens. When the app cannot read the canonical requests, the card surface says so
-and offers a retry; it neither hides the failure nor takes the conversation down
-with it.
+MCP may request publication but may not approve it. The authenticated app shows
+the agent's purpose, exact conversation set, content disclosure and the fact that
+the **complete bearer URL is returned to the requesting agent, which can use or
+forward it**. One approval on this card starts capture, upload and publication;
+there is no second dialog or copy step. A tool flag or history text is not approval.
+Each request creates an independent share; it never updates or rotates an existing
+link, including when approval comes from a different device. Settings manages all
+these links. The header selects the latest active share before an unfinished draft.
+
+MCP delivery is same-account only: the CLI credential owner, active Turn's human
+requester and authenticated approver must be the same user. The service rejects
+cross-account intent even if both accounts are workspace writers; the CLI must not
+substitute its owner for the active user. Same-account approval from another device
+remains supported. A Turn running on somebody else's signed-in machine must use
+manual app sharing or a machine signed in to the requesting user's account.
+Existing cross-account intents cannot be approved, resumed, published or retrieved.
+This authenticates the recipient account, not an independently attested Session/Turn;
+cross-account delegation requires a separately designed, verifiable consent contract.
+
+The requesting CLI durably creates a private recipient key before submitting intent.
+The app encrypts the reader secret to that request's public key, binding the request
+record and share origin. Begin binds this envelope to the immutable deployment;
+the control plane releases it only after publication to the original authorized
+submitter and requesting session, with both original memberships still valid.
+The CLI decrypts locally and returns the complete URL. No plaintext credential,
+private key, source data or approval travels through the result mailbox.
+
+The tool echoes `requestId`; `shareRequestId` is the distinct server record identity.
+Retries preserve purpose, targets and recipient key; a later turn in the same
+authorized session can resume. Each call waits a bounded interval and reports
+pending/confirmed when necessary; the agent repeats the same request without
+another user click. Cancellation and expiry are terminal. Approval renews the
+upload window to 24 hours; successful publication starts a 24-hour result window.
+The publication receipt survives retirement and garbage collection of its initial
+deployment. Reset, revoke or membership loss fences result reads.
+The recipient key survives MCP process restarts. Loss of that local key cannot
+be repaired by the server. Upload secrets remain client-local and ephemeral;
+closing before publication requires abandoning the unfinished deployment and
+issuing a new request. Failures leave the card available for retry or abandonment.
+Legacy intents without delivery consent data expire closed. Query failures remain
+scoped to the card and cannot take down the conversation.
 
 Fork is out of scope for version one. A future fork may import displayable history
 and attachments into the visitor's workspace; a new agent receives Markdown in a

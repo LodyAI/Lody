@@ -15,6 +15,10 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   Draft uploads are not published shares. Reuse `useSessionShareLinkActions` for
   copy/reset/revoke; settings must never reconstruct a credential from cloud data.
   Key state by user/workspace and gate the whole surface with `teamSharing`.
+  A share outlives its source, so both "View conversation" and "Update deployment"
+  require the session in the local metadata cache; opening it closes the desktop
+  settings overlay. Rationale:
+  [share inventory jump](../../../../../.agents/notes/implemented/feature/2026-09-15-share-inventory-session-jump.md).
 
 - A settings row (`compact-layout.tsx`) is one grid: the label column takes the
   remaining space and the control column hugs its content. Never size either column
@@ -34,6 +38,9 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
 - Interface and terminal font choices exclude the known symbol families in
   `lib/local-fonts.ts`; persisted selections use the same filter. Font option names
   use the default interface font so they remain readable.
+- Conversation font size uses `conversation-font-size-slider.tsx` on desktop and
+  mobile. Keep the native range input keyboard-free on touch devices and the mobile
+  row stacked; clamping a number input on each keystroke breaks multi-digit editing.
 - The Codex reset forecast chip in the provider row must not fetch on mount and must
   pass `nestedInDialog` for its dialog: [../codex-reset/AGENTS.md](../codex-reset/AGENTS.md).
 - The usage share card is a fixed-format report, not a second `ChatShareCard`: its two

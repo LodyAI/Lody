@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, nativeTheme, shell } from 'electron'
 import { is } from '@electron-toolkit/utils'
+import { installContextMenu } from './context-menu'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
@@ -22,8 +23,12 @@ import {
 } from './window-theme'
 import { formatUnknownError, normalizeExternalHttpUrl } from './utils'
 import { describeDeepLinkForAuthDebug } from './auth-debug'
+import { captureElectronMainException } from './posthog-error-reporting'
+import { createRendererProcessGoneHandling } from './renderer-process-gone'
 import { resolveMainWindowRuntimePolicy } from './window-runtime-policy'
 import { serializePreferredSystemLanguagesArgument } from '../system-language-argument'
+import { isDevbarRendererEnabled } from './services/devbar/service'
+import { devbarRendererEntry } from './services/devbar/control'
 import {
   clearMountWatchdog,
   clearUnresponsiveWatchdog,
@@ -135,16 +140,29 @@ function formatLoadFailure(details: LoadFailureDetails): string {
   ].join('\n')
 }
 
-function resolveMainRendererTarget(initialPath = '/'): ReloadTarget {
+function resolveMainRendererTarget(
+  initialPath = '/',
+  devbarEnabled = isDevbarRendererEnabled(),
+  auxiliary = false
+): ReloadTarget {
+  const rendererEntry = devbarRendererEntry(devbarEnabled, auxiliary)
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    // The dev server keeps index.html on plain history paths; only the Devbar
+    // entry loads as <entry>.html#/<route> since it runs hash history on http.
+    const path =
+      rendererEntry === 'index.html'
+        ? initialPath
+        : initialPath === '/'
+          ? rendererEntry
+          : `${rendererEntry}#${initialPath}`
     return {
       type: 'url',
-      url: new URL(initialPath, process.env['ELECTRON_RENDERER_URL']).toString()
+      url: new URL(path, process.env['ELECTRON_RENDERER_URL']).toString()
     }
   }
   return {
     type: 'file',
-    filePath: join(__dirname, '../renderer/index.html'),
+    filePath: join(__dirname, `../renderer/${rendererEntry}`),
     ...(initialPath === '/' ? {} : { hash: initialPath })
   }
 }
@@ -164,6 +182,28 @@ function loadRendererTarget(window: BrowserWindow, target: ReloadTarget): Promis
     return window.loadURL(target.url)
   }
   return window.loadFile(target.filePath, target.hash ? { hash: target.hash } : undefined)
+}
+
+function readCurrentRendererPath(window: BrowserWindow): string {
+  try {
+    const current = new URL(window.webContents.getURL())
+    if (current.hash.startsWith('#/')) return current.hash.slice(1)
+    if (!current.pathname.endsWith('.html') && current.pathname.startsWith('/')) {
+      return `${current.pathname}${current.search}`
+    }
+  } catch {
+    // A window still navigating has no route worth preserving.
+  }
+  return '/'
+}
+
+export async function reloadMainWindowForDevbar(
+  window: BrowserWindow,
+  enabled: boolean
+): Promise<void> {
+  const target = resolveMainRendererTarget(readCurrentRendererPath(window), enabled)
+  setReloadTarget(window, target)
+  await loadRendererTarget(window, target)
 }
 
 function isTrustedNavigation(url: string, targets: readonly ReloadTarget[]): boolean {
@@ -311,14 +351,18 @@ function attachMainWindowDiagnostics(window: BrowserWindow, recoveryTarget: Relo
       reason: details.reason,
       exitCode: details.exitCode
     })
-    // 'clean-exit' is normal shutdown — don't surface it.
-    if (details.reason === 'clean-exit') return
     if (isInRecovery(window)) return
-    showRecovery({
-      message: 'The Lody window crashed.',
-      details: `Reason: ${details.reason}\nExit code: ${details.exitCode}`,
-      source: 'render-process-gone'
+    const handling = createRendererProcessGoneHandling(details)
+    if (!handling) return
+
+    // This executes in main because the crashing renderer cannot finish its own
+    // telemetry request. The recovery page stays open afterwards, so this
+    // best-effort flush is never raced by an automatic product reload.
+    void captureElectronMainException(handling.report.error, {
+      component: handling.report.component,
+      extra: handling.report.extra
     })
+    showRecovery(handling.recovery)
   })
 
   webContents.on('devtools-opened', () => {
@@ -389,9 +433,17 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
     }
   })
   if (!options.auxiliary) trackMainWindowState(window)
-  const mainTarget = resolveMainRendererTarget(options.initialPath)
+  const initialDevbarEnabled = isDevbarRendererEnabled()
+  const mainTarget = resolveMainRendererTarget(
+    options.initialPath,
+    initialDevbarEnabled,
+    options.auxiliary
+  )
+  const standardTarget = resolveMainRendererTarget(options.initialPath, false)
+  const devbarTarget = resolveMainRendererTarget(options.initialPath, true)
   const recoveryTarget = resolveRecoveryTarget()
-  installNavigationGuard(window, [mainTarget, recoveryTarget])
+  installNavigationGuard(window, [standardTarget, devbarTarget, recoveryTarget])
+  installContextMenu(window)
   setReloadTarget(window, mainTarget)
   attachMainWindowDiagnostics(window, recoveryTarget)
 

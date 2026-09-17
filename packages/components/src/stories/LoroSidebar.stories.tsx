@@ -1008,8 +1008,8 @@ function ProductionLikeTopContent({
                     machineName="Mac Studio"
                     project={project}
                     canRemoveProject
-                    canNavigateProject
                     collapsed={collapsed}
+                    whetherShowFullList={false}
                     isSelected={false}
                     sessionsForProject={
                       project.id === ('proj-lody' as LocalProjectId) ? demoLocalSessions : []
@@ -1034,6 +1034,7 @@ function ProductionLikeTopContent({
                     onToggleCollapsed={() =>
                       setCollapsedProjects((prev) => ({ ...prev, [key]: !(prev[key] ?? false) }))
                     }
+                    onToggleFullList={() => {}}
                     onRequestRemoval={() => {}}
                   />
                 );
@@ -1063,8 +1064,8 @@ function ProductionLikeTopContent({
                   machineName="MacBook Pro"
                   project={project}
                   canRemoveProject
-                  canNavigateProject
                   collapsed={collapsed}
+                  whetherShowFullList={false}
                   isSelected={false}
                   sessionsForProject={[] as SessionMeta[]}
                   childSessionsByParent={new Map()}
@@ -1087,6 +1088,7 @@ function ProductionLikeTopContent({
                   onToggleCollapsed={() =>
                     setCollapsedProjects((prev) => ({ ...prev, [key]: !(prev[key] ?? false) }))
                   }
+                  onToggleFullList={() => {}}
                   onRequestRemoval={() => {}}
                 />
               );

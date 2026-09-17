@@ -79,15 +79,6 @@ export const SETTINGS_DEFAULT_TAB: SettingsTabId = 'account';
 
 export const SETTINGS_TAB_CONFIGS: SettingsTabConfig[] = [
   {
-    id: 'shares',
-    section: 'workspace',
-    labelKey: 'settings.tabs.shares',
-    descriptionKey: 'settings.shares.description',
-    icon: Share2,
-    capability: 'teamSharing',
-    path: '/$workspaceName/settings/shares',
-  },
-  {
     id: 'account',
     section: 'account',
     labelKey: 'settings.tabs.account',
@@ -197,6 +188,15 @@ export const SETTINGS_TAB_CONFIGS: SettingsTabConfig[] = [
     icon: ChartNoAxesCombined,
     capability: 'usageAnalytics',
     path: '/$workspaceName/settings/ai-usage',
+  },
+  {
+    id: 'shares',
+    section: 'workspace',
+    labelKey: 'settings.tabs.shares',
+    descriptionKey: 'settings.shares.description',
+    icon: Share2,
+    capability: 'teamSharing',
+    path: '/$workspaceName/settings/shares',
   },
   {
     id: 'billing',

@@ -58,6 +58,7 @@ export const supportsBuiltinAuthentication = (input: {
 }): boolean => {
   if (input.cliType !== 'builtin') return false;
   const agentType = input.agentType;
+  if (agentType === 'pi') return false;
   if (!agentType || !isManagedBuiltinAgentType(agentType)) return false;
   if (hasBuiltinEnvAuthentication(agentType, input.env)) return false;
   // A persisted brand marks a preset routed through a third-party provider even
@@ -87,4 +88,7 @@ export const supportsAuthenticationWhenRequired = (input: {
   agentType: string | null | undefined;
 }): boolean =>
   usesAcpProtocolAuthentication(input.cliType) ||
-  (input.cliType === 'builtin' && !!input.agentType && isManagedBuiltinAgentType(input.agentType));
+  (input.cliType === 'builtin' &&
+    !!input.agentType &&
+    input.agentType !== 'pi' &&
+    isManagedBuiltinAgentType(input.agentType));

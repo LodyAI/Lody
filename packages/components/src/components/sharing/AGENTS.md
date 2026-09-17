@@ -1,6 +1,6 @@
 # Static session sharing
 
-Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file only.
+Parent rules apply. `CLAUDE.md` is a symlink; edit this file only.
 
 - Breaking static-publication cutover in progress: do not deploy until the
   anonymous reader, MCP confirmation, GC and integration fixtures switch
@@ -20,8 +20,9 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
   may show a percentage; capture and the publish commit use the indeterminate
   sweep. Auto-copy may claim "copied" only after the clipboard write resolves; a
   rejected write shows the manual-copy field.
-- MCP requests require explicit human confirmation of the locked target set.
-  Opening the dialog does not capture or publish; confirmation starts freeze/upload.
+- MCP consent names purpose, exact targets and full URL delivery to the agent.
+  One approval starts an independent share and encrypted result delivery.
+  Hide cards on local or canonical publication success.
 - `SessionShareDialogFrame` keeps its fixed header and one keyboard-aware scroll
   body; the manager's action row sticks to the bottom of that body. Opening
   focuses the panel and never a control, so the link field is not preselected and
@@ -36,10 +37,10 @@ Parent component instructions apply. `CLAUDE.md` is a symlink; edit this file on
 - `hooks/use-session-share-management.ts` owns prepare/confirm/upload/publish.
   Settings reuses `useSessionShareLinkActions` for copy/reset/revoke. Keep retry
   credentials and request identity stable; publish only after sealing.
-- `session-share-request-cards.tsx` reads canonical pending requests, not history flags.
-  Review locks the explicit target set; confirmation is app-only. Keep its editor
-  mounted when begin consumes the request. Confirmed half-deployments stay visible
-  and can be abandoned; cancelling a published request cannot revoke its share.
+- `session-share-request-cards.tsx`: canonical requests outside virtual rows;
+  app-only approval; scrolling/confirmation must not unmount publishing.
+  Abandon unfinished deployments; cancellation cannot revoke published shares.
+  Known capability fragments are omitted from exports, never live history.
 - `lib/session-share-publisher.ts` is app-only: hydrate all sources before
   synchronous capture, copy attachments under app authority, and release every
   source lease. Never import it from the anonymous entry. Workspace E2EE will

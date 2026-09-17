@@ -37,10 +37,10 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
   embedded browsers, navigation and close actions belong to their source window;
   auxiliary windows must not overwrite the primary window's persisted view state.
 
-- Desktop devbar diagnostics stay runtime opt-in (`LODY_DEVBAR=true`) and local to
-  memory. The compact GPU field identifies process CPU/RSS in its hover text;
-  never describe these measurements as hardware GPU usage or VRAM.
-  Enable precise Chromium heap reporting before app readiness only for devbar.
+- Devbar is off by default; hidden Developer Mode enables it, while
+  `LODY_DEVBAR=true` is automation only. Keep data in memory and MCP/Terminals
+  behind `agentAccess`. GPU means process CPU/RSS, never hardware usage/VRAM.
+  Runtime heap is approximate; only the startup override enables precise readings.
 
 - Generic update metadata may carry localized Markdown under
   `vendor.lodyChangelog.locales.{en,zh_CN}` in addition to the standard English
@@ -100,7 +100,8 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
   menu, clipboard, and save dialog here because the renderer holds the only copy
   of the image (a `blob:` URL main cannot download). Bytes cross once, after the
   menu selection. Naming/filter logic stays in `image-export-core.ts` so it runs
-  under `node --test` without the `electron` runtime.
+  under `node --test` without the `electron` runtime. `context-menu.ts` draws every
+  other right-click and yields to it on images.
 
 ## Local file resources
 

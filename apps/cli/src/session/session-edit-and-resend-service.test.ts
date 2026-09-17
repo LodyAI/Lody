@@ -155,9 +155,12 @@ function createHarness(
       },
     },
   });
+  let storedMeta = meta;
   const repo = {
-    upsertDocMeta: vi.fn(async () => {
+    getDocMeta: vi.fn(async () => ({ meta: storedMeta })),
+    upsertDocMeta: vi.fn(async (_roomId: string, patch: Partial<SessionMeta>) => {
       events.push('meta');
+      storedMeta = { ...storedMeta, ...patch };
     }),
   };
   const agentClient = {
@@ -569,6 +572,11 @@ describe('SessionEditAndResendService', () => {
     const execution = new SessionExecutionService({
       logger: { debug: vi.fn() },
       workspaceDocument: { repo: harness.repo },
+      sessionManager: {
+        getPendingSession: vi.fn(() => undefined),
+        getSession: vi.fn(() => undefined),
+      },
+      isEngineTurnActive: vi.fn(() => false),
     } as never);
     await execution['transitionDispatchOwnership']({
       sessionId,

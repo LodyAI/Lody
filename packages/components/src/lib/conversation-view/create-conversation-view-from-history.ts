@@ -24,6 +24,7 @@ export function createConversationViewFromHistory(
   let history = options.getHistory();
   let indexById = buildIndexById(history);
   let version = 0;
+  let structureVersion = 0;
   let disposed = false;
 
   const rowOf = (entry: SessionHistory): TurnIndexRow => {
@@ -44,6 +45,7 @@ export function createConversationViewFromHistory(
       previous.length !== next.length || previous.some((entry, i) => entry?.id !== next[i]?.id);
     if (structural) {
       indexById = buildIndexById(next);
+      structureVersion += 1;
     }
     version += 1;
     if (structural) {
@@ -62,6 +64,9 @@ export function createConversationViewFromHistory(
     },
     get version() {
       return version;
+    },
+    get structureVersion() {
+      return structureVersion;
     },
     ready: Promise.resolve(),
     index: (i) => {

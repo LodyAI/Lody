@@ -13,6 +13,7 @@
     "packages/acp-extension-grok/**/*",
     "packages/acp-extension-core/test/**/*",
     "packages/acp-extension-kimi/**/*",
+    "packages/acp-extension-pi/**/*",
     "site/**/*",
     "functions/**/*",
     ".codex/**/*",

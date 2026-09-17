@@ -4,6 +4,9 @@
 
 Managed preview tunnels and the local proxy. [apps/cli/AGENTS.md](../../AGENTS.md) applies.
 
+- Annotation is optional: probe proxy reachability independently of runtime injection.
+  Preserve valid page bytes when injection alone would exceed the response limit.
+
 - Preview targets are untrusted, and a managed preview reaches THIS machine's loopback and
   nothing else — agent candidate or user-approved alike, there is no policy under which a LAN
   host is accepted (`normalizeTarget` in `preview-service.ts`). The tunnel makes this machine the

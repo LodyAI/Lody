@@ -44,6 +44,33 @@ function getRegistryAgent(agentType: string) {
 }
 
 describe('resolveBuiltinACPSetting', () => {
+  it('keeps legacy Pi runnable outside the catalog until confirmation', () => {
+    expect(REGISTRY_ACP_AGENTS.some((agent) => agent.id === 'pi-acp')).toBe(false);
+    const launch = resolveACPSetting({ cliType: 'registry', agentType: 'pi-acp' });
+    expect(launch.exec.args).toContain('pi-acp@0.0.33');
+  });
+
+  it('launches the downloaded Pi closure with Node and its actual capability version', async () => {
+    const manager = vi.spyOn(managedRuntime, 'getManagedAgentRuntimeManager').mockReturnValue({
+      resolveRuntimeForLaunch: async () => ({
+        runtimeName: 'pi',
+        version: '0.1.0-local',
+        targetVersion: '0.1.0-local',
+        platformArch: 'node',
+        command: '/managed/pi/package/dist/index.js',
+        updateAvailable: false,
+      }),
+    } as ReturnType<typeof managedRuntime.getManagedAgentRuntimeManager>);
+    try {
+      expect(await resolveACPProcessLaunchAsync({ cliType: 'builtin', agentType: 'pi' })).toEqual({
+        command: process.execPath,
+        args: ['/managed/pi/package/dist/index.js'],
+        capabilitySourceVersion: 'builtin-pi:0.1.0-local',
+      });
+    } finally {
+      manager.mockRestore();
+    }
+  });
   it('requires the async launcher for managed builtin runtimes', () => {
     expect(() => resolveBuiltinACPSetting('claude')).toThrow(/resolveACPProcessLaunchAsync/);
     expect(() => resolveBuiltinACPSetting('codex')).toThrow(/resolveACPProcessLaunchAsync/);
@@ -128,10 +155,11 @@ describe('resolveBuiltinACPSetting', () => {
           `@deepseek-ai/dsh-agent-presets@${DEEPSEEK_HARNESS_VERSION}`,
           '--package',
           `@deepseek-ai/dsh-mcp-client@${DEEPSEEK_HARNESS_VERSION}`,
-          'dsh',
-          '--profile',
+          'node',
+          '-e',
         ])
       );
+      expect(launch.env?.LODY_DSH_NODE_EXECUTABLE).toBe(process.execPath);
       expect(parseNpxPackageSpecFromArgs(launch.args)).toEqual({
         name: '@deepseek-ai/dsh',
         version: DEEPSEEK_HARNESS_VERSION,
@@ -143,8 +171,13 @@ describe('resolveBuiltinACPSetting', () => {
       );
       expect(launch.env?.[DEEPSEEK_HARNESS_HOME_ENV]).toBe(dshHome);
 
-      const profileFlag = launch.args.indexOf('--profile');
-      const profileName = launch.args[profileFlag + 1];
+      const runtimeArgs: unknown = JSON.parse(
+        Buffer.from(launch.env?.LODY_DSH_NODE_ARGS ?? '', 'base64').toString()
+      );
+      expect(runtimeArgs).toEqual(expect.arrayContaining(['--profile']));
+      if (!Array.isArray(runtimeArgs)) throw new Error('Missing DSH runtime arguments');
+      const profileFlag = runtimeArgs.indexOf('--profile');
+      const profileName = runtimeArgs[profileFlag + 1];
       expect(profileName).toBeTruthy();
       const profileDir = join(dshHome, 'profiles', profileName!);
       const packageJson = await readFile(join(profileDir, 'package.json'), 'utf8');
@@ -247,6 +280,23 @@ describe('resolveBuiltinACPSetting', () => {
       });
     }
   );
+
+  it('never launches another provider for Pi authentication', async () => {
+    await expect(
+      resolveBuiltinAuthenticationProcessLaunch({
+        cliType: 'builtin',
+        agentType: 'pi',
+        action: 'status',
+      })
+    ).resolves.toBeNull();
+    await expect(
+      resolveBuiltinAuthenticationProcessLaunch({
+        cliType: 'builtin',
+        agentType: 'pi',
+        action: 'login',
+      })
+    ).rejects.toThrow('Configure Pi credentials');
+  });
 
   it('uses Kimi ACP login and skips unsupported status probing', async () => {
     await expect(

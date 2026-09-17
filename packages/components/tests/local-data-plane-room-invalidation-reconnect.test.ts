@@ -164,6 +164,40 @@ function trackRoom(subscription: ReturnType<LocalLoroTransportAdapter['joinDocRo
 }
 
 describe('invalidateDocRoom recovery is room-scoped', () => {
+  it('makes an expired adapter join visible to the real workspace health predicate', () => {
+    const deadlines: Array<() => void> = [];
+    const adapter = new LocalLoroTransportAdapter({
+      workspaceId: WORKSPACE_ID,
+      peerId: 'renderer:deadline',
+      joinAttemptTimeoutMs: 120_000,
+      scheduleTimeout: (callback) => {
+        deadlines.push(callback);
+        return callback;
+      },
+      cancelTimeout: () => {},
+      connection: {
+        send: () => {}, // Withhold the join reply while keeping the relay connected.
+        onMessage: () => () => {},
+        onStatusChange: () => () => {},
+        isConnected: () => true,
+      },
+    });
+    const subscription = adapter.joinDocRoom(DOC_ID, new LoroDoc());
+    const tracked = trackRoom(subscription);
+
+    expect(tracked.loopWouldFire()).toBe(false);
+    deadlines[0]?.();
+
+    // This is exactly the predicate `createLocalReconnectLoop` receives from
+    // createWorkspaceRuntime; no visibility event or manual status rewrite is
+    // involved.
+    expect(subscription.status).toBe('error');
+    expect(tracked.loopWouldFire()).toBe(true);
+
+    tracked.untrack();
+    tracked.tracker.dispose();
+  });
+
   it('repairs the invalidated room without leaving work for the workspace loop', async () => {
     const harness = new Harness();
     const renderer = harness.createAdapter('renderer:1');

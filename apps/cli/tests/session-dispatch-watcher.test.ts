@@ -90,6 +90,8 @@ const addPreparedDispatchShim = (
     tryAcquireSessionRewriteConflictLease?: () => (() => void) | null;
   };
   service.tryAcquireSessionRewriteConflictLease ??= () => () => {};
+  service.reconcileSteerHistory ??= async () => {};
+  service.acknowledgeSteerTurn ??= async () => {};
   if (service.dispatchPreparedSessionTurn) {
     return executionService;
   }
@@ -1930,7 +1932,8 @@ describe('SessionDispatchWatcher', () => {
         type: 'session/cancel',
         sessionId,
         turnId: 'assistant-turn-2',
-      })
+      }),
+      { pendingInput: 'promote', prePromptSession: 'discard' }
     );
   });
 
@@ -2023,7 +2026,8 @@ describe('SessionDispatchWatcher', () => {
         type: 'session/cancel',
         sessionId,
         turnId: 'assistant-turn-2b',
-      })
+      }),
+      { pendingInput: 'promote', prePromptSession: 'discard' }
     );
 
     resolveContinue?.();

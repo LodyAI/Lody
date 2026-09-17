@@ -6,7 +6,9 @@ import { createRoot, type Root } from 'react-dom/client';
 import { InlineSvg } from '../src/components/icons/inline-svg';
 import {
   resetSafeAreaInsetsForTest,
+  useSafeAreaCollisionPadding,
   useSafeAreaInsets,
+  type CollisionPadding,
   type SafeAreaInsets,
 } from '../src/hooks/use-safe-area-insets';
 
@@ -55,9 +57,7 @@ describe('InlineSvg', () => {
     act(() => root.render(createElement(InlineSvg, { raw: SVG_MARKUP })));
     const first = container.querySelector('span')?.firstElementChild;
 
-    act(() =>
-      root.render(createElement(InlineSvg, { raw: '<svg viewBox="0 0 8 8"><g /></svg>' }))
-    );
+    act(() => root.render(createElement(InlineSvg, { raw: '<svg viewBox="0 0 8 8"><g /></svg>' })));
     const second = container.querySelector('span')?.firstElementChild;
 
     expect(second).not.toBe(first);
@@ -139,5 +139,38 @@ describe('useSafeAreaInsets', () => {
       window.dispatchEvent(new Event('resize'));
     });
     expect(seen[seen.length - 1]).toEqual({ top: 0, right: 0, bottom: 0, left: 0 });
+  });
+});
+
+describe('useSafeAreaCollisionPadding', () => {
+  function measure(collisionPadding?: CollisionPadding): SafeAreaInsets {
+    let padding: SafeAreaInsets | undefined;
+    function Probe() {
+      padding = useSafeAreaCollisionPadding(collisionPadding);
+      return null;
+    }
+    act(() => root.render(createElement(Probe)));
+    if (!padding) throw new Error('probe did not render');
+    return padding;
+  }
+
+  afterEach(() => {
+    document.documentElement.style.removeProperty('--safe-area-bottom');
+  });
+
+  it('keeps every edge clear of the viewport and the safe area', () => {
+    document.documentElement.style.setProperty('--safe-area-bottom', '34px');
+
+    // A surface given no padding of its own still gets one: Radix defaults it
+    // to 0, which lands a colliding menu flush against the screen edge and caps
+    // its scroll height at that same edge.
+    expect(measure()).toEqual({ top: 8, right: 8, bottom: 42, left: 8 });
+  });
+
+  it('widens to the caller request per edge, never narrows below the floor', () => {
+    document.documentElement.style.setProperty('--safe-area-bottom', '34px');
+
+    expect(measure(24)).toEqual({ top: 24, right: 24, bottom: 42, left: 24 });
+    expect(measure({ left: 120 })).toEqual({ top: 8, right: 8, bottom: 42, left: 120 });
   });
 });

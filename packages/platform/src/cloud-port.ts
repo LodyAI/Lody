@@ -5,7 +5,6 @@ import type {
   MachineBugReportResponse,
   PermissionRequestKind,
   SessionPullRequestMeta,
-  ACPSessionId,
   BillingPlanTier,
   MachineId,
   SessionId,
@@ -20,6 +19,12 @@ import type {
 
 export interface CloudSessionSharingPort {
   request(input: SessionShareRequestInput): Promise<SessionShareRequestResult>;
+  getResult(
+    input: Pick<
+      SessionShareRequestInput,
+      'workspaceId' | 'sourceSessionId' | 'requesterUserId' | 'deliveryPublicKey'
+    > & { shareRequestId: string }
+  ): Promise<SessionShareRequestResult>;
 }
 
 /**
@@ -184,7 +189,8 @@ export interface CloudNotificationsPort {
 export interface CloudUsageUpdateInput {
   workspaceId: WorkspaceId;
   sessionId: SessionId;
-  acpSessionId: ACPSessionId;
+  /** Accounting scope; may be a native session ID or a provider turn key. */
+  acpSessionId: string;
   userId: string;
   machineId: MachineId;
   cliType: string;

@@ -30,8 +30,11 @@ import claudeSdkPackageJson from '../../node_modules/@anthropic-ai/claude-agent-
 import claudeRuntimeManifestJson from './claude-runtime-manifest.json';
 import codexRuntimeManifestJson from './codex-runtime-manifest.json';
 import kimiRuntimeManifestJson from './kimi-runtime-manifest.json';
+import piRuntimeManifestJson from './pi-runtime-manifest.json';
 
 import {
+  CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+  MACHINE_PROTOCOL_CAPABILITIES,
   getManagedBuiltinRuntimeByRuntimeName,
   type ManagedBuiltinRuntimeName,
 } from '@lody/shared';
@@ -131,6 +134,7 @@ type ManagedRuntimeInstallEntry = {
 };
 
 const MANAGED_RUNTIME_NAME_VALUES = [
+  'pi',
   'codex',
   'claude-code',
   'kimi-code',
@@ -334,6 +338,7 @@ if (
 export const CODEX_ACP_ADAPTER_VERSION = codexPackageJson.version;
 export const CLAUDE_ACP_ADAPTER_VERSION = claudePackageJson.version;
 export const KIMI_CODE_VERSION = kimiRuntimeManifestJson.version;
+export const PI_RUNTIME_VERSION = piRuntimeManifestJson.version;
 export const GROK_ACP_ADAPTER_VERSION = grokPackageJson.version;
 export const GROK_BUILD_RUNTIME_VERSION = grokRuntimeManifestJson.officialRuntime.version;
 export const KIMI_CODE_MIN_NODE_VERSION = resolveMinimumNodeVersion(
@@ -401,6 +406,15 @@ const RUNTIMES: Record<ManagedRuntimeName, RuntimeDefinition> = {
       'linux-x64-musl': createClaudeRuntimeArchive('linux-x64-musl'),
       'win32-arm64': createClaudeRuntimeArchive('win32-arm64'),
       'win32-x64': createClaudeRuntimeArchive('win32-x64'),
+    },
+  },
+  pi: {
+    name: 'pi',
+    version: PI_RUNTIME_VERSION,
+    kind: 'node-package',
+    minNodeVersion: piRuntimeManifestJson.minNodeVersion,
+    platforms: {
+      node: { ...piRuntimeManifestJson.artifact, compression: 'zstd' },
     },
   },
   'kimi-code': {
@@ -523,6 +537,11 @@ export function mapManagedRuntimePlatform(
   platform: NodeJS.Platform = process.platform,
   arch: string = process.arch
 ): string | undefined {
+  if (
+    name === 'pi' &&
+    (!['darwin', 'linux', 'win32'].includes(platform) || !['arm64', 'x64'].includes(arch))
+  )
+    return undefined;
   if (RUNTIMES[name].kind === 'node-package') return 'node';
   const archPart = arch === 'arm64' ? 'arm64' : arch === 'x64' ? 'x64' : undefined;
   if (!archPart) return undefined;
@@ -533,6 +552,22 @@ export function mapManagedRuntimePlatform(
     return `linux-${archPart}${muslSuffix}`;
   }
   return undefined;
+}
+
+/** Host-dependent runtime capabilities must not be advertised by shared static metadata. */
+export function getHostMachineProtocolCapabilities(
+  nodeVersion = process.versions.node,
+  platform: NodeJS.Platform = process.platform,
+  arch: string = process.arch
+) {
+  const capabilities = { ...CURRENT_MACHINE_PROTOCOL_CAPABILITIES };
+  if (
+    mapManagedRuntimePlatform('pi', platform, arch) &&
+    isNodeVersionAtLeast(nodeVersion, piRuntimeManifestJson.minNodeVersion)
+  ) {
+    capabilities[MACHINE_PROTOCOL_CAPABILITIES.builtinPi] = 1;
+  }
+  return capabilities;
 }
 
 async function sha256File(

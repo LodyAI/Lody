@@ -222,7 +222,11 @@ const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions
       target.machine?.acpCapabilities?.[key],
       target.runtimeOverrides
     );
-    if (capability) {
+    if (
+      capability &&
+      capability.cliType === target.cliType &&
+      capability.agentType === target.agentType
+    ) {
       const authority = getAcpCapabilityCacheEntryAuthority(capability, target.runtimeOverrides);
       const modelReasoningEfforts = capability.modelReasoningEfforts;
       if (capability.configOptions?.length) {

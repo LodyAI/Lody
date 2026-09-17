@@ -23,6 +23,8 @@ export function useAvailableCommands(target?: AcpSelectorTarget): AcpCommandSumm
       machine?.acpCapabilities?.[key],
       runtimeOverrides
     );
-    return capability?.availableCommands ?? [];
+    return capability?.cliType === cliType && capability.agentType === agentType
+      ? (capability.availableCommands ?? [])
+      : [];
   }, [configId, cliType, agentType, runtimeOverrides, machine]);
 }

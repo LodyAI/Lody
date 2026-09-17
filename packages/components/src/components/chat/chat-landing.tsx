@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useAtom, useAtomValue, useSetAtom, useStore } from 'jotai';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import {
   buildPendingUserHistoryEntry,
   buildSessionPreparationRunConfig,
@@ -21,6 +21,12 @@ import {
   findFreshSessionPresenceState,
   FREE_SESSION_LIMIT_PER_WORKSPACE,
   getServerNow,
+  isLegacyPiProvider,
+  migratePiProvider,
+  machineSupportsProtocolCapability,
+  MACHINE_PROTOCOL_CAPABILITIES,
+  getMachineFlockDocId,
+  machineFlockKeys,
   hashAnalyticsId,
   type SessionStartFailureReason,
   InFlightDedupe,
@@ -54,6 +60,7 @@ import {
 } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import { Button } from '@/ui/button';
+import { PiProviderMigrationCard } from './pi-provider-migration-card';
 
 import {
   type AgentSelection,
@@ -206,10 +213,7 @@ import {
   arePersistedMentionRangesEqual,
   toPersistedMentionRanges,
 } from '@/components/mentions/mention-persistence';
-import {
-  buildChatLandingDraftKey,
-  chatLandingAppliedResetKeyAtomFamily,
-} from '@/atoms/chat-landing-draft';
+import { buildChatLandingDraftKey } from '@/atoms/chat-landing-draft';
 import { useChatLandingImageDraft } from '@/hooks/use-chat-landing-image-draft';
 import { useChatLandingFileDraft } from '@/hooks/use-chat-landing-file-draft';
 import { useChatLandingDraftSession } from '@/hooks/use-chat-landing-draft-session';
@@ -245,7 +249,7 @@ import {
   shouldSubmitOnEnterForMobileKeyboardAction,
 } from '@/lib/mobile-keyboard-action';
 import { getChatComposerPromptPlaceholderKey } from '@/lib/chat-composer-placeholder';
-import { splitImageAndFileAttachments } from '@/lib/file-drop';
+import { selectPastedClipboardFiles, splitImageAndFileAttachments } from '@/lib/file-drop';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
 import { createMachinePairing } from '@/lib/cli-api-key';
@@ -391,8 +395,6 @@ interface ChatLandingProps {
    * chat route only; mobile keeps its base-context model.
    */
   onSelectionUrlSync?: (search: ChatLandingSearch) => void;
-  resetDraftKey?: string;
-  resetDraftOnKeyChange?: boolean;
 }
 
 const getGitHubOwnerHandle = (fullName: string): string => {
@@ -568,8 +570,6 @@ function WorkspaceChatLanding({
   preSelectedProject,
   preSelectedRepo,
   onSelectionUrlSync,
-  resetDraftKey,
-  resetDraftOnKeyChange = true,
 }: ChatLandingProps) {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
@@ -1329,38 +1329,6 @@ function WorkspaceChatLanding({
     sessionId: draftSessionId,
     ensureSessionId: ensureDraftSessionId,
   });
-  const draftStore = useStore();
-  const appliedResetKeyAtom = chatLandingAppliedResetKeyAtomFamily(chatLandingDraftKey);
-
-  useEffect(() => {
-    if (!resetDraftKey) {
-      return;
-    }
-
-    const scopedResetKey = `${chatLandingDraftKey}:${resetDraftKey}`;
-    if (draftStore.get(appliedResetKeyAtom) === scopedResetKey) {
-      return;
-    }
-    draftStore.set(appliedResetKeyAtom, scopedResetKey);
-    if (resetDraftOnKeyChange) {
-      setSessionState({ prompt: '', pastedTextDrafts: [] });
-    }
-    setComposerStatus(null);
-    clearPendingImages();
-    clearPendingFiles();
-    resetDraftSessionId();
-  }, [
-    appliedResetKeyAtom,
-    chatLandingDraftKey,
-    clearPendingFiles,
-    clearPendingImages,
-    draftStore,
-    resetDraftSessionId,
-    resetDraftKey,
-    resetDraftOnKeyChange,
-    setSessionState,
-  ]);
-
   const insertLargePastedTextAtSelection = useCallback(
     (text: string) => {
       const normalizedText = normalizePastedTextDraft(text).trim();
@@ -2798,6 +2766,18 @@ function WorkspaceChatLanding({
     void handleSubmit();
   };
 
+  const attachPastedFiles = useCallback(
+    (files: File[]) => {
+      const { images, attachments } = splitImageAndFileAttachments(files);
+      if (images.length > 0) {
+        addFiles(images);
+      }
+      if (attachments.length > 0) {
+        addFileAttachments(attachments);
+      }
+    },
+    [addFileAttachments, addFiles]
+  );
   const handlePromptPaste = useCallback(
     (event: ClipboardEvent<HTMLTextAreaElement>) => {
       const text = event.clipboardData.getData('text/plain');
@@ -2823,31 +2803,41 @@ function WorkspaceChatLanding({
 
       if (text && shouldCapturePastedTextDraft(text)) {
         event.preventDefault();
-        if (insertLargePastedTextAtSelection(text)) {
-          return;
-        }
+        insertLargePastedTextAtSelection(text);
       }
 
-      const pastedFiles = Array.from(event.clipboardData.items)
+      const clipboardFiles = Array.from(event.clipboardData.items)
         .filter((item) => item.kind === 'file')
         .map((item) => item.getAsFile())
         .filter((file): file is File => file !== null);
+      // A Word or PowerPoint copy carries a picture of the selection beside the
+      // text, so attaching every clipboard file turned those pastes into a
+      // screenshot of themselves.
+      const { files: pastedFiles, renderedImages } = selectPastedClipboardFiles({
+        text,
+        files: clipboardFiles,
+      });
+
+      if (renderedImages.length > 0) {
+        toast(t('composer.pastedRichTextAsText', 'Pasted as text.'), {
+          // One id, so pasting repeatedly replaces the hint instead of stacking it.
+          id: 'composer-pasted-rich-text-as-text',
+          action: {
+            label: t('composer.pastedRichTextAttachImage', 'Attach image instead'),
+            onClick: () => attachPastedFiles(renderedImages),
+          },
+        });
+      }
 
       if (pastedFiles.length > 0) {
         event.preventDefault();
-        const { images, attachments } = splitImageAndFileAttachments(pastedFiles);
-        if (images.length > 0) {
-          addFiles(images);
-        }
-        if (attachments.length > 0) {
-          addFileAttachments(attachments);
-        }
+        attachPastedFiles(pastedFiles);
         return;
       }
 
       handleImagePromptPaste(event);
     },
-    [addFileAttachments, addFiles, handleImagePromptPaste, insertLargePastedTextAtSelection, t]
+    [attachPastedFiles, handleImagePromptPaste, insertLargePastedTextAtSelection, t]
   );
   const handleImageDrop = useCallback(
     (files: File[]) => {
@@ -3750,11 +3740,19 @@ function WorkspaceChatLanding({
       name="ChatLandingTopSelector"
       variant="inline"
       resetKeys={[workspaceId, selectedRepo, selectedLocalProject, selectedMachineId, contextType]}
-      fallback={
-        <div className={cn(selectorTagClassName, 'text-xs leading-tight')}>
-          {t('common.unavailable', 'Unavailable')}
-        </div>
-      }
+      fallbackRender={({ resetErrorBoundary }) => (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className={cn(selectorTagClassName, 'text-xs leading-tight')}
+          onClick={resetErrorBoundary}
+          aria-label={t('chat.retryTargetSelector', 'Retry target selector')}
+        >
+          <RefreshCw aria-hidden="true" className="size-3" />
+          {t('common.retry', 'Retry')}
+        </Button>
+      )}
     >
       <div className="flex w-full min-w-0 items-center gap-2">
         <DesktopMachineMenu
@@ -6061,9 +6059,51 @@ function WorkspaceChatLanding({
       </button>
     </div>
   ) : null;
+  const legacyPiProviders = executorConfigs.filter(
+    (config) => isLegacyPiProvider(config) && isOwnVisibleMachine(config.machineId)
+  );
+  const [piMigrationBusy, setPiMigrationBusy] = useState(false);
+  const [piMigrationError, setPiMigrationError] = useState(false);
+  const migratablePiProviders = legacyPiProviders.filter((config) =>
+    machineSupportsProtocolCapability(
+      machines.get(config.machineId),
+      MACHINE_PROTOCOL_CAPABILITIES.builtinPi
+    )
+  );
+  const canMigratePi = migratablePiProviders.length > 0;
+  const confirmPiMigration = async () => {
+    if (!runtime || piMigrationBusy || !canMigratePi) return;
+    setPiMigrationBusy(true);
+    setPiMigrationError(false);
+    try {
+      for (const config of migratablePiProviders) {
+        await runtime.writer.flockRowUpdate(
+          getMachineFlockDocId(runtime.workspaceId, config.machineId),
+          machineFlockKeys.agentConfig(config.id),
+          (current) =>
+            isLegacyPiProvider(current) &&
+            current.id === config.id &&
+            current.machineId === config.machineId
+              ? migratePiProvider(current)
+              : undefined
+        );
+      }
+    } catch {
+      setPiMigrationError(true);
+    } finally {
+      setPiMigrationBusy(false);
+    }
+  };
   const composerNoticeNode =
-    sharingReviewNoticeNode || sessionLimitNoticeNode ? (
+    sharingReviewNoticeNode || sessionLimitNoticeNode || canMigratePi ? (
       <>
+        <PiProviderMigrationCard
+          count={migratablePiProviders.length}
+          busy={piMigrationBusy}
+          error={piMigrationError}
+          canMigrate={canMigratePi}
+          onConfirm={() => void confirmPiMigration()}
+        />
         {sharingReviewNoticeNode}
         {sessionLimitNoticeNode}
       </>
@@ -6098,7 +6138,7 @@ function WorkspaceChatLanding({
         resetKeys={[workspaceId, workspaceSlug, contextType, mobileNewChatOpen]}
       >
         <MobileInlinePickerRowSlot>
-          {sessionLimitNoticeNode}
+          {composerNoticeNode}
           <ChatComposer
             tone={tone}
             variant="session"

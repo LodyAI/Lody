@@ -59,7 +59,6 @@ function ChatRoute() {
       preSelectedMachine={search.machine}
       preSelectedProject={search.project}
       preSelectedRepo={search.repo}
-      resetDraftKey={search.resetDraftKey}
       onSelectionUrlSync={handleSelectionUrlSync}
     />
   );

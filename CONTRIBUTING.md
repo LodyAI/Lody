@@ -102,7 +102,7 @@ continue to live in the nearest `AGENTS.md`.
    docs: improve local setup guide
    ```
 
-5. Open a pull request using the [pull request template](./.github/PULL_REQUEST_TEMPLATE.md). Every fork-based pull request must reference a Lody Issue and fill in the problem, summary, test plan, and Context handoff. Use `Closes #123` when merging the PR should close the Issue, and `Refs #123` only when it must remain open. A bare `#123` or full Lody Issue URL in `Related issue` defaults to `Closes #123`. The handoff gives the maintainers' reviewing Agent concise, PR-specific review focus, decisions to challenge, plausible failures or evidence gaps, and a public summary of the authoring context. Every field is required; `N/A` and redacted answers are rejected because they do not provide enough context for a safe review.
+5. Open a pull request using the [pull request template](./.github/PULL_REQUEST_TEMPLATE.md). Every fork-based pull request must reference a Lody Issue and fill in the problem, summary, test plan, and Context handoff. Use `Closes #123` when merging the PR should close the Issue, and `Refs #123` only when it must remain open. A bare `#123` or full Lody Issue URL in `Related issue` defaults to `Closes #123`. The handoff preserves the original prompt verbatim and, when a shared Lody conversation exists, links it so reviewers can inspect the complete authoring context. `N/A` and redacted answers are rejected because they do not provide enough context for a safe review.
 
 If an Agent prepares a fork-based contribution, it must explain that the Context handoff is public and an invalid PR receives seven days to be corrected before closure. An Agent preparing a same-repository branch must not create an Issue solely to satisfy contribution intake.
 

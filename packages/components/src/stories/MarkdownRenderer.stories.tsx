@@ -331,7 +331,7 @@ const allMarkdownFormatsText = [
   '',
   '## Math',
   '',
-  'Inline math: $E = mc^2$ and $a^2 + b^2 = c^2$.',
+  'Inline math remains literal: $E = mc^2$ and $a^2 + b^2 = c^2$.',
   '',
   '$$',
   '\\frac{\\partial L}{\\partial q} - \\frac{d}{dt}\\frac{\\partial L}{\\partial \\dot q} = 0',
@@ -389,7 +389,7 @@ const streamdownDemoChunks = [
     '',
   ].join('\n'),
   [
-    'Inline math is rendered by KaTeX: $E = mc^2$, and display math works too:',
+    'Inline math remains literal: $E = mc^2$, while display math works too:',
     '',
     '$$',
     '\\int_0^\\infty e^{-x^2}\\,dx = \\frac{\\sqrt{\\pi}}{2}',

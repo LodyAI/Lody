@@ -23,6 +23,7 @@ export const MANAGED_BUILTIN_RUNTIMES = [
   { runtimeName: 'grok-build', agentType: 'grok', displayName: 'Grok' },
   { runtimeName: 'claude-code', agentType: 'claude', displayName: 'Claude Code' },
   { runtimeName: 'codex', agentType: 'codex', displayName: 'Codex' },
+  { runtimeName: 'pi', agentType: 'pi', displayName: 'Pi' },
 ] as const;
 
 export type ManagedBuiltinRuntime = (typeof MANAGED_BUILTIN_RUNTIMES)[number];
@@ -62,6 +63,7 @@ export type AgentType = string;
  * Exhaustive on purpose: adding a builtin agent must not silently default it.
  */
 const BUILTIN_ACP_TITLE_OWNERSHIP: Record<BuiltinAgentType, 'none' | 'untagged' | 'tagged'> = {
+  pi: 'none',
   claude: 'untagged',
   codex: 'tagged',
   grok: 'untagged',

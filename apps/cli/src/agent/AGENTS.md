@@ -37,10 +37,9 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   `lody_task_*` tool.
 - Workspace MCP resolution stays TWO phases: call `loadExternalMcpServers` BEFORE `initialize`,
   never between `initialize` and `newSession`.
-- Acknowledged steer is inject-or-refuse. `AgentSteerNotDeliveredError` marks ONLY a provable
-  refusal — local pre-write failure or the agent's own JSON-RPC `invalid request`; never widen
-  it. The applied-waiter must await the steer request's answer before giving up on the turn's
-  response.
+- Acknowledged steer ends `applied`, `not-applied`, or `unknown`. Only adapter proof maps
+  `not-applied`; transport/process ambiguity stays `unknown`. Await the request answer even
+  after the turn response; Session execution never classifies provider errors.
 
 ## Launch and runtimes
 
@@ -49,8 +48,8 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   that gate.
 - `setting.ts`: every builtin requires `resolveACPProcessLaunchAsync()`.
 - `deepseek-harness-runtime.ts` is NOT a managed runtime: keep it out of runtime download,
-  prefetch, override, and interactive-auth flows. Launch the pinned closure through
-  `dsh --profile` (see README.md). Credentials stay in the agent config environment; never
+  prefetch, override, and auth flows. npx installs the closure; run `dsh --profile` with packaged
+  `process.execPath` and inherited `ELECTRON_RUN_AS_NODE`. Credentials stay in agent env; never
   write them into the generated config. The adapter applies model/reasoning selection
   through the Agent-scoped request waterfall, permissions through Harness presets,
   and `agent_preset` through `AgentPresets.mount/recompose` — never as UI-only state. Presets

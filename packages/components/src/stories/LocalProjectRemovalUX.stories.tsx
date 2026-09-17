@@ -65,9 +65,9 @@ function ProjectRow({ state }: { state?: LocalProjectRemovalState }) {
       machineName={state === 'removing' ? 'Mac Studio' : 'MacBook Pro'}
       project={project}
       canRemoveProject
-      canNavigateProject
       removalState={state ?? null}
       collapsed={false}
+      whetherShowFullList={false}
       isSelected={false}
       sessionsForProject={activeProjectSessions}
       childSessionsByParent={new Map()}
@@ -87,6 +87,7 @@ function ProjectRow({ state }: { state?: LocalProjectRemovalState }) {
       collapsedOpenedBySessionIds={{}}
       onToggleOpenedBySessions={() => {}}
       onToggleCollapsed={() => {}}
+      onToggleFullList={() => {}}
       onRequestRemoval={() => {}}
     />
   );
@@ -141,8 +142,8 @@ function DesktopSidebar({
               createdAtMs: now - 172_800_000,
             }}
             canRemoveProject
-            canNavigateProject
             collapsed
+            whetherShowFullList={false}
             isSelected={!state}
             sessionsForProject={[]}
             childSessionsByParent={new Map()}
@@ -162,6 +163,7 @@ function DesktopSidebar({
             collapsedOpenedBySessionIds={{}}
             onToggleOpenedBySessions={() => {}}
             onToggleCollapsed={() => {}}
+            onToggleFullList={() => {}}
             onRequestRemoval={() => {}}
           />
         </div>

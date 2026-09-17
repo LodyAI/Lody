@@ -11,7 +11,12 @@ import macIcon from '../../build/icon-mac.padded.png?asset'
 import { acquireSingleInstanceLock, registerOpenUrlHandler } from './deep-link'
 import { registerLodyProtocolClient } from './protocol-client'
 import { registerIpcServices } from './ipc/register-services'
-import { openMainWindow, openOrFocusMainWindow, setMainWindowProductReloadTarget } from './window'
+import {
+  openMainWindow,
+  openOrFocusMainWindow,
+  reloadMainWindowForDevbar,
+  setMainWindowProductReloadTarget
+} from './window'
 import { getMainWindow, setAppQuitting, setWindowsTrayAvailable } from './window-state'
 import { CliService } from './services/cli-service'
 import { applyPendingDesktopLocalReset } from './services/local-reset-service'
@@ -22,7 +27,11 @@ import { AuthService } from './services/auth-service'
 import { authClient } from './auth'
 import { AppUpdaterService } from './services/app-updater-service'
 import { shouldConstructUpdaterEnabled } from './services/app-updater-sparkle-policy'
-import { configureDevbarDiagnostics } from './services/devbar-service'
+import {
+  configureDevbarDiagnostics,
+  startDevbarDevframeService,
+  stopDevbarDevframeService
+} from './services/devbar/service'
 import { GlobalShortcutsService } from './services/global-shortcuts-service'
 import { WindowsTrayService } from './services/windows-tray-service'
 import {
@@ -192,6 +201,7 @@ if (hasSingleInstanceLock) {
     // `lody app reset-cache` is the way back for a user whose renderer is wedged,
     // so it has to run while nothing holds that storage open.
     await applyPendingDesktopLocalReset()
+    await startDevbarDevframeService()
     recordE2EBootDiagnostic('initializing-services')
     if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(macIcon)
 
@@ -273,7 +283,8 @@ if (hasSingleInstanceLock) {
       windowBadgeService,
       globalShortcutsService,
       getMainWindow,
-      completeOnboarding
+      completeOnboarding,
+      reloadMainWindowForDevbar
     })
 
     setupApplicationMenu({
@@ -333,7 +344,8 @@ if (hasSingleInstanceLock) {
       event.preventDefault()
       void Promise.allSettled([
         cliService.shutdownForQuit(),
-        flushElectronMainErrorReporting()
+        flushElectronMainErrorReporting(),
+        stopDevbarDevframeService()
       ]).finally(() => {
         cliShutdownComplete = true
         app.quit()

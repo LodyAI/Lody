@@ -12,7 +12,8 @@ export function assertProductWindowSender(event: IpcMainInvokeEvent): void {
     hasAllowedUrl = devRendererUrl
       ? parsedSender.origin === new URL(devRendererUrl).origin
       : parsedSender.protocol === 'file:' &&
-        parsedSender.pathname.endsWith('/out/renderer/index.html')
+        (parsedSender.pathname.endsWith('/out/renderer/index.html') ||
+          parsedSender.pathname.endsWith('/out/renderer/devbar.html'))
   } catch {
     hasAllowedUrl = false
   }

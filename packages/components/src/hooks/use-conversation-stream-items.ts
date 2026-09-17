@@ -128,12 +128,27 @@ export function useConversationStreamItems(
   if (cacheRef.current === undefined) {
     cacheRef.current = chatStreamItemsCacheBySessionId.get(sessionId);
   }
-  const result = useMemo(
-    () => buildChatStreamItems(view, sessionId, cacheRef.current),
+  const previousResultRef = useRef<BuildChatStreamItemsResult | null>(null);
+  const result = useMemo(() => {
+    const next = buildChatStreamItems(view, sessionId, cacheRef.current);
+    // Virtual rows, the outline and its anchors all recompute on this array's
+    // identity, and the view's version bumps at token rate. Per-turn items are
+    // already memoized, so an unchanged conversation rebuilds an array of the
+    // same entries — hand back the previous array instead and the whole chain
+    // below it short-circuits.
+    const previous = previousResultRef.current;
+    const reusable =
+      previous !== null &&
+      previous.lastAssistantMessageId === next.lastAssistantMessageId &&
+      previous.lastCompletedAssistantMessageId === next.lastCompletedAssistantMessageId &&
+      previous.items.length === next.items.length &&
+      previous.items.every((item, index) => item === next.items[index]);
+    const settled = reusable ? previous : next;
+    previousResultRef.current = settled;
+    return settled;
     // `version` is the change signal for the view's contents.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [view, version, sessionId]
-  );
+  }, [view, version, sessionId]);
   cacheRef.current = result.cache;
   useEffect(() => {
     chatStreamItemsCacheBySessionId.set(sessionId, result.cache);

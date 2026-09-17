@@ -6,11 +6,11 @@ import { Provider, createStore } from 'jotai';
 import {
   createStaticStore,
   LOCAL_PLATFORM_CAPABILITIES,
-  type CloudApi,
   type PlatformProvider,
 } from '@lody/platform';
 import { PlatformContext } from '@lody/platform/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import {
   WorkspaceScreen,
   WorkspaceScreenView,

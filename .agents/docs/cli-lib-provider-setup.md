@@ -21,6 +21,13 @@ Missing-executable and missing-ACP-plugin signatures are classified as
 `runtime-unavailable`, allowing the UI to offer the copyable Bub ACP preset installer;
 other startup/protocol failures remain `verification-failed`.
 
+Bub's configuration dialog can explicitly start this queue with Test and observe
+its setup row in place, including installation guidance, retry, and deletion.
+Successful publication returns the dialog to the form with Refresh and Save;
+subsequent refreshes use the published config rather than queueing setup again.
+Closing the dialog leaves the task in the provider list. See the
+[Bub verification Spec](../../specs/bub-provider-verification.md).
+
 Cancellation is a separate row, `['providerSetupCancellation', configId]`. After a
 merge the owning CLI causally deletes any concurrently published setup or config, so a
 cancellation that raced a publish still wins. Restart resumes only non-interactive

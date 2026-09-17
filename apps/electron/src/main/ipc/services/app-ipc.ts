@@ -16,7 +16,8 @@ import {
   type WindowBadgeInput
 } from '@lody/shared/electron-ipc'
 import { getIpcServiceDeps } from '../ipc-service-deps'
-import { getDevbarConfig, getDevbarMetrics } from '../../services/devbar-service'
+import { parseDevbarControlInput } from '../../services/devbar/control'
+import { getDevbarConfig, getDevbarMetrics, setDevbarControl } from '../../services/devbar/service'
 import { setMenuLanguage } from '../../menu'
 import { localFileActionError } from '../../services/local-file-action-error'
 import { hasPathLauncher, launchLocalPath } from '../../services/local-path-launcher-service'
@@ -128,6 +129,44 @@ export class AppIpc extends IpcService {
   @IpcMethod()
   async getDevbarConfig() {
     return getDevbarConfig()
+  }
+
+  @IpcMethod()
+  async setDevbarControl(raw: unknown) {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    const window = BrowserWindow.fromWebContents(event.sender)
+    const mainWindow = getIpcServiceDeps().getMainWindow()
+    if (!window || window !== mainWindow) {
+      return { ok: false as const, error: 'main_window_required' as const }
+    }
+
+    let input
+    try {
+      input = parseDevbarControlInput(raw)
+    } catch {
+      return { ok: false as const, error: 'invalid_input' as const }
+    }
+
+    const result = await setDevbarControl(input)
+    const reload = (enabled: boolean): void => {
+      setImmediate(() => {
+        if (window.isDestroyed()) return
+        void getIpcServiceDeps()
+          .reloadMainWindowForDevbar(window, enabled)
+          .catch((error) => {
+            console.error('[Devbar] Failed to switch renderer entry', error)
+          })
+      })
+    }
+    if (!result.ok) {
+      // A failed capability restart has already closed the previous Hub. Leave
+      // the dedicated renderer too, instead of showing a disconnected Devbar.
+      if (window.webContents.getURL().includes('/devbar.html')) reload(false)
+      return { ok: false as const, error: 'start_failed' as const, config: result.config }
+    }
+    reload(input.enabled)
+    return { ok: true as const, config: result.config }
   }
 
   @IpcMethod()

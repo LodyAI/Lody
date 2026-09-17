@@ -10,6 +10,7 @@ export const VISUAL_ANNOTATION_INSPECTOR_BROWSER_SCRIPT = String.raw`
   var RESOLVED = "VISUAL_ANNOTATION_ANCHORS_RESOLVED";
   var BROWSER_COMMAND = "LODY_MANAGED_BROWSER_COMMAND";
   var BROWSER_STATE = "LODY_MANAGED_BROWSER_STATE";
+  var BROWSER_READY = "LODY_MANAGED_BROWSER_READY";
   var BROWSER_NAVIGATION_REQUEST = "LODY_MANAGED_BROWSER_NAVIGATION_REQUEST";
   var STATIC_HTML_PREVIEW_DOCUMENT_MARKER = "${STATIC_HTML_PREVIEW_DOCUMENT_MARKER}";
   var STATIC_HTML_PREVIEW_NAVIGATION_BASE = "https://html-file-preview.invalid/";
@@ -74,28 +75,14 @@ export const VISUAL_ANNOTATION_INSPECTOR_BROWSER_SCRIPT = String.raw`
   var mutationObserver = null;
   var pendingHoverEvent = null;
   var hoverFrame = 0;
-  var parentOrigin = normalizeOrigin(getParentOrigin());
+  // Referrer describes the previous document after an in-frame navigation, not
+  // necessarily the embedder. Bind only to a control message from window.parent.
+  var parentOrigin = null;
   var parentPostMessageTargetOrigin = parentOrigin;
+  var pendingNavigationRequest = null;
   var suppressNextClick = false;
   var browserStateFrame = 0;
   var pendingStaticDocumentFragmentClick = null;
-
-  function warn(message) {
-    if (window.console && typeof window.console.warn === "function") {
-      window.console.warn("[Lody visual annotation] " + message);
-    }
-  }
-
-  function getParentOrigin() {
-    try {
-      if (document.referrer) {
-        return new URL(document.referrer).origin;
-      }
-    } catch (_error) {
-      return null;
-    }
-    return null;
-  }
 
   function normalizeOrigin(value) {
     if (!value || value === "null") {
@@ -758,7 +745,7 @@ export const VISUAL_ANNOTATION_INSPECTOR_BROWSER_SCRIPT = String.raw`
 
   function postToParent(message) {
     if (!parentPostMessageTargetOrigin) {
-      warn("Refusing to post message because parent origin is unknown.");
+      // The parent initiates the handshake, including when it reuses a frame.
       return;
     }
     window.parent.postMessage(message, parentPostMessageTargetOrigin);
@@ -817,10 +804,17 @@ export const VISUAL_ANNOTATION_INSPECTOR_BROWSER_SCRIPT = String.raw`
         event.stopPropagation();
       }
     }
-    postToParent({
+    var request = {
       type: BROWSER_NAVIGATION_REQUEST,
       payload: { url: destination.toString() }
-    });
+    };
+    if (parentPostMessageTargetOrigin) {
+      postToParent(request);
+    } else {
+      // Retain one destination until the real parent establishes its origin.
+      // Never let a pre-handshake link bypass the parent's navigation policy.
+      pendingNavigationRequest = request;
+    }
     return true;
   }
 
@@ -1025,6 +1019,11 @@ export const VISUAL_ANNOTATION_INSPECTOR_BROWSER_SCRIPT = String.raw`
     if (!learnOrValidateParentOrigin(event)) {
       return;
     }
+    if (pendingNavigationRequest) {
+      var pending = pendingNavigationRequest;
+      pendingNavigationRequest = null;
+      postToParent(pending);
+    }
     if (isSetMode) {
       setEnabled(data.enabled);
       scheduleBrowserState();
@@ -1050,6 +1049,7 @@ export const VISUAL_ANNOTATION_INSPECTOR_BROWSER_SCRIPT = String.raw`
       enabled = false;
     }
     destroyed = true;
+    pendingNavigationRequest = null;
     clearPendingStaticDocumentFragmentClick(pendingStaticDocumentFragmentClick);
     window.removeEventListener("message", handleMessage);
     window.removeEventListener("popstate", scheduleBrowserState);
@@ -1112,6 +1112,8 @@ export const VISUAL_ANNOTATION_INSPECTOR_BROWSER_SCRIPT = String.raw`
     scheduleBrowserState();
     return result;
   };
+  // No page data is sent until a source-checked parent control message arrives.
+  window.parent.postMessage({ type: BROWSER_READY }, "*");
   scheduleBrowserState();
 })();
 `;

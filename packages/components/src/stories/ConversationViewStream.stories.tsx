@@ -114,7 +114,7 @@ function buildHistory(rounds: number): SessionHistory[] {
 }
 
 /** One doc per story load; the writer is the production write path. */
-function openWindowedView(rounds: number, id: SessionId = sessionId): ConversationView {
+function openWindowedView(entries: SessionHistory[], id: SessionId = sessionId): ConversationView {
   const doc = new LoroDoc();
   doc.getMap('session').set('id', id);
   const session = createConversationSession(doc, { sessionId: id });
@@ -126,7 +126,7 @@ function openWindowedView(rounds: number, id: SessionId = sessionId): Conversati
     doc.free();
   };
   const writer = session.historyWriter;
-  for (const entry of buildHistory(rounds)) writer.append(entry);
+  for (const entry of entries) writer.append(entry);
   return view;
 }
 
@@ -135,13 +135,21 @@ const renderMessageRow: SessionChatStreamViewProps['renderMessageRow'] = ({
   sessionId: rowSessionId,
 }) => <MessageRowView message={message} sessionId={rowSessionId} />;
 
-function WindowedStream({ rounds }: { rounds: number }) {
+function WindowedStream({
+  rounds,
+  streamSessionId = sessionId,
+  history,
+}: {
+  rounds?: number;
+  streamSessionId?: SessionId;
+  history?: SessionHistory[];
+}) {
   const [view, setView] = useState<ConversationView | null>(null);
   useEffect(() => {
-    const next = openWindowedView(rounds);
+    const next = openWindowedView(history ?? buildHistory(rounds ?? ROUNDS), streamSessionId);
     setView(next);
     return () => next.dispose();
-  }, [rounds]);
+  }, [rounds, history, streamSessionId]);
   const {
     initialWindowReady,
     items,
@@ -149,13 +157,13 @@ function WindowedStream({ rounds }: { rounds: number }) {
     lastCompletedAssistantMessageId,
     onVisibleTurnRangeChange,
     onOutlinePreviewRound,
-  } = useConversationStreamItems(view, sessionId);
+  } = useConversationStreamItems(view, streamSessionId);
   return (
     <div className="h-[720px] w-full bg-background">
       <SessionChatStreamView
         initialWindowReady={initialWindowReady}
         items={items}
-        sessionId={sessionId}
+        sessionId={streamSessionId}
         className="h-full"
         renderMessageRow={renderMessageRow}
         showScrollToLatest={false}
@@ -189,7 +197,7 @@ function OpenFlickerStory({ rounds }: { rounds: number }) {
   const [view, setView] = useState<ConversationView | null>(null);
   const [openId, setOpenId] = useState(0);
   useEffect(() => {
-    const next = openWindowedView(rounds);
+    const next = openWindowedView(buildHistory(rounds));
     setView(next);
     return () => next.dispose();
   }, [rounds]);
@@ -288,7 +296,7 @@ function SwitchFlickerStory({ rounds }: { rounds: number }) {
   // empty-state render every real session switch goes through.
   const [documentPending, setDocumentPending] = useState(false);
   useEffect(() => {
-    const built = SWITCH_SESSION_IDS.map((id) => openWindowedView(rounds, id));
+    const built = SWITCH_SESSION_IDS.map((id) => openWindowedView(buildHistory(rounds), id));
     setViews(built);
     return () => built.forEach((view) => view.dispose());
   }, [rounds]);
@@ -331,4 +339,78 @@ function SwitchFlickerStory({ rounds }: { rounds: number }) {
 /** Switch between two warm 3,000-turn conversations. */
 export const SwitchBetweenLongConversations: Story = {
   render: () => <SwitchFlickerStory rounds={ROUNDS} />,
+};
+
+const JUMP_SESSION_ID = 'session-worked-group-expand-jump' as SessionId;
+
+/**
+ * Short turns whose last "Worked for …" header rests within a viewport of
+ * the bottom — the shape in which expanding it cannot put the header at the
+ * viewport top because there is not enough content left below.
+ */
+function buildWorkedGroupJumpHistory(): SessionHistory[] {
+  const history: SessionHistory[] = [];
+  for (let round = 0; round < 10; round += 1) {
+    history.push({
+      id: `j-user-${round}`,
+      role: 'user',
+      timestamp: at(round * 2),
+      read: true,
+      finished: true,
+      status: 'handled',
+      fileDiff: [],
+      items: [{ type: 'text', text: `Round ${round + 1}: apply the fix and re-run the suite` }],
+      inputConfig: {
+        prompt: `Round ${round + 1}`,
+        cliType: 'builtin',
+        agentType: 'claude',
+        modeId: 'default',
+        modelId: 'sonnet',
+      },
+    } as unknown as SessionHistory);
+    history.push({
+      id: `j-assistant-${round}`,
+      role: 'assistant',
+      timestamp: at(round * 2 + 1),
+      userTurnId: `j-user-${round}`,
+      endedAt: Date.UTC(2026, 7, 19, 9, 0, 0) + (round * 2 + 1) * 60_000 + 28_000,
+      finished: true,
+      fileDiff: [],
+      items: [
+        { type: 'thought', text: `Thinking about round ${round + 1}.` },
+        {
+          type: 'tool_call',
+          toolCallId: `j-tool-${round}-1`,
+          status: 'completed',
+          title: `Read src/module-${round}.ts`,
+          kind: 'read',
+          rawInput: { path: `src/module-${round}.ts` },
+        },
+        {
+          type: 'tool_call',
+          toolCallId: `j-tool-${round}-2`,
+          status: 'completed',
+          title: `Edit src/module-${round}.ts`,
+          kind: 'edit',
+          rawInput: { path: `src/module-${round}.ts` },
+        },
+        { type: 'text', text: `Answer for round ${round + 1}.\n\n${paragraphs(2, round)}` },
+      ],
+    } as unknown as SessionHistory);
+  }
+  return history;
+}
+
+/**
+ * Regression check for the worked-group expand scroll jump. With
+ * follow-output released (wheel-scroll up a few hundred pixels), clicking the
+ * last turn's "Worked for …" header must toggle in place: the header keeps
+ * its viewport position, the revealed rows open beneath it, and the scroll
+ * offset does not move — expanding used to `scrollToIndex` the header to the
+ * top, which clamped at max scroll and yanked the reader to the session end.
+ */
+export const WorkedGroupExpandJump: Story = {
+  render: () => (
+    <WindowedStream history={buildWorkedGroupJumpHistory()} streamSessionId={JUMP_SESSION_ID} />
+  ),
 };

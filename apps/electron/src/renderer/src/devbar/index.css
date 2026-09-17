@@ -1,0 +1,174 @@
+html[data-desktop-devbar] #root {
+  height: calc(100% - 28px);
+}
+
+html[data-desktop-devbar] #root :is(.h-screen, .h-dvh, .h-svh) {
+  height: calc(100dvh - 28px);
+}
+
+html[data-desktop-devbar] #root :is(.min-h-screen, .min-h-\[100dvh\]) {
+  min-height: calc(100dvh - 28px);
+}
+
+.desktop-devbar {
+  position: fixed;
+  inset: auto 0 0;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border-top: 1px solid hsl(var(--border) / 0.7);
+  background: hsl(var(--bottom-bar));
+  color: hsl(var(--muted-foreground));
+  font-family: var(--font-sans);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+  -webkit-app-region: no-drag;
+  z-index: 10000;
+}
+
+.desktop-devbar-label {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 20px;
+  border: 0;
+  border-radius: var(--radius-md);
+  padding: 0 8px;
+  background: transparent;
+  color: hsl(var(--bottom-bar-foreground) / 0.85);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background var(--dur-1) var(--ease),
+    color var(--dur-1) var(--ease);
+}
+
+.desktop-devbar-label:hover {
+  background: hsl(var(--hover));
+  color: hsl(var(--hover-foreground));
+}
+
+.desktop-devbar-label:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: -1px;
+}
+
+.desktop-devbar-label:active {
+  background: hsl(var(--selection));
+}
+
+.desktop-devbar-status {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+  background: hsl(var(--muted-foreground) / 0.55);
+}
+
+.desktop-devbar-status[data-status='connected'] {
+  background: hsl(var(--status-success));
+}
+
+.desktop-devbar-status[data-status='connecting'] {
+  background: hsl(var(--status-warning));
+  animation: desktop-devbar-status-pulse 1.4s ease-in-out infinite;
+}
+
+.desktop-devbar-status:is(
+  [data-status='error'],
+  [data-status='disconnected'],
+  [data-status='unauthorized']
+) {
+  background: hsl(var(--status-danger));
+}
+
+@keyframes desktop-devbar-status-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.desktop-devbar-metrics {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.desktop-devbar-metric {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  flex-shrink: 0;
+  padding: 0 6px;
+}
+
+.desktop-devbar-metric-label {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground) / 0.85);
+}
+
+.desktop-devbar-metric-value {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: hsl(var(--bottom-bar-foreground) / 0.92);
+}
+
+/* Fixed value widths keep a changing sample from shifting the whole row. */
+.desktop-devbar-metric:nth-child(1) .desktop-devbar-metric-value {
+  width: 4ch;
+}
+
+.desktop-devbar-metric:nth-child(2) .desktop-devbar-metric-value {
+  width: 6ch;
+}
+
+.desktop-devbar-metric:nth-child(3) .desktop-devbar-metric-value {
+  width: 5ch;
+}
+
+.desktop-devbar-metric:nth-child(4) .desktop-devbar-metric-value {
+  width: 8ch;
+}
+
+.desktop-devbar-metric:nth-child(5) .desktop-devbar-metric-value {
+  width: 6ch;
+}
+
+.desktop-devbar-metric:nth-child(6) .desktop-devbar-metric-value {
+  width: 6ch;
+}
+
+.desktop-devbar-metric:nth-child(7) .desktop-devbar-metric-value {
+  width: 12ch;
+}
+
+/* Narrow windows shed the least useful metrics first: GPU, then CLS, then RSS. */
+@media (max-width: 1080px) {
+  .desktop-devbar-metric:nth-child(7) {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .desktop-devbar-metric:nth-child(3) {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .desktop-devbar-metric:nth-child(4) {
+    display: none;
+  }
+}

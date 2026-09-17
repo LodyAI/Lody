@@ -735,6 +735,7 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
   const canCheckAvailability = creating && shouldCheckAvailability;
   const [slugAvailability, setSlugAvailability] = useState<SlugAvailabilityState | null>(null);
   const [slugCheckAttempt, setSlugCheckAttempt] = useState(0);
+  const slugCheckBoundaryRef = useRef<ErrorBoundary>(null);
   const matchingSlugAvailability = slugAvailability?.slug === newSlug ? slugAvailability : null;
   const newSlugChecking =
     canCheckAvailability &&
@@ -763,6 +764,10 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
       attempt: slugCheckAttempt + 2,
     });
     setSlugCheckAttempt((attempt) => attempt + 1);
+    // This boundary intentionally has no fallback controls: query failures are
+    // surfaced inline by WorkspaceScreenView. Its reset must therefore be
+    // driven by the user's Retry button, not by an automatic `resetKeys` hop.
+    slugCheckBoundaryRef.current?.resetErrorBoundary();
   }, [analytics, canCheckAvailability, newSlug, slugCheckAttempt]);
   const [newSlugCheckSlow, setNewSlugCheckSlow] = useState(false);
   useEffect(() => {
@@ -1028,6 +1033,7 @@ export function WorkspaceScreen({ onBack, onNext }: WorkspaceScreenProps) {
     <>
       {canCheckAvailability ? (
         <ErrorBoundary
+          ref={slugCheckBoundaryRef}
           name="OnboardingWorkspaceSlugCheck"
           fallbackRender={() => null}
           resetKeys={[newSlug, slugCheckAttempt]}

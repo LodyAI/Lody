@@ -60,13 +60,15 @@ export function SessionShareDialogFrame({
             'calc(100dvh - var(--native-keyboard-height, 0px) - 2rem - var(--safe-area-top, 0px) - max(0px, var(--safe-area-bottom, 0px) - var(--native-keyboard-height, 0px)))',
         }}
       >
-        <DialogHeader className="shrink-0 gap-0.5 px-5 pb-3 pt-4 text-left">
-          <DialogTitle className="pr-7 text-[0.9375rem] font-semibold leading-6">
+        {/* The conversation being shared is the subject, so it carries the header:
+            the action reads as a small label above it, not as the larger line. */}
+        <DialogHeader className="shrink-0 gap-0.5 px-5 pb-3 pr-11 pt-4 text-left">
+          <DialogDescription className="text-xs font-medium text-muted-foreground">
             {t('sharing.manager.title', 'Share conversation')}
-          </DialogTitle>
-          <DialogDescription className="truncate text-xs text-muted-foreground">
-            {title}
           </DialogDescription>
+          <DialogTitle className="truncate text-base font-semibold leading-6 text-foreground">
+            {title}
+          </DialogTitle>
         </DialogHeader>
         <div
           ref={body}
@@ -83,14 +85,12 @@ function ShareEditor({
   workspaceId,
   session,
   shareId,
-  confirmation,
   onClose,
   title,
 }: {
   workspaceId: WorkspaceId;
   session: SessionMeta;
   shareId?: string;
-  confirmation?: { requestId: string; sessionIds: string[] };
   onClose: () => void;
   title: string;
 }) {
@@ -111,15 +111,13 @@ function ShareEditor({
     workspaceId,
     session.id,
     candidates.map((entry) => entry.sessionId),
-    shareId,
-    confirmation
+    shareId
   );
   return (
     <SessionShareDialogFrame title={title} onClose={onClose}>
       <SessionShareManager
         sessionId={session.id}
         candidates={candidates}
-        selectionLocked={!!confirmation}
         onClose={onClose}
         {...management}
       />
@@ -133,13 +131,11 @@ export function SessionShareDialog({
   session,
   onClose,
   shareId,
-  confirmation,
 }: {
   workspaceId: WorkspaceId;
   session: SessionMeta;
   onClose: () => void;
   shareId?: string;
-  confirmation?: { requestId: string; sessionIds: string[] };
 }) {
   const { t } = useTranslation();
   const userId = useAtomValue(userAtom)?.id;
@@ -147,11 +143,10 @@ export function SessionShareDialog({
   if (userId === undefined) return <SessionShareDialogFrame title={title} onClose={onClose} />;
   return (
     <ShareEditor
-      key={`${userId}:${workspaceId}:${session.id}:${shareId ?? ''}:${confirmation?.requestId ?? ''}`}
+      key={`${userId}:${workspaceId}:${session.id}:${shareId ?? ''}`}
       workspaceId={workspaceId}
       session={session}
       shareId={shareId}
-      confirmation={confirmation}
       onClose={onClose}
       title={title}
     />

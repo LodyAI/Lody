@@ -483,6 +483,97 @@ describe.each(backends)('createConversationViewFromReader over $name', (backend)
     }
   });
 
+  it('re-reads only the named turns when one synced batch carries an early edit and the tail', async () => {
+    // The desktop path: the daemon commits into its own document and the
+    // renderer applies the batch as one import, so both edits arrive in a
+    // single observation.
+    const history = buildFixtureHistory(12);
+    const source = buildSessionDoc(history);
+    const doc = new LoroDoc();
+    doc.setPeerId(2);
+    doc.import(source.export({ mode: 'snapshot' }));
+    const data = createLoroSessionData({ sessionId: FIXTURE_SESSION_ID, doc });
+    const probe = probeReader(data.history);
+    const view = createConversationViewFromReader(probe.reader, {
+      sessionId: FIXTURE_SESSION_ID,
+      tailKeep: 4,
+      maxHydrated: 32,
+      scheduleIdle: () => () => {},
+      yieldToEventLoop: () => Promise.resolve(),
+    });
+    try {
+      await waitTurns(view, history.length);
+      // A reader parked over the head keeps those turns hydrated; a batch that
+      // touches one of them must not drag the rest in with it.
+      const head = view.acquireRange(0, 8);
+      await head.ready;
+      const last = view.turnCount - 1;
+      const lastId = view.index(last)!.id;
+      const earlyId = view.index(1)!.id;
+      expect(view.isHydrated(1)).toBe(true);
+      expect(view.isHydrated(last)).toBe(true);
+      probe.directories.length = 0;
+      probe.turns.length = 0;
+
+      const writer = createHistoryWriter(source);
+      writer.setField(earlyId, 'finished', false as never);
+      writer.updateEntry(lastId, (entry) => ({
+        ...entry,
+        items: [{ type: 'text', text: 'streamed token' }],
+      }));
+      doc.import(source.export({ mode: 'update', from: doc.version() }));
+      await flush();
+
+      // Two rows, not the span between them, and two bodies, not every hydrated
+      // turn in that span.
+      const rowsRead = probe.directories.reduce((total, [lo, hi]) => total + (hi - lo), 0);
+      expect(rowsRead).toBe(2);
+      expect([...probe.turns].sort()).toEqual([earlyId, lastId].sort());
+      expect(view.index(1)?.finished).toBe(false);
+      expect(view.turn(last)?.items).toEqual([{ type: 'text', text: 'streamed token' }]);
+      head.release();
+    } finally {
+      view.dispose();
+      doc.free();
+      source.free();
+    }
+  });
+
+  it("refreshes an unhydrated user turn's send configuration when it changes", async () => {
+    const harness = openView(backend, 12, { tailKeep: 2, maxHydrated: 4 });
+    const { idle, data } = harness;
+    try {
+      await settle(idle, harness.view);
+      const position = harness.view.indexOf('u-1');
+      expect(position).toBeGreaterThanOrEqual(0);
+      // Outside every window: the index row is all a caller can read, and the
+      // sticky send-config resolver reads exactly this.
+      expect(harness.view.isHydrated(position)).toBe(false);
+      expect(harness.view.index(position)?.inputConfig?.modelId).toBe('sonnet');
+
+      data.writer.updateEntry('u-1', (entry) => ({
+        ...entry,
+        inputConfig: {
+          ...(entry.inputConfig as Record<string, unknown>),
+          modelId: 'opus',
+          agentRoleId: 'role-reassigned',
+          agentRoleRevision: 42,
+          mcpServerIds: [],
+        },
+      }));
+      await flush();
+
+      const row = harness.view.index(position);
+      expect(row?.inputConfig?.modelId).toBe('opus');
+      expect(row?.inputConfig?.agentRoleId).toBe('role-reassigned');
+      expect(row?.inputConfig?.agentRoleRevision).toBe(42);
+      expect(row?.inputConfig?.mcpServerIds).toEqual([]);
+    } finally {
+      harness.view.dispose();
+      harness.teardown();
+    }
+  });
+
   it('patches a streamed tail update from its ranged event without a whole-history read', async () => {
     const harness = openView(backend, 12, { tailKeep: 4 });
     const { idle, data } = harness;

@@ -172,21 +172,27 @@ export type AgentConfigMeta = {
  * - TypeScript API: still treat `items` as `MessageContent[]` at the application boundary.
  *   All producers/consumers in CLI/Web should use `MessageContent` as the canonical type.
  *
- * Why not `schema.Any({ defaultLoroText: true })`:
- * - It enables deep Text inference for schema-less nested objects (catchalls), which can
- *   cause Mirror to generate `insert-container` for string values inside maps without a
- *   registered schema. After a restart, the per-container infer options are not persisted,
- *   so applying those diffs can fail with `Unknown schema type: undefined`.
+ * Insertion policy (NOT a migration or a new validation constraint):
+ * - The history item catchall is `schema.Any({ defaultLoroText: false })` so a brand-new
+ *   string field is stored as a plain primitive. A new turn's ordinary metadata
+ *   (`toolCallId`/`status`/`title`/`kind`/`locations[].path`) is therefore not wrapped in
+ *   a `LoroText`, which removes thousands of unnecessary containers across a long session.
+ * - Text containers are reserved for fields that genuinely grow while streaming. They are
+ *   declared explicitly (outer `text`/`markdown`/`content`/`steps`) instead of leaning on
+ *   deep inference, which also avoids emitting `insert-container` for schema-less nested
+ *   strings whose per-container infer options are not persisted across a restart.
+ * - Editing an existing string neither migrates nor rewraps it: the shared
+ *   `HistoryWriter` diffs against the stored container kind, so a legacy `LoroText` keeps
+ *   its container id and a legacy primitive stays primitive (`history-materializer.ts`).
  *
- * Decision:
- * - Keep the schema forward-compatible via `.catchall(schema.Any())`.
- * - Model streaming fields explicitly as `schema.LoroText()` (e.g. `text`) to avoid relying
- *   on inference.
+ * Validation stays separate from this storage hint: the permissive `validate` guard below
+ * still accepts unknown item types from newer peers, and no schema here rejects an old
+ * payload (see the `storageSchema` hints).
  */
 export type SessionHistoryItem = MessageContent;
 export type SessionHistoryItems = MessageContent[];
 
-const historyItemAnySchema = schema.Any({ defaultLoroText: true });
+const historyItemAnySchema = schema.Any({ defaultLoroText: false });
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -196,11 +202,56 @@ const isWorktreeScriptHistoryStep = (value: unknown): boolean =>
   (value.status === 'in_progress' || value.status === 'completed' || value.status === 'failed') &&
   typeof value.output === 'string';
 
+/**
+ * Insertion hints for the nested payloads of tool content and worktree steps.
+ *
+ * Nested metadata is ordinary data, so the catchall defaults to *primitive* and only
+ * the fields that genuinely stream are declared as `LoroText`. A blanket
+ * `defaultLoroText: true` here built Text for `terminal_command.command`, `args[]`,
+ * diff `path`, `steps[].command` and every other string — the container growth this
+ * change exists to remove. The catchall stays permissive so an anomalous legacy shape
+ * is never a validation failure or a rewrite trigger; `history-materializer.ts` reads
+ * `storageSchema`, and the hints are inert for every reader.
+ */
+const historyNestedPayloadSchema = schema.Any({ defaultLoroText: false });
+const historyToolContentSchema = schema
+  .LoroMap({
+    type: schema.String({ required: false }),
+    // Only streaming payload fields; everything else inherits the primitive catchall.
+    text: schema.LoroText({ required: false }),
+    output: schema.LoroText({ required: false }),
+    // The ACP `content` block nests its own text payload.
+    content: schema
+      .LoroMap(
+        {
+          type: schema.String({ required: false }),
+          text: schema.LoroText({ required: false }),
+        },
+        { required: false }
+      )
+      .catchall(historyNestedPayloadSchema),
+  })
+  .catchall(historyNestedPayloadSchema);
+const historyScriptStepSchema = schema
+  .LoroMap({
+    // Only the step output streams; `command`/`status`/timestamps are metadata.
+    output: schema.LoroText({ required: false }),
+  })
+  .catchall(historyNestedPayloadSchema);
+
 const historyMessageItemSchema = schema
   .LoroMap(
     {
       type: schema.String<MessageContent['type']>(),
       text: schema.LoroText({ required: false }),
+      // Streaming fields: a hint, not a validation constraint on old/future payloads.
+      markdown: schema.Any({ storageSchema: schema.LoroText({ required: false }) }),
+      content: schema.Any({
+        storageSchema: schema.LoroList(historyToolContentSchema, undefined, { required: false }),
+      }),
+      steps: schema.Any({
+        storageSchema: schema.LoroList(historyScriptStepSchema, undefined, { required: false }),
+      }),
       // `file` item: the mutable lifecycle fields `transport`/`machineId` are
       // carried through the `.catchall(...)` below (like every other variant's
       // payload fields, e.g. image's `imageId`/`sizeBytes`). They are plain
@@ -431,6 +482,7 @@ export type SessionHistorySendStatus = 'timeout';
 export type SessionHistoryStatus =
   | 'pending'
   | 'pending_apply'
+  | 'delivery_unknown'
   | 'seen'
   | 'processing'
   | 'handled'
@@ -496,6 +548,7 @@ export const sessionPreviewDocSchema = schema.LoroMap(
 export const sessionExternalHistoryCursorDocSchema = schema.LoroMap(
   {
     importedTurnHashes: schema.LoroList(schema.String(), undefined, { required: false }),
+    hashVersion: schema.Number({ required: false }),
     // One atomic value: concurrent clients must not merge half of two baselines.
     storedHistoryBaseline: schema.String({ required: false }),
   },
@@ -534,7 +587,7 @@ export const isSessionHistoryDelivered = (
 ): boolean => {
   const status = resolveSessionHistoryStatus(entry);
   if (status) {
-    return status !== 'pending' && status !== 'pending_apply';
+    return status !== 'pending' && status !== 'pending_apply' && status !== 'delivery_unknown';
   }
   return entry?.read === true;
 };
@@ -702,6 +755,12 @@ export type ExternalAcpHistorySyncMeta = {
   sourceAcpSessionId: ACPSessionId;
   sourceUpdatedAt?: string;
   replayDigest?: string;
+  /**
+   * Canonical-hash version `replayDigest` was computed with. Absent means v1
+   * (written before hash versions existed). It versions the digest only; the
+   * session doc cursor carries its own version for `importedTurnHashes`.
+   */
+  hashVersion?: number;
   importedTurnCount: number;
   /** @deprecated Legacy bulky cursor. New writes do not store per-turn hashes in meta. */
   importedTurnHashes?: string[];
@@ -728,6 +787,13 @@ export type SessionPreviewLegacyMetaFields = {
 
 export type SessionExternalHistoryCursorDocState = {
   importedTurnHashes?: string[];
+  /**
+   * Canonical-hash version `importedTurnHashes` were computed with. Absent means
+   * v1. It is deliberately independent of `ExternalAcpHistorySyncMeta.hashVersion`:
+   * a conflict marker may advance only the metadata while this cursor stays v1, and
+   * a v1 cursor must never be read as v2 (that manufactures a false prefix_mismatch).
+   */
+  hashVersion?: number;
   /** Versioned JSON bound to this cursor's source hashes, not the metadata digest. */
   storedHistoryBaseline?: string;
 };
@@ -806,6 +872,8 @@ export type SessionMeta = {
   userId: string;
   status?: SessionStatus;
   isArchived?: boolean;
+  /** Shared tab visibility only; closing never changes the session lifecycle. */
+  isTabClosed?: boolean;
   origin?: 'lody' | 'external-acp';
   /** When true, this session is pinned to the top of the sidebar list. */
   isPinned?: boolean;
@@ -856,6 +924,11 @@ export type SessionMeta = {
    * producers; execution terminal bookkeeping must never rewrite it.
    */
   latestUserMsgId?: string;
+  /** Daemon-owned steer results awaiting history projection or ordinary dispatch claim. */
+  steerTurnStatuses?: Record<
+    string,
+    'pending' | 'processing' | 'handled' | 'failed' | 'canceled' | 'delivery_unknown'
+  >;
   /** Assistant turn id the client wants to stop; cancel is ignored unless it matches the machine's in-memory active turn. */
   lastCanceledTurn?: string;
   /** Latest user history entry id that the machine has fully handled. */
@@ -971,7 +1044,12 @@ export function getPendingUserTurnActivationId(meta: SessionMeta): string | unde
   ) {
     return meta.latestUserMsgId;
   }
-  return undefined;
+  return Object.keys(meta.steerTurnStatuses ?? {}).find(
+    (id) =>
+      meta.steerTurnStatuses?.[id] === 'pending' &&
+      id !== missingUserTurnId &&
+      id !== settledUserTurnId
+  );
 }
 
 export function hasPendingUserTurnActivation(meta: SessionMeta): boolean {
@@ -1196,7 +1274,7 @@ export type SessionDocMeta = Omit<SessionDoc, '$cid' | 'history'> & {
 export type Session = SessionMeta & SessionDocMeta;
 export type SessionToCreate = Omit<
   SessionMeta,
-  'id' | 'createdAt' | 'chatId' | 'status' | 'isArchived' | 'diffStats'
+  'id' | 'createdAt' | 'chatId' | 'status' | 'isArchived' | 'isTabClosed' | 'diffStats'
 > &
   SessionLaunchConfig & {
     sessionId?: SessionId;

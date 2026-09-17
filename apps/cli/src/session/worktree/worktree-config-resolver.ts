@@ -62,15 +62,16 @@ export async function resolveSessionWorktreeCleanupConfig(input: {
     return null;
   }
 
-  const repoFullName =
-    resolveProjectGitHubRepo(sessionMeta?.project) ?? sessionMeta?.repoFullName;
+  const repoFullName = resolveProjectGitHubRepo(sessionMeta?.project) ?? sessionMeta?.repoFullName;
   return (
-    (await resolveGitHubRepoWorktreeConfig({
-      token: input.token,
-      workspaceId: input.workspaceId,
-      repoFullName,
-      logger: input.logger,
-    }))?.worktreeCleanup ??
+    (
+      await resolveGitHubRepoWorktreeConfig({
+        token: input.token,
+        workspaceId: input.workspaceId,
+        repoFullName,
+        logger: input.logger,
+      })
+    )?.worktreeCleanup ??
     (
       await readLegacySessionLaunchConfig({
         repo: input.workspaceDocument.repo,

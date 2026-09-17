@@ -102,3 +102,14 @@ export const VerificationFailed: Story = {
     },
   },
 };
+
+export const BubNotInstalled: Story = {
+  args: {
+    setup: {
+      ...baseSetup,
+      config: { ...baseSetup.config, agentType: 'bub', name: 'Bub' },
+      status: 'failed',
+      failureCode: 'runtime-unavailable',
+    },
+  },
+};

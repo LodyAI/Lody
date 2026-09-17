@@ -81,12 +81,12 @@ HISTORY_BENCH_SAMPLE_OFFSET=0|1|2，各样本使用独立进程。
 
 76d0e9be 时记录的样本均值中位数，单位 ms/chunk：
 
-| Runtime | Entries | Unpatched reader | Patched reader |
-| --- | ---: | ---: | ---: |
-| Bun 1.3.14 | 50 | 1.060 | 0.189 |
-| Bun 1.3.14 | 200 | 3.839 | 0.156 |
-| Bun 1.3.14 | 400 | 6.067 | 0.180 |
-| Node 24.20.0 + tsx | 200 | 5.225 | 0.181 |
+| Runtime            | Entries | Unpatched reader | Patched reader |
+| ------------------ | ------: | ---------------: | -------------: |
+| Bun 1.3.14         |      50 |            1.060 |          0.189 |
+| Bun 1.3.14         |     200 |            3.839 |          0.156 |
+| Bun 1.3.14         |     400 |            6.067 |          0.180 |
+| Node 24.20.0 + tsx |     200 |            5.225 |          0.181 |
 
 对照使用同一 writer，不是整应用。Node 同进程重复 seed 即使 free/GC 也变慢；
 独立进程避免测量混淆，并非证明生产生命周期问题已修。批量 fork/capture 与多事件
@@ -105,6 +105,10 @@ fork/清理/编辑重发针对性测试通过 38 项。这是历史证据，不�
 按用户要求，将本 PR 增量 Note 收束为本中英文记录。已被替代的阶段结论和详细记录
 可从 123e9132 及以前的 Git 历史恢复。删除仅匹配源码文本的浅测试，保留真实行为
 与编译失败契约；同一主题后续修订更新所属 Note，不为每次小修新增文件。
+
+后续工作在不改变本记录决策的前提下改动了其中两处表述：新写入把普通元数据存为
+primitive、只为流式字段保留 `LoroText`；导入用的规范轮次 hash 增加了版本。见
+[带版本轮次 hash 与 primitive 元数据插入](2026-09-14-versioned-history-hashes-and-primitive-metadata.zh.md)。
 
 意图：[草案 Spec](../../../../specs/session-history-writes.zh.md)。
 PR: [#460](https://github.com/LodyAI/Lody/pull/460)。

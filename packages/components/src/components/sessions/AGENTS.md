@@ -7,17 +7,16 @@ Read each heading’s linked context before changing its files.
 
 ## [Tabs and `?tab` routing](../../../../../.agents/docs/sessions-tabs-routing.md)
 
-- Desktop chrome is ONE merged `SessionTabBar` row: traffic-light insets gated
-  on `!useElectronFullscreen()`, pill/card geometry (y=8 line, `mt-0.5`,
-  button centering) re-derived and MEASURED, never eyeballed.
+- Desktop chrome is ONE `SessionTabBar` row: traffic-light insets gated on
+  `!useElectronFullscreen()`. Measure pill/card geometry (y=8, `mt-0.5`, button centering).
 - Keep the surface ladder canvas → inactive → active in both themes and MEASURE
   it; never give inactive tabs more chrome than the active one, and never use
   `--tab-active`/`--tab-inactive` (both collapse onto `--background` in dark).
 - One leading status slot per tab, `waiting > working > unread > agent icon`;
   test `isWaiting` first, and never drop unread from a tab renderer.
-- `?tab` is the single source of truth for the active tab: derive it from route
-  search, navigate instead of setting state, never reintroduce mirrored state or
-  URL↔state sync effects (#193), and never rewrite the URL from observed data.
+- `?tab` owns selection; never mirror it in state (#193). Confirmed shared closure
+  may replace the current choice with a neighbour or local draft. Close writes
+  `isTabClosed`, never archive/delete; reopening archives restores lifecycle first.
 - `Change owner` writes the OWNER `SessionMeta.userId`, never sharing/visibility;
   they stay separate actions.
 

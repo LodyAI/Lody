@@ -1811,6 +1811,10 @@ export type SessionChatInterfaceHandle = {
     messages: ConversationMessage[],
     onConfirm: (messages: ConversationMessage[]) => void
   ) => void;
+  /** Drops the share selection and restores the composer. Confirming does not:
+   *  the preview can be reopened against the same selection, so only finishing
+   *  the share or an explicit Cancel ends it. */
+  cancelShareImageSelection: () => void;
   openSearch: () => void;
   getLastForkableAssistantTurnId: () => string | null;
   insertSessionMention: (sessionId: string) => boolean;
@@ -2928,6 +2932,7 @@ export const SessionChatInterface = memo(
       if (
         !userMessage ||
         userMessage.status === 'pending_apply' ||
+        userMessage.status === 'delivery_unknown' ||
         (userMessage.inputConfig as Record<string, unknown> | undefined)?._lodyDeliveryKind ===
           'steer'
       ) {
@@ -3604,28 +3609,11 @@ export const SessionChatInterface = memo(
 
     const guideHistoryEntry = useCallback(
       async (userTurnId: string, expectedTurnId: string): Promise<boolean> => {
-        const applied = await requestSessionSteer(session.id, expectedTurnId, userTurnId, {
+        return await requestSessionSteer(session.id, expectedTurnId, userTurnId, {
           machineId: session.machineId,
         });
-        if (!applied) {
-          return false;
-        }
-        try {
-          await updateHistoryEntry(userTurnId, (entry) => ({
-            ...entry,
-            status: 'processing',
-            read: true,
-            inputConfig: {
-              ...entry.inputConfig,
-              _lodyDeliveryKind: 'steer',
-            },
-          }));
-        } catch (error) {
-          console.warn('Guide was applied before local history status updated', error);
-        }
-        return true;
       },
-      [requestSessionSteer, session.id, session.machineId, updateHistoryEntry]
+      [requestSessionSteer, session.id, session.machineId]
     );
 
     const enqueueInputBlocks = useCallback(
@@ -3731,6 +3719,7 @@ export const SessionChatInterface = memo(
               })
               .catch((error: unknown) => {
                 console.error('Failed to apply guide message', error);
+                toast.error(t('sessions.sendError'), { description: getErrorMessage(error) });
               });
           }
 
@@ -4105,11 +4094,15 @@ export const SessionChatInterface = memo(
         if (accepted) {
           // The marker stays as a tombstone; terminalize the abandoned entry.
           try {
-            await updateHistoryEntry(userTurnId, (entry) => ({
-              ...entry,
-              status: 'canceled',
-              read: true,
-            }));
+            await updateHistoryEntry(userTurnId, (entry) =>
+              entry.status === 'delivery_unknown'
+                ? entry
+                : {
+                    ...entry,
+                    status: 'canceled',
+                    read: true,
+                  }
+            );
           } catch (error) {
             console.warn('Failed to supersede the undelivered user turn', {
               userTurnId,
@@ -4900,6 +4893,7 @@ export const SessionChatInterface = memo(
           };
         },
         startShareImageSelection: shareSelection.start,
+        cancelShareImageSelection: shareSelection.cancel,
         openSearch,
         getLastForkableAssistantTurnId: () => lastForkableAssistantMessageId,
         insertSessionMention: (sessionId: string) => {
@@ -4909,6 +4903,7 @@ export const SessionChatInterface = memo(
       [
         handleCopyConversationHistory,
         shareSelection.start,
+        shareSelection.cancel,
         lastForkableAssistantMessageId,
         openSearch,
         session.cliType,
@@ -5978,18 +5973,7 @@ export const SessionChatInterface = memo(
                             sessionCreatedAt={session?.createdAt}
                             dividerLabel={sessionDividerLabel}
                             className="h-full"
-                            leadingContent={
-                              <>
-                                {openedByConversationStart}
-                                {workspaceId && (
-                                  <SessionShareRequestCards
-                                    workspaceId={workspaceId}
-                                    session={session}
-                                    isVisible={isVisible}
-                                  />
-                                )}
-                              </>
-                            }
+                            leadingContent={openedByConversationStart}
                             emptyState={chatStreamEmptyState}
                             agentActivityLabel={agentActivityLabel}
                             agentActivityTone={agentActivityTone}
@@ -6029,6 +6013,19 @@ export const SessionChatInterface = memo(
                       </MessageSendStatusContext.Provider>
                     </ErrorBoundary>
                   </div>
+
+                  {/* Requests and their editor must survive virtual row eviction. */}
+                  {workspaceId && (
+                    <div className="max-h-[35vh] shrink-0 overflow-y-auto">
+                      <ConversationColumn className="px-3">
+                        <SessionShareRequestCards
+                          workspaceId={workspaceId}
+                          session={session}
+                          isVisible={isVisible}
+                        />
+                      </ConversationColumn>
+                    </div>
+                  )}
 
                   {/* Floating permission request - shown when session is waiting for permission */}
                   <FloatingPermissionRequest

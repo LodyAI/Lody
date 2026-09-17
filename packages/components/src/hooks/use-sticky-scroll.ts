@@ -44,8 +44,8 @@ export interface UseStickyScrollOptions {
    */
   skipNextViewportResizeAutoScrollRef?: MutableRefObject<boolean>;
   /**
-   * When true, releases follow-output before a programmatic jump or expansion
-   * can resize the list underneath it.
+   * When true, releases follow-output before a programmatic jump can resize
+   * the list underneath it.
    */
   suppressAutoScrollRef?: RefObject<boolean>;
 }
@@ -187,6 +187,15 @@ export function useStickyScroll({
   const isSticky = state.isAtBottom;
   const stickyBottomRef = useRef(isSticky);
   stickyBottomRef.current = isSticky;
+  /**
+   * The follow lock as of the latest commit. The library can re-arm
+   * `state.isAtBottom` between a commit and the observer callbacks that run
+   * `follow()` — a downward programmatic scroll or a content shrink landing
+   * the viewport within its near-bottom tolerance both re-lock — so the
+   * callbacks consult this commit-time snapshot instead: a reader who was not
+   * following when the change was committed is never pulled to the end.
+   */
+  const wasFollowingRef = useRef(state.isAtBottom);
 
   const itemCountRef = useRef(itemCount);
   itemCountRef.current = itemCount;
@@ -286,13 +295,23 @@ export function useStickyScroll({
       if (
         initialPositionAppliedRef.current &&
         state.isAtBottom &&
+        wasFollowingRef.current &&
         !suppressAutoScrollRef?.current
       ) {
         scrollToRealBottom();
       }
       settleInitialLayout();
     };
-    const resizeObserver = new ResizeObserver(follow);
+    const resizeObserver = new ResizeObserver(() => {
+      // Follow is armed by scroll events, never by geometry observers. The
+      // library's own content ResizeObserver runs earlier in this same
+      // delivery and re-locks `state.isAtBottom` whenever a shrink lands the
+      // viewport within its near-bottom tolerance — release that here so a
+      // reader who was not following at commit is never pulled to the end,
+      // and any scroll tick the library queued finds the lock already open.
+      if (!wasFollowingRef.current && state.isAtBottom) stopScroll();
+      follow();
+    });
     resizeObserver.observe(content);
     const rows = new Set<Element>();
     const observeRows = () => {
@@ -336,7 +355,14 @@ export function useStickyScroll({
       resizeObserver.disconnect();
       mutationObserver.disconnect();
     };
-  }, [scrollElement, scrollToRealBottom, settleInitialLayout, state, suppressAutoScrollRef]);
+  }, [
+    scrollElement,
+    scrollToRealBottom,
+    settleInitialLayout,
+    state,
+    stopScroll,
+    suppressAutoScrollRef,
+  ]);
 
   // Restore before paint, and keep the same follow intent when a placeholder
   // becomes several Virtua rows. Waiting for the content ResizeObserver's RAF
@@ -375,11 +401,14 @@ export function useStickyScroll({
     vlistRef,
   ]);
 
-  // Search jumps and group expansion are deliberate reading-position changes.
-  // Release follow in a layout effect so ResizeObserver cannot pull the list to
-  // the end between the React commit and the caller's programmatic jump.
+  // Search jumps are deliberate reading-position changes. Release follow in a
+  // layout effect so the ResizeObserver/MutationObserver geometry callbacks of
+  // that commit cannot pull the list to the end behind the reader's back. A
+  // suppressed commit snapshots as not-following to those callbacks.
   useLayoutEffect(() => {
-    if (suppressAutoScrollRef?.current) stopScroll();
+    const suppressed = suppressAutoScrollRef?.current ?? false;
+    wasFollowingRef.current = !suppressed && state.isAtBottom;
+    if (suppressed) stopScroll();
   });
 
   const scrollToBottom = useCallback(() => {

@@ -112,6 +112,27 @@ const grokMachineWithLadderProbe = ({
   });
 
 describe('buildAcpSelectorOptions', () => {
+  it('does not reuse registry Pi models after a same-ID builtin migration', () => {
+    const options = buildAcpSelectorOptions({
+      configId: agentConfigId,
+      cliType: 'builtin',
+      agentType: 'pi',
+      machine: machineWithCapabilities({
+        [agentConfigId]: {
+          cliType: 'registry',
+          agentType: 'pi-acp',
+          cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+          provenance: 'runtime',
+          modes: [],
+          models: [{ modelId: 'old-pi-model' }],
+          configOptions: [],
+          fetchedAt: 1,
+        },
+      }),
+    });
+    expect(options.capabilityAuthority).toBe('unavailable');
+    expect(options.modelOptions).toEqual([]);
+  });
   it('uses GPT-6 from an older daemon probe instead of the builtin fallback', () => {
     const options = buildAcpSelectorOptions({
       configId: agentConfigId,

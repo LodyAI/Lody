@@ -8,6 +8,8 @@ import {
   createSessionShareSecret,
   createSessionShareUrl,
   hashSessionShareSecret,
+  encryptShareDelivery,
+  type ShareDeliveryEnvelope,
   uploadPreparedShare,
   type PreparedSharePackage,
 } from '@lody/shared/session-sharing';
@@ -222,6 +224,7 @@ export function useSessionShareStatus(
 }
 
 type PendingPublication = {
+  delivery?: ShareDeliveryEnvelope;
   deployment?: SessionShareView & { deploymentId: string };
   sealed?: boolean;
   prepared: PreparedSharePackage;
@@ -254,17 +257,22 @@ export function useSessionShareManagement(
   sessionId: string,
   candidateIds: string[],
   shareId?: string,
-  confirmation?: { requestId: string; sessionIds: string[] }
+  confirmation?: { requestId: string; sessionIds: string[]; deliveryPublicKey: string }
 ) {
   const scope = useResolvedWorkspaceScope({ workspaceId });
   const userId = useAtomValue(userAtom)?.id;
   const store = useStore();
   const meta = useAtomValue(sessionMetaCacheAtom);
   const actions = useSessionShareLinkActions(workspaceId);
-  const entry = useCloudQuery(
+  const queriedEntry = useCloudQuery(
     operations.getManagement,
-    scope.enabled && userId ? { workspaceId, rootSessionId: sessionId, shareId } : 'skip'
+    scope.enabled && userId && (!confirmation || shareId)
+      ? { workspaceId, rootSessionId: sessionId, shareId }
+      : 'skip'
   );
+  // Every MCP approval owns an independent publication, never an implicit update
+  // to a link already held by other readers or a credential on another device.
+  const entry = confirmation && !shareId ? null : queriedEntry;
   const begin = useCloudMutation(operations.beginDeployment);
   const publish = useCloudMutation(operations.publishDeployment);
   const [selectedDraft, setSelected] = useState<string[] | null>(null);
@@ -320,11 +328,11 @@ export function useSessionShareManagement(
       token,
       sessions,
       rootSessionId: sessionId,
-      previousSourceIds: entry?.sourceIds,
+      previousSourceIds: confirmation ? undefined : entry?.sourceIds,
       signal,
     });
     signal.throwIfAborted();
-    const expected = entry?.status === 'active' ? entry : null;
+    const expected = !confirmation && entry?.status === 'active' ? entry : null;
     const value: PendingPublication = {
       prepared,
       expected,
@@ -339,6 +347,19 @@ export function useSessionShareManagement(
   const publishPrepared = async (value: PendingPublication) => {
     if (!lifetime.current) throw new Error('Share confirmation changed');
     const { expected, prepared, uploadSecret, readerSecret, requestId } = value;
+    if (confirmation && !value.delivery) {
+      const secret = readerSecret ?? (expected && actions.secretFor(expected));
+      if (!secret) throw new Error('Share credential unavailable');
+      const origin = new URL(
+        createSessionShareUrl('validation', secret, import.meta.env.VITE_SESSION_SHARE_ORIGIN)
+      ).origin;
+      value.delivery = await encryptShareDelivery(
+        confirmation.deliveryPublicKey,
+        confirmation.requestId,
+        origin,
+        secret
+      );
+    }
     setPhase('uploading');
     setProgress(0);
     const deployment = value.deployment
@@ -352,6 +373,7 @@ export function useSessionShareManagement(
           uploadCredentialHash: await hashSessionShareSecret(uploadSecret),
           requestId,
           confirmationRequestId: confirmation?.requestId,
+          delivery: value.delivery,
           manifest: prepared.manifest,
           sourceIds: prepared.sourceIds,
         });
@@ -425,9 +447,12 @@ export function useSessionShareManagement(
     result,
     /** The current bearer link when this device can rebuild it, else null. */
     shareLink: result?.url ?? shareLink,
-    canCapture: selected.every(
-      (id) => candidateIds.includes(id) && Object.values(meta).some((session) => session.id === id)
-    ),
+    canCapture:
+      entry !== undefined &&
+      selected.every(
+        (id) =>
+          candidateIds.includes(id) && Object.values(meta).some((session) => session.id === id)
+      ),
     busy: actions.busy,
     error: actions.error,
     notice: actions.notice,

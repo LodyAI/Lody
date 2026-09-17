@@ -41,11 +41,14 @@ Repository map and entry points: [README.md](README.md#repository).
   downloads, read [platform contracts](packages/platform/AGENTS.md).
 - Before changing daemon protocol negotiation, MCP/Role catalogs or their UI
   consumers, per-turn MCP selection, or Role creation/dispatch, read [shared contracts](packages/shared/AGENTS.md).
-- `packages/acp-extension-kimi` stays outside the root pnpm graph in its isolated
+- `packages/acp-extension-kimi` and `packages/acp-extension-pi` stay outside the root pnpm graph in isolated
   submodule workspace; consume only its separately built, checksummed managed-runtime
   artifact and versioned ACP contract. Shared ACP extension contracts belong in the
   public `LodyAI/acp-extension-core` submodule, consumed through the root workspace;
   never duplicate them locally.
+- Pi provider migration requires owner confirmation and the target's `builtinPi`
+  protocol capability. Preserve provider IDs and settings; never convert legacy
+  native session IDs. Contract: [builtin Pi](specs/builtin-pi.md).
 - Viewer packaging/version changes must follow its [rules](packages/code-review-viewer/AGENTS.md).
   Package-scope or cloud/local composition changes require `pnpm check:public-boundary`.
 
@@ -59,8 +62,11 @@ Repository map and entry points: [README.md](README.md#repository).
   [runtime-floor decision](.agents/notes/implemented/bug-fix/2026-09-09-node-api-runtime-floor.md).
   `pnpm install` (nested checkouts skip it); standalone work uses a separate clone.
   `pnpm start:local` starts the desktop; root `pnpm build` uses the same local composition.
-- Before commit: `pnpm check` and `pnpm format`. If tests are skipped, report
+- Before commit: `pnpm check` and `pnpm format`. Root packages share `.oxfmtrc.json`;
+  ACP submodules stay independently formatted. If tests are skipped, report
   type/build/static checks. Manifest changes update `pnpm-lock.yaml`.
+- Packages invoking Oxfmt declare it in their own devDependencies: an embedded
+  parent workspace does not install this repository's root package.
 - Conventional Commits: `feat:`, `fix:`, `docs:`, `chore:`, `test:`. AI commits
   end with `Model: <runtime-model-id>`.
 - Tests use explicit signals, injected clocks, fake timers, and deterministic

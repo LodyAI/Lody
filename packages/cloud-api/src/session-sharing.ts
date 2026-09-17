@@ -1,4 +1,4 @@
-import type { SharePackageManifest } from '@lody/shared/session-sharing';
+import type { SharePackageManifest, ShareDeliveryEnvelope } from '@lody/shared/session-sharing';
 
 import type { SessionShareRequestStatus } from '@lody/shared/session-sharing';
 export type {
@@ -10,6 +10,8 @@ export type SessionShareRequest = {
   requestId: string;
   sourceSessionId: string;
   sessionIds: string[];
+  purpose: string;
+  deliveryPublicKey: string;
   createdAt: number;
   expiresAt: number;
   status: SessionShareRequestStatus | 'published';
@@ -59,4 +61,5 @@ export type BeginShareDeployment = {
   manifest: SharePackageManifest;
   sourceIds: { sourceId: string; conversationId: string }[];
   confirmationRequestId?: string;
+  delivery?: ShareDeliveryEnvelope;
 };

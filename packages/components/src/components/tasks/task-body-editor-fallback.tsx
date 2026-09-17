@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Eye, Pencil, Quote } from 'lucide-react';
 import { toast } from 'sonner';
+import { selectPastedClipboardFiles } from '@/lib/file-drop';
 import { Button } from '@/ui/button';
 import { Textarea } from '@/ui/textarea';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
@@ -217,9 +218,14 @@ export default function TaskBodyEditorFallback({
           rows={14}
           placeholder={t('tasks.body.placeholderShort', 'Add description…')}
           onPaste={(event) => {
-            const files = Array.from(event.clipboardData.files).filter((file) =>
-              file.type.startsWith('image/')
-            );
+            // A Word or PowerPoint copy carries a picture of the selection
+            // beside the text; the text is what the body wants.
+            const { files } = selectPastedClipboardFiles({
+              text: event.clipboardData.getData('text/plain'),
+              files: Array.from(event.clipboardData.files).filter((file) =>
+                file.type.startsWith('image/')
+              ),
+            });
             if (files.length === 0) return;
             event.preventDefault();
             void insertImageFiles(files);

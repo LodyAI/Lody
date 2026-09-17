@@ -48,7 +48,12 @@ describe('computeTargetDueAtMs', () => {
 
   it('a priority change reshapes dueness with no stored next-poll time', () => {
     const low = target({ lastSuccessAtMs: T0, desiredIntervalMs: 300_000 });
-    const promoted = { ...low, lane: 'high' as const, desiredIntervalMs: 20_000, minIntervalMs: 20_000 };
+    const promoted = {
+      ...low,
+      lane: 'high' as const,
+      desiredIntervalMs: 20_000,
+      minIntervalMs: 20_000,
+    };
     expect(computeTargetDueAtMs(low)).toBe(T0 + 300_000);
     expect(computeTargetDueAtMs(promoted)).toBe(T0 + 20_000);
   });

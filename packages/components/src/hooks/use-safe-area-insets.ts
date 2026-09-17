@@ -98,3 +98,38 @@ export function resetSafeAreaInsetsForTest(): void {
   listeners.clear();
   currentInsets = ZERO_INSETS;
 }
+
+/** Radix's `collisionPadding` shape: one number for every edge, or per-edge. */
+export type CollisionPadding = number | Partial<SafeAreaInsets>;
+
+/** Every floating surface keeps this much clear of the viewport edge, so one
+ *  that collides never ends up flush against it. */
+const VIEWPORT_MARGIN = 8;
+
+/**
+ * Collision padding for a floating surface: the viewport margin plus the device
+ * safe area, widened further by whatever the caller asked for.
+ *
+ * Radix feeds this to floating-ui's `detectOverflow`, so it governs both where a
+ * colliding surface is shifted TO and the `--radix-*-available-height` a tall
+ * surface caps itself with — a surface without it sits flush against the screen
+ * edge (and, on a notched device, under the status bar) the moment it collides.
+ */
+export function useSafeAreaCollisionPadding(collisionPadding?: CollisionPadding): SafeAreaInsets {
+  const safeArea = useSafeAreaInsets();
+  const requested =
+    typeof collisionPadding === 'number'
+      ? {
+          top: collisionPadding,
+          right: collisionPadding,
+          bottom: collisionPadding,
+          left: collisionPadding,
+        }
+      : collisionPadding;
+  return {
+    top: Math.max(VIEWPORT_MARGIN + safeArea.top, requested?.top ?? 0),
+    right: Math.max(VIEWPORT_MARGIN + safeArea.right, requested?.right ?? 0),
+    bottom: Math.max(VIEWPORT_MARGIN + safeArea.bottom, requested?.bottom ?? 0),
+    left: Math.max(VIEWPORT_MARGIN + safeArea.left, requested?.left ?? 0),
+  };
+}

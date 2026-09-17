@@ -349,7 +349,11 @@ export class LocalPreviewProxyManager {
         const responseHeaders = this.buildResponseHeaders(
           record,
           headersToEntries(
-            buildInjectedHtmlHeaders(localResponse.headers, injectedHtml.byteLength),
+            buildInjectedHtmlHeaders(
+              localResponse.headers,
+              injectedHtml.body.byteLength,
+              injectedHtml.runtimeInjected
+            ),
             {
               localOrigin: record.localOrigin,
               previewOrigin: record.proxyOrigin,
@@ -358,7 +362,7 @@ export class LocalPreviewProxyManager {
           authorizedByQuery
         );
         response.writeHead(localResponse.status, localResponse.statusText, responseHeaders);
-        response.end(injectedHtml);
+        response.end(injectedHtml.body);
         return;
       }
 

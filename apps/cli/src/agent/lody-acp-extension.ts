@@ -93,6 +93,12 @@ const SessionUsageUpdateSchema = z.object({
   sessionId: z.string().min(1),
   usage: ModelUsageSchema,
   modelUsage: z.record(z.string(), ModelUsageSchema).optional(),
+  delta: z
+    .object({
+      usage: ModelUsageSchema,
+      modelUsage: z.record(z.string(), ModelUsageSchema),
+    })
+    .optional(),
 });
 
 const RateLimitWindowSchema = z.object({
@@ -149,7 +155,7 @@ const LEGACY_METHODS = {
 } as const;
 
 export type LodyExtensionEvent =
-  | { readonly type: 'usage'; readonly update: SessionUsageUpdate }
+  | { readonly type: 'usage'; readonly update: SessionUsageUpdate; readonly accountingId?: string }
   | { readonly type: 'rateLimits'; readonly snapshot: RateLimitsSnapshot }
   | {
       readonly type: 'legacyProposedPlan';
@@ -213,7 +219,22 @@ export function parseLodyExtensionMessage(args: {
 }): LodyExtensionEvent | null {
   const method = normalizeLodyExtensionMethod(args.method);
   if (method === LODY_EXTENSION_METHODS.sessionUsageUpdate) {
-    return { type: 'usage', update: SessionUsageUpdateSchema.parse(args.params) };
+    const update = SessionUsageUpdateSchema.parse(args.params);
+    // Codex turn totals use a stable per-turn identity; unmarked adapters retain their scope.
+    const scope = z
+      .object({
+        _meta: z.object({ codex: z.object({ usageTurnId: z.string().min(1).max(256) }) }),
+      })
+      .safeParse(args.params);
+    return {
+      type: 'usage',
+      update,
+      ...(args.provider === 'codex' && scope.success
+        ? {
+            accountingId: `${args.sessionId}:turn:${encodeURIComponent(scope.data._meta.codex.usageTurnId)}`,
+          }
+        : {}),
+    };
   }
   if (method === LODY_EXTENSION_METHODS.rateLimitsUpdate) {
     return { type: 'rateLimits', snapshot: parseRateLimitsSnapshot(args.params) };

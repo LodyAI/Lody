@@ -84,8 +84,8 @@ export const Route = createFileRoute('/$workspaceName/_auth/sessions/$sessionId'
      always writes an explicit value — the parent tab included
      (`formatExplicitSessionTabSearch`) — so a user's return to the parent is
      never re-restored, and the replace keeps tab-less entries out of the
-     history stack. This is the only non-user `?tab` writer; `SessionDetail`
-     itself never rewrites the URL from derived state. */
+     history stack. SessionDetail may also replace a positively closed current
+     tab with an open neighbour or `empty`; missing metadata never redirects. */
   beforeLoad: ({ params, search }) => {
     if (search.tab !== undefined) {
       return;

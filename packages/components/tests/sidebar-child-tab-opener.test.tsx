@@ -336,6 +336,7 @@ describe('keyboard navigation for a child-tab opener', () => {
                 machineId: 'machine-1',
                 localProjectId: 'proj-1',
                 collapsed: false,
+                showFull: false,
                 sessions: [
                   { id: 'root', rootRankMs: 3_000 },
                   { id: 'unrelated', rootRankMs: 2_500 },

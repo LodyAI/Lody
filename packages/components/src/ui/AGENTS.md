@@ -44,6 +44,12 @@ strings on i18n rather than the registry's inline English.
   `[data-lody-dialog-content]`; a body portal is outside Radix remove-scroll handling.
 - `DiffViewer` uses the shared `@pierre/diffs` worker pools for syntax work regardless
   of file size. Do not create or terminate a worker pool per viewer.
+- Every floating surface passes `useSafeAreaCollisionPadding` to Radix's
+  `collisionPadding`; Radix defaults it to 0, which parks a colliding surface flush
+  against the screen edge and caps `--radix-*-available-height` there too.
+- A submenu's `sideOffset` is measured from its trigger ROW, so it must also clear the
+  parent surface's `p-1` and the 1px ring each surface paints outside its border box.
+  Evidence: [submenu gap note](../../../../.agents/notes/implemented/bug-fix/2026-09-15-menu-submenu-gap-and-viewport-margin.md).
 
 ## Spinner
 
@@ -60,3 +66,29 @@ strings on i18n rather than the registry's inline English.
   every non-loading state; that shipped as a permanently rotating "No machines
   available" and "Files unavailable" icon.
   Evidence: [spinner note](../../../../.agents/notes/implemented/bug-fix/2026-09-13-spinner-off-svg-retina-composite.md).
+
+## Scroll area
+
+- Keep the `@radix-ui/react-scroll-area` patch until an upstream version cancels
+  thumb polling on effect cleanup. Verify both ESM and CommonJS with
+  `tests/scroll-area-lifecycle.test.tsx` when upgrading; removing a thumb during
+  the scroll-end debounce must not retain a frame loop or detached viewport.
+
+## Slider
+
+- `ui/slider.tsx` is the native range input, not a library: the platform supplies
+  keyboard stepping, Home/End, the ARIA role and value, and an OS-correct touch
+  target. Two global rules in `tailwind/index.css` must be worked around, and both
+  are why this is a primitive rather than an inline `<input type="range">`.
+  The "Pro focus style" paints an inset `box-shadow` on any focused input through
+  a zero-specificity `:where(…)`, which on a range input outlines the whole
+  control, so the input carries `focus-visible:shadow-none` and the focus ring
+  lives on the thumb. The global `*:focus-visible` reset forces `--tw-ring-shadow`
+  to none with `!important` and custom properties inherit into pseudo-elements, so
+  `ring-*` utilities are dead on the thumb too — its ring is an explicit
+  `box-shadow`.
+- Write every `::-webkit-slider-*` / `::-moz-range-*` class out in full. Tailwind
+  scans source text for literal candidates, so a class built from a template
+  literal is never generated, and a variant prefix binds only to the class right
+  after it. The track fill is a `--lody-slider-fill` percentage set inline, because
+  a pseudo-element cannot take a style attribute.

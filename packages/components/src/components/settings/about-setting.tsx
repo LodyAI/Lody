@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtom } from 'jotai';
 import { CheckCircle2, AlertCircle, Download, ExternalLink } from 'lucide-react';
@@ -26,6 +26,9 @@ const GIT_COMMIT = typeof __GIT_COMMIT__ !== 'undefined' ? __GIT_COMMIT__ : 'unk
 // a version number.
 const APP_VERSION =
   typeof __APP_VERSION__ !== 'undefined' && __APP_VERSION__.length > 0 ? __APP_VERSION__ : null;
+
+type AppIpc = NonNullable<ReturnType<typeof getIpcServices>>['app'];
+type DevbarConfig = Awaited<ReturnType<AppIpc['getDevbarConfig']>>;
 
 function formatBuildDate(isoDate: string): string {
   if (isoDate === 'development') {
@@ -82,6 +85,122 @@ function UpdateStatusText({
   }
 
   return null;
+}
+
+function DevbarSettingsControls() {
+  const { t } = useTranslation();
+  const [config, setConfig] = useState<DevbarConfig | null>(null);
+  const [supported, setSupported] = useState(true);
+  const [pending, setPending] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    const app = getIpcServices()?.app;
+    if (!app) {
+      setSupported(false);
+      return undefined;
+    }
+    let disposed = false;
+    void app
+      .getDevbarConfig()
+      .then((next) => {
+        if (!disposed) setConfig(next);
+      })
+      .catch(() => {
+        if (!disposed) setFailed(true);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  const update = useCallback(async (enabled: boolean, agentAccess: boolean) => {
+    const app = getIpcServices()?.app;
+    if (!app) return;
+    setPending(true);
+    setFailed(false);
+    try {
+      const result = await app.setDevbarControl({ enabled, agentAccess });
+      if (!result.ok) {
+        setFailed(true);
+        setPending(false);
+        return;
+      }
+      setConfig(result.config);
+      // The main process now reloads this window through the CSP-matched renderer
+      // entry. Keep the control busy so it cannot dispatch a conflicting toggle.
+    } catch {
+      setFailed(true);
+      setPending(false);
+    }
+  }, []);
+
+  if (!supported) return null;
+
+  return (
+    <>
+      <CompactRow
+        label={t('settings.about.devbar', 'Lody Devbar')}
+        helper={t(
+          'settings.about.devbarHelper',
+          'Starts local performance diagnostics for this Lody session.'
+        )}
+      >
+        <Button
+          variant={config?.enabled ? 'outline' : 'default'}
+          size="sm"
+          className="h-7 px-2.5"
+          disabled={!config || pending}
+          onClick={() => void update(!config?.enabled, false)}
+        >
+          {pending && <Spinner className="mr-1 h-3.5 w-3.5" />}
+          {config?.enabled
+            ? t('settings.about.devbarStop', 'Stop Devbar')
+            : t('settings.about.devbarStart', 'Open Devbar')}
+        </Button>
+      </CompactRow>
+      {config?.enabled && (
+        <CompactRow
+          label={t('settings.about.devbarAgentAccess', 'Agent and terminal access')}
+          helper={t(
+            'settings.about.devbarAgentAccessHelper',
+            'Exposes local MCP and restricted subprocess tools until Devbar stops.'
+          )}
+        >
+          <Switch
+            checked={config.agentAccess}
+            disabled={pending}
+            onCheckedChange={(checked) => void update(true, checked)}
+            aria-label={t('settings.about.devbarAgentAccess', 'Agent and terminal access')}
+          />
+        </CompactRow>
+      )}
+      {config?.enabled && config.agentAccess && config.devframe && (
+        <CompactRow
+          label={t('settings.about.devbarAgentConnect', 'Agent connection')}
+          helper={t(
+            'settings.about.devbarAgentConnectHelper',
+            'Run `devframe connect` to proxy this Hub to coding agents over stdio MCP, or use the endpoints below directly.'
+          )}
+        >
+          <div className="flex flex-col items-end gap-0.5 text-right">
+            <code className="text-xs text-muted-foreground">{config.devframe.uiUrl}</code>
+            {config.devframe.mcpUrl && (
+              <code className="text-xs text-muted-foreground">{config.devframe.mcpUrl}</code>
+            )}
+          </div>
+        </CompactRow>
+      )}
+      {failed && (
+        <CompactRow label={t('settings.about.devbar', 'Lody Devbar')}>
+          <span className="flex items-center gap-1 text-xs text-destructive">
+            <AlertCircle className="h-3.5 w-3.5" />
+            {t('settings.about.devbarError', 'Devbar could not be started.')}
+          </span>
+        </CompactRow>
+      )}
+    </>
+  );
 }
 
 export function AboutSettingsComponent() {
@@ -183,12 +302,19 @@ export function AboutSettingsComponent() {
                 setDeveloperModeEnabled(checked);
                 if (!checked) {
                   setDeveloperModeRevealed(false);
+                  if (document.documentElement.hasAttribute('data-desktop-devbar')) {
+                    void getIpcServices()?.app.setDevbarControl({
+                      enabled: false,
+                      agentAccess: false,
+                    });
+                  }
                 }
               }}
               aria-label={t('settings.about.developerMode', 'Developer mode')}
             />
           </CompactRow>
         )}
+        {developerModeEnabled && <DevbarSettingsControls />}
         {updaterState && phase !== 'disabled' && (
           <CompactRow label={t('settings.about.checkForUpdates')}>
             {showStatus && <UpdateStatusText phase={phase} percent={updaterState.percent} t={t} />}

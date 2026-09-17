@@ -6,13 +6,18 @@
   diff, legacy representation, stored-copy and conditional rollback rules.
   Shared business rules live in the planners, not in UI or CLI copies.
 - Directory reads contain identities, scalars and input configuration, never
-  bodies. Targeted reads materialize only the selected turn. Status queries use
+  bodies. Input configuration projects on first read and memoizes: the
+  projection is a schema parse per user turn, and a directory read covers the
+  whole conversation to answer a question about its tail. Targeted reads materialize only the selected turn. Status queries use
   the directory; explicit export/replay uses one consistent `readAll` observation.
   `readTurnOutput` reads the selected assistant and relevant failure notices in
   one observation instead of serializing the transcript on every token.
 - Repeated identity lookups reuse an unchanged pending transaction. Reads must not
   commit writes; uncommitted structural/ID edits and checkout still invalidate lookup.
-- Subscribe and capture the initial directory without a gap. Notifications carry structural ranges or changed turn ids. The display
+- Subscribe and capture the initial directory without a gap. Notifications carry
+  structural ranges or changed turn ids. A content batch reports the EXACT
+  positions it touched, never the span between the lowest and highest: one batch
+  routinely carries an early status write plus the streaming tail. The display
   cache rejects stale async reads. Turn ID edits (including deletion) are structural:
   notify by position so readers can remove the old identity before re-keying. CLI reads in-process synchronously; auto-seen
   scans directory scalars only and permission checks have no await gap.
@@ -30,6 +35,12 @@
 - Import inputs are explicit data. Recheck current history/cursor and bind the
   stored baseline and cursor in the same synchronous write, without an await gap.
   A cursor failure after history mutation is indeterminate.
+- Canonical import hashes are versioned: v1 hashes `{role, items, plan}` verbatim;
+  v2 hashes a canonical item form that excludes tool payload from identity. Cursor,
+  metadata digest and stored baseline each carry their own version; absent means v1.
+  Compare only same-version hashes, recomputing from the replay when versions differ;
+  unknown versions or missing replay data refuse before any write. A metadata-only
+  conflict marker never upgrades the stored cursor by implication.
 - Legacy inline rows and unchanged unknown fields survive updates. Never rewrite
   history while opening or reading. Auto-seen is a separately attached CLI policy
   with a commit-time guard against regressing an advanced execution status.

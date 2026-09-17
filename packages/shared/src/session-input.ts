@@ -101,7 +101,14 @@ const collectSessionConversationSources = (
     const entry = history[index];
     if (entry?.role !== 'user') continue;
     sources.push({
-      value: entry.inputConfig,
+      // Read on demand: a windowed index row resolves its send configuration
+      // lazily (a schema parse per turn), and `resolveSessionConversationConfig`
+      // inspects the newest source plus however few older ones it takes to find
+      // an explicit Role. Reading every entry here would parse the whole
+      // conversation to answer a question about its tail.
+      get value() {
+        return entry.inputConfig;
+      },
       configKey: `history:${entry.id}`,
       turnKey: `turn:${entry.id}`,
     });

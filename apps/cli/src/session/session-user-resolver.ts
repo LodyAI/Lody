@@ -1,3 +1,4 @@
+import { Effect } from 'effect';
 import { buildMissingEmail, isMissingEmail, type WorkspaceId } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
@@ -13,6 +14,8 @@ export type SessionUserProfile = {
 /** Raw workspace-member profile as returned by the CLI-token Convex query. */
 type WorkspaceUserProfileQuery = (userId: string) => Promise<CloudWorkspaceUserProfile | null>;
 
+const USER_PROFILE_TIMEOUT_MS = 60_000;
+
 const trimNonEmpty = (value?: string | null): string | undefined => {
   const trimmed = value?.trim();
   return trimmed !== undefined && trimmed.length > 0 ? trimmed : undefined;
@@ -21,7 +24,7 @@ const trimNonEmpty = (value?: string | null): string | undefined => {
 /**
  * Resolves the requesting user's commit identity for a session turn.
  *
- * This must go through the CLI-token query: the daemon holds an API-key CLI
+ * Non-owner profiles must go through the CLI-token query: the daemon holds an API-key CLI
  * token rather than a Convex JWT, so the JWT-only `auth.getUserById` always
  * resolved to nothing here and every session ended up committing under the
  * host's git identity (the machine owner) instead of the user who started it.
@@ -33,7 +36,8 @@ export class SessionUserResolver {
   constructor(
     private readonly logger: Logger,
     private readonly workspaceId: WorkspaceId,
-    queryProfile: WorkspaceUserProfileQuery
+    queryProfile: WorkspaceUserProfileQuery,
+    private readonly machineOwnerUserId?: string
   ) {
     this.queryProfile = queryProfile;
   }
@@ -48,14 +52,25 @@ export class SessionUserResolver {
       };
     }
 
+    // The Session reads Git configuration in the actual worktree when binding
+    // the owner turn. Do not block that local path on a cloud profile query.
+    if (normalizedUserId === this.machineOwnerUserId) {
+      return this.fallbackUser(normalizedUserId);
+    }
+
     const existing = this.cache.get(normalizedUserId);
     if (existing) {
       return await existing;
     }
 
     const request = this.fetchUser(normalizedUserId).catch((error: unknown) => {
-      this.cache.delete(normalizedUserId);
-      throw error;
+      if (this.cache.get(normalizedUserId) === request) {
+        this.cache.delete(normalizedUserId);
+      }
+      this.logger.debug(
+        `[session-user-resolver] Failed to resolve user ${normalizedUserId} in workspace ${this.workspaceId}: ${formatErrorMessage(error)}`
+      );
+      return this.fallbackUser(normalizedUserId);
     });
     this.cache.set(normalizedUserId, request);
     return await request;
@@ -66,23 +81,18 @@ export class SessionUserResolver {
   }
 
   private async fetchUser(userId: string): Promise<SessionUserProfile> {
-    try {
-      const profile = await this.queryProfile(userId);
-      if (!profile) {
-        this.logger.debug(
-          `[session-user-resolver] User ${userId} not resolvable in workspace ${this.workspaceId}; using placeholder identity`
-        );
-        return this.fallbackUser(userId);
-      }
-      return this.toSessionUserProfile(userId, profile);
-    } catch (error) {
+    const profile = await Effect.runPromise(
+      Effect.tryPromise(() => this.queryProfile(userId)).pipe(
+        Effect.timeout(USER_PROFILE_TIMEOUT_MS)
+      )
+    );
+    if (!profile) {
       this.logger.debug(
-        `[session-user-resolver] Failed to resolve user ${userId} in workspace ${this.workspaceId}: ${formatErrorMessage(
-          error
-        )}`
+        `[session-user-resolver] User ${userId} not resolvable in workspace ${this.workspaceId}; using placeholder identity`
       );
       return this.fallbackUser(userId);
     }
+    return this.toSessionUserProfile(userId, profile);
   }
 
   private toSessionUserProfile(

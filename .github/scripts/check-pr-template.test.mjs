@@ -5,8 +5,11 @@ import { checkPullRequestBody } from './check-pr-body.mjs';
 
 const templateUrl = new URL('../PULL_REQUEST_TEMPLATE.md', import.meta.url);
 const template = readFileSync(templateUrl, 'utf8');
-const originalPromptPlaceholder = '<!-- Paste the triggering user\'s original prompt here, verbatim. -->';
-const originalPrompt = 'Keep the original user prompt in the PR body so reviewers can verify intent.';
+const originalPromptPlaceholder =
+  "<!-- Paste the triggering user's original prompt here, verbatim. -->";
+const originalPrompt =
+  'Keep the original user prompt in the PR body so reviewers can verify intent.';
+const sharedConversationLink = 'https://lody.example/s/demo#access=v1.demo';
 
 function completedTemplate(visualExplanation) {
   return template
@@ -18,11 +21,8 @@ function completedTemplate(visualExplanation) {
     .replace('## Summary', '## Summary\n\nDocument the local route and state owner.')
     .replace('## Visual explanation', `## Visual explanation\n\n${visualExplanation}`)
     .replace('## Test plan', '## Test plan\n\nChecked the routing example against source.')
-    .replace(
-      /(- \*\*[^\n]+?:\*\*)\s*<!--[^\n]*-->/g,
-      '$1 Reviewed local routing only; no runtime behavior changes.'
-    )
-    .replace(originalPromptPlaceholder, originalPrompt);
+    .replace(originalPromptPlaceholder, originalPrompt)
+    .replace('### Shared conversation', `### Shared conversation\n\n${sharedConversationLink}`);
 }
 
 void test('the unedited template is not a valid PR body', () => {
@@ -37,9 +37,9 @@ void test('guidance stays in comments, so it cannot pass as a filled field', () 
 });
 
 void test('every repository path the template names resolves', () => {
-  const referenced = [...template.matchAll(/(?:^|\s)((?:\.[\w-]+|[\w-]+)(?:\/[\w.-]+)+\.md)/gm)].map(
-    (match) => match[1]
-  );
+  const referenced = [
+    ...template.matchAll(/(?:^|\s)((?:\.[\w-]+|[\w-]+)(?:\/[\w.-]+)+\.md)/gm),
+  ].map((match) => match[1]);
   assert.ok(referenced.length > 0, 'template should point authors at guidance');
   for (const target of referenced) {
     assert.ok(existsSync(new URL(`../../${target}`, import.meta.url)), `missing ${target}`);
@@ -62,6 +62,15 @@ void test('the original user prompt cannot be left as the template placeholder',
   assert.ok(result.findings.some((finding) => finding.startsWith('Original user prompt must')));
 });
 
+void test('the optional shared conversation section may be omitted entirely', () => {
+  const body = completedTemplate('Simple change: one documentation sentence changed.').replace(
+    /### Shared conversation[\s\S]*?(?=<!-- context-handoff:end -->)/,
+    ''
+  );
+  const result = checkPullRequestBody(body);
+  assert.equal(result.ok, true, result.findings.join('\n'));
+});
+
 void test('the original prompt may itself contain a triple-backtick code fence', () => {
   const body = completedTemplate('Simple change: one documentation sentence changed.').replace(
     originalPrompt,
@@ -80,9 +89,8 @@ void test('headings inside the original prompt fence do not affect PR section pa
     '## Visual explanation',
     '## Test plan',
     '## Context handoff',
-    '### Instructions for reviewing agents',
-    '### Authoring context',
     '### Original user prompt',
+    '### Shared conversation',
   ].join('\n');
   const body = completedTemplate('Simple change: one documentation sentence changed.').replace(
     originalPrompt,

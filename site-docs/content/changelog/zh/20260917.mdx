@@ -1,0 +1,27 @@
+---
+title: '20260917'
+version: 0.95.0
+date: 2026-09-17
+description: 新增内置 Pi agent，并改进本地 Agent、会话分享和会话恢复体验。
+---
+
+版本 0.95.0
+
+### ✨ 新功能
+
+- 新增内置 Pi agent，支持托管运行时；升级现有 Pi provider 前会请求确认，并保留原有设置与已存历史；迁移后无法续聊旧 Pi 会话，请新建对话。
+- 支持将已获授权的会话分享结果直接返回给 MCP agent。
+- 支持从本地 CLI 启动 Devin。
+- 支持更可靠地关闭和恢复工作区共享会话。
+
+### 🐛 修复与改进
+
+- 修复 DeepSeek Harness 在部分 Node 版本下无法启动的问题，改由 Lody 内置 Node 运行。
+- 修复 iOS 应用从后台恢复后偶发白屏的问题。
+- 改进会话中断、恢复、后台预取和流式内容处理，减少草稿丢失和整段会话失效。
+- 改进分享请求、provider 设置、错误恢复和归档行为。
+- 修复工具输入中的 JSON 被误识别为 Markdown 数学公式的问题。
+
+### 🤝 社区贡献
+
+- 特别感谢外部贡献者 [@tommy0103](https://github.com/tommy0103) 提交 [#711](https://github.com/LodyAI/Lody/pull/711)，以及 [@Astro-Han](https://github.com/Astro-Han) 提交 [acp-extension-pi #1](https://github.com/LodyAI/acp-extension-pi/pull/1)。

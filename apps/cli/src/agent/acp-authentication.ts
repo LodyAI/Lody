@@ -94,6 +94,8 @@ const DEFAULT_TERMINATION_GRACE_MS = 3_000;
 const DEFAULT_STATUS_PROBE_TIMEOUT_MS = 15_000;
 
 const BUILTIN_AUTH_METHODS = {
+  // Pi credentials are configured through the official Pi CLI on the host.
+  pi: [],
   kimi: [
     {
       id: 'login',
@@ -400,6 +402,7 @@ export async function probeBuiltinAuthentication(
   if (
     options.agentType === 'kimi' ||
     options.agentType === 'grok' ||
+    options.agentType === 'pi' ||
     options.agentType === 'codex'
   ) {
     return { status: 'unknown' };

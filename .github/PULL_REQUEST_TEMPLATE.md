@@ -59,36 +59,12 @@ Any supporting artifact must be reachable by reviewers; a local HTML file is not
 
 <!--
 Required for every fork-based pull request. Give maintainers and their reviewing
-agents the minimum public context needed to assess scope, intent, and risk.
-Every field must contain a concise, meaningful summary; N/A and redacted answers
-are not accepted. Never paste private transcripts, secrets, or tool logs.
+agents the minimum public context needed to assess intent and risk. N/A and
+redacted answers are not accepted. Never paste private transcripts, secrets, or
+tool logs; link a published shared conversation instead of copying its text.
 -->
 
 <!-- context-handoff:begin -->
-
-### Instructions for reviewing agents
-
-<!--
-Required and PR-specific. The authoring Agent writes this handoff for the
-organization owners' reviewing Agent. Do not paste a generic review checklist.
-Keep each item to one concise sentence and the whole section under 1,200
-characters. Include only the highest-value files, decisions, risks, and gaps.
--->
-
-- **Review focus:** <!-- Which concrete files or flows deserve attention, and why? -->
-- **Decisions to challenge:** <!-- Which deliberate choices need independent judgment? -->
-- **Plausible failures / evidence gaps:** <!-- What material breakage or uncertainty remains? -->
-
-### Authoring context
-
-<!-- Fill every field with a public summary. Explain briefly when there is no applicable risk or omission. -->
-
-- **User goal / directives:** <!-- Concise paraphrase only; never paste transcripts or tool logs. -->
-- **Constraints / non-goals:** <!-- What must not change or is out of scope. -->
-- **Risk-bearing decisions:** <!-- Decisions affecting data, authority, compatibility, or recovery. -->
-- **Destructive or irreversible behavior:** <!-- Include cleanup, overwrite, migration, rollback, and failure recovery. -->
-- **Deliberately not done or tested:** <!-- Intentional omissions and why they are acceptable. -->
-- **Unknowns / confidence:** <!-- Residual risk and confidence in the change. -->
 
 ### Original user prompt
 
@@ -111,5 +87,18 @@ unrelated transcript turns, tool logs, or attachment bytes.
 ````
 
 </details>
+
+### Shared conversation
+
+<!--
+Optional. If the authoring conversation was published as a shared Lody
+conversation, paste the public link here so reviewers can inspect the complete
+authoring context the summary omits. Otherwise delete this section entirely.
+
+An Agent asks its user to publish the conversation before opening the pull
+request and pastes the returned public link here. Publication needs the user's
+confirmation in the app; the Agent requests it but never approves it and never
+invents a URL.
+-->
 
 <!-- context-handoff:end -->

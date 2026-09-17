@@ -23,7 +23,7 @@ import {
   createAcpStartupMonitor,
 } from '@/agent/acp-startup-monitor';
 import { runNpxStartupWithRecovery } from '@/agent/acp-npx-startup-policy';
-import { getLodyDataDir } from '@lody/shared/node/installation-profile';
+import { ensureLodyDataDir, getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { withLodyNpmCacheForNpx } from '@/agent/npx-cache';
 import {
   type AcpLauncher,
@@ -66,9 +66,15 @@ export const getDefaultSessionWorkdir = (sessionId: SessionId): string =>
 
 export const ensureDefaultSessionWorkdir = (sessionId: SessionId): string => {
   const dir = getDefaultSessionWorkdir(sessionId);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+  if (fs.existsSync(dir)) {
+    return dir;
   }
+  // The data root is checked separately so an unreachable one is reported as Lody's
+  // own directory. It is also what the agent's tools see as the cwd's parent, so a
+  // silent `mkdir` failure here surfaces later as a git error naming a path the user
+  // never picked.
+  ensureLodyDataDir();
+  fs.mkdirSync(dir, { recursive: true });
   return dir;
 };
 

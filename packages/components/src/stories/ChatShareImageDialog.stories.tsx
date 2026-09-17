@@ -107,3 +107,9 @@ export const CustomRuntime: Story = {
     agentName: 'Local Coding Agent',
   },
 };
+
+/** The chat-sized card inside the desktop shell; the handset surface is a drawer. */
+export const ChatDestination: Story = {
+  ...Default,
+  args: { ...Default.args, initialDestination: 'chat' },
+};

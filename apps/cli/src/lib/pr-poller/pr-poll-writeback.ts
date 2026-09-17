@@ -52,7 +52,7 @@ export function selectCurrentPullRequestUrl(args: {
     const branchMatch =
       observation && runtimeBranch && observation.headRefName === runtimeBranch ? 1 : 0;
     const open = isTerminal(status) ? 0 : 1;
-    const updatedAtMs = observation ? (Date.parse(observation.updatedAt) || 0) : -1;
+    const updatedAtMs = observation ? Date.parse(observation.updatedAt) || 0 : -1;
     const prNumber = observation?.number ?? parseGitHubPullRequestUrl(pr.url)?.prNumber ?? -1;
     const rank: [number, number, number, number, number] = [
       branchMatch,

@@ -35,9 +35,10 @@ this page is the full text of the rules summarised there.
     A lone parent Session tab is not draggable; enable tab drag only once a
     second visible tab exists. On desktop, Cmd/Ctrl+W is the native Close
     accelerator. Session-detail registers a tab closer: focused side panel or
-    child tab closes; the lone parent leaves for Chat Landing in the primary window
-    without archiving, and closes an auxiliary window.
-    A parent with siblings is not closeable and does not close the window. With
+    conversation tab closes, including the parent. Close writes shared `isTabClosed`,
+    selects the next open neighbour (right then left), or enters a local draft.
+    `?tab=empty` remains an entry sentinel: after hydration, reuse a local draft or
+    create one and replace the URL. Mobile viewers remain active. With
     no closer mounted (Chat Landing and other surfaces) the chord closes the
     window.
     Each Session tab has ONE leading status slot, priority-ordered
@@ -123,11 +124,12 @@ this page is the full text of the rules summarised there.
   has not delivered yet stays ACTIVE behind a pending surface, because
   treating a transient replica gap as "this tab does not exist" is what
   bounced a just-promoted draft back to the parent (#199 regression). Only
-  positive evidence resolves away from the named tab (an archived or
-  side-panel child, a device-local draft that is provably gone), and NOTHING
-  observes data to
-  rewrite the URL back — the `shouldClearSessionUrlTab` normalizer is
-  deliberately dead. Promotion keeps its `pendingDraftChildSessionIds` entry
+  positive evidence resolves away from the named tab (an archived/closed conversation,
+  side-panel child, or a device-local draft that is provably gone). A confirmed
+  shared close replaces only the still-current URL choice with an open neighbour
+  or `empty` (materialized into a local draft); this narrow invalidation never reopens the parent or mirrors selection
+  into React state. The old broad `shouldClearSessionUrlTab` normalizer remains dead.
+  Promotion keeps its `pendingDraftChildSessionIds` entry
   as a draft→child resolution alias through the send window. The ABSENT value
   means "no explicit choice" and is reserved for external entries: the session
   ROUTE's `beforeLoad` fills it from the last-active store as one replace

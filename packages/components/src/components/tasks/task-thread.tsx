@@ -9,6 +9,7 @@ import {
   type TaskTimelineEntry,
 } from '@lody/shared';
 import { toast } from 'sonner';
+import { selectPastedClipboardFiles } from '@/lib/file-drop';
 import { cn } from '@/lib/utils';
 import { Button } from '@/ui/button';
 import { Textarea } from '@/ui/textarea';
@@ -381,9 +382,14 @@ export function TaskThread({
             )}
             onChange={(event) => setDraft(event.target.value)}
             onPaste={(event) => {
-              const files = Array.from(event.clipboardData.files).filter((file) =>
-                file.type.startsWith('image/')
-              );
+              // A Word or PowerPoint copy carries a picture of the selection
+              // beside the text; the text is what the comment wants.
+              const { files } = selectPastedClipboardFiles({
+                text: event.clipboardData.getData('text/plain'),
+                files: Array.from(event.clipboardData.files).filter((file) =>
+                  file.type.startsWith('image/')
+                ),
+              });
               if (files.length === 0) return;
               event.preventDefault();
               void handleImageFiles(files);

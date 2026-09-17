@@ -27,6 +27,7 @@ import {
   KIMI_CODE_VERSION,
   formatManagedRuntimeFailureMessage,
   isNodeVersionAtLeast,
+  getHostMachineProtocolCapabilities,
   mapManagedRuntimePlatform,
   ManagedAgentRuntimeManager,
   ManagedRuntimeIncompatibleHostError,
@@ -35,6 +36,24 @@ import {
   type FetchImpl,
   type ManagedRuntimeProgressEvent,
 } from './managed-agent-runtime';
+
+describe('host runtime capabilities', () => {
+  it.each([
+    ['22.14.0', 'darwin', 'arm64', undefined],
+    ['22.18.0', 'linux', 'x64', undefined],
+    ['22.19.0', 'darwin', 'arm64', 1],
+    ['23.6.0', 'win32', 'x64', 1],
+    ['24.0.0', 'freebsd', 'x64', undefined],
+    ['24.0.0', 'linux', 'ia32', undefined],
+  ] as const)(
+    'advertises Pi only on compatible host %s %s %s',
+    (node, platform, arch, expected) => {
+      const capabilities = getHostMachineProtocolCapabilities(node, platform, arch);
+      expect(capabilities.builtinPi).toBe(expected);
+      expect(capabilities.providerSetup).toBe(1);
+    }
+  );
+});
 
 async function sha256(bytes: Uint8Array): Promise<string> {
   return createHash('sha256').update(bytes).digest('hex');

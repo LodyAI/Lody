@@ -185,8 +185,8 @@ describe('desktop sidebar mark-unread menus', () => {
             machineName="This device"
             project={project}
             canRemoveProject={false}
-            canNavigateProject
             collapsed={false}
+            whetherShowFullList={false}
             isSelected={false}
             sessionsForProject={[session]}
             childSessionsByParent={new Map()}
@@ -207,6 +207,7 @@ describe('desktop sidebar mark-unread menus', () => {
             collapsedOpenedBySessionIds={{}}
             onToggleOpenedBySessions={() => undefined}
             onToggleCollapsed={() => undefined}
+            onToggleFullList={() => undefined}
             onRequestRemoval={() => undefined}
           />
         </TooltipProvider>

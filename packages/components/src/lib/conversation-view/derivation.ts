@@ -19,6 +19,11 @@ export type ConversationDerivation<F> = {
   readonly complete: boolean;
   readonly version: number;
   subscribe(listener: () => void): () => void;
+  /**
+   * Run or hold the background pass. Facts and view subscription survive a
+   * hold, so a table that is re-acquired resumes instead of starting over.
+   */
+  setActive(active: boolean): void;
   dispose(): void;
 };
 
@@ -31,7 +36,19 @@ export type CreateConversationDerivationOptions = {
   yieldToEventLoop?: () => Promise<void>;
 };
 
-const defaultYield = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+/**
+ * Background chunks yield to real idle time where the platform has it.
+ *
+ * Back-to-back macrotasks kept the pass at the head of the queue, so filling a
+ * long conversation's facts held the main thread for as long as it ran. The
+ * timeout keeps it progressing on a busy tab.
+ */
+const defaultYield = (): Promise<void> =>
+  typeof requestIdleCallback === 'function'
+    ? new Promise((resolve) => {
+        requestIdleCallback(() => resolve(), { timeout: 200 });
+      })
+    : new Promise((resolve) => setTimeout(resolve, 0));
 
 export function createConversationDerivation<F>(
   view: ConversationView,
@@ -47,6 +64,7 @@ export function createConversationDerivation<F>(
   let version = 0;
   let complete = false;
   let disposed = false;
+  let active = true;
   let passRunning = false;
   let passRequested = false;
   let activeRange: ReturnType<ConversationView['acquireRange']> | undefined;
@@ -121,7 +139,7 @@ export function createConversationDerivation<F>(
   const runBackgroundPass = async () => {
     let end = view.turnCount;
     while (end > 0) {
-      if (disposed) return;
+      if (disposed || !active) return;
       // Next chunk of turns (from the tail backwards) that still lack a fact.
       const pending: number[] = [];
       let cursor = end;
@@ -162,10 +180,16 @@ export function createConversationDerivation<F>(
     passRunning = true;
     try {
       while (passRequested) {
-        // `disposed` flips from `dispose()` while this loop is awaiting.
-        if (disposed) return;
+        // `disposed` flips from `dispose()` while this loop is awaiting, and
+        // `active` from the last consumer releasing.
+        if (disposed || !active) return;
         passRequested = false;
         await runBackgroundPass();
+        // A pass that stopped because it was held has not covered everything.
+        if (!active) {
+          passRequested = true;
+          return;
+        }
       }
       if (disposed) return;
       complete = true;
@@ -178,7 +202,7 @@ export function createConversationDerivation<F>(
   function requestPass(): void {
     passRequested = true;
     complete = false;
-    if (!passRunning && !disposed) void runPasses();
+    if (active && !passRunning && !disposed) void runPasses();
   }
 
   // Facts for what is already hydrated come for free before the pass starts.
@@ -201,6 +225,11 @@ export function createConversationDerivation<F>(
         listeners.delete(listener);
       };
     },
+    setActive: (next: boolean) => {
+      if (active === next || disposed) return;
+      active = next;
+      if (active && passRequested && !passRunning) void runPasses();
+    },
     dispose: () => {
       disposed = true;
       activeRange?.release();
@@ -217,29 +246,42 @@ const sharedDerivations = new WeakMap<
   Map<DeriveTurnFact<unknown>, { table: ConversationDerivation<unknown>; users: number }>
 >();
 
-/** Borrow a fact table; release the background scan after the last consumer. */
+/**
+ * Borrow a fact table; hold its background scan after the last consumer.
+ *
+ * The table is NOT disposed on the last release. Deriving a fact needs the
+ * turn's body, so a table that discarded its facts re-materialized the whole
+ * conversation the next time the session was opened — which is what closing
+ * and reopening a tab does. It stays keyed by the view instead, so it is
+ * collected with the view when the session store evicts it, and a re-acquire
+ * resumes with the facts it already has.
+ */
 export function acquireConversationDerivation<F>(
   view: ConversationView,
   derive: DeriveTurnFact<F>
 ) {
-  let tables = sharedDerivations.get(view);
-  if (!tables) sharedDerivations.set(view, (tables = new Map()));
+  // Key and subscribe on the conversation's own view. A projection wrapper is
+  // rebuilt whenever an optimistic entry appears or resolves; giving each one a
+  // table left every released wrapper subscribed through the base view, so a
+  // later token derived once per wrapper ever created and none of them could be
+  // collected.
+  const owner = view.factSource ?? view;
+  let tables = sharedDerivations.get(owner);
+  if (!tables) sharedDerivations.set(owner, (tables = new Map()));
   let entry = tables.get(derive);
   if (!entry) {
-    entry = { table: createConversationDerivation(view, derive), users: 0 };
+    entry = { table: createConversationDerivation(owner, derive), users: 0 };
     tables.set(derive, entry);
   }
   entry.users++;
-  let active = true;
+  entry.table.setActive(true);
+  let held = true;
   return {
     table: entry.table as ConversationDerivation<F>,
     release() {
-      if (!active) return;
-      active = false;
-      if (--entry.users === 0) {
-        entry.table.dispose();
-        tables.delete(derive);
-      }
+      if (!held) return;
+      held = false;
+      if (--entry.users === 0) entry.table.setActive(false);
     },
   };
 }

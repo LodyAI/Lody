@@ -65,15 +65,3 @@ export const chatLandingPendingFilesAtomFamily = atomFamily((_draftKey: string) 
 export const chatLandingDraftSessionIdAtomFamily = atomFamily((_draftKey: string) =>
   atom<SessionId | null>(null)
 );
-
-/**
- * The `resetDraftKey` this scope has already been cleared for. It lives beside
- * the draft rather than in a mount-scoped ref because the draft now outlives the
- * route: a `New chat` URL keeps its `resetDraftKey` in the history entry, so
- * navigating back to it would otherwise re-apply the same reset and destroy the
- * draft this module exists to preserve — revoking its preview URLs and aborting
- * its uploads on the way out.
- */
-export const chatLandingAppliedResetKeyAtomFamily = atomFamily((_draftKey: string) =>
-  atom<string | null>(null)
-);

@@ -19,9 +19,9 @@ Contract: specs/session-orchestration.md.
   exists; retries and recovery never reread mutable history.
 - Machine and Provider credentials stay execution-host scoped; attribution, authorization,
   GitHub, and Git identity use the frozen identity, never the Session owner.
-- Git identity: owner prefers machine then requester; others never read machine config.
-  Never restart ACP/sandbox for identity, even in preparations.
-  Use `CloudPort`; reject placeholders.
+- Git: owner uses local config, no profile query; others never read it.
+  `CloudPort` profiles: 60s deadline, retry failures, reject placeholders.
+  Identity never restarts ACP/sandbox, even in prep.
 
 ## Dispatch
 
@@ -44,21 +44,22 @@ Contract: specs/session-orchestration.md.
 
 ## Turn execution
 
-- Gate turn-scoped history LIST writes on user-entry sync (`turn-history-gate.ts`, 20s);
-  never gate status or meta writes.
+- Gate turn-scoped LIST writes on user-entry sync (`turn-history-gate.ts`, 20s), never status/meta.
 - Goals obey [this contract](../../../../specs/session-goal-control.md).
-- In-flight Stop cancels ACP, never its owner fiber. Keep `TurnRuntimeState` until raw ACP
-  completion or confirmed termination; no second turn. Assistant ids use `userTurnId`.
+- Stop ends local steer waits, not the owner fiber. Drain raw prompt/steer/config work before
+  reuse, or confirm termination. Assistant ids use `userTurnId`.
   `invocation` owns source Turn, requester and config atomically; steer replaces it before tools.
 - Publish `latestUserMsgId` in the SAME write as the history append (`appendUserTurn`). Only
   dispatch producers publish it. Renderer sends and queue promotion retain the missing-history
   tombstone; CLI dispatch producers keep their own marker policy.
 - Ordinary turn execution writes only `processingUserMsgId` and `lastHandledUserMsgId`; no start
   or terminal path may read-await-rewrite the other slots.
-- Never submit steer after Stop. A late accepted ACK cancels that exact steer entry without
-  transferring ownership, changing dispatch pointers or requeueing it.
-  Requeue unaccepted steer via its pointer, not entry status, only before submission or on
-  `AgentSteerNotDeliveredError`; skip active or handled entries.
+- Never steer after cancellation or infer delivery from it. Stop uses
+  `pendingInput: promote` / `prePromptSession: discard`; Edit & Resend uses preserve/keep,
+  access revocation preserve/discard. Limit create/restore fences to initialization.
+- Promote only proven non-delivery via `steerTurnStatuses`, never producer pointers.
+  Unknown never replays; RPC ACKs never revive history. Surface recovery errors.
+- Foreground/steer config uses its owner signal; fence mutations after interrupt.
 - Resume must REOPEN the in-progress assistant entry, clearing
   `finished`/`endedAt`/`permissionWaitMs` there only; never write `finished=false` from teardown.
 - Keep JSON-RPC/transport matching in `acp-error-classification.ts`: disposed/stale `-32603` is
@@ -93,22 +94,21 @@ Contract: specs/session-orchestration.md.
   `buildSessionLaunchConfig` semantics; a published incompatible resource cleans up first.
 - Nested child Sessions rejected: ownership is one parent hop only.
 - Fork commits at `LoroDocumentManager.persistPendingChanges()`; cloud `waitUntilSynced()` is
-  never a success condition. Persist the target placeholder before ACP; a failed final commit
-  terminates the fork and durably deletes the target.
-- Fork an active source turn only on an advertised `_meta.lody.forkAtTurn = { version: 1 }`, pass
-  the adapter's `_meta.lody.turnId` through unchanged as `acpTurnId`, and reuse the source Git
+  never success. Persist the target placeholder before ACP; a failed final commit
+  terminates and durably deletes the target.
+- Fork an active source turn only on advertised `_meta.lody.forkAtTurn = { version: 1 }`, pass
+  `_meta.lody.turnId` through unchanged as `acpTurnId`, and reuse the source Git
   identity only on an exact requester match. New-worktree forks need native fork support, a
-  target-doc `forkOperation` before returning, no target meta before the final commit, durable
-  failed-receipt cleanup, idempotent retry. Engine turns carry `auto:<n>` + `turnOrigin`, not
-  fork positions; updates get `assistant:autonomous-<turnId>` entries
-  ([README](README.md#engine-turns)).
-- Fork recovery fail-closes interrupted operations, found ONLY in machine-local marker store
-  under `withForkOperationLock`; never enumerate rooms or open docs, never `cleanSessionDoc`
-  a doc you do not own.
-- Edit-and-resend: `forkAtTurn` (`session/new` for first User); cancel exact CLIENT turn, await
-  release, then commit history/meta once. Engine marker rejects it; persistence arrival compensates
-  and closes prepared. Barrier blocks dispatch/steer/queue promotion; preserve User attribution,
-  config, attachments; new ids/ACP identity; never replay or roll back files.
+  target-doc `forkOperation` before returning, no target meta before final commit, durable
+  failed-receipt cleanup of ACP/worktree/branch, idempotent retry. Engine turns (`auto:<n>`+
+  `turnOrigin`) are never fork positions (README).
+- Fork recovery fail-closes interrupted operations, found ONLY in the machine-local marker store
+  under `withForkOperationLock`; never enumerate rooms/docs or `cleanSessionDoc` an unowned doc.
+- Edit-and-resend uses `forkAtTurn` (`session/new` for first User), cancels the exact CLIENT
+  turn, commits history/meta once after release. Engine occupancy fails closed; late markers
+  close the prepared replacement and compensate. The barrier blocks queue promotion, dispatch
+  and steer; keep the queue, User attribution/config/attachments, new turn/ACP ids; never replay
+  transcript or roll back files.
 
 ## Access
 

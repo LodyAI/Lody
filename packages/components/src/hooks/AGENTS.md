@@ -26,14 +26,19 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
   No resize-event pumps, guessed transition durations or stop timers. Before a composer
   inline-height write, set a one-shot ref consumed only by the next viewport height
   resize, without `scrollToRealBottom`; keep it separate from jump suppression.
-- Group expansion scrolls after Virtua descendants' layout effects; release suppression
-  in the later parent layout effect of that commit. No frame retries/settle timers.
+- Group toggles never scroll. Observer deliveries must never re-arm the follow
+  lock — only scroll events may — so the content ResizeObserver releases a
+  same-delivery re-lock while the commit-time snapshot says not-following. No
+  frame retries/settle timers.
 - Preserve per-session restoration, search/expansion suppression and viewport resizing
   for keyboards and terminal docks.
 
 ## Session, auth, and app shell
 
 - History uses SessionData commands.
+- A proven-undelivered steer (`no-active-turn` or `promotion-failed`) repairs ordinary
+  dispatch for pending/seen entries even if CLI already changed their status. Never
+  repair active, terminal, removed, or delivery-unknown turns.
 
 - `useStableSession` treats an HTTP 401 from `authClient.useSession()` as potentially
   stale and verifies it once with the current credential. Only a second 401 for the

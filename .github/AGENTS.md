@@ -45,13 +45,13 @@ Workflow-file security constraints live in
   handoff block and its markers. Use `Closes #123` when merging the PR should
   close the Issue and `Refs #123` only when it must stay open. A bare `#123` or
   full Lody Issue URL in `## Related issue` defaults to `Closes #123`.
-- Every Authoring context field is a concise public summary. `N/A` and redacted
-  values are not accepted because maintainers need enough provenance, scope,
-  and risk information to assess the contribution.
-- Review instructions are a PR-specific handoff to the organization owners'
-  reviewing Agent. Require concise review focus, decisions to challenge, and
-  plausible failures or evidence gaps; generic checklists and review essays are
-  not valid substitutes.
+- Before opening a fork-based pull request, an Agent asks its user to publish
+  the authoring conversation and places the public link in the optional
+  `### Shared conversation` section, deleting it when no shareable
+  conversation exists. The Agent may request publication through its tools,
+  but only the user confirms it; never invent a share URL.
+- Context handoff answers are concise public evidence; `N/A` and redacted
+  values are rejected; they give maintainers too little provenance.
 - An Agent preparing a fork-based contribution explains that the Context handoff
   is public and an invalid PR closes after the seven-day correction period.
 - Same-repository branches do not create or require an Issue solely for intake,

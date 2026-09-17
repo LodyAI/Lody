@@ -1,10 +1,12 @@
-import { useState } from 'react';
-import { useAtomValue } from 'jotai';
+import { useCallback, useState } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from '@tanstack/react-router';
 import { useCloudQuery } from '@lody/platform/react';
 import type { PublishedSessionShare } from '@lody/cloud-api';
-import type { WorkspaceId } from '@lody/shared';
-import { userAtom } from '@/atoms';
+import type { SessionId, WorkspaceId } from '@lody/shared';
+import { currentWorkspaceSlugAtom, userAtom } from '@/atoms';
+import { settingsDialogOpenAtom } from '@/atoms/settings';
 import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
 import { useAppCapability } from '@/lib/app-platform';
@@ -47,6 +49,9 @@ function ShareManagementList({
   userId: string;
 }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
+  const setSettingsDialogOpen = useSetAtom(settingsDialogOpenAtom);
   const [cursors, setCursors] = useState<Array<string | null>>([null]);
   const actions = useSessionShareLinkActions(workspaceId);
   const meta = useAtomValue(sessionMetaCacheAtom);
@@ -62,6 +67,20 @@ function ShareManagementList({
     workspaceId,
     paginationOpts: { numItems: 20, cursor: cursors[cursors.length - 1] ?? null },
   });
+  // Desktop renders settings as a modal over the workspace, so the session only
+  // becomes visible once that overlay is dismissed; on mobile settings is a route
+  // and the navigation replaces it.
+  const openSession = useCallback(
+    (sessionId: SessionId) => {
+      if (!workspaceSlug) return;
+      setSettingsDialogOpen(false);
+      void navigate({
+        to: '/$workspaceName/sessions/$sessionId',
+        params: { workspaceName: workspaceSlug, sessionId },
+      });
+    },
+    [navigate, setSettingsDialogOpen, workspaceSlug]
+  );
   return (
     <div className={settingContainerClass}>
       <p className="text-sm text-muted-foreground">
@@ -92,7 +111,10 @@ function ShareManagementList({
           <ul className="divide-y divide-border">
             {result.page.map((entry) => {
               const hasSecret = !!actions.secretFor(entry);
-              const hasSource = Object.values(meta).some(
+              // A share outlives its source: the session may be deleted, or belong
+              // to a member whose sessions this client cannot see. Offer the jump
+              // only when the local metadata cache actually holds the session.
+              const sourceSession = Object.values(meta).find(
                 (session) => session.id === entry.rootSessionId
               );
               return (
@@ -132,6 +154,15 @@ function ShareManagementList({
                     )}
                   </div>
                   <div className="flex flex-wrap gap-2">
+                    {sourceSession && workspaceSlug && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openSession(sourceSession.id)}
+                      >
+                        {t('settings.shares.viewConversation', 'View conversation')}
+                      </Button>
+                    )}
                     {hasSecret && (
                       <Button
                         variant="outline"
@@ -142,7 +173,7 @@ function ShareManagementList({
                         {t('settings.shares.copy', 'Copy link')}
                       </Button>
                     )}
-                    {entry.canManage && hasSource && (
+                    {entry.canManage && sourceSession && (
                       <Button
                         variant="outline"
                         size="sm"
