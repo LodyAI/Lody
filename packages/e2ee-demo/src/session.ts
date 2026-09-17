@@ -23,7 +23,8 @@ import {
 } from '@lody/e2ee-core/ledger';
 import { SqliteLedgerStore } from '@lody/e2ee-core/ledger-node';
 import { StreamsLedgerStream } from '@lody/e2ee-core/streams';
-import { fromHex, randomBytes, toHex } from './bytes';
+import { liveEntropy, type Entropy } from '@lody/e2ee-core';
+import { fromHex, toHex } from './bytes';
 import { type DemoDevice, deviceHex, generateDevice, possessionProof } from './device';
 import {
   CONTROL_STREAM,
@@ -42,6 +43,10 @@ export interface SessionOptions {
   readonly now?: () => number;
   readonly testMode?: boolean;
   readonly device?: DemoDevice;
+  /** Test/lab only. Production clients omit this and use live entropy. */
+  readonly entropy?: Entropy;
+  /** Test/lab fetch hook. Defaults to global fetch. */
+  readonly fetch?: typeof globalThis.fetch;
 }
 
 function wireNote(note: ComparisonNote): ComparisonWire {
@@ -97,6 +102,12 @@ export class DemoSession {
     return headers;
   }
 
+  private random(label: string, length: number): Uint8Array {
+    const bytes = new Uint8Array(length);
+    (this.options.entropy ?? liveEntropy).fill(label, bytes);
+    return bytes;
+  }
+
   async fetch(input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
     const target =
       typeof input === 'string' && !input.startsWith('http://') && !input.startsWith('https://')
@@ -104,7 +115,8 @@ export class DemoSession {
         : input;
     const request = new Request(target, init);
     const headers = this.headers(request.headers);
-    return fetch(new Request(request, { headers }));
+    const upstream = this.options.fetch ?? globalThis.fetch;
+    return upstream(new Request(request, { headers }));
   }
 
   private persistEpochs(): void {
@@ -169,7 +181,7 @@ export class DemoSession {
     const stream = new StreamsLedgerStream(
       new StreamsClient({
         url: this.streamUrl(CONTROL_STREAM),
-        fetch: (input, init) => fetch(input, { ...init, headers: this.headers(init?.headers) }),
+        fetch: (input, init) => this.fetch(input, init),
         retry: { maxAttempts: 0 },
       })
     );
@@ -193,9 +205,9 @@ export class DemoSession {
 
   async createSpace(): Promise<{ genesisHex: string }> {
     if (!this.device || !this.credential) throw new Error('not-started');
-    const secret = randomBytes(32);
-    this.userId = randomBytes(32);
-    this.membershipId = randomBytes(16);
+    const secret = this.random('epoch-secret', 32);
+    this.userId = this.random('user-id', 32);
+    this.membershipId = this.random('membership-id', 16);
     const body = encodeGenesisBody({
       signer: this.device.publicKey,
       userId: this.userId,
@@ -247,9 +259,9 @@ export class DemoSession {
   async requestJoin(genesisHex: string): Promise<JoinRequestWire> {
     if (!this.device) throw new Error('not-started');
     await this.adoptGenesis(genesisHex);
-    this.userId = randomBytes(32);
+    this.userId = this.random('join-user-id', 32);
     const request: Omit<JoinRequest, 'signature'> = {
-      requestId: randomBytes(16),
+      requestId: this.random('join-request-id', 16),
       userId: this.userId,
       signingPublicKey: this.device.publicKey,
       encryptionPublicKey: this.device.enc,
@@ -287,7 +299,7 @@ export class DemoSession {
     status: string;
     membershipId: Uint8Array;
   }> {
-    const membershipId = randomBytes(16);
+    const membershipId = this.random('approve-membership-id', 16);
     const request: JoinRequest = {
       requestId: fromHex(wire.requestId),
       userId: fromHex(wire.userId),
@@ -341,9 +353,15 @@ export class DemoSession {
     const ledger = await this.readLedger();
     const previous = this.epochKeys.get(ledger.state.epoch.number);
     if (!previous) throw new Error('missing-epoch-key');
-    const next = randomBytes(32);
+    const next = this.random('publish-epoch-secret', 32);
     const epoch = ledger.state.epoch.number + 1;
-    const packet = sealHistoryPacket(next, previous, this.genesis, epoch);
+    const packet = sealHistoryPacket(
+      next,
+      previous,
+      this.genesis,
+      epoch,
+      this.options.entropy ?? liveEntropy
+    );
     const submitted = await this.submit({
       type: 'publishEpoch',
       epoch,
@@ -374,7 +392,7 @@ export class DemoSession {
     });
     const client = new StreamsClient({
       url: this.streamUrl(KEYS_STREAM),
-      fetch: (input, init) => fetch(input, { ...init, headers: this.headers(init?.headers) }),
+      fetch: (input, init) => this.fetch(input, init),
       retry: { maxAttempts: 0 },
     });
     const head = await client.head();
@@ -432,7 +450,7 @@ export class DemoSession {
   private async suffixRecords(ledger: Ledger): Promise<Uint8Array[]> {
     const client = new StreamsClient({
       url: this.streamUrl(CONTROL_STREAM),
-      fetch: (input, init) => fetch(input, { ...init, headers: this.headers(init?.headers) }),
+      fetch: (input, init) => this.fetch(input, init),
       retry: { maxAttempts: 0 },
     });
     const records: Uint8Array[] = [];
@@ -508,7 +526,7 @@ export class DemoSession {
   async readKeyFrames(): Promise<Uint8Array[]> {
     const client = new StreamsClient({
       url: this.streamUrl(KEYS_STREAM),
-      fetch: (input, init) => fetch(input, { ...init, headers: this.headers(init?.headers) }),
+      fetch: (input, init) => this.fetch(input, init),
       retry: { maxAttempts: 0 },
     });
     const frames: Uint8Array[] = [];

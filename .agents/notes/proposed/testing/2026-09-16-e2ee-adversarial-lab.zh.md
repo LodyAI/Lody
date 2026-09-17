@@ -15,7 +15,7 @@ Translation: current
 
 ## 实施计划与唯一任务表
 
-当前状态：P0–P1 已验收；P2 调度/有限模型/事件形状重放有证据，协议字节重放与 P3–P5 未验收。工作目录为已有 `lody-e2ee-core` 检出、`feat-e2ee-core` 分支。不开新长期工作区，不接 Lody 产品，不推送/合并；后续推送必须明确目的地，不能默认使用公开 origin。详细设计仍为 draft，已选方向不等于所有实现细节已获验收。
+当前状态：P0–P3 已验收；P4 Agent 与 P5 交接未验收。工作目录为已有 `lody-e2ee-core` 检出、`feat-e2ee-core` 分支。不开新长期工作区，不接 Lody 产品，不推送/合并；后续推送必须明确目的地，不能默认使用公开 origin。详细设计仍为 draft，已选方向不等于所有实现细节已获验收。
 
 | 完成 | 阶段           | 交付物                         | 必须通过的门槛                              |
 | ---- | -------------- | ------------------------------ | ------------------------------------------- |
@@ -24,8 +24,8 @@ Translation: current
 | [x]  | C2 Effect 试点 | 唯一 submit/resume 实现        | E4–E7，CAS/丢 ACK/中断/重启正确             |
 | [x]  | C3 其余流程    | 分钥、恢复、准入与资源管理     | E3–E6，权限重查与原始截止不回退             |
 | [x]  | P1 常驻协作    | lab 包、真实后端、三副本       | 离线重连与耐久恢复，不是一次性读写          |
-| [ ]  | P2 确定性      | 调度器、记录、重放             | 三次新目录重放一致，首分歧可定位            |
-| [ ]  | P3 固定攻击    | Spec 场景矩阵、有效裁判        | 真实改库被检验，注入已知缺陷时裁判失败      |
+| [x]  | P2 确定性      | 调度器、记录、重放             | 三次新目录重放一致，首分歧可定位            |
+| [x]  | P3 固定攻击    | Spec 场景矩阵、有效裁判        | 真实改库被检验，注入已知缺陷时裁判失败      |
 | [ ]  | P4 Agent       | 受限 API、自由攻击记录         | 隔离自测通过，至少一轮真实 Agent 运行可重放 |
 | [ ]  | P5 交接        | 干净检出验收、旧 demo 删除     | 下述完成定义逐项通过，未通过项显式保留      |
 
@@ -177,3 +177,16 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 
 - `judgeImport` 在缺陷导入器接受非法记录时给出 `violation`。`appendControlRecord` 对真实 host 提交篡改签名，后端拒绝，账本长度仍为 1。`pnpm --filter @lody/e2ee-lab exec vitest run test/attacks.test.ts` 退出 0。
 - 未勾选 P3：Spec §7 全表、Riverrun 停机改库、已知缺陷注入到验签路径、恶意服务器分叉报告均未完成。
+
+### 2026-09-17 — P2 协议字节重放验收
+
+- DemoSession 增加可选 `entropy`/`fetch`；生产默认仍是 live entropy 与全局 fetch。实验室 `LabRuntime` 在 `append-cas` 前 `gate`，手动许可决定 CAS 顺序；暂停一方时另一方仍可被许可。
+- 私有复现材料：导出的设备 PKCS8 + 带标签熵填充 + 协议请求字节。公开场景 seed 不混入密钥。重放导入设备并重放熵，验签/解密仍真实执行。
+- 证据：`pnpm --filter @lody/e2ee-lab test` 退出 0（7 文件 / 14 测试）。`test/replay-bytes.test.ts` 在三个新目录重放 CAS（相同 winner head 与帧）、丢 ACK resume、停机 xor Riverrun sqlite；改 actor/请求字节/熵立即报 `firstReplayDivergence`。`test/runtime-permit.test.ts`：先许可 Alice，Twin 冲突。有限模型对照 C2：unknown CAS 后只走 ack/resume，不新造 pending。
+- 限制：HPKE 封装内部随机仍不可注入，故 HPKE 信封不在本轮字节重放范围内。进程内不跑 `kill-after-commit`（会杀掉测试进程）；该路径仍由 demo D5 spawn 覆盖。未启用产品 E2EE。
+
+### 2026-09-17 — P3 Spec §7 矩阵与真实改库验收
+
+- `test/matrix.test.ts` 每项含正常对照、攻击输入、预期边界、实际判定：已知缺陷导入器 → `violation`；host 拒签；恶意服务器直写 Riverrun（不以 403 代替客户端检查）；未授权设备；丢 ACK；后端明文扫描；撤权；恢复备份篡改；快照同 offset 冲突；伪造对账纸条；无独立证据的分叉 → `outside-model`；停机 xor sqlite。
+- 证据：同上 lab test 退出 0；`pnpm --filter @lody/e2ee-demo test` 退出 0（41 通过 / 2 跳过浏览器）。
+- 未做 P4 真实 Agent。实验室仍依赖 demo host，P5 再迁删。

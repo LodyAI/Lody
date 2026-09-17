@@ -67,6 +67,21 @@ describe('lab scheduler', () => {
     expect(result.steps).toBeGreaterThan(10);
   });
 
+  it('matches C2: unknown CAS does not create a second submit for the same actor', () => {
+    let state = emptyScheduler();
+    const pending = requestEvent(state, { actor: 'A', operation: 'submit', phase: 'pending' });
+    state = permitEvent(pending.state, pending.event.eventId).state;
+    state = completeEvent(state, pending.event.eventId);
+    const cas = requestEvent(state, { actor: 'A', operation: 'submit', phase: 'cas' });
+    state = permitEvent(cas.state, cas.event.eventId).state;
+    state = completeEvent(state, cas.event.eventId);
+    const ack = requestEvent(state, { actor: 'A', operation: 'submit', phase: 'ack' });
+    expect(ack.event.phase).toBe('ack');
+    expect(
+      state.events.filter((event) => event.actor === 'A' && event.phase === 'pending')
+    ).toHaveLength(1);
+  });
+
   it('reports the first diverging event instead of only comparing finals', () => {
     const base = recordEvent(emptyScheduler(), {
       actor: 'alice',
@@ -86,7 +101,7 @@ describe('lab scheduler', () => {
     });
     const divergence = firstDivergence(base.state.events, mutated.state.events);
     expect(divergence?.index).toBe(0);
-    expect(divergence?.expected?.actor).toBe('alice');
-    expect(divergence?.actual?.actor).toBe('bob');
+    expect(divergence?.expected).toBe('alice');
+    expect(divergence?.actual).toBe('bob');
   });
 });

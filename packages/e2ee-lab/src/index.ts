@@ -14,6 +14,31 @@ export {
 } from './scheduler';
 export { exploreSubmitInterleavings } from './model';
 export { publicTrace, type PublicTrace } from './trace';
-export { eventSignature, firstDivergence, type Divergence } from './replay';
-export { honestBaselineReport, judgeImport, type JudgeReport, type JudgeVerdict } from './judge';
-export { appendControlRecord } from './attacks';
+export {
+  eventSignature,
+  firstDivergence,
+  firstReplayDivergence,
+  type Divergence,
+  type ReplayMaterial,
+} from './replay';
+export {
+  defectiveAcceptInvalid,
+  honestBaselineReport,
+  judgeCursor,
+  judgeFork,
+  judgeImport,
+  judgeLeak,
+  judgeUnauthorized,
+  type JudgeReport,
+  type JudgeVerdict,
+  type ScenarioRecord,
+} from './judge';
+export { appendControlRecord, maliciousAppendCas, mutateSqliteBytes } from './attacks';
+export { LabRuntime, type ProtocolFrame } from './runtime';
+export {
+  prefixedEntropy,
+  recordingEntropy,
+  replayEntropy,
+  type EntropyFill,
+  type PublicScenarioSeed,
+} from './entropy';

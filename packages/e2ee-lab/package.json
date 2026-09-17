@@ -11,6 +11,7 @@
     "test": "vitest run",
     "check": "pnpm typecheck && pnpm test",
     "scenario:collab": "vitest run test/collab-baseline.test.ts",
+    "replay": "vitest run test/replay-bytes.test.ts test/replay-cas.test.ts",
     "format": "prettier --write src test package.json tsconfig.json README.md README.zh.md AGENTS.md vitest.config.ts",
     "format:check": "prettier --check src test package.json tsconfig.json README.md README.zh.md AGENTS.md vitest.config.ts"
   },

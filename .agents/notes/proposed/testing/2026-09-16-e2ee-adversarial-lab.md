@@ -15,7 +15,7 @@ The [specification](../../../../specs/e2ee-adversarial-lab.md) owns contracts; t
 
 ## Implementation plan and single task tracker
 
-Current state: P0–P1 accepted; P2 has scheduler/model/event-shape replay evidence; protocol-byte replay and P3–P5 are unaccepted. Work in the existing `lody-e2ee-core` checkout on `feat-e2ee-core`. No new permanent workspace, product integration, push or merge. Any later push needs an explicit destination rather than defaulting to public origin. Detailed design stays draft; selecting a direction does not accept every implementation detail.
+Current state: P0–P3 accepted; P4 Agent and P5 handoff are unaccepted. Work in the existing `lody-e2ee-core` checkout on `feat-e2ee-core`. No new permanent workspace, product integration, push or merge. Any later push needs an explicit destination rather than defaulting to public origin. Detailed design stays draft; selecting a direction does not accept every implementation detail.
 
 | Done | Stage                       | Deliverable                                             | Required gate                                                    |
 | ---- | --------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------- |
@@ -24,8 +24,8 @@ Current state: P0–P1 accepted; P2 has scheduler/model/event-shape replay evide
 | [x]  | C2 Effect pilot             | Single submit/resume implementation                     | E4–E7; CAS/lost ACK/interruption/restart                         |
 | [x]  | C3 Remaining workflows      | Delivery, recovery, admission, resources                | E3–E6; live authority and original expiry preserved              |
 | [x]  | P1 Persistent collaboration | Lab package, real backend, three replicas               | Offline/restart durability, not one-shot read/write              |
-| [ ]  | P2 Determinism              | Scheduler, recording, replay                            | Three fresh-directory replays; first-divergence detection        |
-| [ ]  | P3 Fixed attacks            | Scenario matrix and effective judge                     | Real database mutation; known injected defects fail judging      |
+| [x]  | P2 Determinism              | Scheduler, recording, replay                            | Three fresh-directory replays; first-divergence detection        |
+| [x]  | P3 Fixed attacks            | Scenario matrix and effective judge                     | Real database mutation; known injected defects fail judging      |
 | [ ]  | P4 Agent                    | Restricted API and exploration trace                    | Isolation checks; at least one real replayable Agent run         |
 | [ ]  | P5 Handoff                  | Clean-checkout acceptance and old-demo removal          | Complete done criteria below; explicit unpassed items            |
 
@@ -177,3 +177,16 @@ Implementers choose filenames, service names and test organization without repea
 
 - `judgeImport` reports `violation` when a defective importer accepts an invalid record. `appendControlRecord` posts a tampered signature to the real host; the backend refuses and ledger length stays 1. `pnpm --filter @lody/e2ee-lab exec vitest run test/attacks.test.ts` exit 0.
 - P3 stays unchecked: Spec §7 full matrix, offline Riverrun mutation, injecting a defect into the verify path, and malicious-server fork reporting are not done.
+
+### 2026-09-17 — P2 protocol-byte replay accepted
+
+- DemoSession gained optional `entropy` / `fetch`; production still defaults to live entropy and global fetch. `LabRuntime` gates `append-cas` and uses explicit permits for CAS order; a paused actor does not block permitting the other.
+- Private replay material: exported device PKCS8, labeled entropy fills, protocol request bytes. The public scenario seed is not mixed into keys. Replay imports devices and replays entropy; verification/decryption still execute.
+- Evidence: `pnpm --filter @lody/e2ee-lab test` exit 0 (7 files / 14 tests). `test/replay-bytes.test.ts` replays CAS (same winner head and frames), lost-ACK resume, and stopped-host Riverrun sqlite XOR in three fresh directories; changing actor/request bytes/entropy reports `firstReplayDivergence`. `test/runtime-permit.test.ts`: Alice is permitted first, Twin conflicts. Finite model vs C2: after unknown CAS the next step is ack/resume, not a new pending.
+- Limits: HPKE encapsulation entropy is still uninjected, so HPKE envelopes are outside this replay set. In-process tests do not use `kill-after-commit` (it would kill the test process); that path remains covered by demo D5 spawn. Product E2EE is not enabled.
+
+### 2026-09-17 — P3 Spec §7 matrix and real DB mutation accepted
+
+- `test/matrix.test.ts` records control, attack, expected boundary and verdict: known defective importer → `violation`; host signature reject; malicious-server direct Riverrun write (not a 403 stand-in); unauthorized device; lost ACK; plaintext scan; revoke; recovery-backup tamper; snapshot identity conflict; forged compare note; fork without independent evidence → `outside-model`; stopped-host sqlite XOR.
+- Evidence: same lab test exit 0; `pnpm --filter @lody/e2ee-demo test` exit 0 (41 passed / 2 skipped browser).
+- P4 real Agent is not done. The lab still depends on the demo host until P5.

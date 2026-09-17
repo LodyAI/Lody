@@ -11,11 +11,15 @@ malicious-server mutations at recorded event boundaries.
 ```sh
 pnpm --filter @lody/e2ee-lab check
 pnpm --filter @lody/e2ee-lab run scenario:collab
+pnpm --filter @lody/e2ee-lab run replay
 pnpm --filter @lody/e2ee-lab exec tsx src/cli.ts --data-dir /tmp/e2ee-lab-data
 ```
 
 `check` is typecheck plus tests. Root commands do not build the old demo UI.
-Replay commands land in P2.
+`replay` re-runs CAS, lost-ACK and ciphertext-mutation scenarios in three fresh
+directories each and fails at the first diverging event, entropy request or
+protocol frame. Private device material stays in the test process; it is not
+written to the public trace.
 
 ## Backend
 
@@ -25,6 +29,6 @@ after the scenario matrix covers it.
 
 ## Status
 
-P1 persistent three-client collaboration is the current gate. Attack recording,
-replay, and the Agent API are later stages. See the
+P2 replay and P3 fixed-attack matrix are in `test/replay-bytes.test.ts` and
+`test/matrix.test.ts`. The Agent API is P4. See the
 [implementation note](../../.agents/notes/proposed/testing/2026-09-16-e2ee-adversarial-lab.md).
