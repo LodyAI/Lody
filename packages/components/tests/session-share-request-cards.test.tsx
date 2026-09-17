@@ -174,14 +174,12 @@ it('discloses full agent delivery and completes publication with one approval', 
     await cloud.published;
   });
   expect(container.querySelector('[role="dialog"]')).toBeNull();
-  expect(container.textContent).toContain(
-    'Published. The agent can now receive the complete link.'
-  );
+  expect(container.querySelector('section')).toBeNull();
   expect(container.textContent).not.toContain('Approve and share');
   expect(localStorage.length).toBeGreaterThan(0);
 });
 
-it('explains interrupted publication and displays the committed result', async () => {
+it('explains interrupted publication and hides the card when publication is confirmed remotely', async () => {
   cloud.status = 'confirmed';
   await render();
   expect(container.textContent).toContain('Abandon deployment');
@@ -189,7 +187,23 @@ it('explains interrupted publication and displays the committed result', async (
   expect(container.textContent).toContain('new share request with a new requestId');
   cloud.status = 'published';
   await render();
-  expect(container.textContent).toContain('Published.');
+  expect(container.querySelector('section')).toBeNull();
+});
+
+it('does not show already published requests when opening the conversation', async () => {
+  cloud.status = 'published';
+  await render();
+  expect(container.innerHTML).toBe('');
+  expect(localStorage.length).toBe(0);
+});
+
+it('keeps a failed publication visible for retry', async () => {
+  cloud.capture.mockRejectedValue(new Error('Capture failed'));
+  await render();
+  await click('Approve and share');
+  expect(container.querySelector('section')).not.toBeNull();
+  expect(container.querySelector('[role="alert"]')).not.toBeNull();
+  expect(container.textContent).toContain('Approve and share');
 });
 
 it('keeps the conversation alive when the share-request query fails, and recovers on retry', async () => {
@@ -321,7 +335,7 @@ it.each(['leading-row', 'outside-list'] as const)(
         finishUpload();
         await cloud.published;
       });
-      expect(container.textContent).toContain('Published.');
+      expect(container.querySelector('section')).toBeNull();
     }
   }
 );
