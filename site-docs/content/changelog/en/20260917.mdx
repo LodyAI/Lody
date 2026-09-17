@@ -1,14 +1,15 @@
 ---
 title: '20260917'
-version: 0.94.1
+version: 0.95.0
 date: 2026-09-17
-description: Improve DeepSeek Harness, local agents, session sharing, and session recovery.
+description: Add built-in Pi and improve local agents, session sharing, and session recovery.
 ---
 
-Version 0.94.1
+Version 0.95.0
 
 ### ✨ New Features
 
+- Add a managed built-in Pi agent. Migrating an existing Pi provider asks for confirmation and preserves its settings and stored history; previous Pi sessions cannot be resumed after migration, so start a new chat.
 - Return approved session-share results directly to MCP agents.
 - Launch Devin from the local CLI.
 - Close and recover workspace-shared sessions more reliably.
@@ -20,3 +21,7 @@ Version 0.94.1
 - Improve interruption, recovery, background prefetch, and streaming behavior to reduce lost drafts and whole-conversation failures.
 - Improve share requests, provider settings, error recovery, and archive behavior.
 - Fix tool-input JSON being misread as Markdown math.
+
+### 🤝 Community Contributions
+
+- Special thanks to [@tommy0103](https://github.com/tommy0103) for [#711](https://github.com/LodyAI/Lody/pull/711), and [@Astro-Han](https://github.com/Astro-Han) for [acp-extension-pi #1](https://github.com/LodyAI/acp-extension-pi/pull/1).
