@@ -124,6 +124,132 @@ const insert = (doc: LoroDoc, at: number, value: string): void => {
 };
 
 describe('LocalLoroTransportAdapter push+delta sync', () => {
+  it('expires a withheld join into error, then accepts a replacement join', async () => {
+    const sent: LocalLoroDataPlaneClientMessage[] = [];
+    const listeners = new Set<(message: LocalLoroDataPlaneServerMessage) => void>();
+    const deadlines: Array<() => void> = [];
+    const adapter = new LocalLoroTransportAdapter({
+      workspaceId: 'ws',
+      peerId: 'deadline-peer',
+      joinAttemptTimeoutMs: 120_000,
+      scheduleTimeout: (callback) => {
+        deadlines.push(callback);
+        return callback;
+      },
+      cancelTimeout: () => {},
+      connection: {
+        send: (message) => sent.push(message),
+        onMessage: (listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+        onStatusChange: () => () => {},
+        isConnected: () => true,
+      },
+    });
+    const subscription = adapter.joinDocRoom('doc-timeout', new LoroDoc());
+    const firstJoin = sent[0];
+    expect(firstJoin?.type).toBe('join');
+    expect(subscription.status).toBe('connecting');
+
+    // No reply arrives. This is the adapter-owned transition the workspace
+    // reconnect loop needs; it must not remain an indefinitely passive
+    // `connecting`/`reconnecting` room.
+    deadlines[0]?.();
+    expect(subscription.status).toBe('error');
+
+    await adapter.reconnect();
+    const secondJoin = sent[1];
+    expect(secondJoin?.type).toBe('join');
+    if (secondJoin?.type !== 'join') throw new Error('replacement_join_not_sent');
+    for (const listener of listeners) {
+      listener({
+        type: 'joined',
+        protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+        workspaceId: 'ws',
+        peerId: 'deadline-peer',
+        requestId: secondJoin.requestId,
+        room: { scope: 'doc', docId: 'doc-timeout' },
+      });
+    }
+    await subscription.firstSyncedWithRemote;
+    expect(subscription.status).toBe('joined');
+  });
+
+  it('turns a synchronous join send failure into a reconnectable error', () => {
+    const adapter = new LocalLoroTransportAdapter({
+      workspaceId: 'ws',
+      connection: {
+        send: () => {
+          throw new Error('relay_write_failed');
+        },
+        onMessage: () => () => {},
+        onStatusChange: () => () => {},
+        isConnected: () => true,
+      },
+    });
+    const subscription = adapter.joinDocRoom('doc-send-failure', new LoroDoc());
+    expect(subscription.status).toBe('error');
+  });
+
+  it('does not publish Flock joined or first sync after a failed join import', async () => {
+    const sent: LocalLoroDataPlaneClientMessage[] = [];
+    const listeners = new Set<(message: LocalLoroDataPlaneServerMessage) => void>();
+    let rejectImport = true;
+    const adapter = new LocalLoroTransportAdapter({
+      workspaceId: 'ws',
+      peerId: 'flock-import-peer',
+      connection: {
+        send: (message) => sent.push(message),
+        onMessage: (listener) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+        onStatusChange: () => () => {},
+        isConnected: () => true,
+      },
+    });
+    const flock = {
+      exportJson: () => [],
+      importJson: async () => {
+        if (rejectImport) throw new Error('import_failed');
+      },
+      version: () => ({}),
+      subscribe: () => () => {},
+    };
+    const subscription = adapter.joinMetaRoom(flock);
+    const deliverJoin = (requestId: string) => {
+      for (const listener of listeners) {
+        listener({
+          type: 'joined',
+          protocolVersion: LOCAL_LORO_DATA_PLANE_PROTOCOL_VERSION,
+          workspaceId: 'ws',
+          peerId: 'flock-import-peer',
+          requestId,
+          room: { scope: 'meta' },
+          payload: { kind: 'flock-json', bundle: [] },
+        });
+      }
+    };
+    const firstJoin = sent[0];
+    if (firstJoin?.type !== 'join') throw new Error('initial_join_not_sent');
+    deliverJoin(firstJoin.requestId);
+    // Drain the explicitly gated async import/reconciliation chain; no clock
+    // advancement is involved.
+    for (let index = 0; index < 8; index += 1) {
+      await Promise.resolve();
+    }
+    expect(subscription.status).toBe('error');
+
+    rejectImport = false;
+    await adapter.reconnect();
+    const secondJoin = sent[1];
+    if (secondJoin?.type !== 'join') throw new Error('replacement_join_not_sent');
+    deliverJoin(secondJoin.requestId);
+    await subscription.firstSyncedWithRemote;
+    expect(subscription.status).toBe('joined');
+  });
+
   it('first-sync pulls existing server doc state to a fresh client', async () => {
     const harness = new Harness();
     insert(harness.serverDoc('doc-1'), 0, 'hello');
