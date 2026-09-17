@@ -186,6 +186,7 @@ describe('desktop sidebar mark-unread menus', () => {
             project={project}
             canRemoveProject={false}
             collapsed={false}
+            whetherShowFullList={false}
             isSelected={false}
             sessionsForProject={[session]}
             childSessionsByParent={new Map()}
@@ -206,6 +207,7 @@ describe('desktop sidebar mark-unread menus', () => {
             collapsedOpenedBySessionIds={{}}
             onToggleOpenedBySessions={() => undefined}
             onToggleCollapsed={() => undefined}
+            onToggleFullList={() => undefined}
             onRequestRemoval={() => undefined}
           />
         </TooltipProvider>

@@ -120,6 +120,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 import { SwipeActionRow } from '@/components/shared/swipe-action-row';
 import {
+  MAX_VISIBLE_SESSIONS,
   SessionList,
   shallowEqualExceptKeys,
   type SessionListPullRequestOpen,
@@ -182,6 +183,7 @@ import {
 } from '@/components/sidebar-row-shared';
 import {
   buildOpenedBySessionTree,
+  countOpenedByTreeRoots,
   hasOpenedByTreeNesting,
   normalizeSessionRowId,
 } from '@/lib/session-opened-by-tree';
@@ -191,6 +193,7 @@ import type { SessionSharingState } from '@/lib/session-sharing';
 import { useSessionSharing } from '@/hooks/use-session-sharing';
 import {
   buildSidebarNavigationItems,
+  getLocalProjectSessionGroupKey,
   type SidebarNavigationLocalSection,
 } from '@/components/sidebar-navigation-model';
 import {
@@ -949,6 +952,7 @@ export type LocalProjectItemProps = {
   canRemoveProject: boolean;
   removalState?: LocalProjectRemovalState | null;
   collapsed: boolean;
+  whetherShowFullList: boolean;
   isSelected: boolean;
   sessionsForProject: SessionMeta[];
   /**
@@ -996,6 +1000,7 @@ export type LocalProjectItemProps = {
    */
   resolveOpenerRowId?: (openerSessionId: string | null | undefined) => string | null;
   onToggleCollapsed: (machineId: MachineId, localProjectId: LocalProjectId) => void;
+  onToggleFullList: (groupKey: string) => void;
   onRequestRemoval: (info: LocalProjectRemovalRequest) => void;
 };
 
@@ -1036,6 +1041,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   canRemoveProject,
   removalState = null,
   collapsed,
+  whetherShowFullList,
   isSelected,
   sessionsForProject,
   childSessionsByParent,
@@ -1069,29 +1075,47 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   // Default: nest on the precise opener, which is correct whenever it is a root.
   resolveOpenerRowId = normalizeSessionRowId,
   onToggleCollapsed,
+  onToggleFullList,
   onRequestRemoval,
 }: LocalProjectItemProps) {
   const { t } = useTranslation();
+  const groupKey = getLocalProjectSessionGroupKey(machineId, project.id);
   // Same opened-by presentation the GitHub/Chats groups use: MCP-opened
   // independent Sessions indent under the Session that created them, and a
   // list with no such relationship keeps its previous flat geometry.
-  const sessionNodes = useMemo(
-    () =>
-      buildOpenedBySessionTree(sessionsForProject, {
-        getId: (session) => session.id,
-        // Nest under the opener's sidebar ROW, not necessarily the precise
-        // opener: a Session created from a child Tab belongs under that Tab's
-        // root Session, because child Tabs have no row here.
-        getOpenedBySessionId: (session) =>
-          session.openedByRootSessionId ?? resolveOpenerRowId(session.openedBySessionId),
-        isCollapsed: (openerId) => collapsedOpenedBySessionIds[openerId] === true,
-        // Same contract as the other lists: this section is sorted by latest
-        // activity, so an opener is ranked by its freshest opened Session.
-        rootRank: (session) => getEffectiveLatestMessageAt(session, childSessionsByParent),
+  const { canToggleFullList, sessionNodes } = useMemo(() => {
+    const accessors = {
+      getId: (session: SessionMeta) => session.id,
+      // Nest under the opener's sidebar ROW, not necessarily the precise
+      // opener: a Session created from a child Tab belongs under that Tab's
+      // root Session, because child Tabs have no row here.
+      getOpenedBySessionId: (session: SessionMeta) =>
+        session.openedByRootSessionId ?? resolveOpenerRowId(session.openedBySessionId),
+      isCollapsed: (openerId: string) => collapsedOpenedBySessionIds[openerId] === true,
+      // Same contract as the other lists: this section is sorted by latest
+      // activity, so an opener is ranked by its freshest opened Session.
+      rootRank: (session: SessionMeta) =>
+        getEffectiveLatestMessageAt(session, childSessionsByParent),
+    } as const;
+    const canToggle = countOpenedByTreeRoots(sessionsForProject, accessors) > MAX_VISIBLE_SESSIONS;
+    return {
+      canToggleFullList: canToggle,
+      sessionNodes: buildOpenedBySessionTree(sessionsForProject, {
+        ...accessors,
+        ...(whetherShowFullList ? {} : { maxRoots: MAX_VISIBLE_SESSIONS }),
       }),
-    [childSessionsByParent, collapsedOpenedBySessionIds, resolveOpenerRowId, sessionsForProject]
-  );
+    };
+  }, [
+    childSessionsByParent,
+    collapsedOpenedBySessionIds,
+    resolveOpenerRowId,
+    sessionsForProject,
+    whetherShowFullList,
+  ]);
   const showTreeGutter = hasOpenedByTreeNesting(sessionNodes);
+  const toggleListLabel = whetherShowFullList
+    ? t('sessions.showLess', 'Show less')
+    : t('sessions.showAll', 'Show all ({{count}})', { count: sessionsForProject.length });
   const trimmedMachineName =
     typeof machineName === 'string' && machineName.trim() ? machineName.trim() : null;
   const baseAriaLabel = formattedPath
@@ -1386,6 +1410,25 @@ export const LocalProjectItem = memo(function LocalProjectItem({
               </SessionOpenedByTreeRow>
             );
           })}
+          {canToggleFullList ? (
+            <button
+              type="button"
+              data-id={`show-more:${groupKey}`}
+              data-scope-item="row"
+              data-sidebar-show-more={groupKey}
+              className={cn(
+                'flex select-none items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-sidebar-foreground-muted/80',
+                'transition-colors',
+                'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
+                'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40'
+              )}
+              aria-label={toggleListLabel}
+              onClick={() => onToggleFullList(groupKey)}
+            >
+              <span className="flex h-4 w-4 items-center justify-center" aria-hidden="true" />
+              <span>{toggleListLabel}</span>
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -1823,6 +1866,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   const [localProjectCollapseState, setLocalProjectCollapseState] = useAtom(
     localProjectCollapseStateAtom
   );
+  const [showFullSessionGroups, setShowFullSessionGroups] = useAtom(sidebarShowFullListAtom);
   // Shared with SessionList (same atom) so an opener collapsed in one sidebar
   // surface stays collapsed in the other, and with the keyboard nav model so
   // arrow keys never visit a hidden row.
@@ -1832,12 +1876,23 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   const toggleLocalProjectCollapsed = useCallback(
     (machineId: MachineId, localProjectId: LocalProjectId) => {
       const key = `${machineId}:${localProjectId}`;
+      const groupKey = getLocalProjectSessionGroupKey(machineId, localProjectId);
       setLocalProjectCollapseState((prev) => ({
         ...prev,
         [key]: !(prev[key] ?? false),
       }));
+      if (!(localProjectCollapseState[key] ?? false)) {
+        setShowFullSessionGroups((prev) => ({ ...prev, [groupKey]: false }));
+      }
     },
-    [setLocalProjectCollapseState]
+    [localProjectCollapseState, setLocalProjectCollapseState, setShowFullSessionGroups]
+  );
+
+  const handleToggleLocalProjectFullList = useCallback(
+    (groupKey: string) => {
+      setShowFullSessionGroups((prev) => ({ ...prev, [groupKey]: !prev[groupKey] }));
+    },
+    [setShowFullSessionGroups]
   );
 
   const handleNavigateToProject = useCallback(
@@ -2420,6 +2475,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
                     if (!machineId) return null;
                     const projectKey = `${machineId}:${project.id}`;
                     const collapsed = localProjectCollapseState[projectKey] ?? false;
+                    const sessionGroupKey = getLocalProjectSessionGroupKey(machineId, project.id);
                     const sessionsForProject =
                       workspaceLocalProjectSessionsByKey.get(projectKey) ?? [];
                     const isSelected = projectKey === selectedLocalProjectKey;
@@ -2442,6 +2498,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
                             : null
                         }
                         collapsed={collapsed}
+                        whetherShowFullList={showFullSessionGroups[sessionGroupKey] ?? false}
                         isSelected={isSelected}
                         sessionsForProject={sessionsForProject}
                         childSessionsByParent={childSessionsByParent}
@@ -2480,6 +2537,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
                         onToggleOpenedBySessions={handleToggleOpenedBySessions}
                         resolveOpenerRowId={resolveOpenerRowId}
                         onToggleCollapsed={toggleLocalProjectCollapsed}
+                        onToggleFullList={handleToggleLocalProjectFullList}
                         onRequestRemoval={handleRequestRemoval}
                       />
                     );
@@ -2990,6 +3048,8 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
           machineId,
           localProjectId: project.id,
           collapsed,
+          showFull:
+            showFullSessionGroups[getLocalProjectSessionGroupKey(machineId, project.id)] ?? false,
           // Mirror exactly what LocalProjectItem renders: same nesting target and
           // the same group ranking, or arrow keys drift from the visible order.
           sessions: sessionsForProject.map((s) => ({
@@ -3012,6 +3072,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     localProjectCollapseState,
     localProjectsSectionCollapseState,
     resolveOpenerRowId,
+    showFullSessionGroups,
     workspaceLocalProjectSessionsByKey,
   ]);
 
@@ -3052,7 +3113,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
           for (const project of section.projects) {
             for (const session of project.sessions) {
               if (session.id === sessionId) {
-                return `${project.machineId}:${project.localProjectId}`;
+                return getLocalProjectSessionGroupKey(project.machineId, project.localProjectId);
               }
             }
           }
@@ -3075,7 +3136,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     ]
   );
 
-  const showFullSessionGroups = useAtomValue(sidebarShowFullListAtom);
   const sidebarNavigationItems = useMemo(
     () =>
       buildSidebarNavigationItems({

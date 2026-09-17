@@ -4,7 +4,7 @@ import React from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { LocalProjectMeta, MachineId } from '@lody/shared';
+import type { LocalProjectMeta, MachineId, SessionId, SessionMeta } from '@lody/shared';
 
 import { LocalProjectItem } from '../src/components/loro-app-sidebar';
 import { initI18n } from '../src/i18n';
@@ -58,6 +58,9 @@ describe('sidebar local project row', () => {
     onNavigateProject: (machineId: MachineId, localProjectId: string) => void;
     onNewChatInProject: (machineId: MachineId, localProjectId: string) => void;
     removalState?: 'waiting_for_device' | 'removing' | null;
+    sessions?: SessionMeta[];
+    whetherShowFullList?: boolean;
+    onToggleFullList?: (groupKey: string) => void;
   }) {
     flushSync(() => {
       root?.render(
@@ -70,8 +73,9 @@ describe('sidebar local project row', () => {
             canRemoveProject={false}
             removalState={options.removalState ?? null}
             collapsed={false}
+            whetherShowFullList={options.whetherShowFullList ?? false}
             isSelected={false}
-            sessionsForProject={[]}
+            sessionsForProject={options.sessions ?? []}
             childSessionsByParent={new Map()}
             liveSessionStatuses={new Map()}
             formattedPath={project.rootPath}
@@ -91,6 +95,7 @@ describe('sidebar local project row', () => {
             collapsedOpenedBySessionIds={{}}
             onToggleOpenedBySessions={() => undefined}
             onToggleCollapsed={() => undefined}
+            onToggleFullList={options.onToggleFullList ?? (() => undefined)}
             onRequestRemoval={() => undefined}
           />
         </TooltipProvider>
@@ -129,5 +134,39 @@ describe('sidebar local project row', () => {
     flushSync(() => row?.click());
     expect(onNavigateProject).not.toHaveBeenCalled();
     expect(row?.querySelector('button[aria-label="New chat"]')).toBeNull();
+  });
+
+  it('previews five sessions and can reveal the full local project history', () => {
+    const sessions: SessionMeta[] = Array.from({ length: 7 }, (_, index) => ({
+      id: `session-${index}` as SessionId,
+      machineId,
+      createdAt: '2026-09-17T00:00:00.000Z',
+      lastMessageAt: 7 - index,
+      userId: 'user-1',
+      cliType: 'builtin',
+      agentType: 'codex',
+      title: `Session ${index}`,
+    }));
+    const onToggleFullList = vi.fn();
+    const baseOptions = {
+      onNavigateProject: vi.fn(),
+      onNewChatInProject: vi.fn(),
+      sessions,
+      onToggleFullList,
+    };
+
+    render(baseOptions);
+    expect(container?.querySelectorAll('[data-sidebar-session-id]')).toHaveLength(5);
+    const showAll = container?.querySelector<HTMLButtonElement>(
+      '[data-sidebar-show-more="local-project:machine-teammate:project-shared"]'
+    );
+    expect(showAll?.textContent).toBe('Show all (7)');
+
+    flushSync(() => showAll?.click());
+    expect(onToggleFullList).toHaveBeenCalledWith('local-project:machine-teammate:project-shared');
+
+    render({ ...baseOptions, whetherShowFullList: true });
+    expect(container?.querySelectorAll('[data-sidebar-session-id]')).toHaveLength(7);
+    expect(container?.querySelector('[data-sidebar-show-more]')?.textContent).toBe('Show less');
   });
 });

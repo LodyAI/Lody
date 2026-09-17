@@ -1009,6 +1009,7 @@ function ProductionLikeTopContent({
                     project={project}
                     canRemoveProject
                     collapsed={collapsed}
+                    whetherShowFullList={false}
                     isSelected={false}
                     sessionsForProject={
                       project.id === ('proj-lody' as LocalProjectId) ? demoLocalSessions : []
@@ -1033,6 +1034,7 @@ function ProductionLikeTopContent({
                     onToggleCollapsed={() =>
                       setCollapsedProjects((prev) => ({ ...prev, [key]: !(prev[key] ?? false) }))
                     }
+                    onToggleFullList={() => {}}
                     onRequestRemoval={() => {}}
                   />
                 );
@@ -1063,6 +1065,7 @@ function ProductionLikeTopContent({
                   project={project}
                   canRemoveProject
                   collapsed={collapsed}
+                  whetherShowFullList={false}
                   isSelected={false}
                   sessionsForProject={[] as SessionMeta[]}
                   childSessionsByParent={new Map()}
@@ -1085,6 +1088,7 @@ function ProductionLikeTopContent({
                   onToggleCollapsed={() =>
                     setCollapsedProjects((prev) => ({ ...prev, [key]: !(prev[key] ?? false) }))
                   }
+                  onToggleFullList={() => {}}
                   onRequestRemoval={() => {}}
                 />
               );
