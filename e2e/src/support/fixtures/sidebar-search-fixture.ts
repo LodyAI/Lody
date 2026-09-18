@@ -1,5 +1,6 @@
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { quoteCommandArgument } from './command-line.js';
 
 const ACP_ENTRY = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -21,11 +22,6 @@ export const RELEASE_SEARCH_QUERY = 'RELE';
 export const TARGET_INITIAL_SEARCH_QUERY = 'DRAFT';
 export const TARGET_RENAMED_SEARCH_QUERY = 'FINAL';
 export const NO_MATCH_SEARCH_QUERY = 'XQZJ';
-
-function quoteCommandArgument(value: string): string {
-  if (/^[A-Za-z0-9_./:\\-]+$/u.test(value)) return value;
-  return `"${value.replace(/["\\$`]/gu, '\\$&')}"`;
-}
 
 export class SidebarSearchFixture {
   readonly agentCommandLine: string;
