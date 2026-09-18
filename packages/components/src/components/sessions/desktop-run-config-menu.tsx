@@ -187,6 +187,9 @@ function ToggleItem({
   );
 }
 
+/** Hide Mode/Model labels when the composer face slot is this narrow. */
+export const COMPOSER_FACE_LABEL_CLASS = '@max-[280px]/composer-face:hidden';
+
 /* Shared trigger chrome for both footer buttons. */
 const TRIGGER_CLASS = cn(
   'inline-flex h-7 min-w-0 select-none items-center gap-1.5 rounded-[4px] px-2 text-xs leading-tight',
@@ -538,26 +541,40 @@ export function DesktopRunConfigMenu({
   const configFaceParts: ReactNode[] = [];
   if (modelLabel) {
     configFaceParts.push(
-      <span key="model" className="block min-w-0 max-w-40 truncate text-left [direction:rtl]">
+      <span
+        key="model"
+        className={cn(
+          'block min-w-0 max-w-40 truncate text-left [direction:rtl]',
+          COMPOSER_FACE_LABEL_CLASS
+        )}
+      >
         <span dir="ltr">{modelLabel}</span>
       </span>
     );
   }
   if (thinkingLabel) {
     configFaceParts.push(
-      <span key="thinking" className="shrink-0">
+      <span key="thinking" className={cn('shrink-0', COMPOSER_FACE_LABEL_CLASS)}>
         {thinkingLabel}
       </span>
     );
   }
   if (planOn) {
     configFaceParts.push(
-      <ListChecks key="plan" className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+      <ListChecks
+        key="plan"
+        className={cn('h-3.5 w-3.5 shrink-0 text-primary', COMPOSER_FACE_LABEL_CLASS)}
+        aria-hidden="true"
+      />
     );
   }
   if (fastOn) {
     configFaceParts.push(
-      <Zap key="fast" className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
+      <Zap
+        key="fast"
+        className={cn('h-3.5 w-3.5 shrink-0 text-primary', COMPOSER_FACE_LABEL_CLASS)}
+        aria-hidden="true"
+      />
     );
   }
   /* Permission joins the face ONLY behind a Role, and only one the Role pins:
@@ -581,12 +598,18 @@ export function DesktopRunConfigMenu({
     const warning = classifyPermissionModeFace(permissionFace.value);
     configFaceParts.push(
       warning.kind !== 'hidden' && warning.tone === 'warning' ? (
-        <span key="permission" className="flex shrink-0 items-center gap-1 text-status-warning">
+        <span
+          key="permission"
+          className={cn(
+            'flex shrink-0 items-center gap-1 text-status-warning',
+            COMPOSER_FACE_LABEL_CLASS
+          )}
+        >
           <ShieldAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           {permissionFace.label}
         </span>
       ) : (
-        <span key="permission" className="shrink-0">
+        <span key="permission" className={cn('shrink-0', COMPOSER_FACE_LABEL_CLASS)}>
           {permissionFace.label}
         </span>
       )
@@ -655,11 +678,17 @@ export function DesktopRunConfigMenu({
           configuration, so its values belong beside the button rather than
           crowding the one thing there is to click. */}
       {selectedRole ? (
-        <span className="block min-w-0 max-w-44 truncate text-left">{selectedRole.name}</span>
+        <span
+          className={cn('block min-w-0 max-w-44 truncate text-left', COMPOSER_FACE_LABEL_CLASS)}
+        >
+          {selectedRole.name}
+        </span>
       ) : (
         <>
           {showAgentNameInTrigger ? (
-            <span className="block min-w-0 max-w-36 truncate text-left">
+            <span
+              className={cn('block min-w-0 max-w-36 truncate text-left', COMPOSER_FACE_LABEL_CLASS)}
+            >
               {selectedAgentConfig?.name ?? emptyAgentLabel ?? agentLabel}
             </span>
           ) : null}
@@ -960,7 +989,12 @@ export function DesktopRunConfigMenu({
      The Detailed tab is where they are changed. */
   const roleConfigFace =
     selectedRole && configFaceParts.length > 0 ? (
-      <span className="pointer-events-none flex min-w-0 select-none items-center gap-1 text-[11px] leading-tight text-muted-foreground/60">
+      <span
+        className={cn(
+          'pointer-events-none flex min-w-0 select-none items-center gap-1 text-[11px] leading-tight text-muted-foreground/60',
+          COMPOSER_FACE_LABEL_CLASS
+        )}
+      >
         {withFaceDots(configFaceParts, false)}
       </span>
     ) : null;
@@ -977,7 +1011,10 @@ export function DesktopRunConfigMenu({
 
 function FaceDot() {
   return (
-    <span aria-hidden="true" className="shrink-0 select-none text-muted-foreground/60">
+    <span
+      aria-hidden="true"
+      className={cn('shrink-0 select-none text-muted-foreground/60', COMPOSER_FACE_LABEL_CLASS)}
+    >
       ·
     </span>
   );
@@ -1042,8 +1079,9 @@ export function DesktopPermissionModeButton({
           <span className="flex h-4 w-4 shrink-0 items-center justify-center">
             {permissionModeIcon(value ?? null)}
           </span>
-          {/* Full mode name on desktop; truncates when the row runs tight. */}
-          <span className="min-w-0 max-w-36 truncate">{label ?? permissionLabel}</span>
+          <span className={cn('min-w-0 max-w-36 truncate', COMPOSER_FACE_LABEL_CLASS)}>
+            {label ?? permissionLabel}
+          </span>
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-52 max-w-80">
