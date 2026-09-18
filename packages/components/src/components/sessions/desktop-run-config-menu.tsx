@@ -1076,7 +1076,7 @@ export function DesktopPermissionModeButton({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button type="button" className={TRIGGER_CLASS} aria-label={permissionLabel}>
-          <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center [&_svg]:h-4 [&_svg]:w-4">
             {permissionModeIcon(value ?? null)}
           </span>
           <span className={cn('min-w-0 max-w-36 truncate', COMPOSER_FACE_LABEL_CLASS)}>
