@@ -54,11 +54,6 @@ const LOCAL_REGISTRY_AGENTS = {
     args: ['acp'],
     versionArgs: ['--version'],
   },
-  devin: {
-    command: 'devin',
-    args: ['acp'],
-    versionArgs: ['--version'],
-  },
   goose: {
     command: 'goose',
     args: ['--acp=true'],

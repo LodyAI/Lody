@@ -7,6 +7,8 @@ Translation: current
 
 PR: https://github.com/LodyAI/Lody/pull/763
 
+启动方式已被[恢复 Devin 的托管 registry binary](../bug-fix/2026-09-18-devin-managed-binary-restoration.zh.md)部分取代。
+
 ## 摘要
 
 Devin 此前以 `binary` 分发的 registry agent 形式接入：Lody 会把固定版本的
