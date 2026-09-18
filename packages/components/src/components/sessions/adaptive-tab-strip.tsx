@@ -498,12 +498,8 @@ export function AdaptiveTabStrip({
   useEffect(() => {
     if (slideMargins.size === 0 && enteringWidths.size === 0) return undefined;
     const retarget = () => {
-      setSlideMargins((current) => {
-        if (current.size === 0) return current;
-        const next = new Map<string, number>();
-        current.forEach((_, id) => next.set(id, 0));
-        return next;
-      });
+      // Missing margins render as zero; empty state also stops frame scheduling.
+      setSlideMargins(EMPTY_MARGIN_MAP);
       setEnteringWidths(EMPTY_MARGIN_MAP);
     };
     if (typeof requestAnimationFrame === 'function') {

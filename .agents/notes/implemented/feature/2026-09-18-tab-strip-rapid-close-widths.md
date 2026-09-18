@@ -84,6 +84,11 @@ closing tab itself is not kept mounted for a shrink animation — Chromium
 retains it in the model while contracting — so our slide is an approximation
 rather than a frame-exact copy.
 
+Animation cleanup correction: retargeting clears the temporary margin map;
+missing entries render as zero while CSS completes the transition. Keeping
+zero-valued entries recreated a non-empty map every frame, retriggering the
+effect and React commits indefinitely after a middle-tab close.
+
 Two grow-in refinements keep the insert animation honest. A commit that
 removes AND adds is a substitution, not an insert — a draft promoting to a
 session, or an auto-created draft replacing a closed tab — so the replacement
@@ -115,7 +120,10 @@ unarmed programmatic close, active-close promotion, the insert grow-in, the
 substitution morph-from-removed-width, the empty-strip solo insert, and a
 MutationObserver regression asserting the active item's inline width never
 holds the unfrozen value on a removal commit — 24/24 tests pass together with
-the 7 existing `adaptive-tab-strip` allocator tests. The behavior was also
+the 7 existing `adaptive-tab-strip` allocator tests. The rapid-close suite uses
+a manually advanced animation-frame queue. Its slide regression verifies both
+the resting geometry and that subsequent frames produce no React commits or
+pending callbacks; it fails against the original cleanup. The behavior was also
 exercised in a real browser against Storybook
 (`Sessions/SessionTabBar → Rapid Close`): closing a middle tab froze
 survivors, the freeze held inside the 40px/60px slop region and released

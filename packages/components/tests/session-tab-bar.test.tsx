@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { Provider, createStore } from 'jotai';
-import { act, StrictMode, useState } from 'react';
+import { act, Profiler, StrictMode, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { MachineId, SessionId, SessionMeta } from '@lody/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -306,6 +306,9 @@ describe('SessionTabBar rapid-close tab widths', () => {
 
   let resizeObserverCallback: ResizeObserverCallback | null = null;
   let mockViewportWidth = 800;
+  let commits = 0;
+  let nextFrameId = 0;
+  const pendingFrames = new Map<number, FrameRequestCallback>();
 
   beforeEach(() => {
     Object.defineProperty(globalThis, 'PointerEvent', {
@@ -313,6 +316,15 @@ describe('SessionTabBar rapid-close tab widths', () => {
       value: TestPointerEvent,
     });
     mockViewportWidth = 800;
+    commits = 0;
+    nextFrameId = 0;
+    pendingFrames.clear();
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      const id = ++nextFrameId;
+      pendingFrames.set(id, callback);
+      return id;
+    });
+    vi.stubGlobal('cancelAnimationFrame', (id: number) => pendingFrames.delete(id));
     // The strip measures its viewport through clientWidth; jsdom reports 0.
     Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
       configurable: true,
@@ -360,18 +372,12 @@ describe('SessionTabBar rapid-close tab widths', () => {
     return container.querySelector<HTMLElement>('[data-adaptive-tab-strip-viewport]')!;
   }
 
-  // The component retargets slide/entering styles one frame after applying
-  // them; the same fallback the component uses flushes that frame.
+  // Callbacks scheduled during a frame belong to the next frame.
   async function flushFrame() {
+    const callbacks = [...pendingFrames.values()];
+    pendingFrames.clear();
     await act(async () => {
-      await new Promise<void>((resolve) => {
-        const schedule = globalThis.requestAnimationFrame;
-        if (typeof schedule === 'function') {
-          schedule(() => resolve());
-        } else {
-          setTimeout(resolve, 0);
-        }
-      });
+      callbacks.forEach((callback) => callback(0));
     });
   }
 
@@ -465,7 +471,9 @@ describe('SessionTabBar rapid-close tab widths', () => {
         <Provider store={createStore()}>
           <TooltipProvider>
             <FocusScope id={WORKSPACE_FOCUS_SCOPES.sessionConversation}>
-              <Harness />
+              <Profiler id="rapid-close" onRender={() => commits++}>
+                <Harness />
+              </Profiler>
             </FocusScope>
           </TooltipProvider>
         </Provider>
@@ -548,6 +556,11 @@ describe('SessionTabBar rapid-close tab widths', () => {
     await flushFrame();
     expect(itemMargins()).toEqual(['0', '0']);
     expect(tabWidths()).toEqual([259, 258]);
+    const settledCommits = commits;
+    await flushFrame();
+    await flushFrame();
+    expect(commits).toBe(settledCommits);
+    expect(pendingFrames.size).toBe(0);
   });
 
   it('relayouts immediately when only the last tab is closed', async () => {
