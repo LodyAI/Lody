@@ -54,16 +54,28 @@ const splitFilePath = (filePath: string): { directory: string; name: string } =>
   };
 };
 
-const DiffStats = ({ add, del }: { add?: number; del?: number }) => (
-  <span className="ml-auto flex shrink-0 items-center gap-1.5 font-mono text-[11px] tabular-nums">
-    <span className={add === undefined ? 'text-muted-foreground/60' : 'text-code-added'}>
-      +{add ?? '—'}
+const DiffStats = ({ add, del }: { add?: number; del?: number }) => {
+  const { t } = useTranslation();
+
+  if (add === 0 && del === 0) {
+    return (
+      <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">
+        {t('sessions.editedFiles.changed', 'Changed')}
+      </span>
+    );
+  }
+
+  return (
+    <span className="ml-auto flex shrink-0 items-center gap-1.5 font-mono text-[11px] tabular-nums">
+      <span className={add === undefined ? 'text-muted-foreground/60' : 'text-code-added'}>
+        +{add ?? '—'}
+      </span>
+      <span className={del === undefined ? 'text-muted-foreground/60' : 'text-code-removed'}>
+        -{del ?? '—'}
+      </span>
     </span>
-    <span className={del === undefined ? 'text-muted-foreground/60' : 'text-code-removed'}>
-      -{del ?? '—'}
-    </span>
-  </span>
-);
+  );
+};
 
 export function AssistantEditedFiles({ files, onFileClick, className }: AssistantEditedFilesProps) {
   const { t } = useTranslation();

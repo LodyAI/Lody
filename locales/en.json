@@ -1709,6 +1709,7 @@
   "sessions.editedFiles.summary_other": "Edited {{count}} files",
   "sessions.editedFiles.showMore": "Show {{count}} more",
   "sessions.editedFiles.showLess": "Show less",
+  "sessions.editedFiles.changed": "Changed",
   "sessions.toolActivity.commands": "Ran {{count}} commands",
   "sessions.toolActivity.commands_one": "Ran {{count}} command",
   "sessions.toolActivity.commands_other": "Ran {{count}} commands",

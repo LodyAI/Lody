@@ -1709,6 +1709,7 @@
   "sessions.editedFiles.summary_other": "编辑了 {{count}} 个文件",
   "sessions.editedFiles.showMore": "再显示 {{count}} 个",
   "sessions.editedFiles.showLess": "收起",
+  "sessions.editedFiles.changed": "已更改",
   "sessions.toolActivity.commands": "调用了 {{count}} 个命令",
   "sessions.toolActivity.commands_one": "调用了 {{count}} 个命令",
   "sessions.toolActivity.commands_other": "调用了 {{count}} 个命令",
