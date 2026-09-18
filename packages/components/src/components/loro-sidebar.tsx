@@ -981,9 +981,8 @@ export const LoroSidebar = memo(function LoroSidebar({
         <DropdownMenuContent
           align="start"
           side={menuSide}
-          className="w-64"
+          className="w-64 dark:!bg-[rgb(24_24_24)]"
           style={{
-            backgroundColor: 'color-mix(in oklab, hsl(var(--sidebar-background)) 78%, white)',
             boxShadow:
               '0 0 0 1px color-mix(in oklab, hsl(var(--foreground)) 14%, transparent), 0 18px 48px -10px rgb(0 0 0 / 0.55), 0 8px 20px -8px rgb(0 0 0 / 0.35)',
           }}
