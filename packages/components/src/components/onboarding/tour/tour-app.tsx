@@ -503,7 +503,7 @@ function TourWindow({
       <div className="flex min-h-0 flex-1">
         <div data-tour-anchor="sidebar" className="h-full w-[280px] shrink-0 overflow-hidden">
           <LoroSidebar
-            className="h-full w-[280px] border-r border-sidebar-border/70 bg-sidebar"
+            className="h-full w-[280px] border-r-[0.5px] border-sidebar-border/70 bg-sidebar"
             defaultWidth={280}
             minWidth={280}
             maxWidth={280}

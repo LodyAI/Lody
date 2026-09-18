@@ -720,7 +720,7 @@ function NavButton({
 
 export function getLoroSidebarFooterClassName(isMobile: boolean): string {
   return cn(
-    'flex shrink-0 items-center justify-between border-t',
+    'flex shrink-0 items-center justify-between border-t-[0.5px]',
     isMobile
       ? 'pl-[calc(6px+var(--safe-area-left))] pr-[calc(12px+var(--safe-area-right))] pt-1 pb-2'
       : 'px-1.5 py-1',

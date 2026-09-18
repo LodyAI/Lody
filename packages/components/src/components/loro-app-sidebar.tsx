@@ -3217,7 +3217,9 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       {!isMobile ? <WindowDragStrip /> : null}
       <LoroSidebar
         className={cn(
-          isMobile ? 'h-full w-full' : 'h-full w-full border-r border-sidebar-border/70 bg-sidebar',
+          isMobile
+            ? 'h-full w-full'
+            : 'h-full w-full border-r-[0.5px] border-sidebar-border/70 bg-sidebar',
           isElectron && !isElectronFullscreen && 'z-20'
         )}
         workspaceName={resolvedWorkspaceName}
