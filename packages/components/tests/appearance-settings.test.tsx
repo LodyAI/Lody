@@ -111,7 +111,7 @@ describe('AppearanceSettingsView', () => {
   it('shows theme and language while hiding Electron-only settings outside Electron', async () => {
     await act(async () => root?.render(<AppearanceHarness isElectron={false} />));
 
-    expect(container?.textContent).toContain('Conversation font size');
+    expect(container?.textContent).toContain('Font size');
     expect(container?.textContent).toContain('Theme');
     expect(container?.textContent).toContain('Language');
     expect(container?.textContent).not.toContain('Interface font');
@@ -122,7 +122,7 @@ describe('AppearanceSettingsView', () => {
     await act(async () => root?.render(<AppearanceHarness isElectron={false} />));
 
     const sizeInput = container?.querySelector<HTMLInputElement>(
-      'input[type="range"][aria-label="Conversation font size"]'
+      'input[type="range"][aria-label="Font size"]'
     );
     expect(sizeInput?.value).toBe('2');
 
@@ -175,7 +175,7 @@ describe('AppearanceSettingsView', () => {
 
     expect(container?.textContent).toContain('Theme');
     expect(container?.textContent).toContain('Language');
-    expect(container?.textContent).toContain('Conversation font size');
+    expect(container?.textContent).toContain('Font size');
     expect(container?.textContent).not.toContain('Interface font');
     expect(container?.textContent).not.toContain('Terminal');
   });
@@ -183,7 +183,9 @@ describe('AppearanceSettingsView', () => {
   it('renders interface and terminal system font selectors in Electron', async () => {
     await act(async () => root?.render(<AppearanceHarness isElectron />));
 
-    const sizeInput = container?.querySelector<HTMLInputElement>('input[aria-label="Font size"]');
+    const sizeInput = container?.querySelector<HTMLInputElement>(
+      'input[type="number"][aria-label="Font size"]'
+    );
     const preview = Array.from(container?.querySelectorAll('code') ?? []).find(
       (node) => node.textContent === 'npx lody daemon start'
     );

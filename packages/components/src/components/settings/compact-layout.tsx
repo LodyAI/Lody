@@ -33,18 +33,18 @@ export function CompactSection({
   return (
     <section
       className={cn(
-        'overflow-hidden rounded-lg border border-border/70 bg-card/60 text-sm shadow-none',
+        'overflow-hidden rounded-lg border border-border/70 bg-card/60 text-[1em] shadow-none',
         className
       )}
     >
       {title || headerRight ? (
         <header className="flex min-h-10 items-center justify-between gap-2 border-b border-border/70 bg-muted/40 px-3 py-1.5">
           <div className="min-w-0 flex-1 leading-tight">
-            {title ? <p className="text-xs font-normal text-muted-foreground">{title}</p> : null}
-            {description && <p className="text-[11px] text-muted-foreground/90">{description}</p>}
+            {title ? <p className="text-[0.75em] font-normal text-muted-foreground">{title}</p> : null}
+            {description && <p className="text-[0.8em] text-muted-foreground/90">{description}</p>}
           </div>
           {headerRight ? (
-            <div className="min-w-0 shrink truncate text-right text-[11px] text-muted-foreground">
+            <div className="min-w-0 shrink truncate text-right text-[0.8em] text-muted-foreground">
               {headerRight}
             </div>
           ) : null}
@@ -103,10 +103,10 @@ export function CompactRow({
           use the whole column, because long command names should not wrap early. */}
       <div className={cn('min-w-0', helper && 'sm:max-w-[520px]')}>
         <p className="leading-tight text-foreground">{label}</p>
-        {helper && <p className="text-[11px] text-muted-foreground leading-tight">{helper}</p>}
+        {helper && <p className="text-[0.8em] text-muted-foreground leading-tight">{helper}</p>}
       </div>
       {children ? (
-        <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm font-normal sm:justify-end sm:pl-4 [&_button]:font-normal">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 text-[1em] font-normal sm:justify-end sm:pl-4 [&_button]:font-normal">
           {children}
         </div>
       ) : null}

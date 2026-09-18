@@ -3410,7 +3410,7 @@ function WorkspaceChatLanding({
         emptyText={t('chat.branchEmpty', { defaultValue: 'No branches found' })}
         loading={contextType === 'local' ? loadingLocalGitState || runtimeInitializing : undefined}
         loadingText={t('chat.branchLoading', { defaultValue: 'Loading branches...' })}
-        className="h-6 min-w-0 max-w-full gap-1.5 rounded-none border-none bg-transparent px-2 text-xs font-normal text-foreground/80 hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-100 [&_span]:text-xs [&_span]:leading-tight [&_svg]:text-current [&_svg]:opacity-100"
+        className="h-6 min-w-0 max-w-full gap-1.5 rounded-none border-none bg-transparent px-2 text-[0.9em] font-normal text-foreground/80 hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-100 [&_span]:text-[0.9em] [&_span]:leading-tight [&_svg]:text-current [&_svg]:opacity-100"
         disabled={isBranchDisabled}
       />
     </span>
@@ -3745,7 +3745,7 @@ function WorkspaceChatLanding({
           type="button"
           variant="ghost"
           size="sm"
-          className={cn(selectorTagClassName, 'text-xs leading-tight')}
+          className={cn(selectorTagClassName, 'text-[0.9em] leading-tight')}
           onClick={resetErrorBoundary}
           aria-label={t('chat.retryTargetSelector', 'Retry target selector')}
         >

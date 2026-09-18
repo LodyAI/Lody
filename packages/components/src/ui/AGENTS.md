@@ -56,7 +56,9 @@ strings on i18n rather than the registry's inline English.
   `bg-foreground/[0.05]` in light and `--hover` in dark. Do not use the absolute
   `--hover` gray on white popovers — it reads as a heavy slab. Kbd chips use
   the same 6% ink fill and muted text as the workspace Plus badge.
-- Menu chrome lives in `menu-styles.ts`. Items are `13px` / `py-1` / `min-h-7`.
+- Menu chrome lives in `menu-styles.ts`. Items are `0.9em` of `--ui-font-size`
+  (the Appearance slider) / `py-1` / `min-h-7`. Settings chrome is `1em` of the
+  same token. Do not go back to `text-[13px]` or `text-xs` for menu rows.
   The hairline is a `0.5px` shadow ring (not a CSS border). Separators are a
   5% ink mix, lighter than the ring. Dark menus use a brighter ring
   (`rgb(80 80 80)`) and a tighter, darker drop. Do not restore bulky `min-h-8`

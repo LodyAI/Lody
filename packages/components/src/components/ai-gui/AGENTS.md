@@ -100,8 +100,9 @@ File-by-file ownership and coverage pointers: [README.md](README.md).
 - Native child cancel requires subagentCancellation v1 and an exact parent turn;
   never use durable whole-turn Stop or invent a terminal state in the panel.
 
-- Conversation font size is a bounded integer pixel value. Scale body, headings,
-  dense monospace, terminal output, and collapsed height through
+- Font size is a bounded integer pixel value written to `--ui-font-size`
+  (settings 1em; compact menus 0.9em). Conversation body, headings, dense
+  monospace, terminal output, and collapsed height still scale through
   `conversation-font-size-classes.ts`; settings own legacy preset migration.
   Keep Streamdown in streaming mode, but never enable word-level `animated`.
 - A Mermaid diagram in a message is a still preview until a pointer click

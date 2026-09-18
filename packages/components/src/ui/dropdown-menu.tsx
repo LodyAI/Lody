@@ -590,7 +590,7 @@ const DropdownMenuSearchInput = React.forwardRef<HTMLInputElement, DropdownMenuS
           }}
           placeholder={placeholder}
           aria-label={ariaLabel ?? placeholder}
-          className="min-w-0 flex-1 border-none bg-transparent text-[0.8rem] leading-tight outline-none placeholder:text-muted-foreground focus:outline-none focus:ring-0"
+          className="min-w-0 flex-1 border-none bg-transparent text-[0.9em] leading-tight outline-none placeholder:text-muted-foreground focus:outline-none focus:ring-0"
         />
       </div>
     );

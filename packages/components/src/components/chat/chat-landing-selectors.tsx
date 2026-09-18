@@ -48,7 +48,7 @@ export const getModeIcon = (modeId: string | null): ReactNode => {
  */
 export const getSelectorTagClassName = (_tone: ChatLandingTone): string => {
   return cn(
-    'w-auto h-6 px-2 gap-1 rounded-[4px] [&_span]:text-xs [&_span]:leading-tight',
+    'w-auto h-6 px-2 gap-1 rounded-[4px] [&_span]:text-[0.9em] [&_span]:leading-tight',
     'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
   );
 };
@@ -58,7 +58,7 @@ export const getSelectorTagClassName = (_tone: ChatLandingTone): string => {
  */
 export const getCompactSelectorTagClassName = (_tone: ChatLandingTone): string => {
   return cn(
-    'w-auto h-6 px-2 gap-1 rounded-[4px] border [&_span]:text-xs [&_span]:leading-tight',
+    'w-auto h-6 px-2 gap-1 rounded-[4px] border [&_span]:text-[0.9em] [&_span]:leading-tight',
     'border-input-border/70 bg-input/80 text-muted-foreground hover:bg-muted/60 hover:text-foreground'
   );
 };
@@ -252,7 +252,7 @@ export function BranchSelector({
         <div className="flex min-w-0 flex-col">
           <span className="whitespace-normal break-words leading-snug">{option.label}</span>
           {option.description && (
-            <span className="line-clamp-2 text-xs text-muted-foreground">{option.description}</span>
+            <span className="line-clamp-2 text-[0.8em] text-muted-foreground">{option.description}</span>
           )}
         </div>
       )}

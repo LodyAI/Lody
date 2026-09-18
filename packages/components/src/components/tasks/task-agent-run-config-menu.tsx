@@ -90,7 +90,7 @@ function OptionItem({
         event.preventDefault();
         onSelect();
       }}
-      className="h-7 min-h-0 items-center gap-2 py-0 text-xs"
+      className="h-7 min-h-0 items-center gap-2 py-0"
     >
       {icon}
       <span className="min-w-0 flex-1 truncate font-normal leading-tight">{label}</span>

@@ -33,6 +33,8 @@
 :root {
   --diffs-token-light-font-style: normal;
   --diffs-token-dark-font-style: normal;
+  /* Appearance slider. Settings chrome is 1em of this; compact menus/pills 0.9em. */
+  --ui-font-size: 14px;
 
   /* Dialogs use CSS variables in Tailwind arbitrary z-index classes. Keep these
      concrete at runtime so ordinary Radix portals (`z-50`) stay under modal
@@ -73,7 +75,7 @@ body {
   margin: 0;
   /* Inter is bundled; keep system fonts as fallback only. */
   font-family: var(--font-sans);
-  font-size: 14px;
+  font-size: var(--ui-font-size, 14px);
   line-height: 1.45;
   /* Native-like font rendering */
   -webkit-font-smoothing: antialiased;

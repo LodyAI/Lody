@@ -249,7 +249,7 @@ function RoleBindingSubtitle({
   const parts = [agentName, modelLabel].filter((part): part is string => Boolean(part));
   if (parts.length === 0) return null;
   return (
-    <span className="truncate text-[11px] leading-snug text-muted-foreground">
+    <span className="truncate text-[0.8em] leading-snug text-muted-foreground">
       {parts.join(' · ')}
     </span>
   );
@@ -269,13 +269,13 @@ function RoleAvailabilityNote({ availability }: { availability: AgentRoleAvailab
   if (availability.kind === 'available') return null;
   if (availability.kind === 'unknown') {
     return (
-      <span className="text-[10.5px] leading-snug text-muted-foreground/80">
+      <span className="text-[0.75em] leading-snug text-muted-foreground/80">
         {t('settings.agentRoles.status.checking')}
       </span>
     );
   }
   return (
-    <span className="text-[10.5px] leading-snug text-status-warning">
+    <span className="text-[0.75em] leading-snug text-status-warning">
       {t(AGENT_ROLE_UNAVAILABLE_REASON_KEYS[availability.reason])}
     </span>
   );

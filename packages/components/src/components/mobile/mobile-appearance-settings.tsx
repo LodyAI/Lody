@@ -93,10 +93,10 @@ export function MobileAppearanceSettings() {
       <MobileSettingsSection>
         <MobileSettingsRow
           stack
-          label={t('settings.conversationFontSize.label', 'Conversation font size')}
+          label={t('settings.conversationFontSize.label', 'Font size')}
           helper={t(
             'settings.conversationFontSize.helper',
-            'Adjusts message body text in conversations.'
+            'Base size for the app. Conversation text uses this size; compact menus and landing chips are slightly smaller.'
           )}
         >
           <ConversationFontSizeSlider

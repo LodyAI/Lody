@@ -106,7 +106,7 @@ function OptionItem({
         event.preventDefault();
         onSelect();
       }}
-      className="h-7 min-h-0 items-center gap-2 py-0 text-xs"
+      className="h-7 min-h-0 items-center gap-2 py-0"
     >
       {icon}
       {/* nowrap (no min-w-0) so the submenu's max-content includes the label. */}
@@ -134,7 +134,7 @@ function ValueSubTrigger({
   return (
     <DropdownMenuSubTrigger className="pr-1.5" disabled={disabled}>
       <span className="min-w-0 flex-1 truncate">{label}</span>
-      <span className="ml-4 flex min-w-0 max-w-40 items-center gap-1.5 text-xs text-muted-foreground">
+      <span className="ml-4 flex min-w-0 max-w-40 items-center gap-1.5 text-[0.9em] text-muted-foreground">
         {icon}
         <span className="min-w-0 truncate">{value}</span>
       </span>
@@ -190,7 +190,7 @@ export const COMPOSER_FACE_LABEL_CLASS = '@max-[280px]/composer-face:hidden';
 /* Shared trigger chrome for both footer buttons. Compact (label-hidden) face
    is a 28px square so plus / model / mode share the same hit box and gap. */
 const TRIGGER_CLASS = cn(
-  'inline-flex h-7 min-w-0 select-none items-center gap-1.5 rounded-[4px] px-2 text-xs leading-tight',
+  'inline-flex h-7 min-w-0 select-none items-center gap-1.5 rounded-[4px] px-2 text-[0.9em] leading-tight',
   '@max-[280px]/composer-face:w-7 @max-[280px]/composer-face:shrink-0 @max-[280px]/composer-face:justify-center @max-[280px]/composer-face:gap-0 @max-[280px]/composer-face:px-0',
   'text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
   'data-[state=open]:bg-muted data-[state=open]:text-foreground',
@@ -237,7 +237,7 @@ export function DesktopMachineMenu({
           type="button"
           className={cn(
             'inline-flex h-6 min-w-0 select-none items-center gap-1.5 rounded-md bg-[#e7e7e7] px-2 dark:bg-foreground/[0.08]',
-            'text-xs font-normal leading-tight text-foreground/80 transition-colors [&_svg]:text-current [&_svg]:opacity-100',
+            'text-[0.9em] font-normal leading-tight text-foreground/80 transition-colors [&_svg]:text-current [&_svg]:opacity-100',
             'hover:bg-[#dcdcdc] hover:text-foreground data-[state=open]:bg-[#dcdcdc] data-[state=open]:text-foreground dark:hover:bg-foreground/[0.12] dark:data-[state=open]:bg-foreground/[0.12]',
             'disabled:cursor-default disabled:opacity-70'
           )}
@@ -294,7 +294,7 @@ export function DesktopMachineMenu({
                     {t('sharing.private', 'Private')}
                   </span>
                 </TooltipTrigger>
-                <TooltipContent side="right" className="max-w-64 text-xs">
+                <TooltipContent side="right" className="max-w-64 text-[0.8em]">
                   {t(
                     'sharing.machinePrivateHelp',
                     'Only you can use this machine. Share it from machine settings so teammates can see its shared projects and conversations.'
@@ -777,7 +777,7 @@ export function DesktopRunConfigMenu({
           isAgentLocked ? (
             <DropdownMenuItem disabled>
               <span className="min-w-0 flex-1 truncate">{agentLabel}</span>
-              <span className="ml-4 flex max-w-36 items-center gap-1.5 text-xs text-muted-foreground">
+              <span className="ml-4 flex max-w-36 items-center gap-1.5 text-[0.9em] text-muted-foreground">
                 {selectedAgentConfig ? (
                   <AgentIcon
                     cliType={selectedAgentConfig.cliType}
@@ -1061,7 +1061,7 @@ function PermissionModeItem({
       <TooltipContent
         side="right"
         align="start"
-        className="max-w-72 whitespace-pre-wrap text-left text-xs font-normal leading-snug"
+        className="max-w-72 whitespace-pre-wrap text-left text-[0.8em] font-normal leading-snug"
       >
         {option.description}
       </TooltipContent>
