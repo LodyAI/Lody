@@ -2375,23 +2375,31 @@ const SessionDetail = ({
           captureSessionDetailEvent('session/tab_deleted_empty', {
             tab_session_id: tabSessionId,
           });
+          // A deleted tab leaves no isTabClosed meta for the shared-close
+          // effect to react to, and resolveActiveSessionTab keeps a
+          // meta-missing tab active, so the handler must leave the dead URL
+          // itself: a child close returns to the route's session tab.
+          if (tabSessionId === activeTabSessionId) {
+            navigateToSessionTab(sessionId);
+          }
         } else {
           await setSessionTabClosed(tabSessionId, true);
-        }
-        // The shared-close effect chooses the neighbour once hydration finishes.
-        // Do not commit a fallback from this handler's partial metadata snapshot.
-        if (
-          docMetaCacheReady &&
-          tabSessionId === activeTabSessionId &&
-          router.state.location.search.tab === urlTab
-        ) {
-          navigateToSessionTab(
-            getSessionTabFallback(
-              tabSessionId,
-              allOrderedSessionTabIds,
-              orderedSessionTabIds.filter((id) => id !== tabSessionId)
-            )
-          );
+          // The shared-close effect chooses the neighbour once hydration
+          // finishes. Do not commit a fallback from this handler's partial
+          // metadata snapshot.
+          if (
+            docMetaCacheReady &&
+            tabSessionId === activeTabSessionId &&
+            router.state.location.search.tab === urlTab
+          ) {
+            navigateToSessionTab(
+              getSessionTabFallback(
+                tabSessionId,
+                allOrderedSessionTabIds,
+                orderedSessionTabIds.filter((id) => id !== tabSessionId)
+              )
+            );
+          }
         }
       } catch (error) {
         // A silent failure reads as "the close button does nothing" — surface
@@ -2417,6 +2425,7 @@ const SessionDetail = ({
       orderedSessionTabIds,
       router,
       runtime,
+      sessionId,
       urlTab,
       t,
     ]

@@ -42,6 +42,12 @@ doc。本次恢复保留非空 tab 的 `isTabClosed` 新模型，但加回精确
   `runtime.repo.getDocMeta` 直读 tab 的 meta——不依赖扫描缓存状
   态——`!lastMessageAt` 时调用 `deleteSessions`；非空 tab 维持
   #746 的 `isTabClosed` 写入。
+- 删除的是活跃 tab 时 handler 自己导航回路由 session tab：
+  `resolveActiveSessionTab` 刻意让缺 meta 的 `session:` tab 保持活跃
+  （被删 doc 与"副本尚未同步"不可区分），而 shared-close effect 只看
+  `isTabClosed` meta——handler 不导航的话 URL 会永远停在已删 tab
+  上。#814 第一次 e2e-full 验证了这一点：删除已通过，`toHaveURL`
+  到父 tab 超时。
 - `isLoroRepoDocDeleted` 护栏与 `setSessionTabClosed` 的错误契约一
   致；meta 缺失时落入 `setSessionTabClosed`，沿用原有的
   "metadata is still loading" 报错。

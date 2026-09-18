@@ -44,6 +44,13 @@ is still cold. `pnpm e2e:check` is green; the daily run will confirm.
   `runtime.repo.getDocMeta` — a direct doc-meta read, independent of the
   scan-cache state — and calls `deleteSessions` when the tab has no
   `lastMessageAt`. Non-empty tabs keep the #746 `isTabClosed` write.
+- Deleting the ACTIVE tab navigates to the route's session tab itself:
+  `resolveActiveSessionTab` deliberately keeps a meta-missing `session:`
+  tab active (a deleted doc is indistinguishable from a replica that has
+  not caught up), and the shared-close effect only watches `isTabClosed`
+  metas, so without the handler's own navigation the URL would sit on the
+  deleted tab forever. The first #814 e2e-full run proved this: deletion
+  passed, `toHaveURL` to the parent tab timed out.
 - `isLoroRepoDocDeleted` guard mirrors `setSessionTabClosed`'s error
   contract; a missing meta falls through to `setSessionTabClosed`, which
   reports "metadata is still loading" as before.
