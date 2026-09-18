@@ -179,11 +179,7 @@ pre,
 
   .dark .markdown-renderer [data-streamdown='code-block'] {
     /* Same fill as the session composer (`dark:bg-input/90`). */
-    --markdown-code-block-bg: color-mix(
-      in srgb,
-      hsl(var(--input)) 90%,
-      hsl(var(--background))
-    );
+    --markdown-code-block-bg: color-mix(in srgb, hsl(var(--input)) 90%, hsl(var(--background)));
     --markdown-code-block-action-bg: var(--markdown-code-block-bg);
   }
 
@@ -1011,6 +1007,8 @@ pre,
       'Segoe UI Emoji', sans-serif;
     --font-sans: var(--lody-interface-font-family, var(--font-sans-default));
     --font-serif: serif;
+    --font-wordmark:
+      'Iowan Old Style', 'Palatino Linotype', Palatino, 'Book Antiqua', Georgia, serif;
     --font-mono:
       'JetBrains Mono', ui-monospace, 'SF Mono', 'SFMono-Regular', 'Monaco', 'Menlo', 'Consolas',
       'Liberation Mono', 'Courier New', monospace;

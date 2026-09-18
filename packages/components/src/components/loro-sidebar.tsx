@@ -639,7 +639,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   connectionUiState,
   workspaceSyncing = false,
   isElectron = false,
-  isElectronMacOS = false,
+  isElectronMacOS: _isElectronMacOS = false,
   defaultWidth = 280,
   minWidth = 240,
   maxWidth = 420,
@@ -841,12 +841,125 @@ export const LoroSidebar = memo(function LoroSidebar({
   );
   const windowDrag = isElectron && !isElectronFullscreen;
   const workspaceIdentityClassName = cn(
-    'grid w-full min-w-0 select-none grid-cols-[20px_1fr_16px] items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm',
+    'flex w-full min-w-0 select-none items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm',
     isMobile ? 'h-9' : 'h-8',
     'text-sidebar-foreground dark:text-sidebar-foreground/75',
     workspaceSwitcherEnabled &&
       'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground focus-visible:outline-hidden focus-visible:bg-sidebar-hover'
   );
+  const renderWorkspaceControl = (menuSide: 'top' | 'bottom') =>
+    workspaceSwitcherEnabled ? (
+      <DropdownMenu modal={!isMobile}>
+        <div className="min-w-0 flex-1">
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className={cn(workspaceIdentityClassName, windowDrag && WINDOW_DRAG_EXEMPT_CLASS)}
+              data-workspace-switcher-trigger
+              data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
+              aria-busy={workspaceSyncing || undefined}
+            >
+              {workspaceIdentity}
+            </button>
+          </DropdownMenuTrigger>
+        </div>
+        <DropdownMenuContent align="start" side={menuSide} className="w-64">
+          <DropdownMenuLabel className="text-xs font-normal">{userEmail}</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+
+          {workspaces.length > 0 ? (
+            <>
+              <DropdownMenuLabel className="text-xs font-medium">
+                {mergedLabels.switchWorkspace}
+              </DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={currentWorkspaceId}
+                onValueChange={(value) => onWorkspaceSelected?.(value)}
+              >
+                {workspaces.map((ws) => {
+                  const workspaceSlug = ws.slug;
+                  const row = (
+                    <DropdownMenuRadioItem
+                      key={ws.id}
+                      value={ws.id}
+                      className="gap-2"
+                      onClickCapture={(event) => {
+                        if (!workspaceSlug || !isNewWindowClick(event)) return;
+                        if (openDesktopWindow(undefined, workspaceSlug)) {
+                          event.preventDefault();
+                          event.stopPropagation();
+                        }
+                      }}
+                    >
+                      <WorkspaceAvatar
+                        workspace={{ name: ws.name, logo: ws.logo }}
+                        className="h-5 w-5 shrink-0 text-[10px]"
+                      />
+                      <span className="min-w-0 truncate">{ws.name}</span>
+                      {ws.planTier ? (
+                        <Badge
+                          variant="secondary"
+                          className="ml-auto shrink-0 px-1.5 py-0 text-[10px]"
+                        >
+                          {ws.planTier === 'enterprise'
+                            ? mergedLabels.planEnterprise
+                            : mergedLabels.planPlus}
+                        </Badge>
+                      ) : null}
+                    </DropdownMenuRadioItem>
+                  );
+
+                  if (!isElectronRenderer() || !workspaceSlug) return row;
+
+                  return (
+                    <ContextMenu key={ws.id}>
+                      <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+                      <ContextMenuContent>
+                        <ContextMenuItem
+                          onSelect={() => {
+                            openDesktopWindow(undefined, workspaceSlug);
+                          }}
+                        >
+                          <AppWindow />
+                          {t('workspace.openInNewWindow')}
+                        </ContextMenuItem>
+                      </ContextMenuContent>
+                    </ContextMenu>
+                  );
+                })}
+              </DropdownMenuRadioGroup>
+              {isElectronRenderer() && workspaces.some((ws) => ws.slug) ? (
+                <p className="px-2 py-1.5 text-xs text-muted-foreground">
+                  {t('workspace.openInNewWindowHint', {
+                    key: isMacOSElectronRenderer() ? '⌘' : 'Ctrl',
+                  })}
+                </p>
+              ) : null}
+              <DropdownMenuSeparator />
+            </>
+          ) : null}
+
+          <DropdownMenuItem onSelect={() => onCreateWorkspaceClicked?.()}>
+            <Plus className="h-4 w-4" />
+            {mergedLabels.createWorkspace}
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => onInviteClicked?.()}>
+            <Users className="h-4 w-4" />
+            {mergedLabels.inviteMembers}
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => onLinkRepoClicked?.()}>
+            <Link2 className="h-4 w-4" />
+            {mergedLabels.connectGithubRepo}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    ) : (
+      <div className="min-w-0 flex-1">
+        <div className={workspaceIdentityClassName} data-workspace-identity>
+          {workspaceIdentity}
+        </div>
+      </div>
+    );
 
   return (
     <div
@@ -888,145 +1001,33 @@ export const LoroSidebar = memo(function LoroSidebar({
             'group/sidebar-header relative flex items-center justify-between gap-2',
             isMobile
               ? 'pl-[calc(12px+var(--safe-area-left))] pr-[calc(12px+var(--safe-area-right))] pt-[calc(12px+var(--safe-area-top))]'
-              : isElectronMacOS
-                ? 'h-[72px] px-1.5 pt-7'
-                : 'h-11 px-1.5',
+              : 'h-11 px-1.5',
             windowDrag && WINDOW_DRAG_HEADER_CLASS
           )}
         >
-          {workspaceSwitcherEnabled ? (
-            <DropdownMenu modal={!isMobile}>
-              <div className="min-w-0 flex-1">
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    className={cn(
-                      workspaceIdentityClassName,
-                      windowDrag && WINDOW_DRAG_EXEMPT_CLASS
-                    )}
-                    data-workspace-switcher-trigger
-                    data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
-                    aria-busy={workspaceSyncing || undefined}
-                  >
-                    {workspaceIdentity}
-                  </button>
-                </DropdownMenuTrigger>
-              </div>
-              <DropdownMenuContent align="start" className="w-64">
-                <DropdownMenuLabel className="text-xs font-normal">{userEmail}</DropdownMenuLabel>
-                <DropdownMenuSeparator />
-
-                {workspaces.length > 0 ? (
-                  <>
-                    <DropdownMenuLabel className="text-xs font-medium">
-                      {mergedLabels.switchWorkspace}
-                    </DropdownMenuLabel>
-                    <DropdownMenuRadioGroup
-                      value={currentWorkspaceId}
-                      onValueChange={(value) => onWorkspaceSelected?.(value)}
-                    >
-                      {workspaces.map((ws) => {
-                        const workspaceSlug = ws.slug;
-                        const row = (
-                          <DropdownMenuRadioItem
-                            key={ws.id}
-                            value={ws.id}
-                            className="gap-2"
-                            onClickCapture={(event) => {
-                              if (!workspaceSlug || !isNewWindowClick(event)) return;
-                              if (openDesktopWindow(undefined, workspaceSlug)) {
-                                event.preventDefault();
-                                event.stopPropagation();
-                              }
-                            }}
-                          >
-                            <WorkspaceAvatar
-                              workspace={{ name: ws.name, logo: ws.logo }}
-                              className="h-5 w-5 shrink-0 text-[10px]"
-                            />
-                            <span className="min-w-0 truncate">{ws.name}</span>
-                            {ws.planTier ? (
-                              <Badge
-                                variant="secondary"
-                                className="ml-auto shrink-0 px-1.5 py-0 text-[10px]"
-                              >
-                                {ws.planTier === 'enterprise'
-                                  ? mergedLabels.planEnterprise
-                                  : mergedLabels.planPlus}
-                              </Badge>
-                            ) : null}
-                          </DropdownMenuRadioItem>
-                        );
-
-                        // Only wrap in a context menu where the window action
-                        // exists: a DISABLED ContextMenuTrigger stamps
-                        // `data-disabled` onto the row it wraps, and menu items
-                        // style that as `pointer-events-none`, which would make
-                        // every workspace unclickable in the browser.
-                        if (!isElectronRenderer() || !workspaceSlug) return row;
-
-                        return (
-                          <ContextMenu key={ws.id}>
-                            <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
-                            <ContextMenuContent>
-                              <ContextMenuItem
-                                onSelect={() => {
-                                  openDesktopWindow(undefined, workspaceSlug);
-                                }}
-                              >
-                                <AppWindow />
-                                {t('workspace.openInNewWindow')}
-                              </ContextMenuItem>
-                            </ContextMenuContent>
-                          </ContextMenu>
-                        );
-                      })}
-                    </DropdownMenuRadioGroup>
-                    {isElectronRenderer() && workspaces.some((ws) => ws.slug) ? (
-                      <p className="px-2 py-1.5 text-xs text-muted-foreground">
-                        {t('workspace.openInNewWindowHint', {
-                          key: isMacOSElectronRenderer() ? '⌘' : 'Ctrl',
-                        })}
-                      </p>
-                    ) : null}
-                    <DropdownMenuSeparator />
-                  </>
-                ) : null}
-
-                <DropdownMenuItem onSelect={() => onCreateWorkspaceClicked?.()}>
-                  <Plus className="h-4 w-4" />
-                  {mergedLabels.createWorkspace}
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onInviteClicked?.()}>
-                  <Users className="h-4 w-4" />
-                  {mergedLabels.inviteMembers}
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onLinkRepoClicked?.()}>
-                  <Link2 className="h-4 w-4" />
-                  {mergedLabels.connectGithubRepo}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+          {isMobile ? (
+            renderWorkspaceControl('bottom')
+          ) : isElectron ? (
+            <span className="min-w-0 flex-1" />
           ) : (
-            <div className="min-w-0 flex-1">
-              <div className={workspaceIdentityClassName} data-workspace-identity>
-                {workspaceIdentity}
-              </div>
-            </div>
+            <span
+              aria-label="Lody"
+              className="select-none px-2 text-[15px] font-semibold leading-none tracking-[-0.03em] text-sidebar-foreground"
+              style={{ fontFamily: 'var(--font-wordmark)' }}
+            >
+              Lody
+            </span>
           )}
-          {/* Collapse toggle: `top-2` centers the h-7 button in the h-11 header.
-              On macOS Electron the header is flush with the window top
-              (`h-[72px] pt-7`); `top-[9px]` puts the 28px button center on
-              the 23px traffic-light centerline, matching the collapsed-state
-              expand button in web-chat-landing-screen.tsx. */}
+          {/* Collapse sits on the traffic-light row. `top-2` in an h-11 header
+              centers the 28px button at 22px, matching the 23px macOS light
+              centerline and the collapsed expand control. */}
           {!isMobile && onRequestCollapse ? (
             <button
               type="button"
               aria-label="Collapse sidebar"
               onClick={() => onRequestCollapse()}
               className={cn(
-                'absolute right-1.5 flex h-7 w-7 items-center justify-center rounded-md',
-                isElectronMacOS ? 'top-[9px]' : 'top-2',
+                'ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-md',
                 'text-sidebar-foreground-muted hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
                 windowDrag && WINDOW_DRAG_EXEMPT_CLASS,
                 isElectron
@@ -1046,7 +1047,7 @@ export const LoroSidebar = memo(function LoroSidebar({
             'flex flex-col gap-px',
             isMobile
               ? 'mt-2 pl-[calc(12px+var(--safe-area-left))] pr-[calc(12px+var(--safe-area-right))]'
-              : '-mt-1 px-1.5'
+              : 'px-1.5'
           )}
         >
           <NavButton
@@ -1274,7 +1275,8 @@ export const LoroSidebar = memo(function LoroSidebar({
         ) : null}
 
         <div className={getLoroSidebarFooterClassName(isMobile)}>
-          <div className="flex items-center gap-1">
+          {!isMobile ? renderWorkspaceControl('top') : null}
+          <div className={cn('flex items-center gap-1', !isMobile && 'ml-auto shrink-0')}>
             <IconButton label="Settings" onClick={onSettingsClicked}>
               <Settings className="h-4 w-4" />
             </IconButton>
