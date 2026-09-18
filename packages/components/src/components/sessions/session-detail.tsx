@@ -38,6 +38,7 @@ import {
   getSessionPullRequestLegacyFields,
   getSessionRoomId,
   getAcpCapabilityCacheEntryAuthority,
+  isLoroRepoDocDeleted,
   resolveProjectGitHubRepo,
   SessionForkOperationSchema,
   type CommentReferencePayload,
@@ -2360,7 +2361,23 @@ const SessionDetail = ({
         is_active_tab: tabSessionId === activeTabSessionId,
       });
       try {
-        await setSessionTabClosed(tabSessionId, true);
+        // A tab that never had a message is exact-deleted instead of marked
+        // closed — isTabClosed would leave an invisible durable doc. Judge
+        // emptiness from getDocMeta directly: the meta scan cache can still
+        // be cold here, and exact deletion must bypass discovery.
+        const tabEntry = runtime
+          ? await runtime.repo.getDocMeta(getSessionRoomId(tabSessionId))
+          : undefined;
+        if (isLoroRepoDocDeleted(tabEntry)) throw new Error('Session was deleted');
+        const tabMeta = tabEntry?.meta as SessionMeta | undefined;
+        if (tabMeta && !tabMeta.lastMessageAt) {
+          await deleteSessions([tabSessionId]);
+          captureSessionDetailEvent('session/tab_deleted_empty', {
+            tab_session_id: tabSessionId,
+          });
+        } else {
+          await setSessionTabClosed(tabSessionId, true);
+        }
         // The shared-close effect chooses the neighbour once hydration finishes.
         // Do not commit a fallback from this handler's partial metadata snapshot.
         if (
@@ -2390,6 +2407,7 @@ const SessionDetail = ({
     },
     [
       activeTabSessionId,
+      deleteSessions,
       setSessionTabClosed,
       docMetaCacheReady,
       captureSessionDetailEvent,
@@ -2398,6 +2416,7 @@ const SessionDetail = ({
       allOrderedSessionTabIds,
       orderedSessionTabIds,
       router,
+      runtime,
       urlTab,
       t,
     ]
