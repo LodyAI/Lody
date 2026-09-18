@@ -99,8 +99,7 @@ interface SessionTabBarProps {
 
 /* One canvas: `bg-background` runs unbroken from this bar down through the
    message list, and the tabs sit ON it without breaking it. The ACTIVE tab is
-   the heaviest thing in the row — it wears `bg-sidebar` + `border-sidebar-border`
-   so "the one in a box" reads as the current page.
+   the heaviest thing in the row — fill plus a light shadow, no border.
    Inactive tabs get a flat borderless wash and dimmed text; they must stay
    lighter-weight than the active tab, since chrome is what the eye scores as
    selected among siblings.
@@ -109,8 +108,7 @@ interface SessionTabBarProps {
    assumed. `bg-sidebar` gives light that ladder for free (canvas 241 → active
    229), but DARK needs the override: Vesper's sideBar is #161616, a mere 6
    above the #101010 canvas and BELOW the inactive wash (26), so the active pill
-   rendered as a dent and only its border kept it legible. Hence the `dark:`
-   pair, which lands canvas 16 → inactive 26 → active 42, border 70.
+   rendered as a dent. Hence the `dark:` fill plus a light shadow.
    `--tab-active`/`--tab-inactive` are useless here: both collapse onto
    `--background` in dark, which is what forced the original `/[0.22]` vs
    `/[0.12]` tints — a 10% gap that rendered as one gray.

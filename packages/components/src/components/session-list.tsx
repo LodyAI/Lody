@@ -913,7 +913,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
                     !isMobile &&
                     'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
                   showSelectedState &&
-                    'border-sidebar-foreground/10 bg-sidebar-foreground/10 text-sidebar-foreground hover:bg-sidebar-foreground/10',
+                    'bg-sidebar-foreground/10 text-sidebar-foreground hover:bg-sidebar-foreground/10',
                   // Keyboard-only focus ring. Plain :focus-within also matches
                   // after a mouse click (the overlay <a> keeps focus), which
                   // left a permanent inset ring on the selected row that read
