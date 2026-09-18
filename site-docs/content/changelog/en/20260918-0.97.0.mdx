@@ -1,0 +1,20 @@
+---
+title: '20260918-0.97.0'
+version: 0.97.0
+date: 2026-09-18
+description: Add session mentions, the desktop Projects catalog, and queue steering, and fix agent startup on the signed macOS desktop.
+---
+
+Version 0.97.0
+
+### ✨ New Features
+
+- Pasting a session link into the composer turns it into a session mention; use Cmd/Ctrl+Shift+V to paste a plain link.
+- Desktop Settings > Projects is now a two-pane catalog: GitHub / machines on the left, folders for the selected source on the right; click a folder to edit it.
+- Queued messages can be steered directly (not just the first item when the agent supports acknowledged steering); Cmd/Ctrl+Shift+Enter temporarily flips queue vs steer for that send.
+
+### 🐛 Fixes & Improvements
+
+- Fix DeepSeek Harness and other agents that load unsigned native addons failing to start on the signed macOS desktop.
+- The mobile session menu can share a conversation as an image.
+- On a narrow conversation column, the IDE and share actions move into the ⋯ menu.
