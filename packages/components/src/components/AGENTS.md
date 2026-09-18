@@ -28,16 +28,14 @@ Ownership and explanations: [README.md](README.md).
   an opener shows disclosure and a child shows ├/└; hover swaps either for ⋯ at the same
   7px centre. Draw nesting regardless of working/unread/waiting status. Only children
   widen the slot from 14px to 26px for a 12px title indent without shifting the background.
-  Keep geometry in the pure `session-row-leading-slot.tsx` (re-exported by
-  `sidebar-row-shared.tsx` and reused by anonymous shares); context-menu expand/collapse uses the same
-  toggle callback.
-- Conversation titles stay `font-normal`. Pinning is the pin glyph, never a
-  heavier weight — Inter 500 on Chinese in light mode reads as random bold.
+  Keep geometry in `session-row-leading-slot.tsx` (re-exported by
+  `sidebar-row-shared.tsx`); context-menu expand/collapse uses the same toggle.
+- Conversation titles stay `font-normal`; pin with the glyph, never weight.
 - Desktop working/waiting/unread status belongs only in `SessionRowStatusIndicator`
   inside `SidebarRowEndSlot`. Pass those three flags to the end slot, never the leading
   slot. Status replaces resting `Mergeable`, worktree glyph, PR icon, or mobile
-  time with one 14px mark. Do not paint +/- line totals on the row; they live only
-  in the desktop hover info card. Mobile chat leading-node rules remain in
+  time with one 14px mark. No +/- totals on the row (hover card only). Mobile
+  leading-node rules remain in
   [mobile/AGENTS.md](mobile/AGENTS.md).
 - Never hide a Session through nesting: missing, cross-section, cross-group, cycling,
   or deeper-than-one-level openers render top-level. `MAX_VISIBLE_SESSIONS` /

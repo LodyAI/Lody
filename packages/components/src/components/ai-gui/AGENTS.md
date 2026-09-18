@@ -47,11 +47,9 @@ File-by-file ownership and coverage pointers: [README.md](README.md).
   reopens upstream must clear `finished` and `endedAt` (see
   `apps/cli/src/session/AGENTS.md`).
 - Thought and tool rows share one compact transparent timeline, icon gutter, and
-  13px hierarchy. Execute calls are not cards. Desktop disclosure headers
-  (`Worked for …`, tool-group summaries) use body type, a trailing chevron
-  that appears on hover, and no fill; they never advertise Thought/Thinking.
-  Expanded groups omit thought rows. Turns are avatar-free and full-width, and
-  run configuration belongs in the footer info control.
+  13px hierarchy. Execute calls are not cards. Desktop disclosure headers use
+  body type, a hover-only trailing chevron, no fill, and omit thought rows.
+  Turns are avatar-free and full-width; run config lives in the footer.
 - Duration has one owner: desktop uses `WorkedGroupHeader` for folded turns and
   the footer after buttons otherwise; mobile always uses the footer before
   buttons, and the worked header suppresses its copy. Preserve
@@ -100,11 +98,10 @@ File-by-file ownership and coverage pointers: [README.md](README.md).
 - Native child cancel requires subagentCancellation v1 and an exact parent turn;
   never use durable whole-turn Stop or invent a terminal state in the panel.
 
-- Font size is a bounded integer pixel value written to `--ui-font-size`
-  (settings 1em; compact menus 0.9em). Conversation body, headings, dense
-  monospace, terminal output, and collapsed height still scale through
-  `conversation-font-size-classes.ts`; settings own legacy preset migration.
-  Keep Streamdown in streaming mode, but never enable word-level `animated`.
+- `--ui-font-size` is the 1em baseline; compact chrome is 0.9em. Conversation
+  body/headings/mono/terminal still scale through
+  `conversation-font-size-classes.ts`. Streamdown stays streaming; never
+  word-level `animated`.
 - A Mermaid diagram in a message is a still preview until a pointer click
   activates it, and an unmodified wheel is NEVER taken — activated or not.
   `mermaid-diagram-viewer.tsx` stays the only full-screen surface, reached from
@@ -120,9 +117,8 @@ File-by-file ownership and coverage pointers: [README.md](README.md).
 - Terminal persistence and legacy preview bounds live in
   `context/terminal-output-lifecycle.md`. Never send full legacy output through
   ANSI parsing, search, or React rendering.
-- `assistant-edited-files.tsx` shows four paths before expanding and aligns stats
-  without per-file pills. The list sits on `--background`; the header is
-  `bg-muted/30`.
+- `assistant-edited-files.tsx` shows four paths before expanding, no per-file
+  pills, list on `--background`.
 - Update `message-content-guards.ts` with every shared `MessageContent` variant.
   `isMessageContent` gates rendering; a missing case silently drops the item.
 - A user entry marked by `SessionMeta.lastMissingHistoryUserMsgId` renders the
