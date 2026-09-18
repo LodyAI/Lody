@@ -730,7 +730,9 @@ export function getLoroSidebarFooterClassName(isMobile: boolean): string {
 
 export function getLoroSidebarFooterIconButtonClassName(isMobile: boolean, active = false): string {
   return cn(
-    isMobile ? 'h-12 w-12 rounded-xl [&_svg]:h-5 [&_svg]:w-5' : 'h-7 w-7 rounded-md',
+    isMobile
+      ? 'h-12 w-12 rounded-xl [&_svg]:h-5 [&_svg]:w-5'
+      : 'h-6 w-6 rounded-md [&_svg]:h-3.5 [&_svg]:w-3.5',
     'transition-colors focus-visible:ring-1 focus-visible:ring-sidebar-ring/40',
     active
       ? 'bg-sidebar-selection text-sidebar-selection-foreground'
@@ -1431,13 +1433,13 @@ export const LoroSidebar = memo(function LoroSidebar({
           {!isMobile ? renderWorkspaceControl('top') : null}
           <div className={cn('flex items-center gap-1', !isMobile && 'ml-auto shrink-0')}>
             <IconButton label="Settings" onClick={onSettingsClicked}>
-              <Settings className="h-4 w-4" />
+              <Settings />
             </IconButton>
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <IconButton label="Help">
-                  <CircleHelp className="h-4 w-4" />
+                  <CircleHelp />
                 </IconButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent side="top" align="start" className="min-w-[140px]">
@@ -1461,7 +1463,7 @@ export const LoroSidebar = memo(function LoroSidebar({
             </DropdownMenu>
 
             <IconButton label="Archive" active={activeNav === 'archive'} onClick={onArchiveClicked}>
-              <Archive className="h-4 w-4" />
+              <Archive />
             </IconButton>
           </div>
 
