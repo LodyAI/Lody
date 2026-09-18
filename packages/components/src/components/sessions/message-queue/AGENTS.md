@@ -11,8 +11,9 @@ queued-turn list (`message-queue-display.tsx`, `message-queue-row.tsx`,
 
 A queued item's Steer action uses native acknowledged steering only when the
 authoritative ACP capability cache advertises it. Never infer steering support
-from built-in/custom config type or agent identity; unsupported and stale cache
-entries retain the interrupt-and-send fallback.
+from built-in/custom config type or agent identity. Every row offers Steer
+while native steering is available; without it only the FIRST row keeps the
+interrupt-and-send fallback, because interrupt always runs the queue head next.
 
 The queue intentionally stays OUT of the composer info bar
 ([.agents/docs/sessions-info-bar.md](../../../../../../.agents/docs/sessions-info-bar.md)).

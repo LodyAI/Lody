@@ -6,6 +6,8 @@ export type SessionMessageSubmitRoute =
 export type SessionMessageSubmitRouteInput = {
   forceDirect: boolean;
   forceQueue: boolean;
+  /** Swaps the configured busy-send behavior for this one submission only. */
+  invertBehavior: boolean;
   isPromptBusy: boolean;
   hasUnfinishedAssistantTurn: boolean;
   queuedMessageBehavior: 'queue' | 'guide';
@@ -19,10 +21,15 @@ export type SessionMessageSubmitRouteInput = {
  * cross-room window where history has arrived but presence has not: queuing is
  * safe for both a genuinely active turn and a stale transcript, while direct
  * dispatch can violate the session's single-turn contract.
+ *
+ * `invertBehavior` flips `queuedMessageBehavior` for this submission — a queue
+ * default steers, a guide default queues — while keeping every other guard
+ * (steering still requires positive live prompt activity).
  */
 export function resolveSessionMessageSubmitRoute({
   forceDirect,
   forceQueue,
+  invertBehavior,
   isPromptBusy,
   hasUnfinishedAssistantTurn,
   queuedMessageBehavior,
@@ -30,10 +37,15 @@ export function resolveSessionMessageSubmitRoute({
   if (forceDirect) {
     return { type: 'direct_dispatch' };
   }
+  const effectiveBehavior = invertBehavior
+    ? queuedMessageBehavior === 'guide'
+      ? 'queue'
+      : 'guide'
+    : queuedMessageBehavior;
   if (
     !forceQueue &&
     isPromptBusy &&
-    queuedMessageBehavior === 'guide' &&
+    effectiveBehavior === 'guide' &&
     hasUnfinishedAssistantTurn
   ) {
     return { type: 'guide' };

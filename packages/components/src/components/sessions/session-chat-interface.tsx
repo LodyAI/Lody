@@ -1820,6 +1820,8 @@ export type SessionChatInterfaceHandle = {
 export type DispatchInputBlocksOptions = {
   forceQueue?: boolean;
   forceDirect?: boolean;
+  /** Swaps the configured busy-send behavior (queue <-> steer) for this send. */
+  invertSubmitBehavior?: boolean;
   modeIdOverride?: string | null;
   modelIdOverride?: string | null;
   configOptionValuesOverride?: Record<string, AcpConfigOptionValue>;
@@ -3879,6 +3881,7 @@ export const SessionChatInterface = memo(
         const submitRoute = resolveSessionMessageSubmitRoute({
           forceDirect,
           forceQueue: options?.forceQueue === true,
+          invertBehavior: options?.invertSubmitBehavior === true,
           isPromptBusy: isAgentBusy,
           hasUnfinishedAssistantTurn: activeAssistantTurnId != null,
           queuedMessageBehavior,
@@ -3905,6 +3908,7 @@ export const SessionChatInterface = memo(
           ...inputSummary,
           force_queue: Boolean(options?.forceQueue),
           force_direct: forceDirect,
+          invert_behavior: Boolean(options?.invertSubmitBehavior),
           submit_route: submitRoute.type,
           is_agent_busy: isAgentBusy,
           mode_id: turnModeId ?? null,
@@ -4028,9 +4032,10 @@ export const SessionChatInterface = memo(
     const handleSendMessage = useCallback(
       async (
         inputBlocks: SessionInputBlock[],
-        agentRole?: SessionTurnAgentRoleSelection
+        agentRole?: SessionTurnAgentRoleSelection,
+        options?: Omit<DispatchInputBlocksOptions, 'agentRole'>
       ): Promise<boolean> => {
-        return await dispatchInputBlocks(inputBlocks, { agentRole });
+        return await dispatchInputBlocks(inputBlocks, { ...options, agentRole });
       },
       [dispatchInputBlocks]
     );
@@ -5199,13 +5204,24 @@ export const SessionChatInterface = memo(
     );
     const handleSteerQueuedMessage = useCallback(
       async (item: MessageQueueItem) => {
+        // Interrupt-and-send always runs the queue head next, so it is only a
+        // valid steer substitute for the first item. Later items are steerable
+        // exclusively through native acknowledged steering.
+        if (messageQueue[0]?.$cid !== item.$cid && !shouldUseNativeQueueSteer) {
+          return;
+        }
         if (shouldUseNativeQueueSteer) {
           await handleNativeSteerQueuedMessage(item);
           return;
         }
         await handleInterruptAndSend(item);
       },
-      [handleInterruptAndSend, handleNativeSteerQueuedMessage, shouldUseNativeQueueSteer]
+      [
+        handleInterruptAndSend,
+        handleNativeSteerQueuedMessage,
+        messageQueue,
+        shouldUseNativeQueueSteer,
+      ]
     );
 
     const handleReorderQueueItem = useCallback(
@@ -6167,6 +6183,7 @@ export const SessionChatInterface = memo(
                                 !!activeAssistantTurnId &&
                                 !isExternalHistoryRefreshing
                               }
+                              nativeSteerAvailable={shouldUseNativeQueueSteer}
                             />
                           ) : null
                         }

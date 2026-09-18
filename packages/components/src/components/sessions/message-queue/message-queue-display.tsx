@@ -37,6 +37,8 @@ export type MessageQueueDisplayProps = {
   onEditSave: (item: MessageQueueItem, task: string) => void | Promise<void>;
   onSteer: (item: MessageQueueItem) => void | Promise<void>;
   showSteerAction?: boolean;
+  /** Native acknowledged steer: lets every queued row steer, not just the first. */
+  nativeSteerAvailable?: boolean;
   className?: string;
 };
 
@@ -52,6 +54,7 @@ export function MessageQueueDisplay({
   onEditSave,
   onSteer,
   showSteerAction = false,
+  nativeSteerAvailable = false,
   className,
 }: MessageQueueDisplayProps) {
   const { t } = useTranslation();
@@ -158,6 +161,7 @@ export function MessageQueueDisplay({
                     index={index}
                     isFirst={index === 0}
                     showSteerAction={showSteerAction}
+                    nativeSteerAvailable={nativeSteerAvailable}
                     canReorder={canReorder}
                     isEditing={isEditing}
                     editValue={isEditing ? editing.editValue : ''}

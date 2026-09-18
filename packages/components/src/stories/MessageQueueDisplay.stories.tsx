@@ -110,6 +110,14 @@ export const EditingFirstItem: Story = {
   },
 };
 
+export const NativeSteerAllRows: Story = {
+  args: {
+    ...commonArgs,
+    items: makeItems(3),
+    nativeSteerAvailable: true,
+  },
+};
+
 export const SingleItem: Story = {
   args: {
     ...commonArgs,

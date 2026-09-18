@@ -445,7 +445,8 @@ export interface SessionChatInputAreaProps {
   onConfigOptionChange?: (configId: string, value: AcpConfigOptionValue) => void;
   onSendMessage: (
     inputBlocks: SessionInputBlock[],
-    agentRole: SessionTurnAgentRoleSelection
+    agentRole: SessionTurnAgentRoleSelection,
+    options?: SessionSendMessageOptions
   ) => Promise<boolean>;
   onStop: () => void | Promise<void>;
   onRemoveQueueItem: (itemId: string) => Promise<void>;
@@ -474,6 +475,11 @@ export interface SessionChatInputAreaProps {
 }
 
 export type SessionTurnAgentRoleSelection = ComposerTurnAgentRoleSelection;
+
+export type SessionSendMessageOptions = {
+  /** Swaps the configured busy-send behavior (queue <-> steer) for this send. */
+  invertSubmitBehavior?: boolean;
+};
 
 export type SessionChatInputAreaHandle = {
   setInputText: (text: string) => void;
@@ -1795,7 +1801,7 @@ export const SessionChatInputArea = memo(
       [pastedTextDrafts, session.id, updatePastedTextDraftsForSession]
     );
 
-    const sendMessage = useCallback(async () => {
+    const sendMessage = useCallback(async (options?: SessionSendMessageOptions) => {
       if (freeTurnLimitNotice && freeTurnLimitNotice.current >= freeTurnLimitNotice.limit) {
         capturePostHogEvent(postHog, 'session/input_blocked', {
           reason: 'free_session_turn_limit_reached',
@@ -1939,7 +1945,11 @@ export const SessionChatInputArea = memo(
       const submission = beginSubmission({ dismissKeyboard: usesMobileKeyboardAction });
       if (!submission) return;
       try {
-        const accepted = await onSendMessage(inputBlocks, agentRoleTurnSelectionRef.current);
+        const accepted = await onSendMessage(
+          inputBlocks,
+          agentRoleTurnSelectionRef.current,
+          options
+        );
         if (accepted) {
           if (submission.isCurrent()) {
             clearInput();
@@ -1995,6 +2005,13 @@ export const SessionChatInputArea = memo(
     const handleKeyDown = useCallback(
       (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key !== 'Enter' || isImeComposingKeyboardEvent(e)) {
+          return;
+        }
+        // Mod+Shift+Enter sends through the opposite busy-send behavior:
+        // a queue default steers, a steer default queues.
+        if (e.shiftKey && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault();
+          void sendMessage({ invertSubmitBehavior: true });
           return;
         }
         if (
