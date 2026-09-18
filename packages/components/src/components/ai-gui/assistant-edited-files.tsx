@@ -91,11 +91,11 @@ export function AssistantEditedFiles({ files, onFileClick, className }: Assistan
 
   return (
     <div className={cn('w-full text-left', className)}>
-      <div className="overflow-hidden rounded-xl border border-border/50 bg-muted/15">
+      <div className="overflow-hidden rounded-xl border-[0.5px] border-border/50 bg-muted/10">
         {/* Multi-file only: summary bar. Single-file cards skip it so we
             don't stack "Edited 1 file" on top of the lone file row. */}
         {!isSingleFile ? (
-          <div className="flex min-h-8 items-center gap-3 px-2.5 py-1.5">
+          <div className="flex min-h-8 items-center gap-3 bg-muted/25 px-2.5 py-1.5">
             <span className="min-w-0 flex-1 text-xs font-medium text-foreground/80">
               {t('sessions.editedFiles.summary', {
                 count: uniqueFiles.length,
@@ -106,7 +106,10 @@ export function AssistantEditedFiles({ files, onFileClick, className }: Assistan
           </div>
         ) : null}
         <div
-          className={cn('divide-y divide-border/40', !isSingleFile && 'border-t border-border/40')}
+          className={cn(
+            'divide-y divide-border/40',
+            !isSingleFile && 'border-t-[0.5px] border-border/40'
+          )}
         >
           {visibleFiles.map((file) => {
             const { directory, name } = splitFilePath(file.filePath);

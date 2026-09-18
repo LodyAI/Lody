@@ -176,7 +176,7 @@ pre,
     /* Streamdown ships `bg-sidebar border-border rounded-xl p-2` utilities on
        this element. Tailwind's utilities layer beats our components layer, so
        these must be `!important` to pin the block to our --code-* tokens. */
-    border: 1px solid var(--markdown-code-block-border) !important;
+    border: none !important;
     border-radius: 0.5rem !important;
     background: var(--markdown-code-block-bg) !important;
     padding: 0 !important;
@@ -196,7 +196,7 @@ pre,
     justify-content: space-between;
     gap: 0.5rem;
     padding-inline: 0.625rem;
-    border-bottom: 1px solid var(--markdown-code-block-border);
+    border-bottom: 0.5px solid var(--markdown-code-block-border);
     color: var(--markdown-code-block-language);
   }
 
@@ -405,7 +405,7 @@ pre,
     margin-block: 1rem !important;
     overflow: hidden;
     gap: 0 !important;
-    border: 1px solid var(--markdown-mermaid-border);
+    border: 0.5px solid var(--markdown-mermaid-border);
     border-radius: 0.375rem;
     background: var(--markdown-mermaid-bg);
     padding: 0 !important;
