@@ -1,5 +1,3 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { Flock } from '@loro-dev/flock-wasm';
 import type { LoroDoc } from 'loro-crdt';
 import type { RemoteCursor, RemoteCursorStore } from '@loro-dev/streams-crdt/loro';
@@ -9,7 +7,9 @@ import {
   type LedgerStore,
   type LedgerTransaction,
 } from '@lody/e2ee-core/ledger';
+import { join } from 'node:path';
 import { fromHex, toHex } from './bytes';
+import { makeLiveFs, type LabFsShape } from '../services/fs';
 
 export function loroDocPath(clientDir: string): string {
   return join(clientDir, 'loro.doc.bin');
@@ -27,41 +27,58 @@ export function flockCursorPath(clientDir: string): string {
   return join(clientDir, 'flock.cursor.json');
 }
 
-export function persistLoroDocument(clientDir: string, doc: LoroDoc): void {
-  mkdirSync(clientDir, { recursive: true, mode: 0o700 });
-  writeFileSync(loroDocPath(clientDir), doc.export({ mode: 'snapshot' }));
+function fsOf(fs?: LabFsShape): LabFsShape {
+  return fs ?? makeLiveFs();
 }
 
-export function loadLoroDocumentBytes(clientDir: string): Uint8Array | null {
+export function persistLoroDocument(clientDir: string, doc: LoroDoc, fs?: LabFsShape): void {
+  const disk = fsOf(fs);
+  disk.mkdir(clientDir);
+  disk.writeBytes(loroDocPath(clientDir), doc.export({ mode: 'snapshot' }));
+}
+
+export function loadLoroDocumentBytes(clientDir: string, fs?: LabFsShape): Uint8Array | null {
+  const disk = fsOf(fs);
   const path = loroDocPath(clientDir);
-  if (!existsSync(path)) return null;
-  return new Uint8Array(readFileSync(path));
+  if (!disk.exists(path)) return null;
+  return new Uint8Array(disk.readBytes(path));
 }
 
-export function persistFlockDocument(clientDir: string, flock: Flock): void {
-  mkdirSync(clientDir, { recursive: true, mode: 0o700 });
-  writeFileSync(flockDocPath(clientDir), flock.exportFile());
+export function persistFlockDocument(clientDir: string, flock: Flock, fs?: LabFsShape): void {
+  const disk = fsOf(fs);
+  disk.mkdir(clientDir);
+  disk.writeBytes(flockDocPath(clientDir), flock.exportFile());
 }
 
-export function loadFlockDocument(clientDir: string, peerId: string): Flock | null {
+export function loadFlockDocument(
+  clientDir: string,
+  peerId: string,
+  fs?: LabFsShape
+): Flock | null {
+  const disk = fsOf(fs);
   const path = flockDocPath(clientDir);
-  if (!existsSync(path)) return null;
-  return Flock.fromFile(new Uint8Array(readFileSync(path)), peerId);
+  if (!disk.exists(path)) return null;
+  return Flock.fromFile(new Uint8Array(disk.readBytes(path)), peerId);
 }
 
-function loadCursorFile(path: string, streamUrl: string): RemoteCursor | null {
-  if (!existsSync(path)) return null;
-  const raw = JSON.parse(readFileSync(path, 'utf8')) as RemoteCursor;
+function loadCursorFile(path: string, streamUrl: string, disk: LabFsShape): RemoteCursor | null {
+  if (!disk.exists(path)) return null;
+  const raw = JSON.parse(disk.readText(path)) as RemoteCursor;
   if (raw.streamUrl !== streamUrl) return null;
   return raw;
 }
 
 /** Cursor files are invalid unless the matching document snapshot exists. */
 export class FileRemoteCursorStore implements RemoteCursorStore {
+  private readonly disk: LabFsShape;
+
   constructor(
     private readonly clientDir: string,
-    private readonly kind: 'loro' | 'flock' = 'loro'
-  ) {}
+    private readonly kind: 'loro' | 'flock' = 'loro',
+    fs?: LabFsShape
+  ) {
+    this.disk = fsOf(fs);
+  }
 
   private docPath(): string {
     return this.kind === 'flock' ? flockDocPath(this.clientDir) : loroDocPath(this.clientDir);
@@ -72,16 +89,16 @@ export class FileRemoteCursorStore implements RemoteCursorStore {
   }
 
   async load(streamUrl: string): Promise<RemoteCursor | null> {
-    if (!existsSync(this.docPath())) return null;
-    return loadCursorFile(this.cursorFile(), streamUrl);
+    if (!this.disk.exists(this.docPath())) return null;
+    return loadCursorFile(this.cursorFile(), streamUrl, this.disk);
   }
 
   async save(cursor: RemoteCursor): Promise<void> {
-    if (!existsSync(this.docPath())) {
+    if (!this.disk.exists(this.docPath())) {
       throw new Error('cursor-before-document');
     }
-    mkdirSync(this.clientDir, { recursive: true, mode: 0o700 });
-    writeFileSync(this.cursorFile(), JSON.stringify(cursor));
+    this.disk.mkdir(this.clientDir);
+    this.disk.writeText(this.cursorFile(), JSON.stringify(cursor));
   }
 }
 

@@ -1,11 +1,11 @@
 import { join } from 'node:path';
-import { readFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import type { Entropy } from '@lody/e2ee-core';
+import { liveEntropy } from '@lody/e2ee-core';
 import {
   applyAttackAction,
   createAttackLab,
@@ -40,6 +40,7 @@ import { drainUntil, labClient, launchLab, tempDir } from './fixtures';
 import { toHex } from './platform/bytes';
 import { persistLoroDocument } from './platform/persist';
 import type { JoinRequestWire } from './platform/protocol';
+import { makeLiveFs } from './services/fs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const tsxLoader = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
@@ -224,9 +225,12 @@ export async function createCollabWorld(options: CollabWorldOptions = {}): Promi
     clientDirs: [...MEMBERS, ...EXTRA_DEVICES].map((name) => dirs[name]!),
     members: {} as CollabWorld['members'],
     seeds: options.seeds ?? {
-      crash: toHex(crypto.getRandomValues(new Uint8Array(16))),
+      // Live entropy: secret/seed are stored in CollabMaterial, not in fill scripts.
+      crash: toHex(liveEntropy.fill('collab-crash-seed', new Uint8Array(16))),
     },
-    secret: options.secret ?? `collab-secret-${toHex(crypto.getRandomValues(new Uint8Array(6)))}`,
+    secret:
+      options.secret ??
+      `collab-secret-${toHex(liveEntropy.fill('collab-secret', new Uint8Array(6)))}`,
     genesisHex: '',
     joins: {},
     hostFacade: undefined as unknown as LabBackend,
@@ -530,7 +534,7 @@ export function collabScript(): readonly CollabStep[] {
       if (result.signal !== 'SIGKILL') {
         throw new Error(`crash-write:${result.code}:${result.signal}:${result.stderr.slice(-200)}`);
       }
-      if (readFileSync(marker, 'utf8') !== 'after-cursor') throw new Error('crash-marker-missing');
+      if (makeLiveFs().readText(marker) !== 'after-cursor') throw new Error('crash-marker-missing');
     }),
     step('crash-recover', async (w) => {
       const marker = join(w.dirs['crash']!, 'recover.marker');
@@ -538,7 +542,7 @@ export function collabScript(): readonly CollabStep[] {
       if (result.code !== 0) {
         throw new Error(`crash-recover:${result.code}:${result.stderr.slice(-200)}`);
       }
-      const recovered = JSON.parse(readFileSync(marker, 'utf8')) as { text?: string };
+      const recovered = JSON.parse(makeLiveFs().readText(marker)) as { text?: string };
       expectText(recovered.text ?? '', 'crash-mid');
       expectText(recovered.text ?? '', 'epoch-one');
     }),

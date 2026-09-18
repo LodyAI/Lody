@@ -38,6 +38,8 @@ P2 replay is in `test/replay-bytes.test.ts`. P3 fixed-attack matrix is in
 `test/matrix.test.ts`. P4 AttackLab isolation and LLM-free action replay are in
 `test/attack-lab.test.ts`. Ongoing multi-member collaboration, boundary attacks
 and three-directory model-free replay are in `test/collab-scenario.test.ts`;
-real-model intervention is in `test/restricted-agent.test.ts`. Isolation is the
+real-model intervention is in `test/restricted-agent.test.ts`. AttackLab
+clock/fs/HTTP go through Effect `LabClock` / `LabFs` / `LabHttp`
+(`src/services/`); Promise methods provide `LiveLabLayer`. Isolation is the
 capability handle only: not an OS container, and Effect is not a sandbox. See the
 [implementation note](../../.agents/notes/proposed/testing/2026-09-16-e2ee-adversarial-lab.md).

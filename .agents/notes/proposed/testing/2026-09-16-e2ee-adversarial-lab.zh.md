@@ -353,3 +353,18 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 - 新发现死锁：记录的 `finish` 动作在重放中经 `applyRecorded` 裸调 `lab.finish()`，其 `measureHonest` 发 gated `readLedger` 无人放行 → 死锁。修法：`applyRecorded` 三处调用点统一包 `drainUntil`，与 live `lab.finish()` 语义一致。
 - 证据：lab `vitest run` 14 文件 / 71 测试退出 0（含真实模型 S4）；`tsgo --noEmit` 退出 0；`pnpm lint:fast` 0 错误；`pnpm format` 干净。命令固化：`scenario:collab` / `attack:model` / `replay`。未启用产品 E2EE。无 push/merge。
 - 剩余限制：S4 判定为 harness-error 而非 pass——这是被攻击打断后的诚实观测结论，不是测量缺陷；模型服务端不可用属外部阻塞（本环境 OpenRouter/Groq/DeepSeek/OpenAI 密钥至少一个可用时 S4 才能跑）。
+
+### 2026-09-18 — AttackLab Effect 服务纯化（E3 子集）
+
+- 新增 `src/services/`：`LabClock` / `LabFs` / `LabHttp`（`Context.Tag` + `Layer`），`LiveLabLayer` 为 Promise 默认适配；测试可用 `makeTestClock` / `MemoryLabFs` / `TestLabHttp`。
+- `attacks.ts` I/O 改为 `*Effect` + Live 薄包装；`attack-lab.ts` 全部公开方法经 `runLabPromise(..., layer)`；预算/读盘/xor/healthz 不再直接碰 `Date.now`/`node:fs`/`globalThis.fetch`。
+- `LabRuntime` 构造注入 `fetch`（默认 `globalThis.fetch`），`gatedFetch` 不再硬编码全局。
+- **未做**：host/session/persist/content-session/scenario spawn、restricted-agent LLM fetch、HPKE/Wasm 随机闭合。Effect 仍非沙箱。
+- 证据：`test/services.test.ts`（预算时钟、内存 Fs、inject fetch、内存 xor）；`pnpm --filter @lody/e2ee-lab check` 退出 0（13 文件 / 73 测试，含真实模型 S4）。未启用产品 E2EE。无 push/merge。
+
+### 2026-09-18 — 第二轮：host/session/persist/content/LLM 端口注入
+
+- `LabFs` 增加 `mkdir` / `writeText`；`persist`、`FileRemoteCursorStore`、`DemoSession`、`startDemoHost`、`content-session`（含 crash marker 与 `updatedAtMs`）均接受可选 `fs`/`now`/`fetch`，默认 Live 适配器。
+- `restricted-agent` 的 LLM `fetch` 改为可注入 `LabFetch`；`scenario` 的 secret/seed 走 recording entropy，marker 读经 `LabFs`。
+- **仍直接用 Node**：crash 子进程 `spawn`、`cli.ts`、fixtures 的 `mkdtemp`/`rmSync`（进程生命周期边界，非 AttackLab 主路径）。
+- 证据：`pnpm --filter @lody/e2ee-lab check` 退出 0（13 文件 / 73 测试）。未启用产品 E2EE。无 push/merge。

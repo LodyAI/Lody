@@ -32,6 +32,7 @@ continuationOffset streams-crdt tarball。没有浏览器 UI。
 P2 重放见 `test/replay-bytes.test.ts`。P3 固定攻击矩阵见 `test/matrix.test.ts`。
 P4 AttackLab 隔离与无 LLM 动作重放见 `test/attack-lab.test.ts`。多人持续协作、
 边界攻击与三目录无模型重放见 `test/collab-scenario.test.ts`；真实模型介入见
-`test/restricted-agent.test.ts`。隔离只是能力句柄，
-不是 OS 容器，Effect 也不是沙箱。见
+`test/restricted-agent.test.ts`。AttackLab 的时钟/文件/HTTP 经 Effect
+`LabClock` / `LabFs` / `LabHttp`（`src/services/`）；Promise 方法提供
+`LiveLabLayer`。隔离只是能力句柄，不是 OS 容器，Effect 也不是沙箱。见
 [实施说明](../../.agents/notes/proposed/testing/2026-09-16-e2ee-adversarial-lab.zh.md)。

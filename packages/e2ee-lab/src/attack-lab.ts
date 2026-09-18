@@ -1,10 +1,13 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { Effect } from 'effect';
+import { Effect, type Layer } from 'effect';
 import { toHex } from './platform/bytes';
 import type { LabBackend } from './backend';
-import { mutateSqliteBytes, riverrunNextOffset, riverrunRecordCount } from './attacks';
+import {
+  mutateSqliteBytesEffect,
+  riverrunNextOffsetEffect,
+  riverrunRecordCountEffect,
+} from './attacks';
 import { CONTROL_STREAM, FLOCK_STREAM, LORO_STREAM } from './platform/protocol';
 import { judgeClientDurability, judgeClientIntegrity, judgeLeak, type JudgeVerdict } from './judge';
 import { canPermitEvent, type LabEvent } from './scheduler';
@@ -16,6 +19,14 @@ import { LoroDoc, VersionVector } from 'loro-crdt';
 import { Flock } from '@loro-dev/flock-wasm';
 import type { HonestClient } from './actors';
 import { flockCursorPath, flockDocPath, loroCursorPath, loroDocPath } from './platform/persist';
+import {
+  LabClock,
+  LabFs,
+  LabHttp,
+  LiveLabLayer,
+  runLabPromise,
+  type LabServices,
+} from './services';
 
 export interface PublicView {
   readonly events: readonly Pick<
@@ -124,6 +135,7 @@ type PrivateState = {
   mutations: number;
   closed: boolean;
   hostClosed: boolean;
+  layer: Layer.Layer<LabServices, never, never>;
 };
 
 const secrets = new WeakMap<AttackLab, PrivateState>();
@@ -135,183 +147,217 @@ function priv(lab: AttackLab): PrivateState {
   return state;
 }
 
-function publicView(state: PrivateState): PublicView {
-  return {
-    events: state.runtime.events().map((event) => ({
-      eventId: event.eventId,
-      actor: event.actor,
-      operation: event.operation,
-      phase: event.phase,
-      status: event.status,
-    })),
-    genesisHex: state.genesisHex(),
-    backendBytes: existsSync(state.host.riverrunDbPath)
-      ? readFileSync(state.host.riverrunDbPath).byteLength
-      : 0,
-    errors: [...state.errors],
-  };
+function runLab<A>(lab: AttackLab, effect: Effect.Effect<A, unknown, LabServices>): Promise<A> {
+  const state = secrets.get(lab);
+  if (!state) throw new Error('attack-lab-invalid');
+  return runLabPromise(effect, state.layer);
+}
+
+function publicViewEffect(state: PrivateState): Effect.Effect<PublicView, never, LabFs> {
+  return Effect.gen(function* () {
+    const fs = yield* LabFs;
+    const path = state.host.riverrunDbPath;
+    const backendBytes = fs.exists(path) ? fs.readBytes(path).byteLength : 0;
+    return {
+      events: state.runtime.events().map((event) => ({
+        eventId: event.eventId,
+        actor: event.actor,
+        operation: event.operation,
+        phase: event.phase,
+        status: event.status,
+      })),
+      genesisHex: state.genesisHex(),
+      backendBytes,
+      errors: [...state.errors],
+    };
+  });
 }
 
 function knownEvent(state: PrivateState, eventId: string): boolean {
   return state.runtime.events().some((event) => event.eventId === eventId);
 }
 
-function assertBudget(state: PrivateState): void {
-  if (Date.now() - state.startedMs > state.maxMs) throw new Error('attack-budget-time');
+function assertBudgetEffect(state: PrivateState): Effect.Effect<void, Error, LabClock> {
+  return Effect.gen(function* () {
+    const clock = yield* LabClock;
+    if (clock.nowMs() - state.startedMs > state.maxMs) {
+      return yield* Effect.fail(new Error('attack-budget-time'));
+    }
+  });
 }
 
 /**
  * Real client measurement: live verified read, journal re-verification through
  * `Ledger.verify`, and document/cursor file consistency. Returns measured
  * facts; `finish` derives the verdicts.
+ *
+ * Harness Promise entry uses LiveLabLayer. AttackLab `finish` may inject a
+ * custom inspectHonest that already closed over services.
  */
 export function inspectClient(
   client: HonestClient,
-  host: LabBackend
+  host: LabBackend,
+  layer: Layer.Layer<LabServices, never, never> = LiveLabLayer
 ): () => Promise<HonestInspect> {
-  return async () => {
+  return () => runLabPromise(inspectClientEffect(client, host), layer);
+}
+
+function inspectClientEffect(
+  client: HonestClient,
+  host: LabBackend
+): Effect.Effect<HonestInspect, unknown, LabServices> {
+  return Effect.gen(function* () {
     const genesisHex = client.genesisHex;
     if (!genesisHex) return { unmeasured: true };
     const facts: HonestInspect = {};
-    try {
-      facts.verifiedRecords = (await client.readLedger()).length;
-    } catch {
-      facts.importFailed = true;
-    }
-    const counted = await riverrunRecordCount(host.riverrunUrl, genesisHex, CONTROL_STREAM);
+    const ledger = yield* Effect.tryPromise({
+      try: () => client.readLedger(),
+      catch: (error) => error,
+    }).pipe(Effect.catchAll(() => Effect.succeed(null)));
+    if (ledger) facts.verifiedRecords = ledger.length;
+    else facts.importFailed = true;
+    const counted = yield* riverrunRecordCountEffect(
+      host.riverrunUrl,
+      genesisHex,
+      CONTROL_STREAM
+    ).pipe(Effect.catchAll(() => Effect.succeed({ ok: false as const, status: 0, count: 0 })));
     if (counted.ok && facts.verifiedRecords !== undefined) {
       facts.rejectedRecords = Math.max(0, counted.count - facts.verifiedRecords);
     }
-    // Re-verify every record the client durably holds; a stored record that
-    // fails verification is a client-side unauthorized acceptance.
     const store = new SqliteLedgerStore(join(client.clientDir, 'ledger.sqlite'));
-    let journal: { genesis: Uint8Array; records: readonly Uint8Array[] } | null = null;
-    try {
-      journal = await store.exclusive((tx) => tx.load());
-    } catch {
-      journal = null;
-    }
+    const journal = yield* Effect.tryPromise({
+      try: () => store.exclusive((tx) => tx.load()),
+      catch: (error) => error,
+    }).pipe(Effect.catchAll(() => Effect.succeed(null)));
     if (journal && journal.records.length > 0) {
-      try {
-        await Ledger.verify({ anchor: journal.genesis, records: journal.records });
-        facts.unverifiedAccepted = 0;
-      } catch {
-        facts.unverifiedAccepted = journal.records.length;
-      }
+      const verified = yield* Effect.tryPromise({
+        try: () => Ledger.verify({ anchor: journal.genesis, records: journal.records }),
+        catch: (error) => error,
+      }).pipe(Effect.catchAll(() => Effect.succeed(null)));
+      facts.unverifiedAccepted = verified === null ? journal.records.length : 0;
     } else {
-      // Nothing durably held means nothing was accepted — still a fact.
       facts.unverifiedAccepted = 0;
     }
+    const cursors = yield* cursorFactsEffect(client.clientDir, host, genesisHex);
     facts.durableLoss =
       (facts.verifiedRecords !== undefined && facts.verifiedRecords > 0 && !journal) ||
-      (await cursorFacts(client.clientDir, host, genesisHex)).loss;
-    facts.cursorAhead = (await cursorFacts(client.clientDir, host, genesisHex)).ahead;
+      cursors.loss;
+    facts.cursorAhead = cursors.ahead;
     return facts;
-  };
+  });
 }
 
-/**
- * Does the persisted document still cover every version the cursor claims to
- * have consumed? A document rolled back to an older snapshot while keeping the
- * latest cursor fails this check. Returns undefined when it cannot be decided.
- */
-function docCoversCursor(
+function docCoversCursorEffect(
   docPath: string,
   kind: string,
   claimed: Record<string, unknown>
-): boolean | undefined {
-  try {
-    const bytes = readFileSync(docPath);
-    if (kind === FLOCK_STREAM) {
-      const version = Flock.fromFile(new Uint8Array(bytes), 'inspector').inclusiveVersion();
-      for (const [peer, entry] of Object.entries(claimed)) {
-        const seen = version[peer];
-        const want = entry as { physicalTime?: number; logicalCounter?: number } | undefined;
-        if (
-          !seen ||
-          typeof want?.physicalTime !== 'number' ||
-          typeof want?.logicalCounter !== 'number' ||
-          seen.physicalTime < want.physicalTime ||
-          (seen.physicalTime === want.physicalTime && seen.logicalCounter < want.logicalCounter)
-        ) {
-          return false;
-        }
-      }
-      return true;
-    }
-    const doc = new LoroDoc();
-    let version: VersionVector | undefined;
+): Effect.Effect<boolean | undefined, never, LabFs> {
+  return Effect.gen(function* () {
+    const fs = yield* LabFs;
     try {
-      doc.import(new Uint8Array(bytes));
-      version = doc.oplogVersion();
-      const claimedVector = new VersionVector(
-        new Map(
-          Object.entries(claimed).map(([peer, counter]) => [peer as `${number}`, counter as number])
-        )
-      );
-      const order = version.compare(claimedVector);
-      claimedVector.free();
-      return order !== undefined && order >= 0;
-    } finally {
-      version?.free();
-      doc.free();
+      if (!fs.exists(docPath)) return undefined;
+      const bytes = fs.readBytes(docPath);
+      if (kind === FLOCK_STREAM) {
+        const version = Flock.fromFile(new Uint8Array(bytes), 'inspector').inclusiveVersion();
+        for (const [peer, entry] of Object.entries(claimed)) {
+          const seen = version[peer];
+          const want = entry as { physicalTime?: number; logicalCounter?: number } | undefined;
+          if (
+            !seen ||
+            typeof want?.physicalTime !== 'number' ||
+            typeof want?.logicalCounter !== 'number' ||
+            seen.physicalTime < want.physicalTime ||
+            (seen.physicalTime === want.physicalTime && seen.logicalCounter < want.logicalCounter)
+          ) {
+            return false;
+          }
+        }
+        return true;
+      }
+      const doc = new LoroDoc();
+      let version: VersionVector | undefined;
+      try {
+        doc.import(new Uint8Array(bytes));
+        version = doc.oplogVersion();
+        const claimedVector = new VersionVector(
+          new Map(
+            Object.entries(claimed).map(([peer, counter]) => [
+              peer as `${number}`,
+              counter as number,
+            ])
+          )
+        );
+        const order = version.compare(claimedVector);
+        claimedVector.free();
+        return order !== undefined && order >= 0;
+      } finally {
+        version?.free();
+        doc.free();
+      }
+    } catch {
+      return undefined;
     }
-  } catch {
-    return undefined;
-  }
+  });
 }
 
-async function cursorFacts(
+function cursorFactsEffect(
   clientDir: string,
   host: LabBackend,
   genesisHex: string
-): Promise<{ ahead: boolean | undefined; loss: boolean }> {
-  let ahead: boolean | undefined = false;
-  let loss = false;
-  for (const kind of [LORO_STREAM, FLOCK_STREAM] as const) {
-    const cursorPath = kind === 'flock' ? flockCursorPath(clientDir) : loroCursorPath(clientDir);
-    const docPath = kind === 'flock' ? flockDocPath(clientDir) : loroDocPath(clientDir);
-    if (!existsSync(cursorPath)) continue;
-    if (!existsSync(docPath)) {
-      loss = true;
-      continue;
-    }
-    let cursor: {
-      streamUrl?: string;
-      nextOffset?: string;
-      serverLowerBoundVersion?: Record<string, unknown>;
-    };
-    try {
-      cursor = JSON.parse(readFileSync(cursorPath, 'utf8')) as typeof cursor;
-    } catch {
-      loss = true;
-      continue;
-    }
-    // The cursor must be bound to the persisted document: rolling the document
-    // back to an older valid snapshot while keeping this cursor is a violation.
-    const covered = docCoversCursor(docPath, kind, cursor.serverLowerBoundVersion ?? {});
-    if (covered === false) ahead = true;
-    else if (covered === undefined) ahead = undefined;
-    const stream = cursor.streamUrl?.split('/').filter(Boolean).pop() ?? kind;
-    try {
-      const tail = await riverrunNextOffset(host.riverrunUrl, genesisHex, stream);
-      if (cursor.nextOffset !== undefined && BigInt(cursor.nextOffset) > BigInt(tail)) {
+): Effect.Effect<{ ahead: boolean | undefined; loss: boolean }, unknown, LabFs | LabHttp> {
+  return Effect.gen(function* () {
+    const fs = yield* LabFs;
+    let ahead: boolean | undefined = false;
+    let loss = false;
+    for (const kind of [LORO_STREAM, FLOCK_STREAM] as const) {
+      const cursorPath = kind === 'flock' ? flockCursorPath(clientDir) : loroCursorPath(clientDir);
+      const docPath = kind === 'flock' ? flockDocPath(clientDir) : loroDocPath(clientDir);
+      if (!fs.exists(cursorPath)) continue;
+      if (!fs.exists(docPath)) {
+        loss = true;
+        continue;
+      }
+      let cursor: {
+        streamUrl?: string;
+        nextOffset?: string;
+        serverLowerBoundVersion?: Record<string, unknown>;
+      };
+      try {
+        cursor = JSON.parse(fs.readText(cursorPath)) as typeof cursor;
+      } catch {
+        loss = true;
+        continue;
+      }
+      const covered = yield* docCoversCursorEffect(
+        docPath,
+        kind,
+        cursor.serverLowerBoundVersion ?? {}
+      );
+      if (covered === false) ahead = true;
+      else if (covered === undefined) ahead = undefined;
+      const stream = cursor.streamUrl?.split('/').filter(Boolean).pop() ?? kind;
+      const tail = yield* riverrunNextOffsetEffect(host.riverrunUrl, genesisHex, stream).pipe(
+        Effect.catchAll(() => Effect.succeed(null as string | null))
+      );
+      if (tail === null) {
+        ahead = undefined;
+      } else if (cursor.nextOffset !== undefined && BigInt(cursor.nextOffset) > BigInt(tail)) {
         ahead = true;
       }
-    } catch {
-      ahead = undefined;
     }
-  }
-  return { ahead, loss };
+    return { ahead, loss };
+  });
 }
 
-async function measureHonest(state: PrivateState): Promise<HonestInspect> {
-  if (!state.inspectHonest) return { unmeasured: true };
-  try {
-    return await state.inspectHonest();
-  } catch {
-    return { unmeasured: true };
-  }
+function measureHonest(state: PrivateState): Effect.Effect<HonestInspect> {
+  return Effect.promise(async () => {
+    if (!state.inspectHonest) return { unmeasured: true };
+    try {
+      return await state.inspectHonest();
+    } catch {
+      return { unmeasured: true };
+    }
+  });
 }
 
 function recordAction(state: PrivateState, action: AttackAction, replay = action): void {
@@ -334,58 +380,57 @@ export interface ClientDigest {
   readonly flockCursor: string | null;
 }
 
-/**
- * Canonical cursor digest: protocol-meaningful fields only. `streamUrl` is
- * reduced to its path (the port is per-run) and wall-clock fields are dropped.
- */
-function cursorDigest(path: string): string | null {
-  let raw: string;
-  try {
-    raw = readFileSync(path, 'utf8');
-  } catch {
-    return null;
-  }
-  try {
-    const cursor = JSON.parse(raw) as Record<string, unknown>;
-    const url = typeof cursor.streamUrl === 'string' ? new URL(cursor.streamUrl) : null;
-    return JSON.stringify({
-      path: url?.pathname ?? null,
-      nextOffset: cursor.nextOffset ?? null,
-      serverLowerBoundVersion: cursor.serverLowerBoundVersion ?? null,
-    });
-  } catch {
-    return 'unparseable';
-  }
+function cursorDigestEffect(path: string): Effect.Effect<string | null, never, LabFs> {
+  return Effect.gen(function* () {
+    const fs = yield* LabFs;
+    if (!fs.exists(path)) return null;
+    try {
+      const cursor = JSON.parse(fs.readText(path)) as Record<string, unknown>;
+      const url = typeof cursor.streamUrl === 'string' ? new URL(cursor.streamUrl) : null;
+      return JSON.stringify({
+        path: url?.pathname ?? null,
+        nextOffset: cursor.nextOffset ?? null,
+        serverLowerBoundVersion: cursor.serverLowerBoundVersion ?? null,
+      });
+    } catch {
+      return 'unparseable';
+    }
+  });
 }
 
-async function clientStateDigest(dir: string): Promise<ClientDigest> {
-  let journal: { genesis: Uint8Array; records: readonly Uint8Array[] } | null = null;
-  try {
-    const store = new SqliteLedgerStore(join(dir, 'ledger.sqlite'));
-    journal = await store.exclusive((tx) => tx.load());
-  } catch {
-    journal = null;
-  }
-  const hash = createHash('sha256');
-  if (journal) {
-    hash.update(journal.genesis);
-    for (const record of journal.records) hash.update(record);
-  }
-  const fileDigest = (path: string): string | null => {
-    try {
-      return createHash('sha256').update(readFileSync(path)).digest('hex');
-    } catch {
-      return null;
+function clientStateDigestEffect(dir: string): Effect.Effect<ClientDigest, unknown, LabFs> {
+  return Effect.gen(function* () {
+    const fs = yield* LabFs;
+    let journal: { genesis: Uint8Array; records: readonly Uint8Array[] } | null = null;
+    journal = yield* Effect.tryPromise({
+      try: () => {
+        const store = new SqliteLedgerStore(join(dir, 'ledger.sqlite'));
+        return store.exclusive((tx) => tx.load());
+      },
+      catch: (error) => error,
+    }).pipe(Effect.catchAll(() => Effect.succeed(null)));
+    const hash = createHash('sha256');
+    if (journal) {
+      hash.update(journal.genesis);
+      for (const record of journal.records) hash.update(record);
     }
-  };
-  return {
-    ledgerRecords: journal ? journal.records.length : null,
-    ledgerHead: journal ? hash.digest('hex') : null,
-    loroDoc: fileDigest(loroDocPath(dir)),
-    flockDoc: fileDigest(flockDocPath(dir)),
-    loroCursor: cursorDigest(loroCursorPath(dir)),
-    flockCursor: cursorDigest(flockCursorPath(dir)),
-  };
+    const fileDigest = (path: string): string | null => {
+      if (!fs.exists(path)) return null;
+      try {
+        return createHash('sha256').update(fs.readBytes(path)).digest('hex');
+      } catch {
+        return null;
+      }
+    };
+    return {
+      ledgerRecords: journal ? journal.records.length : null,
+      ledgerHead: journal ? hash.digest('hex') : null,
+      loroDoc: fileDigest(loroDocPath(dir)),
+      flockDoc: fileDigest(flockDocPath(dir)),
+      loroCursor: yield* cursorDigestEffect(loroCursorPath(dir)),
+      flockCursor: yield* cursorDigestEffect(flockCursorPath(dir)),
+    };
+  });
 }
 
 export interface ReplayMaterial {
@@ -403,7 +448,11 @@ export interface ReplayMaterial {
 export async function harnessReplayMaterial(lab: AttackLab): Promise<ReplayMaterial> {
   const state = secrets.get(lab);
   const clients: ClientDigest[] = [];
-  for (const dir of state?.clientDirs ?? []) clients.push(await clientStateDigest(dir));
+  if (state) {
+    for (const dir of state.clientDirs) {
+      clients.push(await runLabPromise(clientStateDigestEffect(dir), state.layer));
+    }
+  }
   return {
     actions: [...(state?.replayActions ?? [])],
     events: [...(state?.runtime.events() ?? [])],
@@ -424,18 +473,28 @@ export function createAttackLab(input: {
   /** Harness-set attacker wall-clock budget; the attacker cannot extend it. */
   maxMs?: number;
   maxMutations?: number;
+  /** Side-effect adapters; defaults to Live Node fs/fetch/clock. */
+  layer?: Layer.Layer<LabServices, never, never>;
 }): AttackLab {
+  const layer = input.layer ?? LiveLabLayer;
   const lab: AttackLab = {
-    observe: () => Effect.runPromise(observeEffect(lab)),
-    advance: (body) => Effect.runPromise(advanceEffect(lab, body)),
-    advanceUntil: (body) => Effect.runPromise(advanceUntilEffect(lab, body)),
-    readBackend: (body) => Effect.runPromise(readBackendEffect(lab, body)),
-    mutateBackend: (body) => Effect.runPromise(mutateBackendEffect(lab, body)),
-    intercept: (body) => Effect.runPromise(interceptEffect(lab, body)),
-    submitClaim: (body) => Effect.runPromise(submitClaimEffect(lab, body)),
-    finish: () => Effect.runPromise(finishEffect(lab)),
+    observe: () => runLab(lab, observeEffect(lab)),
+    advance: (body) => runLab(lab, advanceEffect(lab, body)),
+    advanceUntil: (body) => runLab(lab, advanceUntilEffect(lab, body)),
+    readBackend: (body) => runLab(lab, readBackendEffect(lab, body)),
+    mutateBackend: (body) => runLab(lab, mutateBackendEffect(lab, body)),
+    intercept: (body) => runLab(lab, interceptEffect(lab, body)),
+    submitClaim: (body) => runLab(lab, submitClaimEffect(lab, body)),
+    finish: () => runLab(lab, finishEffect(lab)),
     actions: () => [...(secrets.get(lab)?.actions ?? [])],
   };
+  // startedMs is set after providing clock from the same layer.
+  const startedMs = Effect.runSync(
+    Effect.gen(function* () {
+      const clock = yield* LabClock;
+      return clock.nowMs();
+    }).pipe(Effect.provide(layer))
+  );
   secrets.set(lab, {
     host: input.host,
     runtime: input.runtime,
@@ -451,213 +510,218 @@ export function createAttackLab(input: {
     claims: [],
     actions: [],
     replayActions: [],
-    startedMs: Date.now(),
+    startedMs,
     maxMs: input.maxMs ?? 30_000,
     maxMutations: input.maxMutations ?? 16,
     mutations: 0,
     closed: false,
     hostClosed: false,
+    layer,
   });
   return lab;
 }
 
-function observeEffect(lab: AttackLab) {
-  return Effect.tryPromise({
-    try: async () => {
-      const state = priv(lab);
-      assertBudget(state);
-      recordAction(state, { op: 'observe' });
-      return publicView(state);
-    },
-    catch: (error) => error,
+function observeEffect(lab: AttackLab): Effect.Effect<PublicView, unknown, LabServices> {
+  return Effect.gen(function* () {
+    const state = priv(lab);
+    yield* assertBudgetEffect(state);
+    recordAction(state, { op: 'observe' });
+    return yield* publicViewEffect(state);
   });
 }
 
-function advanceEffect(lab: AttackLab, input: { steps: number }) {
-  return Effect.try({
-    try: () => {
-      const state = priv(lab);
-      assertBudget(state);
-      recordAction(state, { op: 'advance', input });
-      let remaining = Math.max(0, input.steps);
-      while (remaining > 0 && state.runtime.permitNext() !== null) {
-        remaining -= 1;
-      }
-      return publicView(state);
-    },
-    catch: (error) => error,
+function advanceEffect(
+  lab: AttackLab,
+  input: { steps: number }
+): Effect.Effect<PublicView, unknown, LabServices> {
+  return Effect.gen(function* () {
+    const state = priv(lab);
+    yield* assertBudgetEffect(state);
+    recordAction(state, { op: 'advance', input });
+    let remaining = Math.max(0, input.steps);
+    while (remaining > 0 && state.runtime.permitNext() !== null) {
+      remaining -= 1;
+    }
+    return yield* publicViewEffect(state);
   });
 }
 
 function advanceUntilEffect(
   lab: AttackLab,
   input: { actor?: string; phase: string; maxSteps: number }
-) {
-  return Effect.try({
-    try: () => {
-      const state = priv(lab);
-      assertBudget(state);
-      recordAction(state, { op: 'advanceUntil', input });
-      for (let i = 0; i < input.maxSteps; i++) {
-        const hit = state.runtime
-          .events()
-          .find(
-            (event) =>
-              event.phase === input.phase &&
-              event.status === 'requested' &&
-              (input.actor === undefined || event.actor === input.actor) &&
-              canPermitEvent(state.runtime.state, event.eventId)
-          );
-        if (hit) {
-          state.runtime.permit(hit.eventId);
-          return { ...publicView(state), unmet: false };
-        }
-        if (state.runtime.permitNext() === null) break;
+): Effect.Effect<PublicView, unknown, LabServices> {
+  return Effect.gen(function* () {
+    const state = priv(lab);
+    yield* assertBudgetEffect(state);
+    recordAction(state, { op: 'advanceUntil', input });
+    for (let i = 0; i < input.maxSteps; i++) {
+      const hit = state.runtime
+        .events()
+        .find(
+          (event) =>
+            event.phase === input.phase &&
+            event.status === 'requested' &&
+            (input.actor === undefined || event.actor === input.actor) &&
+            canPermitEvent(state.runtime.state, event.eventId)
+        );
+      if (hit) {
+        state.runtime.permit(hit.eventId);
+        return { ...(yield* publicViewEffect(state)), unmet: false };
       }
-      return { ...publicView(state), unmet: true };
-    },
-    catch: (error) => error,
+      if (state.runtime.permitNext() === null) break;
+    }
+    return { ...(yield* publicViewEffect(state)), unmet: true };
   });
 }
 
-function readBackendEffect(lab: AttackLab, input: BackendRead) {
-  return Effect.try({
-    try: () => {
-      const state = priv(lab);
-      assertBudget(state);
-      recordAction(state, { op: 'readBackend', input: { ...input } });
-      if (input.target !== 'riverrun') throw new Error('invalid-target');
-      if (!knownEvent(state, input.eventId) && input.eventId !== 'barrier') {
-        throw new Error('invalid-event');
+function readBackendEffect(
+  lab: AttackLab,
+  input: BackendRead
+): Effect.Effect<Uint8Array, unknown, LabServices> {
+  return Effect.gen(function* () {
+    const state = priv(lab);
+    yield* assertBudgetEffect(state);
+    recordAction(state, { op: 'readBackend', input: { ...input } });
+    if (input.target !== 'riverrun') return yield* Effect.fail(new Error('invalid-target'));
+    if (!knownEvent(state, input.eventId) && input.eventId !== 'barrier') {
+      return yield* Effect.fail(new Error('invalid-event'));
+    }
+    const path = resolve(state.host.riverrunDbPath);
+    for (const dir of state.clientDirs) {
+      if (path === dir || path.startsWith(`${dir}/`)) {
+        return yield* Effect.fail(new Error('invalid-target'));
       }
-      const path = resolve(state.host.riverrunDbPath);
-      for (const dir of state.clientDirs) {
-        if (path === dir || path.startsWith(`${dir}/`)) throw new Error('invalid-target');
-      }
-      if (!existsSync(path)) throw new Error('backend-missing');
-      return new Uint8Array(readFileSync(path));
-    },
-    catch: (error) => error,
+    }
+    const fs = yield* LabFs;
+    if (!fs.exists(path)) return yield* Effect.fail(new Error('backend-missing'));
+    return new Uint8Array(fs.readBytes(path));
   });
 }
 
-function mutateBackendEffect(lab: AttackLab, input: BackendMutation) {
-  return Effect.tryPromise({
-    try: async () => {
-      const state = priv(lab);
-      assertBudget(state);
-      recordAction(state, { op: 'mutateBackend', input: { ...input } });
-      if (input.kind !== 'xor') throw new Error('invalid-mutation');
-      if (!knownEvent(state, input.eventId) && input.eventId !== 'barrier') {
-        throw new Error('invalid-event');
+function mutateBackendEffect(
+  lab: AttackLab,
+  input: BackendMutation
+): Effect.Effect<{ ok: boolean }, unknown, LabServices> {
+  return Effect.gen(function* () {
+    const state = priv(lab);
+    yield* assertBudgetEffect(state);
+    recordAction(state, { op: 'mutateBackend', input: { ...input } });
+    if (input.kind !== 'xor') return yield* Effect.fail(new Error('invalid-mutation'));
+    if (!knownEvent(state, input.eventId) && input.eventId !== 'barrier') {
+      return yield* Effect.fail(new Error('invalid-event'));
+    }
+    if (state.mutations >= state.maxMutations) {
+      return yield* Effect.fail(new Error('attack-budget-mutations'));
+    }
+    const path = resolve(state.host.riverrunDbPath);
+    for (const dir of state.clientDirs) {
+      if (path.startsWith(`${dir}/`) || path === dir) {
+        return yield* Effect.fail(new Error('invalid-target'));
       }
-      if (state.mutations >= state.maxMutations) throw new Error('attack-budget-mutations');
-      const path = resolve(state.host.riverrunDbPath);
-      for (const dir of state.clientDirs) {
-        if (path.startsWith(`${dir}/`) || path === dir) throw new Error('invalid-target');
-      }
-      if (!state.hostClosed) {
-        await state.host.close();
-        state.hostClosed = true;
-      }
-      const needle = fromHex(input.needleHex);
-      state.mutations += 1;
-      const ok = mutateSqliteBytes(path, needle, input.xor ?? 0xff);
-      if (!ok) state.errors.push('mutation-miss');
-      // Harness-only replay record: the receipt is compared on replay so a
-      // needle that misses a different ciphertext is a divergence, not a pass.
-      state.replayActions[state.replayActions.length - 1] = {
-        op: 'mutateBackend',
-        input: { ...input, receipt: ok },
-      };
-      return { ok };
-    },
-    catch: (error) => error,
+    }
+    if (!state.hostClosed) {
+      yield* Effect.tryPromise({
+        try: () => state.host.close(),
+        catch: (error) => error,
+      });
+      state.hostClosed = true;
+    }
+    const needle = fromHex(input.needleHex);
+    state.mutations += 1;
+    const ok = yield* mutateSqliteBytesEffect(path, needle, input.xor ?? 0xff);
+    if (!ok) state.errors.push('mutation-miss');
+    state.replayActions[state.replayActions.length - 1] = {
+      op: 'mutateBackend',
+      input: { ...input, receipt: ok },
+    };
+    return { ok };
   });
 }
 
-function interceptEffect(lab: AttackLab, input: ResponseMutation) {
-  return Effect.try({
-    try: () => {
-      const state = priv(lab);
-      assertBudget(state);
-      recordAction(state, { op: 'intercept', input: { ...input } });
-      if (!knownEvent(state, input.eventId)) throw new Error('invalid-event');
-      state.runtime.intercept(input);
-      return { ok: true };
-    },
-    catch: (error) => error,
+function interceptEffect(
+  lab: AttackLab,
+  input: ResponseMutation
+): Effect.Effect<{ ok: boolean }, unknown, LabServices> {
+  return Effect.gen(function* () {
+    const state = priv(lab);
+    yield* assertBudgetEffect(state);
+    recordAction(state, { op: 'intercept', input: { ...input } });
+    if (!knownEvent(state, input.eventId)) {
+      return yield* Effect.fail(new Error('invalid-event'));
+    }
+    state.runtime.intercept(input);
+    return { ok: true };
   });
 }
 
-function submitClaimEffect(lab: AttackLab, input: AttackClaim) {
-  return Effect.try({
-    try: () => {
-      const state = priv(lab);
-      assertBudget(state);
-      recordAction(
-        state,
-        {
-          op: 'submitClaim',
-          input: { kind: input.kind, evidence: input.evidence ? '[redacted]' : undefined },
-        },
-        { op: 'submitClaim', input: { kind: input.kind, evidence: input.evidence } }
-      );
-      state.claims.push(input);
-      return { received: true as const };
-    },
-    catch: (error) => error,
+function submitClaimEffect(
+  lab: AttackLab,
+  input: AttackClaim
+): Effect.Effect<{ received: true }, unknown, LabServices> {
+  return Effect.gen(function* () {
+    const state = priv(lab);
+    yield* assertBudgetEffect(state);
+    recordAction(
+      state,
+      {
+        op: 'submitClaim',
+        input: { kind: input.kind, evidence: input.evidence ? '[redacted]' : undefined },
+      },
+      { op: 'submitClaim', input: { kind: input.kind, evidence: input.evidence } }
+    );
+    state.claims.push(input);
+    return { received: true as const };
   });
 }
 
-function finishEffect(lab: AttackLab) {
-  return Effect.tryPromise({
-    try: async () => {
-      const state = secrets.get(lab);
-      if (!state || state.closed) throw new Error('attack-lab-closed');
-      recordAction(state, { op: 'finish' });
-      state.closed = true;
-      const disk = existsSync(state.host.riverrunDbPath)
-        ? readFileSync(state.host.riverrunDbPath)
-        : Buffer.alloc(0);
-      const leaked = disk.includes(state.expectedPlaintext);
-      const recovered = state.claims.some(
-        (claim) => claim.kind === 'plaintext' && claim.evidence === state.expectedPlaintext
-      );
-      let reachable = false;
-      try {
-        reachable = (await fetch(`${state.host.baseUrl}/healthz`)).ok;
-      } catch {
-        reachable = false;
-      }
-      const confidentiality = judgeLeak({ backendContainsPlaintext: leaked || recovered });
-      let integrity: JudgeVerdict = 'unavailable';
-      let durability: JudgeVerdict = 'unavailable';
-      if (reachable) {
-        const measured = await measureHonest(state);
-        integrity = judgeClientIntegrity({
-          observed: !measured.unmeasured && measured.unverifiedAccepted !== undefined,
-          acceptedUnauthorized: (measured.unverifiedAccepted ?? 0) > 0,
-        });
-        durability = judgeClientDurability({
-          observed:
-            !measured.unmeasured &&
-            measured.cursorAhead !== undefined &&
-            measured.durableLoss !== undefined,
-          cursorAheadOfDocument: measured.cursorAhead === true,
-          lostDurableData: measured.durableLoss === true,
-        });
-      }
-      return {
-        confidentiality,
-        integrity,
-        durability,
-        detectability: (leaked || recovered ? 'violation' : 'pass') as JudgeVerdict,
-        budgetExceeded: Date.now() - state.startedMs > state.maxMs,
-        claims: state.claims.length,
-      };
-    },
-    catch: (error) => error,
+function finishEffect(lab: AttackLab): Effect.Effect<PublicReport, unknown, LabServices> {
+  return Effect.gen(function* () {
+    const state = secrets.get(lab);
+    if (!state || state.closed) return yield* Effect.fail(new Error('attack-lab-closed'));
+    recordAction(state, { op: 'finish' });
+    state.closed = true;
+    const fs = yield* LabFs;
+    const clock = yield* LabClock;
+    const http = yield* LabHttp;
+    const disk = fs.exists(state.host.riverrunDbPath)
+      ? fs.readBytes(state.host.riverrunDbPath)
+      : new Uint8Array();
+    const leaked = Buffer.from(disk).includes(state.expectedPlaintext);
+    const recovered = state.claims.some(
+      (claim) => claim.kind === 'plaintext' && claim.evidence === state.expectedPlaintext
+    );
+    let reachable = false;
+    const health = yield* Effect.tryPromise({
+      try: () => http.fetch(`${state.host.baseUrl}/healthz`),
+      catch: (error) => error,
+    }).pipe(Effect.catchAll(() => Effect.succeed(null)));
+    if (health) reachable = health.ok;
+    const confidentiality = judgeLeak({ backendContainsPlaintext: leaked || recovered });
+    let integrity: JudgeVerdict = 'unavailable';
+    let durability: JudgeVerdict = 'unavailable';
+    if (reachable) {
+      const measured = yield* measureHonest(state);
+      integrity = judgeClientIntegrity({
+        observed: !measured.unmeasured && measured.unverifiedAccepted !== undefined,
+        acceptedUnauthorized: (measured.unverifiedAccepted ?? 0) > 0,
+      });
+      durability = judgeClientDurability({
+        observed:
+          !measured.unmeasured &&
+          measured.cursorAhead !== undefined &&
+          measured.durableLoss !== undefined,
+        cursorAheadOfDocument: measured.cursorAhead === true,
+        lostDurableData: measured.durableLoss === true,
+      });
+    }
+    return {
+      confidentiality,
+      integrity,
+      durability,
+      detectability: (leaked || recovered ? 'violation' : 'pass') as JudgeVerdict,
+      budgetExceeded: clock.nowMs() - state.startedMs > state.maxMs,
+      claims: state.claims.length,
+    };
   });
 }
 
@@ -763,7 +827,11 @@ export async function replayAttackActions(
   }
   if (!divergence && expected?.clients) {
     const actualClients: ClientDigest[] = [];
-    for (const dir of state?.clientDirs ?? []) actualClients.push(await clientStateDigest(dir));
+    if (state) {
+      for (const dir of state.clientDirs) {
+        actualClients.push(await runLabPromise(clientStateDigestEffect(dir), state.layer));
+      }
+    }
     const count = Math.max(expected.clients.length, actualClients.length);
     for (let index = 0; index < count && !divergence; index++) {
       const expectedClient = expected.clients[index];

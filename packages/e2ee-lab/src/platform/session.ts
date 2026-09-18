@@ -1,4 +1,3 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { LoroDoc } from 'loro-crdt';
 import type { Flock } from '@loro-dev/flock-wasm';
@@ -38,6 +37,9 @@ import {
   type IssuedCredential,
   type JoinRequestWire,
 } from './protocol';
+import { makeLabClock } from '../services/clock';
+import { makeLiveFs, type LabFsShape } from '../services/fs';
+import type { LabFetch } from '../services/http';
 
 export interface SessionOptions {
   readonly baseUrl: string;
@@ -48,8 +50,10 @@ export interface SessionOptions {
   readonly device?: DemoDevice;
   /** Test/lab only. Production clients omit this and use live entropy. */
   readonly entropy?: Entropy;
-  /** Test/lab fetch hook. Defaults to global fetch. */
-  readonly fetch?: typeof globalThis.fetch;
+  /** Test/lab fetch hook. Defaults to Live LabHttp. */
+  readonly fetch?: LabFetch;
+  /** Injectable filesystem; defaults to Live LabFs. */
+  readonly fs?: LabFsShape;
   readonly runtime?: import('../runtime').LabRuntime;
 }
 
@@ -92,19 +96,25 @@ export class DemoSession {
   crashAt?: 'after-import' | 'after-document' | 'before-cursor' | 'after-cursor';
   crashMarker?: string;
   readonly runtime?: import('../runtime').LabRuntime;
+  readonly fs: LabFsShape;
   private ledgerClient: LedgerClient | null = null;
   // Per-session verification cache: no mutable cache state shared across runs.
   private readonly pointCache = new SigningPointCache();
   private closed = false;
+  private readonly disk: LabFsShape;
+  private readonly fetchImpl: LabFetch;
 
   constructor(private readonly options: SessionOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, '');
     this.clientDir = options.clientDir;
     this.account = options.account;
-    this.now = options.now ?? (() => Date.now());
+    this.now = options.now ?? makeLabClock(() => Date.now()).nowMs;
     this.testMode = options.testMode === true;
     this.runtime = options.runtime;
-    mkdirSync(this.clientDir, { recursive: true, mode: 0o700 });
+    this.disk = options.fs ?? makeLiveFs();
+    this.fs = this.disk;
+    this.fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis);
+    this.disk.mkdir(this.clientDir);
   }
 
   private headers(extra?: HeadersInit): Headers {
@@ -128,19 +138,23 @@ export class DemoSession {
         : input;
     const request = new Request(target, init);
     const headers = this.headers(request.headers);
-    const upstream = this.options.fetch ?? globalThis.fetch;
+    const upstream = this.fetchImpl;
     return upstream(new Request(request, { headers }));
   }
 
   private persistEpochs(): void {
     const rows = [...this.epochKeys.entries()].map(([epoch, key]) => [epoch, toHex(key)]);
-    writeFileSync(join(this.clientDir, 'epochs.json'), `${JSON.stringify(rows)}\n`);
+    this.disk.writeText(join(this.clientDir, 'epochs.json'), `${JSON.stringify(rows)}\n`);
   }
 
   private loadEpochs(): void {
     const path = join(this.clientDir, 'epochs.json');
     try {
-      const rows = JSON.parse(readFileSync(path, 'utf8')) as Array<[number, string]>;
+      if (!this.disk.exists(path)) {
+        this.epochKeys = new Map();
+        return;
+      }
+      const rows = JSON.parse(this.disk.readText(path)) as Array<[number, string]>;
       this.epochKeys = new Map(rows.map(([epoch, key]) => [epoch, fromHex(key)]));
     } catch {
       this.epochKeys = new Map();

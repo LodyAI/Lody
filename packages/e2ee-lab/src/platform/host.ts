@@ -1,5 +1,4 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { isAbsolute, join, resolve } from 'node:path';
 import { startDevServer, type RunningDevServer } from '@loro-dev/sqlite-riverrun';
@@ -30,6 +29,9 @@ import {
   type IssuedCredential,
   type JoinRequestWire,
 } from './protocol';
+import { makeLabClock } from '../services/clock';
+import { makeLiveFs, type LabFsShape } from '../services/fs';
+import type { LabFetch } from '../services/http';
 
 export interface DemoHostOptions {
   readonly dataDir: string;
@@ -37,6 +39,8 @@ export interface DemoHostOptions {
   readonly port?: number;
   readonly testMode?: boolean;
   readonly wallClock?: () => number;
+  readonly fs?: LabFsShape;
+  readonly fetch?: LabFetch;
 }
 
 export interface RunningDemoHost {
@@ -102,14 +106,16 @@ async function createStream(riverrunUrl: string, bucket: string, stream: string)
 
 export async function startDemoHost(options: DemoHostOptions): Promise<RunningDemoHost> {
   if (!isAbsolute(options.dataDir)) throw new Error('data-dir-must-be-absolute');
-  mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });
+  const disk = options.fs ?? makeLiveFs();
+  const httpFetch = options.fetch ?? globalThis.fetch.bind(globalThis);
+  disk.mkdir(options.dataDir);
   const riverrunDbPath = join(options.dataDir, 'riverrun.sqlite');
   const meta = new HostMeta(join(options.dataDir, 'host.sqlite'));
   const snapshotPath = join(options.dataDir, 'snapshots.sqlite');
-  const snapshotStore = existsSync(snapshotPath)
+  const snapshotStore = disk.exists(snapshotPath)
     ? new SqliteSnapshotPublicationStore(snapshotPath)
     : new SqliteSnapshotPublicationStore(snapshotPath, { create: true });
-  const wallClock = options.wallClock ?? (() => Date.now());
+  const wallClock = options.wallClock ?? makeLabClock(() => Date.now()).nowMs;
   const testMode = options.testMode === true;
   const hostName = options.host ?? '127.0.0.1';
 
@@ -190,7 +196,7 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
       if (Array.isArray(value)) headers.set(name, value.join(', '));
       else headers.set(name, value);
     }
-    const response = await fetch(dest, {
+    const response = await httpFetch(dest, {
       method: req.method,
       headers,
       body: body === undefined ? undefined : Buffer.from(body),
@@ -308,9 +314,12 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
           }
           const genesisHex = toHex(await hashRecord(genesis));
           await Ledger.verify({ anchor: fromHex(genesisHex), records: [genesis], pointCache });
-          const bucket = await fetch(`${riverrun.baseUrl}/ds/${encodeURIComponent(genesisHex)}`, {
-            method: 'PUT',
-          });
+          const bucket = await httpFetch(
+            `${riverrun.baseUrl}/ds/${encodeURIComponent(genesisHex)}`,
+            {
+              method: 'PUT',
+            }
+          );
           if (!bucket.ok && bucket.status !== 409) {
             json(res, 502, { error: 'bucket-create-failed' });
             return;
@@ -444,7 +453,7 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
               if (Array.isArray(value)) headers.set(name, value.join(', '));
               else headers.set(name, value);
             }
-            const response = await fetch(dest, {
+            const response = await httpFetch(dest, {
               method: 'POST',
               headers,
               body: Buffer.from(body),
@@ -457,7 +466,7 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
                 return;
               }
               if (fail === 'kill-after-commit') {
-                writeFileSync(join(options.dataDir, 'killed-after-commit'), '1');
+                disk.writeText(join(options.dataDir, 'killed-after-commit'), '1');
                 process.exit(0);
               }
             }
@@ -523,7 +532,7 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
               expectedResource: resource,
             });
             const dest = `${riverrun.baseUrl}${url.pathname}${url.search}`;
-            const response = await fetch(dest, {
+            const response = await httpFetch(dest, {
               method: 'PUT',
               headers: { 'Content-Type': req.headers['content-type'] ?? CONTENT_TYPE },
               body: Buffer.from(body),
@@ -575,7 +584,7 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
   });
   const address = server.address() as AddressInfo;
   const baseUrl = `http://${hostName}:${address.port}`;
-  writeFileSync(
+  disk.writeText(
     join(options.dataDir, 'host.json'),
     `${JSON.stringify({ pid: process.pid, baseUrl, riverrunUrl: riverrun.baseUrl, riverrunDbPath }, null, 2)}\n`
   );

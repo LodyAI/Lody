@@ -46,10 +46,17 @@ export class LabRuntime {
   }> = [];
   private readonly gateContext = new AsyncLocalStorage<string>();
   private readonly mode: 'auto' | 'manual';
+  private readonly fetchImpl: typeof globalThis.fetch;
   private closed = false;
 
-  constructor(options?: { mode?: 'auto' | 'manual'; time?: number }) {
+  constructor(options?: {
+    mode?: 'auto' | 'manual';
+    time?: number;
+    /** Injectable HTTP; defaults to globalThis.fetch (Live LabHttp). */
+    fetch?: typeof globalThis.fetch;
+  }) {
     this.mode = options?.mode ?? 'auto';
+    this.fetchImpl = options?.fetch ?? globalThis.fetch.bind(globalThis);
     this.state = emptyScheduler(options?.time ?? 0);
     LabRuntime.live.add(this);
   }
@@ -187,7 +194,7 @@ export class LabRuntime {
       const content = url.includes('/loro') || url.includes('/flock');
       const reading = method === 'GET' || method === 'HEAD';
       const operation = reading ? 'read' : content ? 'content' : 'submit';
-      if (!labPath) return globalThis.fetch(request);
+      if (!labPath) return this.fetchImpl(request);
       const requestId = await this.gate(actor, operation, 'request-queued');
       const requestHex = toHex(new Uint8Array(await request.clone().arrayBuffer()));
       const intercept = this.intercepts.find((item) => item.eventId === requestId);
@@ -207,14 +214,14 @@ export class LabRuntime {
           throw new Error('intercept-drop');
         }
         if (intercept?.kind === 'duplicate') {
-          await globalThis.fetch(request.clone());
+          await this.fetchImpl(request.clone());
         }
         let response =
           intercept?.kind === 'replace'
             ? new Response(Buffer.from(fromHexBody(intercept.bodyHex ?? '')), {
                 status: intercept.status ?? 200,
               })
-            : await globalThis.fetch(request);
+            : await this.fetchImpl(request);
         if (intercept?.kind === 'truncate') {
           const bytes = new Uint8Array(await response.clone().arrayBuffer());
           const keep = Math.min(1, bytes.byteLength);

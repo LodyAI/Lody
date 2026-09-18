@@ -353,3 +353,18 @@ Implementers choose filenames, service names and test organization without repea
 - New deadlock found: the recorded `finish` action replays via `applyRecorded` as a bare `lab.finish()` whose `measureHonest` issues gated `readLedger` calls nobody drains → deadlock. Fix: all three `applyRecorded` call sites are wrapped in `drainUntil`, matching live `lab.finish()` semantics.
 - Evidence: lab `vitest run` 14 files / 71 tests, exit 0 (including the real-model S4); `tsgo --noEmit` exit 0; `pnpm lint:fast` 0 errors; `pnpm format` clean. Commands pinned: `scenario:collab` / `attack:model` / `replay`. Not product E2EE. No push/merge.
 - Remaining limits: S4's verdict is harness-error rather than pass — an honest consequence of the attack breaking a member's observability, not a measurement flaw; unavailable model service is an external blocker (S4 requires at least one working key among OpenRouter/Groq/DeepSeek/OpenAI).
+
+### 2026-09-18 — AttackLab Effect service purification (E3 subset)
+
+- Added `src/services/`: `LabClock` / `LabFs` / `LabHttp` (`Context.Tag` + `Layer`), with `LiveLabLayer` as the Promise default; tests can use `makeTestClock` / `MemoryLabFs` / `TestLabHttp`.
+- `attacks.ts` I/O moved to `*Effect` plus thin Live wrappers; every public `attack-lab.ts` method runs through `runLabPromise(..., layer)`; budget / disk / xor / healthz no longer call `Date.now` / `node:fs` / `globalThis.fetch` directly.
+- `LabRuntime` takes an injectable `fetch` (default `globalThis.fetch`); `gatedFetch` no longer hard-codes the global.
+- **Not done:** host/session/persist/content-session/scenario spawn, restricted-agent LLM fetch, HPKE/Wasm entropy closure. Effect remains not a sandbox.
+- Evidence: `test/services.test.ts` (budget clock, memory Fs, inject fetch, in-memory xor); `pnpm --filter @lody/e2ee-lab check` exit 0 (13 files / 73 tests, including real-model S4). Not product E2EE. No push/merge.
+
+### 2026-09-18 — Round 2: host/session/persist/content/LLM port injection
+
+- `LabFs` gains `mkdir` / `writeText`; `persist`, `FileRemoteCursorStore`, `DemoSession`, `startDemoHost`, and `content-session` (including crash markers and `updatedAtMs`) accept optional `fs`/`now`/`fetch`, defaulting to Live adapters.
+- Restricted-agent LLM `fetch` is injectable `LabFetch`; scenario secrets/seeds use recording entropy, and marker reads go through `LabFs`.
+- **Still Node-direct:** crash-subprocess `spawn`, `cli.ts`, and fixture `mkdtemp`/`rmSync` (process-lifecycle boundaries, not the AttackLab path).
+- Evidence: `pnpm --filter @lody/e2ee-lab check` exit 0 (13 files / 73 tests). Not product E2EE. No push/merge.

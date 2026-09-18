@@ -51,6 +51,17 @@ export {
   type ReplayMaterial as AttackReplayMaterial,
   type ReplayOutcome,
 } from './attack-lab';
+export {
+  LabClock,
+  LabFs,
+  LabHttp,
+  LiveLabLayer,
+  makeTestClock,
+  MemoryLabFs,
+  TestLabClock,
+  TestLabHttp,
+  type LabServices,
+} from './services';
 export { LabRuntime, type ProtocolFrame } from './runtime';
 export {
   prefixedEntropy,

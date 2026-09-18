@@ -1,6 +1,7 @@
 import type { AttackAction, AttackLab, PublicReport, PublicView } from './attack-lab';
 import type { AgentTurn, CollabAgent } from './scenario';
 import { toHex } from './platform/bytes';
+import type { LabFetch } from './services/http';
 
 export type AgentStep = {
   op: 'observe' | 'readBackend' | 'mutateBackend' | 'submitClaim' | 'finish';
@@ -72,9 +73,10 @@ export function resolveAgentEndpoint(
 async function chooseStep(
   view: PublicView,
   diskHexPrefix: string,
-  endpoint: AgentEndpoint
+  endpoint: AgentEndpoint,
+  fetchImpl: LabFetch
 ): Promise<AgentStep> {
-  const response = await fetch(endpoint.url, {
+  const response = await fetchImpl(endpoint.url, {
     method: 'POST',
     signal: AbortSignal.timeout(60_000),
     headers: {
@@ -127,13 +129,14 @@ async function chooseStep(
 
 export async function runRestrictedAgentWithFallback(
   lab: AttackLab,
-  endpoints: readonly AgentEndpoint[] = listAgentEndpoints()
+  endpoints: readonly AgentEndpoint[] = listAgentEndpoints(),
+  fetchImpl: LabFetch = globalThis.fetch.bind(globalThis)
 ): Promise<{ report: PublicReport; endpoint: AgentEndpoint }> {
   if (endpoints.length === 0) throw new Error('no model key; P4 Agent run blocked');
   let last: unknown;
   for (const endpoint of endpoints) {
     try {
-      return { report: await runRestrictedAgent(lab, endpoint), endpoint };
+      return { report: await runRestrictedAgent(lab, endpoint, fetchImpl), endpoint };
     } catch (error) {
       last = error;
       const text = String(error);
@@ -148,12 +151,13 @@ export async function runRestrictedAgentWithFallback(
 /** LLM-chosen AttackLab steps. Not the canned xor-at-offset explorer. */
 export async function runRestrictedAgent(
   lab: AttackLab,
-  endpoint: AgentEndpoint
+  endpoint: AgentEndpoint,
+  fetchImpl: LabFetch = globalThis.fetch.bind(globalThis)
 ): Promise<PublicReport> {
   let view = await lab.observe();
   let disk = await lab.readBackend({ target: 'riverrun', eventId: 'barrier' });
   for (let step = 0; step < 4; step++) {
-    const choice = await chooseStep(view, toHex(disk.subarray(0, 32)), endpoint);
+    const choice = await chooseStep(view, toHex(disk.subarray(0, 32)), endpoint, fetchImpl);
     if (choice.op === 'finish') break;
     if (choice.op === 'observe') {
       view = await lab.observe();
@@ -197,8 +201,12 @@ type CollabPlan = {
  * resolved at fire time from the public view. This keeps model latency out of
  * the per-step loop while the model still chooses action and boundary.
  */
-async function chooseCollabPlan(turn: AgentTurn, endpoint: AgentEndpoint): Promise<CollabPlan> {
-  const response = await fetch(endpoint.url, {
+async function chooseCollabPlan(
+  turn: AgentTurn,
+  endpoint: AgentEndpoint,
+  fetchImpl: LabFetch
+): Promise<CollabPlan> {
+  const response = await fetchImpl(endpoint.url, {
     method: 'POST',
     signal: AbortSignal.timeout(60_000),
     headers: {
@@ -284,7 +292,10 @@ function planAction(turn: AgentTurn, plan: CollabPlan): AttackAction | 'pass' | 
  * agent fires it at the chosen step (or the next step that exposes a matching
  * pending event). Every honest step stays deterministic.
  */
-export function collabModelAgent(endpoint: AgentEndpoint): CollabAgent {
+export function collabModelAgent(
+  endpoint: AgentEndpoint,
+  fetchImpl: LabFetch = globalThis.fetch.bind(globalThis)
+): CollabAgent {
   let plan: CollabPlan | null = null;
   let planStep = -1;
   let fired = false;
@@ -295,7 +306,7 @@ export function collabModelAgent(endpoint: AgentEndpoint): CollabAgent {
       if (!plan) {
         if (attempts >= 3) return 'pass';
         attempts += 1;
-        const choice = await chooseCollabPlan(turn, endpoint);
+        const choice = await chooseCollabPlan(turn, endpoint, fetchImpl);
         const offset = turn.remainingSteps.indexOf(choice.step ?? '');
         const attackable =
           choice.op === 'intercept' || choice.op === 'readBackend' || choice.op === 'submitClaim';

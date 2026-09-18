@@ -41,7 +41,7 @@ Translation: current
 | 纯计算             | e2ee-core | 普通 TS 编解码、哈希、验签算法、权限规则和状态转换；无隐式网络、存储、时间、随机数、环境探测或 Worker 创建 |
 | 能力接口与实际适配 | e2ee-core | 明确注入加密能力、时钟/定时器、流、存储、实时授权及验签执行策略；真实算法不替换成 mock                     |
 | 业务流程           | e2ee-core | 用 Effect 管理提交/恢复、分钥、准入及资源生命周期；保留 Promise API 薄入口，只有一套业务实现               |
-| 实验调度与攻击     | e2ee-lab  | 纯事件状态机、受控能力实现、攻击接口、记录和裁判；核心不能反向依赖实验室                                   |
+| 实验调度与攻击     | e2ee-lab  | 纯事件状态机、受控能力实现、攻击接口、记录和裁判；核心不能反向依赖实验室。AttackLab、persist、session、host、content-session 与 LLM fetch 的时钟/文件/HTTP 经 Effect `LabClock`/`LabFs`/`LabHttp` 注入；Promise 入口提供同一套 Live 实现。crash `spawn` 与 CLI/fixture 进程生命周期仍可直接用 Node。 |
 
 以下为新增验收契约 E1–E8；协议、权限、恢复及首轮同步的既有规则不变：
 

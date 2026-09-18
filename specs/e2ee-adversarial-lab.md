@@ -41,7 +41,7 @@ The total order describes one execution, not a concurrency-free protocol. A and 
 | Pure computation                   | e2ee-core | Ordinary TS codecs, hashes, signature algorithms, policy and state transitions; no implicit network, storage, time, randomness, environment detection or Worker creation |
 | Capability ports and live adapters | e2ee-core | Explicit crypto, clock/timers, streams, storage, live authority and verification execution strategy; real algorithms, not crypto mocks                                   |
 | Business workflows                 | e2ee-core | Effect for submission/recovery, key delivery, admission and resource lifecycle; preserve thin Promise entrypoints over one implementation                                |
-| Scheduling and attacks             | e2ee-lab  | Pure event reducer, controlled capability implementations, attacks, recorder and judge; no reverse core dependency                                                       |
+| Scheduling and attacks             | e2ee-lab  | Pure event reducer, controlled capability implementations, attacks, recorder and judge; no reverse core dependency. AttackLab, persist, session, host, content-session, and LLM fetch clock/fs/HTTP go through Effect `LabClock`/`LabFs`/`LabHttp`; Promise entrypoints provide the same Live implementation. Crash `spawn` and CLI/fixture process lifecycle may still use Node APIs. |
 
 Added acceptance contracts E1–E8 preserve existing protocol, policy, recovery and initial-sync rules:
 
