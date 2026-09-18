@@ -65,3 +65,6 @@ isNearBottom`）。虚拟列表 spacer 抖动或折叠都可能产生这种收�
 resize 回调恰好落在用户滚到底部的重新上锁与其提交之间，该意图会被释放；
 读者再滚动一次即可重新上锁。按 `packages/components/src/hooks/AGENTS.md`
 的滚动不变量，未引入任何定时器或逐帧重试。
+
+首次滚到底不是这条跟随锁：在会话显示之前，观察者可以继续纠正到真正底部。
+见 [会话首次显示](2026-09-18-conversation-initial-reveal-follow-lock.zh.md)。

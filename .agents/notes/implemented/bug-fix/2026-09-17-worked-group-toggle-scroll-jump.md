@@ -77,3 +77,7 @@ a resize delivery landing between a user's scroll-to-bottom re-lock and its
 commit can release that intent; the reader scrolls once more and re-locks. No
 timers or frame retries were added, per the scrolling invariants in
 `packages/components/src/hooks/AGENTS.md`.
+
+Initial end-restore is not this follow lock: observers may keep correcting to
+the real bottom until the conversation is revealed. See
+[initial conversation reveal](2026-09-18-conversation-initial-reveal-follow-lock.md).

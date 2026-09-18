@@ -196,6 +196,13 @@ export function useStickyScroll({
    * following when the change was committed is never pulled to the end.
    */
   const wasFollowingRef = useRef(state.isAtBottom);
+  /**
+   * True once the commit snapshot has been following. Distinguishes a first
+   * end-restore that has not yet acquired the lock from a reader who already
+   * followed and then escaped — the latter must not be pulled to the end
+   * while the viewport is still hidden.
+   */
+  const hadFollowedRef = useRef(state.isAtBottom);
 
   const itemCountRef = useRef(itemCount);
   itemCountRef.current = itemCount;
@@ -269,19 +276,20 @@ export function useStickyScroll({
     const virtualizer = vlistRef.current;
     if (!viewport || !virtualizer) return;
     const cached = cachedPositionAtMountRef.current;
+    const restoreIntentIsEnd = cached?.type !== 'offset';
     if (cached?.type === 'offset') {
       const target = Math.min(cached.scrollOffset, getScrollElementMaxOffset(viewport));
       if (Math.abs(viewport.scrollTop - target) > 1) return;
     }
     if (
-      !isInitialScrollLayoutReady(viewport, virtualizer, itemCountRef.current, state.isAtBottom)
+      !isInitialScrollLayoutReady(viewport, virtualizer, itemCountRef.current, restoreIntentIsEnd)
     ) {
       return;
     }
     initialScrollRestoredRef.current = true;
     setInitialScrollRestored(true);
     persistVirtualizerCache();
-  }, [persistVirtualizerCache, state, vlistRef]);
+  }, [persistVirtualizerCache, vlistRef]);
   settleInitialLayoutRef.current = settleInitialLayout;
 
   // Observe the bounded mounted row set, not streamed descendants. A row can
@@ -292,14 +300,20 @@ export function useStickyScroll({
     const content = scrollElement?.firstElementChild;
     if (!(content instanceof HTMLElement)) return undefined;
     const follow = () => {
-      if (
+      // First end-restore is one-time positioning, not the follow lock: keep
+      // correcting to the real bottom until the viewport may be shown, even if
+      // this commit's snapshot is not-following. After reveal, only a reader
+      // who was following at commit may be pinned.
+      if (wasFollowingRef.current) hadFollowedRef.current = true;
+      const restoreIntentIsEnd = cachedPositionAtMountRef.current?.type !== 'offset';
+      const shouldCorrectToBottom =
         initialPositionAppliedRef.current &&
-        state.isAtBottom &&
-        wasFollowingRef.current &&
-        !suppressAutoScrollRef?.current
-      ) {
-        scrollToRealBottom();
-      }
+        !suppressAutoScrollRef?.current &&
+        (initialScrollRestoredRef.current
+          ? state.isAtBottom && wasFollowingRef.current
+          : restoreIntentIsEnd &&
+            (wasFollowingRef.current || (!hadFollowedRef.current && state.isAtBottom)));
+      if (shouldCorrectToBottom) scrollToRealBottom();
       settleInitialLayout();
     };
     const resizeObserver = new ResizeObserver(() => {
@@ -309,7 +323,11 @@ export function useStickyScroll({
       // viewport within its near-bottom tolerance — release that here so a
       // reader who was not following at commit is never pulled to the end,
       // and any scroll tick the library queued finds the lock already open.
-      if (!wasFollowingRef.current && state.isAtBottom) stopScroll();
+      // Do not release during the initial end-restore: that would undo the
+      // positioning the reveal check still needs.
+      if (initialScrollRestoredRef.current && !wasFollowingRef.current && state.isAtBottom) {
+        stopScroll();
+      }
       follow();
     });
     resizeObserver.observe(content);
@@ -373,7 +391,19 @@ export function useStickyScroll({
     if (!currentVlist) return;
 
     if (initialPositionAppliedRef.current) {
-      if (state.isAtBottom && !suppressAutoScrollRef?.current) scrollToRealBottom();
+      const restoreIntentIsEnd = cachedPositionAtMountRef.current?.type !== 'offset';
+      if (!suppressAutoScrollRef?.current) {
+        if (!initialScrollRestoredRef.current) {
+          if (
+            restoreIntentIsEnd &&
+            (wasFollowingRef.current || (!hadFollowedRef.current && state.isAtBottom))
+          ) {
+            scrollToRealBottom();
+          }
+        } else if (state.isAtBottom && wasFollowingRef.current) {
+          scrollToRealBottom();
+        }
+      }
       settleInitialLayout();
       return;
     }
@@ -408,6 +438,7 @@ export function useStickyScroll({
   useLayoutEffect(() => {
     const suppressed = suppressAutoScrollRef?.current ?? false;
     wasFollowingRef.current = !suppressed && state.isAtBottom;
+    if (wasFollowingRef.current) hadFollowedRef.current = true;
     if (suppressed) stopScroll();
   });
 

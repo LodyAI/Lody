@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React, { act, createRef, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Virtualizer, type VirtualizerHandle } from 'virtua';
+import { Virtualizer, type CustomItemComponentProps, type VirtualizerHandle } from 'virtua';
 import { it, expect, vi } from 'vitest';
 import type { SessionId } from '@lody/shared';
 import { scrollViewportToRealBottom } from '../src/hooks/sticky-scroll-dom';
@@ -127,6 +127,10 @@ it.each([5, 25])(
  * the browser, where a same-batch re-lock has already landed when the hook's
  * callback runs.
  */
+function TestVirtualRow({ index, ...props }: CustomItemComponentProps) {
+  return <div {...props} data-virtual-index={index} />;
+}
+
 function mountStickyScroll(sessionId: SessionId) {
   const observers: Array<{ cb: ResizeObserverCallback; targets: Set<Element> }> = [];
   vi.stubGlobal(
@@ -162,7 +166,7 @@ function mountStickyScroll(sessionId: SessionId) {
     const { scrollRef } = useStickyScroll({ sessionId, vlistRef, itemCount: count });
     return (
       <div ref={scrollRef} data-viewport="">
-        <Virtualizer ref={vlistRef} itemSize={100}>
+        <Virtualizer ref={vlistRef} item={TestVirtualRow} itemSize={100}>
           {Array.from({ length: count }, (_, i) => (
             <div key={i}>row {i}</div>
           ))}

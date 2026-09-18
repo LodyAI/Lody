@@ -4,15 +4,17 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
 
 ## Conversation scrolling
 
-- Reveal only after the first window AND its destination rows are measured and
-  positioned by Virtua; a DOM scroll write alone is not readiness. Transient
-  visible-range reports must not redirect the initial lease. Later loads never hide the view. Restore before paint;
+- Reveal only after the first window AND destination rows are measured and
+  positioned by Virtua; a DOM scroll write is not readiness. Until reveal,
+  end-restore keeps correcting to the bottom even if the commit snapshot is
+  not-following. Ready uses restore intent and viewport distance, not the
+  near-bottom lock. Transient visible-range reports must not redirect the
+  initial lease. Later loads never hide the view. Restore before paint;
   hydration re-anchors only while following, using DOM extent, not evictable indices.
-- Correct content measurements in ResizeObserver before paint, even with unchanged
-  row counts; no RAF deferral. Correct Virtua spacer-height commits in MutationObserver
-  before deferred resize delivery. Observe spacer height and mounted row geometry
-  (which may overflow it), never message subtrees/text or scroll pointer styles. Respect the live follow
-  lock and explicit jump suppression.
+- Correct content measurements in ResizeObserver before paint; no RAF deferral.
+  Correct Virtua spacer-height commits in MutationObserver before deferred resize
+  delivery. Observe spacer height and mounted row geometry, never message
+  subtrees/text or scroll pointer styles.
 - Virtua owns rows, measurement and index navigation; `use-sticky-scroll.ts` adapts
   `use-stick-to-bottom` to its viewport/content. No content-token effects or upward
   distance thresholds: real upward wheel, touch, selection or scrollbar movement
@@ -23,15 +25,14 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
 - Follow-lock truth is `state.isAtBottom`: the returned `isAtBottom` includes tolerance;
   `escapedFromLock` records escape history and survives explicit re-locking.
 - Handle viewport HEIGHT changes through ResizeObserver; ignore width-only records.
-  No resize-event pumps, guessed transition durations or stop timers. Before a composer
-  inline-height write, set a one-shot ref consumed only by the next viewport height
+  No resize-event pumps, guessed durations or stop timers. Before a composer
+  inline-height write, set a one-shot ref consumed by the next viewport height
   resize, without `scrollToRealBottom`; keep it separate from jump suppression.
-- Group toggles never scroll. Observer deliveries must never re-arm the follow
-  lock — only scroll events may — so the content ResizeObserver releases a
-  same-delivery re-lock while the commit-time snapshot says not-following. No
+- Group toggles never scroll. After reveal, observer deliveries must never re-arm
+  the follow lock — only scroll events may — so the content ResizeObserver releases
+  a same-delivery re-lock while the commit-time snapshot says not-following. No
   frame retries/settle timers.
-- Preserve per-session restoration, search/expansion suppression and viewport resizing
-  for keyboards and terminal docks.
+- Preserve per-session restoration, search/expansion suppression and viewport resizing.
 
 ## Session, auth, and app shell
 
