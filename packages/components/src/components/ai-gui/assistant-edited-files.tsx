@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { FileIcon } from '@/components/icons/file-icons';
 import { cn } from '@/lib/utils';
 
 export type AssistantEditedFileEntry = {
@@ -107,20 +106,16 @@ export function AssistantEditedFiles({ files, onFileClick, className }: Assistan
           </div>
         ) : null}
         <div
-          className={cn(
-            'divide-y divide-border/40',
-            !isSingleFile && 'border-t border-border/40'
-          )}
+          className={cn('divide-y divide-border/40', !isSingleFile && 'border-t border-border/40')}
         >
           {visibleFiles.map((file) => {
             const { directory, name } = splitFilePath(file.filePath);
             const content = (
               <>
-                <FileIcon filePath={file.filePath} className="size-3.5 shrink-0" />
-                <span className="min-w-0 flex-1 truncate font-mono leading-5">
-                  <span className="text-xs font-medium text-foreground/90">{name}</span>
+                <span className="min-w-0 flex-1 truncate text-[length:var(--markdown-body-font-size,1em)] leading-[1.75]">
+                  <span className="font-medium text-foreground/90">{name}</span>
                   {directory ? (
-                    <span className="ml-1.5 text-[11px] text-muted-foreground/70">{directory}</span>
+                    <span className="ml-1.5 text-muted-foreground/70">{directory}</span>
                   ) : null}
                 </span>
                 <DiffStats add={file.add} del={file.del} />
