@@ -89,10 +89,10 @@ export function ComposerAgentRolePanel({
   useLayoutEffect(() => {
     if (compactOverride != null) {
       setDetectedCompact(compactOverride);
-      return;
+      return undefined;
     }
     const el = rootRef.current;
-    if (!el) return;
+    if (!el) return undefined;
     let frames = 0;
     let raf = 0;
     const measure = () => {
