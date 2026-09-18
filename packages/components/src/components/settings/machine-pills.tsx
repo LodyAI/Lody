@@ -100,7 +100,9 @@ export function MachinePills({
                   )}
                 />
               ) : null}
-              <span className="whitespace-nowrap">{pill.label}</span>
+              <span className="max-w-[9.5rem] truncate" title={pill.label}>
+                {pill.label}
+              </span>
               {pill.private ? (
                 <span className="text-[10px] font-normal text-muted-foreground/70">
                   {t('workspace.machines.private', 'Private')}

@@ -160,17 +160,21 @@ function StoryWrapper({
   githubSections = baseGithubSections,
   addableMachines = baseAddableMachines,
   isLoading = false,
+  canRemove = false,
+  pendingKey = null,
 }: {
   sections?: ProjectSettingsSection[];
   githubSections?: GithubProjectSettingsSection[];
   addableMachines?: AddableProjectMachine[];
   isLoading?: boolean;
+  canRemove?: boolean;
+  pendingKey?: string | null;
 }) {
   const [currentSections, setCurrentSections] = useState(sections);
   const [currentGithubSections, setCurrentGithubSections] = useState(githubSections);
 
   return (
-    <div className="mx-auto h-screen max-w-4xl p-4">
+    <div className="mx-auto h-[min(90vh,950px)] max-w-[1100px] overflow-hidden rounded-xl border border-border bg-background p-4">
       <ProjectSettingsView
         sections={currentSections}
         githubSections={currentGithubSections}
@@ -193,6 +197,20 @@ function StoryWrapper({
         onAddGitHubProject={() => {
           console.info('Add GitHub project');
         }}
+        onOpenGitHubSettings={() => {
+          console.info('Open GitHub settings');
+        }}
+        canRemoveLocalProject={canRemove ? () => true : undefined}
+        onRequestRemoveLocalProject={
+          canRemove
+            ? (row) => {
+                console.info('Remove project', row.project.name);
+              }
+            : undefined
+        }
+        localProjectRemovalStateByKey={
+          pendingKey ? new Map([[pendingKey, 'waiting_for_device']]) : undefined
+        }
         onSyncHistory={async (row, provider) => {
           setCurrentSections((prev) =>
             prev.map((section) => ({
@@ -546,5 +564,59 @@ export const MachineWithoutProjects: Story = {
 export const Loading: Story = {
   args: {
     isLoading: true,
+  },
+};
+
+export const DangerZoneVisible: Story = {
+  args: {
+    canRemove: true,
+  },
+};
+
+export const PendingRemoval: Story = {
+  args: {
+    canRemove: true,
+    pendingKey: 'machine-local:project-lody',
+  },
+};
+
+export const ManyMachines: Story = {
+  args: {
+    canRemove: true,
+    addableMachines: [
+      ...baseAddableMachines,
+      {
+        machineId: 'machine-bonjour' as MachineId,
+        machineName: 'zx MacBook-Pro.local',
+        online: true,
+      },
+      {
+        machineId: 'machine-studio' as MachineId,
+        machineName: 'Studio.local',
+        online: false,
+      },
+      {
+        machineId: 'machine-mini' as MachineId,
+        machineName: 'Mac-mini.local',
+        online: true,
+      },
+    ],
+    sections: [
+      ...baseSections,
+      {
+        machineId: 'machine-bonjour' as MachineId,
+        machineName: 'zx MacBook-Pro.local',
+        rows: [
+          makeRow(
+            'machine-bonjour:lody',
+            'machine-bonjour' as MachineId,
+            'zx MacBook-Pro.local',
+            'lody',
+            '/Users/zx/Code/lody',
+            false
+          ),
+        ],
+      },
+    ],
   },
 };

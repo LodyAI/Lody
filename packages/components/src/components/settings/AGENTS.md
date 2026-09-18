@@ -20,6 +20,12 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   settings overlay. Rationale:
   [share inventory jump](../../../../../.agents/notes/implemented/feature/2026-09-15-share-inventory-session-jump.md).
 
+- Desktop Settings > Projects is catalog (machine pills + left list) plus a
+  stacked right pane of `CompactSection`s. Do not put share on the tab bar or
+  nest a second provider tab strip. Local-project deletion reuses
+  `useRemoveLocalProject` / `RemoveLocalProjectDialog` (nested overlay like MCP);
+  do not add a second confirm. Pending removal stays listed until the owning
+  machine finishes.
 - A settings row (`compact-layout.tsx`) is one grid: the label column takes the
   remaining space and the control column hugs its content. Never size either column
   from a viewport breakpoint — settings render in a panel far narrower than the window,

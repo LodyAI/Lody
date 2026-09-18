@@ -232,6 +232,8 @@ export type RemoveLocalProjectDialogProps = {
   onOpenChange: (open: boolean) => void;
   onPreflightCleanup: () => Promise<LocalProjectWorktreeCleanupPreflightResult>;
   onConfirm: (options: { cleanupWorktrees: boolean }) => void;
+  /** Nested inside another dialog (desktop settings). Matches MCP's overlay. */
+  overlayClassName?: string;
 };
 
 type PendingSessionShare = {
@@ -255,6 +257,7 @@ export function RemoveLocalProjectDialog({
   onOpenChange,
   onPreflightCleanup,
   onConfirm,
+  overlayClassName,
 }: RemoveLocalProjectDialogProps) {
   const { t } = useTranslation();
   const [cleanupWorktrees, setCleanupWorktrees] = useState(false);
@@ -302,7 +305,7 @@ export function RemoveLocalProjectDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg" overlayClassName={overlayClassName}>
         <DialogHeader>
           <DialogTitle>
             {t('sidebar.localProjects.remove.title', 'Remove “{{name}}” from Lody?', {

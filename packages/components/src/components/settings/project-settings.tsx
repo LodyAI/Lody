@@ -7,21 +7,23 @@ import { enUS } from 'date-fns/locale/en-US';
 import { zhCN } from 'date-fns/locale/zh-CN';
 import {
   AlertCircle,
-  Boxes,
   BrushCleaning,
+  Clock3,
+  Copy,
   Download,
+  Ellipsis,
   ExternalLink,
   Folder,
   FolderPlus,
   FolderOpen,
   Github,
   Info,
-  MessagesSquare,
   Plus,
   RefreshCw,
   TerminalSquare,
   Wrench,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { Spinner } from '@/ui/spinner';
 import {
   getLocalProjectHistoryProviderKey,
@@ -31,6 +33,7 @@ import {
   type LocalProjectHistoryProviderKey,
   type LocalProjectHistorySyncSummary,
   type LocalProjectMeta,
+  machineSupportsLocalProjectRemovalProtocol,
   type MachineId,
   type WorktreeCleanupScriptConfig,
   type WorktreeSetupScriptConfig,
@@ -42,10 +45,25 @@ import {
   currentWorkspaceSlugAtom,
   settingsSelectedMachineIdAtom,
   settingsSelectedProjectKeyAtom,
+  userAtom,
 } from '@/atoms';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useLocalProjectsAdmin } from '@/hooks/use-local-projects-admin';
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
+import {
+  useLocalProjectRemovalResultNotifications,
+  usePendingLocalProjectRemovals,
+  useRemoveLocalProject,
+} from '@/hooks/use-remove-local-project';
+import { localMachineIdAtom } from '@/atoms/local-probe';
+import { getMachineMetaMapAtom } from '@/atoms/machines';
+import {
+  RemoveLocalProjectDialog,
+  type LocalProjectRemovalState,
+  type PendingLocalProjectRemoval,
+} from '@/components/loro-app-sidebar';
+import { getIpcServices } from '@/lib/electron-ipc-client';
+import { CompactRow, CompactSection } from './compact-layout';
 import { Button, type ButtonProps } from '@/ui/button';
 import { Checkbox } from '@/ui/checkbox';
 import {
@@ -55,10 +73,11 @@ import {
   DropdownMenuTrigger,
 } from '@/ui/dropdown-menu';
 import { Switch } from '@/ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/tabs';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
 import { getGitHubOwnerAvatarUrl } from '@/lib/github-avatar';
 import { Textarea } from '@/ui/textarea';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/tabs';
+
 import { MachinePills, type MachinePillItem } from './machine-pills';
 import {
   AlertDialog,
@@ -204,7 +223,13 @@ export type ProjectSettingsViewProps = {
   /** Opens the folder picker; a machine id pre-selects that machine. */
   onAddLocalProject?: (machineId?: MachineId | null) => void;
   onAddGitHubProject?: () => void;
+  onOpenGitHubSettings?: () => void;
+  canRemoveLocalProject?: (row: ProjectSettingsRow) => boolean;
+  onRequestRemoveLocalProject?: (row: ProjectSettingsRow) => void;
+  localProjectRemovalStateByKey?: ReadonlyMap<string, LocalProjectRemovalState>;
 };
+
+const NESTED_SETTINGS_DIALOG_OVERLAY = 'z-[var(--z-dialog)] bg-black/20';
 
 const EMPTY_WORKTREE_SETUP: WorktreeSetupScriptConfig = {
   scripts: {},
@@ -416,6 +441,78 @@ export function ProjectSettingsComponent({
     openSettings('github');
   }, [openSettings, workspaceSlug]);
 
+  const currentUserId = useAtomValue(userAtom)?.id;
+  const localMachineId = useAtomValue(localMachineIdAtom);
+  const machineMetaMap = useAtomValue(getMachineMetaMapAtom);
+  const onlineMachineIds = useOnlineMachineIds();
+  const visibleMachineIds = useMemo(() => sections.map((section) => section.machineId), [sections]);
+  const pendingRemovals = usePendingLocalProjectRemovals(visibleMachineIds);
+  useLocalProjectRemovalResultNotifications(visibleMachineIds);
+  const { removeLocalProject, preflightLocalProjectRemoval, getRemoveLocalProjectImpact } =
+    useRemoveLocalProject();
+  const [pendingRemoval, setPendingRemoval] = useState<PendingLocalProjectRemoval | null>(null);
+  const [isRemovingLocalProject, setIsRemovingLocalProject] = useState(false);
+
+  const canRemoveLocalProject = useCallback(
+    (row: ProjectSettingsRow) => {
+      const machine = machineMetaMap.get(row.machineId);
+      if (!machineSupportsLocalProjectRemovalProtocol(machine)) return false;
+      if (localMachineId && row.machineId === localMachineId) return true;
+      return Boolean(currentUserId && machine?.ownerUserId === currentUserId);
+    },
+    [currentUserId, localMachineId, machineMetaMap]
+  );
+
+  const localProjectRemovalStateByKey = useMemo(() => {
+    const next = new Map<string, LocalProjectRemovalState>();
+    for (const [key, pending] of pendingRemovals) {
+      next.set(key, onlineMachineIds.has(pending.machineId) ? 'removing' : 'waiting_for_device');
+    }
+    return next;
+  }, [onlineMachineIds, pendingRemovals]);
+
+  const handleRequestRemoveLocalProject = useCallback(
+    (row: ProjectSettingsRow) => {
+      const impact = getRemoveLocalProjectImpact({
+        machineId: row.machineId,
+        localProjectId: row.project.id,
+      });
+      const rootPath = typeof row.project.rootPath === 'string' ? row.project.rootPath : null;
+      setPendingRemoval({
+        machineId: row.machineId,
+        localProjectId: row.project.id,
+        name: row.project.name,
+        pathLabel: rootPath,
+        originalRootPath: rootPath,
+        conversationCount: impact.conversationCount,
+        runningSessionCount: impact.runningSessionCount,
+      });
+    },
+    [getRemoveLocalProjectImpact]
+  );
+
+  const handleConfirmRemoveLocalProject = useCallback(
+    async (options: { cleanupWorktrees: boolean }) => {
+      if (!pendingRemoval) return;
+      setIsRemovingLocalProject(true);
+      try {
+        const removed = await removeLocalProject(
+          {
+            machineId: pendingRemoval.machineId,
+            localProjectId: pendingRemoval.localProjectId,
+            projectName: pendingRemoval.name,
+            originalRootPath: pendingRemoval.originalRootPath ?? undefined,
+          },
+          options
+        );
+        if (removed) setPendingRemoval(null);
+      } finally {
+        setIsRemovingLocalProject(false);
+      }
+    },
+    [pendingRemoval, removeLocalProject]
+  );
+
   return (
     <>
       <ProjectSettingsView
@@ -437,11 +534,46 @@ export function ProjectSettingsComponent({
         addableMachines={addableMachines}
         onAddLocalProject={handleAddLocalProject}
         onAddGitHubProject={workspaceSlug ? handleAddGitHubProject : undefined}
+        onOpenGitHubSettings={workspaceSlug ? handleAddGitHubProject : undefined}
+        canRemoveLocalProject={canRemoveLocalProject}
+        onRequestRemoveLocalProject={handleRequestRemoveLocalProject}
+        localProjectRemovalStateByKey={localProjectRemovalStateByKey}
       />
       <AddLocalProjectDialogContainer
         open={addLocalProjectDialogOpen}
         onOpenChange={setAddLocalProjectDialogOpen}
         initialMachineId={addLocalProjectMachineId}
+      />
+      <RemoveLocalProjectDialog
+        open={pendingRemoval != null}
+        target={pendingRemoval}
+        isRemote={
+          pendingRemoval != null && (!localMachineId || pendingRemoval.machineId !== localMachineId)
+        }
+        machineName={pendingRemoval ? machineMetaMap.get(pendingRemoval.machineId)?.name : null}
+        deviceOnline={pendingRemoval != null && onlineMachineIds.has(pendingRemoval.machineId)}
+        canCleanupWorktrees={
+          pendingRemoval != null &&
+          onlineMachineIds.has(pendingRemoval.machineId) &&
+          machineSupportsLocalProjectRemovalProtocol(machineMetaMap.get(pendingRemoval.machineId))
+        }
+        isRemoving={isRemovingLocalProject}
+        overlayClassName={NESTED_SETTINGS_DIALOG_OVERLAY}
+        onOpenChange={(open) => {
+          if (!open && !isRemovingLocalProject) setPendingRemoval(null);
+        }}
+        onPreflightCleanup={() => {
+          if (!pendingRemoval) {
+            return Promise.reject(new Error('No project selected.'));
+          }
+          return preflightLocalProjectRemoval({
+            machineId: pendingRemoval.machineId,
+            localProjectId: pendingRemoval.localProjectId,
+          });
+        }}
+        onConfirm={(options) => {
+          void handleConfirmRemoveLocalProject(options);
+        }}
       />
     </>
   );
@@ -469,6 +601,10 @@ function ProjectSettingsDesktop({
   addableMachines,
   onAddLocalProject,
   onAddGitHubProject,
+  onOpenGitHubSettings,
+  canRemoveLocalProject,
+  onRequestRemoveLocalProject,
+  localProjectRemovalStateByKey,
   initialMachineId,
   initialProjectKey,
 }: ProjectSettingsViewProps) {
@@ -591,6 +727,10 @@ function ProjectSettingsDesktop({
     onWorktreeCleanupChange,
     onGithubWorktreeSetupChange,
     onGithubWorktreeCleanupChange,
+    onOpenGitHubSettings,
+    canRemoveLocalProject,
+    onRequestRemoveLocalProject,
+    localProjectRemovalStateByKey,
   };
 
   return (
@@ -695,13 +835,16 @@ function ProjectSettingsDesktop({
                       icon={<Folder className="h-3.5 w-3.5" />}
                       title={selection.row.project.name}
                       subtitle={selection.row.project.rootPath}
+                      removalState={localProjectRemovalStateByKey?.get(selection.key) ?? null}
+                      canRemove={canRemoveLocalProject?.(selection.row) === true}
+                      onRemove={() => onRequestRemoveLocalProject?.(selection.row)}
                       onClick={() => setSelectedProjectKey(selection.key)}
                     />
                   ) : null
                 )
               )}
             </div>
-            <div className="min-w-0 flex-1 overflow-hidden">
+            <div className="min-w-0 flex-1 overflow-y-auto">
               {selectedProject ? (
                 <ProjectDetailPane selection={selectedProject} {...detailHandlers} />
               ) : (
@@ -722,33 +865,89 @@ function ProjectMasterRow({
   icon,
   title,
   subtitle,
+  removalState = null,
+  canRemove = false,
+  onRemove,
   onClick,
 }: {
   readonly selected: boolean;
   readonly icon: ReactNode;
   readonly title: string;
   readonly subtitle: string;
+  readonly removalState?: LocalProjectRemovalState | null;
+  readonly canRemove?: boolean;
+  readonly onRemove?: () => void;
   readonly onClick: () => void;
 }) {
+  const { t } = useTranslation();
+  const removalStateLabel =
+    removalState === 'waiting_for_device'
+      ? t('sidebar.localProjects.remove.waitingForDevice', 'Waiting for device…')
+      : removalState === 'removing'
+        ? t('sidebar.localProjects.remove.removing', 'Removing…')
+        : null;
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
+    <div
       className={cn(
-        'mb-0.5 flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
+        'group mb-0.5 flex w-full min-w-0 items-center gap-1 rounded-md pr-1',
         selected ? 'bg-foreground/[0.08] text-foreground' : 'text-foreground/90 hover:bg-hover/50'
       )}
     >
-      <div className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-md bg-foreground/[0.05] text-muted-foreground">
-        {icon}
-      </div>
-      <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-medium leading-tight">{title}</div>
-        <div className="truncate font-mono text-[11px] leading-tight text-muted-foreground">
-          {subtitle}
+      <button
+        type="button"
+        onClick={onClick}
+        className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left"
+      >
+        <div className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-md bg-foreground/[0.05] text-muted-foreground">
+          {icon}
         </div>
-      </div>
-    </button>
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-sm font-medium leading-tight">{title}</div>
+          <div className="truncate font-mono text-[11px] leading-tight text-muted-foreground">
+            {subtitle}
+          </div>
+        </div>
+      </button>
+      {removalStateLabel ? (
+        <span
+          className="mr-1 inline-flex shrink-0 items-center gap-1 text-[10px] font-medium text-muted-foreground"
+          title={removalStateLabel}
+        >
+          {removalState === 'waiting_for_device' ? (
+            <Clock3 className="h-3 w-3 shrink-0" aria-hidden="true" />
+          ) : (
+            <Spinner className="h-3 w-3 shrink-0" />
+          )}
+        </span>
+      ) : canRemove && onRemove ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100"
+              aria-label={t('sessions.moreActions', 'More actions')}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <Ellipsis className="h-3.5 w-3.5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-[10rem]">
+            <DropdownMenuItem
+              className="text-destructive focus:text-destructive"
+              onClick={(event) => {
+                event.stopPropagation();
+                onRemove();
+              }}
+            >
+              {t('workspace.projects.delete', 'Delete project')}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
+    </div>
   );
 }
 
@@ -845,6 +1044,10 @@ function ProjectDetailPane({
   onWorktreeCleanupChange,
   onGithubWorktreeSetupChange,
   onGithubWorktreeCleanupChange,
+  onOpenGitHubSettings,
+  canRemoveLocalProject,
+  onRequestRemoveLocalProject,
+  localProjectRemovalStateByKey,
 }: {
   readonly selection: ProjectSettingsSelection;
 } & Omit<ProjectRowProps, 'row'> & {
@@ -856,6 +1059,10 @@ function ProjectDetailPane({
       row: GithubProjectSettingsRow,
       config: WorktreeCleanupScriptConfig
     ) => Promise<void>;
+    onOpenGitHubSettings?: () => void;
+    canRemoveLocalProject?: (row: ProjectSettingsRow) => boolean;
+    onRequestRemoveLocalProject?: (row: ProjectSettingsRow) => void;
+    localProjectRemovalStateByKey?: ReadonlyMap<string, LocalProjectRemovalState>;
   }) {
   if (selection.kind === 'github') {
     return (
@@ -863,6 +1070,7 @@ function ProjectDetailPane({
         row={selection.row}
         onWorktreeSetupChange={onGithubWorktreeSetupChange}
         onWorktreeCleanupChange={onGithubWorktreeCleanupChange}
+        onOpenGitHubSettings={onOpenGitHubSettings}
       />
     );
   }
@@ -877,8 +1085,31 @@ function ProjectDetailPane({
       onHistorySelectionChange={onHistorySelectionChange}
       onWorktreeSetupChange={onWorktreeSetupChange}
       onWorktreeCleanupChange={onWorktreeCleanupChange}
+      canRemove={canRemoveLocalProject?.(selection.row) === true}
+      onRemove={() => onRequestRemoveLocalProject?.(selection.row)}
+      removalState={localProjectRemovalStateByKey?.get(selection.row.key) ?? null}
     />
   );
+}
+
+function copyProjectPath(path: string, t: TFunction) {
+  void navigator.clipboard
+    .writeText(path)
+    .then(() => toast.success(t('sessions.pathCopied', 'Path copied to clipboard')))
+    .catch(() => toast.error(t('sessions.copyFailed', 'Unable to copy')));
+}
+
+function revealProjectPath(path: string, t: TFunction) {
+  const services = getIpcServices();
+  if (!services) {
+    copyProjectPath(path, t);
+    return;
+  }
+  void services.app.revealLocalPath(path).then((result) => {
+    if (!result.revealed) {
+      toast.error(t('sessions.fileActions.revealFailed', 'Unable to show this folder'));
+    }
+  });
 }
 
 function LocalProjectDetail({
@@ -890,7 +1121,14 @@ function LocalProjectDetail({
   onHistorySelectionChange,
   onWorktreeSetupChange,
   onWorktreeCleanupChange,
-}: ProjectRowProps) {
+  canRemove = false,
+  onRemove,
+  removalState = null,
+}: ProjectRowProps & {
+  canRemove?: boolean;
+  onRemove?: () => void;
+  removalState?: LocalProjectRemovalState | null;
+}) {
   const { t } = useTranslation();
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const skillsSource: ProjectSkillsSource | null = workspaceId
@@ -901,71 +1139,121 @@ function LocalProjectDetail({
         localProjectId: row.project.id,
       }
     : null;
+  const rootPath = typeof row.project.rootPath === 'string' ? row.project.rootPath : '';
+  const canReveal = Boolean(getIpcServices());
+  const removalStateLabel =
+    removalState === 'waiting_for_device'
+      ? t('sidebar.localProjects.remove.waitingForDevice', 'Waiting for device…')
+      : removalState === 'removing'
+        ? t('sidebar.localProjects.remove.removing', 'Removing…')
+        : null;
+
   return (
     <TooltipProvider delayDuration={200}>
-      {/* No name/path header — the left list already shows those. The share
-          toggle sits at the end of the tab bar; each tab body scrolls on its
-          own with scrollbar-pro so long lists never push the layout. */}
-      <div className="flex h-full min-h-0 flex-col p-4 pt-3">
-        <Tabs defaultValue="sync" className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="flex items-center justify-between gap-2">
-            <TabsList className="h-8">
-              <TabsTrigger value="sync" className="gap-1.5 px-2.5 text-xs">
-                <MessagesSquare className="h-3.5 w-3.5" />
-                {t('workspace.projects.historySyncSection', 'Conversation sync')}
-              </TabsTrigger>
-              <TabsTrigger value="worktree" className="gap-1.5 px-2.5 text-xs">
-                <TerminalSquare className="h-3.5 w-3.5" />
-                {t('workspace.projects.worktreeSetupTab', 'Worktree setup')}
-              </TabsTrigger>
-              <TabsTrigger value="skills" className="gap-1.5 px-2.5 text-xs">
-                <Boxes className="h-3.5 w-3.5" />
-                {t('workspace.projects.skills.tabLabel', 'Skills')}
-              </TabsTrigger>
-            </TabsList>
-            <ProjectShareControl row={row} onSharedWithTeamChange={onSharedWithTeamChange} />
+      <div className="flex flex-col gap-3 p-4 pt-3">
+        <div className="flex min-w-0 items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <h3 className="truncate text-sm font-semibold text-foreground">{row.project.name}</h3>
+            {rootPath ? (
+              <div className="mt-0.5 flex min-w-0 items-center gap-1">
+                <p
+                  className="min-w-0 truncate font-mono text-[11px] text-muted-foreground"
+                  title={rootPath}
+                >
+                  {rootPath}
+                </p>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 shrink-0"
+                  aria-label={t('sessions.copyPath', 'Copy path')}
+                  onClick={() => copyProjectPath(rootPath, t)}
+                >
+                  <Copy className="h-3 w-3" />
+                </Button>
+                {canReveal ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 shrink-0"
+                    aria-label={t('sidebar.localProjects.reveal', 'Reveal in file manager')}
+                    onClick={() => revealProjectPath(rootPath, t)}
+                  >
+                    <FolderOpen className="h-3 w-3" />
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+            {removalStateLabel ? (
+              <p className="mt-1 text-[11px] text-muted-foreground">{removalStateLabel}</p>
+            ) : null}
           </div>
-          <TabsContent value="sync" className="mt-3 flex min-h-0 flex-1 flex-col">
-            <LocalHistorySection
-              row={row}
-              onSyncHistory={onSyncHistory}
-              onImportHistory={onImportHistory}
-              onResolveHistoryConflict={onResolveHistoryConflict}
-              onHistorySelectionChange={onHistorySelectionChange}
+        </div>
+
+        <ProjectShareControl row={row} onSharedWithTeamChange={onSharedWithTeamChange} />
+
+        <CompactSection title={t('workspace.projects.worktreeSetupTitle', 'Worktree')}>
+          <div className="flex flex-col gap-5 p-3">
+            <WorktreeSetupEditor
+              phase="setup"
+              config={row.worktreeSetup}
+              shell={row.shell}
+              isLoading={row.isWorktreeSetupLoading}
+              isSaving={row.isWorktreeSetupSaving}
+              errorMessage={row.worktreeSetupError}
+              onSave={(config) => onWorktreeSetupChange?.(row, config)}
             />
-          </TabsContent>
-          <TabsContent
-            value="worktree"
-            className="scrollbar-pro mt-3 min-h-0 flex-1 overflow-y-auto pr-1"
-          >
-            <div className="flex flex-col gap-5">
-              <WorktreeSetupEditor
-                phase="setup"
-                config={row.worktreeSetup}
-                shell={row.shell}
-                isLoading={row.isWorktreeSetupLoading}
-                isSaving={row.isWorktreeSetupSaving}
-                errorMessage={row.worktreeSetupError}
-                onSave={(config) => onWorktreeSetupChange?.(row, config)}
-              />
-              <WorktreeSetupEditor
-                phase="cleanup"
-                config={row.worktreeCleanup}
-                shell={row.shell}
-                isLoading={row.isWorktreeCleanupLoading}
-                isSaving={row.isWorktreeCleanupSaving}
-                errorMessage={row.worktreeCleanupError}
-                onSave={(config) => onWorktreeCleanupChange?.(row, config)}
-              />
-            </div>
-          </TabsContent>
-          <TabsContent
-            value="skills"
-            className="scrollbar-pro mt-3 min-h-0 flex-1 overflow-y-auto pr-1"
-          >
+            <WorktreeSetupEditor
+              phase="cleanup"
+              config={row.worktreeCleanup}
+              shell={row.shell}
+              isLoading={row.isWorktreeCleanupLoading}
+              isSaving={row.isWorktreeCleanupSaving}
+              errorMessage={row.worktreeCleanupError}
+              onSave={(config) => onWorktreeCleanupChange?.(row, config)}
+            />
+          </div>
+        </CompactSection>
+
+        <CompactSection title={t('workspace.projects.skills.tabLabel', 'Skills')}>
+          <div className="p-3">
             <ProjectSkillsTab source={skillsSource} />
-          </TabsContent>
-        </Tabs>
+          </div>
+        </CompactSection>
+
+        <CompactSection title={t('workspace.projects.historySyncSection', 'Conversation sync')}>
+          <LocalHistorySection
+            row={row}
+            onSyncHistory={onSyncHistory}
+            onImportHistory={onImportHistory}
+            onResolveHistoryConflict={onResolveHistoryConflict}
+            onHistorySelectionChange={onHistorySelectionChange}
+          />
+        </CompactSection>
+
+        {canRemove && onRemove ? (
+          <CompactSection>
+            <CompactRow
+              label={t('workspace.projects.delete', 'Delete project')}
+              helper={t(
+                'sidebar.localProjects.remove.originalDirectorySafe',
+                'Lody never deletes the original project folder or its files.'
+              )}
+            >
+              <Button
+                type="button"
+                variant="destructive"
+                size="sm"
+                disabled={removalState != null}
+                onClick={onRemove}
+              >
+                {t('workspace.projects.delete', 'Delete project')}
+              </Button>
+            </CompactRow>
+          </CompactSection>
+        ) : null}
       </div>
     </TooltipProvider>
   );
@@ -1003,30 +1291,21 @@ function ProjectShareControl({
   }
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <div className="flex shrink-0 items-center gap-2">
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            {t('workspace.projects.shareLabel', 'Share project')}
-            {row.isUpdating ? <Spinner className="h-3.5 w-3.5 text-muted-foreground" /> : null}
-          </span>
-          <Switch
-            checked={row.sharedWithTeam}
-            disabled={row.isUpdating || !row.canUpdateSharing || !onSharedWithTeamChange}
-            aria-label={t('workspace.projects.shareToggle', {
-              defaultValue: 'Share project with team',
-            })}
-            onCheckedChange={(checked) => {
-              void onSharedWithTeamChange?.(row, checked);
-            }}
-          />
-        </div>
-      </TooltipTrigger>
-      <TooltipContent side="left" className="max-w-72 px-2.5 py-2">
-        <div className="font-medium">{tooltipLabel}</div>
-        <div className="mt-0.5 text-xs text-muted-foreground">{scopeDescription}</div>
-      </TooltipContent>
-    </Tooltip>
+    <CompactSection title={t('workspace.projects.shareLabel', 'Share project')}>
+      <CompactRow label={tooltipLabel} helper={scopeDescription}>
+        {row.isUpdating ? <Spinner className="h-3.5 w-3.5 text-muted-foreground" /> : null}
+        <Switch
+          checked={row.sharedWithTeam}
+          disabled={row.isUpdating || !row.canUpdateSharing || !onSharedWithTeamChange}
+          aria-label={t('workspace.projects.shareToggle', {
+            defaultValue: 'Share project with team',
+          })}
+          onCheckedChange={(checked) => {
+            void onSharedWithTeamChange?.(row, checked);
+          }}
+        />
+      </CompactRow>
+    </CompactSection>
   );
 }
 
@@ -1088,63 +1367,52 @@ function LocalHistorySection({
 
   if (!activeHistoryState) {
     return (
-      <div className="flex flex-col items-center justify-center gap-2 px-4 py-10 text-center">
-        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted/60">
-          <MessagesSquare className="h-4 w-4 text-muted-foreground" />
-        </div>
-        <p className="max-w-xs text-xs text-muted-foreground">
-          {t(
-            'workspace.projects.historySyncEmptyHint',
-            'No agents detected on this machine yet. Conversation sync becomes available once an ACP agent has run here.'
-          )}
-        </p>
-      </div>
+      <p className="px-3 py-2.5 text-xs text-muted-foreground">
+        {t(
+          'workspace.projects.historySyncEmptyHint',
+          'No agents detected on this machine yet. Conversation sync becomes available once an ACP agent has run here.'
+        )}
+      </p>
     );
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-foreground/[0.025]">
-      <div
-        role="tablist"
-        aria-label={t('workspace.projects.historyTablistLabel', 'History providers')}
-        className="flex shrink-0 gap-1 overflow-x-auto p-1"
-      >
-        {visibleHistoryImports.map((state) => {
-          const active = state.providerKey === activeHistoryState.providerKey;
-          const providerLabel = getHistoryProviderLabel(state.provider);
-          return (
-            <button
-              key={state.providerKey}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              className={cn(
-                'flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-md px-3 text-xs transition-colors',
-                active
-                  ? 'bg-foreground/[0.08] text-foreground'
-                  : 'text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground'
-              )}
-              onClick={() => setActiveProviderKey(state.providerKey)}
-            >
-              <AgentIcon
-                cliType={state.provider.cliType}
-                agentType={state.provider.agentType}
-                className="h-3 w-3 opacity-60"
-              />
-              <span className="truncate">{providerLabel}</span>
-            </button>
-          );
-        })}
+    <div className="flex min-w-0 flex-col">
+      {visibleHistoryImports.map((state) => {
+        const active = state.providerKey === activeHistoryState.providerKey;
+        const providerLabel = getHistoryProviderLabel(state.provider);
+        return (
+          <button
+            key={state.providerKey}
+            type="button"
+            className={cn(
+              'flex min-w-0 items-center gap-2 px-3 py-2 text-left text-sm transition-colors',
+              active
+                ? 'bg-foreground/[0.06] text-foreground'
+                : 'text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground'
+            )}
+            onClick={() => setActiveProviderKey(state.providerKey)}
+          >
+            <AgentIcon
+              cliType={state.provider.cliType}
+              agentType={state.provider.agentType}
+              className="h-3.5 w-3.5 shrink-0 opacity-70"
+            />
+            <span className="min-w-0 flex-1 truncate">{providerLabel}</span>
+          </button>
+        );
+      })}
+      <div className="border-t border-border/60">
+        <ProjectHistoryImportPanel
+          key={activeHistoryState.providerKey}
+          row={row}
+          state={activeHistoryState}
+          onSyncHistory={onSyncHistory}
+          onImportHistory={onImportHistory}
+          onResolveHistoryConflict={onResolveHistoryConflict}
+          onHistorySelectionChange={onHistorySelectionChange}
+        />
       </div>
-      <ProjectHistoryImportPanel
-        key={activeHistoryState.providerKey}
-        row={row}
-        state={activeHistoryState}
-        onSyncHistory={onSyncHistory}
-        onImportHistory={onImportHistory}
-        onResolveHistoryConflict={onResolveHistoryConflict}
-        onHistorySelectionChange={onHistorySelectionChange}
-      />
     </div>
   );
 }
@@ -1153,6 +1421,7 @@ function GithubProjectDetail({
   row,
   onWorktreeSetupChange,
   onWorktreeCleanupChange,
+  onOpenGitHubSettings,
 }: {
   row: GithubProjectSettingsRow;
   onWorktreeSetupChange?: (
@@ -1163,6 +1432,7 @@ function GithubProjectDetail({
     row: GithubProjectSettingsRow,
     config: WorktreeCleanupScriptConfig
   ) => Promise<void>;
+  onOpenGitHubSettings?: () => void;
 }) {
   const { t } = useTranslation();
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
@@ -1174,51 +1444,57 @@ function GithubProjectDetail({
       }
     : null;
   return (
-    <div className="flex h-full min-h-0 flex-col p-4 pt-3">
-      <Tabs defaultValue="worktree" className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <div className="flex items-center justify-between gap-2">
-          <TabsList className="h-8">
-            <TabsTrigger value="worktree" className="gap-1.5 px-2.5 text-xs">
-              <TerminalSquare className="h-3.5 w-3.5" />
-              {t('workspace.projects.worktreeSetupTab', 'Worktree setup')}
-            </TabsTrigger>
-            <TabsTrigger value="skills" className="gap-1.5 px-2.5 text-xs">
-              <Boxes className="h-3.5 w-3.5" />
-              {t('workspace.projects.skills.tabLabel', 'Skills')}
-            </TabsTrigger>
-          </TabsList>
-          <span className="rounded-sm bg-foreground/[0.06] px-2 py-0.5 text-[11px] text-muted-foreground">
-            {row.private ? t('workspace.projects.privateRepo', 'Private') : 'Public'}
-          </span>
-        </div>
-        <TabsContent
-          value="worktree"
-          className="scrollbar-pro mt-3 min-h-0 flex-1 overflow-y-auto pr-1"
-        >
-          <div className="flex flex-col gap-5">
-            <WorktreeSetupEditor
-              phase="setup"
-              config={row.worktreeSetup}
-              isSaving={row.isWorktreeSetupSaving}
-              errorMessage={row.worktreeSetupError}
-              onSave={(config) => onWorktreeSetupChange?.(row, config)}
-            />
-            <WorktreeSetupEditor
-              phase="cleanup"
-              config={row.worktreeCleanup}
-              isSaving={row.isWorktreeCleanupSaving}
-              errorMessage={row.worktreeCleanupError}
-              onSave={(config) => onWorktreeCleanupChange?.(row, config)}
-            />
+    <div className="flex flex-col gap-3 p-4 pt-3">
+      <div className="flex min-w-0 items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-2">
+            <h3 className="truncate text-sm font-semibold text-foreground">{row.name}</h3>
+            <span className="shrink-0 rounded-sm bg-foreground/[0.06] px-2 py-0.5 text-[11px] text-muted-foreground">
+              {row.private ? t('workspace.projects.privateRepo', 'Private') : 'Public'}
+            </span>
           </div>
-        </TabsContent>
-        <TabsContent
-          value="skills"
-          className="scrollbar-pro mt-3 min-h-0 flex-1 overflow-y-auto pr-1"
-        >
+          <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
+            {row.repoFullName}
+          </p>
+        </div>
+        {onOpenGitHubSettings ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 shrink-0 gap-1 px-2 text-xs"
+            onClick={onOpenGitHubSettings}
+          >
+            <Github className="h-3.5 w-3.5" />
+            {t('workspace.projects.manageInGithubSettings', 'Manage in GitHub settings')}
+          </Button>
+        ) : null}
+      </div>
+
+      <CompactSection title={t('workspace.projects.worktreeSetupTitle', 'Worktree')}>
+        <div className="flex flex-col gap-5 p-3">
+          <WorktreeSetupEditor
+            phase="setup"
+            config={row.worktreeSetup}
+            isSaving={row.isWorktreeSetupSaving}
+            errorMessage={row.worktreeSetupError}
+            onSave={(config) => onWorktreeSetupChange?.(row, config)}
+          />
+          <WorktreeSetupEditor
+            phase="cleanup"
+            config={row.worktreeCleanup}
+            isSaving={row.isWorktreeCleanupSaving}
+            errorMessage={row.worktreeCleanupError}
+            onSave={(config) => onWorktreeCleanupChange?.(row, config)}
+          />
+        </div>
+      </CompactSection>
+
+      <CompactSection title={t('workspace.projects.skills.tabLabel', 'Skills')}>
+        <div className="p-3">
           <ProjectSkillsTab source={skillsSource} />
-        </TabsContent>
-      </Tabs>
+        </div>
+      </CompactSection>
     </div>
   );
 }
@@ -1699,41 +1975,25 @@ export function ProjectHistoryImportPanel({
           </div>
         )}
         {!hasCatalogSessions ? (
-          <div className="flex min-h-44 flex-1 flex-col items-center justify-center px-6 py-10 text-center">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-foreground/[0.06]">
-              <MessagesSquare className="h-4 w-4 text-muted-foreground" />
-            </div>
-            <div className="mt-3 max-w-sm">
-              <p className="font-medium text-foreground">
-                {hasSyncedCatalog
-                  ? t('workspace.projects.historyEmpty', {
-                      defaultValue: 'No {{provider}} conversations found',
-                      provider: providerLabel,
-                    })
-                  : t('workspace.projects.historyInitialSyncTitle', {
-                      defaultValue: 'Sync {{provider}} conversations',
-                      provider: providerLabel,
-                    })}
-              </p>
-              <p className="mt-1 leading-relaxed text-muted-foreground">
-                {hasSyncedCatalog
-                  ? t('workspace.projects.historyEmptyHint', {
-                      defaultValue:
-                        'Start a conversation for this project in {{provider}}, then sync again.',
-                      provider: providerLabel,
-                    })
-                  : t('workspace.projects.historyInitialSyncHint', {
-                      defaultValue:
-                        "Find this project's conversations in {{provider}}, then choose which ones to import.",
-                      provider: providerLabel,
-                    })}
-              </p>
-            </div>
+          <div className="flex flex-col gap-2 px-3 py-2.5">
+            <p className="text-xs text-muted-foreground">
+              {hasSyncedCatalog
+                ? t('workspace.projects.historyEmptyHint', {
+                    defaultValue:
+                      'Start a conversation for this project in {{provider}}, then sync again.',
+                    provider: providerLabel,
+                  })
+                : t('workspace.projects.historyInitialSyncHint', {
+                    defaultValue:
+                      "Find this project's conversations in {{provider}}, then choose which ones to import.",
+                    provider: providerLabel,
+                  })}
+            </p>
             {state.canSync ? (
               <Button
                 type="button"
                 size="sm"
-                className="mt-4"
+                className="h-7 self-start"
                 disabled={state.isSyncing || state.isImporting || !onSyncHistory}
                 onClick={() => {
                   void onSyncHistory?.(row, state.provider);
