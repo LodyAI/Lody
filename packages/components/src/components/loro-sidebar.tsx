@@ -51,6 +51,8 @@ import {
   SquarePen,
   Link2,
   MessageSquareMore,
+  ChevronLeft,
+  ChevronRight,
   PanelLeft,
   Plus,
   Search,
@@ -529,6 +531,44 @@ function useCommandShortcutLabel(id: ShortcutCommandId): string | null {
  * than starting a chat, so the entry sits where you already are instead of
  * behind a navigation; the tooltip is where its shortcut gets taught.
  */
+function SidebarHeaderIconButton({
+  label,
+  shortcut,
+  onClick,
+  className,
+  children,
+}: {
+  label: string;
+  shortcut?: string | null;
+  onClick?: () => void;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          aria-label={label}
+          onClick={onClick}
+          className={cn(
+            'flex h-7 w-7 shrink-0 items-center justify-center rounded-md',
+            'text-sidebar-foreground-muted hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
+            'outline-hidden focus-visible:ring-1 focus-visible:ring-sidebar-ring/40',
+            className
+          )}
+        >
+          {children}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom" className="flex items-center gap-1.5">
+        <span>{label}</span>
+        {shortcut ? <Kbd>{shortcut}</Kbd> : null}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 function SidebarNewTaskButton({ label, onClick }: { label: string; onClick: () => void }) {
   const shortcut = useCommandShortcutLabel('tasks.quickAdd');
   return (
@@ -696,6 +736,9 @@ export const LoroSidebar = memo(function LoroSidebar({
   const isMobile = useIsMobile();
   const isElectronFullscreen = useElectronFullscreen();
   const { t } = useTranslation();
+  const collapseShortcut = useCommandShortcutLabel('sidebar.toggle');
+  const backShortcut = useCommandShortcutLabel('nav.back');
+  const forwardShortcut = useCommandShortcutLabel('nav.forward');
   const mergedLabels: LoroSidebarLabels = {
     ...defaultLabels,
     ...labels,
@@ -1018,25 +1061,48 @@ export const LoroSidebar = memo(function LoroSidebar({
               Lody
             </span>
           )}
-          {/* Collapse sits on the traffic-light row. `top-2` in an h-11 header
-              centers the 28px button at 22px, matching the 23px macOS light
-              centerline and the collapsed expand control. */}
-          {!isMobile && onRequestCollapse ? (
-            <button
-              type="button"
-              aria-label="Collapse sidebar"
-              onClick={() => onRequestCollapse()}
-              className={cn(
-                'ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-md',
-                'text-sidebar-foreground-muted hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
-                windowDrag && WINDOW_DRAG_EXEMPT_CLASS,
-                isElectron
-                  ? 'focus-visible:outline-hidden'
-                  : 'opacity-0 pointer-events-none group-hover/sidebar-header:opacity-100 group-hover/sidebar-header:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto focus-visible:outline-hidden transition-opacity duration-100'
-              )}
-            >
-              <PanelLeft className="h-4 w-4" />
-            </button>
+          {!isMobile ? (
+            <TooltipProvider delayDuration={400}>
+              <div
+                className={cn(
+                  'ml-auto flex shrink-0 items-center',
+                  windowDrag && WINDOW_DRAG_EXEMPT_CLASS
+                )}
+              >
+                {onRequestCollapse ? (
+                  <SidebarHeaderIconButton
+                    label={t('commands.sidebar.toggle', 'Toggle Sidebar')}
+                    shortcut={collapseShortcut}
+                    onClick={() => onRequestCollapse()}
+                    className={
+                      isElectron
+                        ? 'focus-visible:outline-hidden'
+                        : 'opacity-0 pointer-events-none group-hover/sidebar-header:opacity-100 group-hover/sidebar-header:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto transition-opacity duration-100'
+                    }
+                  >
+                    <PanelLeft className="h-4 w-4" />
+                  </SidebarHeaderIconButton>
+                ) : null}
+                <SidebarHeaderIconButton
+                  label={t('commands.nav.back', 'Back')}
+                  shortcut={backShortcut}
+                  onClick={() => {
+                    if (!commands.execute('nav.back')) window.history.back();
+                  }}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </SidebarHeaderIconButton>
+                <SidebarHeaderIconButton
+                  label={t('commands.nav.forward', 'Forward')}
+                  shortcut={forwardShortcut}
+                  onClick={() => {
+                    if (!commands.execute('nav.forward')) window.history.forward();
+                  }}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </SidebarHeaderIconButton>
+              </div>
+            </TooltipProvider>
           ) : null}
         </div>
 

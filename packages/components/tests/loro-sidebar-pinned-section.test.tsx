@@ -147,7 +147,7 @@ describe('LoroSidebar pinned section', () => {
   it('keeps the desktop collapse toggle hover-revealed in browsers', () => {
     renderSidebar({ onRequestCollapse: vi.fn() });
 
-    const button = container?.querySelector('button[aria-label="Collapse sidebar"]');
+    const button = container?.querySelector('button[aria-label="Toggle Sidebar"]');
     expect(button).not.toBeNull();
     expect(button?.className).toContain('opacity-0');
     expect(button?.className).toContain('pointer-events-none');
@@ -157,11 +157,27 @@ describe('LoroSidebar pinned section', () => {
   it('shows the desktop collapse toggle by default in Electron', () => {
     renderSidebar({ isElectron: true, onRequestCollapse: vi.fn() });
 
-    const button = container?.querySelector('button[aria-label="Collapse sidebar"]');
+    const button = container?.querySelector('button[aria-label="Toggle Sidebar"]');
     expect(button).not.toBeNull();
     expect(button?.className).not.toContain('opacity-0');
     expect(button?.className).not.toContain('pointer-events-none');
     expect(button?.className).toContain('focus-visible:outline-hidden');
+  });
+
+  it('renders back and forward next to the collapse toggle', () => {
+    renderSidebar({ onRequestCollapse: vi.fn() });
+
+    const collapse = container?.querySelector('button[aria-label="Toggle Sidebar"]');
+    const back = container?.querySelector('button[aria-label="Back"]');
+    const forward = container?.querySelector('button[aria-label="Forward"]');
+    expect(collapse).not.toBeNull();
+    expect(back).not.toBeNull();
+    expect(forward).not.toBeNull();
+    const parent = collapse?.parentElement;
+    expect(parent).toBe(back?.parentElement);
+    expect(parent?.children[0]).toBe(collapse);
+    expect(parent?.children[1]).toBe(back);
+    expect(parent?.children[2]).toBe(forward);
   });
 
   it('renders pinned conversations before Workspace groups', () => {
