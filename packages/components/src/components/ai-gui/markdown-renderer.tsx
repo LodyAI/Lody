@@ -194,7 +194,7 @@ const MARKDOWN_BASE_CLASSNAME =
   '[&_h5]:!mt-3 [&_h5]:!mb-1.5 [&_h5]:font-semibold [&_h5]:uppercase [&_h5]:tracking-wide ' +
   '[&_h6]:!mt-3 [&_h6]:!mb-1.5 [&_h6]:font-semibold [&_h6]:uppercase [&_h6]:tracking-wide [&_h6]:text-muted-foreground ' +
   '[&_:is(h1,h2,h3,h4,h5,h6):first-child]:!mt-0 ' +
-  '[&_a]:text-[hsl(206_58%_38%)] dark:[&_a]:text-[hsl(205_52%_70%)] ' +
+  '[&_a]:text-[hsl(212_62%_40%)] dark:[&_a]:text-[hsl(211_56%_72%)] ' +
   '[&_a]:underline [&_a]:underline-offset-2 [&_a]:decoration-current/35 [&_a:hover]:decoration-current/70 ' +
   '[&_.katex-display]:!my-5 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden [&_.katex-display]:py-1 ' +
   '[&_[data-streamdown="mermaid-block"]]:!my-5 ' +
@@ -1033,7 +1033,7 @@ const AgentFileLink = ({
       title={href}
       aria-label={`${hasOpenAction ? openAgentFileLabel : copyAgentFileLabel}: ${href}`}
       className={cn(
-        'inline-flex max-w-full items-center gap-1 rounded-sm align-[-0.1em] text-[hsl(206_58%_38%)] no-underline shadow-none transition-colors dark:text-[hsl(205_52%_70%)]',
+        'inline-flex max-w-full items-center gap-1 rounded-sm align-[-0.1em] text-[hsl(212_62%_40%)] no-underline shadow-none transition-colors dark:text-[hsl(211_56%_72%)]',
         'hover:underline underline-offset-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
       )}
     >
