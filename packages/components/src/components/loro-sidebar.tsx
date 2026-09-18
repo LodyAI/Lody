@@ -531,36 +531,105 @@ function useCommandShortcutLabel(id: ShortcutCommandId): string | null {
  * than starting a chat, so the entry sits where you already are instead of
  * behind a navigation; the tooltip is where its shortcut gets taught.
  */
+type NavigationAvailability = {
+  canGoBack: boolean;
+  canGoForward: boolean;
+};
+
+type WindowNavigation = {
+  canGoBack: boolean;
+  canGoForward: boolean;
+  addEventListener: (type: string, listener: () => void) => void;
+  removeEventListener: (type: string, listener: () => void) => void;
+};
+
+const readNavigationAvailability = (): NavigationAvailability => {
+  const navigation = (window as Window & { navigation?: WindowNavigation }).navigation;
+  if (navigation && typeof navigation.canGoBack === 'boolean') {
+    return { canGoBack: navigation.canGoBack, canGoForward: navigation.canGoForward };
+  }
+  return {
+    canGoBack: window.history.length > 1,
+    canGoForward: false,
+  };
+};
+
+let navigationAvailabilitySnapshot: NavigationAvailability = {
+  canGoBack: false,
+  canGoForward: false,
+};
+
+const getNavigationAvailabilitySnapshot = (): NavigationAvailability => {
+  const next = readNavigationAvailability();
+  if (
+    next.canGoBack === navigationAvailabilitySnapshot.canGoBack &&
+    next.canGoForward === navigationAvailabilitySnapshot.canGoForward
+  ) {
+    return navigationAvailabilitySnapshot;
+  }
+  navigationAvailabilitySnapshot = next;
+  return next;
+};
+
+const subscribeNavigationAvailability = (onStoreChange: () => void) => {
+  window.addEventListener('popstate', onStoreChange);
+  const navigation = (window as Window & { navigation?: WindowNavigation }).navigation;
+  navigation?.addEventListener('currententrychange', onStoreChange);
+  navigation?.addEventListener('navigate', onStoreChange);
+  return () => {
+    window.removeEventListener('popstate', onStoreChange);
+    navigation?.removeEventListener('currententrychange', onStoreChange);
+    navigation?.removeEventListener('navigate', onStoreChange);
+  };
+};
+
+function useNavigationAvailability(): NavigationAvailability {
+  return useSyncExternalStore(
+    subscribeNavigationAvailability,
+    getNavigationAvailabilitySnapshot,
+    () => navigationAvailabilitySnapshot
+  );
+}
+
 function SidebarHeaderIconButton({
   label,
   shortcut,
   onClick,
   className,
+  disabled = false,
+  compact = false,
   children,
 }: {
   label: string;
   shortcut?: string | null;
   onClick?: () => void;
   className?: string;
+  disabled?: boolean;
+  compact?: boolean;
   children: ReactNode;
 }) {
+  const button = (
+    <button
+      type="button"
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        'flex shrink-0 items-center justify-center rounded-md outline-hidden',
+        compact ? 'h-5 w-5' : 'h-7 w-7',
+        disabled
+          ? 'cursor-default text-sidebar-foreground-muted/25'
+          : 'text-sidebar-foreground-muted/65 hover:bg-sidebar-hover/70 hover:text-sidebar-foreground-muted focus-visible:ring-1 focus-visible:ring-sidebar-ring/40',
+        className
+      )}
+    >
+      {children}
+    </button>
+  );
+  if (disabled) return button;
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          aria-label={label}
-          onClick={onClick}
-          className={cn(
-            'flex h-7 w-7 shrink-0 items-center justify-center rounded-md',
-            'text-sidebar-foreground-muted hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
-            'outline-hidden focus-visible:ring-1 focus-visible:ring-sidebar-ring/40',
-            className
-          )}
-        >
-          {children}
-        </button>
-      </TooltipTrigger>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
       <TooltipContent side="bottom" className="flex items-center gap-1.5">
         <span>{label}</span>
         {shortcut ? <Kbd>{shortcut}</Kbd> : null}
@@ -739,6 +808,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   const collapseShortcut = useCommandShortcutLabel('sidebar.toggle');
   const backShortcut = useCommandShortcutLabel('nav.back');
   const forwardShortcut = useCommandShortcutLabel('nav.forward');
+  const { canGoBack, canGoForward } = useNavigationAvailability();
   const mergedLabels: LoroSidebarLabels = {
     ...defaultLabels,
     ...labels,
@@ -1084,22 +1154,28 @@ export const LoroSidebar = memo(function LoroSidebar({
                   </SidebarHeaderIconButton>
                 ) : null}
                 <SidebarHeaderIconButton
+                  compact
+                  disabled={!canGoBack}
                   label={t('commands.nav.back', 'Back')}
                   shortcut={backShortcut}
                   onClick={() => {
+                    if (!canGoBack) return;
                     if (!commands.execute('nav.back')) window.history.back();
                   }}
                 >
-                  <ChevronLeft className="h-4 w-4" />
+                  <ChevronLeft className="h-3.5 w-3.5" />
                 </SidebarHeaderIconButton>
                 <SidebarHeaderIconButton
+                  compact
+                  disabled={!canGoForward}
                   label={t('commands.nav.forward', 'Forward')}
                   shortcut={forwardShortcut}
                   onClick={() => {
+                    if (!canGoForward) return;
                     if (!commands.execute('nav.forward')) window.history.forward();
                   }}
                 >
-                  <ChevronRight className="h-4 w-4" />
+                  <ChevronRight className="h-3.5 w-3.5" />
                 </SidebarHeaderIconButton>
               </div>
             </TooltipProvider>

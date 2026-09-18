@@ -178,6 +178,8 @@ describe('LoroSidebar pinned section', () => {
     expect(parent?.children[0]).toBe(collapse);
     expect(parent?.children[1]).toBe(back);
     expect(parent?.children[2]).toBe(forward);
+    expect(back?.className).toContain('h-5');
+    expect(forward?.className).toContain('h-5');
   });
 
   it('renders pinned conversations before Workspace groups', () => {
