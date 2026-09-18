@@ -178,6 +178,18 @@ pre,
     color: var(--markdown-code-block-foreground);
   }
 
+  .dark .markdown-renderer [data-streamdown='code-block'] {
+    /* VS Code `textCodeBlock.background` often composites darker than the
+       conversation canvas. Lift the fenced block off `--background` so it
+       reads as a surface, not a hole. */
+    --markdown-code-block-bg: color-mix(in oklab, hsl(var(--background)) 92%, white);
+    --markdown-code-block-action-bg: color-mix(
+      in oklab,
+      var(--markdown-code-block-bg) 88%,
+      hsl(var(--background))
+    );
+  }
+
   .markdown-renderer [data-streamdown='code-block-header'] {
     position: absolute;
     inset-block-start: 0;
