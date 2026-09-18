@@ -106,7 +106,11 @@ export function PrMergeButton({
           variant={buttonVariant}
           disabled={isDisabled}
           onClick={() => void onMerge?.(method)}
-          className={cn('h-8 gap-1 rounded-r-none border-transparent', readyGreen && greenClasses)}
+          className={cn(
+            'h-8 gap-1 rounded-r-none',
+            buttonVariant === 'outline' ? 'border-r-0' : 'border-transparent',
+            readyGreen && greenClasses
+          )}
         >
           {mainContent}
         </Button>

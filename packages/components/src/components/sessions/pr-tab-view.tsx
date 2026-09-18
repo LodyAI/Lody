@@ -756,7 +756,7 @@ function PrHeaderActionButton({
           onClick={canResolve ? onResolveConflicts : undefined}
           disabled={!canResolve}
           title={tip}
-          className={cn(PR_ACTION_BTN, canClose && 'rounded-r-none')}
+          className={cn(PR_ACTION_BTN, canClose && 'rounded-r-none border-r-0')}
         >
           {resolving ? (
             <Spinner className="h-3.5 w-3.5" />
@@ -805,7 +805,7 @@ function PrHeaderActionButton({
           variant="outline"
           disabled
           title={tip}
-          className={cn(PR_ACTION_BTN, canClose && 'rounded-r-none')}
+          className={cn(PR_ACTION_BTN, canClose && 'rounded-r-none border-r-0')}
         >
           {kind === 'checking' ? (
             <Spinner className="h-3.5 w-3.5" />
