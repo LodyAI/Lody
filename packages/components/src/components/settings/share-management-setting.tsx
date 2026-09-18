@@ -123,7 +123,7 @@ function ShareManagementList({
                   className="flex flex-wrap items-center justify-between gap-3 py-4"
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="break-words text-sm font-medium">
+                    <p className="break-words text-sm font-normal">
                       {entry.title || t('sessions.untitled', 'Untitled session')}
                     </p>
                     <p className="mt-1 text-xs text-muted-foreground">

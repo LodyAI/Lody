@@ -40,7 +40,7 @@ export function CompactSection({
       {title || headerRight ? (
         <header className="flex min-h-10 items-center justify-between gap-2 border-b border-border/70 bg-muted/40 px-3 py-1.5">
           <div className="min-w-0 flex-1 leading-tight">
-            {title ? <p className="text-xs font-semibold text-muted-foreground">{title}</p> : null}
+            {title ? <p className="text-xs font-normal text-muted-foreground">{title}</p> : null}
             {description && <p className="text-[11px] text-muted-foreground/90">{description}</p>}
           </div>
           {headerRight ? (
@@ -65,7 +65,7 @@ export function CompactSection({
                   size: child.props.size ?? 'icon',
                   variant: child.props.variant ?? 'default',
                   className: cn(
-                    'h-7 w-7 rounded-md shadow-xs focus-visible:ring-1 focus-visible:ring-ring/60',
+                    'h-7 w-7 rounded-md font-normal shadow-xs focus-visible:ring-1 focus-visible:ring-ring/60',
                     child.props.className
                   ),
                 });
@@ -102,11 +102,11 @@ export function CompactRow({
       {/* Helper copy is capped so it stays readable on a wide panel; a bare label is free to
           use the whole column, because long command names should not wrap early. */}
       <div className={cn('min-w-0', helper && 'sm:max-w-[520px]')}>
-        <p className="font-medium leading-tight text-foreground">{label}</p>
+        <p className="leading-tight text-foreground">{label}</p>
         {helper && <p className="text-[11px] text-muted-foreground leading-tight">{helper}</p>}
       </div>
       {children ? (
-        <div className="min-w-0 flex flex-wrap items-center gap-2 text-sm sm:justify-end sm:pl-4">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 text-sm font-normal sm:justify-end sm:pl-4 [&_button]:font-normal">
           {children}
         </div>
       ) : null}

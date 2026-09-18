@@ -222,7 +222,7 @@ export function AgentRoleEditorDialog({
         )}
       >
         <header className="shrink-0 border-b border-border/60 px-5 py-3 pr-12">
-          <DialogTitle className="text-sm font-semibold">
+          <DialogTitle className="text-sm font-normal">
             {editor?.mode === 'edit'
               ? t('settings.agentRoles.editTitle')
               : t('settings.agentRoles.addTitle')}

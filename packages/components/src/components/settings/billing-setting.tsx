@@ -624,7 +624,7 @@ function CloudBillingSettings() {
                 </div>
               ) : null}
               {/* Net charged today */}
-              <div className="mt-2 flex items-baseline justify-between gap-4 border-t border-border/60 pt-2 font-medium">
+              <div className="mt-2 flex items-baseline justify-between gap-4 border-t border-border/60 pt-2 font-normal">
                 <span className="text-foreground">{t('billing.switchLineDueNow')}</span>
                 <span className="tabular-nums text-foreground">
                   {formatUsd(intervalPreview.amountDueNow)}

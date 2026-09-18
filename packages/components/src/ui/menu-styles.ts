@@ -9,14 +9,15 @@ import type { CSSProperties } from 'react';
 const menuEdgeColor = 'color-mix(in oklab, hsl(var(--background)) 90%, hsl(var(--foreground)) 10%)';
 
 export const menuSurfaceClassName =
-  'min-w-[220px] rounded-xl bg-background p-1 text-foreground dark:!bg-[rgb(24_24_24)] dark:![box-shadow:0_0_0_1px_rgb(48_48_48),0_18px_48px_-10px_rgb(0_0_0_/_0.55),0_8px_20px_-8px_rgb(0_0_0_/_0.35)]';
+  'min-w-[220px] rounded-xl bg-popover p-1 text-foreground dark:!bg-[rgb(24_24_24)] dark:![box-shadow:0_0_0_0.5px_rgb(80_80_80),0_8px_20px_0_rgb(0_0_0_/_0.7),0_0_2px_0_rgb(0_0_0_/_0.5)]';
 
 export const menuSurfaceStyle: CSSProperties = {
-  backgroundColor: 'hsl(var(--background))',
-  // The edge is the ring in this shadow stack, not a layout-affecting border:
-  // a real border would shift the 220px min-width and the padding box.
-  // Dark theme overrides the fill + ring via `menuSurfaceClassName`.
-  boxShadow: `0 0 0 1px ${menuEdgeColor}, 0 4px 12px 0 rgb(0 0 0 / 0.08), 0 1px 3px 0 rgb(0 0 0 / 0.06)`,
+  backgroundColor: 'hsl(var(--popover))',
+  // The edge is a 0.5px ring in this shadow stack, not a layout-affecting
+  // border: a real border would shift the 220px min-width and the padding box.
+  // Dark theme overrides the fill, a brighter hairline, and a tighter/darker
+  // drop (spread 0, 2px ambient diffusion) via `menuSurfaceClassName`.
+  boxShadow: `0 0 0 0.5px ${menuEdgeColor}, 0 4px 12px 0 rgb(0 0 0 / 0.08), 0 1px 2px 0 rgb(0 0 0 / 0.06)`,
 };
 
 /**
@@ -40,13 +41,17 @@ const menuItemBaseClassName =
 // An item that owns an open surface (a submenu trigger, or a trigger wired to a
 // nested menu) stays lit while that surface is open, so the pointer moving onto
 // it does not make the row it came from look inactive.
-const menuItemOpenStateClassName =
-  'data-[state=open]:bg-hover data-[state=open]:text-hover-foreground aria-expanded:bg-hover aria-expanded:text-hover-foreground';
+/** Light overlay hover: 5% ink on the surface. Dark keeps `--hover`. */
+export const overlayItemHighlightClassName =
+  'bg-foreground/[0.05] text-foreground dark:bg-hover dark:text-hover-foreground';
 
-export const menuItemClassName = `${menuItemBaseClassName} ${menuItemOpenStateClassName} focus:bg-hover focus:text-hover-foreground`;
+const menuItemOpenStateClassName =
+  'data-[state=open]:bg-foreground/[0.05] data-[state=open]:text-foreground aria-expanded:bg-foreground/[0.05] aria-expanded:text-foreground dark:data-[state=open]:bg-hover dark:data-[state=open]:text-hover-foreground dark:aria-expanded:bg-hover dark:aria-expanded:text-hover-foreground';
+
+export const menuItemClassName = `${menuItemBaseClassName} ${menuItemOpenStateClassName} focus:bg-foreground/[0.05] focus:text-foreground dark:focus:bg-hover dark:focus:text-hover-foreground`;
 
 /** Item whose leading box is a selection indicator rather than a caller icon. */
-export const menuSelectionItemClassName = `${menuItemBaseClassName} ${menuItemOpenStateClassName} ps-8 focus:bg-hover focus:text-hover-foreground`;
+export const menuSelectionItemClassName = `${menuItemBaseClassName} ${menuItemOpenStateClassName} ps-8 focus:bg-foreground/[0.05] focus:text-foreground dark:focus:bg-hover dark:focus:text-hover-foreground`;
 
 export const menuItemDestructiveClassName =
   'data-[variant=destructive]:[--menu-icon-color:hsl(var(--destructive))] data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 dark:data-[variant=destructive]:focus:bg-destructive/20 data-[variant=destructive]:focus:text-destructive';

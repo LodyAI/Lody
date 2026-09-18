@@ -76,7 +76,7 @@ export function MobileSettingsLayout({
             <div ref={setDetailHeaderTarget} className="col-span-2 min-w-0" />
           ) : (
             <>
-              <h1 className="truncate text-center text-[0.98rem] font-semibold tracking-tight">
+              <h1 className="truncate text-center text-[0.98rem] font-normal tracking-tight">
                 {title}
               </h1>
               <div aria-hidden="true" />

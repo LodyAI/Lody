@@ -269,9 +269,9 @@ DropdownMenuSubTrigger.displayName = DropdownMenuPrimitive.SubTrigger.displayNam
 /**
  * A submenu is offset from its TRIGGER ROW, not from the parent menu's edge, so
  * the offset has to clear everything between the two: the parent surface's `p-1`
- * (4px) and the 1px hairline ring each surface paints OUTSIDE its border box
- * (`menuSurfaceStyle`). Visual gap between rings = sideOffset - 4 - 1 - 1.
- * `6` welds the two surfaces into one slab; `7` leaves a 1px gap.
+ * (4px) and the 0.5px hairline ring each surface paints OUTSIDE its border box
+ * (`menuSurfaceStyle`). Visual gap between rings = sideOffset - 4 - 0.5 - 0.5.
+ * `5` welds the two surfaces into one slab; `7` leaves a 2px gap.
  */
 const SUB_CONTENT_SIDE_OFFSET = 7;
 

@@ -166,7 +166,7 @@ function PromptShortcutsSettingContent({
           )}
         >
           <header className="shrink-0 border-b border-border/60 px-5 py-3 pr-12">
-            <DialogTitle className="text-sm font-semibold">
+            <DialogTitle className="text-sm font-normal">
               {!editor?.base
                 ? t('settings.promptShortcuts.new', 'New Prompt Shortcut')
                 : owned
@@ -304,7 +304,7 @@ export function PromptShortcutsList({
     <section className="flex flex-col">
       <div className="flex items-center justify-between gap-2 pb-1 pt-0.5">
         <div className="flex min-w-0 items-center gap-2">
-          <h3 className="text-xs font-semibold text-muted-foreground">
+          <h3 className="text-xs font-normal text-muted-foreground">
             {t('settings.tabs.promptShortcuts', 'Prompt Shortcuts')}
           </h3>
           {entries.length > 0 ? (
@@ -424,7 +424,7 @@ export function PromptShortcutRow({
               settings render in a panel far narrower than the window. */}
           <span className="flex min-w-0 flex-1 flex-col gap-1">
             <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="min-w-0 truncate text-sm font-medium leading-tight">
+              <span className="min-w-0 truncate text-sm font-normal leading-tight">
                 {entry.name}
               </span>
               <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
@@ -517,7 +517,7 @@ export function PromptShortcutReadOnlyView({
           <span aria-hidden="true" className="text-sm leading-none">
             {getShortcutEmoji(shortcut)}
           </span>
-          <span className="min-w-0 truncate text-sm font-medium">{shortcut.name}</span>
+          <span className="min-w-0 truncate text-sm font-normal">{shortcut.name}</span>
           <span className="font-mono text-[11px] text-muted-foreground">/{shortcut.slug}</span>
           <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
             {t('settings.promptShortcuts.shared', 'Shared')}

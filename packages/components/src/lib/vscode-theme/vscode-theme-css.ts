@@ -76,6 +76,11 @@ const LODY_ALIAS_RULES: LodyAliasRule[] = [
   { cssVariable: '--background', colorIds: ['editor.background'] },
   { cssVariable: '--foreground', colorIds: ['foreground', 'editor.foreground'] },
   {
+    cssVariable: '--composer',
+    colorIds: ['editorWidget.background', 'quickInput.background', 'editor.background'],
+    compositeOverColorIds: WIDGET_ALIAS_BASE_COLOR_IDS,
+  },
+  {
     cssVariable: '--card',
     colorIds: ['sideBar.background', 'panel.background', 'editor.background'],
     compositeOverColorIds: SIDEBAR_ALIAS_BASE_COLOR_IDS,
@@ -725,7 +730,7 @@ export const createLodyThemeCssVariables = (
  * A control the user can type into must never sit DARKER than the page it is
  * drawn on: on a light canvas a recessed gray rectangle reads as `disabled`.
  * VS Code themes are free to recess `input.background` (Lody Light does:
- * #E8EAED on a #FFFFFF editor background), so the field fill is the LIGHTER of
+ * #DCDEE4 on a #F9F9F9 editor background), so the field fill is the LIGHTER of
  * the field and page colors. Dark themes are unaffected — there
  * `input.background` is already the raised surface (Vesper: #1C1C1C on
  * #101010) — and light themes fall back onto the page color, where the field

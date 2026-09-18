@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import type { PendingScheduledTask, SessionGoalCommand, SessionGoalMessage } from '@lody/shared';
 import type { SessionPullRequestMeta } from '@lody/shared';
 import { sanitizeGoalObjective } from '@lody/shared';
+import { COMPOSER_ELEVATION_CLASS } from '@/components/chat/composer-surface';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { cn } from '@/lib/utils';
 import { ActionChip } from './info-chip';
@@ -274,8 +275,7 @@ export function SessionInfoBar({
   const clusterNonEmpty = clusterKeys.length > 0 || !!onOpenBrowser;
 
   return (
-    // Keep the bar in the composer's input-surface family, with a lighter
-    // opacity so it reads as the secondary tier of the same control stack.
+    // Light: same fill and lift as the session composer. Dark: recessed input.
     <div
       className={cn(
         'w-full shrink-0 bg-background pb-1.5',
@@ -289,7 +289,12 @@ export function SessionInfoBar({
       {/* Same centered width as the composer content, so the bar and the
           input box share edges. */}
       <ConversationColumn>
-        <div className="@container flex h-8 w-full min-w-0 select-none items-center gap-1.5 rounded-md border-[0.5px] border-foreground/[0.10] bg-background px-2.5 text-xs shadow-[0_1px_2px_hsl(0_0%_0%/0.03)] dark:border-input-border/45 dark:bg-input/70 dark:shadow-none">
+        <div
+          className={cn(
+            '@container flex h-8 w-full min-w-0 select-none items-center gap-1.5 rounded-md border-[0.5px] border-foreground/[0.10] bg-[hsl(var(--composer))] px-2.5 text-xs dark:border-input-border/45 dark:bg-input/70',
+            COMPOSER_ELEVATION_CLASS
+          )}
+        >
           {privateAccessStatus ? (
             <button
               type="button"

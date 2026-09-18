@@ -876,15 +876,17 @@ pre,
 }
 
 @layer base {
-  /* Cool-white Linear-like fallbacks (overridden by Lody Light VS Code theme).
-     Hierarchy: pure white page → barely-gray sidebar → soft selection pill. */
+  /* Cool-gray Linear-like fallbacks (overridden by Lody Light VS Code theme).
+     Hierarchy: light conversation canvas → darker sidebar → near-white composer
+     → visible hover → slightly deeper selection pill. */
   :root {
-    --background: 0 0% 100%;
+    --background: 0 0% 97.6%;
     --foreground: 225 7% 11%;
-    --card: 0 0% 100%;
+    --card: 240 14% 94.1%;
     --card-foreground: 225 7% 11%;
     --popover: 0 0% 100%;
     --popover-foreground: 225 7% 11%;
+    --composer: 0 0% 100%;
     --primary: 220 82% 65%;
     --primary-foreground: 0 0% 100%;
     --secondary: 220 16% 97%;
@@ -893,15 +895,15 @@ pre,
     --muted-foreground: 220 6% 42%;
     --highlight: var(--primary);
     --highlight-foreground: var(--primary-foreground);
-    --hover: 220 14% 95%;
+    --hover: 220 12% 90%;
     --hover-foreground: var(--foreground);
-    --selection: 220 12% 92%;
+    --selection: 220 12% 87%;
     --selection-foreground: var(--foreground);
     --selection-inactive: var(--selection);
     --selection-inactive-foreground: var(--selection-foreground);
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
-    --border: 220 14% 91%;
+    --border: 220 12% 86%;
     --input: 220 12% 92%;
     --input-foreground: var(--foreground);
     --input-placeholder: var(--muted-foreground);
@@ -919,16 +921,16 @@ pre,
     --chart-3: 262 60% 55%;
     --chart-4: 24 90% 50%;
     --chart-5: 151 55% 40%;
-    --sidebar-background: 220 20% 98%;
-    --sidebar-foreground: 220 8% 28%;
+    --sidebar-background: 240 14% 94.1%;
+    --sidebar-foreground: 225 7% 11%;
     --sidebar-foreground-muted: 220 6% 46%;
     --sidebar-primary: 220 82% 65%;
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-highlight: var(--sidebar-primary);
     --sidebar-highlight-foreground: var(--sidebar-primary-foreground);
-    --sidebar-hover: 220 14% 95%;
+    --sidebar-hover: 240 6% 89%;
     --sidebar-hover-foreground: var(--sidebar-foreground);
-    --sidebar-selection: 220 12% 92%;
+    --sidebar-selection: 240 6% 84%;
     --sidebar-selection-foreground: var(--sidebar-foreground);
     --sidebar-border: 220 12% 88%;
     --sidebar-ring: 220 82% 65%;
@@ -963,7 +965,7 @@ pre,
     --scrollbar-thumb: var(--muted-foreground);
     --scrollbar-thumb-hover: var(--muted-foreground);
     --scrollbar-thumb-active: var(--muted-foreground);
-    --code-background: 220 14% 96%;
+    --code-background: 240 14% 94.1%;
     --code-foreground: 225 7% 11%;
     --code-border: 220 13% 90%;
     --code-added: var(--github-addition);
@@ -1091,6 +1093,7 @@ pre,
     /* Dark canvases already raise the field above the page, so it keeps the
        theme fill. */
     --input-field: var(--input);
+    --composer: var(--input);
     --switch-track: 220 13% 40%;
     --ring: 210 90% 62%;
     --chart-1: 210 90% 62%;
@@ -1527,9 +1530,9 @@ pre,
     --sidebar-foreground: 222 18% 12%;
     --sidebar-foreground-muted: 220 9% 40%;
     --sidebar-border: 220 10% 90%;
-    --sidebar-hover: 220 12% 96%;
+    --sidebar-hover: 220 12% 91%;
     --sidebar-hover-foreground: 222 18% 12%;
-    --sidebar-selection: 220 12% 93%;
+    --sidebar-selection: 220 12% 88%;
     --sidebar-selection-foreground: 222 18% 12%;
     color-scheme: light;
   }

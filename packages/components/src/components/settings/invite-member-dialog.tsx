@@ -250,10 +250,10 @@ function SeatCostNotice({ preview }: { preview?: SeatInvitePreview | null }) {
   return (
     <div className="rounded-lg border border-border/70 bg-muted/30 p-3">
       <div className="flex items-baseline justify-between gap-4">
-        <span className="text-sm font-medium text-foreground">
+        <span className="text-sm font-normal text-foreground">
           {t('workspace.invite.seat.addsSeat')}
         </span>
-        <span className="text-sm font-medium tabular-nums text-foreground">
+        <span className="text-sm font-normal tabular-nums text-foreground">
           {preview.proratedAmount === null
             ? t('workspace.invite.seat.amountUnknown')
             : t('workspace.invite.seat.approxAmount', {

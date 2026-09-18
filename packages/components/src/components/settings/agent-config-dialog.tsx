@@ -1932,7 +1932,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
             <ArrowLeft className="h-4 w-4" />
           </button>
         )}
-        <div className="min-w-0 flex-1 truncate text-sm font-semibold tracking-tight">
+        <div className="min-w-0 flex-1 truncate text-sm font-normal tracking-tight">
           {t('settings.agent.dialog.chooseType', 'Choose a type')}
         </div>
       </div>
@@ -2056,7 +2056,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
             {selectedOption ? <OptionIcon option={selectedOption} className="h-4 w-4" /> : null}
           </span>
           <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold leading-tight">{dialogTitle}</h2>
+            <h2 className="truncate text-sm font-normal leading-tight">{dialogTitle}</h2>
             {selectedOptionDescription && (
               <p className="line-clamp-1 text-xs text-muted-foreground">
                 {selectedOptionDescription}
@@ -2226,7 +2226,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                     : t('settings.agent.dialog.custom.test', 'Test command')}
                 </Button>
                 {customReady && !probing && (
-                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-status-success">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-normal text-status-success">
                     <Check className="h-3.5 w-3.5" aria-hidden="true" />
                     {t('settings.agent.dialog.ready', 'Ready')}
                   </span>
@@ -2305,7 +2305,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                     : t('settings.agent.dialog.runtimeOverride.test', 'Test runtime')}
                 </Button>
                 {capabilitiesReady && !probing && (
-                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-status-success">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-normal text-status-success">
                     <Check className="h-3.5 w-3.5" aria-hidden="true" />
                     {t('settings.agent.dialog.ready', 'Ready')}
                   </span>
@@ -2697,7 +2697,7 @@ function getOptionDescription(t: Translate, option: AgentTypeOption) {
 function RailGroup({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="mb-1">
-      <div className="px-2 pt-3 pb-1.5 text-[11px] font-medium text-muted-foreground/80">
+      <div className="px-2 pt-3 pb-1.5 text-[11px] font-normal text-muted-foreground/80">
         {title}
       </div>
       <div className="flex flex-col gap-0.5">{children}</div>
@@ -2827,7 +2827,7 @@ function ProbeStatus({
   const { t } = useTranslation();
   if (isPreset) {
     return (
-      <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary">
+      <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-normal text-primary">
         <Sparkles className="h-3 w-3" aria-hidden="true" />
         {t('settings.agent.dialog.presetBadge', 'Preset')}
       </span>
@@ -2882,7 +2882,7 @@ function ProbeStatus({
             )}
           </TooltipContent>
         </Tooltip>
-        <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-status-success/30 bg-status-success/10 px-2.5 py-1 text-[11px] font-medium text-status-success">
+        <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-status-success/30 bg-status-success/10 px-2.5 py-1 text-[11px] font-normal text-status-success">
           <Check className="h-3 w-3" aria-hidden="true" />
           {t('settings.agent.dialog.ready', 'Ready')}
         </span>
@@ -3082,7 +3082,7 @@ function PresetPanel({
                       : 'border-border/60 bg-background/50 text-foreground/80 hover:bg-background'
                   )}
                 >
-                  <span className="block text-xs font-medium">
+                  <span className="block text-xs font-normal">
                     {t(mode.labelKey, mode.labelDefault)}
                   </span>
                   <span className="mt-1 block text-[11px] leading-snug text-muted-foreground">
@@ -3114,7 +3114,7 @@ function PresetPanel({
                   href={preset.helpUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="font-medium text-primary underline-offset-2 hover:underline"
+                  className="font-normal text-primary underline-offset-2 hover:underline"
                 >
                   {t(
                     preset.helpLinkLabelKey ?? 'settings.agent.dialog.preset.helpLink',
@@ -3191,7 +3191,7 @@ function PresetPanel({
         <CollapsibleTrigger asChild>
           <button
             type="button"
-            className="group inline-flex items-center gap-1.5 rounded-md text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+            className="group inline-flex items-center gap-1.5 rounded-md text-[11px] font-normal text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
           >
             <ChevronDown className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180" />
             {t('settings.agent.dialog.preset.showInjected', 'Show injected variables')}
@@ -3242,7 +3242,7 @@ function Field({
     <div className="space-y-1.5">
       <div className="flex items-center gap-1.5">
         {icon && <span className="text-muted-foreground">{icon}</span>}
-        <Label htmlFor={htmlFor} className="text-xs font-medium">
+        <Label htmlFor={htmlFor} className="text-xs font-normal">
           {label}
         </Label>
       </div>
@@ -3275,7 +3275,7 @@ function Section({
         <CollapsibleTrigger asChild>
           <button
             type="button"
-            className="group flex h-full min-w-0 flex-1 items-center gap-2 rounded-md px-3 text-left text-sm font-medium text-foreground/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+            className="group flex h-full min-w-0 flex-1 items-center gap-2 rounded-md px-3 text-left text-sm font-normal text-foreground/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
           >
             <ChevronDown className="h-3 w-3 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
             <span className="min-w-0 truncate">{title}</span>

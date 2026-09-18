@@ -31,11 +31,14 @@ Ownership and explanations: [README.md](README.md).
   Keep geometry in the pure `session-row-leading-slot.tsx` (re-exported by
   `sidebar-row-shared.tsx` and reused by anonymous shares); context-menu expand/collapse uses the same
   toggle callback.
+- Conversation titles stay `font-normal`. Pinning is the pin glyph, never a
+  heavier weight — Inter 500 on Chinese in light mode reads as random bold.
 - Desktop working/waiting/unread status belongs only in `SessionRowStatusIndicator`
   inside `SidebarRowEndSlot`. Pass those three flags to the end slot, never the leading
-  slot. Status replaces resting line diff, `Mergeable`, worktree glyph, PR icon, or mobile
-  time with one 14px mark; retain metrics in the desktop hover info card. Mobile chat
-  leading-node rules remain in [mobile/AGENTS.md](mobile/AGENTS.md).
+  slot. Status replaces resting `Mergeable`, worktree glyph, PR icon, or mobile
+  time with one 14px mark. Do not paint +/- line totals on the row; they live only
+  in the desktop hover info card. Mobile chat leading-node rules remain in
+  [mobile/AGENTS.md](mobile/AGENTS.md).
 - Never hide a Session through nesting: missing, cross-section, cross-group, cycling,
   or deeper-than-one-level openers render top-level. `MAX_VISIBLE_SESSIONS` /
   `SHOW_FULL_BUCKET_THRESHOLD` count top-level rows. Every list passes `rootRank` for

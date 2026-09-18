@@ -34,7 +34,9 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   remaining space and the control column hugs its content. Never size either column
   from a viewport breakpoint — settings render in a panel far narrower than the window,
   and the panel clips its overflow, so a `md:`-width label column silently hides the
-  control.
+  control. Settings copy stays `font-normal` — no `font-medium` / `semibold` /
+  `bold`. Hierarchy is size and muted color, not weight. Inter 500 reads as
+  heavy synthetic bold on Chinese in light mode.
 - Agent configuration lives in `agent-config-dialog.tsx` plus `env-vars-textarea.tsx`.
   DeepSeek Harness official vs custom endpoint is dialog form state only: persist
   `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` (official always writes

@@ -91,11 +91,11 @@ export function AssistantEditedFiles({ files, onFileClick, className }: Assistan
 
   return (
     <div className={cn('w-full text-left', className)}>
-      <div className="overflow-hidden rounded-xl border-[0.5px] border-border/50 bg-muted/10">
+      <div className="overflow-hidden rounded-xl border border-border bg-[hsl(var(--code-background))]">
         {/* Multi-file only: summary bar. Single-file cards skip it so we
             don't stack "Edited 1 file" on top of the lone file row. */}
         {!isSingleFile ? (
-          <div className="flex min-h-8 items-center gap-3 bg-muted/25 px-2.5 py-1.5">
+          <div className="flex min-h-8 items-center gap-3 bg-muted/60 px-2.5 py-1.5">
             <span className="min-w-0 flex-1 text-xs font-medium text-foreground/80">
               {t('sessions.editedFiles.summary', {
                 count: uniqueFiles.length,
@@ -107,8 +107,8 @@ export function AssistantEditedFiles({ files, onFileClick, className }: Assistan
         ) : null}
         <div
           className={cn(
-            'divide-y divide-border/40',
-            !isSingleFile && 'border-t-[0.5px] border-border/40'
+            'divide-y divide-border/70',
+            !isSingleFile && 'border-t border-border/70'
           )}
         >
           {visibleFiles.map((file) => {
@@ -116,7 +116,7 @@ export function AssistantEditedFiles({ files, onFileClick, className }: Assistan
             const content = (
               <>
                 <span className="min-w-0 flex-1 truncate text-[length:var(--markdown-body-font-size,1em)] leading-[1.75]">
-                  <span className="font-medium text-foreground/90">{name}</span>
+                  <span className="text-foreground/90">{name}</span>
                   {directory ? (
                     <span className="ml-1.5 text-muted-foreground/70">{directory}</span>
                   ) : null}
@@ -152,7 +152,7 @@ export function AssistantEditedFiles({ files, onFileClick, className }: Assistan
         {hiddenFileCount > 0 ? (
           <button
             type="button"
-            className="flex h-8 w-full items-center justify-center gap-1 border-t border-border/40 px-2.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-hover/45 hover:text-foreground focus-visible:bg-hover/45 focus-visible:text-foreground focus-visible:outline-none"
+            className="flex h-8 w-full items-center justify-center gap-1 border-t border-border/70 px-2.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-hover/45 hover:text-foreground focus-visible:bg-hover/45 focus-visible:text-foreground focus-visible:outline-none"
             aria-expanded={expanded}
             onClick={() => setExpanded((value) => !value)}
           >

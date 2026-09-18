@@ -426,17 +426,6 @@ function GlassSurface({ className, children }: { className?: string; children: R
   );
 }
 
-function LineChangeBadge({ lineChange }: { lineChange: LoroSidebarRepoItemDelta }) {
-  const addedText = `+${lineChange.add}`;
-  const removedText = `-${lineChange.del}`;
-  return (
-    <div className="flex items-center gap-1 text-[11px] tabular-nums">
-      <span className="text-code-added">{addedText}</span>
-      <span className="text-code-removed">{removedText}</span>
-    </div>
-  );
-}
-
 type WorkspaceIdentityStatus = 'loading' | 'reconnecting' | 'offline' | 'syncing';
 
 function ConnectionPill({
@@ -619,7 +608,7 @@ function SidebarHeaderIconButton({
         compact ? 'h-5 w-5' : 'h-7 w-7',
         disabled
           ? 'cursor-default text-sidebar-foreground-muted/25'
-          : 'text-sidebar-foreground-muted/65 hover:bg-sidebar-hover/70 hover:text-sidebar-foreground-muted focus-visible:ring-1 focus-visible:ring-sidebar-ring/40',
+          : 'text-sidebar-foreground-muted/65 hover:bg-sidebar-hover hover:text-sidebar-hover-foreground focus-visible:ring-1 focus-visible:ring-sidebar-ring/40',
         className
       )}
     >
@@ -1016,7 +1005,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                       {ws.planTier ? (
                         <Badge
                           variant="secondary"
-                          className="ml-auto shrink-0 px-1.5 py-0 text-[10px]"
+                          className="ml-auto shrink-0 border-transparent bg-foreground/[0.06] px-1.5 py-0 text-[10px] font-normal text-muted-foreground"
                         >
                           {ws.planTier === 'enterprise'
                             ? mergedLabels.planEnterprise
@@ -1231,6 +1220,9 @@ export const LoroSidebar = memo(function LoroSidebar({
             'min-h-0 flex-1',
             isMobile ? 'mt-4 pb-[calc(12px+env(safe-area-inset-bottom,0px))]' : 'mt-2'
           )}
+          // Overlay only while the list is scrolling. Radix defaults to `hover`,
+          // which paints the thumb as soon as the pointer enters the sidebar.
+          type="scroll"
           scrollbarClassName={!isMobile ? 'w-2 p-px' : undefined}
           scrollbarThumbClassName={
             !isMobile
@@ -1379,11 +1371,6 @@ export const LoroSidebar = memo(function LoroSidebar({
                               {item.ageLabel ? (
                                 <span className="shrink-0 text-[11px] text-sidebar-foreground-muted">
                                   {item.ageLabel}
-                                </span>
-                              ) : null}
-                              {item.lineChange ? (
-                                <span className="shrink-0">
-                                  <LineChangeBadge lineChange={item.lineChange} />
                                 </span>
                               ) : null}
                             </div>

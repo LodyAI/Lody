@@ -160,7 +160,7 @@ export function ProviderSetupRow({
           size="md"
         />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium">{config.name}</div>
+          <div className="truncate text-sm font-normal">{config.name}</div>
           <div className="truncate text-xs text-muted-foreground">
             {labelForAgent(config.cliType, config.agentType)}
           </div>

@@ -16,6 +16,7 @@ import { useOnlineMachines } from '@/hooks/use-online-machines';
 export type ChatLandingTone = 'light' | 'dark';
 
 const modeIconClassName = 'h-3.5 w-3.5';
+const MODE_ICON_STROKE_WIDTH = 1.5;
 
 /**
  * Shared icon size for agent config logos in compact selectors.
@@ -30,15 +31,15 @@ export const agentIconClassName = 'h-3 w-3 shrink-0 opacity-80';
 export const getModeIcon = (modeId: string | null): ReactNode => {
   switch (modeId) {
     case 'plan':
-      return <Compass className={modeIconClassName} />;
+      return <Compass className={modeIconClassName} strokeWidth={MODE_ICON_STROKE_WIDTH} />;
     case 'acceptEdits':
-      return <PenLine className={modeIconClassName} />;
+      return <PenLine className={modeIconClassName} strokeWidth={MODE_ICON_STROKE_WIDTH} />;
     case 'dontAsk':
-      return <ShieldOff className={modeIconClassName} />;
+      return <ShieldOff className={modeIconClassName} strokeWidth={MODE_ICON_STROKE_WIDTH} />;
     case 'read-only':
-      return <Eye className={modeIconClassName} />;
+      return <Eye className={modeIconClassName} strokeWidth={MODE_ICON_STROKE_WIDTH} />;
     default:
-      return <ShieldCheck className={modeIconClassName} />;
+      return <ShieldCheck className={modeIconClassName} strokeWidth={MODE_ICON_STROKE_WIDTH} />;
   }
 };
 

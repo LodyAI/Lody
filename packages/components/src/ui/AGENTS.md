@@ -48,8 +48,18 @@ strings on i18n rather than the registry's inline English.
   `collisionPadding`; Radix defaults it to 0, which parks a colliding surface flush
   against the screen edge and caps `--radix-*-available-height` there too.
 - A submenu's `sideOffset` is measured from its trigger ROW, so it must also clear the
-  parent surface's `p-1` (4px) and the 1px ring each surface paints outside its border
-  box. Default is `7` so the rings sit 1px apart; `6` welds the two surfaces together.
+  parent surface's `p-1` (4px) and the 0.5px ring each surface paints outside its border
+  box. Default is `7` so the rings sit 2px apart; `5` welds the two surfaces together.
+- Tooltips (`ui/tooltip.tsx`) use a `0.5px` border and a drop of `0 2px 6px 0`
+  with no spread, blacker than `shadow-md`. Do not restore a 1px border.
+- Overlay list hover (menus, command palette, mention, select) is
+  `bg-foreground/[0.05]` in light and `--hover` in dark. Do not use the absolute
+  `--hover` gray on white popovers — it reads as a heavy slab. Kbd chips use
+  the same 6% ink fill and muted text as the workspace Plus badge.
+- Menu chrome lives in `menu-styles.ts`. The hairline is a `0.5px` shadow ring
+  (not a CSS border). Dark menus use a brighter ring (`rgb(80 80 80)`) and a
+  tighter, darker drop (`spread 0`, 2px ambient diffusion). Do not restore the
+  1px ring or the large negative-spread glow.
 
 ## Spinner
 
@@ -73,6 +83,9 @@ strings on i18n rather than the registry's inline English.
   thumb polling on effect cleanup. Verify both ESM and CommonJS with
   `tests/scroll-area-lifecycle.test.tsx` when upgrading; removing a thumb during
   the scroll-end debounce must not retain a frame loop or detached viewport.
+- The desktop left sidebar (`loro-sidebar.tsx`) uses `type="scroll"` so the
+  overlay thumb appears only while scrolling, not on pointer move. Do not
+  revert it to the Radix default `hover`.
 
 ## Slider
 

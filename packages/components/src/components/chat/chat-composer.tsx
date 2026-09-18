@@ -24,7 +24,7 @@ import {
   type VisualAnnotationReferenceChipItem,
 } from './visual-annotation-reference-chip';
 import { cn } from '@/lib/utils';
-import { COMPOSER_SESSION_SURFACE_CLASS } from './composer-surface';
+import { COMPOSER_ELEVATION_CLASS, COMPOSER_SESSION_SURFACE_CLASS } from './composer-surface';
 import {
   CombinedMentionTextarea,
   type CombinedMentionTextareaHandle,
@@ -621,22 +621,22 @@ export function ChatComposer({
    * before redrawing them in the mention colour. It has to equal whatever this
    * composer paints behind the textarea, or the "invisible" cover shows up as a
    * rectangle — which is exactly what `--input` did here, since this surface is
-   * deliberately `bg-background` rather than the muddy `bg-input`.
+   * deliberately `--composer` rather than the muddy `bg-input`.
    *
    * KEEP IN SYNC with the `bg-*` classes below. CSS cannot read an ancestor's
    * background, so this is a copy, and a copy can drift.
    */
   const mentionSurfaceClassName =
-    '[--mention-chip-surface:hsl(var(--background))] dark:[--mention-chip-surface:color-mix(in_srgb,hsl(var(--input))_90%,hsl(var(--background)))]';
+    '[--mention-chip-surface:hsl(var(--composer))] dark:[--mention-chip-surface:color-mix(in_srgb,hsl(var(--input))_90%,hsl(var(--background)))]';
 
-  // Linear-like light surface: white canvas + hairline border + soft lift.
+  // Light surface: near-white composer on the gray canvas + 1px border.
   // Avoid heavy bg-input fills that read as muddy gray on cool-white themes.
   const mentionContainerClassName = !isLanding
     ? cn(
         'w-full',
         'focus-within:ring-1 focus-within:ring-offset-0',
         'focus-within:outline-hidden',
-        'rounded-2xl border-[0.5px] border-foreground/[0.10] bg-background focus-within:ring-ring/30 dark:border-input-border/70 dark:bg-input/90',
+        'rounded-2xl border border-foreground/[0.10] bg-[hsl(var(--composer))] focus-within:ring-ring/30 dark:border-input-border/70 dark:bg-input/90',
         mentionSurfaceClassName
       )
     : undefined;
@@ -659,9 +659,10 @@ export function ChatComposer({
   const actionWidthClassName = isLanding ? 'w-auto shrink-0' : 'w-auto';
 
   const landingContainerClassName = cn(
-    '@container/composer-box flex flex-col gap-4 rounded-xl border-[0.5px] px-4 pt-4 pb-3 transition-shadow focus-within:ring-1',
-    'border-foreground/[0.10] bg-background shadow-[0_1px_2px_hsl(0_0%_0%/0.04),0_8px_24px_-12px_hsl(0_0%_0%/0.08)] focus-within:ring-ring/30',
-    'dark:border-input-border/60 dark:bg-input/90 dark:shadow-[0_22px_70px_-48px_rgba(15,23,42,0.25)] dark:focus-within:ring-ring/40',
+    '@container/composer-box flex flex-col gap-4 rounded-xl border px-4 pt-4 pb-3 transition-shadow focus-within:ring-1',
+    'border-foreground/[0.10] bg-[hsl(var(--composer))] focus-within:ring-ring/30',
+    COMPOSER_ELEVATION_CLASS,
+    'dark:border-input-border/60 dark:bg-input/90 dark:focus-within:ring-ring/40',
     mentionSurfaceClassName
   );
 
@@ -686,7 +687,7 @@ export function ChatComposer({
     ? 'border-primary/50 bg-primary/[0.04] ring-2 ring-primary/25'
     : undefined;
   const boxFooterClassName = cn(
-    'flex select-none items-center gap-x-2',
+    'flex select-none items-center gap-x-1.5',
     isLanding ? 'pt-2' : 'pt-0.5'
   );
   const statusClassName = cn(
@@ -1011,7 +1012,7 @@ export function ChatComposer({
                 {/* Single row only: long model names must shrink/truncate inside
                     the run-config face rather than wrapping config chips onto a
                     second line (especially on mobile). */}
-                <div className="@container/composer-face flex min-w-0 flex-1 flex-nowrap items-center gap-x-2 overflow-hidden">
+                <div className="@container/composer-face flex min-w-0 flex-1 flex-nowrap items-center gap-x-1.5 overflow-hidden">
                   {footerSelector ?? selector}
                 </div>
 

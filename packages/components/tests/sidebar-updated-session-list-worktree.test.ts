@@ -126,17 +126,11 @@ describe('SidebarUpdatedSessionList session-type icon', () => {
     const rowWithoutPr = container.querySelector('[data-sidebar-updated-id="session-without-pr"]');
 
     expect(rowWithPr?.querySelector('.lucide-git-pull-request')).not.toBeNull();
-    expect(rowWithPr?.querySelector('.text-code-added')?.textContent).toBe('+12');
-    expect(rowWithPr?.querySelector('.text-code-removed')?.textContent).toBe('-4');
-    expect(
-      Array.from(rowWithPr?.querySelectorAll('.text-code-removed, .lucide-git-pull-request') ?? [])
-    ).toEqual([
-      rowWithPr?.querySelector('.text-code-removed'),
-      rowWithPr?.querySelector('.lucide-git-pull-request'),
-    ]);
+    expect(rowWithPr?.querySelector('.text-code-added')).toBeNull();
+    expect(rowWithPr?.querySelector('.text-code-removed')).toBeNull();
     expect(rowWithoutPr?.querySelector('.lucide-git-pull-request')).toBeNull();
-    expect(rowWithoutPr?.querySelector('.text-code-added')?.textContent).toBe('+8');
-    expect(rowWithoutPr?.querySelector('.text-code-removed')?.textContent).toBe('-2');
+    expect(rowWithoutPr?.querySelector('.text-code-added')).toBeNull();
+    expect(rowWithoutPr?.querySelector('.text-code-removed')).toBeNull();
   });
 
   it('shows the PR icon for a local row linked to a GitHub PR', () => {

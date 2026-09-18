@@ -757,7 +757,7 @@ function ProjectSettingsDesktop({
       <div className={cn(settingContainerClass, 'flex h-full min-h-0 flex-col md:max-w-6xl')}>
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="text-base font-semibold text-foreground">
+            <h2 className="text-base font-normal text-foreground">
               {t('settings.tabs.projects', 'Projects')}
             </h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -827,7 +827,7 @@ function ProjectSettingsDesktop({
             <div className="flex min-h-0 min-w-0 flex-1 flex-col">
               <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-2">
                 <div className="min-w-0">
-                  <h3 className="truncate text-sm font-medium text-foreground">{sourceTitle}</h3>
+                  <h3 className="truncate text-sm font-normal text-foreground">{sourceTitle}</h3>
                 </div>
                 {addToSelectedMachine ? (
                   <Button
@@ -994,9 +994,9 @@ function SourceRow({
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1.5">
-          <span className="truncate text-sm font-medium leading-tight">{title}</span>
+          <span className="truncate text-sm font-normal leading-tight">{title}</span>
           {offlineLabel ? (
-            <span className="shrink-0 text-[10px] font-medium text-muted-foreground">
+            <span className="shrink-0 text-[10px] font-normal text-muted-foreground">
               {offlineLabel}
             </span>
           ) : null}
@@ -1006,7 +1006,7 @@ function SourceRow({
         ) : null}
       </div>
       {shared ? (
-        <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-medium text-muted-foreground">
+        <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-normal text-muted-foreground">
           <Users className="h-3 w-3" aria-hidden="true" />
           {t('workspace.projects.sharedBadge', 'Shared')}
         </span>
@@ -1064,7 +1064,7 @@ function ProjectMasterRow({
           {icon}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-medium leading-tight">{title}</div>
+          <div className="truncate text-sm font-normal leading-tight">{title}</div>
           <div className="truncate font-mono text-[11px] leading-tight text-muted-foreground">
             {subtitle}
           </div>
@@ -1090,7 +1090,7 @@ function ProjectMasterRow({
       </button>
       {removalStateLabel ? (
         <span
-          className="mr-1 inline-flex shrink-0 items-center gap-1 text-[10px] font-medium text-muted-foreground"
+          className="mr-1 inline-flex shrink-0 items-center gap-1 text-[10px] font-normal text-muted-foreground"
           title={removalStateLabel}
         >
           {removalState === 'waiting_for_device' ? (
@@ -1131,7 +1131,7 @@ function ProjectMasterRow({
 }
 
 function ProjectOwnerLabel({ owner }: { readonly owner: string }) {
-  return <div className="px-1 text-[11px] font-medium text-muted-foreground">{owner}</div>;
+  return <div className="px-1 text-[11px] font-normal text-muted-foreground">{owner}</div>;
 }
 
 function OwnerAvatar({ owner }: { readonly owner: string }) {
@@ -1358,7 +1358,7 @@ function LocalProjectDetail({
       <div className="flex flex-col gap-3 p-4 pt-3">
         <div className="flex min-w-0 items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <h3 className="truncate text-sm font-semibold text-foreground">{row.project.name}</h3>
+            <h3 className="truncate text-sm font-normal text-foreground">{row.project.name}</h3>
             {rootPath ? (
               <div className="mt-0.5 flex min-w-0 items-center gap-1">
                 <p
@@ -1675,7 +1675,7 @@ function GithubProjectDetail({
       <div className="flex min-w-0 items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
-            <h3 className="truncate text-sm font-semibold text-foreground">{row.name}</h3>
+            <h3 className="truncate text-sm font-normal text-foreground">{row.name}</h3>
             <span className="shrink-0 rounded-sm bg-foreground/[0.06] px-2 py-0.5 text-[11px] text-muted-foreground">
               {row.private ? t('workspace.projects.privateRepo', 'Private') : 'Public'}
             </span>
@@ -1905,7 +1905,7 @@ export function WorktreeSetupEditor({
     <div className="flex flex-col gap-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+          <p className="flex items-center gap-1.5 text-sm font-normal text-foreground">
             <PhaseIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
             {title}
           </p>
@@ -1933,7 +1933,7 @@ export function WorktreeSetupEditor({
         </div>
       ) : shell ? (
         <div className="flex flex-col gap-2">
-          <span className="inline-flex w-fit items-center gap-1.5 rounded-md bg-foreground/[0.05] px-2 py-1 text-xs font-medium text-foreground">
+          <span className="inline-flex w-fit items-center gap-1.5 rounded-md bg-foreground/[0.05] px-2 py-1 text-xs font-normal text-foreground">
             <TerminalSquare className="h-3.5 w-3.5" />
             {getWorktreeShellLabel(shell)}
           </span>
@@ -2294,7 +2294,7 @@ export function ProjectHistoryImportPanel({
                     }}
                   />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium text-foreground">{session.title}</div>
+                    <div className="truncate font-normal text-foreground">{session.title}</div>
                     <div
                       className="truncate text-[10px] text-muted-foreground"
                       title={updatedAtTitle}

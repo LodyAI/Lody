@@ -42,7 +42,7 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
     <section className="overflow-hidden rounded-xl border border-border/60 bg-card">
       <div className="flex items-start justify-between gap-3 border-b border-border/50 px-3 py-3">
         <div>
-          <h3 className="text-sm font-medium">{t('joinRequest.admin.title', 'Open join link')}</h3>
+          <h3 className="text-sm font-normal">{t('joinRequest.admin.title', 'Open join link')}</h3>
           <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
             {t(
               'joinRequest.admin.description',
@@ -142,7 +142,7 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
             <div key={request.id} className="border-t border-border/50 px-3 py-3 first:border-t-0">
               <div className="flex items-start gap-3">
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium">{request.applicantName}</p>
+                  <p className="truncate text-sm font-normal">{request.applicantName}</p>
                   <p className="truncate text-xs text-muted-foreground">{request.applicantEmail}</p>
                   <p className="mt-0.5 text-xs text-muted-foreground">
                     {t('joinRequest.admin.requestedAt', 'Requested {{date}}', {

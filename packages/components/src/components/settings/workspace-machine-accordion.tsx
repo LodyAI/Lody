@@ -160,7 +160,7 @@ export function WorkspaceMachineAccordionRow({
               : 'bg-muted-foreground/50 ring-muted'
           )}
         />
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">
+        <span className="min-w-0 flex-1 truncate text-sm font-normal text-foreground">
           {machineName}
         </span>
         <WorkspaceMachineAccordionSummary

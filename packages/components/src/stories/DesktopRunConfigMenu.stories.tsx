@@ -217,7 +217,7 @@ function StoryShell({
     <Provider store={store}>
       <div className="flex min-h-dvh items-end bg-background p-8">
         {/* Mimic the composer footer row the buttons live in. */}
-        <div className="mb-6 flex w-full max-w-3xl items-center gap-2 rounded-xl bg-input/90 px-4 py-3">
+        <div className="mb-6 flex w-full max-w-3xl items-center gap-1.5 rounded-xl bg-input/90 px-4 py-3">
           <DesktopRunConfigMenu
             agentSelection={machineSelected ? { agentId: codexId, machineId } : null}
             allowedMachineIds={machineSelected ? [machineId] : []}
@@ -288,7 +288,7 @@ function GrokConfigShell() {
   return (
     <Provider store={store}>
       <div className="flex min-h-dvh items-end bg-background p-8">
-        <div className="mb-6 flex w-full max-w-3xl items-center gap-2 rounded-xl bg-input/90 px-4 py-3">
+        <div className="mb-6 flex w-full max-w-3xl items-center gap-1.5 rounded-xl bg-input/90 px-4 py-3">
           <DesktopRunConfigMenu
             agentSelection={{ agentId: grokId, machineId }}
             allowedMachineIds={[machineId]}
@@ -326,7 +326,7 @@ function DeepSeekWarningShell() {
   return (
     <Provider store={store}>
       <div className="flex min-h-dvh items-end bg-background p-8">
-        <div className="mb-6 flex w-full max-w-3xl items-center gap-2 rounded-xl bg-input/90 px-4 py-3">
+        <div className="mb-6 flex w-full max-w-3xl items-center gap-1.5 rounded-xl bg-input/90 px-4 py-3">
           <DesktopRunConfigMenu
             agentSelection={{ agentId: deepseekId, machineId }}
             availableAgentConfigs={agents}

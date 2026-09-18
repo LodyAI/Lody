@@ -136,7 +136,7 @@ function SettingsModalBody() {
   return (
     <SettingsDataCacheProvider>
       <DialogDescription className="sr-only">{t('settings.title')}</DialogDescription>
-      <div className="flex min-h-0 flex-1 overflow-hidden">
+      <div className="flex min-h-0 flex-1 overflow-hidden [&_button]:font-normal">
         <FocusScope
           id={navigationScopeId}
           role="navigation"
@@ -151,7 +151,7 @@ function SettingsModalBody() {
                 if (tabs.length === 0 && !showsAccountEntry) return null;
                 return (
                   <section key={section.id} aria-label={section.label}>
-                    <h2 className="px-2.5 pb-1 text-xs font-medium text-muted-foreground/55">
+                    <h2 className="px-2.5 pb-1 text-xs font-normal text-muted-foreground/55">
                       {section.label}
                     </h2>
                     <div className="space-y-0.5">
@@ -179,7 +179,7 @@ function SettingsModalBody() {
                             data-scope-item="row"
                             data-settings-tab-id={tab.id}
                             className={cn(
-                              'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1 text-start text-sm font-medium transition-colors',
+                              'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1 text-start text-sm font-normal transition-colors',
                               resolvedActiveTab === tab.id
                                 ? 'bg-secondary text-secondary-foreground'
                                 : 'text-muted-foreground hover:bg-secondary/50 hover:text-secondary-foreground'
@@ -207,7 +207,7 @@ function SettingsModalBody() {
                 type="button"
                 data-id="settings:report-bug"
                 data-scope-item="row"
-                className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1 text-start text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-secondary-foreground"
+                className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1 text-start text-sm font-normal text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-secondary-foreground"
                 onClick={handleReportBug}
               >
                 <Bug className="h-4 w-4 shrink-0 opacity-80" strokeWidth={1.75} />
@@ -226,7 +226,7 @@ function SettingsModalBody() {
             <DialogTitle className="sr-only">{t(activeTabConfig.labelKey)}</DialogTitle>
           ) : (
             <header className="mt-2 flex h-12 shrink-0 items-center px-8">
-              <DialogTitle className="text-xl font-semibold leading-none">
+              <DialogTitle className="text-xl font-normal leading-none">
                 {t(activeTabConfig.labelKey)}
               </DialogTitle>
             </header>

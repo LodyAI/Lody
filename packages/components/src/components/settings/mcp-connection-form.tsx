@@ -365,7 +365,7 @@ function TransportToggle({
             aria-checked={selected}
             onClick={() => onChange(transport)}
             className={cn(
-              'flex min-w-20 items-center justify-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors',
+              'flex min-w-20 items-center justify-center gap-1.5 rounded-full px-3 text-xs font-normal transition-colors',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
               selected
                 ? 'bg-background text-foreground shadow-sm'

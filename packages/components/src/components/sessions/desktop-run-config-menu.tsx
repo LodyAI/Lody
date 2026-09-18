@@ -190,9 +190,11 @@ function ToggleItem({
 /** Hide Mode/Model labels when the composer face slot is this narrow. */
 export const COMPOSER_FACE_LABEL_CLASS = '@max-[280px]/composer-face:hidden';
 
-/* Shared trigger chrome for both footer buttons. */
+/* Shared trigger chrome for both footer buttons. Compact (label-hidden) face
+   is a 28px square so plus / model / mode share the same hit box and gap. */
 const TRIGGER_CLASS = cn(
   'inline-flex h-7 min-w-0 select-none items-center gap-1.5 rounded-[4px] px-2 text-xs leading-tight',
+  '@max-[280px]/composer-face:w-7 @max-[280px]/composer-face:shrink-0 @max-[280px]/composer-face:justify-center @max-[280px]/composer-face:gap-0 @max-[280px]/composer-face:px-0',
   'text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
   'data-[state=open]:bg-muted data-[state=open]:text-foreground',
   'disabled:cursor-default disabled:opacity-70'
@@ -672,7 +674,7 @@ export function DesktopRunConfigMenu({
           className="h-4 w-4 shrink-0"
         />
       ) : (
-        <Bot className="h-4 w-4 shrink-0" aria-hidden="true" />
+        <Bot className="h-4 w-4 shrink-0" strokeWidth={1.5} aria-hidden="true" />
       )}
       {/* A Role names itself and nothing else: it IS the whole run
           configuration, so its values belong beside the button rather than
@@ -1027,7 +1029,7 @@ function FaceDot() {
 function permissionModeIcon(modeId: string | null): ReactNode {
   const face = classifyPermissionModeFace(modeId);
   if (face.kind !== 'hidden' && face.tone === 'warning') {
-    return <ShieldAlert className="h-4 w-4 shrink-0 text-status-warning" />;
+    return <ShieldAlert className="h-4 w-4 shrink-0 text-status-warning" strokeWidth={1.5} />;
   }
   return getPermissionModeIcon(modeId);
 }
@@ -1076,7 +1078,7 @@ export function DesktopPermissionModeButton({
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button type="button" className={TRIGGER_CLASS} aria-label={permissionLabel}>
-          <span className="flex h-4 w-4 shrink-0 items-center justify-center [&_svg]:h-4 [&_svg]:w-4">
+          <span className="flex h-4 w-4 shrink-0 items-center justify-center [&_svg]:h-4 [&_svg]:w-4 [&_svg]:stroke-[1.5]">
             {permissionModeIcon(value ?? null)}
           </span>
           <span className={cn('min-w-0 max-w-36 truncate', COMPOSER_FACE_LABEL_CLASS)}>

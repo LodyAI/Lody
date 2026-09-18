@@ -650,7 +650,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
     if (!canRename) return;
     setRenameTarget({ sessionId: session.id, initialTitle: title });
   }, [canRename, session.id, title]);
-  const titleContent = <span className="truncate">{title}</span>;
+  const titleContent = <span className="truncate font-normal">{title}</span>;
   // Copy URL is always available (a private link still works for the owner);
   // sharing is a separate menu item that only appears when the conversation
   // isn't already team-visible.
@@ -690,10 +690,10 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
           !isMobile &&
           'hover:bg-sidebar-hover data-[menu-open]:bg-sidebar-hover',
         showSelectedState &&
-          'border-sidebar-foreground/10 bg-sidebar-foreground/10 text-sidebar-foreground hover:bg-sidebar-foreground/10',
+          'bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection',
         showSelectedState
           ? 'text-sidebar-selection-foreground'
-          : 'text-sidebar-foreground dark:text-sidebar-foreground/75'
+          : 'text-sidebar-foreground'
       )}
       onClick={(event) => {
         if (openSessionOnModifiedClick(event, session.id)) return;

@@ -214,7 +214,7 @@ function StatRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="mt-1 flex items-baseline gap-1.5 sm:gap-2">
       <span className="w-7 shrink-0 text-[10px] text-muted-foreground/70 sm:w-8">{label}</span>
-      <span className="min-w-0 truncate text-xs font-semibold tabular-nums text-foreground sm:text-sm">
+      <span className="min-w-0 truncate text-xs font-normal tabular-nums text-foreground sm:text-sm">
         {value}
       </span>
     </div>
@@ -272,7 +272,7 @@ function SessionTable({
   return (
     <>
       <div className="overflow-hidden rounded-lg border border-border/60 bg-background">
-        <div className="hidden grid-cols-[minmax(160px,40%)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_40px] gap-2.5 bg-muted/25 px-2 py-1.5 text-[11px] font-medium text-muted-foreground md:grid">
+        <div className="hidden grid-cols-[minmax(160px,40%)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_40px] gap-2.5 bg-muted/25 px-2 py-1.5 text-[11px] font-normal text-muted-foreground md:grid">
           <span>{t('settings.devices.sessions.session', 'Session')}</span>
           <span className="truncate text-center">
             {t('settings.devices.sessions.status', 'Status')}
@@ -329,7 +329,7 @@ function SessionTable({
                 <div className="min-w-0">
                   <Tooltip>
                     <TooltipTrigger asChild>
-                      <div className="truncate text-sm font-medium md:text-xs">{title}</div>
+                      <div className="truncate text-sm font-normal md:text-xs">{title}</div>
                     </TooltipTrigger>
                     <TooltipContent className="max-w-sm break-words">{title}</TooltipContent>
                   </Tooltip>

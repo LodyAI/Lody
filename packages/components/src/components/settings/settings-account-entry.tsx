@@ -46,7 +46,7 @@ export function SettingsAccountEntry({
         )}
       />
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium text-foreground">
+        <span className="block truncate text-sm font-normal text-foreground">
           {user.name || user.email || t('settings.tabs.account')}
         </span>
         {mobile && user.email ? (

@@ -76,7 +76,7 @@ export function MachineTabList({
     <TooltipProvider delayDuration={250}>
       <FocusScope id={scopeId} className="flex h-full min-h-0 w-full min-w-0 flex-col">
         <div className="flex items-center justify-between gap-2 px-2 pb-2">
-          <p className="min-w-0 truncate text-xs font-semibold text-muted-foreground">
+          <p className="min-w-0 truncate text-xs font-normal text-muted-foreground">
             {t('workspace.machines.title', 'Machines')}
           </p>
           {showFilter ? (
@@ -162,7 +162,7 @@ export function MachineListFilterButton({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44">
-        <DropdownMenuLabel className="font-medium text-muted-foreground">
+        <DropdownMenuLabel className="font-normal text-muted-foreground">
           {t('settings.agent.machineTabs.filter.label', 'Filter machines')}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
@@ -208,7 +208,7 @@ function MachineTab({
         className={cn(
           'group flex w-full min-w-0 items-center gap-2 rounded-md border border-transparent px-2 py-2 text-left text-sm transition-colors',
           isSelected
-            ? 'border-border bg-hover/70 font-medium text-foreground'
+            ? 'border-border bg-hover/70 font-normal text-foreground'
             : 'text-foreground/90 hover:bg-hover/40'
         )}
       >
@@ -282,7 +282,7 @@ function DetailedMachineTab({
         />
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex min-w-0 items-center gap-2">
-            <span className="min-w-0 truncate text-sm font-semibold">
+            <span className="min-w-0 truncate text-sm font-normal">
               {item.machine.name || item.machine.id}
             </span>
             {showOwner ? (
@@ -294,7 +294,7 @@ function DetailedMachineTab({
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
             <span
               className={cn(
-                'font-medium',
+                'font-normal',
                 item.isOnline ? 'text-status-success' : 'text-muted-foreground'
               )}
             >
@@ -388,7 +388,7 @@ function MachineAccessStatus({ sharedWithTeam }: { sharedWithTeam: boolean }) {
         </span>
       </TooltipTrigger>
       <TooltipContent side="right" className="max-w-64 leading-relaxed">
-        <p className="font-medium">{label}</p>
+        <p className="font-normal">{label}</p>
         <p className="mt-0.5 text-muted-foreground">{description}</p>
       </TooltipContent>
     </Tooltip>

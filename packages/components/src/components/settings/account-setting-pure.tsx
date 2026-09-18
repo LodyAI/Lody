@@ -549,7 +549,7 @@ export function AccountSettingsPure({
               ) : (
                 <button
                   type="button"
-                  className="flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-2 py-1 text-left font-medium transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-60"
+                  className="flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-2 py-1 text-left font-normal transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-60"
                   onClick={beginUserNameEdit}
                   disabled={isSavingUserName}
                   aria-label={t('settings.profile.nameEditLabel')}
@@ -565,7 +565,7 @@ export function AccountSettingsPure({
                 </button>
               )
             ) : (
-              <span className="truncate font-medium">{userNameBaseline || '—'}</span>
+              <span className="truncate">{userNameBaseline || '—'}</span>
             )}
           </CompactRow>
           <CompactRow label={t('settings.profile.avatar.label')}>
@@ -608,7 +608,7 @@ export function AccountSettingsPure({
             <Button
               variant="ghost"
               size="sm"
-              className="bg-foreground/[0.06] hover:bg-foreground/[0.1]"
+              className="bg-foreground/[0.06] font-normal hover:bg-foreground/[0.1]"
               onClick={() => {
                 void onSignOut();
               }}
@@ -646,7 +646,7 @@ export function AccountSettingsPure({
               ) : (
                 <button
                   type="button"
-                  className="flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-2 py-1 text-left font-medium transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-60"
+                  className="flex min-w-0 max-w-full items-center gap-1.5 rounded-md px-2 py-1 text-left font-normal transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:pointer-events-none disabled:opacity-60"
                   onClick={beginWorkspaceNameEdit}
                   disabled={isRenamingOrganization}
                   aria-label={t('settings.account.workspaceNameEditLabel')}
@@ -660,7 +660,7 @@ export function AccountSettingsPure({
                 </button>
               )
             ) : (
-              <span className="truncate font-medium">{organization.name}</span>
+              <span className="truncate">{organization.name}</span>
             )}
           </CompactRow>
           <CompactRow label={t('settings.workspace.avatar.label')}>
@@ -814,7 +814,7 @@ export function AccountSettingsPure({
               <div key={member.id} className="flex items-center gap-3 px-3 py-2.5 text-sm">
                 <UserAvatar user={member.user} className="h-7 w-7 shrink-0 text-[11px]" />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium leading-tight">
+                  <p className="truncate leading-tight">
                     {member.user?.name || '—'}
                     {member.userId === currentUser?.id && (
                       <span className="ml-1.5 text-[11px] font-normal text-muted-foreground">
@@ -830,7 +830,7 @@ export function AccountSettingsPure({
                   {isEditable ? (
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <button className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                        <button className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-0.5 text-xs font-normal text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
                           {t(`organization.role.${member.role}`)}
                           <ChevronDown className="h-3 w-3 opacity-50" />
                         </button>
@@ -865,7 +865,7 @@ export function AccountSettingsPure({
                       </DropdownMenuContent>
                     </DropdownMenu>
                   ) : (
-                    <span className="px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                    <span className="px-2 py-0.5 text-xs font-normal text-muted-foreground">
                       {t(`organization.role.${member.role}`)}
                     </span>
                   )}
@@ -898,7 +898,7 @@ export function AccountSettingsPure({
                 <Mail className="h-3.5 w-3.5 text-muted-foreground" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="truncate font-medium leading-tight">{invitation.email}</p>
+                <p className="truncate leading-tight">{invitation.email}</p>
                 <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
                   <span>{t(`organization.role.${invitation.role}`)}</span>
                   <span className="inline-flex items-center gap-0.5">
@@ -974,7 +974,7 @@ export function AccountSettingsPure({
             <Button
               variant="ghost"
               size="sm"
-              className="h-7 w-auto bg-foreground/[0.06] px-2 text-foreground hover:bg-foreground/[0.1]"
+              className="h-7 w-auto bg-foreground/[0.06] px-2 font-normal text-foreground hover:bg-foreground/[0.1]"
               onClick={() => {
                 setCliApiKeyDialogOpen(true);
               }}
@@ -1013,7 +1013,7 @@ export function AccountSettingsPure({
                 >
                   <div className="min-w-0 space-y-1">
                     <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-                      <p className="truncate font-medium">
+                      <p className="truncate">
                         {apiKey.note || t('settings.account.cliAuth.recordNoteFallback')}
                       </p>
                       {sourceLabel && (
@@ -1241,7 +1241,7 @@ export function AccountSettingsPure({
           </DialogHeader>
           <div className="space-y-4 py-4">
             {billingUiAvailable && deleteBillingGuard?.kind === 'cancel-scheduled' ? (
-              <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-950 dark:text-amber-100">
+              <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-normal text-amber-950 dark:text-amber-100">
                 {t('workspace.deleteCancelingWarning', {
                   date: deleteBillingGuard.formattedPeriodEnd ?? '',
                 })}
