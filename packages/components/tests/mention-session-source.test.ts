@@ -5,6 +5,7 @@ import { applyTextRewrites, type SessionMeta } from '@lody/shared';
 
 import {
   buildSessionMentionItems,
+  buildSessionMentionPrompt,
   buildSessionMentionSlug,
   buildSessionMentionRewrites,
   filterSessionMentionItemsByProject,
@@ -208,11 +209,31 @@ describe('buildSessionMentionRewrites', () => {
   const expand = (text: string, mentions: Parameters<typeof buildSessionMentionRewrites>[1]) =>
     applyTextRewrites(text, buildSessionMentionRewrites(text, mentions)).text;
 
-  it('replaces the range with an id-bearing instruction', () => {
+  it('replaces the range with a session:// markdown link', () => {
     const text = 'look at @fix-ci please';
     expect(expand(text, [range(8, 15)])).toBe(
-      'look at use lody mcp to query session[id: ses_7f3ac91b] history please'
+      'look at [@fix-ci](session://ses_7f3ac91b) please'
     );
+  });
+
+  it('prefers the human title in the link label when supplied', () => {
+    const text = 'look at @fix-ci please';
+    const result = applyTextRewrites(
+      text,
+      buildSessionMentionRewrites(text, [range(8, 15)], {
+        items: [{ sessionId: 'ses_7f3ac91b', title: 'Fix CI' }],
+      })
+    ).text;
+    expect(result).toBe('look at [@Fix CI](session://ses_7f3ac91b) please');
+  });
+
+  it('escapes brackets in the title so the markdown link stays well-formed', () => {
+    expect(
+      buildSessionMentionPrompt({
+        sessionId: 'ses_1',
+        title: 'See [draft]',
+      })
+    ).toBe('[@See \\[draft\\]](session://ses_1)');
   });
 
   it('keeps the slug as the span label so the transcript can show it back', () => {
@@ -232,7 +253,7 @@ describe('buildSessionMentionRewrites', () => {
   it('expands every range', () => {
     const text = '@fix-ci and @fix-ci';
     expect(expand(text, [range(0, 7), range(12, 19)])).toBe(
-      'use lody mcp to query session[id: ses_7f3ac91b] history and use lody mcp to query session[id: ses_7f3ac91b] history'
+      '[@fix-ci](session://ses_7f3ac91b) and [@fix-ci](session://ses_7f3ac91b)'
     );
   });
 
@@ -320,7 +341,7 @@ describe('hydration records the kind', () => {
       new Map([['fix-ci', 'ses_7f3ac91b']])
     );
     expect(applyTextRewrites(text, buildSessionMentionRewrites(text, mentions)).text).toBe(
-      'see use lody mcp to query session[id: ses_7f3ac91b] history now'
+      'see [@fix-ci](session://ses_7f3ac91b) now'
     );
   });
 });

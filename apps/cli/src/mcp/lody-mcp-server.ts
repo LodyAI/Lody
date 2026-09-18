@@ -875,7 +875,9 @@ const SessionHistoryToolInputSchema = z
       .trim()
       .min(1)
       .optional()
-      .describe('Target session id, or current. Defaults to current.'),
+      .describe(
+        'Target session id, or current. Defaults to current. Also accepts a `session://<sessionId>` URI from a session mention link.'
+      ),
     cursor: z.string().trim().min(1).optional(),
     limit: z
       .number()
@@ -1211,12 +1213,21 @@ const parseJsonCliOutput = (stdout: string): unknown => {
 const runLodyCliJson = async (args: string[], timeoutMs?: number): Promise<unknown> =>
   parseJsonCliOutput((await runLodyCli(args, timeoutMs)).stdout);
 
+const SESSION_URI_PREFIX = 'session://';
+
+const stripSessionUriPrefix = (value: string): string =>
+  value.startsWith(SESSION_URI_PREFIX) ? value.slice(SESSION_URI_PREFIX.length) : value;
+
 const resolveMcpSessionId = (
   sessionId: string | undefined,
   ctx: ReturnType<typeof getSessionContext>
 ) => {
   const normalized = normalizeCliValue(sessionId);
-  return normalized && normalized !== 'current' ? normalized : ctx.sessionId;
+  if (!normalized || normalized === 'current') {
+    return ctx.sessionId;
+  }
+  // Mentions arrive as `session://<id>`; accept that form as well as a bare id.
+  return stripSessionUriPrefix(normalized);
 };
 
 const getMcpWorkspaceId = (ctx: ReturnType<typeof getSessionContext>) =>
@@ -3977,6 +3988,7 @@ export const __lodyMcpServerInternals = {
   resolveUploadPath,
   truncateUtf8HeadTail,
   SESSION_CONTROL_TIMEOUT_MS,
+  resolveMcpSessionId,
 };
 
 export function buildLodyMcpServer(config: { taskToolsEnabled?: boolean } = {}): McpServer {
@@ -3984,10 +3996,19 @@ export function buildLodyMcpServer(config: { taskToolsEnabled?: boolean } = {}):
   // Agent session. Initialization is idempotent and local-platform telemetry
   // remains hard-disabled inside the analytics layer.
   initCliAnalytics();
-  const server = new McpServer({
-    name: 'lody',
-    version: '0.1.0',
-  });
+  const server = new McpServer(
+    {
+      name: 'lody',
+      version: '0.1.0',
+    },
+    {
+      instructions: [
+        'Session mentions in user messages may appear as markdown links of the form [@Title](session://<sessionId>).',
+        'To read that conversation, call lody_session_history with sessionId set to the <sessionId> (the part after session://), or pass the full session:// URI.',
+        'Paginate with nextCursor when you need older turns.',
+      ].join(' '),
+    }
+  );
 
   server.registerTool(
     FEEDBACK_TOOL_NAME,
@@ -4695,7 +4716,7 @@ export function buildLodyMcpServer(config: { taskToolsEnabled?: boolean } = {}):
     SESSION_HISTORY_TOOL_NAME,
     {
       title: 'Read Lody session history',
-      description: `Read one bounded visible transcript page, oldest-to-newest. Omit cursor for the newest page; nextCursor reads older entries. Defaults to ${DEFAULT_MCP_SESSION_HISTORY_LIMIT}, max ${MAX_MCP_SESSION_HISTORY_LIMIT}, with a 128 KiB response cap.`,
+      description: `Read one bounded visible transcript page, oldest-to-newest. Use this for [@Title](session://<sessionId>) mention links: pass sessionId as the <sessionId> or the full session:// URI. Omit cursor for the newest page; nextCursor reads older entries. Defaults to ${DEFAULT_MCP_SESSION_HISTORY_LIMIT}, max ${MAX_MCP_SESSION_HISTORY_LIMIT}, with a 128 KiB response cap.`,
       inputSchema: SessionHistoryToolInputSchema,
     },
     async (args: SessionHistoryToolInput) => {

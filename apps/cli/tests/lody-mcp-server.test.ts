@@ -22,6 +22,7 @@ const {
   postPreviewCandidate,
   postSessionControl,
   resolveUploadPath,
+  resolveMcpSessionId,
   summarizeTaskForMcp,
 } = __lodyMcpServerInternals;
 
@@ -376,5 +377,22 @@ describe('summarizeTaskForMcp bounds', () => {
     expect(out.commentCount).toBe(25);
     // The newest are the ones kept.
     expect(out.comments.at(-1)?.body).toBe('comment 24');
+  });
+});
+
+describe('resolveMcpSessionId', () => {
+  const ctx = { sessionId: 'current-session' } as ReturnType<typeof getSessionContext>;
+
+  it('accepts a bare session id', () => {
+    expect(resolveMcpSessionId('ses_abc', ctx)).toBe('ses_abc');
+  });
+
+  it('strips a session:// mention URI', () => {
+    expect(resolveMcpSessionId('session://ses_abc', ctx)).toBe('ses_abc');
+  });
+
+  it('falls back to the current session', () => {
+    expect(resolveMcpSessionId(undefined, ctx)).toBe('current-session');
+    expect(resolveMcpSessionId('current', ctx)).toBe('current-session');
   });
 });

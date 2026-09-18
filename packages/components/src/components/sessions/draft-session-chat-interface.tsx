@@ -126,7 +126,10 @@ export interface DraftSessionChatInterfaceProps {
 export type DraftSessionChatInterfaceHandle = {
   focusInput: () => void;
   addCommentReference: (reference: CommentReferencePayload) => boolean;
-  insertSessionMention: (sessionId: string) => boolean;
+  insertSessionMention: (
+    sessionId: string,
+    options?: { at?: number; replaceEnd?: number }
+  ) => boolean;
 };
 
 export const DraftSessionChatInterface = memo(
@@ -621,8 +624,8 @@ export const DraftSessionChatInterface = memo(
           addCommentReference: (reference: CommentReferencePayload) => {
             return inputAreaRef.current?.addCommentReference(reference) ?? false;
           },
-          insertSessionMention: (sessionId: string) => {
-            return inputAreaRef.current?.insertSessionMention(sessionId) ?? false;
+          insertSessionMention: (sessionId, options) => {
+            return inputAreaRef.current?.insertSessionMention(sessionId, options) ?? false;
           },
         }),
         []

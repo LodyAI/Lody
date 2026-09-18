@@ -74,7 +74,10 @@ Parent instructions apply.
 - `session_history` pages through `SessionData.history.readVisiblePage`, never `getHistory()`:
   `limit` counts displayable turns, the cursor is the raw position from the previous page, and
   hidden/empty rows never shift it. A page reports `hasMore` from the underlying raw rows, so a
-  scan budget never claims the history ended.
+  scan budget never claims the history ended. Session mentions expand to
+  `[@Title](session://<sessionId>)`; resolve them with this tool, accepting a bare id or a
+  `session://` URI.
+  ([note](../../../../.agents/notes/implemented/feature/2026-09-18-session-mention-uri-and-paste.md))
 - Bound every task reply: body 64 KiB with head-and-tail truncation
   (`bodyTruncated`/`bodyOmittedBytes`), newest 20 comments with `commentCount`, 50 links,
   `lody_task_list` 20/100 with `matched`. `lody_task_edit_body` still matches exactly against the

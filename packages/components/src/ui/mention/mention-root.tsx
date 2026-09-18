@@ -161,6 +161,11 @@ interface MentionInsertRequest {
   /** Insertion index. @default end of the current value */
   at?: number;
   /**
+   * End of the text replaced by this insert. Defaults to `at` (pure insert).
+   * Paste over a selection sets this to the selection end.
+   */
+  replaceEnd?: number;
+  /**
    * Prefix a single space unless the text already ends in whitespace (or the
    * insert lands at the very start). Resolved against the input's own value, so
    * a caller holding a stale copy of it cannot glue the mention to the previous
@@ -710,9 +715,13 @@ const MentionRoot = React.forwardRef<RootElement, MentionRootProps>((props, forw
         let result = { value: sourceValue, mentions: initialMentions, caret: sourceValue.length };
         for (const entry of requests) {
           const at = Math.max(0, Math.min(result.value.length, entry.at ?? result.value.length));
+          const replaceEnd = Math.max(
+            at,
+            Math.min(result.value.length, entry.replaceEnd ?? at)
+          );
           result = applyMentionSplice(result.value, result.mentions, {
             replaceStart: at,
-            replaceEnd: at,
+            replaceEnd,
             prefix: resolveMentionInsertPrefix(result.value, at, entry.separate),
             text: entry.text,
             suffix: entry.suffix,

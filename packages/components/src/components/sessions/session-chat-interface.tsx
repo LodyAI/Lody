@@ -1814,7 +1814,10 @@ export type SessionChatInterfaceHandle = {
   cancelShareImageSelection: () => void;
   openSearch: () => void;
   getLastAssistantTurnId: () => string | null;
-  insertSessionMention: (sessionId: string) => boolean;
+  insertSessionMention: (
+    sessionId: string,
+    options?: { at?: number; replaceEnd?: number }
+  ) => boolean;
 };
 
 export type DispatchInputBlocksOptions = {
@@ -4871,8 +4874,8 @@ export const SessionChatInterface = memo(
         cancelShareImageSelection: shareSelection.cancel,
         openSearch,
         getLastAssistantTurnId: () => lastCompletedAssistantMessageId,
-        insertSessionMention: (sessionId: string) => {
-          return inputAreaRef.current?.insertSessionMention(sessionId) ?? false;
+        insertSessionMention: (sessionId, options) => {
+          return inputAreaRef.current?.insertSessionMention(sessionId, options) ?? false;
         },
       }),
       [
