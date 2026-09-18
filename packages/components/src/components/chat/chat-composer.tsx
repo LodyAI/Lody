@@ -336,7 +336,7 @@ export function ChatComposer({
   const [useCompactPlaceholder, setUseCompactPlaceholder] = useState(false);
   useLayoutEffect(() => {
     const box = composerBoxRef.current;
-    if (!box) return;
+    if (!box) return undefined;
     const update = (width: number) => {
       setUseCompactPlaceholder(width <= COMPOSER_COMPACT_PLACEHOLDER_MAX_PX);
     };

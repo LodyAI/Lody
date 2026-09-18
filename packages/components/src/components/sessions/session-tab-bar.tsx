@@ -98,22 +98,9 @@ interface SessionTabBarProps {
 }
 
 /* One canvas: `bg-background` runs unbroken from this bar down through the
-   message list, and the tabs sit ON it without breaking it. The ACTIVE tab is
-   the heaviest thing in the row — fill plus a light shadow, no border.
-   Inactive tabs get a flat borderless wash and dimmed text; they must stay
-   lighter-weight than the active tab, since chrome is what the eye scores as
-   selected among siblings.
-
-   Keep the surface ladder ordered — canvas → inactive → active — measured, not
-   assumed. `bg-sidebar` gives light that ladder for free (canvas 241 → active
-   229), but DARK needs the override: Vesper's sideBar is #161616, a mere 6
-   above the #101010 canvas and BELOW the inactive wash (26), so the active pill
-   rendered as a dent. Hence the `dark:` fill plus a light shadow.
-   `--tab-active`/`--tab-inactive` are useless here: both collapse onto
-   `--background` in dark, which is what forced the original `/[0.22]` vs
-   `/[0.12]` tints — a 10% gap that rendered as one gray.
-   `border-transparent` on the base keeps every state on the same box model, so
-   switching tabs never shifts a label by a pixel. */
+   message list. Active/inactive fills come from `TAB_PILL_*_CLASS` — the same
+   tokens as the right side-panel tab strip. `border-transparent` on the base
+   keeps every state on the same box model. */
 const TAB_ITEM_CLASS =
   'group relative flex h-8 w-full min-w-0 items-center gap-1.5 overflow-hidden rounded-md border border-transparent px-3 text-[13px] transition-colors cursor-pointer';
 const TAB_ITEM_ACTIVE_CLASS = TAB_PILL_ACTIVE_CLASS;

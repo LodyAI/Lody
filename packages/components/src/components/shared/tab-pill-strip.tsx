@@ -6,10 +6,9 @@ import { cn } from '@/lib/utils';
  * `session-tab-bar.tsx` (canvas → inactive → active) before touching these;
  * re-derive and measure against the actual theme tokens, don't guess.
  */
-export const TAB_PILL_ACTIVE_CLASS =
-  'border-transparent bg-sidebar text-tab-active-foreground shadow-[0_1px_2px_rgb(0_0_0/0.08),0_1px_1px_rgb(0_0_0/0.05)] dark:bg-muted-foreground/[0.18] dark:shadow-[0_2px_8px_rgb(0_0_0/0.4),0_1px_2px_rgb(0_0_0/0.25)]';
+export const TAB_PILL_ACTIVE_CLASS = 'bg-foreground/[0.08] text-tab-active-foreground';
 export const TAB_PILL_INACTIVE_CLASS =
-  'bg-muted-foreground/[0.07] text-tab-inactive-foreground hover:bg-muted-foreground/[0.12] hover:text-tab-hover-foreground';
+  'bg-foreground/[0.035] text-tab-inactive-foreground hover:bg-foreground/[0.06] hover:text-tab-hover-foreground';
 
 export interface TabPillItem<Key extends string = string> {
   key: Key;

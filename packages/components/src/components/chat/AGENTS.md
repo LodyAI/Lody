@@ -29,7 +29,8 @@ Index and rationale: [README.md](README.md).
   suppresses that user's notice for the workspace across future revisions.
 - The composer box border is 1px (`border`), not a 0.5px hairline. Light fill is
   `--composer`; the session info bar uses the same fill. Both share
-  `COMPOSER_ELEVATION_CLASS` (`0 2px 8px 0`). Dark fill stays `bg-input/90`.
+  `COMPOSER_ELEVATION_CLASS`. The info bar uses `INFO_BAR_ELEVATION_CLASS`.
+  Dark fill stays `bg-input/90`.
 - Desktop footer order: run config → permission → usage. Provider interaction mode
   belongs inside run config; the standalone button is explicit permission mode,
   falling back to legacy ACP modes. Plus / model / mode share `gap-x-1.5`; when

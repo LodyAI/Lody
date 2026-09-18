@@ -1935,7 +1935,7 @@ export const SessionChatStreamView = forwardRef<
                   <Button
                     variant="secondary"
                     size="icon"
-                    className="pointer-events-auto rounded-full border border-border/70 shadow-lg"
+                    className="pointer-events-auto rounded-full border-[0.5px] border-border bg-white text-foreground shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.04)] hover:bg-white dark:bg-secondary dark:text-secondary-foreground dark:shadow-none"
                     onClick={scrollToBottom}
                     aria-label={t('sessions.scrollToLatest')}
                   >
@@ -2956,7 +2956,9 @@ const UserMessageRowView = ({
       <div
         className={cn(
           'group/usermsg flex min-w-0 flex-1 flex-col items-end text-left',
-          isMobile ? 'max-w-[min(100%,28rem)] gap-1' : 'max-w-[80%] gap-1.5 sm:max-w-[70%]'
+          isMobile
+            ? 'max-w-[min(100%,28rem)] gap-1'
+            : 'max-w-full gap-1.5 @[520px]:max-w-[80%] @[720px]:max-w-[70%]'
         )}
       >
         <div
@@ -3021,7 +3023,7 @@ const UserMessageRowView = ({
                 honors overflow-wrap here so it doesn't repro there — hence "only sometimes". */}
             <div className={cn('relative min-w-0 max-w-full', isEditing ? 'w-full' : 'w-fit')}>
               {showSendingSpinner && (
-                <Spinner className="absolute bottom-[13px] right-full mr-1.5 h-4 w-4 text-muted-foreground" />
+                <Spinner className="absolute bottom-[13px] right-full mr-1.5 hidden h-4 w-4 text-muted-foreground @[520px]:block" />
               )}
               <div
                 className={cn(

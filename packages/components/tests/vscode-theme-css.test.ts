@@ -61,7 +61,7 @@ describe('createLodyThemeCssVariables', () => {
     const sidebarForeground = hexColorToHslChannel('#A0A0A0');
 
     expect(variables['--background']).toBe('0 0% 6.3%');
-    expect(variables['--hover']).toBe('0 0% 15.7%');
+    expect(variables['--hover']).toBe('0 0% 10.2%');
     expect(variables['--hover-foreground']).toBe('0 0% 100%');
     expect(variables['--highlight']).toBe(warmAccent);
     expect(variables['--highlight-foreground']).toBe(buttonForeground);

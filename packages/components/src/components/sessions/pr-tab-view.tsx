@@ -6,7 +6,6 @@ import {
   CheckCircle2,
   ChevronDown,
   CircleDashed,
-  Copy,
   CircleDot,
   GitMerge,
   GitPullRequestArrow,
@@ -154,7 +153,16 @@ function UserAvatar({
   );
 }
 
-function InlineCopyButton({ value, label }: { value: string; label: string }) {
+function BranchRefChip({
+  label,
+  value,
+  copyLabel,
+}: {
+  label: string;
+  value: string;
+  copyLabel: string;
+}) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const handleCopy = useCallback(() => {
     if (!value) return;
@@ -163,22 +171,21 @@ function InlineCopyButton({ value, label }: { value: string; label: string }) {
     window.setTimeout(() => setCopied(false), 1500);
   }, [value]);
   return (
-    <button
-      type="button"
-      onClick={handleCopy}
-      className={cn(
-        'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors',
-        'hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring'
-      )}
-      title={label}
-      aria-label={label}
-    >
-      {copied ? (
-        <CheckCircle2 className="h-3 w-3 text-status-success" />
-      ) : (
-        <Copy className="h-3 w-3" />
-      )}
-    </button>
+    <div className="grid min-w-0 grid-cols-[2.75rem_minmax(0,1fr)] items-center gap-x-2">
+      <span className="text-[11px] text-muted-foreground">{label}</span>
+      <button
+        type="button"
+        onClick={handleCopy}
+        title={copied ? t('common.copied', 'Copied') : copyLabel}
+        aria-label={copied ? t('common.copied', 'Copied') : copyLabel}
+        className={cn(
+          'min-w-0 truncate rounded-sm bg-foreground/[0.06] px-1.5 py-0.5 text-left font-mono text-[11px] font-normal text-foreground',
+          'hover:bg-foreground/[0.1] focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring'
+        )}
+      >
+        {copied ? t('common.copied', 'Copied') : value}
+      </button>
+    </div>
   );
 }
 
@@ -910,14 +917,21 @@ function PrHeaderActionButton({
         variant="outline"
         onClick={() => void onDeleteBranch?.()}
         disabled={busy}
-        className={PR_ACTION_BTN}
+        className={cn(
+          PR_ACTION_BTN,
+          '@max-[420px]/pr-tab:h-7 @max-[420px]/pr-tab:w-7 @max-[420px]/pr-tab:min-w-7 @max-[420px]/pr-tab:gap-0 @max-[420px]/pr-tab:px-0'
+        )}
+        aria-label={t('sessions.prTab.deleteBranch', 'Delete branch')}
+        title={t('sessions.prTab.deleteBranch', 'Delete branch')}
       >
         {isDeletingBranch ? (
           <Spinner className="h-3.5 w-3.5" />
         ) : (
           <Trash2 className="h-3.5 w-3.5" />
         )}
-        {t('sessions.prTab.deleteBranch', 'Delete branch')}
+        <span className="@max-[420px]/pr-tab:hidden">
+          {t('sessions.prTab.deleteBranch', 'Delete branch')}
+        </span>
       </Button>
     );
   }
@@ -1057,36 +1071,20 @@ function resolveMergeKind(pr: GitHubPullRequestDetails): MergeKind {
 
 function BranchRow({ pr }: { pr: GitHubPullRequestDetails }) {
   const { t } = useTranslation();
+  const copyLabel = t('sessions.prTab.copyBranch', 'Copy branch name');
   return (
     <div className="border-b border-border px-4 py-2">
-      <div className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-        <span className="inline-flex items-center gap-1">
-          <span className="uppercase tracking-wide text-muted-foreground/80">
-            {t('sessions.prTab.base', 'base')}
-          </span>
-          <code className="rounded-sm bg-muted px-1 py-px font-mono text-foreground">
-            {pr.baseRef}
-          </code>
-          <InlineCopyButton
-            value={pr.baseRef}
-            label={t('sessions.prTab.copyBranch', 'Copy branch name')}
-          />
-        </span>
-        <span aria-hidden className="text-muted-foreground/60">
-          ←
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <span className="uppercase tracking-wide text-muted-foreground/80">
-            {t('sessions.prTab.head', 'head')}
-          </span>
-          <code className="rounded-sm bg-muted px-1 py-px font-mono text-foreground">
-            {pr.headRef}
-          </code>
-          <InlineCopyButton
-            value={pr.headRef}
-            label={t('sessions.prTab.copyBranch', 'Copy branch name')}
-          />
-        </span>
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-1">
+        <BranchRefChip
+          label={t('sessions.prTab.base', 'Base')}
+          value={pr.baseRef}
+          copyLabel={copyLabel}
+        />
+        <BranchRefChip
+          label={t('sessions.prTab.head', 'Head')}
+          value={pr.headRef}
+          copyLabel={copyLabel}
+        />
       </div>
     </div>
   );
@@ -1189,36 +1187,38 @@ export const PrTabView = memo(function PrTabView({
                 #{pr.number}
               </span>
             </h2>
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
-              {pr.user && (
-                <>
-                  <UserAvatar
-                    user={{ login: pr.user.login, avatarUrl: pr.user.avatarUrl }}
-                    size="xs"
-                  />
-                  <span className="font-medium text-foreground">{pr.user.login}</span>
-                </>
-              )}
-              <span>
-                {t('sessions.prTab.opened', 'opened {{when}}', {
-                  when: formatRelativeTime(pr.createdAt, t),
-                })}
+            <div className="flex flex-col gap-1 text-[11px] text-muted-foreground @min-[420px]/pr-tab:flex-row @min-[420px]/pr-tab:flex-wrap @min-[420px]/pr-tab:items-center @min-[420px]/pr-tab:gap-x-2">
+              <span className="inline-flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                {pr.user && (
+                  <>
+                    <UserAvatar
+                      user={{ login: pr.user.login, avatarUrl: pr.user.avatarUrl }}
+                      size="xs"
+                    />
+                    <span className="font-normal text-foreground">{pr.user.login}</span>
+                  </>
+                )}
+                <span>
+                  {t('sessions.prTab.opened', 'opened {{when}}', {
+                    when: formatRelativeTime(pr.createdAt, t),
+                  })}
+                </span>
+                <span aria-hidden>·</span>
+                <span>
+                  {t('sessions.prTab.commitsSummary', '{{count}} commits', {
+                    count: pr.commits,
+                  })}
+                </span>
               </span>
-              <span>·</span>
-              <span>
-                {t('sessions.prTab.commitsSummary', '{{count}} commits', {
-                  count: pr.commits,
-                })}
-              </span>
-              <span>·</span>
-              <span className="tabular-nums">
+              <span className="inline-flex items-center gap-1.5 tabular-nums">
                 <span className="text-status-success">+{pr.additions}</span>
-                {' / '}
                 <span className="text-status-danger">-{pr.deletions}</span>
-                {' · '}
-                {t('sessions.prTab.filesChanged', '{{count}} files', {
-                  count: pr.changedFiles,
-                })}
+                <span aria-hidden>·</span>
+                <span>
+                  {t('sessions.prTab.filesChanged', '{{count}} files', {
+                    count: pr.changedFiles,
+                  })}
+                </span>
               </span>
             </div>
             {pr.body ? (
@@ -1311,7 +1311,7 @@ export const PrTabView = memo(function PrTabView({
     ) : null;
 
   return (
-    <div className={cn('flex h-full min-h-0 flex-col bg-background', className)}>
+    <div className={cn('@container/pr-tab flex h-full min-h-0 flex-col bg-background', className)}>
       {embedded ? (
         /* Landing: slim bar — badge + merge only (no branch row / github chrome). */
         <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-5">
@@ -1328,7 +1328,7 @@ export const PrTabView = memo(function PrTabView({
           <div className="mx-auto flex w-full max-w-3xl items-center gap-2">
             {leadingSlot}
             <PullRequestBadge pr={badgeMeta} size="md" />
-            <span className="min-w-0 truncate text-xs font-medium text-foreground">
+            <span className="min-w-0 truncate text-xs font-normal text-foreground @max-[280px]/pr-tab:hidden">
               {repoFullName}
             </span>
             <div className="ml-auto flex shrink-0 items-center gap-1">

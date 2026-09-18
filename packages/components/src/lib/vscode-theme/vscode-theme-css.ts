@@ -189,20 +189,14 @@ const LODY_ALIAS_RULES: LodyAliasRule[] = [
   },
   {
     cssVariable: '--hover',
-    colorIds: [
-      'list.hoverBackground',
-      'menu.selectionBackground',
-      'quickInputList.focusBackground',
-      'list.inactiveSelectionBackground',
-      'list.focusBackground',
-      'editorWidget.background',
-      'sideBarSectionHeader.background',
-      'sideBar.background',
-    ],
+    // Page-level hover is a wash on the editor canvas. Do not reuse
+    // `list.hoverBackground` — that token is sized for the sidebar and reads
+    // as a heavy slab on the conversation/archive page.
+    colorIds: ['editor.background'],
     compositeOverColorIds: DEFAULT_ALIAS_BASE_COLOR_IDS,
     ensureVisibleAgainst: {
       colorIds: ['editor.background'],
-      fallbackBlendRatio: 0.08,
+      fallbackBlendRatio: 0.04,
     },
   },
   {

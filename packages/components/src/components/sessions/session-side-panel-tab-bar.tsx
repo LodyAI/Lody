@@ -12,6 +12,7 @@ import {
 } from '@/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { WINDOW_DRAG_EXEMPT_CLASS, useWindowDragRegionClass } from '@/ui/window-drag-region';
+import { TAB_PILL_ACTIVE_CLASS, TAB_PILL_INACTIVE_CLASS } from '@/components/shared/tab-pill-strip';
 
 export type SessionSidePanelTabItem = {
   id: string;
@@ -128,11 +129,8 @@ type SessionSidePanelTabBarProps = {
 };
 
 const TAB_CLASS = `group relative flex h-7 max-w-[180px] shrink-0 cursor-pointer items-center gap-1.5 rounded-md text-[13px] transition-colors ${WINDOW_DRAG_EXEMPT_CLASS}`;
-// Soft cool-gray pills on the white side panel (Linear-like), not heavy slate washes.
-const ACTIVE_TAB_CLASS =
-  'bg-foreground/[0.08] text-tab-active-foreground shadow-[inset_0_0_0_1px_hsl(var(--border)/0.7)]';
-const INACTIVE_TAB_CLASS =
-  'bg-foreground/[0.035] text-tab-inactive-foreground hover:bg-foreground/[0.06] hover:text-tab-hover-foreground';
+const ACTIVE_TAB_CLASS = TAB_PILL_ACTIVE_CLASS;
+const INACTIVE_TAB_CLASS = TAB_PILL_INACTIVE_CLASS;
 
 function SidePanelTabIcon({ tab }: { tab: SessionSidePanelTabItem }) {
   if (tab.pending) {

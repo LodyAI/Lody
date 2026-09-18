@@ -1,5 +1,6 @@
-import { memo, useMemo, useState } from 'react';
-import { WrapText } from 'lucide-react';
+import { lazy, memo, Suspense, useMemo, useState } from 'react';
+import { Eye, EyeOff, WrapText } from 'lucide-react';
+import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import {
   CodeBlock,
@@ -7,9 +8,15 @@ import {
   CodeBlockCopyButton,
   type CustomRendererProps,
 } from 'streamdown';
+import { conversationFontSizeAtom } from '@/atoms/settings';
 
 const NAMED_PATH_PATTERN = /(?:title|filename|path|file)\s*=\s*(?:"([^"]+)"|'([^']+)'|(\S+))/iu;
 const HIGHLIGHT_LANG_PATTERN = /\bhighlight=(\S+)/iu;
+const MARKDOWN_FENCE_LANGUAGES = new Set(['md', 'markdown', 'mdx', 'gfm', 'mdown', 'mkd']);
+
+const MarkdownPreview = lazy(() =>
+  import('./markdown-renderer').then((mod) => ({ default: mod.MarkdownRenderer }))
+);
 
 export function parseMarkdownCodeBlockPath(meta: string | undefined): string | null {
   if (!meta) return null;
@@ -44,35 +51,64 @@ export function parseMarkdownCodeHighlightLanguage(
   return language.trim() || 'text';
 }
 
+export function isMarkdownCodeFence(language: string, meta: string | undefined): boolean {
+  const lang = language.trim().toLowerCase();
+  if (MARKDOWN_FENCE_LANGUAGES.has(lang)) return true;
+  const path = parseMarkdownCodeBlockPath(meta);
+  return path != null && /\.(?:md|markdown|mdx|mdown|mkd)$/iu.test(path);
+}
+
 export const MarkdownCodeToolbar = memo(function MarkdownCodeToolbar({
   code,
   label,
   wrapped,
   onToggleWrap,
+  markdownPreview = false,
+  previewing = false,
+  onTogglePreview,
 }: {
   code: string;
   label: string;
   wrapped: boolean;
   onToggleWrap: () => void;
+  markdownPreview?: boolean;
+  previewing?: boolean;
+  onTogglePreview?: () => void;
 }) {
   const { t } = useTranslation();
   const wrapLabel = wrapped
     ? t('sessions.fileViewer.wordWrapDisable', 'Disable line wrap')
     : t('sessions.fileViewer.wordWrapEnable', 'Wrap long lines');
+  const previewLabel = previewing
+    ? t('sessions.fileViewer.preview.hide', 'Hide preview')
+    : t('sessions.fileViewer.preview.show', 'Preview');
 
   return (
     <div data-streamdown="code-block-toolbar">
       <div data-streamdown="code-block-header">{label ? <span>{label}</span> : null}</div>
       <div data-streamdown="code-block-actions">
-        <button
-          type="button"
-          aria-label={wrapLabel}
-          aria-pressed={wrapped}
-          title={wrapLabel}
-          onClick={onToggleWrap}
-        >
-          <WrapText />
-        </button>
+        {markdownPreview && onTogglePreview ? (
+          <button
+            type="button"
+            aria-label={previewLabel}
+            aria-pressed={previewing}
+            title={previewLabel}
+            onClick={onTogglePreview}
+          >
+            {previewing ? <EyeOff /> : <Eye />}
+          </button>
+        ) : null}
+        {previewing ? null : (
+          <button
+            type="button"
+            aria-label={wrapLabel}
+            aria-pressed={wrapped}
+            title={wrapLabel}
+            onClick={onToggleWrap}
+          >
+            <WrapText />
+          </button>
+        )}
         <CodeBlockCopyButton code={code} />
       </div>
     </div>
@@ -86,15 +122,20 @@ export const MarkdownFencedCodeBlock = memo(function MarkdownFencedCodeBlock({
   meta,
 }: CustomRendererProps) {
   const [wrapped, setWrapped] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  const conversationFontSize = useAtomValue(conversationFontSizeAtom);
+  const markdownPreview = useMemo(() => isMarkdownCodeFence(language, meta), [language, meta]);
   const label = useMemo(() => parseMarkdownCodeBlockLabel(language, meta), [language, meta]);
   const highlightLanguage = useMemo(
     () => parseMarkdownCodeHighlightLanguage(language, meta),
     [language, meta]
   );
+  const showPreview = markdownPreview && previewing;
 
   return (
     <CodeBlockContainer
-      data-code-wrap={wrapped ? 'true' : undefined}
+      data-code-wrap={!showPreview && wrapped ? 'true' : undefined}
+      data-markdown-preview={showPreview ? 'true' : undefined}
       isIncomplete={isIncomplete}
       language={language}
     >
@@ -103,15 +144,26 @@ export const MarkdownFencedCodeBlock = memo(function MarkdownFencedCodeBlock({
         label={label}
         wrapped={wrapped}
         onToggleWrap={() => setWrapped((current) => !current)}
+        markdownPreview={markdownPreview}
+        previewing={showPreview}
+        onTogglePreview={() => setPreviewing((current) => !current)}
       />
-      <div className="lody-code-highlight">
-        <CodeBlock
-          code={code}
-          isIncomplete={isIncomplete}
-          language={highlightLanguage}
-          lineNumbers={false}
-        />
-      </div>
+      {showPreview ? (
+        <div data-markdown-preview="true">
+          <Suspense fallback={null}>
+            <MarkdownPreview text={code} size={conversationFontSize} isStreaming={isIncomplete} />
+          </Suspense>
+        </div>
+      ) : (
+        <div className="lody-code-highlight">
+          <CodeBlock
+            code={code}
+            isIncomplete={isIncomplete}
+            language={highlightLanguage}
+            lineNumbers={false}
+          />
+        </div>
+      )}
     </CodeBlockContainer>
   );
 });

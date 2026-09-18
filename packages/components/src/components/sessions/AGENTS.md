@@ -9,8 +9,8 @@ Read each heading’s linked context before changing its files.
 
 - ONE `SessionTabBar` row; traffic-light insets gated on `!useElectronFullscreen()`.
   Hide IDE/share pills below `SESSION_PAGE_HEADER_PILLS_MIN_WIDTH_PX`; keep them on `⋯`.
-- Keep the surface ladder canvas → inactive → active in both themes and MEASURE
-  it; never give inactive tabs more chrome than the active one, and never use
+- Conversation tabs and the right side-panel tab strip share `TAB_PILL_*_CLASS`
+  (`tab-pill-strip.tsx`). Do not restyle one without the other. Never use
   `--tab-active`/`--tab-inactive` (both collapse onto `--background` in dark).
 - One leading status slot per tab, `waiting > working > unread > agent icon`;
   test `isWaiting` first, and never drop unread from a tab renderer.

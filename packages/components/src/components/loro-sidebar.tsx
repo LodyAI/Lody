@@ -607,8 +607,8 @@ function SidebarHeaderIconButton({
         'flex shrink-0 items-center justify-center rounded-md outline-hidden',
         compact ? 'h-5 w-5' : 'h-7 w-7',
         disabled
-          ? 'cursor-default text-sidebar-foreground-muted/25'
-          : 'text-sidebar-foreground-muted/65 hover:bg-sidebar-hover hover:text-sidebar-hover-foreground focus-visible:ring-1 focus-visible:ring-sidebar-ring/40',
+          ? 'cursor-default text-sidebar-foreground-muted/40'
+          : 'text-sidebar-foreground-muted hover:bg-sidebar-hover hover:text-sidebar-hover-foreground focus-visible:ring-1 focus-visible:ring-sidebar-ring/40',
         className
       )}
     >
@@ -912,7 +912,7 @@ export const LoroSidebar = memo(function LoroSidebar({
       labels={mergedLabels.filter}
       side="bottom"
       align="end"
-      triggerClassName="h-5 w-5 [&_svg]:h-3.5 [&_svg]:w-3.5"
+      triggerClassName="h-5 w-5 [&_svg]:h-4 [&_svg]:w-4"
     />
   ) : null;
   const sectionHeaderFilterPlaceholder = !isMobile
@@ -1245,7 +1245,7 @@ export const LoroSidebar = memo(function LoroSidebar({
         >
           <div className="relative">
             {!isMobile && desktopFilterNode ? (
-              <div className="pointer-events-none absolute right-0 top-1 z-10 flex h-7 items-center">
+              <div className="pointer-events-none absolute right-2 top-1 z-10 flex h-5 items-center">
                 <div className="pointer-events-auto flex">{desktopFilterNode}</div>
               </div>
             ) : null}

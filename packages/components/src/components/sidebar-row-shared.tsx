@@ -61,9 +61,8 @@ type PrCiVerdict = 'success' | 'failure' | 'pending' | 'expected';
 /**
  * PR + CI use the original 14px PR / 10px verdict-slot geometry. The circular
  * mask removes the PR stroke beneath the verdict without painting a
- * sidebar-colored backdrop, so the cutout stays transparent on hover and
- * selected-row surfaces. The base keeps its PR-status tone; only the verdict
- * uses the CI-state tone. Running uses a static dot and a tighter cutout.
+ * sidebar-colored backdrop. The info bar ContextChip uses this same
+ * `SessionPrIcon`. Running uses a static dot and a tighter cutout.
  */
 function MaskedPrCiIcon({
   BaseIcon,
@@ -225,7 +224,7 @@ export function SessionPrIcon({
         VerdictIcon={VerdictIcon}
         baseToneClassName={meta.iconColorClassName}
         verdict={verdict}
-        className={className}
+        className={cn(prStatus === 'merged' && 'translate-x-px', className)}
       />
     );
   }

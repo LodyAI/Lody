@@ -238,7 +238,7 @@ export function AppearanceSettingsView({
         </CompactRow>
         <div
           aria-label={t('settings.conversationFontSize.preview', 'Conversation preview')}
-          className="border-t border-border/60 bg-muted/20 px-3 py-3"
+          className="bg-muted/20 px-3 py-3"
         >
           <p
             className="max-w-[520px] leading-relaxed text-foreground"

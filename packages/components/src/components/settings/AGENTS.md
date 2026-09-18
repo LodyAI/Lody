@@ -10,6 +10,10 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
 
 ## Layout and components
 
+- The desktop settings overlay (`desktop-settings-modal.tsx`) owns a compact
+  close row on the RIGHT pane only. Left nav stays flush to the top; do not
+  overlay the default dialog X on the page title.
+
 - `share-management-setting.tsx` lists published static copies via the scoped cloud
   query. Ordinary members see their publications; admins see the workspace inventory.
   Draft uploads are not published shares. Reuse `useSessionShareLinkActions` for

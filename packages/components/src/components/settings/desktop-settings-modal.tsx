@@ -1,5 +1,5 @@
 import { useCallback, useId } from 'react';
-import { Bug } from 'lucide-react';
+import { Bug, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useAtom, useSetAtom } from 'jotai';
 import {
@@ -11,7 +11,13 @@ import {
 } from '@/atoms';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/ui';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
+import {
+  Dialog,
+  DialogClose,
+  DialogContentWithoutClose,
+  DialogDescription,
+  DialogTitle,
+} from '@/ui/dialog';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { useAppCapability } from '@/lib/app-platform';
@@ -62,12 +68,12 @@ export function DesktopSettingsModal() {
         if (!next) setOpen(false);
       }}
     >
-      <DialogContent
+      <DialogContentWithoutClose
         noAnimation
         className="flex h-[min(90vh,950px)] w-[84vw] max-w-[1100px] flex-col gap-0 overflow-hidden p-0 sm:p-0"
       >
         <SettingsModalBody />
-      </DialogContent>
+      </DialogContentWithoutClose>
     </Dialog>
   );
 }
@@ -181,8 +187,8 @@ function SettingsModalBody() {
                             className={cn(
                               'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1 text-start text-sm font-normal transition-colors',
                               resolvedActiveTab === tab.id
-                                ? 'bg-secondary text-secondary-foreground'
-                                : 'text-muted-foreground hover:bg-secondary/50 hover:text-secondary-foreground'
+                                ? 'bg-foreground/[0.06] text-foreground'
+                                : 'text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground'
                             )}
                             onClick={() => selectTab(tab.id)}
                           >
@@ -207,7 +213,7 @@ function SettingsModalBody() {
                 type="button"
                 data-id="settings:report-bug"
                 data-scope-item="row"
-                className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1 text-start text-sm font-normal text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-secondary-foreground"
+                className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1 text-start text-sm font-normal text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
                 onClick={handleReportBug}
               >
                 <Bug className="h-4 w-4 shrink-0 opacity-80" strokeWidth={1.75} />
@@ -222,10 +228,18 @@ function SettingsModalBody() {
           role="main"
           className="flex min-h-0 min-w-0 flex-1 flex-col"
         >
+          <div className="flex h-7 shrink-0 items-center justify-end px-3">
+            <DialogClose
+              className="flex h-5 w-5 items-center justify-center rounded-full bg-foreground/[0.06] text-muted-foreground transition-colors hover:bg-foreground/[0.12] hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+              aria-label={t('common.close', 'Close')}
+            >
+              <X className="h-3 w-3" strokeWidth={2} aria-hidden="true" />
+            </DialogClose>
+          </div>
           {selfTitledTab ? (
             <DialogTitle className="sr-only">{t(activeTabConfig.labelKey)}</DialogTitle>
           ) : (
-            <header className="mt-2 flex h-12 shrink-0 items-center px-8">
+            <header className="flex h-10 shrink-0 items-center px-8">
               <DialogTitle className="text-xl font-normal leading-none">
                 {t(activeTabConfig.labelKey)}
               </DialogTitle>

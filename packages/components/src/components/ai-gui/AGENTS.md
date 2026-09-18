@@ -118,8 +118,8 @@ File-by-file ownership and coverage pointers: [README.md](README.md).
   `context/terminal-output-lifecycle.md`. Never send full legacy output through
   ANSI parsing, search, or React rendering.
 - `assistant-edited-files.tsx` shows four paths before expanding and aligns stats
-  without per-file pills. The card body shares `--code-background` with multiline
-  code blocks and the session info bar; the header is `bg-muted/60`.
+  without per-file pills. The list sits on `--background`; the header is
+  `bg-muted/30`.
 - Update `message-content-guards.ts` with every shared `MessageContent` variant.
   `isMessageContent` gates rendering; a missing case silently drops the item.
 - A user entry marked by `SessionMeta.lastMissingHistoryUserMsgId` renders the

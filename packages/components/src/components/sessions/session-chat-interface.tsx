@@ -6154,6 +6154,7 @@ export const SessionChatInterface = memo(
                     scheduledTasks={pendingScheduledTasks}
                     prCiRuns={infoBarPrCiRuns}
                     onOpenPrCiRun={handleOpenPrCiRun}
+                    prCiState={latestPrState?.s}
                     projectName={repoFullName || resolvedLocalProjectMeta?.name || null}
                     branch={isMobile ? null : session.branchName?.trim() || null}
                     workspaceLocation={

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  isMarkdownCodeFence,
   parseMarkdownCodeBlockLabel,
   parseMarkdownCodeBlockPath,
   parseMarkdownCodeHighlightLanguage,
@@ -38,5 +39,23 @@ describe('parseMarkdownCodeHighlightLanguage', () => {
 
   it('falls back to the fence language', () => {
     expect(parseMarkdownCodeHighlightLanguage('tsx', undefined)).toBe('tsx');
+  });
+});
+
+describe('isMarkdownCodeFence', () => {
+  it('matches markdown language ids', () => {
+    expect(isMarkdownCodeFence('markdown', undefined)).toBe(true);
+    expect(isMarkdownCodeFence('md', undefined)).toBe(true);
+    expect(isMarkdownCodeFence('MDX', undefined)).toBe(true);
+  });
+
+  it('matches markdown file paths in meta', () => {
+    expect(isMarkdownCodeFence('text', 'notes.md')).toBe(true);
+    expect(isMarkdownCodeFence('text', 'title="docs/guide.markdown"')).toBe(true);
+  });
+
+  it('ignores other fences', () => {
+    expect(isMarkdownCodeFence('ts', 'src/app.ts')).toBe(false);
+    expect(isMarkdownCodeFence('json', undefined)).toBe(false);
   });
 });
