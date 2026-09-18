@@ -104,7 +104,11 @@ const maskStyle = (url: string): React.CSSProperties => ({
 export const MonochromeFileIcon = ({ filePath, className = 'h-4 w-4' }: FileIconProps) => {
   const iconUrl = useMemo(() => getFileIconUrl(getFileIconName(filePath)), [filePath]);
   return (
-    <span aria-hidden="true" className={`${className} bg-current`} style={maskStyle(iconUrl)} />
+    <span
+      aria-hidden="true"
+      className={`inline-block ${className} bg-current`}
+      style={maskStyle(iconUrl)}
+    />
   );
 };
 

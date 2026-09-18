@@ -6186,10 +6186,6 @@ const SessionDetail = ({
             panels={sidePanelOptions}
             onPanelOpen={handleSidePanelOptionOpen}
             title={t('sessions.sidebar.emptyTitle', 'Open a panel')}
-            description={t(
-              'sessions.sidebar.emptyDescription',
-              'Choose what you want to see in this sidebar.'
-            )}
           />
         ) : null}
         {desktopSideSessionSurfaces}

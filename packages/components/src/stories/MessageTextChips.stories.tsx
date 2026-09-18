@@ -95,7 +95,7 @@ function Bubble({
   return (
     <div className={cn('flex flex-col items-end gap-1.5', className)}>
       <div className="font-medium text-muted-foreground text-xs">{title}</div>
-      <div className="min-w-0 max-w-full rounded-2xl border border-foreground/[0.08] bg-foreground/[0.05] px-4 py-2.5">
+      <div className="min-w-0 max-w-full rounded-2xl bg-foreground/[0.05] px-4 py-2.5">
         <div
           className={cn(
             'min-w-0 max-w-full whitespace-pre-wrap text-sm [overflow-wrap:anywhere]',

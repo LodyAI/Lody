@@ -154,7 +154,6 @@ export const EmptyState: Story = {
             panels={ALL_PANELS}
             onPanelOpen={() => {}}
             title="Open a panel"
-            description="Choose what you want to see in this sidebar."
           />
         </div>
       </div>

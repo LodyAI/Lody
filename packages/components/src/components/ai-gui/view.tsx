@@ -5589,7 +5589,7 @@ const UserPlainTextBlock = ({
 
   return (
     <div className="flex max-w-full justify-end sm:pl-2">
-      <div className="min-w-0 max-w-full rounded-[1.15rem] border border-foreground/[0.08] bg-foreground/[0.05] px-3.5 py-2 sm:rounded-2xl sm:px-4 sm:py-2.5">
+      <div className="min-w-0 max-w-full rounded-[1.15rem] bg-foreground/[0.05] px-3.5 py-2 sm:rounded-2xl sm:px-4 sm:py-2.5">
         <div
           className={cn(
             // overflow-wrap:anywhere (not break-words) is load-bearing: only `anywhere`

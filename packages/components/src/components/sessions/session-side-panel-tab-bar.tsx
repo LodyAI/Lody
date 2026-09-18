@@ -163,29 +163,26 @@ export function SessionSidePanelEmptyState({
   panels,
   onPanelOpen,
   title,
-  description,
 }: {
   panels: SessionSidePanelOption[];
   onPanelOpen: (panelId: SessionSidePanelOption['id']) => void;
   title: string;
-  description: string;
 }) {
   return (
-    <div className="flex h-full items-center justify-center p-6">
+    <div className="@container/empty-panel flex h-full items-center justify-center p-6">
       <div className="w-full max-w-xs text-center">
         <div className="text-sm font-medium text-foreground">{title}</div>
-        <div className="mt-1 text-xs leading-5 text-muted-foreground">{description}</div>
-        <div className="mt-4 grid grid-cols-2 gap-2">
+        <div className="mt-4 grid grid-cols-1 gap-2 @min-[320px]/empty-panel:grid-cols-2">
           {panels.map((panel) => (
             <button
               key={panel.id}
               type="button"
               disabled={panel.disabled}
-              className="grid h-10 grid-cols-[1rem_minmax(0,1fr)] items-center gap-2 rounded-md border border-border/70 bg-background px-3 text-left text-sm text-foreground transition-colors hover:bg-hover hover:text-hover-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-background disabled:hover:text-foreground"
+              className="flex min-h-10 items-center gap-2 rounded-md border border-border/70 bg-background px-3 text-left text-sm text-foreground transition-colors hover:bg-hover hover:text-hover-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-background disabled:hover:text-foreground"
               onClick={() => onPanelOpen(panel.id)}
             >
               <SidePanelTabIcon tab={panel} />
-              <span className="truncate">{panel.label}</span>
+              <span className="min-w-0">{panel.label}</span>
             </button>
           ))}
         </div>

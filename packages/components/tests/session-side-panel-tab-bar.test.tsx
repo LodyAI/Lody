@@ -248,7 +248,6 @@ describe('SessionSidePanelTabBar', () => {
           ],
           onPanelOpen,
           title: 'Open a panel',
-          description: 'Choose what to show.',
         })
       );
     });

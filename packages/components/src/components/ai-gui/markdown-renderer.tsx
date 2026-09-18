@@ -212,7 +212,7 @@ const MARKDOWN_BASE_CLASSNAME =
   '[&_[data-streamdown="mermaid"]]:overflow-hidden ' +
   '[&_[data-streamdown="code-block"]]:!my-4 ' +
   '[&_table]:!my-0 [&_table]:w-full [&_table]:border-collapse [&_table]:text-[0.92em] [&_table]:leading-[1.5] ' +
-  '[&_th]:border-b [&_th]:border-border/70 [&_th]:bg-muted/45 [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-semibold [&_th]:text-foreground/80 ' +
+  '[&_th]:border-b [&_th]:border-border/70 [&_th]:bg-muted/20 [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-semibold [&_th]:text-foreground/80 dark:[&_th]:bg-muted/40 ' +
   '[&_td]:border-b [&_td]:border-border/45 [&_td]:px-2.5 [&_td]:py-1.5 [&_td]:align-top ' +
   '[&_tbody_tr:nth-child(even)]:bg-muted/15 [&_tbody_tr:last-child_td]:border-b-0 ' +
   '[&_:is(th,td):first-child]:w-px [&_:is(th,td):first-child]:whitespace-nowrap ' +
@@ -1039,7 +1039,7 @@ const AgentFileLink = ({
     >
       <MonochromeFileIcon
         filePath={iconPath}
-        className="h-[1em] w-[1em] shrink-0 self-center"
+        className="h-[1.38em] w-[1.38em] shrink-0 self-center"
       />
       <span className="min-w-0 truncate">{children}</span>
       {!hasOpenAction ? (

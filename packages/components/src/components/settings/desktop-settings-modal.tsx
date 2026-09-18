@@ -157,7 +157,7 @@ function SettingsModalBody() {
                 if (tabs.length === 0 && !showsAccountEntry) return null;
                 return (
                   <section key={section.id} aria-label={section.label}>
-                    <h2 className="px-2.5 pb-1 text-[0.75em] font-normal text-muted-foreground/55">
+                    <h2 className="px-2.5 pb-1 text-[0.75em] font-normal text-foreground/50 dark:text-muted-foreground/70">
                       {section.label}
                     </h2>
                     <div className="space-y-0.5">
@@ -188,7 +188,7 @@ function SettingsModalBody() {
                               'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1 text-start text-[1em] font-normal transition-colors',
                               resolvedActiveTab === tab.id
                                 ? 'bg-foreground/[0.06] text-foreground'
-                                : 'text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground'
+                                : 'text-foreground/80 hover:bg-foreground/[0.04] hover:text-foreground dark:text-muted-foreground'
                             )}
                             onClick={() => selectTab(tab.id)}
                           >
@@ -213,7 +213,7 @@ function SettingsModalBody() {
                 type="button"
                 data-id="settings:report-bug"
                 data-scope-item="row"
-                className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1 text-start text-[1em] font-normal text-muted-foreground transition-colors hover:bg-foreground/[0.04] hover:text-foreground"
+                className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1 text-start text-[1em] font-normal text-foreground/80 transition-colors hover:bg-foreground/[0.04] hover:text-foreground dark:text-muted-foreground"
                 onClick={handleReportBug}
               >
                 <Bug className="h-4 w-4 shrink-0 opacity-80" strokeWidth={1.75} />
