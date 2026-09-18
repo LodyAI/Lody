@@ -1430,15 +1430,15 @@ export const LoroSidebar = memo(function LoroSidebar({
 
         <div className={getLoroSidebarFooterClassName(isMobile)}>
           {!isMobile ? renderWorkspaceControl('top') : null}
-          <div className={cn('flex items-center gap-1', !isMobile && 'ml-auto shrink-0')}>
+          <div className={cn('flex items-center gap-1', !isMobile && 'ml-auto shrink-0 gap-2')}>
             <IconButton label="Settings" onClick={onSettingsClicked}>
-              <Settings />
+              <Settings strokeWidth={1.5} />
             </IconButton>
 
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <IconButton label="Help">
-                  <CircleHelp />
+                  <CircleHelp strokeWidth={1.5} />
                 </IconButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent side="top" align="start" className="min-w-[140px]">
@@ -1462,7 +1462,7 @@ export const LoroSidebar = memo(function LoroSidebar({
             </DropdownMenu>
 
             <IconButton label="Archive" active={activeNav === 'archive'} onClick={onArchiveClicked}>
-              <Archive />
+              <Archive strokeWidth={1.5} />
             </IconButton>
           </div>
 
