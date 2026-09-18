@@ -27,7 +27,9 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   `useRemoveLocalProject` / `RemoveLocalProjectDialog` (nested overlay like MCP);
   do not add a second confirm. Pending removal stays listed until the owning
   machine finishes. Do not RPC-probe worktree/skills on offline remotes, and
-  never surface `machine_rpc_unavailable` as an editor error.
+  never surface `machine_rpc_unavailable` as an editor error. The GitHub source
+  row must paint from `lody:githubReposCache` on first frame; do not wait on
+  `listWorkspaceReposWithStatus` to decide whether GitHub exists.
 - A settings row (`compact-layout.tsx`) is one grid: the label column takes the
   remaining space and the control column hugs its content. Never size either column
   from a viewport breakpoint — settings render in a panel far narrower than the window,
