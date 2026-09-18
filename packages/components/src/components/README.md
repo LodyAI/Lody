@@ -1,7 +1,7 @@
 # Product surfaces
 
 Binding rules live in [AGENTS.md](AGENTS.md); this index explains ownership.
-Child directories such as `sessions/`, `mobile/`, and `chat/` own their scoped rules.
+Child directories such as `sessions/`, `mobile/`, `chat/`, and `archive/` own their scoped rules.
 
 ## Sidebar and session rows
 
