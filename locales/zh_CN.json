@@ -1695,6 +1695,7 @@
   "sessions.findInConversation": "在会话中查找",
   "sessions.finishedWorking": "已完成工作",
   "sessions.workedFor": "工作了 {{duration}}",
+  "sessions.activityWithDuration": "{{label}}（工作了 {{duration}}）",
   "sessions.copyResponse": "复制回答",
   "sessions.editedFiles.summary": "编辑了 {{count}} 个文件",
   "sessions.editedFiles.summary_one": "编辑了 {{count}} 个文件",

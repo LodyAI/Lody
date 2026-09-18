@@ -1695,6 +1695,7 @@
   "sessions.findInConversation": "Find in session",
   "sessions.finishedWorking": "Finished working",
   "sessions.workedFor": "Worked for {{duration}}",
+  "sessions.activityWithDuration": "{{label}} (Worked for {{duration}})",
   "sessions.copyResponse": "Copy response",
   "sessions.editedFiles.summary": "Edited {{count}} files",
   "sessions.editedFiles.summary_one": "Edited {{count}} file",

@@ -377,8 +377,8 @@ type AssistantVirtualContent =
   | {
       kind: 'footer';
       showDuration: boolean;
-      /** The turn is the conversation's last one and has not ended: its
-       *  duration slot counts up instead of standing empty. */
+      /** The turn is the conversation's last one and has not ended, so an
+       *  available streaming copy action stays visibly active. */
       isLive: boolean;
     };
 
@@ -524,22 +524,28 @@ const SessionImagePreviewContext = createContext<{
   openImagePreview: (imageKey: string) => void;
 } | null>(null);
 
-const AgentActivityRow = ({
+export const AgentActivityRow = ({
   label,
   tone = 'primary',
+  message,
 }: {
   label: string;
   tone?: AgentActivityTone;
+  message?: Pick<SessionHistoryParsed, 'timestamp' | 'permissionWaitMs'> | null;
 }) => {
   return (
     <ConversationColumn className="flex items-start -mt-2 pb-1.5 pt-0.5">
       <div className="flex h-6 items-center">
-        <AgentActivityIndicator
-          label={label}
-          tone={tone}
-          displaySize={14}
-          labelClassName="text-[12.5px] font-medium leading-snug"
-        />
+        {message ? (
+          <LiveAgentActivityIndicator label={label} tone={tone} message={message} />
+        ) : (
+          <AgentActivityIndicator
+            label={label}
+            tone={tone}
+            displaySize={14}
+            labelClassName="text-[12.5px] font-medium leading-snug"
+          />
+        )}
       </div>
     </ConversationColumn>
   );
@@ -830,16 +836,13 @@ const shouldRenderAssistantFooter = ({
   fileDiffs,
   assistantActions,
   showDuration,
-  isLive,
 }: {
   message: SessionHistoryParsed;
   renderEntries: readonly AssistantMessageRenderItem[];
   fileDiffs: readonly AssistantEditedFileEntry[];
   assistantActions?: AssistantMessageAction[];
   showDuration: boolean;
-  isLive: boolean;
 }): boolean => {
-  if (isLive) return true;
   if ((assistantActions?.length ?? 0) > 0) return true;
   if (message.finished !== true) return false;
   const visibleContentItems = renderEntries.map((entry) => entry.content);
@@ -1204,7 +1207,6 @@ export const buildChatVirtualRows = ({
         fileDiffs,
         assistantActions: scopedAssistantActions,
         showDuration: showDurationInFooter,
-        isLive: isLastAssistantMessage && message.finished !== true,
       })
     ) {
       assistantRows.push({
@@ -1296,6 +1298,17 @@ export const SessionChatStreamView = forwardRef<
     const search = useSessionSearch();
     const activeSearchBlockId = search?.activeBlockId ?? null;
     const shouldShowAgentActivity = Boolean(agentActivityLabel);
+    const liveAgentActivityMessage = useMemo(
+      () =>
+        items.find(
+          (item): item is SessionMessageItem =>
+            item.type === 'message' &&
+            item.message.id === lastAssistantMessageId &&
+            item.message.role === 'assistant' &&
+            item.message.finished !== true
+        )?.message ?? null,
+      [items, lastAssistantMessageId]
+    );
     const [assistantExpansionVersion, setAssistantExpansionVersion] = useState(0);
     const [hoveredAssistantMessageId, setHoveredAssistantMessageId] = useState<string | null>(null);
     /**
@@ -1905,7 +1918,11 @@ export const SessionChatStreamView = forwardRef<
                   );
                 })}
                 {shouldShowAgentActivity && agentActivityLabel && (
-                  <AgentActivityRow label={agentActivityLabel} tone={agentActivityTone} />
+                  <AgentActivityRow
+                    label={agentActivityLabel}
+                    tone={agentActivityTone}
+                    message={liveAgentActivityMessage}
+                  />
                 )}
               </Virtualizer>
               <MessageSelectionOverlay />
@@ -3751,6 +3768,9 @@ export const MOBILE_TURN_ACTION_LEADING_INSET_PX = 48;
 
 /**
  * The live counterpart of the mobile footer's "Worked for {duration}" label.
+ * The live duration belongs in the active status itself (for example,
+ * "Exploring (Worked for 35s)") rather than in a separate desktop footer row.
+ * Mobile retains the explanatory label in its reserved action slot.
  *
  * While the turn runs, that leading slot used to stand empty — the slot is
  * reserved unconditionally (it is what pushes the copy button clear of the
@@ -3796,6 +3816,44 @@ const LiveTurnDurationLabel = ({
   });
   if (!duration) return null;
   return <>{t('sessions.workedFor', { duration, defaultValue: 'Worked for {{duration}}' })}</>;
+};
+
+const LiveAgentActivityIndicator = ({
+  label,
+  tone,
+  message,
+}: {
+  label: string;
+  tone: AgentActivityTone;
+  message: Pick<SessionHistoryParsed, 'timestamp' | 'permissionWaitMs'>;
+}) => {
+  const { t } = useTranslation();
+  const now = useStableNow(LIVE_TURN_DURATION_SAMPLE_MS);
+  const durationMs = resolveLiveSessionHistoryDurationMs(message, now.getTime());
+  const duration =
+    durationMs === null
+      ? ''
+      : formatDurationCompact(durationMs, {
+          hour: t('time.unitShort.hour', 'h'),
+          minute: t('time.unitShort.minute', 'm'),
+          second: t('time.unitShort.second', 's'),
+        });
+  const liveLabel = duration
+    ? t('sessions.activityWithDuration', {
+        label,
+        duration,
+        defaultValue: '{{label}} (Worked for {{duration}})',
+      })
+    : label;
+
+  return (
+    <AgentActivityIndicator
+      label={liveLabel}
+      tone={tone}
+      displaySize={14}
+      labelClassName="text-[12.5px] font-medium leading-snug"
+    />
+  );
 };
 
 const AssistantForkButton = ({
@@ -3896,7 +3954,6 @@ export const AssistantTurnFooter = ({
   const durationMs = resolveSessionHistoryDurationMs(message);
   const durationLabel =
     durationMs === null ? '' : formatDurationCompact(durationMs, durationUnitLabels);
-  const liveDurationVisible = isLive && !isMobile;
   const showFinishedMetadata = message.finished === true;
   const showStreamingContextCopy = !showFinishedMetadata && !!copyContext;
   /* Mobile: no completion timestamp — model meta + Worked-for already carry
@@ -3922,7 +3979,6 @@ export const AssistantTurnFooter = ({
     hasCopyableText ||
     completionTimestampLabel.length > 0 ||
     (durationLabel.length > 0 && (isMobile || showDuration)) ||
-    liveDurationVisible ||
     hasTurnConfigInfo;
   const showActionBar = hasActionBarContent || onFork !== undefined || !!copyContext;
 
@@ -3956,7 +4012,7 @@ export const AssistantTurnFooter = ({
           }
         />
       ) : null}
-      {(showFinishedMetadata || !!copyContext || isLive) && showActionBar ? (
+      {(showFinishedMetadata || !!copyContext) && showActionBar ? (
         <div
           className={cn(
             'flex flex-wrap items-center justify-start text-[11px] text-muted-foreground',
@@ -4072,11 +4128,6 @@ export const AssistantTurnFooter = ({
           ) : null}
           {showFinishedMetadata && completionTimestampLabel ? (
             <span className="tabular-nums">{completionTimestampLabel}</span>
-          ) : null}
-          {liveDurationVisible ? (
-            <span className="font-mono tabular-nums" data-assistant-turn-duration>
-              <LiveTurnDurationLabel message={message} />
-            </span>
           ) : null}
           {showFinishedMetadata && !isMobile && showDuration && durationLabel ? (
             <>

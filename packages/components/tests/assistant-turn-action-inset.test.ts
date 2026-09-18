@@ -6,6 +6,7 @@ import type { SessionHistoryParsed, SessionId } from '@lody/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  AgentActivityRow,
   AssistantTurnFooter,
   MOBILE_TURN_ACTION_LEADING_INSET_PX,
   SessionChatActionContext,
@@ -251,12 +252,12 @@ describe('mobile assistant-turn duration slot', () => {
   });
 });
 
-describe('desktop assistant-turn duration', () => {
+describe('desktop live-turn duration', () => {
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it('shows and updates the live duration while the latest turn is running', async () => {
+  it('adds and updates duration in the live activity status rather than a footer', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-09-10T03:00:00.000Z'));
     await initI18n('en');
@@ -276,27 +277,35 @@ describe('desktop assistant-turn duration', () => {
         createElement(
           ForceDesktopLayoutProvider,
           null,
-          createElement(AssistantTurnFooter, {
-            message,
-            sessionId: 'session-desktop-live' as SessionId,
-            showDuration: false,
-            isLive: true,
-            isTurnHovered: false,
-          })
+          createElement(
+            'div',
+            null,
+            createElement(AgentActivityRow, {
+              label: 'Exploring',
+              tone: 'warning',
+              message,
+            }),
+            createElement(AssistantTurnFooter, {
+              message,
+              sessionId: 'session-desktop-live' as SessionId,
+              showDuration: false,
+              isLive: true,
+              isTurnHovered: false,
+            })
+          )
         )
       );
     });
 
-    const duration = () => container.querySelector('[data-assistant-turn-duration]')?.textContent;
-    expect(duration()).toBe('Worked for 5s');
+    const activityLabel = () => container.querySelector('[data-highlight-label]')?.textContent;
+    expect(activityLabel()).toBe('Exploring (Worked for 5s)');
+    expect(container.querySelector('[data-assistant-turn-duration]')).toBeNull();
+    expect(container.querySelector('[data-assistant-turn-actions]')).toBeNull();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2_100);
     });
-    expect(duration()).toBe('Worked for 7s');
-    expect(
-      container.querySelector('[data-assistant-turn-actions]')?.classList.contains('opacity-100')
-    ).toBe(true);
+    expect(activityLabel()).toBe('Exploring (Worked for 7s)');
 
     await act(async () => root.unmount());
     container.remove();
