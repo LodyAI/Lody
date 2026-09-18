@@ -7,6 +7,7 @@ import { verifyPreviewTunnelRoundTrip } from './preview-tunnel-readiness';
 
 const createLogger = () => ({
   debug: () => {},
+  trace: () => {},
   info: () => {},
   warn: () => {},
   error: () => {},

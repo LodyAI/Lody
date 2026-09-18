@@ -34,10 +34,40 @@ export type TraceSpan = {
   fail: (error: unknown, fields?: TraceFields) => void;
 };
 
-export const startTraceSpan = (logger: Logger, name: string, fields?: TraceFields): TraceSpan => {
+/**
+ * Spans that run per streamed token batch produce more log volume than every
+ * other span combined, so they are marked `hot`: their start/end records go to
+ * `trace` and stay out of the default file sink. Diagnosability is preserved on
+ * the paths that matter — a hot span that fails, or that takes at least
+ * `slowMs`, still reports at `debug`, so a stall or an error is visible without
+ * turning tracing on.
+ */
+export type TraceSpanOptions = {
+  hot?: boolean;
+  slowMs?: number;
+};
+
+const DEFAULT_HOT_SPAN_SLOW_MS = 1_000;
+
+export const startTraceSpan = (
+  logger: Logger,
+  name: string,
+  fields?: TraceFields,
+  options?: TraceSpanOptions
+): TraceSpan => {
+  const hot = options?.hot === true;
+  const slowMs = options?.slowMs ?? (hot ? DEFAULT_HOT_SPAN_SLOW_MS : undefined);
   const startedAtMs = performance.now();
   let closed = false;
-  logger.debug(`[trace-span] start name=${name}${formatTraceFields(fields)}`);
+  const write = (quiet: boolean, line: string): void => {
+    if (quiet) {
+      logger.trace(line);
+      return;
+    }
+    logger.debug(line);
+  };
+
+  write(hot, `[trace-span] start name=${name}${formatTraceFields(fields)}`);
 
   return {
     end: (endFields) => {
@@ -45,10 +75,14 @@ export const startTraceSpan = (logger: Logger, name: string, fields?: TraceField
         return;
       }
       closed = true;
-      logger.debug(
-        `[trace-span] end name=${name} status=ok durationMs=${Math.round(
-          performance.now() - startedAtMs
-        )}${formatTraceFields({ ...fields, ...endFields })}`
+      const durationMs = Math.round(performance.now() - startedAtMs);
+      const slow = slowMs !== undefined && durationMs >= slowMs;
+      write(
+        hot && !slow,
+        `[trace-span] end name=${name} status=ok durationMs=${durationMs}${formatTraceFields({
+          ...fields,
+          ...endFields,
+        })}`
       );
     },
     fail: (error, endFields) => {
@@ -56,6 +90,8 @@ export const startTraceSpan = (logger: Logger, name: string, fields?: TraceField
         return;
       }
       closed = true;
+      // Failures always report at debug: a hot path that breaks is exactly the
+      // case the log has to explain without tracing enabled after the fact.
       logger.debug(
         `[trace-span] end name=${name} status=error durationMs=${Math.round(
           performance.now() - startedAtMs
@@ -73,9 +109,10 @@ export const traceAsync = async <T>(
   logger: Logger,
   name: string,
   fields: TraceFields | undefined,
-  run: () => Promise<T>
+  run: () => Promise<T>,
+  options?: TraceSpanOptions
 ): Promise<T> => {
-  const span = startTraceSpan(logger, name, fields);
+  const span = startTraceSpan(logger, name, fields, options);
   try {
     const result = await run();
     span.end();

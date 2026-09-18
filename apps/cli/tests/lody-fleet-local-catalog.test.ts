@@ -40,6 +40,7 @@ const createSilentLogger = (): Logger => ({
   error: () => {},
   success: () => {},
   debug: () => {},
+  trace: () => {},
   setLevel: () => {},
   setDebug: () => {},
   child: () => createSilentLogger(),

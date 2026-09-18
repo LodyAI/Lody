@@ -48,7 +48,11 @@ Root `AGENTS.md` applies; this file adds CLI context. Build, PR-poller, and adap
 - After a remote prompt arrives, only correctness-critical setup may block before ACP
   `agent.prompt`; never await notifications, analytics, or UI summaries
   (context/cli-prompt-hot-path.md).
-- Startup order and timing traces: context/cli-startup.md. Local logs: context/cli-logs.md.
+- Startup order and timing traces: context/cli-startup.md.
+- The daemon's file log always captures `debug`, so a `logger.debug` per streamed token or per tick
+  evicts history from the 20 MB rotation window. Route those to `logger.trace` (kept only under
+  `LODY_LOG_TRACE=1`) and leave the failing or slow branch at `debug`
+  ([note](../../.agents/notes/implemented/architecture/2026-09-16-daemon-log-volume.md)).
 - Read context/local-agent-ownership.md before changing local ports/sockets, daemon PID state,
   Electron/daemon startup, Supervisor retries, or Worker shutdown; health probes are observation
   only and never authorize PID killing.

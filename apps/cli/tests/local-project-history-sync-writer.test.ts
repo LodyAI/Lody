@@ -84,6 +84,7 @@ async function createHarness() {
     error: () => {},
     success: () => {},
     debug: () => {},
+    trace: () => {},
     setLevel: () => {},
     child: () => logger,
     close: async () => {},

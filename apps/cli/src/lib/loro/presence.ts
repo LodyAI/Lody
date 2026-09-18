@@ -379,7 +379,9 @@ export class CliPresenceRuntime {
       updatedAt: getServerNow(),
     };
     this.writeLocalOrigin(this.machineKey, state);
-    this.options.logger.debug(
+    // A steady tick per workspace: useful as a trail when presence misbehaves,
+    // not worth a line in the default sink while it is healthy.
+    this.options.logger.trace(
       `[${this.options.workspaceId}] Loro presence machine heartbeat written (seq=${seq} updatedAt=${state.updatedAt})`
     );
   }

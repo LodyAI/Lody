@@ -7,6 +7,7 @@ import { applyAcpSessionRunConfig } from './acp-session-config-applier';
 function createLogger(): Logger {
   const logger = {
     debug: vi.fn(),
+    trace: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),

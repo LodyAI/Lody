@@ -43,6 +43,7 @@ function deferred<T>() {
 function createLogger(): Logger {
   const logger: Logger = {
     debug: vi.fn(),
+    trace: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),
     error: vi.fn(),

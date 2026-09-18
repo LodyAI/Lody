@@ -65,6 +65,7 @@ import {
   classifyAcpProtocolReason,
 } from './acp-analytics';
 import { filterAcpConfigOptions } from './acp-config-option-filter';
+import { summarizeNewSessionResponse } from './acp-session-response-summary';
 import {
   readLegacySessionModelState,
   type LegacySessionModelState,
@@ -2226,7 +2227,8 @@ export class AgentClient implements acp.Client {
         resumeSessionId && sessionResponse.sessionId === resumeSessionId ? 'yes' : 'no'
       })`
     );
-    this.logger.debug('ACP Session started:', sessionResponse);
+    this.logger.debug(`ACP Session started: ${summarizeNewSessionResponse(sessionResponse)}`);
+    this.logger.trace('ACP Session started (full response):', sessionResponse);
     this.applySessionResponseState(sessionResponse);
 
     const availableModesCount = sessionResponse.modes?.availableModes?.length ?? 0;
