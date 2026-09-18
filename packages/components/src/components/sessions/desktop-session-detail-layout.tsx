@@ -166,22 +166,15 @@ export function DesktopSessionDetailLayout({
         <ResizableHandle
           disabled={!sidebarOpen}
           // Invisible at rest; hover/drag paints a 2px accent line that
-          // covers the side panel CARD's left border — the card is inset
-          // `mx-2` from this 1px layout handle (see desktopSecondaryPanel
-          // in session-detail.tsx), so a line centered on the handle would
-          // float in the gutter instead of lighting up the visible edge.
-          // left-[9px] = handle 1px + 8px card margin. hitAreaMargins
-          // widened so hovering ON the card border also triggers.
+          // covers the side panel's left hairline (see desktopSecondaryPanel
+          // in session-detail.tsx).
           hitAreaMargins={{ coarse: 15, fine: 12 }}
           onDragging={setIsResizing}
           className={cn(
             'bg-transparent transition-opacity',
             sidebarOpen ? 'opacity-100' : 'pointer-events-none opacity-0',
-            'after:left-[9px] after:w-[2px] after:translate-x-0',
-            // Vertically clamp to the card border's STRAIGHT segment: the
-            // card is inset mt-2/mb-2 and rounded-xl (12px), so a full
-            // height line would overshoot past the rounded corners.
-            'after:inset-y-auto after:top-5 after:bottom-5 after:rounded-full',
+            'after:left-0 after:w-[2px] after:translate-x-0',
+            'after:inset-y-0 after:top-0 after:bottom-0',
             'after:transition-colors after:duration-150',
             'data-[resize-handle-state=hover]:after:bg-sidebar-ring/50',
             'data-[resize-handle-state=hover]:after:delay-150',

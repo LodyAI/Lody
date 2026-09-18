@@ -17,9 +17,6 @@ import { WindowDragStrip } from '@/ui/window-drag-region';
 // LoroSidebar's default expanded width (see loro-sidebar.tsx `defaultWidth`);
 // `sidebarLastWidthAtom` stores 0 until the user resizes, so fall back to this.
 const DEFAULT_SIDEBAR_WIDTH = 280;
-// Extra px the sidebar card is inset by (`ml-2` + `mr-1` in loro-app-sidebar),
-// added to the slide distance so it clears fully off the left edge.
-const SIDEBAR_GUTTER = 12;
 
 export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
   // Only the pathname drives this layout (settings branch + error boundary
@@ -46,13 +43,12 @@ export function WebWorkspaceLayout({ children }: { children: ReactNode }) {
   }
 
   // Slide the sidebar in/out horizontally on collapse/expand. Animating
-  // `marginLeft` (not width/transform) both slides the card off the left edge —
+  // `marginLeft` (not width/transform) both slides the panel off the left edge —
   // clipped by this row's `overflow-hidden` — and reclaims the flex space so the
   // content pane grows to fill. AnimatePresence keeps the sidebar mounted for the
   // exit slide, then unmounts it. marginLeft stays 0 while expanded, so live
   // resize never fights the animation.
-  const sidebarSlideWidth =
-    (sidebarLastWidth > 0 ? sidebarLastWidth : DEFAULT_SIDEBAR_WIDTH) + SIDEBAR_GUTTER;
+  const sidebarSlideWidth = sidebarLastWidth > 0 ? sidebarLastWidth : DEFAULT_SIDEBAR_WIDTH;
 
   return (
     <div className={getWebWorkspaceLayoutRootClassName()}>

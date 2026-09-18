@@ -3210,16 +3210,14 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     <FocusScope
       id={WORKSPACE_FOCUS_SCOPES.sidebar}
       className={cn(
-        'relative flow-root bg-background data-[scope-active]:ring-2 data-[scope-active]:ring-ring/30 data-[scope-active]:ring-inset data-[scope-active]:rounded-2xl',
+        'relative flow-root bg-background data-[scope-active]:ring-2 data-[scope-active]:ring-ring/30 data-[scope-active]:ring-inset',
         className
       )}
     >
       {!isMobile ? <WindowDragStrip /> : null}
       <LoroSidebar
         className={cn(
-          isMobile
-            ? 'h-full w-full rounded-none border-0 shadow-none'
-            : 'mb-2 ml-2 mr-1 mt-2 h-[calc(100%_-_1rem)] rounded-xl border border-sidebar-border/80 bg-sidebar shadow-[0_1px_4px_-1px_rgba(0,0,0,0.18)]',
+          isMobile ? 'h-full w-full' : 'h-full w-full border-r border-sidebar-border/70 bg-sidebar',
           isElectron && !isElectronFullscreen && 'z-20'
         )}
         workspaceName={resolvedWorkspaceName}

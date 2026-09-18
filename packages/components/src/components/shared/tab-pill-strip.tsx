@@ -7,7 +7,7 @@ import { cn } from '@/lib/utils';
  * re-derive and measure against the actual theme tokens, don't guess.
  */
 export const TAB_PILL_ACTIVE_CLASS =
-  'border-sidebar-border/80 bg-sidebar text-tab-active-foreground shadow-[0_1px_4px_-1px_rgba(0,0,0,0.18)] dark:border-muted-foreground/[0.24] dark:bg-muted-foreground/[0.18]';
+  'border-sidebar-border/80 bg-sidebar text-tab-active-foreground dark:border-muted-foreground/[0.24] dark:bg-muted-foreground/[0.18]';
 export const TAB_PILL_INACTIVE_CLASS =
   'bg-muted-foreground/[0.07] text-tab-inactive-foreground hover:bg-muted-foreground/[0.12] hover:text-tab-hover-foreground';
 

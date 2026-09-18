@@ -5990,12 +5990,9 @@ const SessionDetail = ({
         // collapsed, over the horizontally-cleared `pl-[4.5rem]` gap below),
         // never over this top bar — so it must not reserve vertical inset.
         //
-        // `mt-0.5`, not `mt-2`: the tab pills share a top border line with the
-        // sidebar and side-panel cards, and both of those sit at `mt-2` (8px).
-        // The h-8 pills are centered inside this h-11 row, so the row must start
-        // 6px higher for them to land on that same line: 2 + (44 - 32) / 2 = 8.
-        // Re-derive this if the row or the pill height changes.
-        'mt-0.5 h-11',
+        // Flush with the window/sidebar top so this h-11 row shares y=0 with
+        // the sidebar header. Re-derive if the row or pill height changes.
+        'h-11',
         isLeftSidebarHidden && hasMacOSTitlebarInset && 'pl-[4.5rem]',
         !isSidebarVisible && windowsCaptionPadClass
       )}
@@ -6149,12 +6146,12 @@ const SessionDetail = ({
     });
 
   // White reading surface (not bg-sidebar): the file editor/monaco canvas is
-  // pure white, so a gray panel shell left a two-tone mismatch. Match the
-  // surrounding cool-white chrome; keep a light border + soft shadow for card lift.
+  // pure white, so a gray panel shell left a two-tone mismatch. Full-bleed
+  // panel with a left hairline against the conversation.
   const desktopSecondaryPanel = (
     <div
       data-lody-session-tab-region="side-panel"
-      className="mx-2 mb-2 mt-2 flex h-[calc(100%_-_1rem)] min-w-0 flex-col overflow-hidden rounded-xl border border-border/70 bg-background shadow-[0_1px_3px_-1px_rgba(15,17,21,0.08),0_1px_2px_rgba(15,17,21,0.04)]"
+      className="flex h-full min-w-0 flex-col overflow-hidden border-l border-border/70 bg-background"
     >
       <SessionSidePanelTabBar
         tabs={sidePanelTabs}

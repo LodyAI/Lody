@@ -852,12 +852,7 @@ export const LoroSidebar = memo(function LoroSidebar({
     <div
       // No overflow-hidden here: the resize sash extends past the right border
       // so its hit area straddles the edge; the inner content div clips instead.
-      className={cn(
-        'relative h-full select-none rounded-2xl border-x',
-        // Linear-like: soft cool wash + hairline edge, not a heavy gray slab.
-        'border-sidebar-border/70 bg-sidebar text-sidebar-foreground shadow-[0_1px_2px_hsl(0_0%_0%/0.03)]',
-        className
-      )}
+      className={cn('relative h-full select-none bg-sidebar text-sidebar-foreground', className)}
       style={
         isMobile
           ? undefined
@@ -873,10 +868,9 @@ export const LoroSidebar = memo(function LoroSidebar({
         <div
           className={cn(
             'absolute -right-1.5 top-0 z-20 h-full w-3 cursor-col-resize bg-transparent',
-            // Line spans only the border's straight segment (card corners are
-            // 12px rounded), with soft rounded ends.
-            'after:absolute after:right-[5px] after:top-3 after:bottom-3 after:w-[2px]',
-            'after:rounded-full after:bg-transparent after:transition-colors after:duration-150',
+            // 2px line covers the panel's `border-r` for the full height.
+            'after:absolute after:right-[5px] after:top-0 after:bottom-0 after:w-[2px]',
+            'after:bg-transparent after:transition-colors after:duration-150',
             isResizing
               ? 'after:bg-sidebar-ring/70'
               : 'hover:after:bg-sidebar-ring/50 hover:after:delay-150'
@@ -888,12 +882,7 @@ export const LoroSidebar = memo(function LoroSidebar({
         />
       )}
 
-      <div
-        className={cn(
-          'relative flex h-full flex-col overflow-hidden rounded-[inherit]',
-          !isMobile && 'p-[2px]'
-        )}
-      >
+      <div className="relative flex h-full flex-col overflow-hidden">
         <div
           className={cn(
             'group/sidebar-header relative flex items-center justify-between gap-2',
@@ -1025,17 +1014,11 @@ export const LoroSidebar = memo(function LoroSidebar({
               </div>
             </div>
           )}
-          {/* Collapse toggle anchored to the header's top-right corner.
-              `top-2` centers the h-7 button inside the standard h-11 header.
-              On macOS Electron the header is taller (`h-[72px] pt-7`) and its
-              top sits 11px below the window top (card `mt-2` + 1px border +
-              inner `p-[2px]`); `-top-0.5` then puts the button center at
-              11 - 2 + 14 = 23px, exactly on the traffic-light centerline
-              (`trafficLightPosition.y` 16 + 7px radius in
-              apps/electron/src/main/window.ts) — and level with the
-              collapsed-state expand button (`top-[9px]` in
-              web-chat-landing-screen.tsx), so the control stays put across
-              collapse/expand. */}
+          {/* Collapse toggle: `top-2` centers the h-7 button in the h-11 header.
+              On macOS Electron the header is flush with the window top
+              (`h-[72px] pt-7`); `top-[9px]` puts the 28px button center on
+              the 23px traffic-light centerline, matching the collapsed-state
+              expand button in web-chat-landing-screen.tsx. */}
           {!isMobile && onRequestCollapse ? (
             <button
               type="button"
@@ -1043,7 +1026,7 @@ export const LoroSidebar = memo(function LoroSidebar({
               onClick={() => onRequestCollapse()}
               className={cn(
                 'absolute right-1.5 flex h-7 w-7 items-center justify-center rounded-md',
-                isElectronMacOS ? '-top-0.5' : 'top-2',
+                isElectronMacOS ? 'top-[9px]' : 'top-2',
                 'text-sidebar-foreground-muted hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
                 windowDrag && WINDOW_DRAG_EXEMPT_CLASS,
                 isElectron
