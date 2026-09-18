@@ -96,6 +96,12 @@ pre,
 }
 
 @layer utilities {
+  .text-markdown-link {
+    color: hsl(212 62% 40%);
+  }
+  .dark .text-markdown-link {
+    color: hsl(211 56% 72%);
+  }
   .text-balance {
     text-wrap: balance;
   }

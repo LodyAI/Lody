@@ -33,7 +33,7 @@ export const PR_STATUS_META: Record<PrStatus, StatusMeta> = {
   merged: {
     icon: GitMerge,
     className: 'bg-github-merged/[0.12] text-github-merged hover:bg-github-merged/[0.18]',
-    iconColorClassName: 'text-github-merged',
+    iconColorClassName: 'text-markdown-link',
     labelKey: 'sessions.pr.statusMerged',
     labelFallback: 'Merged',
   },

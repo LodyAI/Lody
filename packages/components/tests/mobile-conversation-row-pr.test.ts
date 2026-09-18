@@ -75,7 +75,7 @@ describe('mobile ConversationRow PR status', () => {
 
     const prIcon = row.querySelector('svg[data-pr-ci-verdict="success"]');
     expect(prIcon).not.toBeNull();
-    expect(prIcon?.querySelector('.lucide-git-merge')?.classList.contains('text-github-merged')).toBe(
+    expect(prIcon?.querySelector('.lucide-git-merge')?.classList.contains('text-markdown-link')).toBe(
       true
     );
     expect(prIcon?.querySelector('.lucide-check')?.classList.contains('text-status-success')).toBe(

@@ -11,7 +11,7 @@ import { initI18n } from '../src/i18n';
 
 const PR_STATUS_CASES = [
   ['open', '.lucide-git-pull-request', 'text-github-open'],
-  ['merged', '.lucide-git-merge', 'text-github-merged'],
+  ['merged', '.lucide-git-merge', 'text-markdown-link'],
   ['closed', '.lucide-git-pull-request-closed', 'text-github-closed'],
   ['draft', '.lucide-git-pull-request-draft', 'text-github-draft'],
 ] as const;
