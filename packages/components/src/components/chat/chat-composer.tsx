@@ -215,7 +215,7 @@ export function getChatComposerTextareaClassName({
           isMobile ? 'min-h-[24px]' : 'min-h-[48px]'
         ),
     'focus-visible:outline-hidden focus-visible:ring-0 focus-visible:ring-offset-0',
-    'text-input-foreground placeholder:text-input-placeholder'
+    'text-input-foreground placeholder:text-input-placeholder/40 @max-[440px]/composer-box:placeholder:text-transparent'
   );
 }
 
@@ -617,7 +617,7 @@ export function ChatComposer({
   const dialogTextareaClassName = cn(
     'input-scrollbar min-h-[120px] resize-none px-4 py-3 text-sm leading-6 transition-shadow sm:min-h-[120px]',
     'w-full rounded-2xl border-transparent bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0',
-    'text-input-foreground placeholder:text-input-placeholder'
+    'text-input-foreground placeholder:text-input-placeholder/40 @max-[440px]/composer-box:placeholder:text-transparent'
   );
 
   const actionBaseClassName = cn(
@@ -632,7 +632,7 @@ export function ChatComposer({
   const actionWidthClassName = isLanding ? 'w-auto shrink-0' : 'w-auto';
 
   const landingContainerClassName = cn(
-    'flex flex-col gap-4 rounded-xl border px-4 pt-4 pb-3 transition-shadow focus-within:ring-1',
+    '@container/composer-box flex flex-col gap-4 rounded-xl border px-4 pt-4 pb-3 transition-shadow focus-within:ring-1',
     'border-foreground/[0.10] bg-background shadow-[0_1px_2px_hsl(0_0%_0%/0.04),0_8px_24px_-12px_hsl(0_0%_0%/0.08)] focus-within:ring-ring/30',
     'dark:border-input-border/60 dark:bg-input/90 dark:shadow-[0_22px_70px_-48px_rgba(15,23,42,0.25)] dark:focus-within:ring-ring/40',
     mentionSurfaceClassName
