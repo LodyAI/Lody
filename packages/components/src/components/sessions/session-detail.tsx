@@ -12,6 +12,7 @@ import {
   GitBranch,
   GitFork,
   Github,
+  Image,
   Link,
   LockKeyhole,
   Monitor,
@@ -2450,13 +2451,7 @@ const SessionDetail = ({
     if (resolution.kind === 'navigate') {
       navigateToSessionTab(resolution.tabSessionId, { push: true });
     }
-  }, [
-    closedConversationIds,
-    navigateToSessionTab,
-    pendingTabRestoreNavigation,
-    sessionId,
-    urlTab,
-  ]);
+  }, [closedConversationIds, navigateToSessionTab, pendingTabRestoreNavigation, sessionId, urlTab]);
 
   // Navigate back to session list.
   const handleBackToList = useCallback(() => {
@@ -5184,6 +5179,22 @@ const SessionDetail = ({
         void handleCopyUrl();
       },
     });
+    // Share-as-image arms message selection inside the chat surface, so it is
+    // only offered while that surface is the one on screen: a draft has no
+    // conversation and a viewer tab covers the rows being picked.
+    if (!activeDraftTab && !hasActiveViewerTab) {
+      mobileMenuActions.push({
+        id: 'share-image',
+        icon: <Image className="h-3.5 w-3.5" />,
+        label: t('sessions.shareAsImage', 'Share as image…'),
+        onClick: () => {
+          void handleShareAsImage().catch((error: unknown) => {
+            console.error('Failed to load conversation for image sharing', error);
+            toast.error(t('sessions.shareImage.empty', 'No conversation to share'));
+          });
+        },
+      });
+    }
     // Copy URL stays available for private sessions (the link still works for
     // the owner); sharing is a separate action shown only while the
     // conversation isn't team-visible.
@@ -5751,6 +5762,16 @@ const SessionDetail = ({
         <RenameSessionDialog
           target={renameDialogTarget}
           onClose={() => setRenameDialogTarget(null)}
+        />
+        <ChatShareImageDialog
+          open={shareImageTarget != null}
+          onOpenChange={(open) => {
+            if (!open) setShareImageTarget(null);
+          }}
+          onCompleted={handleShareImageCompleted}
+          session={shareImageTarget?.session ?? null}
+          messages={shareImageTarget?.messages ?? []}
+          agentName={shareImageTarget?.agentName}
         />
       </div>
     );

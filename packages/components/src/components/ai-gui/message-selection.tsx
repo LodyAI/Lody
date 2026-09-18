@@ -15,6 +15,7 @@ import type { ConversationMessage } from '@lody/shared';
 import { Button } from '@/ui/button';
 import { Checkbox } from '@/ui/checkbox';
 import { ConversationColumn } from '@/components/shared/conversation-column';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 type SelectionGesture = {
   anchor: string;
@@ -266,6 +267,7 @@ export function MessageSelectionRow({
 }) {
   const selection = useContext(MessageSelectionContext);
   const { t } = useTranslation();
+  const isMobile = useIsMobile();
   const handledPointer = useRef(false);
   const selectable = !!id && selection?.availableIds.has(id);
   const selected = !!id && selection?.ids.has(id);
@@ -321,12 +323,27 @@ export function MessageSelectionRow({
     >
       {selectable && first ? (
         <ConversationColumn className="pointer-events-none relative h-0">
+          {/* On a handset the left edge belongs to the session drawer's
+              back-swipe strip (EDGE_ZONE_PX), so the box cannot be a tap
+              target there — it drops to a passive state badge inside the
+              conversation gutter and the row itself keeps the tap. A passive
+              badge may sit inside the strip; only interactive controls must
+              inset past it. Same split the mobile list's own multi-select
+              rows use. */}
           <Checkbox
             data-message-selection-checkbox=""
-            className="pointer-events-auto absolute left-0 top-3"
+            className={
+              isMobile
+                ? 'pointer-events-none absolute left-3 top-3'
+                : 'pointer-events-auto absolute left-0 top-3'
+            }
             checked={selected}
-            onCheckedChange={() => selection?.toggle(id)}
-            aria-label={t('sessions.shareImage.selectMessage', 'Select message')}
+            onCheckedChange={isMobile ? undefined : () => selection?.toggle(id)}
+            tabIndex={isMobile ? -1 : undefined}
+            aria-hidden={isMobile ? true : undefined}
+            aria-label={
+              isMobile ? undefined : t('sessions.shareImage.selectMessage', 'Select message')
+            }
           />
         </ConversationColumn>
       ) : null}
@@ -341,6 +358,7 @@ export function MessageSelectionToolbar({
   selection: ReturnType<typeof useMessageSelection>;
 }) {
   const { t } = useTranslation();
+  const isMobile = useIsMobile();
   const { active, cancel } = selection;
   useEffect(() => {
     if (!active) return undefined;
@@ -359,6 +377,10 @@ export function MessageSelectionToolbar({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [active, cancel]);
   if (!selection.active) return null;
+  // These buttons are the mode's primary touch targets on a handset, so they
+  // keep the default size there — the same call the share preview's own action
+  // row makes (h-8 text-xs is a desktop density).
+  const actionSize = isMobile ? 'default' : 'sm';
   return (
     <ConversationColumn className="flex flex-wrap items-center gap-2 border-t py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
       <span className="mr-auto text-sm" role="status">
@@ -366,15 +388,23 @@ export function MessageSelectionToolbar({
           count: selection.messages.length,
         })}
       </span>
-      <Button variant="ghost" size="sm" onClick={selection.toggleAll}>
+      <Button variant="ghost" size={actionSize} onClick={selection.toggleAll}>
         {selection.allSelected
           ? t('sessions.shareImage.clearSelection', 'Clear selection')
           : t('sessions.shareImage.selectAll', 'Select all')}
       </Button>
-      <Button variant="ghost" size="sm" onClick={selection.cancel}>
+      <Button variant="ghost" size={actionSize} onClick={selection.cancel}>
         {t('common.cancel', 'Cancel')}
       </Button>
-      <Button size="sm" disabled={!selection.messages.length} onClick={selection.confirm}>
+      {/* On a handset the four controls do not share one row; let the primary
+          action wrap deliberately into a full-width line instead of a
+          half-orphaned one. */}
+      <Button
+        size={actionSize}
+        className={isMobile ? 'w-full' : undefined}
+        disabled={!selection.messages.length}
+        onClick={selection.confirm}
+      >
         <ImageIcon className="size-4" />
         {t('sessions.shareImage.preview', 'Preview image')}
       </Button>
