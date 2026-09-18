@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
 import { fn, userEvent, within } from 'storybook/test';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   getLodySessionPresenceKey,
   getServerNow,
@@ -290,12 +290,15 @@ type StoryShellProps = React.ComponentProps<typeof SessionTabBar> & {
   frameWidth?: number;
   reservedRightWidth?: number;
   presence?: StoryPresence;
+  /** Wire close/select/reorder/new-tab to local state so the bar is clickable. */
+  interactive?: boolean;
 };
 
 function StoryShell({
   frameWidth,
   reservedRightWidth = 0,
   presence = DEFAULT_STORY_PRESENCE,
+  interactive = false,
   ...props
 }: StoryShellProps) {
   const [store] = useState(() => {
@@ -305,6 +308,13 @@ function StoryShell({
   });
   const [activeTabSessionId, setActiveTabSessionId] = useState(props.activeTabSessionId);
   const [activeViewerTabId, setActiveViewerTabId] = useState(props.activeViewerTabId);
+  const [parentClosed, setParentClosed] = useState(false);
+  const [childrenState, setChildrenState] = useState(props.childSessions);
+  const [draftsState, setDraftsState] = useState(props.draftTabs);
+  const [viewersState, setViewersState] = useState(props.viewerTabs ?? []);
+  const [archivedState, setArchivedState] = useState(props.archivedChildSessions);
+  const [orderState, setOrderState] = useState(props.tabOrder);
+  const draftSeq = useRef(0);
 
   useEffect(() => {
     setActiveTabSessionId(props.activeTabSessionId);
@@ -312,6 +322,92 @@ function StoryShell({
   useEffect(() => {
     setActiveViewerTabId(props.activeViewerTabId);
   }, [props.activeViewerTabId]);
+  useEffect(() => {
+    setChildrenState(props.childSessions);
+    setDraftsState(props.draftTabs);
+    setViewersState(props.viewerTabs ?? []);
+    setArchivedState(props.archivedChildSessions);
+    setOrderState(props.tabOrder);
+    setParentClosed(false);
+  }, [
+    props.childSessions,
+    props.draftTabs,
+    props.viewerTabs,
+    props.archivedChildSessions,
+    props.tabOrder,
+  ]);
+
+  const interactiveProps = interactive
+    ? {
+        parentSession: { ...props.parentSession, isTabClosed: parentClosed },
+        childSessions: childrenState,
+        draftTabs: draftsState,
+        viewerTabs: viewersState,
+        archivedChildSessions: archivedState,
+        tabOrder: orderState,
+        onTabClose: (tabId: string) => {
+          if (tabId === props.parentSession.id) {
+            setParentClosed(true);
+            setArchivedState((prev) => [props.parentSession, ...prev]);
+          }
+          setChildrenState((prev) => {
+            const closedIndex = prev.findIndex((session) => session.id === tabId);
+            const next = prev.filter((session) => session.id !== tabId);
+            if (tabId === activeTabSessionId) {
+              // Mirror getSessionTabFallback: next open neighbour, then the
+              // previous one, then the parent.
+              setActiveTabSessionId(
+                closedIndex === -1
+                  ? (next[0]?.id ?? props.parentSession.id)
+                  : (next[closedIndex]?.id ?? next[closedIndex - 1]?.id ?? props.parentSession.id)
+              );
+            }
+            return next;
+          });
+          setDraftsState((prev) => prev.filter((draft) => draft.id !== tabId));
+          void props.onTabClose?.(tabId);
+        },
+        onViewerTabClose: (tabId: string) => {
+          setViewersState((prev) => prev.filter((tab) => tab.id !== tabId));
+          void props.onViewerTabClose?.(tabId);
+        },
+        onTabReorder: (orderedTabIds: string[]) => {
+          setOrderState(orderedTabIds);
+          props.onTabReorder?.(orderedTabIds);
+        },
+        onNewTab: () => {
+          const id = `draft:story-${++draftSeq.current}`;
+          setDraftsState((prev) => [
+            ...prev,
+            {
+              id: id as DraftSessionTab['id'],
+              sessionId: id as SessionId,
+              prompt: '',
+              cliType: 'builtin',
+              agentType: 'codex',
+              agentConfigId,
+              modeId: null,
+              modelId: null,
+            },
+          ]);
+          setOrderState((prev) => [...(prev ?? []), id]);
+          setActiveViewerTabId(null);
+          setActiveTabSessionId(id);
+          void props.onNewTab?.();
+        },
+        onTabRestore: (sessionId: SessionId) => {
+          const restored = archivedState.find((session) => session.id === sessionId);
+          setArchivedState((prev) => prev.filter((session) => session.id !== sessionId));
+          if (sessionId === props.parentSession.id) {
+            setParentClosed(false);
+          } else if (restored) {
+            setChildrenState((prev) => [...prev, restored]);
+            setOrderState((prev) => [...(prev ?? []), sessionId]);
+          }
+          void props.onTabRestore?.(sessionId);
+        },
+      }
+    : {};
 
   const reservedRightSlot =
     reservedRightWidth > 0 ? (
@@ -327,6 +423,7 @@ function StoryShell({
       >
         <SessionTabBar
           {...props}
+          {...interactiveProps}
           activeTabSessionId={activeTabSessionId}
           activeViewerTabId={activeViewerTabId}
           onTabSelect={(tabId) => {
@@ -545,6 +642,29 @@ export const ManyTabsNarrow: Story = {
     tabOrder: manyChildSessions.map((session) => session.id),
     activeTabSessionId: manyChildSessions[3]!.id,
     frameWidth: 480,
+  },
+};
+
+export const RapidClose: Story = {
+  name: 'Rapid close (Chrome-style freeze)',
+  args: {
+    interactive: true,
+    childSessions: manyChildSessions,
+    draftTabs: [],
+    archivedChildSessions: archivedChildSessions,
+    tabOrder: manyChildSessions.map((session) => session.id),
+    activeTabSessionId: manyChildSessions[0]!.id,
+    frameWidth: 1200,
+  },
+  parameters: {
+    docs: {
+      description: {
+        story:
+          'Interactive: close a middle tab and the survivors keep their widths so the next ' +
+          'close button lands under the cursor — repeated clicks keep closing. Move the ' +
+          'pointer out of the strip (or add a tab) and the row re-expands to full width.',
+      },
+    },
   },
 };
 

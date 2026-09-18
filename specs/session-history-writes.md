@@ -54,7 +54,7 @@ That tolerance must not authorize creating new malformed items locally.
   edits retain existing request information. Identity changes require complete item parsing;
   changed content blocks are parsed separately. Invalid new fields reject the command before any write.
 - New history accepts existing legacy built-in CLI selector normalization without rewriting
-  stored history. Steer config and same-identity task-proposal edits parse only changed fields.
+  stored history. Steer config edits parse only changed fields.
 - Queue promotion removes its queued row only after history acceptance; failed writes retain it.
 - Manual Codex compaction owns its native turn through completion. Stop interrupts
   that turn and retains the ACP prompt until `turn/completed` confirms its outcome

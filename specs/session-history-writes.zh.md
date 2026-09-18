@@ -38,8 +38,7 @@ Translation: current
 - 除 type/toolCallId 外，工具字段只解析本次变化的值，不重验未修改的工具内容；
   只修改 outcome 时保留已有请求信息。修改工具身份需完整 item 解析；变化的 content block
   单独解析。新增字段非法时，整条命令在写入前拒绝。
-- 新历史接受原有内置 CLI selector 的归一化，不重写旧历史。steer 配置和保持身份的
-  task proposal 编辑也只校验变化的字段。
+- 新历史接受原有内置 CLI selector 的归一化，不重写旧历史。steer 配置编辑只校验变化的字段。
 - 队列提升必须在历史接受后才删除队列行；写入失败保留队列行。
 - 手动 Codex 压缩持有 native turn 直到完成。Stop 中断该 turn，并保留 ACP prompt，
   直到 `turn/completed` 确认结果或 provider 连接关闭。对已 in-flight 且 ACP session 就绪的

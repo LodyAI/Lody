@@ -16,7 +16,8 @@ Read each heading’s linked context before changing its files.
   test `isWaiting` first, and never drop unread from a tab renderer.
 - `?tab` owns selection; never mirror it in state (#193). Confirmed shared closure
   may replace the current choice with a neighbour or local draft. Close writes
-  `isTabClosed`, never archive/delete; reopening archives restores lifecycle first.
+  `isTabClosed`, never archive — a never-messaged tab is exact-deleted.
+  Reopening archives restores lifecycle first.
 - `Change owner` writes the OWNER `SessionMeta.userId`, never sharing/visibility;
   they stay separate actions.
 

@@ -1,5 +1,6 @@
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { quoteCommandArgument } from './command-line.js';
 
 const ACP_ENTRY = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -11,11 +12,6 @@ export const SESSION_MANAGEMENT_PROMPT =
 export const CREATED_SESSION_TITLE = 'Synthetic session title';
 export const RENAMED_SESSION_TITLE = 'Renamed local session';
 export const SESSION_HISTORY_TEXT = 'Synthetic response started. Synthetic response complete.';
-
-function quoteCommandArgument(value: string): string {
-  if (/^[A-Za-z0-9_./:\\-]+$/u.test(value)) return value;
-  return `"${value.replace(/["\\$`]/gu, '\\$&')}"`;
-}
 
 export class SessionManagementFixture {
   readonly agentCommandLine: string;

@@ -459,6 +459,25 @@ describe('resolveBuiltinACPSetting', () => {
     );
   });
 
+  it('keeps Devin on the downloadable registry binary path', () => {
+    const agent = getRegistryAgent('devin');
+
+    expect(agent.distribution.local).toBeUndefined();
+    expect(Object.keys(agent.distribution.binary ?? {})).toEqual(
+      expect.arrayContaining([
+        'darwin-aarch64',
+        'darwin-x86_64',
+        'linux-aarch64',
+        'linux-x86_64',
+        'windows-aarch64',
+        'windows-x86_64',
+      ])
+    );
+    expect(() => resolveACPSetting({ cliType: 'registry', agentType: 'devin' })).toThrow(
+      /resolveACPProcessLaunchAsync/
+    );
+  });
+
   it('uses the hardcoded Interactive Claude registry provider with exact platform npx packages', () => {
     const agent = getRegistryAgent('claude-p');
     const npx = agent.distribution.npx;

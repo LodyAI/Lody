@@ -1,8 +1,6 @@
 import {
   forwardRef,
   Fragment,
-  lazy,
-  Suspense,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -21,7 +19,6 @@ import {
   FolderPlus,
   Folders,
   Github,
-  ListTodo,
   LockKeyhole,
   MessageCircle,
   Monitor,
@@ -33,7 +30,7 @@ import {
 } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
-import { MdChat, MdChecklist, MdComputer, MdFolderCopy } from 'react-icons/md';
+import { MdChat, MdComputer, MdFolderCopy } from 'react-icons/md';
 import { FaGithub } from 'react-icons/fa';
 import type { IconType } from 'react-icons';
 import { isIOSRuntimeEnvironment } from '@/lib/native-platform';
@@ -58,13 +55,6 @@ import { MobileInitialLetterAvatar } from './mobile-initial-letter-avatar';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
 import { WorkspaceAvatar } from '@/components/workspace-avatar';
 import { MobileWorkspaceTabBar, type MobileBottomTabBarTabSpec } from './mobile-workspace-tabbar';
-
-/* Lazy so the Tasks surface (board/list + detail graph) stays out of the
-   mobile home chunk for the vast majority of users who never enable the
-   Tasks beta — the tab only renders when `showTasksTab` is on. */
-const TasksListBody = lazy(() =>
-  import('../tasks/tasks-workspace').then((m) => ({ default: m.TasksListBody }))
-);
 
 function MobileReactIcon({
   icon: Icon,
@@ -94,14 +84,12 @@ function MobileReactIcon({
    the home screen don't have to chase the type to its new module. */
 export type { MobileChatGroupBy };
 
-/* The mobile home dock surfaces up to four content tabs, ordered
-   left → right: Inbox · Chat · Tasks · 项目. Inbox is available in
+/* The mobile home dock surfaces up to three content tabs, ordered
+   left → right: Inbox · Chat · 项目. Inbox is available in
    multi-member workspaces and occupies the natural "home" position.
-   Tasks only appears when the caller passes `showTasksTab` (the
-   developer-mode Tasks beta gate). The 项目 tab merges Local + GitHub
-   via an inner sub-tab; the 设置 surface lives in the header's gear
-   button. */
-export type MobileHomeTab = 'inbox' | 'chat' | 'projects' | 'tasks';
+   The 项目 tab merges Local + GitHub via an inner sub-tab; the 设置
+   surface lives in the header's gear button. */
+export type MobileHomeTab = 'inbox' | 'chat' | 'projects';
 
 /* Sub-tab inside the "项目" tab. Drives both the heading + full list
    below the segmented selector. Persisted via `mobileHomeProjectsSubTabAtom`
@@ -282,9 +270,6 @@ export type MobileHomeScreenLabels = {
   addGitHubRepository?: string;
   addGitHubRepositoryHint?: string;
   chatTab?: string;
-  /** Label for the Tasks tab in the bottom dock. Only rendered when the
-     caller also passes `showTasksTab`. */
-  tasksTab?: string;
   settingsTab?: string;
   /** aria-label for the archive-toggle chip in the header. Toggles the
      Chat tab between active and archived conversations. */
@@ -386,10 +371,6 @@ export type MobileHomeScreenProps = {
   selectedTab: MobileHomeTab;
   /** Inbox only appears in workspaces with more than one member. */
   showInboxTab?: boolean;
-  /** Shows the Tasks tab in the bottom dock (developer-mode Tasks beta
-     gate). When false the tab is not rendered at all — as if never
-     built — and a `selectedTab` of `'tasks'` falls back to Chat. */
-  showTasksTab?: boolean;
   /** Active sub-tab inside the Projects tab. Required when `selectedTab`
      is 'projects'; ignored on the Chat tab. */
   selectedProjectsSubTab?: MobileProjectsSubTab;
@@ -987,7 +968,6 @@ function RecentItemsRow<TItem extends { id: string }>({
    `<MobileWorkspaceTabBar>` via plain props, not closures. */
 function workspaceTabSpecs(
   labels: MobileHomeScreenLabels,
-  showTasksTab = false,
   showInboxTab = false
 ): ReadonlyArray<MobileBottomTabBarTabSpec<MobileHomeTab>> {
   /* Icons at 24px (h-6) — the dock pill is h-14, so h-5/20px read as
@@ -1010,16 +990,6 @@ function workspaceTabSpecs(
       material: <MobileReactIcon icon={MdChat} className="h-6 w-6" />,
       label: labels.chatTab ?? 'Chat',
     },
-    ...(showTasksTab
-      ? [
-          {
-            key: 'tasks' as const,
-            ios: <ListTodo className="h-6 w-6" strokeWidth={1.75} />,
-            material: <MobileReactIcon icon={MdChecklist} className="h-6 w-6" />,
-            label: labels.tasksTab ?? 'Tasks',
-          },
-        ]
-      : []),
     {
       key: 'projects',
       ios: <Folders className="h-6 w-6" strokeWidth={1.75} />,
@@ -1249,7 +1219,6 @@ export function MobileHomeScreen({
   onPullToRefresh,
   selectedTab,
   showInboxTab = false,
-  showTasksTab = false,
   selectedProjectsSubTab = 'local',
   onProjectsSubTabSelect,
   onAddLocalProject,
@@ -1355,13 +1324,7 @@ export function MobileHomeScreen({
     return map;
   }, [machines]);
 
-  /* The Tasks tab only exists while the beta gate is on. If it flips off
-     while the user is sitting on the tab (or a stale `selectedTab`
-     arrives), fall back to Chat rather than rendering a featureless
-     shell — gate-off must behave as if the tab were never built. */
-  const tasksTabActive = showTasksTab && selectedTab === 'tasks';
-  const effectiveSelectedTab: MobileHomeTab =
-    selectedTab === 'tasks' && !showTasksTab ? 'chat' : selectedTab;
+  const effectiveSelectedTab: MobileHomeTab = selectedTab;
 
   const resolvedTheme: 'ios' | 'material' =
     theme ?? (isIOSRuntimeEnvironment() ? 'ios' : 'material');
@@ -1392,14 +1355,11 @@ export function MobileHomeScreen({
     connectionUiState === 'offline';
   /* Keep search mounted for the exit transition; opacity/transform are
      driven by `searchOpaque`. Pill only mounts once `statusRevealed`. */
-  const [searchOpaque, setSearchOpaque] = useState(() => !tasksTabActive && !wantStatusSlot);
-  const [statusRevealed, setStatusRevealed] = useState(() => tasksTabActive || wantStatusSlot);
+  const [searchOpaque, setSearchOpaque] = useState(() => !wantStatusSlot);
+  const [statusRevealed, setStatusRevealed] = useState(() => wantStatusSlot);
   useEffect(() => {
     let reveal: number | undefined;
-    if (tasksTabActive) {
-      setSearchOpaque(false);
-      setStatusRevealed(true);
-    } else if (wantStatusSlot) {
+    if (wantStatusSlot) {
       /* Exit search first; reveal pill only after the fade finishes so
          the two never share the chrome band. */
       setSearchOpaque(false);
@@ -1417,7 +1377,7 @@ export function MobileHomeScreen({
     return () => {
       if (reveal !== undefined) window.clearTimeout(reveal);
     };
-  }, [tasksTabActive, wantStatusSlot]);
+  }, [wantStatusSlot]);
 
   /* Tab swipe was removed — conflicted with the row-level
      left-swipe-to-reveal-actions gesture on conversation rows. The
@@ -1482,21 +1442,19 @@ export function MobileHomeScreen({
                    Duration matches HEADER_SEARCH_EXIT_MS (tailwind
                    duration-150 ≈ 150ms; keep the timeout in sync). */
                 'transition-[opacity,transform] duration-150 ease-out',
-                searchOpaque && !tasksTabActive
+                searchOpaque
                   ? 'opacity-100 translate-y-0'
                   : 'pointer-events-none translate-y-1.5 opacity-0'
               )}
-              aria-hidden={!searchOpaque || tasksTabActive}
+              aria-hidden={!searchOpaque}
             >
-              {!tasksTabActive ? (
-                <HeaderSearchInput
-                  value={searchQuery}
-                  onChange={setSearchQuery}
-                  placeholder={searchPlaceholder}
-                  ariaLabel={searchAriaLabel}
-                  clearAriaLabel={clearSearchAriaLabel}
-                />
-              ) : null}
+              <HeaderSearchInput
+                value={searchQuery}
+                onChange={setSearchQuery}
+                placeholder={searchPlaceholder}
+                ariaLabel={searchAriaLabel}
+                clearAriaLabel={clearSearchAriaLabel}
+              />
             </div>
 
             {/* Trailing header actions — same canvas liquid-glass discs as
@@ -1578,13 +1536,8 @@ export function MobileHomeScreen({
            The header stays put: search does a fast top→bottom exit,
            then the centered status pill mounts. */}
         <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-          {/* The chat/projects group stays MOUNTED (but `hidden`) while
-             the Tasks tab is active: unmounting would drop the list
-             scroll element the pull-to-refresh + dock-collapse listeners
-             are bound to, and would reset the chat list's scroll
-             position on every Tasks round-trip. */}
           <div
-            className={cn('flex min-h-0 flex-1 flex-col', tasksTabActive && 'hidden')}
+            className="flex min-h-0 flex-1 flex-col"
             style={
               pullDistance > 0
                 ? {
@@ -1697,28 +1650,15 @@ export function MobileHomeScreen({
             </div>
           </div>
 
-          {/* Tasks tab: the shared All Tasks body (inbox + list) fills the
-             content region under the home header, dock still visible.
-             `embedded` skips BaseHeader's safe-area / drawer menu so we
-             don't double-stack chrome under the home header. The home
-             search row stays hidden (it only filters chats/projects).
-             Tapping a card routes to full-screen `/tasks/$taskId`. */}
-          {tasksTabActive ? (
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-              <Suspense fallback={null}>
-                <TasksListBody mobile embedded />
-              </Suspense>
-            </div>
-          ) : null}
         </div>
 
-        {/* Shared workspace tabbar (chat / tasks / projects) + the
-            optional separate new-chat chip. The 设置 surface is reached
-            via the gear button in the top header, so it's no longer one
-            of the bottom tabs. Tabs are built locally so the
-            translations stay co-located with the other screen copy. */}
+        {/* Shared workspace tabbar (chat / projects) + the optional
+            separate new-chat chip. The 设置 surface is reached via the
+            gear button in the top header, so it's no longer one of the
+            bottom tabs. Tabs are built locally so the translations stay
+            co-located with the other screen copy. */}
         <MobileWorkspaceTabBar<MobileHomeTab>
-          tabs={workspaceTabSpecs(labels, showTasksTab, showInboxTab)}
+          tabs={workspaceTabSpecs(labels, showInboxTab)}
           selectedTab={effectiveSelectedTab}
           onTabSelect={(tab) => onTabSelect?.(tab)}
           onNewChat={onNewChat}

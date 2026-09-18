@@ -17,5 +17,12 @@
     假如 已配置支持分叉的确定性 Agent 桌面
     并且 已建立含 child Tab 和两个独立 worktree 的 Session 关系
     当 用户归档并永久删除 opener Session
-    那么 child Tab 被删除而 opened Sessions 保留 dangling 溯源并可独立清理
+    # Suspended per wibus-wee's call (2026-09-18): since #746 an archived
+    # Session's own route resolves to an empty/draft tab (isSessionTabClosed
+    # treats isArchived as closed), so the opened-by card never renders.
+    # wibus-wee judges that redirect acceptable, not a confirmed product bug,
+    # so this assertion is parked until the archived-view UX (view history vs
+    # restore-first) is decided. Provenance retention itself can be re-verified
+    # at doc-meta level (openedBySessionId) without rendering the card.
+    # 那么 child Tab 被删除而 opened Sessions 保留 dangling 溯源并可独立清理
     并且 metadata 未完成 hydration 时精确删除 empty child Tab 仍成功

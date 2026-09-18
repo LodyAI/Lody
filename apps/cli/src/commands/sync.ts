@@ -1,14 +1,10 @@
 import { Command } from 'commander';
 import {
   getMachineFlockDocId,
-  getTaskIndexFlockDocId,
-  getTaskRoomId,
   isMachineDocRoomId,
   type MachineMeta,
-  type TaskId,
   type WorkspaceId,
 } from '@lody/shared';
-import { listWorkspaceTaskIds } from '@/lib/task-doc';
 import {
   getAuthContextOrThrow,
   listAliveDocMetas,
@@ -242,26 +238,14 @@ async function listSyncableFlockDocIds(
   workspaceId: WorkspaceId
 ): Promise<string[]> {
   const machines = await listAliveDocMetas<MachineMeta>(manager, isMachineDocRoomId);
-  return [
-    ...machines.map((entry) => getMachineFlockDocId(workspaceId, entry.meta.id)),
-    getTaskIndexFlockDocId(workspaceId),
-  ].sort((left, right) => left.localeCompare(right));
+  return machines
+    .map((entry) => getMachineFlockDocId(workspaceId, entry.meta.id))
+    .sort((left, right) => left.localeCompare(right));
 }
 
-/**
- * Documents `lody sync` pulls.
- *
- * Task rooms normally come from loro-repo's `e/<docId>` existence index. The
- * Task Index remains a compatibility and repair source for older or interrupted
- * writes, so merge both enumerations without syncing a room twice.
- */
-export function buildSyncDocIds(
-  aliveRoomIds: readonly string[],
-  taskIds: readonly TaskId[]
-): string[] {
-  return [...new Set([...aliveRoomIds, ...taskIds.map((taskId) => getTaskRoomId(taskId))])].sort(
-    (left, right) => left.localeCompare(right)
-  );
+/** Documents `lody sync` pulls. */
+export function buildSyncDocIds(aliveRoomIds: readonly string[]): string[] {
+  return [...aliveRoomIds].sort((left, right) => left.localeCompare(right));
 }
 
 async function syncWorkspace(input: {
@@ -296,8 +280,7 @@ async function syncWorkspace(input: {
       return;
     }
 
-    const taskIds = await listWorkspaceTaskIds(manager, workspaceId).catch(() => []);
-    const docIds = buildSyncDocIds(await listAliveRoomIds(manager, () => true), taskIds);
+    const docIds = buildSyncDocIds(await listAliveRoomIds(manager, () => true));
     const flockDocIds = await listSyncableFlockDocIds(manager, workspaceId);
 
     await syncItems({

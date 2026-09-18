@@ -26,7 +26,6 @@ import {
   PreviewConnection,
   Role,
   SessionId,
-  TaskId,
   WorktreeCleanupScriptConfig,
   WorktreeSetupScriptConfig,
 } from '.';
@@ -526,8 +525,6 @@ const acpSessionConfigSchema = schema
       configOptionValues: schema.Any({ required: false }),
       /** Workspace MCP catalog ids selected for this session (string[]). */
       mcpServerIds: schema.Any({ required: false }),
-      /** Whether the built-in Lody Task MCP tools are mounted for this Turn. */
-      taskToolsEnabled: schema.Boolean({ required: false }),
       /** Agent Role selected for this Turn; null is explicit None. */
       agentRoleId: agentRoleIdSchema,
       agentRoleRevision: schema.Number({ required: false }),
@@ -981,12 +978,6 @@ export type SessionMeta = {
   /** Last queue update signal the owning CLI checked when no dispatchable turn was found. */
   messageQueueCheckedAt?: number;
   /**
-   * Task this session belongs to, for navigation back to it. The association
-   * itself, with its provenance, lives in the task document; this is only a
-   * pointer, and a session belongs to at most one task.
-   */
-  taskId?: TaskId;
-  /**
    * When the session started waiting on a human answer, cleared when the request
    * resolves. A list-rendering summary of the durable truth in history (a
    * permission request with no outcome), so surfaces can show "waiting on you"
@@ -1003,8 +994,7 @@ export type SessionMeta = {
    *
    * Only a human may write it. The reviewer and the authoring agent both run
    * with MCP access to this session, and an agent that could grant itself merge
-   * authority would make the whole gate decorative — the same rule that keeps
-   * MCP from writing a Task's entrusted `agent`.
+   * authority would make the whole gate decorative.
    */
   autoReview?: SessionAutoReviewMeta;
 };

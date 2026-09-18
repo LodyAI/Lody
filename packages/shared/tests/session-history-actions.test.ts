@@ -119,25 +119,6 @@ for (const backend of ['loro'] as const)
       ).rejects.toThrow();
       expect(await data.history.readAll()).toEqual(before);
     });
-    it('keeps proposal publication idempotent and refuses a stable-id collision', async () => {
-      const data = create();
-      const action = {
-        kind: 'task-proposal' as const,
-        turnId: 'proposal',
-        timestamp: '2026-01-01T00:00:00Z',
-        meta: { proposalId: 'p', title: 'task', proposedBy: { kind: 'agent' as const } },
-      };
-      await data.commands.applyHistoryAction(action);
-      expect((await data.commands.applyHistoryAction(action)).matched).toBe(false);
-      const before = await data.history.readAll();
-      await expect(
-        data.commands.applyHistoryAction({
-          ...action,
-          meta: { ...action.meta, proposalId: 'different' },
-        })
-      ).rejects.toThrow();
-      expect(await data.history.readAll()).toEqual(before);
-    });
   });
 it('retains an opaque stored item during a named field action', async () => {
   const doc = new LoroDoc();

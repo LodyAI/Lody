@@ -44,13 +44,8 @@ Parent instructions apply.
   `lody_session_create_many` tools. When `agentRoleId` is present, tolerate manual Machine, Agent,
   and run-config fields but remove them before resolution: the current Role row is authoritative
   and those fields must not influence validation, canonical identity, recovery, or dispatch.
-- The driving Turn's frozen `taskToolsEnabled` gates the complete `lody_task_*` family for
-  both stdio and HTTP transports. Missing means disabled. Do not merely hide creation: disabled
-  servers publish no Task tools, and a still-resident Agent whose next Turn disables the feature
-  is rejected at every Task handler. Task-originated automation explicitly freezes `true` so it
-  can update and comment on the Task it is executing.
 
-## Session and Task tool contracts
+## Session tool contracts
 
 - MCP session tools use stable machine/session/agent-config ids and strict, narrow input schemas.
   Create/chat Commands require a caller-chosen Operation id, and Create persists the Operation
@@ -59,7 +54,7 @@ Parent instructions apply.
   the prompt. Completion is delivered automatically — no public wait tool — and legacy `wait=true`
   is a temporary adapter new callers must not use.
 - Chat follow-ups inherit omitted mode/model/options from the target's last model turn
-  (else its last matching turn), never Task consent. Explicit fields and category options
+  (else its last matching turn). Explicit fields and category options
   win; a model change drops old options. Validate effort/Fast against the final model:
   probe mismatch cannot reject them, and missing per-model data defers to runtime. Drop
   incompatible inherited selectors; fill builtin mode only when still empty.
@@ -78,23 +73,3 @@ Parent instructions apply.
   `[@Title](session://<sessionId>)`; resolve them with this tool, accepting a bare id or a
   `session://` URI.
   ([note](../../../../.agents/notes/implemented/feature/2026-09-18-session-mention-uri-and-paste.md))
-- Bound every task reply: body 64 KiB with head-and-tail truncation
-  (`bodyTruncated`/`bodyOmittedBytes`), newest 20 comments with `commentCount`, 50 links,
-  `lody_task_list` 20/100 with `matched`. `lody_task_edit_body` still matches exactly against the
-  FULL body server-side.
-- `lody_task_list` reads the Task Index Flock ONLY: never open task documents on a list path, and
-  never return `order`.
-- `lody_task_update` writes every scalar property EXCEPT `agent`, and never the body: the body goes
-  through the exact-match edit, and `agent` is the sole automation consent.
-- INVARIANT: `status`, `ownerId`, and `projects` all sit in the delegated-automation eligibility
-  predicate (`planTaskAutomation`), so an agent write to any of them can START a session on an
-  already-entrusted task; anything in that predicate is an execution trigger. Its attributed
-  activity entry is an audit record, NOT a user-visible notice.
-- `ownerId` on an agent WRITE accepts ONLY `""` (unassign) — `TaskOwnerIdWriteSchema` — because
-  naming an owner points `isTaskAutomationEligible` somewhere new and could route a task into
-  execution under this operator's credentials on someone else's consent; it also disposes of the
-  `me` filter sentinel. Keep that restriction at the MCP boundary, NOT in `task-doc.ts`.
-- `lody_task_create` versus `lody_task_propose` splits on WHO ASKED (user request → create now;
-  agent-noticed follow-up → proposal card), and that split lives in the tool descriptions on
-  purpose. The proposal writer hydrates the Session doc, flushes locally, and confirms remote sync
-  before `ok`.

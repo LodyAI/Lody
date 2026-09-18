@@ -27,8 +27,6 @@ export interface SessionConfig {
   configOptionValues?: SessionTurnInputConfig['configOptionValues'];
   /** Selection carried by the dispatching turn; ACP startup must not re-read history for it. */
   mcpServerIds: McpServerId[];
-  /** Whether this driving Turn mounts the built-in Lody Task MCP tools. */
-  taskToolsEnabled: boolean;
   /** Launch spec for this execution request; durable default lives on the agent config. */
   customAcp?: CustomAcpLaunchSpec;
   /** Advanced runtime binary override for builtin Claude/Codex. */

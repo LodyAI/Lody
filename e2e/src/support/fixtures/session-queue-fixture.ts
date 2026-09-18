@@ -2,6 +2,7 @@ import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect } from '@playwright/test';
+import { quoteCommandArgument } from './command-line.js';
 
 const fixtureDirectory = dirname(fileURLToPath(import.meta.url));
 const SCRIPTED_ACP_ENTRY = resolve(fixtureDirectory, 'session-queue-scripted-acp.mjs');
@@ -16,11 +17,6 @@ export type QueueAcpEvent = {
   sessionId?: string;
   stopReason?: string;
 };
-
-function quoteCommandArgument(value: string): string {
-  if (/^[A-Za-z0-9_./:\\-]+$/u.test(value)) return value;
-  return `"${value.replace(/["\\$`]/gu, '\\$&')}"`;
-}
 
 export class QueueSessionFixture {
   readonly scriptedAgentCommandLine: string;

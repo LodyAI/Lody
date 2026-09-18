@@ -21,7 +21,7 @@ export function withHistoryPort<T extends object>(fixture: T): T & { sessionData
   const commands = {
     async applyHistoryAction(action: HistoryAction) {
       let plan: ReturnType<typeof applyHistoryAction> | undefined;
-      if (action.kind === 'operation-progress' || action.kind === 'task-proposal') {
+      if (action.kind === 'operation-progress') {
         plan = applyHistoryAction(structuredClone(read()), action);
         if (!plan.matched) return { matched: false, proposal: plan.proposal };
       }

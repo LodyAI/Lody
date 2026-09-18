@@ -1,7 +1,6 @@
 import path from 'node:path';
 import { Command } from 'commander';
-import { getSessionRoomId, getTaskRoomId, type WorkspaceId } from '@lody/shared';
-import { listWorkspaceTaskIds } from '@/lib/task-doc';
+import { getSessionRoomId } from '@lody/shared';
 import {
   getAuthContextOrThrow,
   listAliveSessionMetas,
@@ -46,14 +45,6 @@ async function syncWorkspaceSessionsForExport(
       getSessionRoomId(entry.meta.id),
       `export:${workspace.id}:${entry.meta.id}`
     );
-  });
-
-  // This reconciles visible index rows with repo existence, repairing a missing
-  // projection row without reviving an explicit index tombstone.
-  const workspaceId = workspace.id as WorkspaceId;
-  const taskIds = await listWorkspaceTaskIds(manager, workspaceId).catch(() => []);
-  await mapWithConcurrency(taskIds, EXPORT_SYNC_CONCURRENCY, async (taskId) => {
-    await syncDocForRead(manager, getTaskRoomId(taskId), `export:${workspace.id}:${taskId}`);
   });
 }
 

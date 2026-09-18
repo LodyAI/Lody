@@ -1283,27 +1283,3 @@ export const StressTest: Story = {
     sessionListProps: stressTaskListProps,
   },
 };
-
-/**
- * The Tasks entry only exists while the Tasks beta is on (`showTasks`, driven by
- * `tasksFeatureEnabledAtom`). It sits with New Chat at the top of the sidebar,
- * not in the bottom utility rail, because it is a primary destination. Every
- * other story leaves it off, which is the default state for anyone who has not
- * enabled Developer mode plus the beta — so this is the one place the entry
- * stays reviewable. No open-task count on the row: the number was noise next
- * to New chat and is already available on the Tasks page itself.
- *
- * The trailing `+` is quick capture: it opens the global capture dialog without
- * navigating, so writing a task down stays cheaper than starting a chat. Its
- * tooltip carries the shortcut — in Storybook the command registry is empty, so
- * only the label shows.
- */
-export const TasksBetaEnabled: Story = {
-  name: 'Tasks beta enabled',
-  render: (args) => <WithProjectsLayout {...args} />,
-  args: {
-    ...Default.args!,
-    showTasks: true,
-    onNewTaskClicked: () => {},
-  },
-};

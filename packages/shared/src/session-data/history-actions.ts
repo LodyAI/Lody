@@ -2,8 +2,6 @@ import { markAssistantTurnFinished } from './assistant-finalize';
 import { planOperationProgress, planOperationCompletion } from './operation-progress';
 import type { StoredLodyOperation } from '../session-orchestration';
 import type { OperationProgressStatus } from '../session-orchestration';
-import { planTaskProposal } from './task-proposal';
-import type { TaskProposalMeta } from '../ai';
 import type { RequestPermissionRequest } from '@agentclientprotocol/sdk';
 import {
   mergeToolCallWithPermission,
@@ -25,7 +23,6 @@ export type HistoryAction =
       statuses?: readonly (readonly [string, OperationProgressStatus])[];
     }
   | { kind: 'operation-completion'; operation: StoredLodyOperation; turn: SessionEntry }
-  | { kind: 'task-proposal'; turnId: string; meta: TaskProposalMeta; timestamp: string }
   | {
       kind: 'upsert-goal';
       goal: Extract<MessageContent, { type: 'goal' }>;
@@ -75,7 +72,6 @@ export function applyHistoryAction(
 ): {
   turns: SessionEntry[];
   matched: boolean;
-  proposal?: import('./task-proposal').TaskProposalPublishResult;
 } {
   switch (action.kind) {
     case 'assistant-file-diff': {
@@ -101,8 +97,6 @@ export function applyHistoryAction(
       const turns = planOperationCompletion(history, action.operation, action.turn);
       return { turns, matched: turns !== history };
     }
-    case 'task-proposal':
-      return planTaskProposal(history, action.turnId, action.meta, action.timestamp);
     case 'upsert-goal': {
       let replaced = false;
       for (const entry of history)

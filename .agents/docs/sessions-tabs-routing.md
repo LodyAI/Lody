@@ -56,6 +56,30 @@ this page is the full text of the rules summarised there.
     sidebar row — so do not drop the marker from any tab renderer.
     Desktop tabs share width equally whenever all can reach `ACTIVE_TAB_MIN_WIDTH`;
     below that threshold the active tab keeps that width and the others share the remainder.
+    A pointer-triggered close freezes every surviving tab at its current width
+    (Chromium's `in_tab_close_` rapid-close mode) so the next tab's close
+    button lands under the cursor; the freeze only arms on a pointerdown inside
+    the strip, so keyboard/programmatic closes relayout normally. The freeze
+    decision runs DURING RENDER (React's derived-state adjustment), so a
+    removal commit's first painted frame already carries the frozen widths —
+    deciding it in an effect let the unfrozen allocation commit first and
+    flashed survivors at the fresh width for a frame. The freeze
+    releases when the pointer leaves an EXPANDED region — 40px below the strip
+    and 60px toward the new-tab button, like Chromium's MouseWatcher — or on a
+    tab add, a viewport shrink below the captured width (a wider viewport keeps
+    it), or a single remaining tab. Widths freeze by role, not by tab: a
+    survivor that becomes active mid-freeze takes the captured active width
+    while the deselected tab drops back to the inactive width. Closing only the
+    LAST tab never enters the mode — the new last tab already ends at the right
+    edge — and closing the last tab while frozen re-spreads the survivors over
+    the occupied width instead of shrinking the budget, keeping that edge
+    under the cursor. Removals slide closed (the survivor starts with the
+    freed width as an inline-start margin) and pure inserts grow from zero
+    width, both over a 200ms transition that reduced-motion users skip. A
+    same-commit remove+add is a substitution, not an insert — a draft
+    promoting to a session morphs from the removed tab's width rather than
+    appearing from zero — and a lone tab added to an empty strip renders at
+    its final width directly.
     **The tab pills' top border shares one line with the sidebar and side-panel
     cards at y=8**, since every floating card is `mt-2` (sidebar in
     `loro-app-sidebar.tsx`, side panel + terminal dock in `session-detail.tsx` /

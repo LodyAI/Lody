@@ -16,14 +16,12 @@ import { __lodyMcpServerInternals } from '../src/mcp/lody-mcp-server';
 
 const {
   ImageUploadToolInputSchema,
-  TaskImageUploadToolInputSchema,
   getSessionContext,
   postImageUpload,
   postPreviewCandidate,
   postSessionControl,
   resolveUploadPath,
   resolveMcpSessionId,
-  summarizeTaskForMcp,
 } = __lodyMcpServerInternals;
 
 const ENV_KEYS = [
@@ -32,7 +30,6 @@ const ENV_KEYS = [
   'LODY_MCP_SESSION_ID',
   'LODY_MCP_SOCKET_PATH',
   'LODY_MCP_WORKDIR',
-  'LODY_MCP_TASK_TOOLS_ENABLED',
   'LODY_PREVIEW_MCP_MACHINE_ID',
   'LODY_PREVIEW_MCP_WORKSPACE_ID',
   'LODY_PREVIEW_MCP_SESSION_ID',
@@ -150,22 +147,6 @@ describe('lody MCP server internals', () => {
     ).toBe(true);
   });
 
-  it('validates task image paths and rejects unknown fields', () => {
-    expect(TaskImageUploadToolInputSchema.safeParse({ paths: [] }).success).toBe(false);
-    expect(
-      TaskImageUploadToolInputSchema.safeParse({
-        paths: Array.from({ length: 9 }, (_, index) => `/tmp/${index}.png`),
-      }).success
-    ).toBe(false);
-    expect(TaskImageUploadToolInputSchema.safeParse({ paths: ['task.png'] }).success).toBe(true);
-    expect(
-      TaskImageUploadToolInputSchema.safeParse({
-        paths: ['task.png'],
-        taskId: 'task-1',
-      }).success
-    ).toBe(false);
-  });
-
   it('posts local-control requests and returns validated responses', async () => {
     const request = previewRequest();
     const responsePayload = {
@@ -266,7 +247,6 @@ describe('lody MCP server internals', () => {
     process.env.LODY_MCP_SESSION_ID = 'session';
     process.env.LODY_MCP_SOCKET_PATH = '/tmp/lody-control.sock';
     process.env.LODY_MCP_WORKDIR = '/workdir';
-    process.env.LODY_MCP_TASK_TOOLS_ENABLED = '1';
 
     expect(getSessionContext()).toEqual({
       machineId: 'machine',
@@ -274,7 +254,6 @@ describe('lody MCP server internals', () => {
       sessionId: 'session',
       localControlSocketPath: '/tmp/lody-control.sock',
       workdir: '/workdir',
-      taskToolsEnabled: true,
     });
   });
 
@@ -291,7 +270,6 @@ describe('lody MCP server internals', () => {
       sessionId: 'legacy-session',
       localControlSocketPath: '/tmp/legacy-control.sock',
       workdir: '/legacy-workdir',
-      taskToolsEnabled: false,
     });
   });
 
@@ -313,70 +291,11 @@ describe('lody MCP server internals', () => {
       sessionId: 'session',
       localControlSocketPath: '/tmp/lody-control.sock',
       workdir: '/workdir',
-      taskToolsEnabled: false,
     });
   });
 
   it('requires session identity env vars', () => {
     expect(() => getSessionContext()).toThrow(/LODY_MCP_MACHINE_ID/);
-  });
-});
-
-describe('summarizeTaskForMcp bounds', () => {
-  const snapshot = (over: Record<string, unknown> = {}) =>
-    ({
-      meta: {
-        taskId: 't1',
-        title: 'T',
-        status: 'backlog',
-        ownerId: 'u1',
-        order: '1',
-        createdAt: 1,
-        updatedAt: 1,
-      },
-      body: 'short body',
-      links: [],
-      timeline: [],
-      ...over,
-    }) as never;
-
-  it('returns a short body untouched and unflagged', () => {
-    const out = summarizeTaskForMcp(snapshot());
-
-    expect(out.body).toBe('short body');
-    expect('bodyTruncated' in out).toBe(false);
-  });
-
-  it('bounds a huge body and says so instead of blowing the caller context', () => {
-    const out = summarizeTaskForMcp(snapshot({ body: 'x'.repeat(400_000) }));
-
-    expect(Buffer.byteLength(out.body, 'utf8')).toBeLessThanOrEqual(64 * 1024);
-    expect(out.bodyTruncated).toBe(true);
-    expect(out.bodyOmittedBytes).toBeGreaterThan(0);
-  });
-
-  it('keeps both ends of a bounded body so an exact-match edit can still aim', () => {
-    const body = `HEAD-MARKER\n${'y'.repeat(300_000)}\nTAIL-MARKER`;
-    const out = summarizeTaskForMcp(snapshot({ body }));
-
-    expect(out.body.startsWith('HEAD-MARKER')).toBe(true);
-    expect(out.body.endsWith('TAIL-MARKER')).toBe(true);
-  });
-
-  it('reports that older comments exist rather than silently keeping 20', () => {
-    const timeline = Array.from({ length: 25 }, (_, index) => ({
-      id: `c${index}`,
-      kind: 'comment',
-      actorKind: 'human',
-      createdAt: index,
-      body: `comment ${index}`,
-    }));
-    const out = summarizeTaskForMcp(snapshot({ timeline }));
-
-    expect(out.comments).toHaveLength(20);
-    expect(out.commentCount).toBe(25);
-    // The newest are the ones kept.
-    expect(out.comments.at(-1)?.body).toBe('comment 24');
   });
 });
 

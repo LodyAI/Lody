@@ -46,14 +46,6 @@ describe('session preparation run config', () => {
     ]);
   });
 
-  it('keeps the Task tool gate in preparation and dedup identity', () => {
-    const enabled = buildSessionPreparationRunConfig({ taskToolsEnabled: true });
-
-    expect(enabled).toEqual({ taskToolsEnabled: true });
-    expect(normalizeSessionPreparationRunConfigForDedup(enabled)).toEqual([null, null, null, true]);
-    expect(buildSessionPreparationRunConfig({ taskToolsEnabled: false })).toBeUndefined();
-  });
-
   it('omits an empty selection', () => {
     expect(
       buildSessionPreparationRunConfig({

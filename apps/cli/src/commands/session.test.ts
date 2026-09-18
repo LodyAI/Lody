@@ -902,36 +902,6 @@ describe('session command helpers', () => {
     ).toMatchObject({ modeId: 'agent-auto-review' });
   });
 
-  it.each([undefined, false, true])(
-    'takes Task tool consent only from the chat caller (%s)',
-    (taskToolsEnabled) => {
-      const target = createSessionMeta();
-      const inheritedDispatchConfig = resolveTurnDispatchDefaultsFromHistory(
-        [
-          createHistoryEntry({
-            role: 'user',
-            inputConfig: {
-              prompt: 'previous',
-              cliType: target.cliType,
-              agentType: target.agentType,
-              modelId: 'model-a',
-              taskToolsEnabled: true,
-            },
-          }),
-        ],
-        target
-      );
-      const result = resolveEffectiveSessionChatDispatchConfig({
-        dispatchConfig: { taskToolsEnabled },
-        inheritedDispatchConfig,
-        target,
-        capability: createAcpCapability(),
-      });
-      expect(result.modelId).toBe('model-a');
-      expect(result.taskToolsEnabled).toBe(taskToolsEnabled);
-    }
-  );
-
   it.each(['xhigh', 'medium'])(
     'checks inherited effort %s against the inherited model',
     (effort) => {
@@ -1077,7 +1047,6 @@ describe('session command helpers', () => {
       modeId: undefined,
       modelId: undefined,
       configOptionValues: { mode: 'plan', model: 'model-b' },
-      taskToolsEnabled: undefined,
     });
   });
 
@@ -1110,7 +1079,6 @@ describe('session command helpers', () => {
       modelId: 'model-b',
       modeId: 'default',
       configOptionValues: undefined,
-      taskToolsEnabled: undefined,
     });
     expect(resolve({ modelId: 'model-a' }).configOptionValues).toEqual({ fast: true });
     expect(resolve({}).configOptionValues).toEqual({ fast: true });

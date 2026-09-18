@@ -111,7 +111,6 @@ function StoryHarness({
   actionLabels,
   mergeAction = false,
   syncing = false,
-  task = null,
 }: {
   status?: SessionStatusStripState | null;
   goal?: SessionGoalMessage | null;
@@ -127,8 +126,7 @@ function StoryHarness({
   pr?: SessionPullRequestMeta | null;
   diffStat?: { add: number; del: number } | null;
   width?: number;
-  initialStage?: 'status' | 'goal' | 'schedule' | 'task' | 'context';
-  task?: { taskId: string; title: string } | null;
+  initialStage?: 'status' | 'goal' | 'schedule' | 'context';
   withPreview?: boolean;
   actionLabels?: string[];
   mergeAction?: boolean;
@@ -172,8 +170,6 @@ function StoryHarness({
         scheduledTasks={scheduledTasks}
         prCiRuns={prCiRuns}
         onOpenPrCiRun={fn()}
-        task={task}
-        onOpenTask={fn()}
         initialStage={initialStage}
         projectName={projectName}
         branch={branch}
@@ -554,36 +550,4 @@ function PeekPlayground() {
 
 export const RecencyFocus: Story = {
   render: () => <PeekPlayground />,
-};
-
-/**
- * 会话属于某个任务时，簇里多一个 task chip——它是从工作现场回到任务的路。
- * 任务链接不是状态，所以保持中性色，不带语义色。
- */
-export const WithTask: Story = {
-  args: {
-    status: null,
-    task: { taskId: 't1', title: 'Refactor the auth flow' },
-    projectName: 'loro-dev/lody',
-    branch: 'feat/tasks',
-  },
-};
-
-/** 任务标题还没同步过来时，chip 退化为"未命名任务"而不是空白。 */
-export const WithUntitledTask: Story = {
-  args: {
-    status: null,
-    task: { taskId: 't1', title: '' },
-    projectName: 'loro-dev/lody',
-  },
-};
-
-/** task chip 作为舞台项时给出打开任务的动作。 */
-export const TaskStaged: Story = {
-  args: {
-    status: null,
-    task: { taskId: 't1', title: 'Ship the PR poller fix' },
-    projectName: 'loro-dev/lody',
-    initialStage: 'task',
-  },
 };

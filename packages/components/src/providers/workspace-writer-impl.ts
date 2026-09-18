@@ -150,20 +150,6 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
       });
     },
 
-    async resolveSessionTaskProposal(sessionId, entryId, proposalId, resolution) {
-      await withSessionStore(sessionId, async (store) => {
-        const result = await store.sessionData.commands.resolveTaskProposal(
-          entryId,
-          proposalId,
-          resolution
-        );
-        // The UI decision is best-effort: a proposal removed by a peer is not an
-        // error, matching the previous silent no-op. A malformed decision still
-        // throws the writer's validation diagnostic.
-        if (!result) return;
-      });
-    },
-
     async respondSessionPermission(sessionId, requestId, outcome, options) {
       await withSessionStore(sessionId, async (store) => {
         if (!(await store.sessionData.commands.respondPermission(requestId, outcome, options)))

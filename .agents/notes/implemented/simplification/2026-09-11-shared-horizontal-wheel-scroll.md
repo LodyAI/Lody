@@ -30,10 +30,10 @@ and page deltas use the viewport width. A one-pixel epsilon avoids trapping whee
 input on fractional device-pixel overflow.
 
 The optional `shouldHandle` predicate is the boundary for surface-specific policy.
-[`TasksBoardView`](../../../../packages/components/src/components/tasks/tasks-board-view.tsx)
-uses it to preserve vertical scrolling whenever the event starts inside a board
-column; [`SessionSidePanelTabBar`](../../../../packages/components/src/components/sessions/session-side-panel-tab-bar.tsx)
-accepts all otherwise eligible vertical wheel events.
+The Tasks board used it to preserve vertical scrolling whenever the event started
+inside a board column; [`SessionSidePanelTabBar`](../../../../packages/components/src/components/sessions/session-side-panel-tab-bar.tsx)
+accepts all otherwise eligible vertical wheel events. The Tasks board was later
+removed: [remove the workspace Tasks product](2026-09-18-remove-legacy-tasks.md).
 
 ## Evidence and verification
 

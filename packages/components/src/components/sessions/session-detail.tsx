@@ -38,6 +38,7 @@ import {
   getSessionPullRequestLegacyFields,
   getSessionRoomId,
   getAcpCapabilityCacheEntryAuthority,
+  isLoroRepoDocDeleted,
   resolveProjectGitHubRepo,
   SessionForkOperationSchema,
   type CommentReferencePayload,
@@ -2360,21 +2361,45 @@ const SessionDetail = ({
         is_active_tab: tabSessionId === activeTabSessionId,
       });
       try {
-        await setSessionTabClosed(tabSessionId, true);
-        // The shared-close effect chooses the neighbour once hydration finishes.
-        // Do not commit a fallback from this handler's partial metadata snapshot.
-        if (
-          docMetaCacheReady &&
-          tabSessionId === activeTabSessionId &&
-          router.state.location.search.tab === urlTab
-        ) {
-          navigateToSessionTab(
-            getSessionTabFallback(
-              tabSessionId,
-              allOrderedSessionTabIds,
-              orderedSessionTabIds.filter((id) => id !== tabSessionId)
-            )
-          );
+        // A tab that never had a message is exact-deleted instead of marked
+        // closed — isTabClosed would leave an invisible durable doc. Judge
+        // emptiness from getDocMeta directly: the meta scan cache can still
+        // be cold here, and exact deletion must bypass discovery.
+        const tabEntry = runtime
+          ? await runtime.repo.getDocMeta(getSessionRoomId(tabSessionId))
+          : undefined;
+        if (isLoroRepoDocDeleted(tabEntry)) throw new Error('Session was deleted');
+        const tabMeta = tabEntry?.meta as SessionMeta | undefined;
+        if (tabMeta && !tabMeta.lastMessageAt) {
+          await deleteSessions([tabSessionId]);
+          captureSessionDetailEvent('session/tab_deleted_empty', {
+            tab_session_id: tabSessionId,
+          });
+          // A deleted tab leaves no isTabClosed meta for the shared-close
+          // effect to react to, and resolveActiveSessionTab keeps a
+          // meta-missing tab active, so the handler must leave the dead URL
+          // itself: a child close returns to the route's session tab.
+          if (tabSessionId === activeTabSessionId) {
+            navigateToSessionTab(sessionId);
+          }
+        } else {
+          await setSessionTabClosed(tabSessionId, true);
+          // The shared-close effect chooses the neighbour once hydration
+          // finishes. Do not commit a fallback from this handler's partial
+          // metadata snapshot.
+          if (
+            docMetaCacheReady &&
+            tabSessionId === activeTabSessionId &&
+            router.state.location.search.tab === urlTab
+          ) {
+            navigateToSessionTab(
+              getSessionTabFallback(
+                tabSessionId,
+                allOrderedSessionTabIds,
+                orderedSessionTabIds.filter((id) => id !== tabSessionId)
+              )
+            );
+          }
         }
       } catch (error) {
         // A silent failure reads as "the close button does nothing" — surface
@@ -2390,6 +2415,7 @@ const SessionDetail = ({
     },
     [
       activeTabSessionId,
+      deleteSessions,
       setSessionTabClosed,
       docMetaCacheReady,
       captureSessionDetailEvent,
@@ -2398,6 +2424,8 @@ const SessionDetail = ({
       allOrderedSessionTabIds,
       orderedSessionTabIds,
       router,
+      runtime,
+      sessionId,
       urlTab,
       t,
     ]

@@ -32,10 +32,9 @@ orchestration, and the bug history behind these rules: [README.md](README.md).
 - **`awaiting_confirmation` alongside transient blockers waits, not blocks.** The
   confirmation is requested only when it is the SOLE remaining blocker; mixed with
   `ci_not_green`/`merge_state_not_clean`/`no_pr` the planner returns `wait`.
-- **Restart resumes.** Unlike `task-automation/`, the first pass after a restart
-  DOES act, because every run exists because a person ticked a box on that session
-  and was told the branch is being watched. Do not copy that scheduler's baseline
-  pattern over.
+- **Restart resumes.** The first pass after a restart DOES act, because every run
+  exists because a person ticked a box on that session and was told the branch is
+  being watched.
 - **`REVIEW.md` is read from the BASE branch**, via `git show <baseRef>:REVIEW.md`
   in the prompt, and is in the default protected paths. Both halves matter: the
   file is ordinary repository content, so a branch that could rewrite the rules it
