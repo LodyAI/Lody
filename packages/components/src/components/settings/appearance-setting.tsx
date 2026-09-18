@@ -6,6 +6,7 @@ import { Monitor, Moon, SquareTerminal, Sun } from 'lucide-react';
 import {
   conversationFontSizeAtom,
   interfaceFontFamilyAtom,
+  normalizeConversationFontSize,
   normalizeTerminalFontSize,
   terminalFontFamilyAtom,
   terminalFontSizeAtom,
@@ -13,7 +14,6 @@ import {
   TERMINAL_FONT_SIZE_MIN,
   type ConversationFontSize,
 } from '@/atoms';
-import { conversationTextFontSizeStyle } from '@/components/ai-gui/conversation-font-size-classes';
 import { MobileAppearanceSettings } from '@/components/mobile/mobile-appearance-settings';
 import { OptionSelector, type OptionSelectorOption } from '@/components/shared/option-selector';
 import { buildTerminalFontPreviewFamily } from '@/components/terminal/terminal-theme';
@@ -24,7 +24,7 @@ import { LanguageSelector } from '../../i18n';
 import { useTheme, type Theme } from '../../theme-provider';
 import { settingContainerClass } from '.';
 import { CompactRow, CompactSection } from './compact-layout';
-import { ConversationFontSizeSlider } from './conversation-font-size-slider';
+import { buildConversationFontSizeChoices } from './conversation-font-size-options';
 import { PreviewSelect, type PreviewSelectOption } from './preview-select';
 
 export type SystemFontLoadState = 'idle' | 'loading' | 'loaded' | 'error';
@@ -117,6 +117,15 @@ export function AppearanceSettingsView({
       ),
     },
   ];
+
+  const conversationFontSizeOptions = useMemo<PreviewSelectOption<string>[]>(
+    () =>
+      buildConversationFontSizeChoices().map(({ value, labelKey }) => ({
+        value,
+        label: t(labelKey),
+      })),
+    [t]
+  );
 
   const defaultFontLabel = t('settings.terminal.fontFamily.placeholder', 'Default');
   const interfaceFontOptions = useMemo(
@@ -222,34 +231,14 @@ export function AppearanceSettingsView({
             />
           </CompactRow>
         ) : null}
-        <CompactRow
-          label={t('settings.conversationFontSize.label', 'Font size')}
-          helper={t(
-            'settings.conversationFontSize.helper',
-            'Base size for the app. Conversation text uses this size; compact menus and landing chips are slightly smaller.'
-          )}
-        >
-          <div className="w-full sm:w-[220px]">
-            <ConversationFontSizeSlider
-              value={conversationFontSize}
-              onChange={onConversationFontSizeChange}
-            />
-          </div>
+        <CompactRow label={t('settings.conversationFontSize.label', 'Font size')}>
+          <PreviewSelect
+            value={String(normalizeConversationFontSize(conversationFontSize))}
+            options={conversationFontSizeOptions}
+            onCommit={(value) => onConversationFontSizeChange(Number(value))}
+            triggerClassName="w-full sm:w-[220px]"
+          />
         </CompactRow>
-        <div
-          aria-label={t('settings.conversationFontSize.preview', 'Conversation preview')}
-          className="bg-muted/20 px-3 py-3"
-        >
-          <p
-            className="max-w-[520px] leading-relaxed text-foreground"
-            style={conversationTextFontSizeStyle(conversationFontSize)}
-          >
-            {t(
-              'settings.conversationFontSize.previewText',
-              'This is how message text looks in a conversation.'
-            )}
-          </p>
-        </div>
       </CompactSection>
 
       {isElectron ? (

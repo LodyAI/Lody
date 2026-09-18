@@ -57,10 +57,11 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
 - Interface and terminal font choices exclude the known symbol families in
   `lib/local-fonts.ts`; persisted selections use the same filter. Font option names
   use the default interface font so they remain readable.
-- Font size uses `conversation-font-size-slider.tsx` on desktop and
-  mobile. It writes `--ui-font-size` (1em for settings; 0.9em for compact
-  menus and landing chips). Keep the native range input keyboard-free on touch
-  devices and the mobile row stacked; clamping a number input on each
+- Font size is five named tiers — smaller/small/default/large/larger for
+  12–16px — built once in `conversation-font-size-options.ts` and offered as a
+  `PreviewSelect` on desktop and an inline picker on mobile. It writes
+  `--ui-font-size` (1em for settings; 0.9em for compact menus and landing
+  chips). Free-form numbers stay out: clamping a number input on each
   keystroke breaks multi-digit editing.
 - The Codex reset forecast chip in the provider row must not fetch on mount and must
   pass `nestedInDialog` for its dialog: [../codex-reset/AGENTS.md](../codex-reset/AGENTS.md).

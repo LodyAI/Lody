@@ -9,11 +9,12 @@ export const languageAtom = atomWithStorage<SupportedLanguage>('lody-language', 
 
 export const DEFAULT_CONVERSATION_FONT_SIZE = 14;
 /**
- * The sizes settings offers, ascending. Free-form entry is deliberately gone: a number
- * field silently rewrote whatever the user typed (clamped into a range, rounded), which
- * reads as the app fighting the keystrokes. A short scale has one value per visible step.
+ * The sizes settings offers, ascending — five named tiers (smaller, small, default,
+ * large, larger). Free-form entry is deliberately gone: a number field silently rewrote
+ * whatever the user typed (clamped into a range, rounded), which reads as the app
+ * fighting the keystrokes. A short scale has one value per visible step.
  */
-export const CONVERSATION_FONT_SIZES = [8, 12, 14, 16, 20, 24, 28, 32] as const;
+export const CONVERSATION_FONT_SIZES = [12, 13, 14, 15, 16] as const;
 export type ConversationFontSize = number;
 
 const LEGACY_CONVERSATION_FONT_SIZES: Record<string, ConversationFontSize> = {

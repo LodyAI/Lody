@@ -42,9 +42,7 @@ describe('InterfaceFontController', () => {
   });
 
   it('normalizes persisted font family values', () => {
-    expect(normalizeInterfaceFontFamily('  Atkinson Hyperlegible  ')).toBe(
-      'Atkinson Hyperlegible'
-    );
+    expect(normalizeInterfaceFontFamily('  Atkinson Hyperlegible  ')).toBe('Atkinson Hyperlegible');
     expect(
       normalizeInterfaceFontFamily('a'.repeat(INTERFACE_FONT_FAMILY_MAX_LENGTH + 10))
     ).toHaveLength(INTERFACE_FONT_FAMILY_MAX_LENGTH);
@@ -121,9 +119,9 @@ describe('InterfaceFontController', () => {
     expect(document.documentElement.style.getPropertyValue(INTERFACE_FONT_CSS_VARIABLE)).toBe('');
   });
 
-  it('writes --ui-font-size from the appearance slider on every platform', async () => {
+  it('writes --ui-font-size from the appearance setting on every platform', async () => {
     const store = createStore();
-    store.set(conversationFontSizeAtom, 20);
+    store.set(conversationFontSizeAtom, 16);
 
     await act(async () => {
       root?.render(
@@ -133,7 +131,7 @@ describe('InterfaceFontController', () => {
       );
     });
 
-    expect(document.documentElement.style.getPropertyValue(UI_FONT_SIZE_CSS_VARIABLE)).toBe('20px');
+    expect(document.documentElement.style.getPropertyValue(UI_FONT_SIZE_CSS_VARIABLE)).toBe('16px');
 
     await act(async () => {
       store.set(conversationFontSizeAtom, 12);
