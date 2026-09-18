@@ -14,11 +14,13 @@ import {
 import {
   buildSessionMentionRewrites,
   useSessionMentionItems,
+  type SessionMentionItem,
 } from '@/components/mentions/mention-session-source';
 import {
   buildAgentRoleMentionContext,
   buildAgentRoleMentionRewrites,
   useAgentRoleMentionItems,
+  type AgentRoleMentionItem,
 } from '@/components/mentions/mention-agent-role-source';
 import { buildPastedTextRewrites, type PastedTextDraft } from '@/lib/pasted-text-draft';
 import type { Mention as MentionRange } from '@/ui/mention/index';
@@ -116,6 +118,41 @@ export function buildVerbatimMentionRewrites(
   return rewrites;
 }
 
+/**
+ * Compose every mention rewrite against the original composer text.
+ *
+ * Same order the send path uses. Callers that only need the agent-facing string
+ * run this through `applyTextRewrites`; the composer copy path feeds the
+ * expanding subset into `getExpandedClipboardTextForSelection`.
+ */
+export function buildMentionPromptRewrites({
+  text,
+  mentions = [],
+  pastedTextDrafts = [],
+  skillRewrites,
+  sessionItems,
+  agentRoleItems,
+}: MentionPromptExpansionArgs & {
+  skillRewrites: (text: string) => TextRewrite[];
+  sessionItems: readonly Pick<SessionMentionItem, 'sessionId' | 'title'>[];
+  agentRoleItems: readonly AgentRoleMentionItem[];
+}): TextRewrite[] {
+  return [
+    ...buildPastedTextRewrites(pastedTextDrafts),
+    ...skillRewrites(text),
+    ...buildSessionMentionRewrites(text, mentions, { items: sessionItems }),
+    ...buildAgentRoleMentionRewrites(text, mentions, agentRoleItems),
+    ...buildVerbatimMentionRewrites(text, mentions),
+  ];
+}
+
+export type MentionPromptExpansion = {
+  /** Expand composer text the way the send path does. */
+  expand: (args: MentionPromptExpansionArgs) => ExpandedMentionPrompt;
+  /** Same rewrites `expand` would apply — used by composer copy. */
+  getRewrites: (args: MentionPromptExpansionArgs) => TextRewrite[];
+};
+
 export function useMentionPromptExpansion({
   source,
   skillAgent,
@@ -124,7 +161,7 @@ export function useMentionPromptExpansion({
   currentSessionId,
 }: MentionPromptExpansionInput & {
   currentSessionId?: string | null;
-}): (args: MentionPromptExpansionArgs) => ExpandedMentionPrompt {
+}): MentionPromptExpansion {
   const skillRewrites = useSkillMentionRewrites(source, skillAgent, promptValue);
   const agentRoleContext = React.useMemo(
     () => buildAgentRoleMentionContext({ mentionSource: source }),
@@ -135,18 +172,25 @@ export function useMentionPromptExpansion({
   const agentRoleItems = useAgentRoleMentionItems(agentRoleContext);
   const sessionItems = useSessionMentionItems(currentSessionId);
 
-  return React.useCallback(
-    ({ text, mentions = [], pastedTextDrafts = [] }: MentionPromptExpansionArgs) => ({
-      ...applyTextRewrites(text, [
-        ...buildPastedTextRewrites(pastedTextDrafts),
-        ...skillRewrites(text),
-        ...buildSessionMentionRewrites(text, mentions, {
-          items: sessionItems,
-        }),
-        ...buildAgentRoleMentionRewrites(text, mentions, agentRoleItems),
-        ...buildVerbatimMentionRewrites(text, mentions),
-      ]),
-    }),
+  const getRewrites = React.useCallback(
+    ({ text, mentions = [], pastedTextDrafts = [] }: MentionPromptExpansionArgs) =>
+      buildMentionPromptRewrites({
+        text,
+        mentions,
+        pastedTextDrafts,
+        skillRewrites,
+        sessionItems,
+        agentRoleItems,
+      }),
     [agentRoleItems, sessionItems, skillRewrites]
   );
+
+  const expand = React.useCallback(
+    (args: MentionPromptExpansionArgs) => ({
+      ...applyTextRewrites(args.text, getRewrites(args)),
+    }),
+    [getRewrites]
+  );
+
+  return React.useMemo(() => ({ expand, getRewrites }), [expand, getRewrites]);
 }

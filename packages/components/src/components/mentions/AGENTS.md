@@ -63,10 +63,10 @@ true })`. The fetch timestamp rides on the cached entry (survives IndexedDB).
 
 ## Before-send expansion and transcript
 
-- `useMentionPromptExpansion` is the single before-send text transform where
-  per-type hooks compose. `mention-expansion.ts` lists the rewritten kinds
-  (`REWRITTEN_SPAN_KINDS`) and derives the verbatim ones from
-  `MESSAGE_TEXT_SPAN_KINDS` minus it.
+- `useMentionPromptExpansion` owns before-send rewrites (`expand` /
+  `getRewrites`). Composer copy reuses them via
+  `getExpandedClipboardTextForSelection` (session → `[@Title](session://…)`,
+  not `@slug`). Rewritten: `REWRITTEN_SPAN_KINDS`; else verbatim.
 - The transcript chip comes from `MessageTextSpan.mark`, FROZEN at send time,
   never resolved from the catalog at render. A span field must be declared in
   BOTH `sanitizeMessageTextSpans` and the strict `MessageTextSpanSchema`.

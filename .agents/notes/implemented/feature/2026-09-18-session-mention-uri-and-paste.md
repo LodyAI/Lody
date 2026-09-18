@@ -43,6 +43,10 @@ still paste as ordinary content.
   `resolveMcpSessionId` strips a `session://` prefix so either form works. The
   tool description and `sessionId` schema text say the same thing so clients
   that ignore instructions still see the rule on the tool.
+- Composer copy must expand the same rewrites as send. `ChatComposer` tracks
+  live mention ranges and runs `getExpandedClipboardTextForSelection` on copy,
+  so selecting an `@slug` session mention puts `[@Title](session://…)` on the
+  clipboard rather than the chip text. Pasted-text expansion shares that helper.
 
 ## Verification and limits
 
@@ -53,6 +57,9 @@ still paste as ordinary content.
   and [`mention-prompt-spans.test.ts`](../../../../packages/components/tests/mention-prompt-spans.test.ts)
   assert the rewrite emits `session://` links, prefers title when supplied, and
   escapes brackets in labels.
+- [`composer-clipboard.test.ts`](../../../../packages/components/tests/composer-clipboard.test.ts)
+  covers selection expansion for session rewrites, partial-slug expansion, and
+  native-copy fallthrough when nothing expands.
 - [`lody-mcp-server.test.ts`](../../../../apps/cli/tests/lody-mcp-server.test.ts)
   asserts `resolveMcpSessionId` accepts bare ids and `session://` URIs and still
   falls back to the current session.

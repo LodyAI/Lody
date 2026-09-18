@@ -34,6 +34,10 @@ mention（Cmd/Ctrl+Shift+V 除外），发送前的重写改为 `[@Title](sessio
   `[@Title](session://…)` 调用 `lody_session_history`；`resolveMcpSessionId` 会剥掉
   `session://` 前缀，两种写法都可用。工具描述与 `sessionId` schema 文案写同一规则，
   避免只读工具说明、忽略 instructions 的客户端漏掉约定。
+- Composer 复制必须走与发送相同的重写。`ChatComposer` 跟踪 live mention ranges，
+  在 copy 时跑 `getExpandedClipboardTextForSelection`，因此选中 `@slug` session
+  mention 时剪贴板是 `[@Title](session://…)`，而不是 chip 文本。pasted-text 展开
+  共用同一 helper。
 
 ## 验证与限制
 
@@ -42,6 +46,9 @@ mention（Cmd/Ctrl+Shift+V 除外），发送前的重写改为 `[@Title](sessio
 - [`mention-session-source.test.ts`](../../../../packages/components/tests/mention-session-source.test.ts)
   与 [`mention-prompt-spans.test.ts`](../../../../packages/components/tests/mention-prompt-spans.test.ts)
   断言重写产出 `session://` 链接、有标题时优先用标题，并转义标签中的方括号。
+- [`composer-clipboard.test.ts`](../../../../packages/components/tests/composer-clipboard.test.ts)
+  覆盖 session rewrite 的选区展开、部分选中 slug 仍整段展开，以及无展开项时回落
+  浏览器原生复制。
 - [`lody-mcp-server.test.ts`](../../../../apps/cli/tests/lody-mcp-server.test.ts)
   断言 `resolveMcpSessionId` 接受裸 id 与 `session://` URI，并仍可回退到当前会话。
 - 粘贴转换已接到会话与首页输入框，但没有渲染组件的 paste 事件测试；真实浏览器剪贴板

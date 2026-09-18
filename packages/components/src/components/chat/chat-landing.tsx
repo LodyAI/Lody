@@ -4323,7 +4323,7 @@ function WorkspaceChatLanding({
     selectedRepo,
     workspaceId,
   ]);
-  const expandSkillMentionsForPrompt = useMentionPromptExpansion({
+  const { expand: expandSkillMentionsForPrompt } = useMentionPromptExpansion({
     source: mentionSource,
     skillAgent,
     promptValue: prompt,

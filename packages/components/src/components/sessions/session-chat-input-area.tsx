@@ -2182,7 +2182,7 @@ export const SessionChatInputArea = memo(
           : undefined,
       [isArchived, session.agentType, session.cliType, session.machineId]
     );
-    const expandPromptMentions = useMentionPromptExpansion({
+    const { expand: expandPromptMentions } = useMentionPromptExpansion({
       source: isArchived ? undefined : mentionSource,
       skillAgent,
       promptValue: userInput,
