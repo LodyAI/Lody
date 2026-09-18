@@ -20,6 +20,22 @@ import { DropdownMenuItem, DropdownMenuSeparator } from '@/ui/dropdown-menu';
 /** List `13.5rem` + detail pane `16rem`. Below this, the pane cannot fit. */
 const TWO_PANE_MIN_PX = 29.5 * 16;
 
+/** Space the Role submenu may still grow into. Prefer Radix's popper var
+ *  (set after it positions); fall back to the box's distance to the viewport. */
+function remainingWidthForRolePanel(el: HTMLElement): number {
+  const fromVar = Number.parseFloat(
+    getComputedStyle(el).getPropertyValue('--radix-popper-available-width')
+  );
+  const host =
+    (el.closest('[role="menu"]') as HTMLElement | null) ??
+    (el.closest('[data-radix-popper-content-wrapper]') as HTMLElement | null) ??
+    el;
+  const toViewportRight = window.innerWidth - Math.max(host.getBoundingClientRect().left, 0);
+  const candidates = [toViewportRight];
+  if (Number.isFinite(fromVar) && fromVar > 0) candidates.push(fromVar);
+  return Math.min(...candidates);
+}
+
 /**
  * The Role submenu: the Roles bound to the machine this chat will start on, and
  * what the highlighted one actually runs.
@@ -60,7 +76,9 @@ export function ComposerAgentRolePanel({
 }) {
   const { t } = useTranslation();
   const rootRef = useRef<HTMLDivElement>(null);
-  const [detectedCompact, setDetectedCompact] = useState(compactOverride === true);
+  // Start compact so a two-pane first paint cannot overflow before Radix
+  // writes `--radix-popper-available-width`. Expand only once that space fits.
+  const [detectedCompact, setDetectedCompact] = useState(compactOverride !== false);
   const compact = compactOverride ?? detectedCompact;
   const [previewRoleId, setPreviewRoleId] = useState<AgentRoleId | null>(null);
   const previewItem =
@@ -75,20 +93,25 @@ export function ComposerAgentRolePanel({
     }
     const el = rootRef.current;
     if (!el) return;
+    let frames = 0;
+    let raf = 0;
     const measure = () => {
-      const host = (el.closest('[data-radix-menu-content]') as HTMLElement | null) ?? el;
-      const fromVar = Number.parseFloat(
-        getComputedStyle(host).getPropertyValue('--radix-popper-available-width')
-      );
-      const remaining =
-        Number.isFinite(fromVar) && fromVar > 0
-          ? fromVar
-          : window.innerWidth - host.getBoundingClientRect().left;
-      setDetectedCompact(remaining < TWO_PANE_MIN_PX);
+      setDetectedCompact(remainingWidthForRolePanel(el) < TWO_PANE_MIN_PX);
     };
-    measure();
+    const tick = () => {
+      measure();
+      frames += 1;
+      const positioned = getComputedStyle(el).getPropertyValue('--radix-popper-available-width');
+      if (frames < 16 && (!positioned || frames < 4)) {
+        raf = requestAnimationFrame(tick);
+      }
+    };
+    tick();
     window.addEventListener('resize', measure);
-    return () => window.removeEventListener('resize', measure);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('resize', measure);
+    };
   }, [compactOverride]);
 
   // The Role row turns into a create action instead of opening this submenu

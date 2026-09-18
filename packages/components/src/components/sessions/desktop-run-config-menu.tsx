@@ -760,7 +760,7 @@ export function DesktopRunConfigMenu({
                   ) : null
                 }
               />
-              <DropdownMenuSubContent className="p-0">
+              <DropdownMenuSubContent className="max-w-[min(29.5rem,var(--radix-popper-available-width,29.5rem))] overflow-x-hidden p-0">
                 <ComposerAgentRolePanel
                   items={agentRoles.items}
                   machine={agentRoles.machine}

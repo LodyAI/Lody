@@ -237,6 +237,23 @@ describe('ComposerAgentRolePanel', () => {
     expect(view.textContent).not.toContain('Review the diff for correctness before style.');
   });
 
+  it('detects a too-narrow popper and drops the detail pane without a compact prop', async () => {
+    const innerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 400 });
+    try {
+      const view = await render({ compact: undefined, onEdit: () => undefined });
+      const row = [...view.querySelectorAll('[role="menuitemradio"]')].find((node) =>
+        node.textContent?.includes('Code Reviewer')
+      );
+      expect(row?.textContent).toContain('Codex');
+      expect(row?.textContent).toContain('5.6-Sol');
+      expect(view.textContent).not.toContain('Edit role');
+    } finally {
+      if (innerWidth) Object.defineProperty(window, 'innerWidth', innerWidth);
+      else delete (window as { innerWidth?: number }).innerWidth;
+    }
+  });
+
   it('still picks a Role from the compact two-line list', async () => {
     const onSelect = vi.fn();
     const view = await render({ compact: true, onSelect });
