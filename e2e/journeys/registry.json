@@ -490,11 +490,11 @@
       "state": "active",
       "priority": "P1",
       "runtime": "simulator",
-      "title": "Opened Sessions survive opener archive and delete with dangling provenance",
+      "title": "Opened Sessions survive opener archive and delete",
       "owner": "session-lifecycle",
       "feature": "src/features/session-management.feature",
       "fixture": "session-fork-and-seeded-relations",
-      "fingerprint": "44fb98c9f5d0f5bbd93acb3185c24de4909f562138f0d35eb9a63858e816c1b3",
+      "fingerprint": "4f2e14b9458ebd4f064cc8aca5a02bfd1209989a8c450207cec5409c7eac23d9",
       "ownerPaths": [
         "packages/components/src/hooks/use-session-actions.ts",
         "packages/components/src/lib/session-navigation.ts",
@@ -506,7 +506,6 @@
         { "id": "session.seedRelations" },
         { "id": "session.archiveOpener" },
         { "id": "archive.deletePermanently" },
-        { "id": "session.openSurvivors" },
         { "id": "session.reloadWithMetadataScanBlocked" },
         { "id": "session.closeEmptyChildTab" }
       ],
@@ -514,19 +513,18 @@
         "archive cascades through containment and opened-by links to the child Tab and both opened Sessions",
         "each archived opened Session releases its ACP process and worktree directory",
         "permanent delete removes only the archived root and its direct child Tab",
-        "opened Sessions stay archived with documents and dangling provenance and remain independently deletable",
-        "dangling opener provenance is visible and non-navigable",
+        "opened Sessions stay archived, listed, and undeleted after the root delete",
         "exact child deletion succeeds before metadata hydration completes"
       ],
       "cleanup": [
-        "opened worktree Sessions and ACP processes are permanently deleted",
+        "surviving archived Sessions live only inside the disposable run directory",
         "isolated app and Git fixture directories are removed"
       ],
       "coverage": {
-        "renderer": "Session archive, Archive delete, child Tabs, and opened-by provenance",
+        "renderer": "Session archive, Archive delete, and child Tabs",
         "electronIpc": "Real window, local repo, terminal, and Session RPC",
         "bundledCli": "Real archive and worktree cleanup command processing",
-        "durableState": "Archive cascade teardown, containment-scoped deletion, and provenance retention",
+        "durableState": "Archive cascade teardown and containment-scoped deletion",
         "externalWire": "Scripted fork-capable ACP"
       },
       "signals": {
