@@ -8,13 +8,14 @@ import type { CSSProperties } from 'react';
 // so they read as the same line in every theme.
 const menuEdgeColor = 'color-mix(in oklab, hsl(var(--background)) 90%, hsl(var(--foreground)) 10%)';
 
-export const menuSurfaceClassName = 'min-w-[220px] rounded-xl bg-background p-1 text-foreground';
+export const menuSurfaceClassName =
+  'min-w-[220px] rounded-xl bg-background p-1 text-foreground dark:!bg-[rgb(24_24_24)] dark:![box-shadow:0_0_0_1px_rgb(48_48_48),0_18px_48px_-10px_rgb(0_0_0_/_0.55),0_8px_20px_-8px_rgb(0_0_0_/_0.35)]';
 
 export const menuSurfaceStyle: CSSProperties = {
-  // Match the app's main background so the menu reads as the same surface.
   backgroundColor: 'hsl(var(--background))',
   // The edge is the ring in this shadow stack, not a layout-affecting border:
   // a real border would shift the 220px min-width and the padding box.
+  // Dark theme overrides the fill + ring via `menuSurfaceClassName`.
   boxShadow: `0 0 0 1px ${menuEdgeColor}, 0 4px 12px 0 rgb(0 0 0 / 0.08), 0 1px 3px 0 rgb(0 0 0 / 0.06)`,
 };
 
