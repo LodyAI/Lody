@@ -1720,11 +1720,11 @@ export const SessionChatInputArea = memo(
         });
 
         if (renderedImages.length > 0) {
-          toast(t('composer.pastedRichTextAsText', 'Pasted as text.'), {
+          toast(t('composer.pastedRichTextAsText', 'Pasted as text'), {
             // One id, so pasting repeatedly replaces the hint instead of stacking it.
             id: 'composer-pasted-rich-text-as-text',
             action: {
-              label: t('composer.pastedRichTextAttachImage', 'Attach image instead'),
+              label: t('composer.pastedRichTextAttachImage', 'Attach image'),
               onClick: () => attachPastedFiles(renderedImages),
             },
           });

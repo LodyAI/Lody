@@ -77,21 +77,22 @@ import {
  * Both menus use the app-wide DropdownMenu surface.
  */
 
-/* Option row with a trailing check for the selected value; description under
-   the label when present. Selecting keeps the menu (and submenu) OPEN — same
-   as the Plan/Fast toggle rows — so several run knobs can be adjusted in one
-   visit; the check mark moving is the feedback. Dismiss via Esc/outside. */
+/* Option-only submenus hug the longest label instead of inheriting the
+   200px surface floor. 108px is the floor so a short name is not a sliver;
+   `max-w-80` still caps a long provider list. */
+const COMPACT_OPTION_SUBMENU_CLASS = 'w-max min-w-[108px] max-w-80';
+
+/* Option row with a trailing check. Title only — no description — so submenus
+   stay as compact as the parent. Selecting keeps the menu OPEN. */
 function OptionItem({
   icon,
   label,
-  description,
   selected,
   disabled,
   onSelect,
 }: {
   icon?: ReactNode;
   label: string;
-  description?: string;
   selected: boolean;
   disabled?: boolean;
   onSelect: () => void;
@@ -105,19 +106,14 @@ function OptionItem({
         event.preventDefault();
         onSelect();
       }}
-      // items-center (not items-start): single-line agent/model/reasoning rows
-      // must sit in the middle of the min-h-8 item. py-1 is tighter than the
-      // default py-1.5.
-      className="items-center gap-2 py-1"
+      className="h-7 min-h-0 items-center gap-2 py-0 text-xs"
     >
       {icon}
-      <span className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
-        <span className={cn('truncate leading-tight', selected && 'font-medium')}>{label}</span>
-        {description ? (
-          <span className="text-xs leading-snug text-muted-foreground">{description}</span>
-        ) : null}
+      {/* nowrap (no min-w-0) so the submenu's max-content includes the label. */}
+      <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-normal leading-tight">
+        {label}
       </span>
-      {selected ? <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> : null}
+      {selected ? <Check className="h-3 w-3 shrink-0" aria-hidden="true" /> : null}
     </DropdownMenuItem>
   );
 }
@@ -167,10 +163,11 @@ function ToggleItem({
         event.preventDefault();
         onToggle();
       }}
+      className="h-7 min-h-0 py-0"
     >
       <span
         className={cn(
-          'flex h-4 w-4 shrink-0 items-center justify-center',
+          'flex h-3.5 w-3.5 shrink-0 items-center justify-center',
           checked ? 'text-foreground' : 'text-muted-foreground'
         )}
       >
@@ -181,7 +178,7 @@ function ToggleItem({
         checked={checked}
         aria-hidden="true"
         tabIndex={-1}
-        className="pointer-events-none ml-4 shrink-0"
+        className="pointer-events-none ml-2 h-3.5 w-6 shrink-0 [&>span]:h-3 [&>span]:w-3 [&>span]:data-[state=checked]:translate-x-2.5"
       />
     </DropdownMenuItem>
   );
@@ -239,9 +236,9 @@ export function DesktopMachineMenu({
         <button
           type="button"
           className={cn(
-            'inline-flex h-6 min-w-0 select-none items-center gap-1.5 rounded-md bg-input/60 px-2 dark:bg-foreground/[0.08]',
+            'inline-flex h-6 min-w-0 select-none items-center gap-1.5 rounded-md bg-[#e7e7e7] px-2 dark:bg-foreground/[0.08]',
             'text-xs font-normal leading-tight text-foreground/80 transition-colors [&_svg]:text-current [&_svg]:opacity-100',
-            'hover:bg-input hover:text-foreground data-[state=open]:bg-input data-[state=open]:text-foreground dark:hover:bg-foreground/[0.12] dark:data-[state=open]:bg-foreground/[0.12]',
+            'hover:bg-[#dcdcdc] hover:text-foreground data-[state=open]:bg-[#dcdcdc] data-[state=open]:text-foreground dark:hover:bg-foreground/[0.12] dark:data-[state=open]:bg-foreground/[0.12]',
             'disabled:cursor-default disabled:opacity-70'
           )}
           disabled={isDisabled}
@@ -712,7 +709,7 @@ export function DesktopRunConfigMenu({
       ) : (
         <DropdownMenuTrigger asChild>{triggerButton}</DropdownMenuTrigger>
       )}
-      <DropdownMenuContent align="start" className="min-w-56">
+      <DropdownMenuContent align="start" className="min-w-48">
         {onRecentRunConfigSelect ? (
           <RecentRunConfigMenuGroup
             items={recentRunConfigs ?? []}
@@ -727,12 +724,28 @@ export function DesktopRunConfigMenu({
             <DropdownMenuItem
               disabled={!agentRoles.onCreate}
               onSelect={() => agentRoles.onCreate?.()}
+              className="h-7 min-h-0"
             >
               <span className="min-w-0 flex-1 truncate">{roleLabel}</span>
-              <span className="ml-4 inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
-                <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                {t('chat.runConfig.roles.create', 'New role')}
-              </span>
+              <Tooltip delayDuration={300}>
+                <TooltipTrigger asChild>
+                  <span
+                    className="ml-2 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground"
+                    aria-label={t(
+                      'chat.runConfig.roles.createFromSettings',
+                      'Create role from current settings'
+                    )}
+                  >
+                    <Plus className="h-3.5 w-3.5" aria-hidden="true" />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent side="right">
+                  {t(
+                    'chat.runConfig.roles.createFromSettings',
+                    'Create role from current settings'
+                  )}
+                </TooltipContent>
+              </Tooltip>
             </DropdownMenuItem>
           ) : (
             <DropdownMenuSub>
@@ -780,8 +793,8 @@ export function DesktopRunConfigMenu({
           ) : (
             <DropdownMenuSub>
               <ValueSubTrigger label={agentLabel} value={selectedAgentConfig?.name ?? null} />
-              <DropdownMenuSubContent>
-                {agentOptions.map(({ config, machineName }) => (
+              <DropdownMenuSubContent className={COMPACT_OPTION_SUBMENU_CLASS}>
+                {agentOptions.map(({ config }) => (
                   <OptionItem
                     key={`${config.id}:${config.machineId}`}
                     icon={
@@ -790,11 +803,10 @@ export function DesktopRunConfigMenu({
                         agentType={config.agentType}
                         brandId={config.brandId}
                         env={config.env}
-                        className="h-4 w-4 shrink-0"
+                        className="h-3.5 w-3.5 shrink-0"
                       />
                     }
                     label={config.name}
-                    description={allowedMachineIds ? undefined : machineName}
                     selected={
                       config.id === agentSelection?.agentId &&
                       config.machineId === agentSelection.machineId
@@ -825,12 +837,11 @@ export function DesktopRunConfigMenu({
           return (
             <DropdownMenuSub key={selector.configId}>
               <ValueSubTrigger label={selector.label} value={selectedLabel} disabled={locked} />
-              <DropdownMenuSubContent>
+              <DropdownMenuSubContent className={COMPACT_OPTION_SUBMENU_CLASS}>
                 {selector.options.map((option) => (
                   <OptionItem
                     key={option.value}
                     label={option.label}
-                    description={option.description}
                     selected={option.value === selectedValue}
                     disabled={option.disabled || locked}
                     onSelect={() =>
@@ -852,7 +863,7 @@ export function DesktopRunConfigMenu({
             <DropdownMenuSubContent
               // `p-0` + column layout so the search row stays put while only the
               // options scroll; the padding it drops moves onto the list itself.
-              className="flex max-w-80 flex-col overflow-y-hidden p-0"
+              className={cn(COMPACT_OPTION_SUBMENU_CLASS, 'flex flex-col overflow-y-hidden p-0')}
               // Cap the list so a long model list scrolls inside a compact menu
               // instead of running the full viewport height. Inline (not a max-h-*
               // class) so it reliably wins over the base content's max-h, and clamps
@@ -872,7 +883,6 @@ export function DesktopRunConfigMenu({
                   <OptionItem
                     key={opt.value}
                     label={opt.label}
-                    description={opt.description}
                     selected={opt.value === modelValue}
                     disabled={opt.disabled}
                     onSelect={select}
@@ -905,12 +915,11 @@ export function DesktopRunConfigMenu({
         {interactionSelector ? (
           <DropdownMenuSub>
             <ValueSubTrigger label={interactionSelector.label} value={interactionLabel} />
-            <DropdownMenuSubContent>
+            <DropdownMenuSubContent className={COMPACT_OPTION_SUBMENU_CLASS}>
               {interactionSelector.options.map((opt) => (
                 <OptionItem
                   key={opt.value}
                   label={opt.label}
-                  description={opt.description}
                   selected={opt.value === interactionValue}
                   disabled={opt.disabled}
                   onSelect={() =>
@@ -928,12 +937,11 @@ export function DesktopRunConfigMenu({
         {thinkingSelector ? (
           <DropdownMenuSub>
             <ValueSubTrigger label={reasoningLabel} value={thinkingLabel} />
-            <DropdownMenuSubContent>
+            <DropdownMenuSubContent className={COMPACT_OPTION_SUBMENU_CLASS}>
               {thinkingSelector.options.map((opt) => (
                 <OptionItem
                   key={opt.value}
                   label={opt.label}
-                  description={opt.description}
                   selected={opt.value === thinkingValue}
                   disabled={opt.disabled}
                   onSelect={() =>
@@ -1024,6 +1032,43 @@ function FaceDot() {
 
 /* ── Permission mode (standalone button) ─────────────────────────────── */
 
+function PermissionModeItem({
+  option,
+  selected,
+  onSelect,
+}: {
+  option: AcpSessionSelectOption;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const item = (
+    <DropdownMenuItem
+      disabled={option.disabled}
+      onSelect={onSelect}
+      className="h-7 min-h-0 items-center gap-1.5 py-0"
+    >
+      <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center [&_svg]:h-3.5 [&_svg]:w-3.5">
+        {permissionModeIcon(option.value)}
+      </span>
+      <span className="min-w-0 flex-1 truncate font-normal">{option.label}</span>
+      {selected ? <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> : null}
+    </DropdownMenuItem>
+  );
+  if (!option.description) return item;
+  return (
+    <Tooltip delayDuration={300}>
+      <TooltipTrigger asChild>{item}</TooltipTrigger>
+      <TooltipContent
+        side="right"
+        align="start"
+        className="max-w-72 whitespace-pre-wrap text-left text-xs font-normal leading-snug"
+      >
+        {option.description}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 /* Warning-tone modes (full access / skip permissions) share the amber shield
    with the mobile face; everything else keeps its neutral per-mode icon. */
 function permissionModeIcon(modeId: string | null): ReactNode {
@@ -1086,36 +1131,17 @@ export function DesktopPermissionModeButton({
           </span>
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="min-w-52 max-w-80">
-        <DropdownMenuLabel className="px-2.5 pb-1 pt-1.5 text-[0.68rem] font-medium tracking-wide text-muted-foreground/70">
+      <DropdownMenuContent align="start" className="w-max min-w-44 max-w-64">
+        <DropdownMenuLabel className="normal-case px-2.5 pb-1 pt-1.5 text-[0.68rem] font-medium tracking-normal text-muted-foreground/70">
           {permissionLabel}
         </DropdownMenuLabel>
         {options.map((opt) => (
-          <DropdownMenuItem
+          <PermissionModeItem
             key={opt.value}
-            disabled={opt.disabled}
+            option={opt}
+            selected={opt.value === value}
             onSelect={() => handleSelect(opt.value)}
-            className="items-center"
-          >
-            <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
-              {permissionModeIcon(opt.value)}
-            </span>
-            <span className="flex min-w-0 flex-1 flex-col justify-center">
-              <span className={cn('truncate', opt.value === value && 'font-medium')}>
-                {opt.label}
-              </span>
-              {opt.description ? (
-                // Safety copy (e.g. the Full-access warning) must stay readable
-                // — wrap instead of truncating.
-                <span className="text-xs leading-snug text-muted-foreground">
-                  {opt.description}
-                </span>
-              ) : null}
-            </span>
-            {opt.value === value ? (
-              <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            ) : null}
-          </DropdownMenuItem>
+          />
         ))}
       </DropdownMenuContent>
     </DropdownMenu>

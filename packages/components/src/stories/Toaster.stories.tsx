@@ -4,10 +4,8 @@ import { Toaster } from '@/ui/sonner';
 import { Button } from '@/ui/button';
 
 /**
- * The global toast surface. Toasts render neutral (no accent color) with a
- * subtle border and an inline close button tucked inside on the right, aligned
- * with the title line. An action button takes a full-width row of its own below
- * the text so a wrapping description keeps the toast's full width.
+ * The global toast surface. Close is always on the far right. Title stays
+ * left; an action chip sits with the close on the right.
  */
 const meta: Meta<typeof Toaster> = {
   title: 'UI/Toaster',

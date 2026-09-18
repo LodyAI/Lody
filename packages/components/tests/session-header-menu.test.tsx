@@ -11,6 +11,7 @@ import {
   reviewAgentExperimentEnabledAtom,
 } from '../src/atoms/settings';
 import { SessionHeaderMenu } from '../src/components/sessions/session-chat-interface';
+import { TooltipProvider } from '../src/ui/tooltip';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -231,6 +232,52 @@ describe('SessionHeaderMenu', () => {
     ).find((button) => button.textContent?.includes('Open review settings'));
     await act(async () => openSettings?.click());
     expect(onOpenReviewSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('omits the Session group heading and keeps Team as a normal-weight row', async () => {
+    await act(async () => {
+      root?.render(
+        <TooltipProvider>
+          <SessionHeaderMenu
+            session={
+              {
+                ...session,
+                project: { kind: 'github', repoFullName: 'loro-dev/lody', branch: 'main' },
+                repoFullName: 'loro-dev/lody',
+                branchName: 'fix/ui',
+                baseBranch: 'main',
+              } as SessionMeta
+            }
+            machineName="MacBook"
+            sharing={{
+              visibility: 'team',
+              canManage: true,
+              machineId: null,
+              localProjectId: null,
+              machineName: 'MacBook',
+              projectName: 'lody',
+            }}
+            onCopyUrl={vi.fn()}
+            t={translate}
+          />
+        </TooltipProvider>
+      );
+    });
+    await openMenu();
+
+    expect(
+      Array.from(document.querySelectorAll('*')).some(
+        (el) => el.childNodes.length === 1 && el.textContent === 'Session'
+      )
+    ).toBe(false);
+
+    const teamLabel = Array.from(document.querySelectorAll('span')).find(
+      (el) => el.textContent === 'Team' && el.childElementCount === 0
+    );
+    expect(teamLabel?.className).toContain('font-normal');
+    expect(teamLabel?.className).not.toContain('font-medium');
+    expect(teamLabel?.closest('div')?.className).toContain('cursor-default');
+    expect(teamLabel?.closest('div')?.className).toContain('select-none');
   });
 
   it('omits Open in IDE when no launchers are provided', async () => {

@@ -216,7 +216,9 @@ describe('DesktopRunConfigMenu role face', () => {
     const roleRow = [...menu.querySelectorAll('[role="menuitem"]')].find((node) =>
       node.textContent?.trim().startsWith('Role')
     );
-    expect(roleRow?.textContent).toContain('New role');
+    expect(
+      roleRow?.querySelector('[aria-label="Create role from current settings"]')
+    ).not.toBeNull();
     await act(async () => {
       (roleRow as HTMLElement).dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });

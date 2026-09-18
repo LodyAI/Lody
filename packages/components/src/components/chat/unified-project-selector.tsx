@@ -283,11 +283,11 @@ function ProjectAccessStatus({
   const sharedClassName = cn(
     'inline-flex shrink-0 select-none items-center gap-1 text-muted-foreground',
     variant === 'trigger' &&
-      'h-6 rounded-r-md border-l border-border/60 bg-input/60 px-2 text-[0.66rem] font-medium transition-colors dark:bg-foreground/[0.08]',
+      'h-6 rounded-r-md border-l border-border/60 bg-[#e7e7e7] px-2 text-[0.66rem] font-medium transition-colors dark:bg-foreground/[0.08]',
     variant === 'option' && 'text-[0.68rem] font-medium',
     'text-foreground/75',
     isAction &&
-      'cursor-pointer hover:bg-input hover:text-foreground dark:hover:bg-foreground/[0.12]',
+      'cursor-pointer hover:bg-[#dcdcdc] hover:text-foreground dark:hover:bg-foreground/[0.12]',
     variant === 'trigger' &&
       'outline-hidden focus-visible:relative focus-visible:z-20 focus-visible:ring-2 focus-visible:ring-ring/50'
   );
@@ -521,9 +521,9 @@ export function UnifiedProjectSelectorView({
                     value.kind === 'none' && 'text-muted-foreground',
                   ]
                 : [
-                    'flex h-6 min-w-0 max-w-[18rem] items-center gap-1.5 rounded-md bg-input/60 px-2 dark:bg-foreground/[0.08]',
-                    'text-xs font-normal text-foreground/80 transition-colors hover:bg-input hover:text-foreground dark:hover:bg-foreground/[0.12] [&_svg]:text-current [&_svg]:opacity-100',
-                    'data-[state=open]:bg-input data-[state=open]:text-foreground dark:data-[state=open]:bg-foreground/[0.12]',
+                    'flex h-6 min-w-0 max-w-[18rem] items-center gap-1.5 rounded-md bg-[#e7e7e7] px-2 dark:bg-foreground/[0.08]',
+                    'text-xs font-normal text-foreground/80 transition-colors hover:bg-[#dcdcdc] hover:text-foreground dark:hover:bg-foreground/[0.12] [&_svg]:text-current [&_svg]:opacity-100',
+                    'data-[state=open]:bg-[#dcdcdc] data-[state=open]:text-foreground dark:data-[state=open]:bg-foreground/[0.12]',
                     selectedPrivateSharing && 'rounded-r-none',
                   ],
               className

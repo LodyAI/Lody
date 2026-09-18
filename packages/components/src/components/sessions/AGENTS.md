@@ -80,7 +80,9 @@ Read each heading’s linked context before changing its files.
   to unedited composer fields, never infer runtime config from a permission
   click, and freeze a non-Plan mode for explicit execution actions.
 - `AgentRoleDetailPane` is the ONE pane that reads a Role and shows only what it
-  pins; `AgentRoleEditorDialog` is the one editor.
+  pins; `AgentRoleEditorDialog` is the one editor. `ComposerAgentRolePanel`
+  hides that pane when remaining width cannot fit it and puts agent · model
+  on a second line of each Role row instead.
 
 ## [Live status and dispatch](../../../../../.agents/docs/sessions-live-status.md)
 

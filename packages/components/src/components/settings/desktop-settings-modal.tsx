@@ -147,7 +147,7 @@ function SettingsModalBody() {
           id={navigationScopeId}
           role="navigation"
           aria-label={t('settings.title')}
-          className="flex w-60 flex-col border-e bg-background"
+          className="flex w-52 flex-col border-e bg-background"
         >
           <nav className="min-h-0 flex-1 overflow-y-auto p-3">
             <div className="space-y-4">
@@ -226,41 +226,43 @@ function SettingsModalBody() {
         <FocusScope
           id={contentScopeId}
           role="main"
-          className="flex min-h-0 min-w-0 flex-1 flex-col"
+          className="relative flex min-h-0 min-w-0 flex-1 flex-col"
         >
-          <div className="flex h-7 shrink-0 items-center justify-end px-3">
-            <DialogClose
-              className="flex h-5 w-5 items-center justify-center rounded-full bg-foreground/[0.06] text-muted-foreground transition-colors hover:bg-foreground/[0.12] hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-              aria-label={t('common.close', 'Close')}
-            >
-              <X className="h-3 w-3" strokeWidth={2} aria-hidden="true" />
-            </DialogClose>
-          </div>
-          {selfTitledTab ? (
-            <DialogTitle className="sr-only">{t(activeTabConfig.labelKey)}</DialogTitle>
-          ) : (
-            <header className="flex h-10 shrink-0 items-center px-8">
-              <DialogTitle className="text-xl font-normal leading-none">
-                {t(activeTabConfig.labelKey)}
-              </DialogTitle>
-            </header>
-          )}
-          <div className="min-h-0 flex-1">
-            {usesInternalScrolling ? (
-              <div className="h-full px-6 pb-6 pt-6">
-                <div className="mx-auto h-full max-w-5xl">
-                  <SettingsTabContent tabId={resolvedActiveTab} />
-                </div>
-              </div>
+          <DialogClose
+            className="absolute top-2.5 right-2.5 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-foreground/[0.06] text-muted-foreground transition-colors hover:bg-foreground/[0.12] hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+            aria-label={t('common.close', 'Close')}
+          >
+            <X className="h-3 w-3" strokeWidth={2} aria-hidden="true" />
+          </DialogClose>
+          {/* `pr-10` keeps every right-pane control off the close button's
+              vertical column (10px inset + 20px control). */}
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col pt-5 pr-10">
+            {selfTitledTab ? (
+              <DialogTitle className="sr-only">{t(activeTabConfig.labelKey)}</DialogTitle>
             ) : (
-              <ScrollArea className="h-full">
-                <div className={cn('px-6 pb-6', selfTitledTab ? 'pt-6' : 'pt-0')}>
-                  <div className="mx-auto max-w-5xl">
+              <header className="flex h-10 shrink-0 items-center pl-8">
+                <DialogTitle className="text-xl font-normal leading-none">
+                  {t(activeTabConfig.labelKey)}
+                </DialogTitle>
+              </header>
+            )}
+            <div className="min-h-0 flex-1">
+              {usesInternalScrolling ? (
+                <div className="h-full pb-6 pl-6 pt-6">
+                  <div className="mx-auto h-full max-w-5xl">
                     <SettingsTabContent tabId={resolvedActiveTab} />
                   </div>
                 </div>
-              </ScrollArea>
-            )}
+              ) : (
+                <ScrollArea className="h-full">
+                  <div className={cn('pb-6 pl-6', selfTitledTab ? 'pt-6' : 'pt-0')}>
+                    <div className="mx-auto max-w-5xl">
+                      <SettingsTabContent tabId={resolvedActiveTab} />
+                    </div>
+                  </div>
+                </ScrollArea>
+              )}
+            </div>
           </div>
         </FocusScope>
       </div>

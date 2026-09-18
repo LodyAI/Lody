@@ -10,9 +10,12 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
 
 ## Layout and components
 
-- The desktop settings overlay (`desktop-settings-modal.tsx`) owns a compact
-  close row on the RIGHT pane only. Left nav stays flush to the top; do not
-  overlay the default dialog X on the page title.
+- The desktop settings overlay (`desktop-settings-modal.tsx`) pins a compact
+  close control on the RIGHT pane only (`absolute` with equal `top`/`right`
+  inset). Left nav stays flush to the top; do not overlay the default dialog X
+  on the page title, and do not keep a dedicated close row or a hairline under
+  it. The right pane's `padding-right` reserves the close button's full
+  vertical column so no tab chrome or control collides with it.
 
 - `share-management-setting.tsx` lists published static copies via the scoped cloud
   query. Ordinary members see their publications; admins see the workspace inventory.

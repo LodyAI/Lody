@@ -257,7 +257,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -932,6 +931,11 @@ export type SessionOpenedByMenuState = {
   onOpenSession: (target: SessionNavigationTarget) => void;
 };
 
+const SESSION_HEADER_MENU_CONTENT_CLASS =
+  'min-w-[200px] max-w-[320px] [&_[role=menuitem]]:min-h-8 [&_[role=menuitem]]:py-1.5';
+const SESSION_HEADER_MENU_STATIC_ROW_CLASS =
+  'flex min-h-8 w-full min-w-0 cursor-default select-none items-center gap-2 overflow-hidden rounded-md px-2 py-1.5 text-[13px] leading-4';
+
 /** Session header "···" menu — context, visibility, sharing, and session actions. */
 export function SessionHeaderMenu({
   session,
@@ -1144,19 +1148,14 @@ export function SessionHeaderMenu({
             <Ellipsis className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="min-w-[200px] max-w-[320px]">
+        <DropdownMenuContent align="end" className={SESSION_HEADER_MENU_CONTENT_CLASS}>
           <SessionWindowMenuItem sessionId={session.id} dropdown />
-          {/* One compact context group keeps useful identity visible. Separate labels make
-              every value pay for two rows, while a submenu hides context behind another step. */}
+          {/* Identity stays inline: a group label wastes a row, and a submenu hides
+              repo/branch/machine behind another step. */}
           {!compact && showSessionContext ? (
             <>
-              <DropdownMenuLabel className="pb-0.5 pt-1.5 text-[0.7rem] font-medium text-muted-foreground">
-                {t('sessions.sessionContextLabel', 'Session')}
-              </DropdownMenuLabel>
-
               {isGitHub && repoFullName ? (
                 <DropdownMenuItem
-                  className="py-1.5"
                   onClick={() =>
                     copyToClipboard(
                       repoFullName,
@@ -1174,7 +1173,7 @@ export function SessionHeaderMenu({
 
               {showBranchInfo ? (
                 <DropdownMenuItem
-                  className="items-start py-1.5"
+                  className="items-start"
                   onClick={() =>
                     copyToClipboard(
                       branchDisplayValue,
@@ -1213,7 +1212,6 @@ export function SessionHeaderMenu({
                 </DropdownMenuItem>
               ) : showProjectPath ? (
                 <DropdownMenuItem
-                  className="py-1.5"
                   onClick={() =>
                     copyToClipboard(
                       localPath,
@@ -1230,7 +1228,7 @@ export function SessionHeaderMenu({
               ) : null}
 
               {machineName ? (
-                <div className="flex min-w-0 items-center gap-2 px-2.5 py-1.5 text-[0.8rem]">
+                <div className={SESSION_HEADER_MENU_STATIC_ROW_CLASS}>
                   <Monitor className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <span className="sr-only">{t('sessions.machineLabel', 'Machine')}: </span>
                   <span className="min-w-0 flex-1 truncate">{machineName}</span>
@@ -1247,7 +1245,7 @@ export function SessionHeaderMenu({
               {sharing ? (
                 <Tooltip delayDuration={300}>
                   <TooltipTrigger asChild>
-                    <div className="flex min-w-0 items-center gap-2 px-2.5 py-1.5 text-[0.8rem]">
+                    <div className={SESSION_HEADER_MENU_STATIC_ROW_CLASS}>
                       {sharing.visibility === 'team' ? (
                         <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                       ) : sharing.visibility === 'private' ? (
@@ -1255,7 +1253,7 @@ export function SessionHeaderMenu({
                       ) : (
                         <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                       )}
-                      <span className="min-w-0 flex-1 truncate font-medium">
+                      <span className="min-w-0 flex-1 truncate font-normal">
                         {getSessionSharingLabel(t, sharing)}
                       </span>
                     </div>

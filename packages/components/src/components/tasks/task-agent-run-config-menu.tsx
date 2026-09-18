@@ -70,7 +70,6 @@ const recentTaskAgentCombosAtom = atomWithStorage<RecentTaskAgentCombo[]>(
 function OptionItem({
   icon,
   label,
-  description,
   selected,
   disabled,
   onSelect,
@@ -91,16 +90,11 @@ function OptionItem({
         event.preventDefault();
         onSelect();
       }}
-      className="items-center gap-2 py-1"
+      className="h-7 min-h-0 items-center gap-2 py-0 text-xs"
     >
       {icon}
-      <span className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
-        <span className={cn('truncate leading-tight', selected && 'font-medium')}>{label}</span>
-        {description ? (
-          <span className="text-xs leading-snug text-muted-foreground">{description}</span>
-        ) : null}
-      </span>
-      {selected ? <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> : null}
+      <span className="min-w-0 flex-1 truncate font-normal leading-tight">{label}</span>
+      {selected ? <Check className="h-3 w-3 shrink-0" aria-hidden="true" /> : null}
     </DropdownMenuItem>
   );
 }
@@ -147,7 +141,7 @@ function ToggleItem({
         checked={checked}
         aria-hidden="true"
         tabIndex={-1}
-        className="pointer-events-none ml-4 shrink-0"
+        className="pointer-events-none ml-2 h-3.5 w-6 shrink-0 [&>span]:h-3 [&>span]:w-3 [&>span]:data-[state=checked]:translate-x-2.5"
       />
     </DropdownMenuItem>
   );

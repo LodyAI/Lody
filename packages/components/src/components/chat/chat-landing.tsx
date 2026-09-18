@@ -2819,11 +2819,11 @@ function WorkspaceChatLanding({
       });
 
       if (renderedImages.length > 0) {
-        toast(t('composer.pastedRichTextAsText', 'Pasted as text.'), {
+        toast(t('composer.pastedRichTextAsText', 'Pasted as text'), {
           // One id, so pasting repeatedly replaces the hint instead of stacking it.
           id: 'composer-pasted-rich-text-as-text',
           action: {
-            label: t('composer.pastedRichTextAttachImage', 'Attach image instead'),
+            label: t('composer.pastedRichTextAttachImage', 'Attach image'),
             onClick: () => attachPastedFiles(renderedImages),
           },
         });
@@ -3468,7 +3468,7 @@ function WorkspaceChatLanding({
 
   const branchWorktreePill =
     branchSelectorNode || topWorktreeNode ? (
-      <div className="flex h-6 min-w-0 max-w-full items-center overflow-hidden rounded-md bg-input/60 dark:bg-foreground/[0.08]">
+      <div className="flex h-6 min-w-0 max-w-full items-center overflow-hidden rounded-md bg-[hsl(var(--composer))] dark:bg-foreground/[0.08]">
         {branchSelectorNode}
         {branchSelectorNode && topWorktreeNode ? (
           <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border" />

@@ -10,12 +10,10 @@ const MOBILE_TOASTER_OFFSET = {
 } satisfies ToasterProps['mobileOffset'];
 
 /**
- * `basis-full` is what forces a toast button onto its own row (see the `toast`
- * class below). `-mr-5` gives back the close button's `pr-9` lane so the button
- * sits symmetrically inside the toast padding.
+ * Compact chip. Sits with the close control on the right; the title stays left.
  */
 const TOAST_BUTTON_CLASS_NAME =
-  'mt-2.5! ml-0! -mr-5! h-7! basis-full! justify-center! rounded-md!';
+  'mt-0! ml-0! mr-0! h-6! w-auto! shrink-0! justify-center! rounded-md! border-0! bg-foreground/[0.06]! px-2! text-xs! font-normal! text-foreground! shadow-none! hover:bg-foreground/[0.1]!';
 
 const Toaster = ({
   closeButton = true,
@@ -45,28 +43,20 @@ const Toaster = ({
       toastOptions={{
         ...toastOptions,
         classNames: {
-          // Leave room on the right for the inline close button so long
-          // messages don't slip underneath it. Sonner lays the toast out as one
-          // centered row (icon | text | action); `items-start` + `flex-wrap`
-          // turns it into "icon + text on the first line, action on its own row"
-          // so a wrapping description is never squeezed into a narrow column
-          // beside the button.
-          toast: 'pr-9! items-start! flex-wrap!',
-          // `flex-1 basis-0` (not the default `basis-auto`) keeps the text
-          // column on the first line next to the icon; with `basis-auto` a long
-          // description wraps the whole column below the icon.
-          content: 'min-w-0! flex-1! basis-0!',
-          icon: 'mt-0.5!',
+          // Title left, action + close right. Close is first in Sonner's DOM,
+          // so `order-last` pins it to the far right of the 356px column.
+          toast:
+            'w-full! min-w-0! flex-nowrap! items-center! justify-start! gap-2! py-2! pl-3.5! pr-2!',
+          content: 'min-w-0! flex-1!',
+          title: 'min-w-0! truncate! text-left! leading-5!',
+          icon: 'mt-0! shrink-0!',
           // Sonner hard-codes description colors per theme; use the app token so
           // it always reads against the toast surface.
-          description: 'text-muted-foreground!',
+          description: 'text-left! text-muted-foreground!',
           actionButton: TOAST_BUTTON_CLASS_NAME,
           cancelButton: TOAST_BUTTON_CLASS_NAME,
-          // Sonner ships a circular close button floating on the top-left
-          // corner. Restyle it into a plain, muted "×" tucked inside on the
-          // right edge, aligned with the title line (matches the neutral design).
           closeButton:
-            'left-auto! right-2! top-4! size-5! rounded-md! border-transparent! bg-transparent! text-muted-foreground! transition-colors! hover:bg-muted! hover:text-foreground!',
+            'relative! inset-auto! left-auto! right-auto! top-auto! order-last! ml-0! size-5! shrink-0! rounded-md! border-transparent! bg-transparent! text-muted-foreground! transition-colors! hover:bg-muted! hover:text-foreground!',
           ...toastOptions?.classNames,
         },
       }}
@@ -77,6 +67,9 @@ const Toaster = ({
           // behind positioned UI (e.g. the session header at top-center). Fall back to
           // the registry's toast layer (100) so toasts always sit on top.
           zIndex: 'var(--z-toast, 100)',
+          // Sonner's default column is 356px and top-center. Keep that floor so
+          // a one-line toast is a centered card, not a content-hugging sliver.
+          '--width': 'min(22.25rem, calc(100vw - 2rem))',
           // These tokens are raw HSL triplets (e.g. `214 32% 91%`), so they must
           // be wrapped in `hsl(...)` to be valid colors — Sonner drops them into
           // bare `background`/`color`/`border` declarations. The background is an
@@ -88,8 +81,7 @@ const Toaster = ({
           '--normal-text': 'hsl(var(--popover-foreground))',
           '--normal-border': 'hsl(var(--border))',
           // Cancel Sonner's default corner-float transform so the close button
-          // sits inline; its position comes from the `closeButton` classNames
-          // (`right-2` + `top-4`, which lands it on the title line).
+          // can sit in-flow on the far right (`order-last`).
           '--toast-close-button-transform': 'none',
           ...style,
         } as React.CSSProperties

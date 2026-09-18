@@ -47,9 +47,11 @@ File-by-file ownership and coverage pointers: [README.md](README.md).
   reopens upstream must clear `finished` and `endedAt` (see
   `apps/cli/src/session/AGENTS.md`).
 - Thought and tool rows share one compact transparent timeline, icon gutter, and
-  13px hierarchy. Execute calls are not cards; Thought headings stay at
-  activity-detail scale. Turns are avatar-free and full-width, and run
-  configuration belongs in the footer info control.
+  13px hierarchy. Execute calls are not cards. Desktop disclosure headers
+  (`Worked for …`, tool-group summaries) use body type, a trailing chevron
+  that appears on hover, and no fill; they never advertise Thought/Thinking.
+  Expanded groups omit thought rows. Turns are avatar-free and full-width, and
+  run configuration belongs in the footer info control.
 - Duration has one owner: desktop uses `WorkedGroupHeader` for folded turns and
   the footer after buttons otherwise; mobile always uses the footer before
   buttons, and the worked header suppresses its copy. Preserve

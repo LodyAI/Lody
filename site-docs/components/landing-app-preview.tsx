@@ -3726,7 +3726,7 @@ export function LandingAppPreview({
      from production — worktree is a checkbox pill now. */
   const branchWorktreePill =
     contextType === 'chat' ? null : (
-      <div className="flex h-6 min-w-0 max-w-full items-center overflow-hidden rounded-md bg-input/60 dark:bg-foreground/[0.08]">
+      <div className="flex h-6 min-w-0 max-w-full items-center overflow-hidden rounded-md bg-[hsl(var(--composer))] dark:bg-foreground/[0.08]">
         <span className="inline-flex min-w-0 items-center" data-demo="branch">
           <BranchSelector
             value={selectedBranch}
