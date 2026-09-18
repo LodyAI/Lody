@@ -52,4 +52,21 @@ describe('AssistantEditedFiles', () => {
     expect(countedRow?.textContent).toContain('+4');
     expect(countedRow?.textContent).toContain('-2');
   });
+
+  it('labels an all-zero multi-file summary without line stats', async () => {
+    await act(async () => {
+      root.render(
+        createElement(AssistantEditedFiles, {
+          files: [
+            { filePath: 'README.md', add: 0, del: 0 },
+            { filePath: 'assets/image.png', add: 0, del: 0 },
+          ],
+        })
+      );
+    });
+
+    expect(container.textContent).toContain('Changed');
+    expect(container.textContent).not.toContain('+0');
+    expect(container.textContent).not.toContain('-0');
+  });
 });
