@@ -1256,12 +1256,12 @@ export const LoroSidebar = memo(function LoroSidebar({
           viewportClassName={cn(
             isMobile
               ? 'pl-[calc(12px+env(safe-area-inset-left,0px))] pr-[calc(12px+env(safe-area-inset-right,0px))]'
-              : 'pl-1.5 pr-2.5 pb-3'
+              : 'px-1.5 pb-3'
           )}
         >
           <div className="relative">
             {!isMobile && desktopFilterNode ? (
-              <div className="pointer-events-none absolute right-[9px] top-1 z-10 flex h-7 items-center">
+              <div className="pointer-events-none absolute right-0 top-1 z-10 flex h-7 items-center">
                 <div className="pointer-events-auto flex">{desktopFilterNode}</div>
               </div>
             ) : null}
