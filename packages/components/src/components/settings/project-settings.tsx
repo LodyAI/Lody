@@ -547,6 +547,7 @@ export function ProjectSettingsComponent({
         open={addLocalProjectDialogOpen}
         onOpenChange={setAddLocalProjectDialogOpen}
         initialMachineId={addLocalProjectMachineId}
+        overlayClassName={NESTED_SETTINGS_DIALOG_OVERLAY}
       />
       <RemoveLocalProjectDialog
         open={pendingRemoval != null}
