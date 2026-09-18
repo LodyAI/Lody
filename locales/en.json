@@ -3211,6 +3211,7 @@
   "workspace.projects.delete": "Delete project",
   "workspace.projects.deleteConfirmTitle": "Remove project from Lody?",
   "workspace.projects.manageInGithubSettings": "Manage in GitHub settings",
+  "workspace.projects.machineUnreachable": "This machine isn’t connected. Worktree setup and skills will load when it comes online.",
   "workspace.projects.addProjectMenu": "Add project",
   "workspace.projects.addFolder": "Add folder",
   "workspace.projects.addFolderOnMachine": "Add a folder on {{machine}}",

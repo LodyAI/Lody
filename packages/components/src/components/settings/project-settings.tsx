@@ -45,7 +45,6 @@ import {
   currentWorkspaceSlugAtom,
   settingsSelectedMachineIdAtom,
   settingsSelectedProjectKeyAtom,
-  userAtom,
 } from '@/atoms';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useLocalProjectsAdmin } from '@/hooks/use-local-projects-admin';
@@ -441,7 +440,6 @@ export function ProjectSettingsComponent({
     openSettings('github');
   }, [openSettings, workspaceSlug]);
 
-  const currentUserId = useAtomValue(userAtom)?.id;
   const localMachineId = useAtomValue(localMachineIdAtom);
   const machineMetaMap = useAtomValue(getMachineMetaMapAtom);
   const onlineMachineIds = useOnlineMachineIds();
@@ -453,15 +451,11 @@ export function ProjectSettingsComponent({
   const [pendingRemoval, setPendingRemoval] = useState<PendingLocalProjectRemoval | null>(null);
   const [isRemovingLocalProject, setIsRemovingLocalProject] = useState(false);
 
-  const canRemoveLocalProject = useCallback(
-    (row: ProjectSettingsRow) => {
-      const machine = machineMetaMap.get(row.machineId);
-      if (!machineSupportsLocalProjectRemovalProtocol(machine)) return false;
-      if (localMachineId && row.machineId === localMachineId) return true;
-      return Boolean(currentUserId && machine?.ownerUserId === currentUserId);
-    },
-    [currentUserId, localMachineId, machineMetaMap]
-  );
+  const canRemoveLocalProject = useCallback((_row: ProjectSettingsRow) => {
+    // This catalog is already owner-scoped. Protocol capability only gates
+    // worktree cleanup inside the existing confirm dialog.
+    return true;
+  }, []);
 
   const localProjectRemovalStateByKey = useMemo(() => {
     const next = new Map<string, LocalProjectRemovalState>();
@@ -610,6 +604,7 @@ function ProjectSettingsDesktop({
 }: ProjectSettingsViewProps) {
   const { t } = useTranslation();
   const onlineMachineIds = useOnlineMachineIds();
+  const localMachineId = useAtomValue(localMachineIdAtom);
 
   const totalProjects = sections.reduce((sum, section) => sum + section.rows.length, 0);
   const totalGithubProjects = githubSections.reduce((sum, section) => sum + section.rows.length, 0);
@@ -731,6 +726,8 @@ function ProjectSettingsDesktop({
     canRemoveLocalProject,
     onRequestRemoveLocalProject,
     localProjectRemovalStateByKey,
+    localMachineId,
+    onlineMachineIds,
   };
 
   return (
@@ -927,7 +924,7 @@ function ProjectMasterRow({
               type="button"
               variant="ghost"
               size="icon"
-              className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100"
+              className="h-6 w-6 shrink-0"
               aria-label={t('sessions.moreActions', 'More actions')}
               onClick={(event) => event.stopPropagation()}
             >
@@ -1048,6 +1045,8 @@ function ProjectDetailPane({
   canRemoveLocalProject,
   onRequestRemoveLocalProject,
   localProjectRemovalStateByKey,
+  localMachineId,
+  onlineMachineIds,
 }: {
   readonly selection: ProjectSettingsSelection;
 } & Omit<ProjectRowProps, 'row'> & {
@@ -1063,6 +1062,8 @@ function ProjectDetailPane({
     canRemoveLocalProject?: (row: ProjectSettingsRow) => boolean;
     onRequestRemoveLocalProject?: (row: ProjectSettingsRow) => void;
     localProjectRemovalStateByKey?: ReadonlyMap<string, LocalProjectRemovalState>;
+    localMachineId?: MachineId | null;
+    onlineMachineIds?: ReadonlySet<MachineId>;
   }) {
   if (selection.kind === 'github') {
     return (
@@ -1088,7 +1089,18 @@ function ProjectDetailPane({
       canRemove={canRemoveLocalProject?.(selection.row) === true}
       onRemove={() => onRequestRemoveLocalProject?.(selection.row)}
       removalState={localProjectRemovalStateByKey?.get(selection.row.key) ?? null}
+      machineReachable={
+        (localMachineId != null && selection.row.machineId === localMachineId) ||
+        Boolean(onlineMachineIds?.has(selection.row.machineId))
+      }
     />
+  );
+}
+
+function isUnreachableMachineError(message: string | null | undefined): boolean {
+  if (!message) return false;
+  return (
+    message.includes('machine_rpc_unavailable') || message.includes('CLI is not accepting RPC')
   );
 }
 
@@ -1124,10 +1136,12 @@ function LocalProjectDetail({
   canRemove = false,
   onRemove,
   removalState = null,
+  machineReachable = true,
 }: ProjectRowProps & {
   canRemove?: boolean;
   onRemove?: () => void;
   removalState?: LocalProjectRemovalState | null;
+  machineReachable?: boolean;
 }) {
   const { t } = useTranslation();
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
@@ -1148,10 +1162,19 @@ function LocalProjectDetail({
         ? t('sidebar.localProjects.remove.removing', 'Removing…')
         : null;
 
+  const worktreeSetupError =
+    machineReachable && !isUnreachableMachineError(row.worktreeSetupError)
+      ? row.worktreeSetupError
+      : null;
+  const worktreeCleanupError =
+    machineReachable && !isUnreachableMachineError(row.worktreeCleanupError)
+      ? row.worktreeCleanupError
+      : null;
+
   return (
     <TooltipProvider delayDuration={200}>
       <div className="flex flex-col gap-3 p-4 pt-3">
-        <div className="flex min-w-0 items-start justify-between gap-2">
+        <div className="sticky top-0 z-10 -mx-4 -mt-3 flex min-w-0 items-start justify-between gap-2 border-b border-border/60 bg-background px-4 py-3">
           <div className="min-w-0 flex-1">
             <h3 className="truncate text-sm font-semibold text-foreground">{row.project.name}</h3>
             {rootPath ? (
@@ -1190,36 +1213,69 @@ function LocalProjectDetail({
               <p className="mt-1 text-[11px] text-muted-foreground">{removalStateLabel}</p>
             ) : null}
           </div>
+          {canRemove && onRemove ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 shrink-0 text-destructive hover:text-destructive"
+              disabled={removalState != null}
+              onClick={onRemove}
+            >
+              {t('workspace.projects.delete', 'Delete project')}
+            </Button>
+          ) : null}
         </div>
 
         <ProjectShareControl row={row} onSharedWithTeamChange={onSharedWithTeamChange} />
 
         <CompactSection title={t('workspace.projects.worktreeSetupTitle', 'Worktree')}>
           <div className="flex flex-col gap-5 p-3">
+            {!machineReachable ? (
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  'workspace.projects.machineUnreachable',
+                  'This machine isn’t connected. Worktree setup and skills will load when it comes online.'
+                )}
+              </p>
+            ) : null}
             <WorktreeSetupEditor
               phase="setup"
               config={row.worktreeSetup}
               shell={row.shell}
-              isLoading={row.isWorktreeSetupLoading}
+              isLoading={machineReachable && row.isWorktreeSetupLoading}
               isSaving={row.isWorktreeSetupSaving}
-              errorMessage={row.worktreeSetupError}
-              onSave={(config) => onWorktreeSetupChange?.(row, config)}
+              errorMessage={worktreeSetupError}
+              onSave={
+                machineReachable ? (config) => onWorktreeSetupChange?.(row, config) : undefined
+              }
             />
             <WorktreeSetupEditor
               phase="cleanup"
               config={row.worktreeCleanup}
               shell={row.shell}
-              isLoading={row.isWorktreeCleanupLoading}
+              isLoading={machineReachable && row.isWorktreeCleanupLoading}
               isSaving={row.isWorktreeCleanupSaving}
-              errorMessage={row.worktreeCleanupError}
-              onSave={(config) => onWorktreeCleanupChange?.(row, config)}
+              errorMessage={worktreeCleanupError}
+              onSave={
+                machineReachable ? (config) => onWorktreeCleanupChange?.(row, config) : undefined
+              }
             />
           </div>
         </CompactSection>
 
         <CompactSection title={t('workspace.projects.skills.tabLabel', 'Skills')}>
           <div className="p-3">
-            <ProjectSkillsTab source={skillsSource} />
+            {machineReachable ? (
+              <ProjectSkillsTab source={skillsSource} />
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  'workspace.projects.machineUnreachable',
+                  'This machine isn’t connected. Worktree setup and skills will load when it comes online.'
+                )}
+              </p>
+            )}
           </div>
         </CompactSection>
 

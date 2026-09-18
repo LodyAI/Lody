@@ -25,7 +25,8 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   nest a second provider tab strip. Local-project deletion reuses
   `useRemoveLocalProject` / `RemoveLocalProjectDialog` (nested overlay like MCP);
   do not add a second confirm. Pending removal stays listed until the owning
-  machine finishes.
+  machine finishes. Do not RPC-probe worktree/skills on offline remotes, and
+  never surface `machine_rpc_unavailable` as an editor error.
 - A settings row (`compact-layout.tsx`) is one grid: the label column takes the
   remaining space and the control column hugs its content. Never size either column
   from a viewport breakpoint — settings render in a panel far narrower than the window,

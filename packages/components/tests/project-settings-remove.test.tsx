@@ -116,6 +116,9 @@ describe('ProjectSettingsView local-project remove', () => {
       button.textContent?.includes('Delete project')
     );
     expect(deleteButtons.length).toBeGreaterThan(0);
+    expect(deleteButtons.some((button) => button.className.includes('text-destructive'))).toBe(
+      true
+    );
     await act(async () => deleteButtons[0]?.click());
     expect(onRequestRemoveLocalProject).toHaveBeenCalledTimes(1);
     expect(onRequestRemoveLocalProject.mock.calls[0]?.[0]?.project.name).toBe('Lody');

@@ -43,6 +43,7 @@ import { reconcileLocalProjectHistoryCatalog } from '@/lib/local-project-history
 import { worktreeCleanupConfigCache, worktreeSetupConfigCache } from '@/lib/local-storage-cache';
 import { projectSharingReducer } from '@/lib/project-sharing-state';
 import { useAppCapability } from '@/lib/app-platform';
+import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import type {
   ProjectHistoryImportState,
   ProjectSettingsRow,
@@ -186,6 +187,7 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
   const currentUserId = useAtomValue(userAtom)?.id ?? null;
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const localMachineId = useAtomValue(localMachineIdAtom);
+  const onlineMachineIds = useOnlineMachineIds();
   const { isAuthenticated, isLoading: isConvexAuthLoading } = useAuthenticatedConvex();
   /* Read the raw runtime, NOT `activeWorkspaceRuntimeAtom`.
      `activeWorkspaceRuntimeAtom` returns `null` whenever the route's
@@ -262,9 +264,14 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
   useEffect(() => {
     if (!runtime || !workspaceId || !currentUserId) return;
     if (typeof window !== 'undefined' && window.__LODY_ELECTRON__ && !localMachineId) return;
-    const ownedEntries = Array.from(projects.values()).filter(
-      (entry) => entry.machine.ownerUserId === currentUserId
-    );
+    const ownedEntries = Array.from(projects.values()).filter((entry) => {
+      if (entry.machine.ownerUserId !== currentUserId) return false;
+      // Offline remotes have no RPC stream. Probing them surfaces
+      // `machine_rpc_unavailable` in the worktree editors. The local
+      // machine still answers even if presence is stale.
+      if (localMachineId && entry.machineId === localMachineId) return true;
+      return onlineMachineIds.has(entry.machineId);
+    });
 
     const loadPhase = (
       phase: WorktreeConfigPhase,
@@ -380,6 +387,7 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
   }, [
     currentUserId,
     localMachineId,
+    onlineMachineIds,
     projects,
     runtime,
     setWorktreeCleanupByKey,
@@ -466,10 +474,10 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
         isUpdating: sharingUpdate !== undefined,
         canUpdateSharing: Boolean(
           teamSharingAvailable &&
-            workspaceId &&
-            isAuthenticated &&
-            !isConvexAuthLoading &&
-            entry.isMachineRegistered
+          workspaceId &&
+          isAuthenticated &&
+          !isConvexAuthLoading &&
+          entry.isMachineRegistered
         ),
         worktreeSetup: worktreeSetupByKey[entry.key] ?? EMPTY_WORKTREE_SETUP,
         isWorktreeSetupLoading: worktreeSetupLoadingByKey[entry.key] === true,

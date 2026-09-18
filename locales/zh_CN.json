@@ -3211,6 +3211,7 @@
   "workspace.projects.delete": "删除项目",
   "workspace.projects.deleteConfirmTitle": "从 Lody 中删除项目？",
   "workspace.projects.manageInGithubSettings": "在 GitHub 设置中管理",
+  "workspace.projects.machineUnreachable": "这台机器当前未连接。连上之后会加载 Worktree 配置和技能。",
   "workspace.projects.addProjectMenu": "添加项目",
   "workspace.projects.addFolder": "添加文件夹",
   "workspace.projects.addFolderOnMachine": "在 {{machine}} 上添加文件夹",
