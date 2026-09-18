@@ -1,11 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Flock } from '@loro-dev/flock-wasm';
-import { LoroDoc, LoroList } from 'loro-crdt';
+import { LoroDoc } from 'loro-crdt';
 import {
   createPreviewVisualComment,
   createPreviewVisualCommentDoc,
   createSessionMirror,
-  createHistoryWriter,
   type SessionHistory,
   type MinimalVisualAnnotationAnchor,
   type PreviewVisualCommentDocInput,
