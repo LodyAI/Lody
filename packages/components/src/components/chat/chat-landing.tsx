@@ -6154,6 +6154,7 @@ function WorkspaceChatLanding({
             onImageDrop={submitting ? undefined : handleImageDrop}
             imageDropDisabled={submitting}
             promptPlaceholder={promptPlaceholder}
+            compactPlaceholderName={activeAgentRole?.name ?? selectedConfig?.name ?? null}
             promptDisabled={submitting}
             promptRows={4}
             promptEnterKeyHint={promptEnterKeyHint}
@@ -6593,6 +6594,7 @@ function WorkspaceChatLanding({
         onPromptPaste={handlePromptPaste}
         onImageDrop={handleImageDrop}
         promptPlaceholder={promptPlaceholder}
+        compactPlaceholderName={activeAgentRole?.name ?? selectedConfig?.name ?? null}
         promptEnterKeyHint={promptEnterKeyHint}
         promptRef={promptTextareaRef}
         pastedTextDrafts={pastedTextDrafts}

@@ -678,6 +678,8 @@
   "composer.pastedTextTooLarge": "粘贴的文本过大（{{size}}）。",
   "composer.pastedTextTooLargeDescription": "上限为 {{limit}}，请改为以文件形式添加。",
   "composer.promptPlaceholder.base": "",
+  "composer.promptPlaceholder.compact": "随便问点什么",
+  "composer.promptPlaceholder.compactNamed": "和 {{name}} 一起工作",
   "composer.promptPlaceholder.commands": "按 '/' 使用命令。",
   "composer.promptPlaceholder.commandsMentions": "按 '/' 使用命令，'@' 添加提及。",
   "composer.promptPlaceholder.commandsMentionsSkills": "按 '/' 使用命令，'@' 添加提及，'$' 使用技能。",

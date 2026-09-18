@@ -678,6 +678,8 @@
   "composer.pastedTextTooLarge": "Pasted text is too large ({{size}}).",
   "composer.pastedTextTooLargeDescription": "The limit is {{limit}}. Attach it as a file instead.",
   "composer.promptPlaceholder.base": "",
+  "composer.promptPlaceholder.compact": "Ask anything",
+  "composer.promptPlaceholder.compactNamed": "Work with {{name}}",
   "composer.promptPlaceholder.commands": "Press '/' for commands.",
   "composer.promptPlaceholder.commandsMentions": "Press '/' for commands, '@' for mentions.",
   "composer.promptPlaceholder.commandsMentionsSkills": "Press '/' for commands, '@' for mentions, '$' for skills.",

@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -60,6 +61,8 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/ui/sheet';
 import { Textarea, type TextareaProps } from '@/ui/textarea';
 import { hasFileTransfer, readDroppedTransfer } from '@/lib/file-drop';
 import {
+  COMPOSER_COMPACT_PLACEHOLDER_MAX_PX,
+  getChatComposerCompactPlaceholder,
   getChatComposerPromptPlaceholderKey,
   getChatComposerMobilePromptPlaceholderKey,
 } from '@/lib/chat-composer-placeholder';
@@ -118,6 +121,8 @@ export interface ChatComposerProps {
   onPromptKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onPromptPaste?: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
   promptPlaceholder?: string;
+  /** Agent or role name for the compact-width placeholder ("Work with {{name}}"). */
+  compactPlaceholderName?: string | null;
   promptDisabled?: boolean;
   promptRows?: number;
   promptEnterKeyHint?: TextareaProps['enterKeyHint'];
@@ -215,7 +220,7 @@ export function getChatComposerTextareaClassName({
           isMobile ? 'min-h-[24px]' : 'min-h-[48px]'
         ),
     'focus-visible:outline-hidden focus-visible:ring-0 focus-visible:ring-offset-0',
-    'text-input-foreground placeholder:text-input-placeholder/40 @max-[440px]/composer-box:placeholder:text-transparent'
+    'text-input-foreground placeholder:text-input-placeholder/40'
   );
 }
 
@@ -248,6 +253,7 @@ export function ChatComposer({
   onPromptKeyDown,
   onPromptPaste,
   promptPlaceholder,
+  compactPlaceholderName,
   promptDisabled = false,
   promptRows = 3,
   promptEnterKeyHint,
@@ -326,17 +332,38 @@ export function ChatComposer({
   const imagePreviewLabel = t('sessions.imagePreview', 'Image preview');
   const pastedTextDialogTitle = t('composer.pastedTextTitle', 'Pasted text');
   const pastedTextEditorLabel = t('composer.pastedTextEditorLabel', 'Edit pasted text');
-  const resolvedPromptPlaceholder =
-    promptPlaceholder ??
-    (isMobile
-      ? t(getChatComposerMobilePromptPlaceholderKey({ mentionSource, skillAgent }))
-      : t(
-          getChatComposerPromptPlaceholderKey({
-            mentionSource,
-            availableCommands,
-            skillAgent,
-          })
-        ));
+  const composerBoxRef = useRef<HTMLDivElement>(null);
+  const [useCompactPlaceholder, setUseCompactPlaceholder] = useState(false);
+  useLayoutEffect(() => {
+    const box = composerBoxRef.current;
+    if (!box) return;
+    const update = (width: number) => {
+      setUseCompactPlaceholder(width <= COMPOSER_COMPACT_PLACEHOLDER_MAX_PX);
+    };
+    update(box.getBoundingClientRect().width);
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? 0;
+      update(width);
+    });
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, []);
+  const compactPromptPlaceholder = (() => {
+    const compact = getChatComposerCompactPlaceholder({ name: compactPlaceholderName });
+    return compact.name ? t(compact.key, { name: compact.name }) : t(compact.key);
+  })();
+  const resolvedPromptPlaceholder = useCompactPlaceholder
+    ? compactPromptPlaceholder
+    : (promptPlaceholder ??
+      (isMobile
+        ? t(getChatComposerMobilePromptPlaceholderKey({ mentionSource, skillAgent }))
+        : t(
+            getChatComposerPromptPlaceholderKey({
+              mentionSource,
+              availableCommands,
+              skillAgent,
+            })
+          )));
   const numberFormatter = useMemo(() => new Intl.NumberFormat(intlLocale), [intlLocale]);
   const previewPastedTextDraft =
     pastedTextDrafts.find((item) => item.id === previewPastedTextDraftId) ?? null;
@@ -617,7 +644,7 @@ export function ChatComposer({
   const dialogTextareaClassName = cn(
     'input-scrollbar min-h-[120px] resize-none px-4 py-3 text-sm leading-6 transition-shadow sm:min-h-[120px]',
     'w-full rounded-2xl border-transparent bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0',
-    'text-input-foreground placeholder:text-input-placeholder/40 @max-[440px]/composer-box:placeholder:text-transparent'
+    'text-input-foreground placeholder:text-input-placeholder/40'
   );
 
   const actionBaseClassName = cn(
@@ -701,6 +728,7 @@ export function ChatComposer({
               </div>
             ) : null}
             <div
+              ref={composerBoxRef}
               className={cn(boxContainerClassName, imageDropClassName, 'group relative')}
               onDragEnter={canHandleImageDrop ? handleImageDragEnter : undefined}
               onDragOver={canHandleImageDrop ? handleImageDragOver : undefined}

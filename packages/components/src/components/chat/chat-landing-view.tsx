@@ -20,10 +20,7 @@ import { ArrowUp, Bug, Download, ExternalLink, Settings } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import type { PastedTextDraft } from '@/lib/pasted-text-draft';
 import { getDroppedFileLocalPath, toPathMentionInsertion } from '@/lib/dropped-local-path';
-import {
-  isPlainLinkPasteShortcut,
-  parseAppSessionUrl,
-} from '@/lib/session-app-url';
+import { isPlainLinkPasteShortcut, parseAppSessionUrl } from '@/lib/session-app-url';
 import { MobileChatLandingScreen } from '@/components/mobile/mobile-chat-landing-screen';
 import { WebChatLandingScreen } from './web-chat-landing-screen';
 
@@ -61,6 +58,7 @@ export interface ChatLandingViewProps {
   onImageDrop?: (files: File[]) => void;
   /** Placeholder text for the prompt textarea */
   promptPlaceholder?: string;
+  compactPlaceholderName?: string | null;
   /** Mobile keyboard action hint for the prompt textarea */
   promptEnterKeyHint?: 'send' | 'enter';
   /** Ref for the prompt textarea */
@@ -201,6 +199,7 @@ export function ChatLandingView({
   onPromptPaste,
   onImageDrop,
   promptPlaceholder,
+  compactPlaceholderName,
   promptEnterKeyHint = 'send',
   promptRef,
   pastedTextDrafts = [],
@@ -468,6 +467,7 @@ export function ChatLandingView({
         onDirectoryDrop={submissionPending ? undefined : handleDirectoryDrop}
         imageDropDisabled={submissionPending}
         promptPlaceholder={promptPlaceholder}
+        compactPlaceholderName={compactPlaceholderName}
         promptDisabled={submissionPending}
         promptRows={2}
         promptEnterKeyHint={promptEnterKeyHint}
