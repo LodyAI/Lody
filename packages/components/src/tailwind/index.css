@@ -160,10 +160,9 @@ pre,
     --lody-shiki-token-deleted: hsl(var(--code-removed));
     --lody-shiki-token-changed: hsl(var(--modified-file));
     position: relative;
-    /* Plain rounded container; the language label and copy actions float as
-       absolute overlays, so the code body spans the full width and scrolls
-       cleanly beneath them (no reserved right rail). */
-    display: block !important;
+    /* Toolbar row, then the highlighted body. */
+    display: flex !important;
+    flex-direction: column !important;
     width: 100%;
     margin-block: 0.875rem !important;
     overflow: hidden;
@@ -190,81 +189,60 @@ pre,
     );
   }
 
-  .markdown-renderer [data-streamdown='code-block-header'] {
-    position: absolute;
-    inset-block-start: 0;
-    inset-inline-end: 0;
-    z-index: 1;
+  .markdown-renderer [data-streamdown='code-block-toolbar'] {
     display: flex;
-    /* `h-8` utility from Streamdown overrides plain height; pin ours. */
-    height: 1.75rem !important;
+    min-height: 1.75rem;
     align-items: center;
-    justify-content: flex-end;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding-inline: 0.625rem;
+    border-bottom: 1px solid var(--markdown-code-block-border);
+    color: var(--markdown-code-block-language);
+  }
+
+  .markdown-renderer [data-streamdown='code-block-header'] {
+    position: static;
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    height: auto !important;
+    align-items: center;
+    justify-content: flex-start;
     margin: 0;
-    /* Opaque mask in the SAME color as the pinned block background, so a long
-       first line scrolls cleanly beneath the label with no visible pill. */
-    padding-inline: 0.75rem;
-    background: var(--markdown-code-block-bg);
-    border-end-start-radius: 0.375rem;
+    padding: 0;
+    overflow: hidden;
+    background: transparent;
     color: var(--markdown-code-block-language);
     font-family: var(--font-mono);
     font-size: 0.6875rem;
     line-height: 1;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.02em;
     pointer-events: none;
-    transition: opacity 120ms ease;
   }
 
   .markdown-renderer [data-streamdown='code-block-header'] span {
-    margin-left: 0;
-  }
-
-  /* Streamdown wraps the actions in a `position: sticky` `h-8 -mt-10` container.
-     Left intact it becomes the positioned ancestor for our absolute chip,
-     anchoring it to the wrapper's flow position (block bottom) instead of the
-     block. `display: contents` removes the wrapper's box so the chip positions
-     against the code-block (position: relative) — top-right, every block. */
-  .markdown-renderer
-    [data-streamdown='code-block']
-    > div:not([data-streamdown]):has(> [data-streamdown='code-block-actions']) {
-    display: contents !important;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .markdown-renderer [data-streamdown='code-block-actions'] {
-    position: absolute;
-    /* Center the chip on the first code line: body top padding + half the code
-       line-height (0.75rem font x 1.4). For a single-line block this equals the
-       block's vertical center; for multi-line it stays aligned to the top line. */
-    inset-block-start: calc(0.75rem + (0.75rem * 1.4) / 2);
-    inset-inline-end: 0.3125rem;
-    transform: translateY(-50%);
-    z-index: 2;
+    position: static;
+    z-index: 1;
+    display: flex;
     height: auto;
-    margin-top: 0;
-    /* Streamdown ships `bg-sidebar/80 border-sidebar px-1.5 py-1` here; pin our
-       tokens so the copy chip matches the block surface. */
-    padding: 0.25rem !important;
-    border: 1px solid var(--markdown-code-block-action-border) !important;
-    border-radius: 0.375rem;
-    background: var(--markdown-code-block-action-bg) !important;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 0.125rem;
+    margin: 0;
+    transform: none;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
     color: var(--markdown-code-block-language);
-    opacity: 0;
-    backdrop-filter: blur(8px);
-    transition:
-      opacity 120ms ease,
-      color 120ms ease;
-  }
-
-  .markdown-renderer
-    [data-streamdown='code-block']:is(:hover, :focus-within)
-    [data-streamdown='code-block-actions'] {
     opacity: 1;
-  }
-
-  .markdown-renderer
-    [data-streamdown='code-block']:is(:hover, :focus-within)
-    [data-streamdown='code-block-header'] {
-    opacity: 0;
+    backdrop-filter: none;
   }
 
   .markdown-renderer [data-streamdown='code-block-actions'] button {
@@ -299,13 +277,6 @@ pre,
     padding-block: 0.75rem !important;
     padding-inline: 1rem !important;
     color: var(--markdown-code-block-foreground);
-  }
-
-  /* No language fence: nothing to label, so drop the floating label entirely. */
-  .markdown-renderer
-    [data-streamdown='code-block'][data-language='']
-    [data-streamdown='code-block-header'] {
-    display: none;
   }
 
   .markdown-renderer [data-streamdown='code-block-body'] pre {
@@ -384,14 +355,40 @@ pre,
     color: var(--markdown-code-block-language);
   }
 
-  @media (hover: none) {
-    .markdown-renderer [data-streamdown='code-block-actions'] {
-      opacity: 1;
-    }
+  .markdown-renderer [data-code-wrap='true'] [data-streamdown='code-block-body'] {
+    overflow-x: hidden;
+  }
 
-    .markdown-renderer [data-streamdown='code-block-header'] {
-      opacity: 0;
-    }
+  .markdown-renderer [data-code-wrap='true'] [data-streamdown='code-block-body'] pre {
+    width: 100%;
+    min-width: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .markdown-renderer
+    [data-code-wrap='true']
+    [data-streamdown='code-block-actions']
+    button[aria-pressed='true'] {
+    color: var(--markdown-code-block-foreground);
+  }
+
+  /* Nested Streamdown highlighter: chrome lives on the outer block. */
+  .markdown-renderer .lody-code-highlight [data-streamdown='code-block'] {
+    margin: 0 !important;
+    overflow: visible;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+  }
+
+  .markdown-renderer .lody-code-highlight [data-streamdown='code-block-header'],
+  .markdown-renderer .lody-code-highlight [data-streamdown='code-block-actions'],
+  .markdown-renderer
+    .lody-code-highlight
+    [data-streamdown='code-block']
+    > div:not([data-streamdown]):has(> [data-streamdown='code-block-actions']) {
+    display: none !important;
   }
 
   .markdown-renderer [data-streamdown='mermaid-block'] {

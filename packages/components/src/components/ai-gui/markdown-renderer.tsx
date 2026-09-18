@@ -54,6 +54,7 @@ import { findSessionSearchOccurrences } from '@/lib/session-chat-search';
 import { useResolvedTheme } from '../../theme-provider';
 import type { ConversationFontSize } from '@/atoms/settings';
 import { useTaskImageUrl } from '@/hooks/use-task-image';
+import { MarkdownFencedCodeBlock } from './markdown-code-block';
 import { MarkdownDiffBlock } from './markdown-diff-block';
 import { createMarkdownMermaidConfig, createMarkdownMermaidPlugin } from './markdown-mermaid';
 import { MermaidDiagramViewer } from './mermaid-diagram-viewer';
@@ -660,13 +661,6 @@ const remarkLinkifyFilePaths = () => {
   };
 };
 
-const MARKDOWN_REMARK_PLUGINS = [
-  remarkGfm,
-  remarkRepairMalformedGfmAutolinks,
-  remarkLinkifyPlainUrls,
-  remarkLinkifyFilePaths,
-];
-
 const MARKDOWN_MATH_PLUGIN = createMathPlugin();
 
 type ShikiHighlighter = Awaited<ReturnType<(typeof import('shiki/core'))['createHighlighterCore']>>;
@@ -710,6 +704,39 @@ const MARKDOWN_CODE_LANGUAGE_SET = new Set<string>([
   ...MARKDOWN_CODE_LANGUAGES,
   ...Object.keys(MARKDOWN_CODE_LANGUAGE_ALIASES),
 ]);
+
+const FENCED_CODE_RENDERER_LANGUAGE_SET = new Set<string>([
+  ...MARKDOWN_CODE_LANGUAGE_SET,
+  'diff',
+  'text',
+  'plaintext',
+  'txt',
+]);
+
+const remarkDefaultFencedCodeLanguage = () => (tree: unknown) => {
+  const walk = (node: MdastNode) => {
+    if (node.type === 'code') {
+      const codeNode = node as { lang?: string; meta?: string | null };
+      const lang = String(codeNode.lang ?? '').trim();
+      if (!lang) {
+        codeNode.lang = 'text';
+      } else if (!FENCED_CODE_RENDERER_LANGUAGE_SET.has(lang.toLowerCase())) {
+        codeNode.meta = [`highlight=${lang}`, codeNode.meta].filter(Boolean).join(' ');
+        codeNode.lang = 'text';
+      }
+    }
+    node.children?.forEach(walk);
+  };
+  if (typeof tree === 'object' && tree !== null) walk(tree as MdastNode);
+};
+
+const MARKDOWN_REMARK_PLUGINS = [
+  remarkGfm,
+  remarkRepairMalformedGfmAutolinks,
+  remarkLinkifyPlainUrls,
+  remarkLinkifyFilePaths,
+  remarkDefaultFencedCodeLanguage,
+];
 
 const normalizeCodeLanguage = (language: BundledLanguage): BundledLanguage | null => {
   const normalized = String(language).trim().toLowerCase();
@@ -880,6 +907,15 @@ const MARKDOWN_CODE_PLUGIN = createLazyShikiCodePlugin();
 
 const MARKDOWN_MERMAID_PLUGIN = createMarkdownMermaidPlugin();
 
+const FENCED_CODE_RENDERER_LANGUAGES = [
+  ...MARKDOWN_CODE_LANGUAGES,
+  ...Object.keys(MARKDOWN_CODE_LANGUAGE_ALIASES),
+  'diff',
+  'text',
+  'plaintext',
+  'txt',
+] as const;
+
 const STREAMDOWN_PLUGINS = {
   code: MARKDOWN_CODE_PLUGIN,
   math: MARKDOWN_MATH_PLUGIN,
@@ -888,6 +924,10 @@ const STREAMDOWN_PLUGINS = {
     {
       language: 'diff',
       component: MarkdownDiffBlock,
+    },
+    {
+      language: [...FENCED_CODE_RENDERER_LANGUAGES],
+      component: MarkdownFencedCodeBlock,
     },
   ],
 } satisfies PluginConfig;

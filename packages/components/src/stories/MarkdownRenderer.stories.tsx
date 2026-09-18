@@ -146,6 +146,12 @@ export const CodeBlocks: Story = {
       'export const hello = (name: string) => `Hello, ${name}`;',
       '```',
       '',
+      'Fenced code with a path:',
+      '',
+      '```ts src/lib/hello.ts',
+      'export const hello = (name: string) => `Hello, ${name}`;',
+      '```',
+      '',
       'Fenced code without language:',
       '',
       '```',
@@ -205,8 +211,7 @@ export const CodeBlockPaddingSymmetry: Story = {
   args: {
     size: 'default',
     text: [
-      'Single-line code blocks stay compact and vertically centered, with the',
-      'language label floating in the top-right corner.',
+      'Fenced blocks keep a toolbar row for language or path, wrap, and copy.',
       '',
       '```ts',
       'const answer = 42;',
