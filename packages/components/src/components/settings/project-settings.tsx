@@ -711,6 +711,11 @@ function ProjectSettingsDesktop({
         machine: selectedMachineAddTarget.machineName,
       })
     : undefined;
+  const selectedMachineOffline = Boolean(
+    selectedMachine &&
+    !selectedMachine.online &&
+    !(localMachineId && selectedMachine.machineId === localMachineId)
+  );
 
   const detailHandlers = {
     onSharedWithTeamChange,
@@ -786,6 +791,21 @@ function ProjectSettingsDesktop({
               ) : null
             }
           />
+          {selectedMachineOffline && selectedMachine ? (
+            <div className="flex items-center gap-2 rounded-md border border-border/70 bg-muted/40 px-2.5 py-1.5 text-xs text-muted-foreground">
+              <span
+                aria-hidden
+                className="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/50"
+              />
+              <span className="min-w-0">
+                {t(
+                  'workspace.projects.selectedMachineOffline',
+                  '{{name}} is offline. Worktree setup and skills will load when it comes online.',
+                  { name: selectedMachine.machineName }
+                )}
+              </span>
+            </div>
+          ) : null}
           <div className="flex min-h-0 min-w-0 flex-1">
             <div className="scrollbar-pro w-[240px] shrink-0 overflow-y-auto border-r border-border/60 py-1 pr-2">
               {isGithubPill ? (
@@ -1174,7 +1194,7 @@ function LocalProjectDetail({
   return (
     <TooltipProvider delayDuration={200}>
       <div className="flex flex-col gap-3 p-4 pt-3">
-        <div className="sticky top-0 z-10 -mx-4 -mt-3 flex min-w-0 items-start justify-between gap-2 border-b border-border/60 bg-background px-4 py-3">
+        <div className="flex min-w-0 items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <h3 className="truncate text-sm font-semibold text-foreground">{row.project.name}</h3>
             {rootPath ? (
@@ -1213,32 +1233,12 @@ function LocalProjectDetail({
               <p className="mt-1 text-[11px] text-muted-foreground">{removalStateLabel}</p>
             ) : null}
           </div>
-          {canRemove && onRemove ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-7 shrink-0 text-destructive hover:text-destructive"
-              disabled={removalState != null}
-              onClick={onRemove}
-            >
-              {t('workspace.projects.delete', 'Delete project')}
-            </Button>
-          ) : null}
         </div>
 
         <ProjectShareControl row={row} onSharedWithTeamChange={onSharedWithTeamChange} />
 
         <CompactSection title={t('workspace.projects.worktreeSetupTitle', 'Worktree')}>
           <div className="flex flex-col gap-5 p-3">
-            {!machineReachable ? (
-              <p className="text-xs text-muted-foreground">
-                {t(
-                  'workspace.projects.machineUnreachable',
-                  'This machine isn’t connected. Worktree setup and skills will load when it comes online.'
-                )}
-              </p>
-            ) : null}
             <WorktreeSetupEditor
               phase="setup"
               config={row.worktreeSetup}
