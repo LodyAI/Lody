@@ -3985,14 +3985,16 @@ export const AssistantTurnFooter = ({
           ) : null}
           {/* Icon buttons are 28px boxes around 14px glyphs, so their own 7px of
              interior padding would push the glyph 7px inside the answer text
-             above. Pull the cluster back by that padding so the outermost glyph
-             sits on the text's edge (and the inner one keeps the row gap to the
-             timestamp). Keep it on the cluster, not the row: when no buttons
-             render, the timestamp must stay on the plain gutter. Mobile pulls
-             only the trailing edge — its leading glyph aligns to the duration
-             label, not to the answer text. */}
+             above. Pull the cluster back so the outermost glyph sits on the
+             text's edge (and the inner one keeps the row gap to the timestamp).
+             Desktop uses 5px on the leading edge (2px less than the raw padding)
+             so the copy glyph aligns with the body; trailing stay 7px. Keep it
+             on the cluster, not the row: when no buttons render, the timestamp
+             must stay on the plain gutter. Mobile pulls only the trailing edge
+             — its leading glyph aligns to the duration label, not to the answer
+             text. */}
           {hasCopyableText || hasTurnConfigInfo || onFork || copyContext ? (
-            <div className={cn('flex items-center gap-0.5', isMobile ? '-mr-[7px]' : '-mx-[7px]')}>
+            <div className={cn('flex items-center gap-0.5', isMobile ? '-mr-[7px]' : '-ml-[5px] -mr-[7px]')}>
               {showStreamingContextCopy ? (
                 <TooltipProvider>
                   <Tooltip delayDuration={500}>
