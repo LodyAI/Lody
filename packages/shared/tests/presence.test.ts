@@ -76,6 +76,24 @@ describe('presence helpers', () => {
     });
   });
 
+  it('accepts a bounded running presence detail', () => {
+    const sessionKey = getLodySessionPresenceKey(sessionId, instanceId);
+    const parsed = parseLodyPresenceStates({
+      [sessionKey]: {
+        kind: 'session',
+        sessionId,
+        machineId,
+        instanceId,
+        status: { type: 'running', detail: 'Inspecting workspace' },
+        updatedAt: 120,
+      },
+    });
+
+    expect(parsed[sessionKey]).toMatchObject({
+      status: { type: 'running', detail: 'Inspecting workspace' },
+    });
+  });
+
   it('returns only fresh latest presence for a machine/session', () => {
     const freshInstance = 'instance-fresh' as LodyPresenceInstanceId;
     const staleInstance = 'instance-stale' as LodyPresenceInstanceId;

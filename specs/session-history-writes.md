@@ -49,6 +49,13 @@ That tolerance must not authorize creating new malformed items locally.
   External provider imports remain new inputs, not privileged stored-history copies.
 - Acceptance here means a local CRDT write. Existing repo persistence and transport
   still own durability, permissions, and remote synchronization.
+- Provider updates classified as transient before the history boundary must never
+  reach `HistoryWriter`. Builtin Codex `agent_thought_chunk` is one such update:
+  it may publish a bounded live status through ephemeral presence, but it creates
+  no assistant `thought` item, is absent from exports and reopens, and clears when
+  the turn's presence is cleared. This is prospective only; opening a session does
+  not scrub thought items persisted by older clients. Standard thought chunks from
+  other ACP providers retain the normal history path.
 - Tool fields other than type/toolCallId
   parse only changed fields without reparsing untouched tool payloads; outcome-only
   edits retain existing request information. Identity changes require complete item parsing;

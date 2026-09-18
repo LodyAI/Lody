@@ -2774,6 +2774,10 @@ export const SessionChatInterface = memo(
       }
       return resolveActivityFromHistory(sessionHistory);
     }, [liveSessionStatus, sessionHistory]);
+    const runningReasoningLabel =
+      session.agentType === 'codex' && liveSessionStatus?.type === 'running'
+        ? (liveSessionStatus.detail ?? null)
+        : null;
 
     const activeAssistantTurnId = useMemo(() => {
       return resolveActiveAssistantTurnId(sessionHistory);
@@ -3567,7 +3571,8 @@ export const SessionChatInterface = memo(
         : isSessionActive
           ? liveSessionStatus?.type === 'requestPermission'
             ? t('sessions.statusIndicator.requestPermission')
-            : t(`sessions.statusIndicator.${runningActivity ?? 'thinking'}`)
+            : (runningReasoningLabel ??
+              t(`sessions.statusIndicator.${runningActivity ?? 'thinking'}`))
           : hasPendingDispatch && statusStripState == null
             ? // Pre-start only while the turn can actually start: any
               // connection/machine problem (browser offline, machine removed or

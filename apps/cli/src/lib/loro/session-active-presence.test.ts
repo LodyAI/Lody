@@ -102,6 +102,28 @@ describe('SessionActivePresenceController', () => {
     );
   });
 
+  it('publishes a thinking detail only through ephemeral presence', () => {
+    const workspaceDocument = createWorkspaceDocument();
+    const controller = new SessionActivePresenceController(
+      workspaceDocument as LoroDocumentManager,
+      machineId,
+      createLogger(),
+      { intervalMs: 1_000 }
+    );
+
+    controller.start(sessionId, 'thinking');
+    controller.setPhase(sessionId, 'thinking', 'Inspecting workspace');
+
+    expect(workspaceDocument.publishSessionPresence).toHaveBeenLastCalledWith(
+      sessionId,
+      machineId,
+      SessionStatusFactory.running(undefined, 'Inspecting workspace')
+    );
+
+    controller.clear(sessionId);
+    expect(workspaceDocument.clearSessionPresence).toHaveBeenCalledWith(sessionId);
+  });
+
   it('refreshes active presence on the heartbeat interval and stops after clear', () => {
     const workspaceDocument = createWorkspaceDocument();
     const controller = new SessionActivePresenceController(
