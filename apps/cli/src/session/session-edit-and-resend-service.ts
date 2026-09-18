@@ -169,8 +169,7 @@ export class SessionEditAndResendService {
       runtime = await this.getOrRestoreRuntime(
         meta,
         spec.requestedByUserId,
-        resolveSessionMcpSelection(history),
-        spec.inputConfig.taskToolsEnabled === true
+        resolveSessionMcpSelection(history)
       );
       const agentClient = runtime.agentClient;
       oldAcpSessionId = runtime.acpSessionId;
@@ -509,8 +508,7 @@ export class SessionEditAndResendService {
   private async getOrRestoreRuntime(
     meta: SessionMeta,
     requestedByUserId: string,
-    mcpServerIds: McpServerId[],
-    taskToolsEnabled: boolean
+    mcpServerIds: McpServerId[]
   ): Promise<ISession> {
     const existing = this.deps.sessionManager.getSession(meta.id);
     if (existing) return existing;
@@ -533,7 +531,6 @@ export class SessionEditAndResendService {
         agentCliType: meta.cliType,
         agentType: meta.agentType,
         mcpServerIds,
-        taskToolsEnabled,
         customAcp: agentConfig.customAcp,
         runtimeOverrides: agentConfig.runtimeOverrides,
         env: agentConfig.env,

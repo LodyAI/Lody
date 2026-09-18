@@ -30,10 +30,7 @@ import { createHistoryWriter, type HistoryWriter } from '../history-writer';
 import type { SessionSnapshotService } from './snapshot';
 import {
   EditableTailRefusedError,
-  hasTaskProposal,
-  parseTaskProposalResolution,
   planEditableTailReplacement,
-  resolveTaskProposalOnEntry,
   type EditableTailPlan,
 } from './planner';
 import type {
@@ -396,21 +393,19 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
   const commands: SessionHistoryCommands = {
     async applyHistoryAction(action) {
       let matched = action.kind === 'user-status' && action.requeueUndelivered === true;
-      let proposal: import('./task-proposal').TaskProposalPublishResult | undefined;
       const apply = (entries: SessionHistoryInput[]) => {
         const result = applyHistoryAction(entries, action);
         matched = result.matched;
-        proposal = result.proposal;
         return result.turns;
       };
-      if (action.kind === 'operation-progress' || action.kind === 'task-proposal') {
+      if (action.kind === 'operation-progress') {
         const preview = applyHistoryAction(writer.readStored(), action);
-        if (!preview.matched) return { matched: false, proposal: preview.proposal };
+        if (!preview.matched) return { matched: false };
       }
       const target = historyActionTarget(action);
       if (target !== undefined) writer.updateEntry(target, (entry) => apply([entry])[0] ?? entry);
       else writer.update(apply);
-      return { matched, proposal };
+      return { matched };
     },
     async appendTurn(turn) {
       writer.append(turn as unknown as SessionHistory);
@@ -420,17 +415,6 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
       const commit = writer.prepareReplace(turnId, turn as unknown as SessionHistory);
       if (!commit) throw new HistoryWriteError([{ path: ['history'], code: 'not_found' }]);
       commit();
-    },
-    async resolveTaskProposal(entryId, proposalId, resolution) {
-      parseTaskProposalResolution(resolution);
-      let found = false;
-      writer.updateEntry(entryId, (entry) => {
-        if (!hasTaskProposal(entry, proposalId)) return entry;
-        resolveTaskProposalOnEntry(entry, proposalId, resolution);
-        found = true;
-        return entry;
-      });
-      return found;
     },
     async respondPermission(requestId, outcome, respondOptions) {
       parseHistoryWrite(PermissionOutcomeSchema, outcome);

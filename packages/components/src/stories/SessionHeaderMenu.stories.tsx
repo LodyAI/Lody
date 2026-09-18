@@ -99,3 +99,18 @@ export const OwnerTransferPending: Story = {
   globals: { theme: 'dark' },
   args: { owner: { ...ownerMenuState, pendingUserId: 'user-teammate' } },
 };
+
+export const OpenInIde: Story = {
+  globals: { theme: 'dark' },
+  args: {
+    openInIde: {
+      options: [
+        { kind: 'builtin', id: 'vscode', label: 'VS Code' },
+        { kind: 'builtin', id: 'cursor', label: 'Cursor' },
+      ],
+      selected: { kind: 'builtin', id: 'vscode', label: 'VS Code' },
+      onOpen: fn(),
+      onSelect: fn(),
+    },
+  },
+};

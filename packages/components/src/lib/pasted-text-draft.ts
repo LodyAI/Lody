@@ -1,4 +1,5 @@
 import type { TextRewrite } from '@lody/shared';
+import { getExpandedClipboardTextForSelection } from '@/lib/composer-clipboard';
 
 export interface PastedTextDraft {
   id: string;
@@ -271,54 +272,13 @@ export const getPastedTextClipboardTextForSelection = ({
   drafts: readonly PastedTextDraft[];
   selectionStart: number | null;
   selectionEnd: number | null;
-}): string | null => {
-  const safeStart = Math.max(0, Math.min(selectionStart ?? 0, value.length));
-  const safeEnd = Math.max(safeStart, Math.min(selectionEnd ?? safeStart, value.length));
-
-  if (safeStart === safeEnd) {
-    return null;
-  }
-
-  const sortedDrafts = sanitizePastedTextDrafts(drafts);
-  let cursor = safeStart;
-  let clipboardText = '';
-  let expandedDraftCount = 0;
-
-  for (const draft of sortedDrafts) {
-    if (draft.start >= safeEnd) {
-      break;
-    }
-
-    if (
-      draft.start < 0 ||
-      draft.end <= draft.start ||
-      draft.end > value.length ||
-      draft.end <= safeStart ||
-      draft.end <= cursor
-    ) {
-      continue;
-    }
-
-    if (draft.start < cursor && cursor !== safeStart) {
-      continue;
-    }
-
-    if (draft.start > cursor) {
-      clipboardText += value.slice(cursor, Math.min(draft.start, safeEnd));
-    }
-
-    clipboardText += normalizePastedTextDraft(draft.text);
-    expandedDraftCount += 1;
-    cursor = Math.max(cursor, Math.min(draft.end, safeEnd));
-  }
-
-  if (expandedDraftCount === 0) {
-    return null;
-  }
-
-  clipboardText += value.slice(cursor, safeEnd);
-  return clipboardText;
-};
+}): string | null =>
+  getExpandedClipboardTextForSelection({
+    value,
+    selectionStart,
+    selectionEnd,
+    rewrites: buildPastedTextRewrites(sanitizePastedTextDrafts(drafts)),
+  });
 
 export const arePastedTextDraftsEqual = (
   current: readonly PastedTextDraft[],

@@ -11,7 +11,6 @@ import {
   Folder,
   GitBranch,
   Github,
-  ListTodo,
   Pause,
   Play,
   Target,
@@ -60,43 +59,6 @@ import { PrMergeButton, PrMergeMethodLabel } from './pr-merge-button';
 export type InfoBarItemMode = { mode: 'cluster'; onPromote: () => void } | { mode: 'stage' };
 
 /* ── Status (offline / removed) ──────────────────────────────────────── */
-
-/**
- * The task this session belongs to.
- *
- * Ambient and neutral like the other context chips — a task link is not a status,
- * so it carries no semantic colour. Its one job is being the way back to the task
- * from inside the work.
- */
-export function TaskChip({
-  title,
-  onOpen,
-  ...itemMode
-}: { title: string; onOpen?: (() => void) | undefined } & InfoBarItemMode) {
-  const { t } = useTranslation();
-  const label = title.trim() || t('tasks.untitled', 'Untitled task');
-
-  if (itemMode.mode === 'cluster') {
-    return (
-      <ClusterChip
-        icon={ListTodo}
-        label={label}
-        textClassName="text-muted-foreground"
-        onPromote={itemMode.onPromote}
-      />
-    );
-  }
-
-  return (
-    <StageChip
-      icon={ListTodo}
-      label={label}
-      textClassName="text-muted-foreground"
-      summary={label}
-      {...(onOpen ? { detail: { kind: 'action', onAction: onOpen, ariaLabel: label } } : {})}
-    />
-  );
-}
 
 export function StatusChip({
   state,

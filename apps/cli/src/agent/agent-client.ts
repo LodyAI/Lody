@@ -40,6 +40,9 @@ import {
   getServerNow,
   ACP_INIT_TIMEOUT_MS as DEFAULT_ACP_INIT_TIMEOUT_MS,
   ACP_NEW_SESSION_TIMEOUT_MS as DEFAULT_ACP_NEW_SESSION_TIMEOUT_MS,
+  getDevinSubagentContextId,
+  hasOtherDevinSubagentMeta,
+  parseDevinSubagentTaskMeta,
 } from '@lody/shared';
 import { getLocalControlSocketPath } from '@lody/shared/node/local-ipc';
 import { getLodyMcpHttpEndpoint } from '@/mcp/lody-mcp-http-server';
@@ -573,8 +576,6 @@ export interface AgentClientOptions {
   };
   /** Config selected before ACP session establishment. */
   configOptionValues?: SessionTurnInputConfig['configOptionValues'];
-  /** Whether this Agent session mounts the built-in Lody Task MCP tools. */
-  taskToolsEnabled?: boolean;
   /** Launcher family (npx/uvx/local) for ACP startup analytics; non-PII. */
   launcher?: AcpLauncher;
   /**
@@ -626,6 +627,7 @@ export class AgentClient implements acp.Client {
   private supportsFork = false;
   private supportsForkAtTurn = false;
   private lodyExtensionCapabilities: LodyExtensionCapabilities = {};
+  private readonly devinSubagentTaskIds = new Set<string>();
   private worktreeProject?: LodyWorktreeProject;
   private authMethods: acp.AuthMethod[] = [];
   private authenticationRequired = false;
@@ -693,7 +695,6 @@ export class AgentClient implements acp.Client {
               workspaceId: this.options.workspaceId,
               machineId: this.options.machineId,
               workdir,
-              taskToolsEnabled: this.options.taskToolsEnabled === true,
             }),
           },
         ];
@@ -710,10 +711,6 @@ export class AgentClient implements acp.Client {
       { name: 'LODY_MCP_MACHINE_ID', value: this.options.machineId },
       { name: 'LODY_MCP_SOCKET_PATH', value: getLocalControlSocketPath() },
       { name: 'LODY_MCP_WORKDIR', value: workdir },
-      {
-        name: 'LODY_MCP_TASK_TOOLS_ENABLED',
-        value: this.options.taskToolsEnabled === true ? '1' : '0',
-      },
     ];
 
     // ACP MCP config is an explicit environment allowlist. The MCP subprocess
@@ -903,6 +900,35 @@ export class AgentClient implements acp.Client {
       return;
     }
     this.lastSessionUpdateAtMs = Date.now();
+
+    // Devin publishes subagent internals under `cognition.ai/subagent_context`.
+    // Non-tool internals are dropped here, before usage/config/title side
+    // consumers and the transcript see them; tool updates continue so their
+    // edit evidence and permission-requested rows still resolve in history.
+    // Register only a lifecycle row that can itself materialize as a task —
+    // a malformed marker on a non-tool update must not make the applier's
+    // fail-open (no task row → keep internals visible) unreachable.
+    const isToolUpdate =
+      params.update.sessionUpdate === 'tool_call' ||
+      params.update.sessionUpdate === 'tool_call_update';
+    const devinLifecycle = parseDevinSubagentTaskMeta(params.update._meta);
+    if (
+      devinLifecycle !== null &&
+      isToolUpdate &&
+      'toolCallId' in params.update &&
+      params.update.toolCallId.length > 0
+    ) {
+      this.devinSubagentTaskIds.add(devinLifecycle.taskId);
+    }
+    const devinSubagentOwnerId = getDevinSubagentContextId(params.update._meta);
+    const isDevinSubagentInternal =
+      devinSubagentOwnerId !== null &&
+      this.devinSubagentTaskIds.has(devinSubagentOwnerId) &&
+      !hasOtherDevinSubagentMeta(params.update._meta);
+    if (isDevinSubagentInternal && !isToolUpdate) {
+      return;
+    }
+
     if (this.handleUsageUpdate(params.update)) {
       // Usage telemetry is handled outside persisted chat history and remains
       // soft-validated so malformed telemetry cannot break the session stream.
@@ -1628,6 +1654,18 @@ export class AgentClient implements acp.Client {
       : undefined;
   }
 
+  /**
+   * Devin CLI keeps its subagent lifecycle/attribution notifications behind a
+   * private `cognition.ai/*` capability bit; without it, subagents surface only
+   * as instantly-completed `run_subagent`/`read_subagent` tool calls. See
+   * `devin-subagent-task.ts` for the matching `_meta` readers.
+   */
+  private getDevinClientCapabilitiesMeta(): Record<string, unknown> | undefined {
+    return this.options.agentConfig?.agentType === 'devin'
+      ? { 'cognition.ai/subagentSupport': true }
+      : undefined;
+  }
+
   private getSessionStartMeta(forkSessionTurnId?: string) {
     const clientIdentifier = this.getGrokClientIdentifier();
     const lody = {
@@ -1733,6 +1771,7 @@ export class AgentClient implements acp.Client {
     const connection = new acp.ClientSideConnection(() => this, stream);
     this.connection = connection;
     const grokClientIdentifier = this.getGrokClientIdentifier();
+    const devinClientCapabilitiesMeta = this.getDevinClientCapabilitiesMeta();
     this.worktreeProject = undefined;
     this.logger.debug(
       `[${this.options.sessionId}] Starting ACP client (workdir=${workdir} resumeSessionId=${
@@ -1809,6 +1848,9 @@ export class AgentClient implements acp.Client {
               elicitation: {
                 form: {},
               },
+              ...(devinClientCapabilitiesMeta !== undefined
+                ? { _meta: devinClientCapabilitiesMeta }
+                : {}),
             },
           }),
           startupAbort
@@ -2196,6 +2238,7 @@ export class AgentClient implements acp.Client {
     });
 
     this.acpSessionId = sessionResponse.sessionId;
+    this.devinSubagentTaskIds.clear();
     this.logger.debug(
       `[${this.options.sessionId}] ACP session id set: ${sessionResponse.sessionId}`
     );
@@ -2266,6 +2309,7 @@ export class AgentClient implements acp.Client {
   adoptPreparedSession(sessionResponse: acp.NewSessionResponse): void {
     this.applySessionResponseState(sessionResponse);
     this.acpSessionId = sessionResponse.sessionId;
+    this.devinSubagentTaskIds.clear();
     this.authenticationRequired = false;
     this.logger.debug(
       `[${this.options.sessionId}] Adopted replacement ACP session: ${sessionResponse.sessionId}`

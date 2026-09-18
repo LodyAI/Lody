@@ -31,10 +31,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   allowlist, never inheritance: keep `LODY_AUTH_URL`, `LODY_AUTH_SITE_URL`, and
   `LODY_SERVER_URL` so cloud MCP orchestration uses the daemon's deployment, let local platform
   assembly clear them before agent startup, and never add CLI credentials or secrets.
-- Pass the same MCP config on initial and replacement DeepSeek Harness sessions, and preserve
-  the driving Turn's `taskToolsEnabled` bit (HTTP header or stdio allowlisted env) across
-  replacement and restored sessions; missing/false keeps the server mounted but drops every
-  `lody_task_*` tool.
+- Pass the same MCP config on initial and replacement DeepSeek Harness sessions.
 - Workspace MCP resolution stays TWO phases: call `loadExternalMcpServers` BEFORE `initialize`,
   never between `initialize` and `newSession`.
 - Acknowledged steer ends `applied`, `not-applied`, or `unknown`. Only adapter proof maps

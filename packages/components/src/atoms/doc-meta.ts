@@ -116,7 +116,6 @@ const SESSION_LIST_VISIBLE_KEYS: readonly (keyof SessionMeta)[] = [
   'openedByRootSessionId',
   'latestUserMsgId',
   'awaitingUserSince',
-  'taskId',
   'lastCanceledTurn',
 ] as const;
 const DOC_META_EVENT_FLUSH_BATCH_SIZE = 50;

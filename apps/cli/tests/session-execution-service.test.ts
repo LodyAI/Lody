@@ -2653,7 +2653,7 @@ describe('SessionExecutionService', () => {
       invocation: {
         sourceTurnId: 'turn-prepared-presence',
         requesterUserId: 'user-b',
-        inputConfig: { prompt: 'fast path prompt', taskToolsEnabled: true },
+        inputConfig: { prompt: 'fast path prompt' },
       },
       dispatchSource: 'rpc',
       accessPromise,
@@ -2679,7 +2679,7 @@ describe('SessionExecutionService', () => {
     expect(service.getActiveInvocationContext('session-prepared-presence' as SessionId)).toEqual({
       requesterUserId: 'user-b',
       sourceTurnId: 'turn-prepared-presence',
-      inputConfig: { prompt: 'fast path prompt', taskToolsEnabled: true },
+      inputConfig: { prompt: 'fast path prompt' },
     });
     expect(onAccessAllowed).not.toHaveBeenCalled();
 

@@ -5,7 +5,6 @@ import { createMcpHttpServer } from './lody-mcp-http-host';
 import {
   MCP_HTTP_MACHINE_ID_HEADER,
   MCP_HTTP_SESSION_ID_HEADER,
-  MCP_HTTP_TASK_TOOLS_ENABLED_HEADER,
   MCP_HTTP_WORKDIR_B64_HEADER,
   MCP_HTTP_WORKSPACE_ID_HEADER,
 } from './lody-mcp-http-protocol';
@@ -38,7 +37,6 @@ const sessionContextHeaders = (): Record<string, string> => ({
   [MCP_HTTP_SESSION_ID_HEADER]: 'session-under-test',
   [MCP_HTTP_WORKSPACE_ID_HEADER]: 'workspace-under-test',
   [MCP_HTTP_MACHINE_ID_HEADER]: 'machine-under-test',
-  [MCP_HTTP_TASK_TOOLS_ENABLED_HEADER]: '0',
   [MCP_HTTP_WORKDIR_B64_HEADER]: Buffer.from('/tmp/workdir', 'utf8').toString('base64url'),
 });
 

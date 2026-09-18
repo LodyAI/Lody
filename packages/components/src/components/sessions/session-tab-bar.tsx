@@ -37,6 +37,7 @@ import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import { isSessionTabClosed } from '@/lib/session-tab-url';
 import { TAB_PILL_ACTIVE_CLASS, TAB_PILL_INACTIVE_CLASS } from '@/components/shared/tab-pill-strip';
 import { AdaptiveTabStrip, AdaptiveTabStripItem } from './adaptive-tab-strip';
+import { SESSION_PAGE_CONTAINER_CLASS } from './session-conversation-page';
 import {
   armSessionMentionDrag,
   clearSessionMentionDrag,
@@ -759,7 +760,14 @@ export const SessionTabBar = memo(function SessionTabBar({
   ) : null;
 
   return (
-    <div className={cn('flex min-w-0 items-center bg-background', windowDragClass, className)}>
+    <div
+      className={cn(
+        SESSION_PAGE_CONTAINER_CLASS,
+        'flex min-w-0 items-center bg-background',
+        windowDragClass,
+        className
+      )}
+    >
       {leftSlot ? (
         <div
           className={cn(

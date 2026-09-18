@@ -49,6 +49,9 @@ const launchLocalPath = vi.fn(
     launched: true,
   })
 );
+const probePathLaunchers = vi.fn(async (payload: { launchers: Array<{ launcherId: string }> }) => ({
+  availableIds: payload.launchers.map((launcher) => launcher.launcherId),
+}));
 let bridgeAvailable = true;
 const writeTextToClipboard = vi.fn(async (_text: string) => true);
 vi.mock('../src/lib/clipboard', () => ({
@@ -56,7 +59,9 @@ vi.mock('../src/lib/clipboard', () => ({
 }));
 vi.mock('../src/lib/electron-ipc-client', () => ({
   getIpcServices: () =>
-    bridgeAvailable ? { app: { revealLocalPath, openLocalPath, launchLocalPath } } : null,
+    bridgeAvailable
+      ? { app: { revealLocalPath, openLocalPath, launchLocalPath, probePathLaunchers } }
+      : null,
 }));
 
 const toastError = vi.fn();
@@ -275,7 +280,10 @@ describe('local-host actions vs a resolvable host path', () => {
     bridgeAvailable = true;
     toastError.mockClear();
     revealLocalPath.mockClear();
+    openLocalPath.mockClear();
     launchLocalPath.mockClear();
+    probePathLaunchers.mockClear();
+    writeTextToClipboard.mockClear();
     vi.spyOn(console, 'error').mockImplementation(() => {});
     localMachineId = session.machineId;
     localHomeDir = '/home/dev';
@@ -314,6 +322,9 @@ describe('local-host actions vs a resolvable host path', () => {
     await act(async () => {
       root?.render(createElement(Provider, null, createElement(Probe)));
     });
+    await act(async () => {
+      await Promise.resolve();
+    });
     if (!actions) throw new Error('hook did not render');
     return actions;
   };
@@ -345,11 +356,69 @@ describe('local-host actions vs a resolvable host path', () => {
     expect(openLocalPath).toHaveBeenLastCalledWith(artifact);
   });
 
+  it('offers the complete local Markdown-link menu and removes line anchors before IPC', async () => {
+    const actions = await resolveActions();
+    const items = actions.buildMarkdownLinkMenuItems('/tmp/build/Lody.zip:366');
+    expect(items.map((item) => item.id)).toEqual([
+      'copy-path',
+      'open-file',
+      'open-in-editor',
+      'open-with',
+      'reveal',
+    ]);
+
+    const action = (id: string) => {
+      const item = items.find((candidate) => candidate.id === id);
+      if (!item || item.kind !== 'action') throw new Error(`Missing action: ${id}`);
+      return item;
+    };
+    await act(async () => {
+      action('copy-path').run();
+      action('open-file').run();
+      action('open-in-editor').run();
+      await Promise.resolve();
+    });
+    expect(writeTextToClipboard).toHaveBeenLastCalledWith('/tmp/build/Lody.zip');
+    expect(openLocalPath).toHaveBeenLastCalledWith('/tmp/build/Lody.zip');
+    expect(launchLocalPath).toHaveBeenLastCalledWith(
+      expect.objectContaining({ targetPath: '/tmp/build/Lody.zip' })
+    );
+
+    const openWith = items.find((item) => item.id === 'open-with');
+    if (!openWith || openWith.kind !== 'submenu') throw new Error('Missing Open with submenu');
+    expect(openWith.items.length).toBeGreaterThan(0);
+    await act(async () => {
+      openWith.items[0]?.run();
+      action('reveal').run();
+      await Promise.resolve();
+    });
+    expect(launchLocalPath).toHaveBeenLastCalledWith(
+      expect.objectContaining({ targetPath: '/tmp/build/Lody.zip' })
+    );
+    expect(revealLocalPath).toHaveBeenLastCalledWith('/tmp/build/Lody.zip');
+  });
+
   it('does not offer local shell actions for an absolute remote path', async () => {
     localMachineId = 'another-machine';
     const actions = await resolveActions();
     expect(actions.buildErrorActions('/tmp/build/Lody.zip')?.localHost).toBeUndefined();
     expect(actions.menuItems.some((item) => item.id === 'reveal')).toBe(false);
+  });
+
+  it('offers only Copy Path for Markdown links outside the local Electron boundary', async () => {
+    localMachineId = 'another-machine';
+    const actions = await resolveActions();
+    const items = actions.buildMarkdownLinkMenuItems('/tmp/build/Lody.zip:366');
+    expect(items.map((item) => item.id)).toEqual(['copy-path']);
+    await act(async () => {
+      const item = items[0];
+      if (item?.kind === 'action') item.run();
+      await Promise.resolve();
+    });
+    expect(writeTextToClipboard).toHaveBeenLastCalledWith('/tmp/build/Lody.zip');
+    expect(openLocalPath).not.toHaveBeenCalled();
+    expect(revealLocalPath).not.toHaveBeenCalled();
+    expect(launchLocalPath).not.toHaveBeenCalled();
   });
 
   it('reports a reveal IPC failure without claiming an application is missing', async () => {

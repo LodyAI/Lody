@@ -157,45 +157,31 @@ describe('isMessageContent', () => {
 });
 
 describe('shouldRenderSystemRowItem', () => {
-  const enabled = true;
-  const disabled = false;
-
-  it('renders the four system row types regardless of the Tasks beta', () => {
-    for (const tasksEnabled of [enabled, disabled]) {
-      expect(shouldRenderSystemRowItem({ type: 'system_notice' }, tasksEnabled)).toBe(true);
-      expect(shouldRenderSystemRowItem({ type: 'worktree_script' }, tasksEnabled)).toBe(true);
-      expect(shouldRenderSystemRowItem({ type: 'operation_completion' }, tasksEnabled)).toBe(true);
-      expect(shouldRenderSystemRowItem({ type: 'operation_progress' }, tasksEnabled)).toBe(true);
-    }
+  it('renders the four system row types', () => {
+    expect(shouldRenderSystemRowItem({ type: 'system_notice' })).toBe(true);
+    expect(shouldRenderSystemRowItem({ type: 'worktree_script' })).toBe(true);
+    expect(shouldRenderSystemRowItem({ type: 'operation_completion' })).toBe(true);
+    expect(shouldRenderSystemRowItem({ type: 'operation_progress' })).toBe(true);
   });
 
   it('never renders item types that are not system rows', () => {
-    for (const tasksEnabled of [enabled, disabled]) {
-      expect(shouldRenderSystemRowItem({ type: 'text' }, tasksEnabled)).toBe(false);
-      expect(shouldRenderSystemRowItem({ type: 'tool_call' }, tasksEnabled)).toBe(false);
-      expect(shouldRenderSystemRowItem({ type: 'image_group' }, tasksEnabled)).toBe(false);
-    }
+    expect(shouldRenderSystemRowItem({ type: 'text' })).toBe(false);
+    expect(shouldRenderSystemRowItem({ type: 'tool_call' })).toBe(false);
+    expect(shouldRenderSystemRowItem({ type: 'image_group' })).toBe(false);
   });
 
-  it('drops an agent task proposal only while the Tasks beta is off', () => {
-    const proposal = { type: 'system_notice', name: 'task_proposal' };
-    expect(shouldRenderSystemRowItem(proposal, enabled)).toBe(true);
-    expect(shouldRenderSystemRowItem(proposal, disabled)).toBe(false);
+  it('drops leftover agent task proposals', () => {
+    expect(shouldRenderSystemRowItem({ type: 'system_notice', name: 'task_proposal' })).toBe(false);
   });
 
-  it('keeps other named system notices when the Tasks beta is off', () => {
-    // The gate must remove the task proposal and nothing else — this is the
-    // case that would silently swallow unrelated notices if the condition were
-    // mis-inverted.
+  it('keeps other named system notices', () => {
     expect(
-      shouldRenderSystemRowItem(
-        { type: 'system_notice', name: 'resume_from_external_chat_history' },
-        disabled
-      )
+      shouldRenderSystemRowItem({
+        type: 'system_notice',
+        name: 'resume_from_external_chat_history',
+      })
     ).toBe(true);
-    expect(shouldRenderSystemRowItem({ type: 'system_notice', name: undefined }, disabled)).toBe(
-      true
-    );
+    expect(shouldRenderSystemRowItem({ type: 'system_notice', name: undefined })).toBe(true);
   });
 });
 

@@ -339,14 +339,49 @@ const REMOTE_REGISTRY_ACP_AGENTS: RegistryAcpAgent[] = [
     description: 'Devin CLI coding agent by Cognition',
     icon: 'https://cdn.agentclientprotocol.com/registry/v1/latest/devin.svg',
     distribution: {
-      local: {
-        command: 'devin',
-        args: [
-          'acp'
-        ],
-        versionArgs: [
-          '--version'
-        ]
+      binary: {
+        'darwin-aarch64': {
+          archive: 'https://static.devin.ai/cli/3000.10.21/devin-3000.10.21-aarch64-apple-darwin.tar.gz',
+          cmd: './bin/devin',
+          args: [
+            'acp'
+          ]
+        },
+        'darwin-x86_64': {
+          archive: 'https://static.devin.ai/cli/3000.10.21/devin-3000.10.21-x86_64-apple-darwin.tar.gz',
+          cmd: './bin/devin',
+          args: [
+            'acp'
+          ]
+        },
+        'linux-aarch64': {
+          archive: 'https://static.devin.ai/cli/3000.10.21/devin-3000.10.21-aarch64-unknown-linux.tar.gz',
+          cmd: './bin/devin',
+          args: [
+            'acp'
+          ]
+        },
+        'linux-x86_64': {
+          archive: 'https://static.devin.ai/cli/3000.10.21/devin-3000.10.21-x86_64-unknown-linux.tar.gz',
+          cmd: './bin/devin',
+          args: [
+            'acp'
+          ]
+        },
+        'windows-aarch64': {
+          archive: 'https://static.devin.ai/cli/3000.10.21/devin-3000.10.21-aarch64-pc-windows.zip',
+          cmd: './bin\\devin.exe',
+          args: [
+            'acp'
+          ]
+        },
+        'windows-x86_64': {
+          archive: 'https://static.devin.ai/cli/3000.10.21/devin-3000.10.21-x86_64-pc-windows.zip',
+          cmd: './bin\\devin.exe',
+          args: [
+            'acp'
+          ]
+        }
       }
     }
   },

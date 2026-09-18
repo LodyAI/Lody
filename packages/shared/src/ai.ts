@@ -1278,10 +1278,8 @@ export type MessageItemActor = {
 };
 
 /**
- * Metadata for the task_proposal system notice: an agent suggesting that work
- * be recorded as a task. The notice stays in history unresolved, so a proposal
- * ignored today can still be confirmed days later — unlike a dialog, which
- * would vanish while the session ran unattended.
+ * Leftover metadata for stored `task_proposal` system notices. The Tasks
+ * product is gone; this shape exists only so existing history still parses.
  */
 export type TaskProposalMeta = {
   /** Stable id so repeated proposals of the same work do not stack up. */
@@ -1702,8 +1700,6 @@ export type ACPSessionConfig = {
   configOptionValues?: Record<string, AcpConfigOptionValue>;
   /** Workspace MCP catalog ids selected for this session. */
   mcpServerIds?: McpServerId[];
-  /** Whether the built-in Lody Task MCP tools are available to this Turn's Agent session. */
-  taskToolsEnabled?: boolean;
   /**
    * Agent Role identity selected in the composer for this Turn. Null is an
    * explicit None selection; absence is legacy/unknown. This is provenance for

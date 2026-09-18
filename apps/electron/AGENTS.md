@@ -113,6 +113,11 @@ contracts, and window/renderer integration rules live in
 
 ## Verification
 
+- Cloud browser login is owned by main: PKCE attempts, callback exchange and replay
+  handling must not depend on a renderer. Organization failures never roll back
+  authentication. Windows subscribe then read revisioned snapshots. Contract:
+  [desktop browser login](../../specs/desktop-browser-login.md).
+
 - Run the repository checks after source changes. Packaging/native-dependency changes
   also require the Electron packaging probes for every affected target architecture.
 - Do not replace deterministic probes with launch sleeps or retry-only tests.

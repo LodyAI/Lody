@@ -39,12 +39,12 @@ alone never selects an archive target.
 
 ## Operation contract
 
-| Operation                           | Targets                                                                                         | Metadata readiness                                                             |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Archive a Session                   | The selected Session and recursive descendants through containment and precise opened-by links. | Reject before mutation while the client metadata cache is incomplete.          |
-| Restore a Session                   | The selected Session and the same direct children.                                              | Target discovery must use complete metadata.                                   |
-| Permanently delete an archived root | The selected Session and the same direct children.                                              | Reject before mutation unless the metadata set used for discovery is complete. |
-| Delete exact Session ids            | Exactly the ids supplied by the caller.                                                         | Must not wait for global metadata hydration or discover additional Sessions.   |
+| Operation                           | Targets                                                                                         | Metadata readiness                                                           |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| Archive a Session                   | The selected Session and recursive descendants through containment and precise opened-by links. | Read one ready Repo metadata snapshot, independent of the UI projection.     |
+| Restore a Session                   | The selected Session and the same direct children.                                              | Read one ready Repo metadata snapshot, independent of the UI projection.     |
+| Permanently delete an archived root | The selected Session and the same direct children.                                              | Read one ready Repo metadata snapshot, independent of the UI projection.     |
+| Delete exact Session ids            | Exactly the ids supplied by the caller.                                                         | Must not wait for global metadata hydration or discover additional Sessions. |
 
 Every side effect follows the same target set as the state or document operation.
 Terminal closure, machine commands and queues, launch-config removal, and worktree
@@ -76,25 +76,33 @@ Archived and active lists may use opened-by provenance to group or indent Sessio
 List filtering, pinning and collapse state do not change archive targets. Presentation
 must not expand the target set of restore or deletion.
 
-## Scope and implementation gap
+## Readiness, lifetime, and failure
+
+Root validation and target discovery use the same live Session metadata snapshot.
+Document room ids define identity; deleted entries are excluded. Failed reads and
+missing or deleted roots reject before writes or terminal closure, without a UI-cache
+fallback. UI metadata readiness is a presentation concern, not a discovery boundary.
+
+The runtime must have completed initial synchronization with its selected metadata
+source. Desktop local operations use the local data plane and do not require cloud
+connectivity. CLI archive, restore, and delete require successful synchronization
+before discovery, including when initialization continued in degraded mode.
+
+An action captures its runtime and checks it is still current before the first write.
+Once writes begin, the action retains that runtime and target set. This guarantees
+the observed Repo snapshot, not completeness across disconnected replicas or an
+atomic barrier against later creation. Exact deletion and ordinary Tab closure do
+not require this discovery boundary.
+
+Archive writes are idempotent but not transactional. A failed write surfaces an error
+and may leave earlier targets archived; retrying an already archived root rediscovers
+descendants. Accepted archive writes retain runtime shutdown and worktree cleanup.
+Terminal closure follows each accepted write and is best-effort; metadata rollback
+cannot undo resource shutdown. Permanent deletion processes children before the root.
 
 This Spec does not define worker supervision, status or result aggregation, unread or
 permission routing, worker panels, settle, or handoff behavior. Those product choices
 remain separate in [#529](https://github.com/LodyAI/Lody/issues/529).
-
-Archive requires a complete client metadata cache before any write. CLI archive
-additionally requires successful metadata synchronization before root
-validation and target discovery, including when initialization continued in degraded mode.
-This is a synchronized snapshot guarantee, not an atomic barrier against later creation.
-Repeating archive
-on an already archived root still discovers and archives descendants. Writes are
-idempotent but not transactional; a failed write surfaces an error and can be retried.
-Each archived Session retains the existing runtime shutdown and worktree cleanup behavior.
-
-Restore still discovers direct children from a client metadata cache that can be
-incomplete while Session Detail is interactive. It can miss a child during hydration.
-[#574](https://github.com/LodyAI/Lody/issues/574) tracks the required readiness or
-complete-query fix.
 
 ## Evidence
 
@@ -104,7 +112,8 @@ cleanup live in
 [`use-session-actions.ts`](../packages/components/src/hooks/use-session-actions.ts),
 and reverse-navigation resolution lives in
 [`session-navigation.ts`](../packages/components/src/lib/session-navigation.ts).
-CLI direct-child selection and the nested-child rejection are in
+The shared [snapshot reader](../packages/shared/src/session-operation-targets.ts)
+owns target discovery for both clients. CLI synchronization and nested-child rejection are in
 [`session.ts`](../apps/cli/src/commands/session.ts). Behavioral coverage is in
 [`use-session-actions.test.ts`](../packages/components/tests/use-session-actions.test.ts)
 and
@@ -113,3 +122,6 @@ and
 The containment-only baseline was implemented by #569. The
 [archive descendants decision](../.agents/notes/implemented/bug-fix/2026-09-13-session-archive-descendants.md)
 supersedes its archive target rule. This revised contract remains a draft.
+The [Repo snapshot decision](../.agents/notes/implemented/architecture/2026-09-17-session-operation-metadata-snapshots.md)
+addresses [#574](https://github.com/LodyAI/Lody/issues/574)'s discovery gap without
+changing those relation rules.

@@ -221,6 +221,7 @@ function StoryShell({
           <DesktopRunConfigMenu
             agentSelection={machineSelected ? { agentId: codexId, machineId } : null}
             allowedMachineIds={machineSelected ? [machineId] : []}
+            availableAgentConfigs={agents}
             disabledReason={machineSelected ? undefined : 'Select a machine first'}
             agentLocked={!isEmptyConversation}
             onAgentConfigChange={fn()}

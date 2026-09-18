@@ -6,7 +6,11 @@ import { Spinner } from '@/ui/spinner';
 import { usePostHog } from '@posthog/react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import isEmail from 'validator/lib/isEmail';
-import { electronDeepLinkSignInInProgressAtom, nativeSignInInProgressAtom } from '@/atoms';
+import {
+  electronLoginErrorAtom,
+  electronLoginPhaseAtom,
+  nativeSignInInProgressAtom,
+} from '@/atoms';
 import { Button } from '@/ui/button';
 import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
@@ -592,11 +596,11 @@ export function LoginPage({
   // cookie still set), and must not produce a handoff link afterwards.
   const electronAccountGenerationRef = useRef(0);
   const autoOpenedElectronHandoffRef = useRef<string | null>(null);
-  // Set the instant the browser hands the auth token back via the `lody://auth/
-  // callback#token=…` deep link (detected centrally in DesktopDeepLinkRouter), so
-  // the desktop login shows a "signing in" spinner while better-auth exchanges
-  // the token for a session.
-  const isCompletingElectronSignIn = useAtomValue(electronDeepLinkSignInInProgressAtom);
+  // Main owns the callback exchange; restored snapshots also recover progress
+  // when this renderer mounts after the browser has returned.
+  const electronLoginPhase = useAtomValue(electronLoginPhaseAtom);
+  const electronLoginError = useAtomValue(electronLoginErrorAtom);
+  const isCompletingElectronSignIn = electronLoginPhase === 'exchanging';
   const setNativeSignInInProgress = useSetAtom(nativeSignInInProgressAtom);
   const [providerContentWidth, setProviderContentWidth] = useState<number | null>(null);
   const providerLabelMeasureRef = useRef<HTMLDivElement | null>(null);
@@ -643,7 +647,11 @@ export function LoginPage({
     getAppWindowSearchParams().get('expired') === '1'
       ? t('login.sessionExpired', 'Login expired. Please sign in again.')
       : '';
-  const effectiveError = error || expiredMessage;
+  const desktopLoginError =
+    isElectronRendererLogin && electronLoginError
+      ? t(`login.desktopErrors.${electronLoginError}`)
+      : '';
+  const effectiveError = error || desktopLoginError || expiredMessage;
   const isAnyLoading =
     loadingProvider !== null ||
     isEmailSubmitting ||
@@ -1737,10 +1745,12 @@ export function LoginPage({
         />
       </Button>
       <p className="text-center text-xs leading-5 text-muted-foreground">
-        {t(
-          'login.desktopBrowserHint',
-          'Your browser will return you to Lody Desktop after sign-in.'
-        )}
+        {electronLoginPhase === 'waiting'
+          ? t('login.desktopWaiting')
+          : t(
+              'login.desktopBrowserHint',
+              'Your browser will return you to Lody Desktop after sign-in.'
+            )}
       </p>
       {isDevElectronEmailPasswordLoginEnabled ? (
         <Button

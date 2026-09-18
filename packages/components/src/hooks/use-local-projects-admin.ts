@@ -32,6 +32,7 @@ import { localMachineIdAtom } from '@/atoms/local-probe';
 import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
 import { useAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
 import { useVisibleLocalProjects } from '@/hooks/use-visible-local-projects';
+import { getLocalProjectVisibilityKey } from '@/lib/visible-local-project-index';
 import { useConvexErrorMessage } from '@/hooks/use-convex-error-message';
 import {
   canUseProjectHistoryProjectControl,
@@ -43,6 +44,7 @@ import { reconcileLocalProjectHistoryCatalog } from '@/lib/local-project-history
 import { worktreeCleanupConfigCache, worktreeSetupConfigCache } from '@/lib/local-storage-cache';
 import { projectSharingReducer } from '@/lib/project-sharing-state';
 import { useAppCapability } from '@/lib/app-platform';
+import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
 import type {
   ProjectHistoryImportState,
   ProjectSettingsRow,
@@ -186,6 +188,7 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
   const currentUserId = useAtomValue(userAtom)?.id ?? null;
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const localMachineId = useAtomValue(localMachineIdAtom);
+  const onlineMachineIds = useOnlineMachineIds();
   const { isAuthenticated, isLoading: isConvexAuthLoading } = useAuthenticatedConvex();
   /* Read the raw runtime, NOT `activeWorkspaceRuntimeAtom`.
      `activeWorkspaceRuntimeAtom` returns `null` whenever the route's
@@ -200,7 +203,7 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
   const runtime = useAtomValue(runtimeAtom);
   const agentConfigs = useAtomValue(getAllAgentConfigAtom);
   const sessionMetas = useAtomValue(sessionMetaCacheAtom);
-  const { projects, accessByProjectKey, isLoading } = useVisibleLocalProjects();
+  const { projects, accessByProjectKey, accessByMachineId, isLoading } = useVisibleLocalProjects();
   const getConvexErrorMessage = useConvexErrorMessage();
   // Team sharing is cloud-only; on the local platform the sharing controls are
   // hidden and canUpdateSharing stays false as a logic-gate.
@@ -262,9 +265,14 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
   useEffect(() => {
     if (!runtime || !workspaceId || !currentUserId) return;
     if (typeof window !== 'undefined' && window.__LODY_ELECTRON__ && !localMachineId) return;
-    const ownedEntries = Array.from(projects.values()).filter(
-      (entry) => entry.machine.ownerUserId === currentUserId
-    );
+    const ownedEntries = Array.from(projects.values()).filter((entry) => {
+      if (entry.machine.ownerUserId !== currentUserId) return false;
+      // Offline remotes have no RPC stream. Probing them surfaces
+      // `machine_rpc_unavailable` in the worktree editors. The local
+      // machine still answers even if presence is stale.
+      if (localMachineId && entry.machineId === localMachineId) return true;
+      return onlineMachineIds.has(entry.machineId);
+    });
 
     const loadPhase = (
       phase: WorktreeConfigPhase,
@@ -380,6 +388,7 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
   }, [
     currentUserId,
     localMachineId,
+    onlineMachineIds,
     projects,
     runtime,
     setWorktreeCleanupByKey,
@@ -396,6 +405,14 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
   ]);
 
   const sections = useMemo(() => {
+    const conversationCountByKey = new Map<string, number>();
+    for (const session of sessionMetaList) {
+      const project = session.project;
+      if (project?.kind !== 'local') continue;
+      const key = getLocalProjectVisibilityKey(session.machineId, project.localProjectId);
+      conversationCountByKey.set(key, (conversationCountByKey.get(key) ?? 0) + 1);
+    }
+
     const grouped = new Map<MachineId, ProjectSettingsSection>();
 
     for (const entry of projects.values()) {
@@ -461,15 +478,16 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
         shell: resolveWorktreeSetupShellForPlatform(entry.machine.os),
         project: entry.project,
         sharedWithTeam: sharingUpdate?.desired ?? access?.sharedWithTeam ?? false,
+        conversationCount: conversationCountByKey.get(entry.key) ?? 0,
         // Keep the control locked until the reactive query confirms the write.
         // This prevents a second toggle from racing a delayed first query result.
         isUpdating: sharingUpdate !== undefined,
         canUpdateSharing: Boolean(
           teamSharingAvailable &&
-            workspaceId &&
-            isAuthenticated &&
-            !isConvexAuthLoading &&
-            entry.isMachineRegistered
+          workspaceId &&
+          isAuthenticated &&
+          !isConvexAuthLoading &&
+          entry.isMachineRegistered
         ),
         worktreeSetup: worktreeSetupByKey[entry.key] ?? EMPTY_WORKTREE_SETUP,
         isWorktreeSetupLoading: worktreeSetupLoadingByKey[entry.key] === true,
@@ -489,6 +507,7 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
         grouped.set(entry.machineId, {
           machineId: entry.machineId,
           machineName,
+          sharedWithTeam: accessByMachineId.get(entry.machineId)?.sharedWithTeam ?? false,
           rows: [row],
         });
       }
@@ -501,6 +520,7 @@ export function useLocalProjectsAdmin(): LocalProjectsAdminData {
       }))
       .sort((left, right) => left.machineName.localeCompare(right.machineName));
   }, [
+    accessByMachineId,
     accessByProjectKey,
     agentConfigs,
     catalogByKey,

@@ -31,9 +31,7 @@ import { Route as WorkspaceNameAuthSettingsRouteImport } from './routes/$workspa
 import { Route as WorkspaceNameAuthSessionsRouteImport } from './routes/$workspaceName/_auth/sessions';
 import { Route as WorkspaceNameAuthChatRouteImport } from './routes/$workspaceName/_auth/chat';
 import { Route as WorkspaceNameAuthArchiveRouteImport } from './routes/$workspaceName/_auth/archive';
-import { Route as WorkspaceNameAuthTasksIndexRouteImport } from './routes/$workspaceName/_auth/tasks.index';
 import { Route as WorkspaceNameAuthSettingsIndexRouteImport } from './routes/$workspaceName/_auth/settings.index';
-import { Route as WorkspaceNameAuthTasksTaskIdRouteImport } from './routes/$workspaceName/_auth/tasks.$taskId';
 import { Route as WorkspaceNameAuthSettingsWorkspaceRouteImport } from './routes/$workspaceName/_auth/settings/workspace';
 import { Route as WorkspaceNameAuthSettingsStatsRouteImport } from './routes/$workspaceName/_auth/settings/stats';
 import { Route as WorkspaceNameAuthSettingsSharesRouteImport } from './routes/$workspaceName/_auth/settings/shares';
@@ -168,20 +166,10 @@ const WorkspaceNameAuthArchiveRoute = WorkspaceNameAuthArchiveRouteImport.update
   path: '/archive',
   getParentRoute: () => WorkspaceNameAuthRoute,
 } as any);
-const WorkspaceNameAuthTasksIndexRoute = WorkspaceNameAuthTasksIndexRouteImport.update({
-  id: '/tasks/',
-  path: '/tasks/',
-  getParentRoute: () => WorkspaceNameAuthRoute,
-} as any);
 const WorkspaceNameAuthSettingsIndexRoute = WorkspaceNameAuthSettingsIndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => WorkspaceNameAuthSettingsRoute,
-} as any);
-const WorkspaceNameAuthTasksTaskIdRoute = WorkspaceNameAuthTasksTaskIdRouteImport.update({
-  id: '/tasks/$taskId',
-  path: '/tasks/$taskId',
-  getParentRoute: () => WorkspaceNameAuthRoute,
 } as any);
 const WorkspaceNameAuthSettingsWorkspaceRoute =
   WorkspaceNameAuthSettingsWorkspaceRouteImport.update({
@@ -359,9 +347,7 @@ export interface FileRoutesByFullPath {
   '/$workspaceName/settings/shares': typeof WorkspaceNameAuthSettingsSharesRoute;
   '/$workspaceName/settings/stats': typeof WorkspaceNameAuthSettingsStatsRoute;
   '/$workspaceName/settings/workspace': typeof WorkspaceNameAuthSettingsWorkspaceRoute;
-  '/$workspaceName/tasks/$taskId': typeof WorkspaceNameAuthTasksTaskIdRoute;
   '/$workspaceName/settings/': typeof WorkspaceNameAuthSettingsIndexRoute;
-  '/$workspaceName/tasks/': typeof WorkspaceNameAuthTasksIndexRoute;
   '/$workspaceName/local/$machineId/$localProjectId': typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute;
 }
 export interface FileRoutesByTo {
@@ -407,9 +393,7 @@ export interface FileRoutesByTo {
   '/$workspaceName/settings/shares': typeof WorkspaceNameAuthSettingsSharesRoute;
   '/$workspaceName/settings/stats': typeof WorkspaceNameAuthSettingsStatsRoute;
   '/$workspaceName/settings/workspace': typeof WorkspaceNameAuthSettingsWorkspaceRoute;
-  '/$workspaceName/tasks/$taskId': typeof WorkspaceNameAuthTasksTaskIdRoute;
   '/$workspaceName/settings': typeof WorkspaceNameAuthSettingsIndexRoute;
-  '/$workspaceName/tasks': typeof WorkspaceNameAuthTasksIndexRoute;
   '/$workspaceName/local/$machineId/$localProjectId': typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute;
 }
 export interface FileRoutesById {
@@ -459,9 +443,7 @@ export interface FileRoutesById {
   '/$workspaceName/_auth/settings/shares': typeof WorkspaceNameAuthSettingsSharesRoute;
   '/$workspaceName/_auth/settings/stats': typeof WorkspaceNameAuthSettingsStatsRoute;
   '/$workspaceName/_auth/settings/workspace': typeof WorkspaceNameAuthSettingsWorkspaceRoute;
-  '/$workspaceName/_auth/tasks/$taskId': typeof WorkspaceNameAuthTasksTaskIdRoute;
   '/$workspaceName/_auth/settings/': typeof WorkspaceNameAuthSettingsIndexRoute;
-  '/$workspaceName/_auth/tasks/': typeof WorkspaceNameAuthTasksIndexRoute;
   '/$workspaceName/_auth/local/$machineId/$localProjectId': typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute;
 }
 export interface FileRouteTypes {
@@ -511,9 +493,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/settings/shares'
     | '/$workspaceName/settings/stats'
     | '/$workspaceName/settings/workspace'
-    | '/$workspaceName/tasks/$taskId'
     | '/$workspaceName/settings/'
-    | '/$workspaceName/tasks/'
     | '/$workspaceName/local/$machineId/$localProjectId';
   fileRoutesByTo: FileRoutesByTo;
   to:
@@ -559,9 +539,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/settings/shares'
     | '/$workspaceName/settings/stats'
     | '/$workspaceName/settings/workspace'
-    | '/$workspaceName/tasks/$taskId'
     | '/$workspaceName/settings'
-    | '/$workspaceName/tasks'
     | '/$workspaceName/local/$machineId/$localProjectId';
   id:
     | '__root__'
@@ -610,9 +588,7 @@ export interface FileRouteTypes {
     | '/$workspaceName/_auth/settings/shares'
     | '/$workspaceName/_auth/settings/stats'
     | '/$workspaceName/_auth/settings/workspace'
-    | '/$workspaceName/_auth/tasks/$taskId'
     | '/$workspaceName/_auth/settings/'
-    | '/$workspaceName/_auth/tasks/'
     | '/$workspaceName/_auth/local/$machineId/$localProjectId';
   fileRoutesById: FileRoutesById;
 }
@@ -791,26 +767,12 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceNameAuthArchiveRouteImport;
       parentRoute: typeof WorkspaceNameAuthRoute;
     };
-    '/$workspaceName/_auth/tasks/': {
-      id: '/$workspaceName/_auth/tasks/';
-      path: '/tasks';
-      fullPath: '/$workspaceName/tasks/';
-      preLoaderRoute: typeof WorkspaceNameAuthTasksIndexRouteImport;
-      parentRoute: typeof WorkspaceNameAuthRoute;
-    };
     '/$workspaceName/_auth/settings/': {
       id: '/$workspaceName/_auth/settings/';
       path: '/';
       fullPath: '/$workspaceName/settings/';
       preLoaderRoute: typeof WorkspaceNameAuthSettingsIndexRouteImport;
       parentRoute: typeof WorkspaceNameAuthSettingsRoute;
-    };
-    '/$workspaceName/_auth/tasks/$taskId': {
-      id: '/$workspaceName/_auth/tasks/$taskId';
-      path: '/tasks/$taskId';
-      fullPath: '/$workspaceName/tasks/$taskId';
-      preLoaderRoute: typeof WorkspaceNameAuthTasksTaskIdRouteImport;
-      parentRoute: typeof WorkspaceNameAuthRoute;
     };
     '/$workspaceName/_auth/settings/workspace': {
       id: '/$workspaceName/_auth/settings/workspace';
@@ -1056,8 +1018,6 @@ interface WorkspaceNameAuthRouteChildren {
   WorkspaceNameAuthChatRoute: typeof WorkspaceNameAuthChatRoute;
   WorkspaceNameAuthSessionsRoute: typeof WorkspaceNameAuthSessionsRouteWithChildren;
   WorkspaceNameAuthSettingsRoute: typeof WorkspaceNameAuthSettingsRouteWithChildren;
-  WorkspaceNameAuthTasksTaskIdRoute: typeof WorkspaceNameAuthTasksTaskIdRoute;
-  WorkspaceNameAuthTasksIndexRoute: typeof WorkspaceNameAuthTasksIndexRoute;
   WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute: typeof WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute;
 }
 
@@ -1066,8 +1026,6 @@ const WorkspaceNameAuthRouteChildren: WorkspaceNameAuthRouteChildren = {
   WorkspaceNameAuthChatRoute: WorkspaceNameAuthChatRoute,
   WorkspaceNameAuthSessionsRoute: WorkspaceNameAuthSessionsRouteWithChildren,
   WorkspaceNameAuthSettingsRoute: WorkspaceNameAuthSettingsRouteWithChildren,
-  WorkspaceNameAuthTasksTaskIdRoute: WorkspaceNameAuthTasksTaskIdRoute,
-  WorkspaceNameAuthTasksIndexRoute: WorkspaceNameAuthTasksIndexRoute,
   WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute:
     WorkspaceNameAuthLocalMachineIdLocalProjectIdRoute,
 };

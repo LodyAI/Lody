@@ -70,7 +70,6 @@ import {
 import { useSessionMcpSelection } from '@/hooks/use-session-mcp-selection';
 import { MessageQueueDisplay, shouldRequestNativeQueueSteer } from './message-queue';
 import { useTranslation } from 'react-i18next';
-import { useRouter } from '@tanstack/react-router';
 import { toast } from 'sonner';
 import type {
   LocalProjectId,
@@ -137,9 +136,6 @@ import {
   queuedMessageBehaviorAtom,
   userAtom,
 } from '@/atoms';
-import { currentWorkspaceSlugAtom } from '@/atoms';
-import { taskIndexRowsAtom } from '@/atoms/tasks';
-import { tasksFeatureEnabledAtom } from '@/atoms/settings';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { browserOnlineAtom } from '@/atoms/control-connection';
 import {
@@ -246,6 +242,7 @@ import {
 import { ReviewAgentSetupDialog } from './auto-review-info';
 import { AutoReviewStatus } from './auto-review-status';
 import { useAutoReview } from '@/hooks/use-auto-review';
+import { SessionAgentFileLinkMenuProvider } from './session-agent-file-link-menu';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { SessionRelationCard } from '@/components/shared/session-relation-card';
 import {
@@ -288,6 +285,7 @@ import { SessionPinContext, type SessionPinContextValue } from './session-pin-co
 import { SessionSyncingIndicator } from './session-syncing-indicator';
 import { ChildTabEmptyState } from './child-tab-empty-state';
 import {
+  SESSION_PAGE_HEADER_PILLS_CLASS,
   SessionConversationPage,
   SessionConversationPageHeader,
 } from './session-conversation-page';
@@ -959,6 +957,7 @@ export function SessionHeaderMenu({
   onRestore,
   onDelete,
   compact = false,
+  openInIde,
   t,
 }: {
   session: SessionMeta;
@@ -990,6 +989,13 @@ export function SessionHeaderMenu({
   onRestore?: () => void | Promise<void>;
   onDelete?: () => void | Promise<void>;
   compact?: boolean;
+  /** Electron path launchers; always listed in `⋯` so CSS-hidden pills stay reachable. */
+  openInIde?: {
+    options: PathLauncherOption[];
+    selected: PathLauncherOption;
+    onOpen: () => void;
+    onSelect: (launcher: PathLauncherOption) => void;
+  };
   t: SessionSharingTranslator;
 }) {
   const isArchived = !!session.isArchived;
@@ -1068,6 +1074,45 @@ export function SessionHeaderMenu({
         <DropdownMenuSeparator />
       </>
     ) : null;
+
+  const openInIdeMenu = (() => {
+    if (!openInIde || openInIde.options.length === 0) return null;
+    const SelectedIcon = getPathLauncherIcon(openInIde.selected);
+    const openLabel = t('sessions.openInIde', 'Open in {{name}}', {
+      name: openInIde.selected.label,
+    });
+    if (openInIde.options.length === 1) {
+      return (
+        <DropdownMenuItem onClick={openInIde.onOpen}>
+          <SelectedIcon className="h-3.5 w-3.5 shrink-0" />
+          {openLabel}
+        </DropdownMenuItem>
+      );
+    }
+    return (
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger>
+          <SelectedIcon className="h-3.5 w-3.5 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">{openLabel}</span>
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent>
+          {openInIde.options.map((launcher) => {
+            const launcherId = getPathLauncherId(launcher);
+            const LauncherIcon = getPathLauncherIcon(launcher);
+            return (
+              <DropdownMenuItem key={launcherId} onClick={() => openInIde.onSelect(launcher)}>
+                <LauncherIcon className="h-3.5 w-3.5 shrink-0" />
+                {launcher.label}
+                {launcherId === getPathLauncherId(openInIde.selected) ? (
+                  <Check className="ml-auto h-3.5 w-3.5 shrink-0" />
+                ) : null}
+              </DropdownMenuItem>
+            );
+          })}
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+    );
+  })();
 
   const copyToClipboard = useCallback(
     // successMessage names what was copied in a full sentence (e.g. "Base
@@ -1226,6 +1271,8 @@ export function SessionHeaderMenu({
           ) : null}
 
           {openedByRelationRows}
+
+          {openInIdeMenu}
 
           {onOpenPublicShare && (
             <DropdownMenuItem onClick={onOpenPublicShare}>
@@ -1817,12 +1864,17 @@ export type SessionChatInterfaceHandle = {
   cancelShareImageSelection: () => void;
   openSearch: () => void;
   getLastForkableAssistantTurnId: () => string | null;
-  insertSessionMention: (sessionId: string) => boolean;
+  insertSessionMention: (
+    sessionId: string,
+    options?: { at?: number; replaceEnd?: number }
+  ) => boolean;
 };
 
 export type DispatchInputBlocksOptions = {
   forceQueue?: boolean;
   forceDirect?: boolean;
+  /** Swaps the configured busy-send behavior (queue <-> steer) for this send. */
+  invertSubmitBehavior?: boolean;
   modeIdOverride?: string | null;
   modelIdOverride?: string | null;
   configOptionValuesOverride?: Record<string, AcpConfigOptionValue>;
@@ -1957,7 +2009,6 @@ export const SessionChatInterface = memo(
     const [publicShareSessionId, setPublicShareSessionId] = useState<string | null>(null);
     const publicShareStatus = useSessionShareStatus(publicShareWorkspaceId ?? null, session.id);
     const currentUser = useAtomValue(userAtom);
-    const tasksEnabled = useAtomValue(tasksFeatureEnabledAtom);
     const { openSettings } = useOpenSettings();
     const billingEntitlement = useCloudQuery(
       cloudOperations.billing.getWorkspaceBillingEntitlement,
@@ -3650,7 +3701,6 @@ export const SessionChatInterface = memo(
             configOptionValues: turnConfigOptionValues,
             issuePRMentions,
             mcpServerIds: mcpSelection.selectedIds,
-            taskToolsEnabled: tasksEnabled,
             agentRoleId:
               options?.agentRole?.agentRoleId ?? (options?.agentRole === null ? null : undefined),
             agentRoleRevision: options?.agentRole?.agentRoleRevision,
@@ -3760,7 +3810,6 @@ export const SessionChatInterface = memo(
         touchSessionActivity,
         updateHistoryEntry,
         t,
-        tasksEnabled,
       ]
     );
 
@@ -3792,7 +3841,6 @@ export const SessionChatInterface = memo(
             configOptionValues: turnConfigOptionValues,
             issuePRMentions,
             mcpServerIds: mcpSelection.selectedIds,
-            taskToolsEnabled: tasksEnabled,
             agentRoleId:
               options?.agentRole?.agentRoleId ?? (options?.agentRole === null ? null : undefined),
             agentRoleRevision: options?.agentRole?.agentRoleRevision,
@@ -3808,7 +3856,6 @@ export const SessionChatInterface = memo(
             configOptionValues: inputConfig.configOptionValues ?? undefined,
             issuePRMentions: inputConfig.issuePRMentions ?? undefined,
             mcpServerIds: [...mcpSelection.selectedIds],
-            taskToolsEnabled: inputConfig.taskToolsEnabled,
             agentRoleId: inputConfig.agentRoleId,
             agentRoleRevision: inputConfig.agentRoleRevision,
             resume: inputConfig.resume ?? undefined,
@@ -3857,7 +3904,6 @@ export const SessionChatInterface = memo(
         session.userId,
         sessionProject,
         t,
-        tasksEnabled,
       ]
     );
 
@@ -3904,6 +3950,7 @@ export const SessionChatInterface = memo(
         const submitRoute = resolveSessionMessageSubmitRoute({
           forceDirect,
           forceQueue: options?.forceQueue === true,
+          invertBehavior: options?.invertSubmitBehavior === true,
           isPromptBusy: isAgentBusy,
           hasUnfinishedAssistantTurn: activeAssistantTurnId != null,
           queuedMessageBehavior,
@@ -3930,6 +3977,7 @@ export const SessionChatInterface = memo(
           ...inputSummary,
           force_queue: Boolean(options?.forceQueue),
           force_direct: forceDirect,
+          invert_behavior: Boolean(options?.invertSubmitBehavior),
           submit_route: submitRoute.type,
           is_agent_busy: isAgentBusy,
           mode_id: turnModeId ?? null,
@@ -4053,9 +4101,10 @@ export const SessionChatInterface = memo(
     const handleSendMessage = useCallback(
       async (
         inputBlocks: SessionInputBlock[],
-        agentRole?: SessionTurnAgentRoleSelection
+        agentRole?: SessionTurnAgentRoleSelection,
+        options?: Omit<DispatchInputBlocksOptions, 'agentRole'>
       ): Promise<boolean> => {
-        return await dispatchInputBlocks(inputBlocks, { agentRole });
+        return await dispatchInputBlocks(inputBlocks, { ...options, agentRole });
       },
       [dispatchInputBlocks]
     );
@@ -4559,33 +4608,6 @@ export const SessionChatInterface = memo(
       if (run.url) window.open(run.url, '_blank', 'noopener,noreferrer');
     }, []);
 
-    // The task this session belongs to. Titles come from the workspace task
-    // index, which is already loaded for the sidebar count, so the chip costs no
-    // extra read.
-    const router = useRouter();
-    const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
-    const sessionTaskId = session.taskId;
-    const taskIndexRows = useAtomValue(taskIndexRowsAtom);
-    // A session keeps its `taskId` even for a user who never enabled the Tasks
-    // beta (an agent or another device can set it), so the chip is gated too —
-    // otherwise it would be a visible door to a feature that is supposed to be
-    // absent, and the index it reads from is not even synced.
-    const sessionTaskChip = useMemo(() => {
-      if (!tasksEnabled || !sessionTaskId) return null;
-      const row = taskIndexRows[sessionTaskId];
-      return { taskId: sessionTaskId as string, title: row?.title ?? '' };
-    }, [tasksEnabled, sessionTaskId, taskIndexRows]);
-    const handleOpenSessionTask = useCallback(
-      (taskId: string) => {
-        if (!workspaceSlug) return;
-        void router.navigate({
-          to: '/$workspaceName/tasks/$taskId',
-          params: { workspaceName: workspaceSlug, taskId },
-        });
-      },
-      [router, workspaceSlug]
-    );
-
     // Presentation-only "opened by" provenance (MCP `lody_session_create`).
     // Read from the already-loaded session meta cache, so it costs no extra
     // document. `parentSessionId` children are excluded by the atom — they are
@@ -4896,8 +4918,8 @@ export const SessionChatInterface = memo(
         cancelShareImageSelection: shareSelection.cancel,
         openSearch,
         getLastForkableAssistantTurnId: () => lastForkableAssistantMessageId,
-        insertSessionMention: (sessionId: string) => {
-          return inputAreaRef.current?.insertSessionMention(sessionId) ?? false;
+        insertSessionMention: (sessionId, options) => {
+          return inputAreaRef.current?.insertSessionMention(sessionId, options) ?? false;
         },
       }),
       [
@@ -5224,13 +5246,24 @@ export const SessionChatInterface = memo(
     );
     const handleSteerQueuedMessage = useCallback(
       async (item: MessageQueueItem) => {
+        // Interrupt-and-send always runs the queue head next, so it is only a
+        // valid steer substitute for the first item. Later items are steerable
+        // exclusively through native acknowledged steering.
+        if (messageQueue[0]?.$cid !== item.$cid && !shouldUseNativeQueueSteer) {
+          return;
+        }
         if (shouldUseNativeQueueSteer) {
           await handleNativeSteerQueuedMessage(item);
           return;
         }
         await handleInterruptAndSend(item);
       },
-      [handleInterruptAndSend, handleNativeSteerQueuedMessage, shouldUseNativeQueueSteer]
+      [
+        handleInterruptAndSend,
+        handleNativeSteerQueuedMessage,
+        messageQueue,
+        shouldUseNativeQueueSteer,
+      ]
     );
 
     const handleReorderQueueItem = useCallback(
@@ -5734,7 +5767,7 @@ export const SessionChatInterface = memo(
     const headerLauncherActions = (
       <>
         {shouldShowOpenInIdeButton && isElectronRendererForPathLaunch && (
-          <div className="flex items-center">
+          <div className={cn(SESSION_PAGE_HEADER_PILLS_CLASS, 'items-center')}>
             <Button
               className="h-6 px-2 py-1 rounded-r-none border-r-0 gap-1"
               variant="outline"
@@ -5846,6 +5879,18 @@ export const SessionChatInterface = memo(
         onArchive={onArchiveSession}
         onRestore={onRestoreSession}
         onDelete={onDeleteSession}
+        openInIde={
+          shouldShowOpenInIdeButton && isElectronRendererForPathLaunch
+            ? {
+                options: pathLauncherOptions,
+                selected: selectedPathLauncher,
+                onOpen: handleOpenInIde,
+                onSelect: (launcher) => {
+                  void handleSelectPathLauncher(launcher);
+                },
+              }
+            : undefined
+        }
         t={t}
       />
     );
@@ -5857,11 +5902,13 @@ export const SessionChatInterface = memo(
       : undefined;
     const headerAccessNode =
       !isMobile && (sharing || headerPublicShare) ? (
-        <SessionAccessControl
-          state={sharing}
-          onShareWithTeam={onShareWithTeam}
-          publicShare={headerPublicShare}
-        />
+        <div className={cn(SESSION_PAGE_HEADER_PILLS_CLASS, 'items-center')}>
+          <SessionAccessControl
+            state={sharing}
+            onShareWithTeam={onShareWithTeam}
+            publicShare={headerPublicShare}
+          />
+        </div>
       ) : null;
     const headerArchivedNode = session.isArchived === true ? <SessionArchivedBadge /> : null;
 
@@ -5963,52 +6010,54 @@ export const SessionChatInterface = memo(
                       {/* Key forces remount on session change, preventing scroll state bleed between sessions */}
                       <MessageSendStatusContext.Provider value={sendingMessageIds}>
                         <MessageSelectionContext.Provider value={shareSelection.context}>
-                          <SessionChatStream
-                            key={session.id}
-                            ref={chatStreamRef}
-                            sessionId={session?.id}
-                            workspaceId={workspaceId}
-                            showSenderIdentity={isMultiMember}
-                            view={conversationView}
-                            sessionCreatedAt={session?.createdAt}
-                            dividerLabel={sessionDividerLabel}
-                            className="h-full"
-                            leadingContent={openedByConversationStart}
-                            emptyState={chatStreamEmptyState}
-                            agentActivityLabel={agentActivityLabel}
-                            agentActivityTone={agentActivityTone}
-                            onFileDiffClick={onFileDiffClick}
-                            onFilePathClick={onFilePathClick ? handleFilePathClick : undefined}
-                            onOpenHtmlFile={handleOpenHtmlAttachment}
-                            messageFileDiffEntriesByTurn={messageFileDiffEntriesByTurn}
-                            assistantActions={assistantQuickActions}
-                            assistantActionsMessageId={latestCompletedProposedPlan?.entryId}
-                            onCopyContext={(messageId) => {
-                              void handleCopyConversationHistory(messageId);
-                            }}
-                            onForkLastAssistant={onForkLastAssistant}
-                            forkWorktreeAvailability={forkWorktreeAvailability}
-                            onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
-                            onEditLastUser={
-                              editableLastUserMessageId ? handleEditLastUser : undefined
-                            }
-                            onResendUndelivered={handleResendUndelivered}
-                            capacityRetry={capacityRetry ?? undefined}
-                            forkingAssistantMessageId={forkingAssistantMessageId}
-                            onNavigateSession={onNavigateSession}
-                            onLastCompletedAssistantMessageIdChange={
-                              handleLastCompletedAssistantMessageIdChange
-                            }
-                            onLastForkableAssistantMessageIdChange={
-                              handleLastForkableAssistantMessageIdChange
-                            }
-                            conversationFontSize={conversationFontSize}
-                            skipNextViewportResizeAutoScrollRef={
-                              skipNextViewportResizeAutoScrollRef
-                            }
-                            suppressStickyAutoScrollRef={suppressStickyAutoScrollRef}
-                            outlineOverlayRoot={outlineOverlayRoot}
-                          />
+                          <SessionAgentFileLinkMenuProvider session={session}>
+                            <SessionChatStream
+                              key={session.id}
+                              ref={chatStreamRef}
+                              sessionId={session?.id}
+                              workspaceId={workspaceId}
+                              showSenderIdentity={isMultiMember}
+                              view={conversationView}
+                              sessionCreatedAt={session?.createdAt}
+                              dividerLabel={sessionDividerLabel}
+                              className="h-full"
+                              leadingContent={openedByConversationStart}
+                              emptyState={chatStreamEmptyState}
+                              agentActivityLabel={agentActivityLabel}
+                              agentActivityTone={agentActivityTone}
+                              onFileDiffClick={onFileDiffClick}
+                              onFilePathClick={onFilePathClick ? handleFilePathClick : undefined}
+                              onOpenHtmlFile={handleOpenHtmlAttachment}
+                              messageFileDiffEntriesByTurn={messageFileDiffEntriesByTurn}
+                              assistantActions={assistantQuickActions}
+                              assistantActionsMessageId={latestCompletedProposedPlan?.entryId}
+                              onCopyContext={(messageId) => {
+                                void handleCopyConversationHistory(messageId);
+                              }}
+                              onForkLastAssistant={onForkLastAssistant}
+                              forkWorktreeAvailability={forkWorktreeAvailability}
+                              onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
+                              onEditLastUser={
+                                editableLastUserMessageId ? handleEditLastUser : undefined
+                              }
+                              onResendUndelivered={handleResendUndelivered}
+                              capacityRetry={capacityRetry ?? undefined}
+                              forkingAssistantMessageId={forkingAssistantMessageId}
+                              onNavigateSession={onNavigateSession}
+                              onLastCompletedAssistantMessageIdChange={
+                                handleLastCompletedAssistantMessageIdChange
+                              }
+                              onLastForkableAssistantMessageIdChange={
+                                handleLastForkableAssistantMessageIdChange
+                              }
+                              conversationFontSize={conversationFontSize}
+                              skipNextViewportResizeAutoScrollRef={
+                                skipNextViewportResizeAutoScrollRef
+                              }
+                              suppressStickyAutoScrollRef={suppressStickyAutoScrollRef}
+                              outlineOverlayRoot={outlineOverlayRoot}
+                            />
+                          </SessionAgentFileLinkMenuProvider>
                         </MessageSelectionContext.Provider>
                       </MessageSendStatusContext.Provider>
                     </ErrorBoundary>
@@ -6092,8 +6141,6 @@ export const SessionChatInterface = memo(
                     }
                     onGoalCommand={handleGoalCardCommand}
                     onGoalDismiss={handleDismissGoalBanner}
-                    task={sessionTaskChip}
-                    onOpenTask={handleOpenSessionTask}
                     scheduledTasks={pendingScheduledTasks}
                     prCiRuns={infoBarPrCiRuns}
                     onOpenPrCiRun={handleOpenPrCiRun}
@@ -6193,6 +6240,7 @@ export const SessionChatInterface = memo(
                                 !!activeAssistantTurnId &&
                                 !isExternalHistoryRefreshing
                               }
+                              nativeSteerAvailable={shouldUseNativeQueueSteer}
                             />
                           ) : null
                         }

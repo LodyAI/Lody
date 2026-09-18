@@ -58,7 +58,8 @@ const SENT = applyTextRewrites(COMPOSER_TEXT, [
   },
   {
     ...at('@session:crdt-metadata-cleanup'),
-    replacement: 'use lody mcp to query session[id: 9f2c-4a11] history',
+    replacement:
+      '[@CRDT metadata cleanup](session://9f2c-4a11)',
     span: { kind: 'session', label: 'CRDT metadata cleanup', target: '9f2c-4a11' },
   },
   {

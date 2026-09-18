@@ -1,7 +1,12 @@
 import { fn } from 'storybook/test';
 import type { Meta, StoryObj } from '@storybook/react';
 import { useEffect, useState, type ReactNode } from 'react';
-import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
+import { Copy, ExternalLink, FolderOpen } from 'lucide-react';
+import {
+  AgentFileLinkContextMenuItemsContext,
+  MarkdownRenderer,
+} from '@/components/ai-gui/markdown-renderer';
+import type { MarkdownAgentFileLinkMenuItem } from '@/hooks/use-session-file-actions';
 
 const meta = {
   title: 'AI/MarkdownRenderer',
@@ -32,6 +37,34 @@ const wrap = (children: ReactNode) => (
     </div>
   </div>
 );
+
+const LOCAL_FILE_LINK_MENU: readonly MarkdownAgentFileLinkMenuItem[] = [
+  { kind: 'action', id: 'copy-path', label: 'Copy Path', icon: Copy, run: fn() },
+  { kind: 'action', id: 'open-file', label: 'Open File', icon: ExternalLink, run: fn() },
+  { kind: 'action', id: 'open-in-editor', label: 'Open in VS Code', icon: ExternalLink, run: fn() },
+  {
+    kind: 'submenu',
+    id: 'open-with',
+    label: 'Open with',
+    icon: ExternalLink,
+    items: [
+      { kind: 'action', id: 'open-with:cursor', label: 'Cursor', icon: ExternalLink, run: fn() },
+    ],
+  },
+  { kind: 'action', id: 'reveal', label: 'Show in Finder', icon: FolderOpen, run: fn() },
+];
+
+export const AgentFileLinkContextMenu: Story = {
+  args: {
+    text: '[submit.ts](/Users/dev/project/src/ledger/submit.ts:366)',
+  },
+  render: (args) =>
+    wrap(
+      <AgentFileLinkContextMenuItemsContext.Provider value={() => LOCAL_FILE_LINK_MENU}>
+        <MarkdownRenderer {...args} />
+      </AgentFileLinkContextMenuItemsContext.Provider>
+    ),
+};
 
 export const Paragraphs: Story = {
   args: {

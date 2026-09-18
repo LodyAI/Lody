@@ -15,8 +15,7 @@ import {
  * Pure policy for auto review and merge.
  *
  * Every gate that can spend tokens, write to GitHub, or merge lives here so it
- * can be tested without a daemon, a repository, or an agent — the same split
- * `task-automation-plan.ts` uses.
+ * can be tested without a daemon, a repository, or an agent.
  *
  * The states are all "waiting for" states, which is what makes a pass safely
  * repeatable: re-running the planner against unchanged facts returns `wait`

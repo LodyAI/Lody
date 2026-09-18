@@ -2,11 +2,11 @@
  * Mention spans carried alongside a `text` message item.
  *
  * A user prompt is rewritten on its way to the agent: `$skill` becomes a skill
- * instruction, `@session:` becomes an MCP call, and a pasted-text placeholder
- * becomes the whole pasted blob. The stored `text` is that rewritten string —
- * it has to be, because it is the exact string the agent receives — so by the
- * time the transcript renders it, every trace of what the user actually typed
- * is gone.
+ * instruction, a session mention becomes `[@Title](session://<id>)`, and a
+ * pasted-text placeholder becomes the whole pasted blob. The stored `text` is
+ * that rewritten string — it has to be, because it is the exact string the
+ * agent receives — so by the time the transcript renders it, every trace of
+ * what the user actually typed is gone.
  *
  * A span records the mapping the rewrite already computed and used to throw
  * away: this region of the final text stands for that mention. One string,

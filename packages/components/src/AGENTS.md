@@ -13,7 +13,7 @@ bound, so the windowed path avoids mirroring it into memory as an array. Everyth
   window. In React use `useSessionDoc().history`, `useConversationTail`,
   `useTurnRange`, or `useSessionTurnFacts` for a whole-history fact.
 - **Write** domain commands through `store.sessionData` (`@lody/shared/session-data`):
-  `applyHistoryAction`, `appendTurn`, `replaceTurn`, `resolveTaskProposal` and
+  `applyHistoryAction`, `appendTurn`, `replaceTurn` and
   `respondPermission`. It is composed over the same doc and the
   one shared writer; a rejected command surfaces as a failure, never a silent drop.
 - The composition owns one HistoryWriter; the UI store does not expose it.

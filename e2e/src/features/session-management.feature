@@ -17,5 +17,5 @@
     假如 已配置支持分叉的确定性 Agent 桌面
     并且 已建立含 child Tab 和两个独立 worktree 的 Session 关系
     当 用户归档并永久删除 opener Session
-    那么 child Tab 被删除而 opened Sessions 和 worktree 保留
+    那么 child Tab 被删除而 opened Sessions 保留 dangling 溯源并可独立清理
     并且 metadata 未完成 hydration 时精确删除 empty child Tab 仍成功

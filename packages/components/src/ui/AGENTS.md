@@ -48,8 +48,8 @@ strings on i18n rather than the registry's inline English.
   `collisionPadding`; Radix defaults it to 0, which parks a colliding surface flush
   against the screen edge and caps `--radix-*-available-height` there too.
 - A submenu's `sideOffset` is measured from its trigger ROW, so it must also clear the
-  parent surface's `p-1` and the 1px ring each surface paints outside its border box.
-  Evidence: [submenu gap note](../../../../.agents/notes/implemented/bug-fix/2026-09-15-menu-submenu-gap-and-viewport-margin.md).
+  parent surface's `p-1` (4px) and the 1px ring each surface paints outside its border
+  box. Default is `7` so the rings sit 1px apart; `6` welds the two surfaces together.
 
 ## Spinner
 

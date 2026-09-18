@@ -591,29 +591,21 @@ const HEADER_MERGE_METHODS: Array<{
   value: GitHubMergeMethod;
   labelKey: string;
   labelFallback: string;
-  descKey: string;
-  descFallback: string;
 }> = [
   {
     value: 'merge',
     labelKey: 'sessions.prTab.mergeMerge',
     labelFallback: 'Create a merge commit',
-    descKey: 'sessions.prTab.mergeMergeDesc',
-    descFallback: 'All commits from this branch will be added to the base branch.',
   },
   {
     value: 'squash',
     labelKey: 'sessions.prTab.mergeSquash',
     labelFallback: 'Squash and merge',
-    descKey: 'sessions.prTab.mergeSquashDesc',
-    descFallback: 'The commits from this branch will be combined into a single commit.',
   },
   {
     value: 'rebase',
     labelKey: 'sessions.prTab.mergeRebase',
     labelFallback: 'Rebase and merge',
-    descKey: 'sessions.prTab.mergeRebaseDesc',
-    descFallback: 'The commits will be rebased and added to the base branch.',
   },
 ];
 
@@ -682,7 +674,6 @@ function PrHeaderActionButton({
   const busy = Boolean(isMerging || isUpdatingState || isMarkingReady || isDeletingBranch);
   const canClose = Boolean(onSetState) && !pr.merged && pr.state !== 'closed';
   const canReopen = Boolean(onSetState) && pr.state === 'closed' && !pr.merged;
-  const menuClassName = cn('min-w-[280px]', menuContentClassName);
 
   const closeItem = canClose ? (
     <DropdownMenuItem
@@ -720,7 +711,7 @@ function PrHeaderActionButton({
               <ChevronDown className="h-3.5 w-3.5" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className={menuClassName}>
+          <DropdownMenuContent align="end" className={menuContentClassName}>
             <DropdownMenuLabel>
               {t('sessions.prTab.chooseMergeMethod', 'Choose merge method')}
             </DropdownMenuLabel>
@@ -729,19 +720,8 @@ function PrHeaderActionButton({
               onValueChange={(value) => onSelectMergeMethod?.(value as GitHubMergeMethod)}
             >
               {HEADER_MERGE_METHODS.map((method) => (
-                <DropdownMenuRadioItem
-                  key={method.value}
-                  value={method.value}
-                  className="items-start"
-                >
-                  <div className="flex min-w-0 flex-col gap-0.5">
-                    <span className="text-sm font-medium">
-                      {t(method.labelKey, method.labelFallback)}
-                    </span>
-                    <span className="text-[11px] text-muted-foreground">
-                      {t(method.descKey, method.descFallback)}
-                    </span>
-                  </div>
+                <DropdownMenuRadioItem key={method.value} value={method.value}>
+                  {t(method.labelKey, method.labelFallback)}
                 </DropdownMenuRadioItem>
               ))}
             </DropdownMenuRadioGroup>
@@ -776,7 +756,7 @@ function PrHeaderActionButton({
           onClick={canResolve ? onResolveConflicts : undefined}
           disabled={!canResolve}
           title={tip}
-          className={cn(PR_ACTION_BTN, canClose && 'rounded-r-none')}
+          className={cn(PR_ACTION_BTN, canClose && 'rounded-r-none border-r-0')}
         >
           {resolving ? (
             <Spinner className="h-3.5 w-3.5" />
@@ -825,7 +805,7 @@ function PrHeaderActionButton({
           variant="outline"
           disabled
           title={tip}
-          className={cn(PR_ACTION_BTN, canClose && 'rounded-r-none')}
+          className={cn(PR_ACTION_BTN, canClose && 'rounded-r-none border-r-0')}
         >
           {kind === 'checking' ? (
             <Spinner className="h-3.5 w-3.5" />

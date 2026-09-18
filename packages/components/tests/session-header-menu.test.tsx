@@ -33,7 +33,14 @@ const session = {
   title: 'Menu test',
 } as SessionMeta;
 
-const translate = (_key: string, fallback: string) => fallback;
+const translate = (_key: string, fallback: string, options?: Record<string, unknown>) =>
+  Object.entries(options ?? {}).reduce(
+    (message, [name, value]) => message.replaceAll(`{{${name}}}`, String(value)),
+    fallback
+  );
+
+const vscodeLauncher = { kind: 'builtin' as const, id: 'vscode' as const, label: 'VS Code' };
+const cursorLauncher = { kind: 'builtin' as const, id: 'cursor' as const, label: 'Cursor' };
 
 describe('SessionHeaderMenu', () => {
   let root: Root | undefined;
@@ -180,9 +187,9 @@ describe('SessionHeaderMenu', () => {
     });
     await openMenu();
 
-    const openedByItem = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
-      (item) => item.textContent?.includes('Opened by: Deleted session')
-    );
+    const openedByItem = Array.from(
+      document.querySelectorAll<HTMLElement>('[role="menuitem"]')
+    ).find((item) => item.textContent?.includes('Opened by: Deleted session'));
     expect(openedByItem?.getAttribute('data-disabled')).not.toBeNull();
 
     await act(async () => openedByItem?.click());
@@ -224,5 +231,60 @@ describe('SessionHeaderMenu', () => {
     ).find((button) => button.textContent?.includes('Open review settings'));
     await act(async () => openSettings?.click());
     expect(onOpenReviewSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('omits Open in IDE when no launchers are provided', async () => {
+    await act(async () => {
+      root?.render(<SessionHeaderMenu session={session} onCopyUrl={vi.fn()} t={translate} />);
+    });
+    await openMenu();
+    expect(document.body.textContent).not.toContain('Open in VS Code');
+  });
+
+  it('opens the selected IDE from the actions menu', async () => {
+    const onOpen = vi.fn();
+    await act(async () => {
+      root?.render(
+        <SessionHeaderMenu
+          session={session}
+          onCopyUrl={vi.fn()}
+          openInIde={{
+            options: [vscodeLauncher],
+            selected: vscodeLauncher,
+            onOpen,
+            onSelect: vi.fn(),
+          }}
+          t={translate}
+        />
+      );
+    });
+    await openMenu();
+    await act(async () => menuItem('Open in VS Code').click());
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it('lists multiple IDE launchers in a submenu and launches the chosen one', async () => {
+    const onSelect = vi.fn();
+    await act(async () => {
+      root?.render(
+        <SessionHeaderMenu
+          session={session}
+          onCopyUrl={vi.fn()}
+          openInIde={{
+            options: [vscodeLauncher, cursorLauncher],
+            selected: vscodeLauncher,
+            onOpen: vi.fn(),
+            onSelect,
+          }}
+          t={translate}
+        />
+      );
+    });
+    await openMenu();
+    const trigger = menuItem('Open in VS Code');
+    expect(trigger.getAttribute('aria-haspopup')).toBe('menu');
+    await act(async () => trigger.click());
+    await act(async () => menuItem('Cursor').click());
+    expect(onSelect).toHaveBeenCalledWith(cursorLauncher);
   });
 });

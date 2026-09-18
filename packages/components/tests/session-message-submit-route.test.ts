@@ -5,6 +5,7 @@ const resolve = (overrides: Partial<Parameters<typeof resolveSessionMessageSubmi
   resolveSessionMessageSubmitRoute({
     forceDirect: false,
     forceQueue: false,
+    invertBehavior: false,
     isPromptBusy: false,
     hasUnfinishedAssistantTurn: false,
     queuedMessageBehavior: 'queue',
@@ -52,5 +53,48 @@ describe('resolveSessionMessageSubmitRoute', () => {
         hasUnfinishedAssistantTurn: true,
       })
     ).toEqual({ type: 'direct_dispatch' });
+  });
+
+  it('inverts a queue default into a steer for one busy submission', () => {
+    expect(
+      resolve({
+        invertBehavior: true,
+        isPromptBusy: true,
+        hasUnfinishedAssistantTurn: true,
+      })
+    ).toEqual({ type: 'guide' });
+  });
+
+  it('inverts a guide default into a queued busy submission', () => {
+    expect(
+      resolve({
+        invertBehavior: true,
+        isPromptBusy: true,
+        hasUnfinishedAssistantTurn: true,
+        queuedMessageBehavior: 'guide',
+      })
+    ).toEqual({ type: 'queue', reason: 'prompt_busy' });
+  });
+
+  it('never steers an inverted submission without positive live activity', () => {
+    expect(
+      resolve({ invertBehavior: true, hasUnfinishedAssistantTurn: true })
+    ).toEqual({ type: 'queue', reason: 'unfinished_assistant_turn' });
+    expect(resolve({ invertBehavior: true })).toEqual({ type: 'direct_dispatch' });
+    expect(resolve({ invertBehavior: true, isPromptBusy: true })).toEqual({
+      type: 'queue',
+      reason: 'prompt_busy',
+    });
+  });
+
+  it('keeps forceQueue ahead of an inverted steer', () => {
+    expect(
+      resolve({
+        invertBehavior: true,
+        forceQueue: true,
+        isPromptBusy: true,
+        hasUnfinishedAssistantTurn: true,
+      })
+    ).toEqual({ type: 'queue', reason: 'forced' });
   });
 });

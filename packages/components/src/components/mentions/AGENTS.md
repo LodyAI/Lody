@@ -63,10 +63,10 @@ true })`. The fetch timestamp rides on the cached entry (survives IndexedDB).
 
 ## Before-send expansion and transcript
 
-- `useMentionPromptExpansion` is the single before-send text transform where
-  per-type hooks compose. `mention-expansion.ts` lists the rewritten kinds
-  (`REWRITTEN_SPAN_KINDS`) and derives the verbatim ones from
-  `MESSAGE_TEXT_SPAN_KINDS` minus it.
+- `useMentionPromptExpansion` owns before-send rewrites (`expand` /
+  `getRewrites`). Composer copy reuses them via
+  `getExpandedClipboardTextForSelection` (session → `[@Title](session://…)`,
+  not `@slug`). Rewritten: `REWRITTEN_SPAN_KINDS`; else verbatim.
 - The transcript chip comes from `MessageTextSpan.mark`, FROZEN at send time,
   never resolved from the catalog at render. A span field must be declared in
   BOTH `sanitizeMessageTextSpans` and the strict `MessageTextSpanSchema`.
@@ -99,22 +99,22 @@ true })`. The fetch timestamp rides on the cached entry (survives IndexedDB).
   rows; archived and own sessions stay excluded. Project scope is a menu-only
   filter over that complete list — never scope hydration, expansion, drag
   insertion, slug resolution, or child-session addressing.
-- A session mention commits as a plain `@<title-slug>` (no `session:` marker);
-  its range carries the real `sessionId`, and the expansion rewrites THE RANGE
-  into an id-bearing MCP instruction. A token with no range is sent verbatim —
-  never resolve a slug — and `hydrateSessionMentionsFromText` must skip any
-  token the file source knows.
+- A session mention commits as plain `@<title-slug>` (no `session:` marker); the
+  range carries `sessionId`, and expansion rewrites to
+  `[@Title](session://<id>)`. A lone app-origin session URL paste becomes that
+  mention unless Cmd/Ctrl+Shift+V. No range → send verbatim; never resolve a
+  slug; hydration skips tokens the file source knows. Evidence:
+  [session:// URI](../../../../../.agents/notes/implemented/feature/2026-09-18-session-mention-uri-and-paste.md).
 - Slugs resolve through the live list first, then a `localStorage` slug → id
   map. That store stays synchronous, its key is registered in
   `lib/clear-local-cache.ts`, and the write is skipped when the serialized map
   is unchanged.
 - A session dragged from the sidebar or a session tab onto a chat surface
-  becomes a mention, and the drop must produce a REAL range, not `@<slug>` text:
-  route it through `mentionActionsRef.insertSessionMention(sessionId)`, which
-  returns false for an unknown, own, or already-mentioned session. Draft and
-  file/diff tabs are not mention sources. The conversation COLUMN paints ONE
-  `ConversationDropOverlay` via `SessionMentionDropLayer`, never one per
-  keep-alive tab page.
+  becomes a mention; the drop must be a REAL range, not `@<slug>` text: use
+  `mentionActionsRef.insertSessionMention(sessionId)` (false for unknown, own,
+  or already-mentioned). Draft and file/diff tabs are not mention sources. The
+  conversation COLUMN paints ONE `ConversationDropOverlay` via
+  `SessionMentionDropLayer`, never one per keep-alive tab page.
 
 ## Agent Roles
 

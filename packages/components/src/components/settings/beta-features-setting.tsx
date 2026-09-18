@@ -5,7 +5,6 @@ import {
   developerModeEnabledAtom,
   inboxBetaEnabledAtom,
   promptShortcutsBetaEnabledAtom,
-  tasksBetaEnabledAtom,
 } from '@/atoms/settings';
 import { CompactRow, CompactSection } from './compact-layout';
 
@@ -22,7 +21,6 @@ import { CompactRow, CompactSection } from './compact-layout';
 export function BetaFeaturesSection() {
   const { t } = useTranslation();
   const developerModeEnabled = useAtomValue(developerModeEnabledAtom);
-  const [tasksBetaEnabled, setTasksBetaEnabled] = useAtom(tasksBetaEnabledAtom);
   const [inboxBetaEnabled, setInboxBetaEnabled] = useAtom(inboxBetaEnabledAtom);
 
   const [promptShortcutsBetaEnabled, setPromptShortcutsBetaEnabled] = useAtom(
@@ -33,19 +31,6 @@ export function BetaFeaturesSection() {
 
   return (
     <CompactSection title={t('settings.beta.title', 'Beta features')}>
-      <CompactRow
-        label={t('settings.beta.tasks', 'Tasks')}
-        helper={t(
-          'settings.beta.tasksHelper',
-          'Track work you are not starting yet, separately from chats. In development — expect rough edges.'
-        )}
-      >
-        <Switch
-          checked={tasksBetaEnabled}
-          onCheckedChange={setTasksBetaEnabled}
-          aria-label={t('settings.beta.tasks', 'Tasks')}
-        />
-      </CompactRow>
       <CompactRow
         label={t('settings.beta.inbox', 'Inbox')}
         helper={t(

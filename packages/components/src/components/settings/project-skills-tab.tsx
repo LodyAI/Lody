@@ -95,6 +95,19 @@ export function ProjectSkillsView({
 
   if (groups.length === 0) {
     if (status === 'error') {
+      const unreachable =
+        Boolean(error?.includes('machine_rpc_unavailable')) ||
+        Boolean(error?.includes('CLI is not accepting RPC'));
+      if (unreachable) {
+        return (
+          <p className="text-xs text-muted-foreground">
+            {t(
+              'workspace.projects.machineUnreachable',
+              'This machine isn’t connected. Worktree setup and skills will load when it comes online.'
+            )}
+          </p>
+        );
+      }
       return (
         <SkillsEmptyShell
           icon={<AlertCircle className="h-4 w-4 text-destructive" />}

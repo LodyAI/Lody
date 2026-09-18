@@ -113,6 +113,8 @@ function AuthedHomeRoute() {
     organizations,
     organizationsLoading,
     error: organizationsError,
+    refetchOrganizations,
+    refetchActiveOrganization,
   } = useOrganization();
   const [orgSettled, setOrgSettled] = useState(!organizationsLoading);
 
@@ -134,6 +136,10 @@ function AuthedHomeRoute() {
       <RouteMessage
         title={t('workspace.route.loadingWorkspacesErrorTitle')}
         description={t('workspace.route.loadingWorkspacesErrorDescription')}
+        onRetry={() => {
+          void refetchOrganizations();
+          void refetchActiveOrganization();
+        }}
       />
     );
   }

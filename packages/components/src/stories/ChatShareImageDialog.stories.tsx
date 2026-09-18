@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from '@storybook/react';
 import { useState, type ComponentProps } from 'react';
 import type { ConversationMessage, SessionMeta } from '@lody/shared';
 import { ChatShareImageDialog } from '@/components/sessions/chat-share-image-dialog';
+import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 
 const meta = {
   title: 'Sessions/ChatShareImageDialog',
@@ -112,4 +113,20 @@ export const CustomRuntime: Story = {
 export const ChatDestination: Story = {
   ...Default,
   args: { ...Default.args, initialDestination: 'chat' },
+};
+
+/**
+ * The handset surface: the same preview, controls and actions carried by a
+ * bottom drawer instead of the dialog. `ForceMobileLayoutProvider` makes the
+ * component's own `useIsMobile` pick the drawer branch; `mobile1` keeps the
+ * canvas phone-sized.
+ */
+export const MobileDrawer: Story = {
+  ...Default,
+  parameters: { viewport: { defaultViewport: 'mobile1' } },
+  render: (args) => (
+    <ForceMobileLayoutProvider force>
+      <DialogHarness {...args} />
+    </ForceMobileLayoutProvider>
+  ),
 };

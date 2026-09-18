@@ -10,9 +10,15 @@ reference: `context/acp-protocol.md`; per-agent payload quirks:
 
 ## Ownership is bound at enqueue time
 
-Validated `_meta.lody.task` snapshots survive history filtering while running and
-merge by taskId. They are lifecycle facts, not repeated terminal output; never
+Validated task-lifecycle `_meta` snapshots survive history filtering while running
+and merge by taskId — `_meta.lody.task` and Devin's `cognition.ai/subagent_*`
+markers alike. They are lifecycle facts, not repeated terminal output; never
 drop them under the generic intermediate-tool snapshot compaction rule.
+
+Devin `cognition.ai/subagent_context`-tagged non-tool updates for a known subagent
+are dropped in `AgentClient.sessionUpdate` BEFORE usage/config/title consumers;
+tool updates continue so permission-requested rows and edit evidence still
+resolve in history.
 
 Machine RPC `session/cancel` with `subagentTaskId` forwards only to the native
 AgentClient for the exact active parent turn. It never marks the parent cancelled

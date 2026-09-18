@@ -2,8 +2,9 @@
 
 `CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
 
-Archive uses `collectSessionArchiveTargets` for contained/opened descendants;
-restore/delete retain containment-only targets. See [relations](../../specs/session-relations.md).
+Discover archive/restore/delete targets from one ready Repo snapshot, never UI caches.
+Archive uses `collectSessionArchiveTargets`; restore/delete keep direct containment.
+Exact deletion bypasses discovery. See [relations](../../specs/session-relations.md).
 
 ## Session history
 
@@ -40,8 +41,7 @@ restore/delete retain containment-only targets. See [relations](../../specs/sess
   not untouched stored payloads. Content-list edits retain unchanged blocks and parse
   authored blocks; tool identity changes still use the complete item parser.
 - Normalize legacy built-in CLI selectors on new history input only. Independent stored
-  input-config and task-proposal metadata edits validate changed fields, not untouched
-  historical values; proposal identity changes still require complete parsing.
+  input-config metadata edits validate changed fields, not untouched historical values.
 - ACP tool blocks and locations are explicit JSON extension boundaries. Unknown block
   types must not bypass validation of malformed known variants. Preserve declared `_meta`
   and extension keys; closed execution configuration still selects declared fields.
@@ -56,8 +56,7 @@ restore/delete retain containment-only targets. See [relations](../../specs/sess
   Resolve the live turn on each call, preserve immutable ids, and preflight before writing.
   Generic history updates remain for operations with cross-turn ownership or structural edits.
 - Permission responses inspect request metadata and materialize only the matching turn;
-  a supplied turn id restricts lookup to that turn. Renderer task-proposal decisions use
-  `updateEntry`, not a whole-history callback. Preserve legacy JSON metadata on lookup.
+  a supplied turn id restricts lookup to that turn. Preserve legacy JSON metadata on lookup.
 - Mirror's text-event optimization ships upstream in pinned `loro-mirror`; no local patch
   exists and no storage schema or write validation depends on it.
 

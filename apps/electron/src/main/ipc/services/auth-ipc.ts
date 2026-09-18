@@ -1,9 +1,7 @@
 import { productWindows } from '../../window-state'
 import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
 import {
-  ElectronAuthCallbackInputSchema,
   ElectronDevEmailPasswordSignInInputSchema,
-  type ElectronAuthCallbackInput,
   type ElectronDevEmailPasswordSignInInput
 } from '@lody/shared/electron-ipc'
 import { assertProductWindowSender } from '../assert-sender'
@@ -23,10 +21,15 @@ export class AuthIpc extends IpcService {
   static override readonly groupName = 'auth'
 
   @IpcMethod()
-  async completeCallback(payload: ElectronAuthCallbackInput) {
+  async startLogin() {
     assertAuthSender()
-    const input = ElectronAuthCallbackInputSchema.parse(payload)
-    return await getIpcServiceDeps().authService.completeCallback(input)
+    await getIpcServiceDeps().authService.startLogin()
+  }
+
+  @IpcMethod()
+  getLoginState() {
+    assertAuthSender()
+    return getIpcServiceDeps().authService.login.getState()
   }
 
   @IpcMethod()

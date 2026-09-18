@@ -37,11 +37,12 @@ import type { SkillMentionAgent } from '@/components/mentions/mention-skill-sour
 import {
   arePastedTextDraftsEqual,
   getPastedTextCharacterCount,
-  getPastedTextClipboardTextForSelection,
   getPastedTextLineCount,
   updatePastedTextDraftContent,
   type PastedTextDraft,
 } from '@/lib/pasted-text-draft';
+import { getExpandedClipboardTextForSelection } from '@/lib/composer-clipboard';
+import { useMentionPromptExpansion } from '@/components/mentions/mention-expansion';
 import type { Mention as MentionRange } from '@/ui/mention/index';
 import type { PersistedMentionRange } from '@/components/mentions/mention-persistence';
 import { toIntlLocale } from '@/lib/intl-locale';
@@ -358,6 +359,26 @@ export function ChatComposer({
       })),
     [pastedTextDrafts]
   );
+  // Live ranges for copy expansion. Send still owns its copy via the parent
+  // callback; we mirror here so Cmd/Ctrl+C can expand without waiting on send.
+  const [mentionRanges, setMentionRanges] = useState<MentionRange[]>([]);
+  const handleMentionRangesChange = useCallback(
+    (ranges: MentionRange[]) => {
+      setMentionRanges(ranges);
+      onMentionRangesChange?.(ranges);
+    },
+    [onMentionRangesChange]
+  );
+  const { getRewrites: getMentionPromptRewrites } = useMentionPromptExpansion({
+    source: mentionSource,
+    skillAgent,
+    promptValue,
+    currentSessionId,
+  });
+  // Drop stale ranges when the draft identity changes (session swap / remount).
+  useEffect(() => {
+    setMentionRanges([]);
+  }, [draftKey]);
   const handlePastedTextMentionsChange = useCallback(
     (nextMentions: MentionRange[]) => {
       if (promptDisabled) return;
@@ -429,11 +450,17 @@ export function ChatComposer({
   const handlePromptCopy = useCallback(
     (event: ClipboardEvent<HTMLTextAreaElement>) => {
       const input = event.currentTarget;
-      const clipboardText = getPastedTextClipboardTextForSelection({
+      // Expand session/skill/role/pasted mentions to the agent-facing plain
+      // text — same rewrites as send. Native copy stays when nothing expands.
+      const clipboardText = getExpandedClipboardTextForSelection({
         value: promptValue,
-        drafts: pastedTextDrafts,
         selectionStart: input.selectionStart,
         selectionEnd: input.selectionEnd,
+        rewrites: getMentionPromptRewrites({
+          text: promptValue,
+          mentions: mentionRanges,
+          pastedTextDrafts,
+        }),
       });
 
       if (clipboardText === null) {
@@ -443,7 +470,7 @@ export function ChatComposer({
       event.preventDefault();
       event.clipboardData.setData('text/plain', clipboardText);
     },
-    [pastedTextDrafts, promptValue]
+    [getMentionPromptRewrites, mentionRanges, pastedTextDrafts, promptValue]
   );
 
   const canHandleImageDrop = Boolean(onImageDrop) && !imageDropDisabled && !promptDisabled;
@@ -898,7 +925,7 @@ export function ChatComposer({
                 onExternalMentionsChange={handlePastedTextMentionsChange}
                 onMentionClick={handleMentionClick}
                 getMentionChip={getComposerMentionChip}
-                onMentionRangesChange={onMentionRangesChange}
+                onMentionRangesChange={handleMentionRangesChange}
                 persistedMentions={persistedMentions}
                 draftKey={draftKey}
                 mentionActionsRef={mentionActionsRef}
@@ -1001,7 +1028,7 @@ export function ChatComposer({
               onExternalMentionsChange={handlePastedTextMentionsChange}
               onMentionClick={handleMentionClick}
               getMentionChip={getComposerMentionChip}
-              onMentionRangesChange={onMentionRangesChange}
+              onMentionRangesChange={handleMentionRangesChange}
               persistedMentions={persistedMentions}
               draftKey={draftKey}
               mentionActionsRef={mentionActionsRef}

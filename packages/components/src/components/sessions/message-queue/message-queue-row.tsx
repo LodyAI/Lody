@@ -9,6 +9,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { cn } from '@/lib/utils';
 import { QueuedImagePreview, type QueuedImageBlock } from './queued-image-preview';
+import { shouldShowQueuedItemSteer } from './queued-message-steer';
 import { getEditableTaskText } from './use-message-queue-editing';
 
 const MAX_INLINE_IMAGES = 3;
@@ -19,6 +20,7 @@ export type MessageQueueRowProps = {
   index: number;
   isFirst: boolean;
   showSteerAction: boolean;
+  nativeSteerAvailable: boolean;
   canReorder: boolean;
   isEditing: boolean;
   editValue: string;
@@ -288,7 +290,7 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
 
 function RowActions(props: MessageQueueRowProps) {
   const { t } = useTranslation();
-  const { item, isFirst, showSteerAction, isEditing, onStartEdit, onRemove, onSteer } = props;
+  const { item, isFirst, showSteerAction, nativeSteerAvailable, isEditing, onStartEdit, onRemove, onSteer } = props;
 
   // In edit mode the textarea owns the row: it carries its own confirm button, so we
   // render no row-level actions that would compete for the click mid-edit.
@@ -298,7 +300,7 @@ function RowActions(props: MessageQueueRowProps) {
 
   return (
     <div className="flex shrink-0 items-center gap-0.5">
-      {isFirst && showSteerAction ? (
+      {shouldShowQueuedItemSteer({ showSteerAction, isFirst, nativeSteerAvailable }) ? (
         <TextAction
           text={t('sessions.messageQueue.guideAction', 'Steer')}
           ariaLabel={t(

@@ -101,20 +101,5 @@ never pushed to renderers as local room health.
   single publish commit, cancellation, when the queue may start in cloud versus OSS
   local mode, and the rule that a setup row never carries authorization URLs, codes,
   tokens, or raw provider output.
-- `task-doc.ts`: only creation passes `initialState` to the Mirror
-  (`seedEmptyDocument`); every other path must treat an absent document as absent, or
-  `readTask` answers with a placeholder meta and TASK_NOT_FOUND stops existing. Each
-  write republishes the index row from the document's post-write state. Persisted Task
-  documents get a repo `e/task-<id>` existence entry and no duplicated `m/*` business
-  meta. **Never write the agent field here**: it is the automation consent, so
-  `applyAgentTaskUpdate` covers every other scalar without an `agent` branch. Anything
-  needing every visible Task uses `listWorkspaceTaskIds`, which merges existence with
-  index rows, repairs a missing projection, and never revives an index tombstone.
-  `status`/`ownerId`/`projects` writes here can make a task automation-eligible and
-  start a session. Contract: specs/tasks.md.
-- `task-image-upload.ts` reads local images with `O_NOFOLLOW`.
-- `task-automation/`: an agent counts as busy while its task is **in progress**, not
-  merely while being dispatched, or one agent gets two concurrent sessions in one
-  working copy.
 - **A `file-preview/` preview must never activate Code Collab**: no workspace watch, no
   All Changes recompute, no Flock publish.

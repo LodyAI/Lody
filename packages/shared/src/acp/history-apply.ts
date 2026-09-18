@@ -22,6 +22,11 @@ import {
   mergeSubagentTaskPayload,
 } from './claude-subagent-task';
 import { parseCodexCollabAgentTasks } from './codex-collab-agent-task';
+import {
+  getDevinSubagentContextId,
+  hasOtherDevinSubagentMeta,
+  parseDevinSubagentTaskMeta,
+} from './devin-subagent-task';
 import { isAutonomousTurnId } from './turn-identity';
 
 type StoredToolCallContent = NonNullable<Extract<MessageContent, { type: 'tool_call' }>['content']>;
@@ -1150,9 +1155,17 @@ export const buildMessageContentFromNotification = (
       // item instead of persisting a tool_call; the applier merges by taskId.
       const subagentTask =
         parseLodyTaskMeta((update as ToolCallUpdateWithMeta)._meta) ??
+        parseDevinSubagentTaskMeta((update as ToolCallUpdateWithMeta)._meta) ??
         parseSubagentTaskWire(update.rawInput);
       if (subagentTask) {
-        return [{ type: 'subagent_task', ...subagentTask }];
+        const devinSubagentId = getDevinSubagentContextId((update as ToolCallUpdateWithMeta)._meta);
+        return [
+          {
+            type: 'subagent_task',
+            ...(devinSubagentId !== null ? { parentTaskId: devinSubagentId } : {}),
+            ...subagentTask,
+          },
+        ];
       }
 
       const codexCollabTasks = parseCodexCollabAgentTasks(update.title, update.rawInput);
@@ -1355,7 +1368,7 @@ class NotificationOnHistoryApplier {
   private readonly toolCallEntryIndexById = new Map<string, number | null>();
   // Subagent tasks receive future lifecycle events that must merge into the item
   // where the task first appeared (keyed by `taskId`).
-  private readonly subagentTaskEntryIndexById = new Map<string, number>();
+  private readonly subagentTaskEntryIndexById = new Map<string, number | null>();
   private readonly touchedAssistantEntryIndices = new Set<number>();
   // Assistant entry owning each `_meta.lody.turnId` seen so far. Built lazily by
   // scanning history once, then kept current as entries are stamped/created.
@@ -1386,6 +1399,22 @@ class NotificationOnHistoryApplier {
 
     for (const notification of notifications) {
       const { update } = notification;
+
+      // Devin subagent internals carry `cognition.ai/subagent_context`. Once the
+      // owning task row exists, internals stay out of the transcript — except a
+      // tool update merging into an already-persisted row (e.g. one a permission
+      // request wrote), and any update carrying a `cognition.ai/subagent_*`
+      // payload this version doesn't recognize, which passes through fail-open.
+      const devinSubagentOwnerId = getDevinSubagentContextId(update._meta);
+      if (
+        devinSubagentOwnerId !== null &&
+        !hasOtherDevinSubagentMeta(update._meta) &&
+        this.resolveSubagentTaskEntryIndex(devinSubagentOwnerId) !== undefined &&
+        ((update.sessionUpdate !== 'tool_call' && update.sessionUpdate !== 'tool_call_update') ||
+          this.resolveToolCallEntryIndex(update.toolCallId) === undefined)
+      ) {
+        continue;
+      }
 
       // Only an engine-opened turn (kimi stamps those with an `auto:` id plus
       // `turnOrigin`) gets turn-aware routing: its updates land in their own
@@ -1510,8 +1539,10 @@ class NotificationOnHistoryApplier {
   }
 
   private resolveSubagentTaskEntryIndex(taskId: string): number | undefined {
-    const cached = this.subagentTaskEntryIndexById.get(taskId);
-    if (cached !== undefined) return cached;
+    if (this.subagentTaskEntryIndexById.has(taskId)) {
+      const cached = this.subagentTaskEntryIndexById.get(taskId);
+      return cached === null ? undefined : cached;
+    }
 
     for (let i = this.history.length - 1; i >= 0; i--) {
       const items = this.readEntryItems(i);
@@ -1521,6 +1552,7 @@ class NotificationOnHistoryApplier {
       }
     }
 
+    this.subagentTaskEntryIndexById.set(taskId, null);
     return undefined;
   }
 

@@ -3,7 +3,6 @@ import type {
   SessionId,
   SessionHistory,
   PermissionOutcome,
-  TaskProposalMeta,
 } from '@lody/shared';
 
 // # WorkspaceWriter — the renderer's authored-write seam
@@ -87,16 +86,6 @@ export interface WorkspaceWriter {
    * replacement entry before calling this.
    */
   updateSessionHistory(sessionId: string, entryId: string, entry: SessionHistory): Promise<void>;
-
-  /** Resolve against the latest proposal; never write back a rendered history snapshot. */
-  resolveSessionTaskProposal(
-    sessionId: string,
-    entryId: string,
-    proposalId: string,
-    resolution: Pick<TaskProposalMeta, 'taskId'> & {
-      outcome: NonNullable<TaskProposalMeta['outcome']>;
-    }
-  ): Promise<void>;
 
   /**
    * Author a permission response: locate the tool_call whose

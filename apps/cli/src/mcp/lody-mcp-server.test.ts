@@ -9,7 +9,6 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   AGENT_ROLE_VERSION,
   SESSION_FILE_MAX_COUNT,
-  TASK_LABEL_MAX_COUNT,
   getSessionRoomId,
   workspaceFlockKeys,
   type AgentConfigId,
@@ -38,17 +37,6 @@ import {
 } from './lody-mcp-server';
 
 const {
-  TaskListToolInputSchema,
-  TaskGetToolInputSchema,
-  TaskCreateToolInputSchema,
-  TaskProposeToolInputSchema,
-  TaskUpdateToolInputSchema,
-  TaskEditBodyToolInputSchema,
-  TaskCommentToolInputSchema,
-  resolveTaskPrProvider,
-  buildTaskListFilter,
-  buildTaskUpdateInput,
-  toTaskProjectRef,
   FeedbackToolInputSchema,
   FileUploadToolInputSchema,
   SessionCreateOptionsToolInputSchema,
@@ -94,7 +82,6 @@ const createMcpContext = (): ReturnType<typeof getSessionContext> => ({
   sessionId: 'current-session-id',
   localControlSocketPath: '/tmp/lody-control.sock',
   workdir: '/tmp/workspace',
-  taskToolsEnabled: false,
 });
 
 const agentRole = (overrides: Partial<AgentRole> = {}): AgentRole => ({
@@ -143,9 +130,9 @@ describe('shared Operation store path', () => {
   });
 });
 
-const listPublishedToolNames = async (taskToolsEnabled: boolean): Promise<string[]> => {
-  const server = buildLodyMcpServer({ taskToolsEnabled });
-  const client = new Client({ name: 'task-gate-test-client', version: '1.0.0' });
+const listPublishedToolNames = async (): Promise<string[]> => {
+  const server = buildLodyMcpServer();
+  const client = new Client({ name: 'mcp-catalog-test-client', version: '1.0.0' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
   try {
@@ -155,30 +142,14 @@ const listPublishedToolNames = async (taskToolsEnabled: boolean): Promise<string
   }
 };
 
-describe('Lody Task MCP tool gate', () => {
-  const taskToolNames = [
-    'lody_task_list',
-    'lody_task_get',
-    'lody_task_create',
-    'lody_task_propose',
-    'lody_task_update',
-    'lody_task_edit_body',
-    'lody_task_comment',
-    'lody_task_upload_images',
-  ];
-
-  it('omits every Task tool while leaving the rest of Lody MCP available when disabled', async () => {
-    const names = await listPublishedToolNames(false);
+describe('Lody MCP tool catalog', () => {
+  it('publishes session tools and never advertises a Task family', async () => {
+    const names = await listPublishedToolNames();
     expect(names).toContain('lody_feedback');
     expect(names).toEqual(
       expect.arrayContaining(['lody_session_rename', 'lody_session_rename_many'])
     );
     expect(names.filter((name) => name.startsWith('lody_task_'))).toEqual([]);
-  });
-
-  it('publishes the complete Task tool family when enabled', async () => {
-    const names = await listPublishedToolNames(true);
-    expect(names).toEqual(expect.arrayContaining(taskToolNames));
   });
 });
 
@@ -628,7 +599,6 @@ describe('session MCP input schemas', () => {
       modeId: 'default',
       modelId: 'opus',
       configOptionValues: { reasoning_effort: 'medium' },
-      taskToolsEnabled: false,
       inheritSessionDefaults: false,
     });
     expect(buildResolvedMcpCreateCanonicalCommand(resolved)).toMatchObject({
@@ -1169,218 +1139,5 @@ describe('session MCP input schemas', () => {
       Buffer.byteLength(original, 'utf8') -
         Buffer.byteLength(result.text.replace('\n…\n', ''), 'utf8')
     );
-  });
-});
-
-describe('lody task MCP input schemas', () => {
-  it('requires a task id and rejects extra fields', () => {
-    expect(TaskGetToolInputSchema.safeParse({ taskId: 't1' }).success).toBe(true);
-    expect(TaskGetToolInputSchema.safeParse({ taskId: '  ' }).success).toBe(false);
-    expect(TaskGetToolInputSchema.safeParse({}).success).toBe(false);
-    expect(TaskGetToolInputSchema.safeParse({ taskId: 't1', extra: 1 }).success).toBe(false);
-  });
-
-  it('requires a stable proposal id and a title', () => {
-    expect(
-      TaskProposeToolInputSchema.safeParse({ proposalId: 'p1', title: 'Do the thing' }).success
-    ).toBe(true);
-    expect(TaskProposeToolInputSchema.safeParse({ title: 'Do the thing' }).success).toBe(false);
-    expect(TaskProposeToolInputSchema.safeParse({ proposalId: 'p1', title: '' }).success).toBe(
-      false
-    );
-    expect(
-      TaskProposeToolInputSchema.safeParse({
-        proposalId: 'p1',
-        title: 'x',
-        body: '# Details',
-      }).success
-    ).toBe(true);
-  });
-
-  it('does not let an agent update a task with nothing to change', () => {
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1' }).success).toBe(false);
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1', status: 'done' }).success).toBe(
-      true
-    );
-    expect(
-      TaskUpdateToolInputSchema.safeParse({
-        taskId: 't1',
-        pullRequestUrl: 'https://github.com/o/r/pull/1',
-      }).success
-    ).toBe(true);
-  });
-
-  it('rejects unknown statuses and non-URL pull requests', () => {
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1', status: 'shipped' }).success).toBe(
-      false
-    );
-    expect(
-      TaskUpdateToolInputSchema.safeParse({ taskId: 't1', pullRequestUrl: 'o/r#1' }).success
-    ).toBe(false);
-  });
-
-  it('accepts every writable scalar property', () => {
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1', title: 'new' }).success).toBe(true);
-    // Empty string is the unassign path, so it must not be rejected as blank.
-    // (Naming an owner is human-only; covered separately below.)
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1', ownerId: '' }).success).toBe(true);
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1', priority: 'high' }).success).toBe(
-      true
-    );
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1', priority: 'none' }).success).toBe(
-      true
-    );
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1', labels: [] }).success).toBe(true);
-    expect(
-      TaskUpdateToolInputSchema.safeParse({
-        taskId: 't1',
-        project: { kind: 'github', repo: 'o/r' },
-      }).success
-    ).toBe(true);
-  });
-
-  it('keeps the body and the entrusted agent out of the update tool', () => {
-    // The body goes through the exact-match edit so a content change carries its
-    // size delta; `agent` is the automation consent and only a person sets it.
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1', body: 'new' }).success).toBe(false);
-    expect(
-      TaskUpdateToolInputSchema.safeParse({ taskId: 't1', agent: { agentConfigId: 'a1' } }).success
-    ).toBe(false);
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1', agentConfigId: 'a1' }).success).toBe(
-      false
-    );
-  });
-
-  it('rejects an unknown priority and an oversized label set', () => {
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1', priority: 'blocker' }).success).toBe(
-      false
-    );
-    expect(
-      TaskUpdateToolInputSchema.safeParse({
-        taskId: 't1',
-        labels: Array.from({ length: TASK_LABEL_MAX_COUNT + 1 }, (_, index) => `l${index}`),
-      }).success
-    ).toBe(false);
-  });
-
-  it('requires a title to create a task and never accepts an agent', () => {
-    expect(TaskCreateToolInputSchema.safeParse({ title: 'Fix the header' }).success).toBe(true);
-    expect(TaskCreateToolInputSchema.safeParse({ body: 'no title' }).success).toBe(false);
-    expect(TaskCreateToolInputSchema.safeParse({ title: '   ' }).success).toBe(false);
-    expect(
-      TaskCreateToolInputSchema.safeParse({ title: 'x', agent: { agentConfigId: 'a1' } }).success
-    ).toBe(false);
-    expect(
-      TaskCreateToolInputSchema.safeParse({
-        title: 'x',
-        body: '## Why',
-        status: 'todo',
-        priority: 'low',
-        labels: ['Bug'],
-        project: { kind: 'local', projectId: 'p1', worktree: true },
-      }).success
-    ).toBe(true);
-  });
-
-  it('bounds the task list page and rejects an unknown status filter', () => {
-    expect(TaskListToolInputSchema.safeParse({}).success).toBe(true);
-    expect(TaskListToolInputSchema.safeParse({ status: ['todo', 'done'] }).success).toBe(true);
-    expect(TaskListToolInputSchema.safeParse({ status: [] }).success).toBe(false);
-    expect(TaskListToolInputSchema.safeParse({ status: ['shipped'] }).success).toBe(false);
-    expect(TaskListToolInputSchema.safeParse({ limit: 101 }).success).toBe(false);
-    expect(TaskListToolInputSchema.safeParse({ limit: 0 }).success).toBe(false);
-  });
-
-  it('lets an agent unassign an owner but never name one', () => {
-    // Unassigning is the one direction that can only reduce automation
-    // eligibility; naming an owner points the predicate somewhere new.
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1', ownerId: '' }).success).toBe(true);
-    expect(TaskCreateToolInputSchema.safeParse({ title: 'x', ownerId: '' }).success).toBe(true);
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1', ownerId: 'user-2' }).success).toBe(
-      false
-    );
-    expect(TaskCreateToolInputSchema.safeParse({ title: 'x', ownerId: 'user-2' }).success).toBe(
-      false
-    );
-    // `me` is a list filter, not a user id — it must not sneak through either.
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1', ownerId: 'me' }).success).toBe(
-      false
-    );
-    expect(TaskListToolInputSchema.safeParse({ ownerId: 'me' }).success).toBe(true);
-    expect(TaskListToolInputSchema.safeParse({ ownerId: 'user-2' }).success).toBe(true);
-  });
-
-  it('resolves "me" in the list filter against the signed-in operator', () => {
-    expect(buildTaskListFilter({ ownerId: 'me' }, 'user-1')).toEqual({
-      ownerId: 'user-1',
-      limit: 20,
-    });
-    // Empty string means unassigned and must survive as itself.
-    expect(buildTaskListFilter({ ownerId: '' }, 'user-1')).toEqual({ ownerId: '', limit: 20 });
-    // An omitted owner must not become the operator: that would silently hide
-    // every task belonging to a teammate.
-    expect(buildTaskListFilter({}, 'user-1')).toEqual({ limit: 20 });
-  });
-
-  it('maps the update input onto the document patch', () => {
-    expect(
-      buildTaskUpdateInput(
-        {
-          taskId: 't1',
-          priority: 'none',
-          labels: ['Bug', 'bug'],
-          project: { kind: 'github', repo: 'o/r' },
-          pullRequestUrl: 'https://github.com/o/r/pull/1',
-        },
-        'session-1' as SessionId
-      )
-    ).toEqual({
-      // 'none' is how a caller clears a priority; null is what the document takes.
-      priority: null,
-      labels: ['Bug', 'bug'],
-      projects: [{ kind: 'github', repoFullName: 'o/r', branch: 'main' }],
-      pullRequest: {
-        url: 'https://github.com/o/r/pull/1',
-        provider: 'github',
-        originSessionId: 'session-1',
-      },
-    });
-    // An untouched field must stay absent rather than be written as undefined,
-    // or a no-op update would clear it.
-    expect(
-      buildTaskUpdateInput({ taskId: 't1', status: 'done' }, 'session-1' as SessionId)
-    ).toEqual({ status: 'done' });
-  });
-
-  it('keeps a local project worktree flag and drops it when unset', () => {
-    expect(toTaskProjectRef({ kind: 'local', projectId: 'p1', worktree: true })).toEqual({
-      kind: 'local',
-      localProjectId: 'p1',
-      useWorktree: true,
-    });
-    expect(toTaskProjectRef({ kind: 'local', projectId: 'p1' })).toEqual({
-      kind: 'local',
-      localProjectId: 'p1',
-    });
-  });
-
-  it('allows an empty oldString so an agent can append a section', () => {
-    expect(
-      TaskEditBodyToolInputSchema.safeParse({ taskId: 't1', oldString: '', newString: '## New' })
-        .success
-    ).toBe(true);
-    expect(TaskEditBodyToolInputSchema.safeParse({ taskId: 't1', oldString: 'a' }).success).toBe(
-      false
-    );
-  });
-
-  it('requires comment text', () => {
-    expect(TaskCommentToolInputSchema.safeParse({ taskId: 't1', body: 'done' }).success).toBe(true);
-    expect(TaskCommentToolInputSchema.safeParse({ taskId: 't1', body: '   ' }).success).toBe(false);
-  });
-
-  it('derives the provider from the pull request URL', () => {
-    expect(resolveTaskPrProvider('https://github.com/o/r/pull/1')).toBe('github');
-    expect(resolveTaskPrProvider('https://gitlab.com/o/r/-/merge_requests/1')).toBe('gitlab');
   });
 });

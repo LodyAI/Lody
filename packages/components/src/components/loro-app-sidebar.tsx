@@ -56,8 +56,6 @@ import { docMetaCacheScopeAtom } from '@/atoms/doc-meta';
 import { useWorkspaceRouteTargetSlug } from '../providers/workspace-route-target';
 import { resolveWorkspaceDataScope } from '@/lib/workspace-data-scope';
 
-import { tasksFeatureEnabledAtom } from '@/atoms/settings';
-import { taskQuickAddOpenAtom, taskQuickAddStatusAtom } from '@/atoms/tasks';
 import { lodyConnectionUiStateAtom } from '@/atoms/control-connection';
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import { getLocalProjectVisibilityKey } from '@/lib/visible-local-project-index';
@@ -232,6 +230,8 @@ export type RemoveLocalProjectDialogProps = {
   onOpenChange: (open: boolean) => void;
   onPreflightCleanup: () => Promise<LocalProjectWorktreeCleanupPreflightResult>;
   onConfirm: (options: { cleanupWorktrees: boolean }) => void;
+  /** Nested inside another dialog (desktop settings). Matches MCP's overlay. */
+  overlayClassName?: string;
 };
 
 type PendingSessionShare = {
@@ -255,6 +255,7 @@ export function RemoveLocalProjectDialog({
   onOpenChange,
   onPreflightCleanup,
   onConfirm,
+  overlayClassName,
 }: RemoveLocalProjectDialogProps) {
   const { t } = useTranslation();
   const [cleanupWorktrees, setCleanupWorktrees] = useState(false);
@@ -302,7 +303,7 @@ export function RemoveLocalProjectDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg" overlayClassName={overlayClassName}>
         <DialogHeader>
           <DialogTitle>
             {t('sidebar.localProjects.remove.title', 'Remove “{{name}}” from Lody?', {
@@ -496,16 +497,6 @@ function isHomeRoute(pathname: string, workspaceSlug: string | null): boolean {
       : pathname;
 
   return normalizedPath.startsWith('/chat');
-}
-
-function isTasksRoute(pathname: string, workspaceSlug: string | null): boolean {
-  const workspacePrefix = workspaceSlug ? `/${workspaceSlug}` : '';
-  const normalizedPath =
-    workspaceSlug && pathname.startsWith(workspacePrefix)
-      ? pathname.slice(workspacePrefix.length) || '/'
-      : pathname;
-
-  return normalizedPath.startsWith('/tasks');
 }
 
 function isArchiveRoute(pathname: string, workspaceSlug: string | null): boolean {
@@ -1570,7 +1561,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
 
   const activeNav = useMemo(() => {
     if (isArchiveRoute(location.pathname, workspaceSlug)) return 'archive';
-    if (isTasksRoute(location.pathname, workspaceSlug)) return 'tasks';
     if (
       isHomeRoute(location.pathname, workspaceSlug) &&
       !selectedSessionId &&
@@ -2691,39 +2681,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     });
   }, [activeNav, closeMobileDrawer, router, workspaceSlug]);
 
-  const tasksEnabled = useAtomValue(tasksFeatureEnabledAtom);
-
-  const handleTasksClicked = useCallback(() => {
-    if (!workspaceSlug) return;
-    closeMobileDrawer();
-    if (activeNav === 'tasks') {
-      if (typeof window !== 'undefined' && window.history.length > 1) {
-        window.history.back();
-        return;
-      }
-      void router.navigate({
-        to: '/$workspaceName/chat',
-        params: { workspaceName: workspaceSlug },
-      });
-      return;
-    }
-    void router.navigate({
-      to: '/$workspaceName/tasks',
-      params: { workspaceName: workspaceSlug },
-    });
-  }, [activeNav, closeMobileDrawer, router, workspaceSlug]);
-
-  // Capture without navigating: the dialog is global (MainLayout), so the `+`
-  // works from anywhere the sidebar is. Status is reset because the board's
-  // per-column `+` leaves its own status behind in that atom.
-  const openTaskQuickAdd = useSetAtom(taskQuickAddOpenAtom);
-  const setTaskQuickAddStatus = useSetAtom(taskQuickAddStatusAtom);
-  const handleNewTaskClicked = useCallback(() => {
-    closeMobileDrawer();
-    setTaskQuickAddStatus(null);
-    openTaskQuickAdd(true);
-  }, [closeMobileDrawer, openTaskQuickAdd, setTaskQuickAddStatus]);
-
   const handleDocsClicked = useCallback(() => {
     closeMobileDrawer();
     if (typeof window === 'undefined') return;
@@ -2814,7 +2771,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   const labels: Partial<LoroSidebarLabels> = useMemo(() => {
     return {
       home: t('sidebar.home', 'Home'),
-      newTask: t('tasks.newTask', 'New task'),
       docs: t('sidebar.docs', 'Docs'),
       joinCommunity: t('sidebar.joinCommunity', 'Join community'),
       feedback: t('sidebar.feedback', 'Feedback'),
@@ -3267,9 +3223,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         onCreateWorkspaceClicked={handleCreateWorkspaceClicked}
         onHomeClicked={handleHomeClicked}
         onArchiveClicked={handleArchiveClicked}
-        onTasksClicked={handleTasksClicked}
-        onNewTaskClicked={handleNewTaskClicked}
-        showTasks={tasksEnabled}
         onDocsClicked={handleDocsClicked}
         onJoinCommunityClicked={handleJoinCommunityClicked}
         onFeedbackClicked={handleFeedbackClicked}

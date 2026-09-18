@@ -140,7 +140,6 @@ export const SESSION_DIRECTORY_INPUT_CONFIG_KEYS = [
   'agentType',
   'mcpServerIds',
   'configOptionValues',
-  'taskToolsEnabled',
 ] as const;
 
 /** Business history shape, independent of the storage schema and container ids.

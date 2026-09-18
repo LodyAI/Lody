@@ -554,8 +554,14 @@ export type CombinedMentionTextareaHandle = {
   /**
    * Append a session mention. Returns false when nothing was written: an
    * unknown/archived/own session, or one the draft already mentions.
+   *
+   * Paste supplies `at`/`replaceEnd` so the mention lands on the caret (or
+   * replaces the current selection) instead of appending.
    */
-  insertSessionMention: (sessionId: string) => boolean;
+  insertSessionMention: (
+    sessionId: string,
+    options?: { at?: number; replaceEnd?: number }
+  ) => boolean;
   /**
    * Append `@path` mentions in one transaction for paths outside the menu —
    * folders dropped from the OS. Each writes text plus a committed range,
@@ -583,12 +589,12 @@ function MentionActionsBridge({
   React.useImperativeHandle(
     actionsRef,
     () => ({
-      insertSessionMention: (sessionId: string) => {
+      insertSessionMention: (sessionId, options) => {
         // Session mentions being disabled IS an empty list, so the lookup is
         // also the enablement check — there is nothing to mention.
         const item = items.find((candidate) => candidate.sessionId === sessionId);
         if (!item) return false;
-        const insertion = buildSessionMentionInsertion(mentions, item);
+        const insertion = buildSessionMentionInsertion(mentions, item, options);
         if (!insertion) return false;
         onMentionInsert(insertion);
         return true;

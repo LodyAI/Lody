@@ -20,6 +20,18 @@ absolute and parent-relative paths outside the workspace. Remote sessions never 
 viewer's machine. Clicking the assistant link itself only opens the preview;
 opening the OS application requires a separate user click.
 
+Right-clicking an assistant Markdown file link always offers Copy Path. On an
+Electron renderer whose session belongs to this machine and whose workspace path
+has resolved, its menu additionally offers Open File with the OS default app,
+Open in the editor selected in the session header, Open with the other available
+configured path launchers, and Reveal in Finder (or the host's file manager).
+The path handed to the clipboard or OS excludes a Markdown line/column suffix; ordinary left
+click retains that suffix for in-app preview navigation. Browser, mobile, remote,
+and unresolved-local contexts offer Copy Path only.
+Each rendered conversation surface resolves that capability from its own Session.
+An opened, child, or side Session never inherits its opener's workspace, machine,
+or native file actions.
+
 Native mobile offers Share file in the binary notice and file menu. It exports
 the complete authorized preview bytes into an isolated app-cache file and opens
 the system share sheet, preserving the filename extension. Copy file path remains

@@ -37,9 +37,8 @@ before touching gestures.
 
 ## Home and chat lists
 
-- Inbox renders only on `showInboxTab`, Tasks only on `showTasksTab`
-  (`../tasks/AGENTS.md`). Keep the chat/projects group mounted-but-hidden so
-  pull-to-refresh and scroll position survive tab round-trips.
+- Inbox renders only on `showInboxTab`. Keep the chat/projects group
+  mounted so pull-to-refresh and scroll position survive tab round-trips.
   `../chat/chat-landing.tsx` owns the default home tab; the workspace stack only
   keeps `/chat` base context mounted under drawers.
 - The sticky home header is ONE chrome row (workspace | search |

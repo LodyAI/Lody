@@ -123,6 +123,7 @@ describe('useSessionSharing project visibility', () => {
           ? new Map([[privateProject.key, privateProject]])
           : new Map(),
         accessByProjectKey: new Map(),
+        accessByMachineId: new Map(),
         isLoading: false,
       })
     );

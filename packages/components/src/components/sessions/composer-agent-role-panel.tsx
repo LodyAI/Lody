@@ -86,21 +86,19 @@ export function ComposerAgentRolePanel({
                 disabled={availability.kind !== 'available'}
                 role="menuitemradio"
                 aria-checked={role.id === selectedRoleId}
-                className="items-start gap-2"
+                className="items-center gap-2"
                 onFocus={() => setPreviewRoleId(role.id)}
                 onSelect={() => onSelect(role.id)}
               >
-                <span className="flex h-4 shrink-0 items-center text-sm leading-none">
+                <span className="flex shrink-0 items-center text-sm leading-none">
                   <span aria-hidden="true">{getAgentRoleEmoji(role)}</span>
                 </span>
-                <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
                   <span className="truncate leading-tight">{role.name}</span>
                   <RoleAvailabilityNote availability={availability} />
                 </span>
                 {role.id === selectedRoleId ? (
-                  <span className="flex h-4 shrink-0 items-center">
-                    <Check className="h-3.5 w-3.5" aria-hidden="true" />
-                  </span>
+                  <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 ) : null}
               </DropdownMenuItem>
             </div>

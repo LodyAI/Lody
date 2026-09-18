@@ -13,7 +13,6 @@ import {
   resolveSessionAcpRuntimeConfig,
   resolveSessionConversationConfig,
   resolveSessionConversationSourceFence,
-  resolveSessionTaskToolsEnabled,
 } from '../src/session-input';
 import { normalizeSessionTurnInputConfig, SessionFileBlockSchema } from '../src/message-schemas';
 import { sessionDocSchema } from '../src/schema';
@@ -292,32 +291,6 @@ describe('session-input helpers', () => {
         configOptionValues: { collaboration_mode: 'default' },
       })
     ).toBeNull();
-  });
-
-  it('resolves the frozen Task tool gate with legacy inputs disabled', () => {
-    expect(
-      resolveSessionTaskToolsEnabled([
-        {
-          id: 'turn-1',
-          role: 'user',
-          inputConfig: {
-            prompt: 'create a task',
-            cliType: 'builtin',
-            agentType: 'codex',
-            taskToolsEnabled: true,
-          },
-        },
-      ])
-    ).toBe(true);
-    expect(
-      resolveSessionTaskToolsEnabled([
-        {
-          id: 'legacy-turn',
-          role: 'user',
-          inputConfig: { prompt: 'hello', cliType: 'builtin', agentType: 'codex' },
-        },
-      ])
-    ).toBe(false);
   });
 
   it('ignores invalid and unconfigured history when resolving conversation config', () => {

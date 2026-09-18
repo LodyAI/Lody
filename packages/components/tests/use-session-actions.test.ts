@@ -6,11 +6,14 @@ import { act, createElement, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { LoroRepo } from 'loro-repo';
 import {
   FREE_SESSION_LIMIT_PER_WORKSPACE,
   getMachineRoomId,
   getSessionRoomId,
+  isLoroRepoDocDeleted,
   machineFlockKeys,
+  readSessionOperationTargets,
   type MachineId,
   type SessionId,
   type SessionMeta,
@@ -141,7 +144,15 @@ const sessionDataOver = (history: unknown[]) => ({
 
 const createRuntime = (
   overrides: Partial<
-    Pick<WorkspaceRuntime, 'ensureDocStream' | 'repo' | 'workspaceId' | 'workspaceSlug' | 'writer'>
+    Pick<
+      WorkspaceRuntime,
+      | 'ensureDocStream'
+      | 'repo'
+      | 'workspaceId'
+      | 'workspaceSlug'
+      | 'writer'
+      | 'readSessionOperationTargets'
+    >
   >
 ): WorkspaceRuntime => {
   const repo =
@@ -203,6 +214,9 @@ const createRuntime = (
     workspaceId: overrides.workspaceId ?? ('workspace-1' as WorkspaceId),
     repo,
     writer,
+    readSessionOperationTargets:
+      overrides.readSessionOperationTargets ??
+      ((sessionId, operation) => readSessionOperationTargets(repo, sessionId, operation)),
     ensureDocStream: overrides.ensureDocStream ?? vi.fn(async () => undefined),
     releaseSessionStore: vi.fn(async () => undefined),
     withSessionStore: vi.fn(async (_sessionId: unknown, fn: (store: unknown) => unknown) =>
@@ -277,6 +291,7 @@ function createSessionMetaRepo(sessions: readonly SessionMeta[]) {
     sessions.map((session) => [getSessionRoomId(session.id), { ...session }])
   );
   const repo = {
+    listDoc: async () => [...docs].map(([docId, meta]) => ({ docId, meta: { ...meta } })),
     getDocMeta: vi.fn(async (roomId: string) => ({ meta: docs.get(roomId) ?? {} })),
     upsertDocMeta: vi.fn(async (roomId: string, patch: Record<string, unknown>) => {
       docs.set(roomId, { ...(docs.get(roomId) ?? {}), ...patch });
@@ -333,9 +348,10 @@ describe('useSessionActions', () => {
       workspaceSlug?: string | null;
       docMetaCacheReady?: boolean;
       sessionMetaCache?: Record<string, SessionMeta>;
+      store?: ReturnType<typeof createStore>;
     } = {}
   ): Promise<SessionActions> => {
-    const jotaiStore = createStore();
+    const jotaiStore = options.store ?? createStore();
     jotaiStore.set(runtimeAtom, runtime);
     jotaiStore.set(docMetaCacheReadyAtom, options.docMetaCacheReady ?? true);
     jotaiStore.set(sessionMetaCacheAtom, options.sessionMetaCache ?? {});
@@ -1224,7 +1240,7 @@ describe('useSessionActions', () => {
     expect(metaRepo.getSession(tree.openedSession.id)).toEqual(tree.openedSession);
   });
 
-  it('preserves state when closing fails and refuses incomplete archive restoration', async () => {
+  it('preserves state when closing or restoration writes fail', async () => {
     const tree = createContainmentSessions('failed-close', true);
     const metaRepo = createSessionMetaRepo(tree.sessions);
     metaRepo.repo.upsertDocMeta = async () => {
@@ -1236,82 +1252,197 @@ describe('useSessionActions', () => {
     await expect(actions.setSessionTabClosed(tree.rootSession.id, true)).rejects.toThrow(
       'disk full'
     );
-    await expect(actions.reopenSessionTab(tree.rootSession.id)).rejects.toThrow('still loading');
+    await expect(actions.reopenSessionTab(tree.rootSession.id)).rejects.toThrow('disk full');
     expect(metaRepo.getSession(tree.rootSession.id)).toEqual(tree.rootSession);
   });
 
-  it('archives by writing the archived state only, never a machine command or queue', async () => {
-    const sessionId = 'session-archive-legacy-queue' as SessionId;
-    const machineId = 'machine-1';
-    const sessionMeta = {
-      id: sessionId,
-      machineId,
-      userId: 'user-1',
-      cliType: 'builtin',
-      createdAt: new Date().toISOString(),
-    } as SessionMeta;
-    const upsertDocMeta = vi.fn(async () => undefined);
-    const getDocMeta = vi.fn(async (roomId: string) => {
-      if (roomId === getSessionRoomId(sessionId)) return { meta: sessionMeta };
-      if (roomId === getMachineRoomId(machineId)) {
-        return { meta: { needToArchiveSessions: {}, needToDeleteSessions: {} } };
+  it.each([false, true])('uses one Repo snapshot even when UI readiness is %s', async (ready) => {
+    const tree = createContainmentSessions('snapshot', false);
+    const unrelated = { ...tree.rootSession, id: 'unrelated' as SessionId };
+    const hintOnly = {
+      ...unrelated,
+      id: 'hint-only' as SessionId,
+      openedByRootSessionId: tree.rootSession.id,
+    };
+    const conflicting = {
+      ...unrelated,
+      id: 'conflicting' as SessionId,
+      parentSessionId: unrelated.id,
+      openedBySessionId: tree.rootSession.id,
+    };
+    const deleted = { ...tree.tabSession, id: 'deleted' as SessionId };
+    const repo = await LoroRepo.create({});
+    try {
+      for (const session of [...tree.sessions, unrelated, hintOnly, conflicting, deleted]) {
+        await repo.upsertDocMeta(getSessionRoomId(session.id), {
+          ...session,
+          id: 'stale-embedded-id',
+          isTabClosed: true,
+        });
       }
-      return { meta: {} };
-    });
-    const runtime = createRuntime({
-      repo: {
-        getDocMeta,
-        upsertDocMeta,
-        openFlockDoc: vi.fn(async () => ({
-          flock: { scan: () => [], set: vi.fn(), delete: vi.fn(), commit: vi.fn() },
-          syncOnce: vi.fn(async () => undefined),
-        })),
-        flush: vi.fn(async () => undefined),
-      } as unknown as WorkspaceRuntime['repo'],
-    });
-    const actions = await renderActions(runtime);
-
-    await actions.archiveSession(sessionId);
-
-    expect(upsertDocMeta).toHaveBeenCalledWith(
-      getSessionRoomId(sessionId),
-      expect.objectContaining({ isArchived: true })
-    );
-    expect(upsertDocMeta).not.toHaveBeenCalledWith(getMachineRoomId(machineId), expect.anything());
-    expect(runtime.writer.flockRowPut).not.toHaveBeenCalled();
+      await repo.deleteDoc(getSessionRoomId(deleted.id));
+      const runtime = createRuntime({ repo });
+      const actions = await renderActions(runtime, {
+        docMetaCacheReady: ready,
+        sessionMetaCache: { [getSessionRoomId(tree.rootSession.id)]: tree.rootSession },
+      });
+      await actions.archiveSession(tree.rootSession.id);
+      for (const session of tree.sessions) {
+        expect((await repo.getDocMeta(getSessionRoomId(session.id)))?.meta).toMatchObject({
+          isArchived: true,
+          status: { type: 'idle' },
+        });
+      }
+      for (const session of [unrelated, hintOnly, conflicting]) {
+        expect((await repo.getDocMeta(getSessionRoomId(session.id)))?.meta.isArchived).toBe(false);
+      }
+      expect(isLoroRepoDocDeleted(await repo.getDocMeta(getSessionRoomId(deleted.id)))).toBe(true);
+      await actions.restoreSession(tree.rootSession.id);
+      expect((await repo.getDocMeta(getSessionRoomId(tree.rootSession.id)))?.meta).toMatchObject({
+        isArchived: false,
+        isTabClosed: false,
+      });
+      expect((await repo.getDocMeta(getSessionRoomId(tree.tabSession.id)))?.meta).toMatchObject({
+        isArchived: false,
+        isTabClosed: true,
+      });
+      for (const session of [tree.openedSession, tree.openedFromTabSession]) {
+        expect((await repo.getDocMeta(getSessionRoomId(session.id)))?.meta.isArchived).toBe(true);
+      }
+      await actions.archiveSession(tree.rootSession.id);
+      await actions.deleteArchivedSession(tree.rootSession.id);
+      for (const session of [tree.rootSession, tree.tabSession]) {
+        expect(isLoroRepoDocDeleted(await repo.getDocMeta(getSessionRoomId(session.id)))).toBe(
+          true
+        );
+      }
+      for (const session of [tree.openedSession, tree.openedFromTabSession]) {
+        const entry = await repo.getDocMeta(getSessionRoomId(session.id));
+        expect(isLoroRepoDocDeleted(entry)).toBe(false);
+        expect(entry?.meta.isArchived).toBe(true);
+      }
+      expect(runtime.writer.flockRowPut).not.toHaveBeenCalled();
+    } finally {
+      await repo.destroy();
+    }
   });
 
-  it('archives from the rendered meta cache when repo meta has not hydrated', async () => {
-    const sessionId = 'session-archive-known-meta' as SessionId;
-    const renderedMeta = {
-      id: sessionId,
-      machineId: 'machine-1',
-      userId: 'user-1',
-      cliType: 'builtin',
-      createdAt: new Date().toISOString(),
-      parentSessionId: 'parent-session-1' as SessionId,
-    } as SessionMeta;
-    const upsertDocMeta = vi.fn(async () => undefined);
-    // The repo cannot read the doc meta yet (child session still hydrating).
-    const getDocMeta = vi.fn(async () => undefined);
-    const runtime = createRuntime({
-      repo: { getDocMeta, upsertDocMeta } as unknown as WorkspaceRuntime['repo'],
+  it.each(['archiveSession', 'restoreSession', 'deleteArchivedSession'] as const)(
+    '%s rejects failed reads and missing roots without using the UI cache',
+    async (action) => {
+      const tree = createContainmentSessions('failed-read', true);
+      const metaRepo = createSessionMetaRepo(tree.sessions);
+      const listDoc = metaRepo.repo.listDoc.bind(metaRepo.repo);
+      metaRepo.repo.listDoc = async () => {
+        throw new Error('metadata unavailable');
+      };
+      const actions = await renderActions(createRuntime({ repo: metaRepo.repo }), {
+        sessionMetaCache: tree.sessionMetaCache,
+      });
+      await expect(actions[action](tree.rootSession.id)).rejects.toThrow('metadata unavailable');
+      for (const session of tree.sessions) expect(metaRepo.getSession(session.id)).toEqual(session);
+      metaRepo.repo.listDoc = listDoc;
+      await metaRepo.repo.deleteDoc(getSessionRoomId(tree.rootSession.id));
+      await expect(actions[action](tree.rootSession.id)).rejects.toThrow(
+        'Session metadata missing'
+      );
+      expect(metaRepo.getSession(tree.rootSession.id)).toBeUndefined();
+      for (const session of tree.sessions.slice(1))
+        expect(metaRepo.getSession(session.id)).toEqual(session);
+      expect(sendIpcMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['archiveSession', 'restoreSession', 'deleteArchivedSession'] as const)(
+    '%s refuses a workspace switch while reading targets',
+    async (action) => {
+      const tree = createContainmentSessions('switch', true);
+      const original = createSessionMetaRepo(tree.sessions);
+      const replacement = createSessionMetaRepo(tree.sessions);
+      const reading = createDeferred();
+      const finish = createDeferred();
+      const runtime = createRuntime({
+        repo: original.repo,
+        readSessionOperationTargets: async (id, operation) => {
+          const targets = await readSessionOperationTargets(original.repo, id, operation);
+          reading.resolve();
+          await finish.promise;
+          return targets;
+        },
+      });
+      const store = createStore();
+      const actions = await renderActions(runtime, { store });
+      const result = actions[action](tree.rootSession.id);
+      const rejected = expect(result).rejects.toThrow('Workspace changed');
+      await reading.promise;
+      await act(async () => {
+        store.set(runtimeAtom, createRuntime({ repo: replacement.repo }));
+      });
+      finish.resolve();
+      await rejected;
+      for (const session of tree.sessions) {
+        expect(original.getSession(session.id)).toEqual(session);
+        expect(replacement.getSession(session.id)).toEqual(session);
+      }
+      expect(sendIpcMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it('finishes the captured snapshot on its original runtime after the first write', async () => {
+    const tree = createContainmentSessions('pinned', false);
+    const original = createSessionMetaRepo(tree.sessions);
+    const replacement = createSessionMetaRepo(tree.sessions);
+    const written = createDeferred();
+    const finish = createDeferred();
+    const write = original.repo.upsertDocMeta.bind(original.repo);
+    original.repo.upsertDocMeta = async (id, patch) => {
+      await write(id, patch);
+      if (id === getSessionRoomId(tree.rootSession.id)) {
+        written.resolve();
+        await finish.promise;
+      }
+    };
+    const store = createStore();
+    const actions = await renderActions(createRuntime({ repo: original.repo }), { store });
+    const result = actions.archiveSession(tree.rootSession.id);
+    await written.promise;
+    const lateChild = { ...tree.tabSession, id: 'late-child' as SessionId };
+    original.setMeta(getSessionRoomId(lateChild.id), lateChild);
+    await act(async () => {
+      store.set(runtimeAtom, createRuntime({ repo: replacement.repo }));
     });
-    const actions = await renderActions(runtime, {
-      sessionMetaCache: { [getSessionRoomId(sessionId)]: renderedMeta },
+    finish.resolve();
+    await result;
+    for (const session of tree.sessions) {
+      expect(original.getSession(session.id)?.isArchived).toBe(true);
+      expect(replacement.getSession(session.id)).toEqual(session);
+    }
+    expect(original.getSession(lateChild.id)).toEqual(lateChild);
+  });
+
+  it('surfaces partial archive writes without rollback and repairs them on retry', async () => {
+    const tree = createContainmentSessions('partial', false);
+    const metaRepo = createSessionMetaRepo(tree.sessions);
+    const write = metaRepo.repo.upsertDocMeta.bind(metaRepo.repo);
+    metaRepo.repo.upsertDocMeta = async (id, patch) => {
+      if (id === getSessionRoomId(tree.tabSession.id)) throw new Error('disk full');
+      await write(id, patch);
+    };
+    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }));
+    await expect(actions.archiveSession(tree.rootSession.id)).rejects.toThrow('disk full');
+    expect(metaRepo.getSession(tree.rootSession.id)?.isArchived).toBe(true);
+    for (const session of tree.sessions.slice(1))
+      expect(metaRepo.getSession(session.id)).toEqual(session);
+    expect(sendIpcMock.mock.calls).toEqual([
+      ['terminal.closeSession', { sessionId: tree.rootSession.id }],
+    ]);
+    metaRepo.repo.upsertDocMeta = write;
+    sendIpcMock.mockImplementationOnce(() => {
+      throw new Error('terminal unavailable');
     });
-
-    await actions.archiveSession(sessionId);
-
-    expect(upsertDocMeta).toHaveBeenCalledWith(
-      getSessionRoomId(sessionId),
-      expect.objectContaining({ isArchived: true })
-    );
-
-    // A session neither the repo nor the UI knows still fails loudly.
-    await expect(actions.archiveSession('session-unknown-meta' as SessionId)).rejects.toThrow(
-      'Session metadata missing'
-    );
+    await actions.archiveSession(tree.rootSession.id);
+    for (const session of tree.sessions)
+      expect(metaRepo.getSession(session.id)?.isArchived).toBe(true);
   });
 
   it('archives tabs and recursively opened sessions, leaving unrelated sessions active', async () => {
@@ -1356,22 +1487,6 @@ describe('useSessionActions', () => {
     expect(runtime.writer.flockRowPut).not.toHaveBeenCalled();
     for (const session of [rootSession, openedSession, openedFromTabSession]) {
       expect(metaRepo.getMeta(getMachineRoomId(session.machineId))).toBeUndefined();
-    }
-  });
-
-  it('rejects archive before metadata hydration without partially archiving the root', async () => {
-    const { rootSession, sessionMetaCache } = createContainmentSessions('loading', false);
-    const metaRepo = createSessionMetaRepo(Object.values(sessionMetaCache));
-    const actions = await renderActions(createRuntime({ repo: metaRepo.repo }), {
-      docMetaCacheReady: false,
-      sessionMetaCache: { [getSessionRoomId(rootSession.id)]: rootSession },
-    });
-
-    await expect(actions.archiveSession(rootSession.id)).rejects.toThrow(
-      'Session metadata is still loading'
-    );
-    for (const session of Object.values(sessionMetaCache)) {
-      expect(metaRepo.getSession(session.id)).toMatchObject({ isArchived: false });
     }
   });
 
@@ -1438,7 +1553,12 @@ describe('useSessionActions', () => {
     const { rootSession, tabSession, openedSession, openedFromTabSession, sessionMetaCache } =
       createContainmentSessions('exact-delete', false);
     const metaRepo = createSessionMetaRepo(Object.values(sessionMetaCache));
-    const runtime = createRuntime({ repo: metaRepo.repo });
+    const runtime = createRuntime({
+      repo: metaRepo.repo,
+      readSessionOperationTargets: async () => {
+        throw new Error('Session metadata is still loading');
+      },
+    });
     const actions = await renderActions(runtime, { sessionMetaCache, docMetaCacheReady: false });
 
     await actions.deleteSessions([tabSession.id]);
@@ -1553,169 +1673,6 @@ describe('useSessionActions', () => {
         [openedFromTabSession.id]: true,
       },
     });
-  });
-
-  it('rejects archived-root deletion until the Session metadata cache is complete', async () => {
-    const sessionId = 'session-delete-loading' as SessionId;
-    const deleteDoc = vi.fn(async () => undefined);
-    const getDocMeta = vi.fn(async () => ({ meta: { id: sessionId } }));
-    const runtime = createRuntime({
-      repo: {
-        getDocMeta,
-        deleteDoc,
-      } as unknown as WorkspaceRuntime['repo'],
-    });
-    const actions = await renderActions(runtime, {
-      docMetaCacheReady: false,
-      sessionMetaCache: {
-        [getSessionRoomId(sessionId)]: { id: sessionId } as SessionMeta,
-      },
-    });
-
-    await expect(actions.deleteArchivedSession(sessionId)).rejects.toThrow(
-      'Session metadata is still loading'
-    );
-    expect(getDocMeta).not.toHaveBeenCalled();
-    expect(deleteDoc).not.toHaveBeenCalled();
-  });
-
-  it('deletes an archived code session by deleting its doc, never a machine command or queue', async () => {
-    const sessionId = 'session-delete-legacy-queue' as SessionId;
-    const machineId = 'machine-1';
-    const sessionMeta = {
-      id: sessionId,
-      machineId,
-      userId: 'user-1',
-      cliType: 'builtin',
-      createdAt: new Date().toISOString(),
-      isArchived: true,
-      repoFullName: 'loro-dev/lody',
-      branchName: 'lody/session-delete-legacy-queue',
-      baseBranch: 'main',
-      isWorktree: true,
-    } as SessionMeta;
-    const upsertDocMeta = vi.fn(async () => undefined);
-    const deleteDoc = vi.fn(async () => undefined);
-    const getDocMeta = vi.fn(async (roomId: string) => {
-      if (roomId === getSessionRoomId(sessionId)) return { meta: sessionMeta };
-      if (roomId === getMachineRoomId(machineId)) {
-        return {
-          meta: {
-            needToArchiveSessions: { [sessionId]: true },
-            needToDeleteSessions: {},
-          },
-        };
-      }
-      return { meta: {} };
-    });
-    const runtime = createRuntime({
-      repo: {
-        getDocMeta,
-        upsertDocMeta,
-        deleteDoc,
-        openFlockDoc: vi.fn(async () => ({
-          flock: {
-            scan: () => [
-              {
-                key: machineFlockKeys.archiveSessionCommand(sessionId),
-                value: { v: 1, requestedAt: 1 },
-              },
-            ],
-            set: vi.fn(),
-            delete: vi.fn(),
-            commit: vi.fn(),
-          },
-          syncOnce: vi.fn(async () => undefined),
-        })),
-        flush: vi.fn(async () => undefined),
-      } as unknown as WorkspaceRuntime['repo'],
-    });
-    const actions = await renderActions(runtime, { docMetaCacheReady: true });
-
-    await actions.deleteArchivedSession(sessionId);
-
-    expect(deleteDoc).toHaveBeenCalledWith(getSessionRoomId(sessionId));
-    expect(upsertDocMeta).not.toHaveBeenCalledWith(getMachineRoomId(machineId), expect.anything());
-    expect(runtime.writer.flockRowPut).not.toHaveBeenCalled();
-  });
-
-  it('allows permanent deletion without a browser connection', async () => {
-    const sessionId = 'session-delete-offline' as SessionId;
-    const getDocMeta = vi.fn(async () => ({ meta: {} }));
-    const deleteDoc = vi.fn(async () => undefined);
-    const upsertDocMeta = vi.fn(async () => undefined);
-    const runtime = createRuntime({
-      repo: {
-        getDocMeta,
-        deleteDoc,
-        upsertDocMeta,
-      } as unknown as WorkspaceRuntime['repo'],
-    });
-    const actions = await renderActions(runtime, { docMetaCacheReady: true });
-
-    await expect(actions.deleteArchivedSession(sessionId)).resolves.toBeUndefined();
-    await expect(actions.deleteSessions([sessionId])).resolves.toBeUndefined();
-
-    expect(getDocMeta).toHaveBeenCalled();
-    expect(deleteDoc).toHaveBeenCalledWith(getSessionRoomId(sessionId));
-    expect(upsertDocMeta).not.toHaveBeenCalled();
-    expect(recordMyWorkspaceDailyActiveUser).not.toHaveBeenCalled();
-  });
-
-  it('deletes an archived local session by deleting its doc and leaves legacy queues to the daemon', async () => {
-    const sessionId = 'session-delete-local-no-cleanup' as SessionId;
-    const machineId = 'machine-1';
-    const sessionMeta = {
-      id: sessionId,
-      machineId,
-      userId: 'user-1',
-      cliType: 'builtin',
-      createdAt: new Date().toISOString(),
-      isArchived: true,
-      project: { kind: 'local' },
-    } as SessionMeta;
-    const upsertDocMeta = vi.fn(async () => undefined);
-    const deleteDoc = vi.fn(async () => undefined);
-    const getDocMeta = vi.fn(async (roomId: string) => {
-      if (roomId === getSessionRoomId(sessionId)) return { meta: sessionMeta };
-      if (roomId === getMachineRoomId(machineId)) {
-        return {
-          meta: {
-            needToArchiveSessions: { [sessionId]: true },
-            needToDeleteSessions: {},
-          },
-        };
-      }
-      return { meta: {} };
-    });
-    const runtime = createRuntime({
-      repo: {
-        getDocMeta,
-        upsertDocMeta,
-        deleteDoc,
-        openFlockDoc: vi.fn(async () => ({
-          flock: {
-            scan: () => [
-              {
-                key: machineFlockKeys.archiveSessionCommand(sessionId),
-                value: { v: 1, requestedAt: 1 },
-              },
-            ],
-            set: vi.fn(),
-            delete: vi.fn(),
-            commit: vi.fn(),
-          },
-          syncOnce: vi.fn(async () => undefined),
-        })),
-        flush: vi.fn(async () => undefined),
-      } as unknown as WorkspaceRuntime['repo'],
-    });
-    const actions = await renderActions(runtime, { docMetaCacheReady: true });
-
-    await actions.deleteArchivedSession(sessionId);
-
-    expect(deleteDoc).toHaveBeenCalledWith(getSessionRoomId(sessionId));
-    expect(upsertDocMeta).not.toHaveBeenCalledWith(getMachineRoomId(machineId), expect.anything());
   });
 });
 
