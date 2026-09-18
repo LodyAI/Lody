@@ -45,6 +45,7 @@ function makeRow(
       createdAtMs: 1,
     },
     sharedWithTeam,
+    conversationCount: sharedWithTeam ? 12 : 3,
     isUpdating: false,
     canUpdateSharing: true,
     worktreeSetup: emptySetup,
@@ -90,6 +91,7 @@ const baseSections: ProjectSettingsSection[] = [
   {
     machineId: machineLocal,
     machineName: 'MacBook Pro',
+    sharedWithTeam: true,
     rows: [
       makeRow(
         'machine-local:project-lody',
@@ -112,6 +114,7 @@ const baseSections: ProjectSettingsSection[] = [
   {
     machineId: machineRemote,
     machineName: 'Workstation',
+    sharedWithTeam: false,
     rows: [
       makeRow(
         'machine-remote:project-cli',
@@ -501,6 +504,7 @@ export const ManyProjects: Story = {
       {
         machineId: machineLocal,
         machineName: 'MacBook Pro',
+        sharedWithTeam: true,
         rows: [
           makeRow('machine-local:p1', machineLocal, 'MacBook Pro', 'Lody', '/repo/lody', true),
           makeRow(
@@ -525,6 +529,7 @@ export const ManyProjects: Story = {
       {
         machineId: machineRemote,
         machineName: 'Workstation',
+        sharedWithTeam: false,
         rows: [
           makeRow(
             'machine-remote:p1',
@@ -611,6 +616,7 @@ export const ManyMachines: Story = {
       {
         machineId: 'machine-bonjour' as MachineId,
         machineName: 'zx MacBook-Pro.local',
+        sharedWithTeam: false,
         rows: [
           makeRow(
             'machine-bonjour:lody',

@@ -54,6 +54,7 @@ function makeRow(state: ProjectHistoryImportState): ProjectSettingsRow {
       createdAtMs: 1,
     },
     sharedWithTeam: false,
+    conversationCount: 0,
     isUpdating: false,
     canUpdateSharing: true,
     worktreeSetup: { scripts: {} },

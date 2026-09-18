@@ -32,6 +32,7 @@ function makeRow(): ProjectSettingsRow {
       createdAtMs: 1,
     },
     sharedWithTeam: false,
+    conversationCount: 4,
     isUpdating: false,
     canUpdateSharing: true,
     worktreeSetup: { scripts: {} },
@@ -47,7 +48,7 @@ function makeRow(): ProjectSettingsRow {
 }
 
 const sections: ProjectSettingsSection[] = [
-  { machineId, machineName: 'MacBook Pro', rows: [makeRow()] },
+  { machineId, machineName: 'MacBook Pro', sharedWithTeam: false, rows: [makeRow()] },
 ];
 
 describe('ProjectSettingsView local-project remove', () => {

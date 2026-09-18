@@ -3214,6 +3214,8 @@
   "workspace.projects.machineUnreachable": "This machine isn’t connected. Worktree setup and skills will load when it comes online.",
   "workspace.projects.selectedMachineOffline": "{{name}} is offline. Worktree setup and skills will load when it comes online.",
   "workspace.projects.projectCount": "{{count}} projects",
+  "workspace.projects.sharedBadge": "Shared",
+  "workspace.projects.conversationCount": "{{count}} conversations",
   "workspace.projects.addProjectMenu": "Add project",
   "workspace.projects.addFolder": "Add folder",
   "workspace.projects.addFolderOnMachine": "Add a folder on {{machine}}",

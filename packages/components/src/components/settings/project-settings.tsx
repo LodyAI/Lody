@@ -18,6 +18,7 @@ import {
   FolderOpen,
   Github,
   Info,
+  Users,
   Plus,
   RefreshCw,
   TerminalSquare,
@@ -115,6 +116,7 @@ export type ProjectSettingsRow = {
   shell: WorktreeSetupShell;
   project: LocalProjectMeta;
   sharedWithTeam: boolean;
+  conversationCount: number;
   isUpdating: boolean;
   canUpdateSharing: boolean;
   worktreeSetup: WorktreeSetupScriptConfig;
@@ -144,6 +146,7 @@ export type ProjectHistoryImportState = {
 export type ProjectSettingsSection = {
   machineId: MachineId;
   machineName: string;
+  sharedWithTeam: boolean;
   rows: ProjectSettingsRow[];
 };
 
@@ -175,6 +178,7 @@ export type AddableProjectMachine = {
   machineId: MachineId;
   machineName: string;
   online: boolean;
+  sharedWithTeam?: boolean;
 };
 
 export type ProjectSettingsViewProps = {
@@ -627,6 +631,7 @@ function ProjectSettingsDesktop({
         machineId: section.machineId,
         machineName: section.machineName,
         online: onlineMachineIds.has(section.machineId),
+        sharedWithTeam: section.sharedWithTeam,
       });
     }
     for (const machine of addableMachines ?? []) {
@@ -723,11 +728,6 @@ function ProjectSettingsDesktop({
         machine: selectedMachineAddTarget.machineName,
       })
     : undefined;
-  const selectedMachineOffline = Boolean(
-    selectedMachine &&
-    !selectedMachine.online &&
-    !(localMachineId && selectedMachine.machineId === localMachineId)
-  );
 
   const detailHandlers = {
     onSharedWithTeamChange,
@@ -817,6 +817,7 @@ function ProjectSettingsDesktop({
                         ? t('workspace.machines.offline', 'Offline')
                         : null
                     }
+                    shared={machine.sharedWithTeam === true}
                     onClick={() => setSelectedSourceId(machine.machineId)}
                   />
                 );
@@ -826,15 +827,6 @@ function ProjectSettingsDesktop({
               <div className="flex shrink-0 items-center justify-between gap-2 px-3 py-2">
                 <div className="min-w-0">
                   <h3 className="truncate text-sm font-medium text-foreground">{sourceTitle}</h3>
-                  {selectedMachineOffline ? (
-                    <p className="mt-0.5 text-[11px] text-muted-foreground">
-                      {t(
-                        'workspace.projects.selectedMachineOffline',
-                        '{{name}} is offline. Worktree setup and skills will load when it comes online.',
-                        { name: selectedMachine?.machineName ?? sourceTitle }
-                      )}
-                    </p>
-                  ) : null}
                 </div>
                 {addToSelectedMachine ? (
                   <Button
@@ -873,6 +865,7 @@ function ProjectSettingsDesktop({
                           icon={<OwnerAvatar owner={section.owner} />}
                           title={row.name}
                           subtitle={row.repoFullName}
+                          privateRepo={row.private}
                           onClick={() => setEditingProjectKey(row.key)}
                         />
                       ))}
@@ -909,6 +902,8 @@ function ProjectSettingsDesktop({
                         icon={<Folder className="h-3.5 w-3.5" />}
                         title={selection.row.project.name}
                         subtitle={projectPathTail(selection.row.project.rootPath)}
+                        shared={selection.row.sharedWithTeam}
+                        conversationCount={selection.row.conversationCount}
                         removalState={localProjectRemovalStateByKey?.get(selection.key) ?? null}
                         canRemove={canRemoveLocalProject?.(selection.row) === true}
                         onRemove={() => onRequestRemoveLocalProject?.(selection.row)}
@@ -963,6 +958,7 @@ function SourceRow({
   subtitle,
   online,
   offlineLabel,
+  shared = false,
   onClick,
 }: {
   readonly selected: boolean;
@@ -971,8 +967,10 @@ function SourceRow({
   readonly subtitle?: string;
   readonly online?: boolean;
   readonly offlineLabel?: string | null;
+  readonly shared?: boolean;
   readonly onClick: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <button
       type="button"
@@ -1006,6 +1004,12 @@ function SourceRow({
           <div className="truncate text-[11px] leading-tight text-muted-foreground">{subtitle}</div>
         ) : null}
       </div>
+      {shared ? (
+        <span className="inline-flex shrink-0 items-center gap-1 text-[10px] font-medium text-muted-foreground">
+          <Users className="h-3 w-3" aria-hidden="true" />
+          {t('workspace.projects.sharedBadge', 'Shared')}
+        </span>
+      ) : null}
     </button>
   );
 }
@@ -1015,6 +1019,9 @@ function ProjectMasterRow({
   icon,
   title,
   subtitle,
+  shared = false,
+  privateRepo = false,
+  conversationCount,
   removalState = null,
   canRemove = false,
   onRemove,
@@ -1024,6 +1031,9 @@ function ProjectMasterRow({
   readonly icon: ReactNode;
   readonly title: string;
   readonly subtitle: string;
+  readonly shared?: boolean;
+  readonly privateRepo?: boolean;
+  readonly conversationCount?: number;
   readonly removalState?: LocalProjectRemovalState | null;
   readonly canRemove?: boolean;
   readonly onRemove?: () => void;
@@ -1057,6 +1067,24 @@ function ProjectMasterRow({
           <div className="truncate font-mono text-[11px] leading-tight text-muted-foreground">
             {subtitle}
           </div>
+          {shared || privateRepo || conversationCount != null ? (
+            <div className="mt-0.5 flex min-w-0 items-center gap-2 text-[10px] text-muted-foreground">
+              {shared ? (
+                <span className="inline-flex items-center gap-1">
+                  <Users className="h-3 w-3" aria-hidden="true" />
+                  {t('workspace.projects.sharedBadge', 'Shared')}
+                </span>
+              ) : null}
+              {privateRepo ? <span>{t('workspace.projects.privateRepo', 'Private')}</span> : null}
+              {conversationCount != null ? (
+                <span>
+                  {t('workspace.projects.conversationCount', '{{count}} conversations', {
+                    count: conversationCount,
+                  })}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </button>
       {removalStateLabel ? (
@@ -1364,6 +1392,15 @@ function LocalProjectDetail({
             ) : null}
             {removalStateLabel ? (
               <p className="mt-1 text-[11px] text-muted-foreground">{removalStateLabel}</p>
+            ) : null}
+            {!machineReachable ? (
+              <p className="mt-1 text-[11px] text-muted-foreground">
+                {t(
+                  'workspace.projects.selectedMachineOffline',
+                  '{{name}} is offline. Worktree setup and skills will load when it comes online.',
+                  { name: row.machineName }
+                )}
+              </p>
             ) : null}
           </div>
         </div>

@@ -3214,6 +3214,8 @@
   "workspace.projects.machineUnreachable": "这台机器当前未连接。连上之后会加载 Worktree 配置和技能。",
   "workspace.projects.selectedMachineOffline": "{{name}} 目前离线。连上之后会加载 Worktree 配置和技能。",
   "workspace.projects.projectCount": "{{count}} 个项目",
+  "workspace.projects.sharedBadge": "共享",
+  "workspace.projects.conversationCount": "{{count}} 个对话",
   "workspace.projects.addProjectMenu": "添加项目",
   "workspace.projects.addFolder": "添加文件夹",
   "workspace.projects.addFolderOnMachine": "在 {{machine}} 上添加文件夹",

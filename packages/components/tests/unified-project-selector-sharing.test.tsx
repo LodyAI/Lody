@@ -119,6 +119,7 @@ function createVisibleProjects({
       ],
     ]),
     accessByProjectKey: includeProjectAccess ? new Map([[projectKey, projectAccess]]) : new Map(),
+    accessByMachineId: new Map(),
     isLoading,
   };
 }
