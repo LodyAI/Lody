@@ -220,11 +220,14 @@ export const writePersistedDraftTabs = (
   }
 
   try {
+    const storage = windowStorage();
+    const key = getDraftTabsStorageKey(parentSessionId);
     const persistedDraftTabs = draftTabs.filter((draft) => draft.prompt.length > 0);
-    windowStorage().setItem(
-      getDraftTabsStorageKey(parentSessionId),
-      JSON.stringify(persistedDraftTabs)
-    );
+    if (persistedDraftTabs.length === 0) {
+      storage.removeItem(key);
+      return;
+    }
+    storage.setItem(key, JSON.stringify(persistedDraftTabs));
   } catch {
     // ignore
   }
