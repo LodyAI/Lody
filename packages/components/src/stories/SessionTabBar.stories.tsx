@@ -16,7 +16,13 @@ import {
 import { lodyPresenceStatesAtom } from '@/atoms/presence';
 import { SessionAccessControl } from '@/components/session-sharing';
 import { SessionHeaderMenu } from '@/components/sessions/session-chat-interface';
+import {
+  SESSION_PAGE_HEADER_PILLS_CLASS,
+  SESSION_PAGE_HEADER_PILLS_MIN_WIDTH_PX,
+} from '@/components/sessions/session-conversation-page';
 import { SessionTabBar, type ViewerTabItem } from '@/components/sessions/session-tab-bar';
+import { cn } from '@/lib/utils';
+import type { PathLauncherOption } from '@/lib/session-path-launchers';
 import type { DraftSessionTab } from '@/lib/session-draft-tabs';
 import type { SessionSharingState } from '@/lib/session-sharing';
 
@@ -128,10 +134,26 @@ const translate = (_key: string, fallback: string, options?: Record<string, unkn
     fallback
   );
 
+const vscodeLauncher: PathLauncherOption = {
+  kind: 'builtin',
+  id: 'vscode',
+  label: 'VS Code',
+};
+
 function ConversationToolbar() {
   return (
     <div className="flex h-full shrink-0 items-center gap-1 pl-1 pr-2">
-      <SessionAccessControl state={toolbarSharing} onShareWithTeam={toolbarAction} />
+      <div className={cn(SESSION_PAGE_HEADER_PILLS_CLASS, 'items-center')}>
+        <button
+          type="button"
+          className="inline-flex h-6 items-center rounded-md border border-border px-2 text-xs"
+        >
+          VS Code
+        </button>
+      </div>
+      <div className={cn(SESSION_PAGE_HEADER_PILLS_CLASS, 'items-center')}>
+        <SessionAccessControl state={toolbarSharing} onShareWithTeam={toolbarAction} />
+      </div>
       <SessionHeaderMenu
         session={screenshotParentSession}
         localProjectMeta={{ name: 'lody', rootPath: '/Users/developer/Code/lody' }}
@@ -144,6 +166,12 @@ function ConversationToolbar() {
         onOpenSearch={toolbarAction}
         onFork={toolbarAction}
         onRename={toolbarAction}
+        openInIde={{
+          options: [vscodeLauncher],
+          selected: vscodeLauncher,
+          onOpen: toolbarAction,
+          onSelect: toolbarAction,
+        }}
         t={translate}
       />
     </div>
@@ -410,6 +438,41 @@ export const ConversationPrivateAccessMenuOpen: Story = {
   globals: { theme: 'light' },
   play: async ({ canvasElement }) => {
     await userEvent.click(within(canvasElement).getByRole('button', { name: /Private to you/ }));
+  },
+};
+
+export const ConversationToolbarNarrow: Story = {
+  name: 'Conversation toolbar — narrow hides pills',
+  args: {
+    parentSession: screenshotParentSession,
+    childSessions: screenshotChildSessions,
+    draftTabs: [],
+    archivedChildSessions: [],
+    tabOrder: screenshotChildSessions.map((session) => session.id),
+    activeTabSessionId: screenshotChildSessions[0]!.id,
+    frameWidth: 560,
+    rightSlot: <ConversationToolbar />,
+  },
+  parameters: {
+    docs: {
+      description: {
+        story: `IDE and share pills hide below ${SESSION_PAGE_HEADER_PILLS_MIN_WIDTH_PX}px. Tabs and ⋯ remain.`,
+      },
+    },
+  },
+};
+
+export const ConversationToolbarWide: Story = {
+  name: 'Conversation toolbar — wide shows pills',
+  args: {
+    parentSession: screenshotParentSession,
+    childSessions: screenshotChildSessions,
+    draftTabs: [],
+    archivedChildSessions: [],
+    tabOrder: screenshotChildSessions.map((session) => session.id),
+    activeTabSessionId: screenshotChildSessions[0]!.id,
+    frameWidth: 1024,
+    rightSlot: <ConversationToolbar />,
   },
 };
 

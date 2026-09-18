@@ -1869,6 +1869,7 @@
   "sessions.openAgentFile": "Open agent file",
   "sessions.openSenderProfile": "View profile for {{name}}",
   "sessions.openIn": "Open in",
+  "sessions.openInIde": "Open in {{name}}",
   "sessions.senderProfile": "Sender profile",
   "sessions.outline.noReplyYet": "No reply yet.",
   "sessions.outline.noUserMessage": "Started by the agent.",

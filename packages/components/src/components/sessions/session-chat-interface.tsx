@@ -289,6 +289,7 @@ import { SessionPinContext, type SessionPinContextValue } from './session-pin-co
 import { SessionSyncingIndicator } from './session-syncing-indicator';
 import { ChildTabEmptyState } from './child-tab-empty-state';
 import {
+  SESSION_PAGE_HEADER_PILLS_CLASS,
   SessionConversationPage,
   SessionConversationPageHeader,
 } from './session-conversation-page';
@@ -956,6 +957,7 @@ export function SessionHeaderMenu({
   onRestore,
   onDelete,
   compact = false,
+  openInIde,
   t,
 }: {
   session: SessionMeta;
@@ -987,6 +989,13 @@ export function SessionHeaderMenu({
   onRestore?: () => void | Promise<void>;
   onDelete?: () => void | Promise<void>;
   compact?: boolean;
+  /** Electron path launchers; always listed in `⋯` so CSS-hidden pills stay reachable. */
+  openInIde?: {
+    options: PathLauncherOption[];
+    selected: PathLauncherOption;
+    onOpen: () => void;
+    onSelect: (launcher: PathLauncherOption) => void;
+  };
   t: SessionSharingTranslator;
 }) {
   const isArchived = !!session.isArchived;
@@ -1065,6 +1074,45 @@ export function SessionHeaderMenu({
         <DropdownMenuSeparator />
       </>
     ) : null;
+
+  const openInIdeMenu = (() => {
+    if (!openInIde || openInIde.options.length === 0) return null;
+    const SelectedIcon = getPathLauncherIcon(openInIde.selected);
+    const openLabel = t('sessions.openInIde', 'Open in {{name}}', {
+      name: openInIde.selected.label,
+    });
+    if (openInIde.options.length === 1) {
+      return (
+        <DropdownMenuItem onClick={openInIde.onOpen}>
+          <SelectedIcon className="h-3.5 w-3.5 shrink-0" />
+          {openLabel}
+        </DropdownMenuItem>
+      );
+    }
+    return (
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger>
+          <SelectedIcon className="h-3.5 w-3.5 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">{openLabel}</span>
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent>
+          {openInIde.options.map((launcher) => {
+            const launcherId = getPathLauncherId(launcher);
+            const LauncherIcon = getPathLauncherIcon(launcher);
+            return (
+              <DropdownMenuItem key={launcherId} onClick={() => openInIde.onSelect(launcher)}>
+                <LauncherIcon className="h-3.5 w-3.5 shrink-0" />
+                {launcher.label}
+                {launcherId === getPathLauncherId(openInIde.selected) ? (
+                  <Check className="ml-auto h-3.5 w-3.5 shrink-0" />
+                ) : null}
+              </DropdownMenuItem>
+            );
+          })}
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+    );
+  })();
 
   const copyToClipboard = useCallback(
     // successMessage names what was copied in a full sentence (e.g. "Base
@@ -1223,6 +1271,8 @@ export function SessionHeaderMenu({
           ) : null}
 
           {openedByRelationRows}
+
+          {openInIdeMenu}
 
           {onOpenPublicShare && (
             <DropdownMenuItem onClick={onOpenPublicShare}>
@@ -5712,7 +5762,7 @@ export const SessionChatInterface = memo(
     const headerLauncherActions = (
       <>
         {shouldShowOpenInIdeButton && isElectronRendererForPathLaunch && (
-          <div className="flex items-center">
+          <div className={cn(SESSION_PAGE_HEADER_PILLS_CLASS, 'items-center')}>
             <Button
               className="h-6 px-2 py-1 rounded-r-none border-r-0 gap-1"
               variant="outline"
@@ -5824,6 +5874,18 @@ export const SessionChatInterface = memo(
         onArchive={onArchiveSession}
         onRestore={onRestoreSession}
         onDelete={onDeleteSession}
+        openInIde={
+          shouldShowOpenInIdeButton && isElectronRendererForPathLaunch
+            ? {
+                options: pathLauncherOptions,
+                selected: selectedPathLauncher,
+                onOpen: handleOpenInIde,
+                onSelect: (launcher) => {
+                  void handleSelectPathLauncher(launcher);
+                },
+              }
+            : undefined
+        }
         t={t}
       />
     );
@@ -5835,11 +5897,13 @@ export const SessionChatInterface = memo(
       : undefined;
     const headerAccessNode =
       !isMobile && (sharing || headerPublicShare) ? (
-        <SessionAccessControl
-          state={sharing}
-          onShareWithTeam={onShareWithTeam}
-          publicShare={headerPublicShare}
-        />
+        <div className={cn(SESSION_PAGE_HEADER_PILLS_CLASS, 'items-center')}>
+          <SessionAccessControl
+            state={sharing}
+            onShareWithTeam={onShareWithTeam}
+            publicShare={headerPublicShare}
+          />
+        </div>
       ) : null;
     const headerArchivedNode = session.isArchived === true ? <SessionArchivedBadge /> : null;
 

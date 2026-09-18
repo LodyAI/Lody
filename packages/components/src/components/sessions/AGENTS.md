@@ -9,6 +9,8 @@ Read each heading’s linked context before changing its files.
 
 - Desktop chrome is ONE `SessionTabBar` row: traffic-light insets gated on
   `!useElectronFullscreen()`. Measure pill/card geometry (y=8, `mt-0.5`, button centering).
+- Conversation-page `@container/session-page` hides the IDE and share pills
+  below `SESSION_PAGE_HEADER_PILLS_MIN_WIDTH_PX`; both stay reachable from `⋯`.
 - Keep the surface ladder canvas → inactive → active in both themes and MEASURE
   it; never give inactive tabs more chrome than the active one, and never use
   `--tab-active`/`--tab-inactive` (both collapse onto `--background` in dark).
