@@ -497,6 +497,44 @@ describe('useStickyScroll Virtua adapter', () => {
     expect(latestResult?.initialScrollRestored).toBe(true);
   });
 
+  it('releases a near-bottom relock during an unrestored offset restore', async () => {
+    const sessionId = 'session-offset-pre-reveal-relock' as SessionId;
+    saveScrollPosition(sessionId, { type: 'offset', scrollOffset: 96 });
+    const fixture = createScrollFixture();
+    fixture.lastRow.style.visibility = 'hidden';
+    await renderHarness({
+      sessionId,
+      vlist: createMockVirtualizerHandle(fixture.scrollElement),
+      scrollElement: fixture.scrollElement,
+      itemCount: 4,
+    });
+    expect(latestResult?.initialScrollRestored).toBe(false);
+    expect(fixture.getScrollTop()).toBe(96);
+
+    // max offset 120, so 96 sits 24px from the bottom — inside the library's
+    // ~70px near-bottom band. A shrink here re-locks follow unless stopScroll
+    // still runs before reveal.
+    fixture.setScrollHeight(520);
+    fixture.setContentHeight(496);
+    await act(async () => {
+      emitResize(fixture.contentElement);
+      emitResize(fixture.lastRow);
+      await advanceAnimationFrames();
+    });
+    expect(fixture.getScrollTop()).toBe(96);
+    expect(getScrollPosition(sessionId)).toEqual({ type: 'offset', scrollOffset: 96 });
+    expect(latestResult?.isSticky).toBe(false);
+
+    await act(async () => {
+      fixture.lastRow.style.visibility = '';
+      emitResize(fixture.lastRow);
+    });
+    expect(fixture.getScrollTop()).toBe(96);
+    expect(latestResult?.initialScrollRestored).toBe(true);
+    expect(latestResult?.isSticky).toBe(false);
+    expect(getScrollPosition(sessionId)).toEqual({ type: 'offset', scrollOffset: 96 });
+  });
+
   it('reveals a near-bottom offset restore without requiring a 2px flush', async () => {
     const sessionId = 'session-near-bottom-offset' as SessionId;
     saveScrollPosition(sessionId, { type: 'offset', scrollOffset: 200 });

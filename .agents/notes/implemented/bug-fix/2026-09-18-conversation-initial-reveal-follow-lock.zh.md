@@ -41,7 +41,9 @@ Translation: current
 - 在 `initialScrollRestored` 之前，末尾恢复（缓存位置不是 `offset`）可以在
   跟随锁从未持有（`hadFollowedRef` 为 false）或提交快照仍在跟随时，从观察者
   和 layout 路径继续写入真正的 DOM 底部。已经跟随过再逃逸的读者即使视口仍
-  隐藏也不会被拉回去。显示之前几何观察者不得 `stopScroll()`。
+  隐藏也不会被拉回去。几何观察者只在这次首次末尾恢复时抑制 `stopScroll()`。
+  offset 恢复在显示前仍会解除同批次重新上锁，避免内容收缩进入近底带时把缓存
+  阅读位置拽到底部，或把缓存改写成 `end`。
 - 就绪用恢复意图，不用 `state.isAtBottom`。offset 恢复绝不走贴底分支。
   末尾恢复要求 `getScrollElementDistanceFromBottom <= 2`，且目标行已挂载、
   不是 Virtua 未测量状态（`style.visibility === 'hidden'`）。
@@ -68,7 +70,8 @@ timer，也只是把闪一下换成晚一点闪。
 `packages/components/tests/use-sticky-scroll.test.ts` 覆盖就绪函数（末尾
 恢复时最后一行盒子偏离 50px，只要 `scrollTop` 已在 DOM 底部就显示；近底
 offset 恢复不必 2px 贴底；未测量目标行保持隐藏；可见底边查找减去上下
-padding）以及 hook（同样两种恢复）。
+padding）以及 hook（同样两种恢复；未显示的 offset 恢复在收缩进入近底带后
+仍停在缓存偏移，缓存不会被改写成 `end`）。
 `packages/components/tests/sticky-scroll-virtua.test.tsx` 仍断言显示之后
 折叠收缩不能为已脱离的读者重新上锁，跟随中的读者仍停在末尾。
 

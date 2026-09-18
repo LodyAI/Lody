@@ -324,8 +324,15 @@ export function useStickyScroll({
       // reader who was not following at commit is never pulled to the end,
       // and any scroll tick the library queued finds the lock already open.
       // Do not release during the initial end-restore: that would undo the
-      // positioning the reveal check still needs.
-      if (initialScrollRestoredRef.current && !wasFollowingRef.current && state.isAtBottom) {
+      // positioning the reveal check still needs. Offset restore must still
+      // release — a shrink into the near-bottom band would otherwise re-arm
+      // follow and pull the cached reading position to the end.
+      const restoreIntentIsEnd = cachedPositionAtMountRef.current?.type !== 'offset';
+      if (
+        (initialScrollRestoredRef.current || !restoreIntentIsEnd) &&
+        !wasFollowingRef.current &&
+        state.isAtBottom
+      ) {
         stopScroll();
       }
       follow();

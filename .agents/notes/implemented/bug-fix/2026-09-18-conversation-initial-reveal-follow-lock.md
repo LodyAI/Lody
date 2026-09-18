@@ -48,7 +48,10 @@ virtualizer.
   paths while the lock has never been held (`hadFollowedRef` is false) or
   the commit snapshot is still following. A reader who already followed and
   then escaped is not pulled back, even while the viewport is hidden.
-  `stopScroll()` from geometry observers is suppressed until reveal.
+  Geometry observers suppress `stopScroll()` only for that first end-restore.
+  Offset restore still releases a same-delivery re-lock before reveal, so a
+  shrink into the near-bottom band cannot pull the cached reading position to
+  the end or rewrite the cache as `end`.
 - Ready uses restore intent, not `state.isAtBottom`. Offset restores never
   take the flush-to-bottom branch. End restores require
   `getScrollElementDistanceFromBottom <= 2` and a mounted destination row
@@ -80,7 +83,9 @@ Reverting the group-toggle follow-lock fix was rejected: expanding a finished
 function (end restore with a last-row box 50px off still reveals when
 `scrollTop` is at the DOM bottom; near-bottom offset restore reveals without
 a 2px flush; unmeasured destination stays hidden; visible-bottom lookup
-subtracts top and bottom padding) and the hook (same two restore cases).
+subtracts top and bottom padding) and the hook (same two restore cases; an
+unrestored offset restore stays at the cached offset through a shrink into
+the near-bottom band, and the cache is not rewritten as `end`).
 `packages/components/tests/sticky-scroll-virtua.test.tsx` still asserts that
 a collapse shrink cannot re-arm follow for an escaped reader after reveal,
 and that a following reader stays at the end.

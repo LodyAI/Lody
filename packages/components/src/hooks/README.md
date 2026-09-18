@@ -70,8 +70,11 @@ and a measured destination row. End-restore intent uses viewport distance from
 the DOM bottom, not last-row `getBoundingClientRect` and not the library's
 near-bottom lock (`state.isAtBottom` includes ~70px of tolerance). Until that
 reveal, observers keep correcting an end restore to the real bottom even when
-the commit snapshot is not-following — first positioning is not the follow lock.
-After reveal, the same observers must not re-arm follow. Direct row
+the commit snapshot is not-following — first positioning is not the follow lock
+— and they skip `stopScroll()` only for that end restore. An offset restore
+still releases a same-delivery re-lock, so a shrink into the near-bottom band
+cannot pull the cached reading position to the end. After reveal, observers
+must not re-arm follow. Direct row
 ResizeObserver records and spacer/row geometry commits drive this check without
 a settle timer, including when the row count is unchanged. Those row records also correct following before the spacer's
 deferred resize; programmatic corrections use the library's scroll setter to

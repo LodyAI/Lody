@@ -28,10 +28,10 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
   No resize-event pumps, guessed durations or stop timers. Before a composer
   inline-height write, set a one-shot ref consumed by the next viewport height
   resize, without `scrollToRealBottom`; keep it separate from jump suppression.
-- Group toggles never scroll. After reveal, observer deliveries must never re-arm
-  the follow lock — only scroll events may — so the content ResizeObserver releases
-  a same-delivery re-lock while the commit-time snapshot says not-following. No
-  frame retries/settle timers.
+- Group toggles never scroll. Observer deliveries must never re-arm the follow
+  lock — only scroll events may — except the first end-restore. Offset restore
+  still releases a same-delivery re-lock while not-following. No frame
+  retries/settle timers.
 - Preserve per-session restoration, search/expansion suppression and viewport resizing.
 
 ## Session, auth, and app shell
