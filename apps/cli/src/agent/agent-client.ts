@@ -576,8 +576,6 @@ export interface AgentClientOptions {
   };
   /** Config selected before ACP session establishment. */
   configOptionValues?: SessionTurnInputConfig['configOptionValues'];
-  /** Whether this Agent session mounts the built-in Lody Task MCP tools. */
-  taskToolsEnabled?: boolean;
   /** Launcher family (npx/uvx/local) for ACP startup analytics; non-PII. */
   launcher?: AcpLauncher;
   /**
@@ -697,7 +695,6 @@ export class AgentClient implements acp.Client {
               workspaceId: this.options.workspaceId,
               machineId: this.options.machineId,
               workdir,
-              taskToolsEnabled: this.options.taskToolsEnabled === true,
             }),
           },
         ];
@@ -714,10 +711,6 @@ export class AgentClient implements acp.Client {
       { name: 'LODY_MCP_MACHINE_ID', value: this.options.machineId },
       { name: 'LODY_MCP_SOCKET_PATH', value: getLocalControlSocketPath() },
       { name: 'LODY_MCP_WORKDIR', value: workdir },
-      {
-        name: 'LODY_MCP_TASK_TOOLS_ENABLED',
-        value: this.options.taskToolsEnabled === true ? '1' : '0',
-      },
     ];
 
     // ACP MCP config is an explicit environment allowlist. The MCP subprocess

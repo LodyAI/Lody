@@ -25,7 +25,6 @@ export const buildInitialHistoryEntry = (args: {
   configOptionValues?: SessionTurnInputConfig['configOptionValues'];
   issuePRMentions?: SessionTurnInputConfig['issuePRMentions'];
   resume?: SessionTurnInputConfig['resume'];
-  taskToolsEnabled?: boolean;
 }): SessionHistoryInput | null => {
   const normalizedInputBlocks = normalizeSessionInputBlocks(args.inputBlocks, args.prompt ?? '');
   if (normalizedInputBlocks.length === 0) {
@@ -42,7 +41,6 @@ export const buildInitialHistoryEntry = (args: {
     configOptionValues: args.configOptionValues,
     issuePRMentions: args.issuePRMentions,
     resume: args.resume,
-    taskToolsEnabled: args.taskToolsEnabled,
   });
   const pendingEntry = buildPendingUserHistoryEntry({
     userId: args.userId,

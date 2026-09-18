@@ -212,12 +212,7 @@ import {
 import { downloadSessionFile, fetchSessionFilePreview } from '@/lib/session-file-download';
 import { getMachineMetaByIdAtomFamily } from '@/atoms/machines';
 import { isHtmlSessionFile } from '@/lib/session-file-presentation';
-import type {
-  MachineId,
-  MessageTextSpan,
-  SessionFilePayload,
-  TaskProposalMeta,
-} from '@lody/shared';
+import type { MachineId, MessageTextSpan, SessionFilePayload } from '@lody/shared';
 import { MessageTextWithChips } from '@/components/mentions/message-text-chips';
 import { isNativeIOSAppShell } from '@/lib/native-platform';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
@@ -228,8 +223,6 @@ import { toast } from 'sonner';
 import { SessionPlanBar } from '@/components/sessions/session-plan-bar';
 import { ContainerQueryProvider } from './container-query-provider';
 import { usePermissionResponse } from '@/hooks/use-permission-response';
-import { TaskProposalNotice } from '@/components/tasks/task-proposal-notice';
-import { tasksFeatureEnabledAtom } from '@/atoms/settings';
 import { shouldRenderSystemRowItem } from './message-content-guards';
 import { getChatFailedDiagnosticCopy } from './chat-failed-diagnostic-copy';
 import { extractReadableChatFailedMessage } from './chat-failed-error-report';
@@ -2044,9 +2037,8 @@ const SystemMessageRowView = ({
   onNavigateSession?: (target: SessionNavigationTarget) => void;
   capacityRetry?: CapacityRetryControl;
 }) => {
-  const tasksEnabled = useAtomValue(tasksFeatureEnabledAtom);
   const systemItems = message.items.flatMap((item, itemIndex) =>
-    shouldRenderSystemRowItem(item, tasksEnabled) ? [{ item, itemIndex }] : []
+    shouldRenderSystemRowItem(item) ? [{ item, itemIndex }] : []
   );
 
   if (systemItems.length === 0) {
@@ -2056,15 +2048,7 @@ const SystemMessageRowView = ({
   return (
     <div className="flex flex-col gap-2">
       {systemItems.map(({ item, itemIndex }) =>
-        item.type === 'system_notice' && item.name === 'task_proposal' ? (
-          <TaskProposalNotice
-            key={`task-proposal-${itemIndex}`}
-            meta={(item.meta ?? { proposalId: '', title: '' }) as TaskProposalMeta}
-            sessionId={sessionId}
-            entryId={message.id}
-            itemIndex={itemIndex}
-          />
-        ) : item.type === 'system_notice' ? (
+        item.type === 'system_notice' ? (
           <SystemNoticeView
             key={`${item.name}-${itemIndex}`}
             notice={item}

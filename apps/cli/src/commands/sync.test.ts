@@ -1,28 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { TaskId } from '@lody/shared';
 import { buildSyncDocIds, createWorkspaceSummary, mergeSummaries, syncItems } from './sync';
 
 describe('buildSyncDocIds', () => {
-  it('unions task rooms from repo existence and the Task Index', () => {
-    const docIds = buildSyncDocIds(['session-1', 'machine-1'], ['t1', 't2'] as TaskId[]);
-
-    expect(docIds).toContain('task-t1');
-    expect(docIds).toContain('task-t2');
-    expect(docIds).toContain('session-1');
-  });
-
-  it('returns a stable order', () => {
-    expect(buildSyncDocIds(['session-b', 'session-a'], ['t1'] as TaskId[])).toEqual([
+  it('returns a stable order of alive rooms', () => {
+    expect(buildSyncDocIds(['session-b', 'session-a', 'machine-1'])).toEqual([
+      'machine-1',
       'session-a',
       'session-b',
-      'task-t1',
-    ]);
-  });
-
-  it('does not sync a task twice when both enumerations contain it', () => {
-    expect(buildSyncDocIds(['task-t1', 'session-1'], ['t1'] as TaskId[])).toEqual([
-      'session-1',
-      'task-t1',
     ]);
   });
 });

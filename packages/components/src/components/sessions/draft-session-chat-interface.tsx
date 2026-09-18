@@ -31,7 +31,6 @@ import {
 
 import { getAllAgentConfigAtom } from '@/atoms';
 import { docMetaCacheReadyAtom } from '@/atoms/doc-meta';
-import { tasksFeatureEnabledAtom } from '@/atoms/settings';
 import {
   extractIssuePRMentionsFromText,
   useKnownIssuePrItems,
@@ -178,7 +177,6 @@ export const DraftSessionChatInterface = memo(
         return item.role.agentConfigId === draft.agentConfigId ? item.role : null;
       }, [composerAgentRoleItems, draft.agentConfigId, draft.agentRoleId]);
       const docMetaCacheReady = useAtomValue(docMetaCacheReadyAtom);
-      const tasksFeatureEnabled = useAtomValue(tasksFeatureEnabledAtom);
       // The draft composer has no MCP picker yet, so the first turn carries the
       // workspace default selection — the same set the promoted child composer
       // resolves for an empty session doc.
@@ -562,7 +560,6 @@ export const DraftSessionChatInterface = memo(
                   )
                 : undefined,
               mcpServerIds: mcpSelection.selectedIds,
-              taskToolsEnabled: tasksFeatureEnabled,
               agentRoleId: activeAgentRole?.id ?? null,
               agentRoleRevision: activeAgentRole?.revision,
             }),
@@ -584,7 +581,6 @@ export const DraftSessionChatInterface = memo(
           parentRepoFullName,
           selectedModeId,
           selectedModelId,
-          tasksFeatureEnabled,
         ]
       );
 

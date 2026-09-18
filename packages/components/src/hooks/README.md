@@ -34,8 +34,8 @@ mobile viewer selection or creates a shared Session.
 mouse wheel into horizontal movement. It uses a non-passive native listener because
 React delegates wheel events passively, and releases native horizontal gestures,
 browser zoom, nested content selected by the caller, and movement at either edge.
-Both the task board and compact tab strips use this behavior so their delta-mode
-normalization and edge handling cannot drift.
+Compact tab strips use this behavior so their delta-mode normalization and edge
+handling cannot drift.
 
 ## Workspace membership refresh
 

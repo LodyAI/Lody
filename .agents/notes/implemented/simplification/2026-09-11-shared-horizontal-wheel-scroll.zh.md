@@ -24,11 +24,11 @@ PR: https://github.com/LodyAI/Lody/pull/617
 达边缘的滚动方向。像素 delta 直接透传，行 delta 使用稳定的 16 像素单位，页 delta 使用视口宽度。
 一像素的 epsilon 避免在分数设备像素溢出时把滚轮输入困住。
 
-可选的 `shouldHandle` 谓词是界面特有策略的边界。
-[`TasksBoardView`](../../../../packages/components/src/components/tasks/tasks-board-view.tsx)
-用它在事件起始于看板列内部时保留竖直滚动；
+可选的 `shouldHandle` 谓词是界面特有策略的边界。任务看板曾用它在事件起始于看板列内部时
+保留竖直滚动；
 [`SessionSidePanelTabBar`](../../../../packages/components/src/components/sessions/session-side-panel-tab-bar.tsx)
-则接受所有其他符合条件的竖直滚轮事件。
+则接受所有其他符合条件的竖直滚轮事件。任务看板后来被移除：
+[移除工作区 Tasks 产品](2026-09-18-remove-legacy-tasks.zh.md)。
 
 ## 证据与验证
 

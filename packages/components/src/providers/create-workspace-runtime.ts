@@ -19,9 +19,6 @@ import {
   buildLoroStreamsTokenEndpoint,
   createLoroStreamsTokenProvider,
   getPreviewCommentRoomId,
-  getTaskRoomId,
-  taskDocSchema,
-  TASK_ORDER_MIN_KEY,
   createLoroStreamUrl,
   getLoroMetaStreamId,
   getLoroStreamIdForDocId,
@@ -71,7 +68,7 @@ import {
   ACP_CAPABILITIES_REFRESH_CLIENT_BACKSTOP_MS,
 } from '@lody/shared';
 import { LocalLoroTransportAdapter } from '@lody/shared/local-loro-transport';
-import type { TaskId, WorkspaceId } from '@lody/shared';
+import type { WorkspaceId } from '@lody/shared';
 import { createDirectWorkspaceWriter } from './workspace-writer-impl';
 import { createConversationSession } from '@/lib/conversation-view';
 import {
@@ -87,7 +84,6 @@ import {
   type PreviewVisualCommentDocStore,
   type SessionDocState,
   type SessionDocStore,
-  type TaskDocStore,
 } from '@/atoms/runtime';
 import type { LodyControlConnectionState } from '@/atoms/control-connection';
 import { createManagedStoreCache } from './store-ref-tracker';
@@ -4045,107 +4041,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     unload: (sessionId) => repo.unloadDoc(getPreviewCommentRoomId(sessionId)),
   });
 
-  const createTaskStore = async (taskId: TaskId): Promise<TaskDocStore> => {
-    const roomId = getTaskRoomId(taskId);
-    const persistedDoc = await repo.openPersistedDoc(roomId);
-
-    const mirror = new Mirror({
-      doc: persistedDoc.doc as LoroDoc,
-      schema: taskDocSchema,
-      // Tolerate root keys written by peers running a newer schema version.
-      ignoreUnknownProperties: true,
-      initialState: {
-        meta: {
-          taskId,
-          title: '',
-          status: 'backlog',
-          ownerId: '',
-          order: TASK_ORDER_MIN_KEY,
-          priority: undefined,
-          labels: undefined,
-          agent: undefined,
-          projects: undefined,
-          lastRunConfig: undefined,
-          createdAt: 0,
-          updatedAt: 0,
-          createdBy: undefined,
-        },
-        body: '',
-        links: [],
-        timeline: [],
-      },
-      debug: false,
-    });
-
-    const syncTracker = createTrackedRoomSyncTracker(roomId);
-    let roomSub: Awaited<ReturnType<typeof persistedDoc.joinRoom>> | null = null;
-    let disposed = false;
-
-    const firstSynced = transportReady.promise.then(async () => {
-      try {
-        // Tasks are workspace-scoped, so unlike session rooms there is no owning
-        // machine to resolve first: the room routes to the cloud plane (and the
-        // readiness binding below is therefore always the cloud one).
-        const joined = await waitForRoomToSync(() => persistedDoc.joinRoom(), {
-          roomId,
-          initialDelayMs: 0,
-          isCancelled: () => disposed,
-          firstSynced: (sub) => readinessBindingForDocRoom(sub, roomId).firstSyncedWithRemote,
-          onSubscription: (joinedSub) => {
-            roomSub = joinedSub;
-            syncTracker.attach(readinessBindingForDocRoom(joinedSub, roomId));
-          },
-        });
-        if (!joined) {
-          return;
-        }
-        if (disposed) {
-          joined.unsubscribe();
-          return;
-        }
-        roomSub = joined;
-        syncTracker.markFirstSynced();
-      } catch (error) {
-        syncTracker.markFirstSyncFailed();
-        throw error;
-      }
-    });
-    void firstSynced.catch(() => {});
-
-    return {
-      taskId,
-      roomId,
-      doc: persistedDoc.doc as LoroDoc,
-      firstSynced,
-      getSyncState: syncTracker.getSyncState,
-      subscribeSyncState: syncTracker.subscribeSyncState,
-      getState: () => mirror.getState(),
-      setState: (updater) => {
-        mirror.setState(updater as never);
-      },
-      subscribe: (listener) => mirror.subscribe(listener),
-      dispose: () => {
-        disposed = true;
-        syncTracker.dispose();
-        mirror.dispose();
-        roomSub?.unsubscribe();
-      },
-      waitUntilSynced: async () => {
-        await transportReady.promise;
-        await firstSynced.catch(() => {});
-        if (roomSub) {
-          await waitUntilRoomSynced(roomSub, roomId);
-        }
-      },
-    };
-  };
-
-  const taskStoreCache = createManagedStoreCache<TaskId, TaskDocStore>({
-    create: createTaskStore,
-    releaseDelayMs: STORE_RELEASE_DELAY_MS,
-    unload: (taskId) => repo.unloadDoc(getTaskRoomId(taskId)),
-  });
-
   // Dual-author: every client direct-authors its own durable writes and uploads
   // them over its own cloud connection; local targets additionally converge with
   // the CLI over the local plane (specs/local-first-two-plane.md 作者规则).
@@ -4164,7 +4059,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     await Promise.all([
       sessionStoreCache.releaseIdle(),
       previewVisualCommentStoreCache.releaseIdle(),
-      taskStoreCache.releaseIdle(),
     ]);
   };
 
@@ -4506,7 +4400,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
       await sessionStoreCache.disposeAll();
       await previewVisualCommentStoreCache.disposeAll();
-      await taskStoreCache.disposeAll();
       let codeCollabFileIndexCacheDisposeError: unknown = null;
       try {
         await codeCollabFileIndexCache.dispose();
@@ -4673,20 +4566,6 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     releasePreviewVisualCommentStore: previewVisualCommentStoreCache.release,
     acquirePreviewVisualCommentStore: previewVisualCommentStoreCache.acquire,
     releasePreviewVisualCommentStoreRef: previewVisualCommentStoreCache.releaseRef,
-    withTaskStore: async <T>(
-      taskId: TaskId,
-      fn: (store: TaskDocStore) => Promise<T> | T
-    ): Promise<T> => {
-      const store = await taskStoreCache.acquire(taskId);
-      try {
-        return await fn(store);
-      } finally {
-        taskStoreCache.releaseRef(taskId);
-      }
-    },
-    releaseTaskStore: taskStoreCache.release,
-    acquireTaskStore: taskStoreCache.acquire,
-    releaseTaskStoreRef: taskStoreCache.releaseRef,
     sendControl,
     waitForSessionCreateResponse,
     waitForSessionCancelResponse,

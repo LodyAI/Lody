@@ -19,7 +19,6 @@ import {
   type SessionMeta,
   type ProjectRef,
   resolveSessionMcpSelection,
-  resolveSessionTaskToolsEnabled,
 } from '@lody/shared';
 import type { SessionSnapshot, SessionTurn } from '@lody/shared/session-data';
 import type { Logger } from '@/utils/logger';
@@ -355,7 +354,6 @@ export class SessionForkService {
           agentCliType: marker.cleanup.cliType,
           agentType: marker.cleanup.agentType as never,
           mcpServerIds: resolveSessionMcpSelection(history),
-          taskToolsEnabled: false,
           project: marker.cleanup.project as ProjectRef,
           sessionId: targetSessionId,
           githubRepo: marker.cleanup.repoFullName,
@@ -829,7 +827,6 @@ export class SessionForkService {
             agentCliType: source.cliType,
             agentType: source.agentType,
             mcpServerIds: resolveSessionMcpSelection(historyResult.history),
-            taskToolsEnabled: resolveSessionTaskToolsEnabled(historyResult.history),
             customAcp: agentConfig.customAcp,
             runtimeOverrides: agentConfig.runtimeOverrides,
             env: agentConfig.env,
@@ -954,7 +951,6 @@ export class SessionForkService {
       agentCliType: source.cliType,
       agentType: source.agentType,
       mcpServerIds: resolveSessionMcpSelection(historyResult.history),
-      taskToolsEnabled: resolveSessionTaskToolsEnabled(historyResult.history),
       customAcp: agentConfig.customAcp,
       runtimeOverrides: agentConfig.runtimeOverrides,
       env: agentConfig.env,

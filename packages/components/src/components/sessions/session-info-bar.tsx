@@ -12,7 +12,6 @@ import {
   GoalChip,
   ScheduleChip,
   StatusChip,
-  TaskChip,
   useScheduledTaskSignature,
   type GoalChipCommandHandler,
   type ContextChipAction,
@@ -22,13 +21,10 @@ import {
 import type { SessionStatusStripState } from './session-status-strip';
 import { SessionSyncingIndicator } from './session-syncing-indicator';
 
-export type InfoBarItemKey = 'status' | 'goal' | 'schedule' | 'task' | 'context';
+export type InfoBarItemKey = 'status' | 'goal' | 'schedule' | 'context';
 
 export type SessionInfoBarProps = {
   status: SessionStatusStripState | null;
-  /** Task this session belongs to; the chip is the way back to it. */
-  task?: { taskId: string; title: string } | null;
-  onOpenTask?: (taskId: string) => void;
   /** Active/paused/terminal goal snapshot; the chip replaces the old sticky top banner. */
   goal?: SessionGoalMessage | null;
   goalCommands?: readonly SessionGoalCommand[];
@@ -108,8 +104,6 @@ export function SessionInfoBar({
   goalPendingCommand,
   onGoalCommand,
   onGoalDismiss,
-  task,
-  onOpenTask,
   scheduledTasks,
   prCiRuns,
   onOpenPrCiRun,
@@ -135,18 +129,15 @@ export function SessionInfoBar({
   const scheduleSignature = useScheduledTaskSignature(scheduledTasks);
   const hasSchedule = scheduleSignature !== null;
   const hasStatus = !!status;
-  const hasTask = !!task;
 
   const present: Record<InfoBarItemKey, boolean> = {
     status: hasStatus,
     goal: hasGoal,
     schedule: hasSchedule,
-    task: hasTask,
     context: hasContext,
   };
   const defaultKey =
-    (['context', 'status', 'goal', 'schedule', 'task'] as const).find((key) => present[key]) ??
-    null;
+    (['context', 'status', 'goal', 'schedule'] as const).find((key) => present[key]) ?? null;
 
   const [stage, setStage] = useState<InfoBarItemKey | null>(initialStage ?? defaultKey);
 
@@ -168,12 +159,10 @@ export function SessionInfoBar({
     : null;
 
   const mountedRef = useRef(false);
-  const taskSignature = task ? `${task.taskId}:${task.title}` : null;
   const prevRef = useRef({
     status: statusSignature,
     goal: goalSignature,
     schedule: scheduleSignature,
-    task: taskSignature,
     context: contextSignature,
   });
   useEffect(() => {
@@ -188,8 +177,6 @@ export function SessionInfoBar({
       setStage('goal');
     } else if (scheduleSignature !== prev.schedule && scheduleSignature !== null) {
       setStage('schedule');
-    } else if (taskSignature !== prev.task && taskSignature !== null) {
-      setStage('task');
     } else if (contextSignature !== prev.context && contextSignature !== null) {
       setStage('context');
     }
@@ -197,10 +184,9 @@ export function SessionInfoBar({
       status: statusSignature,
       goal: goalSignature,
       schedule: scheduleSignature,
-      task: taskSignature,
       context: contextSignature,
     };
-  }, [statusSignature, goalSignature, scheduleSignature, taskSignature, contextSignature]);
+  }, [statusSignature, goalSignature, scheduleSignature, contextSignature]);
 
   // With no staged items the bar hides unless it still owns a standalone
   // action or ambient syncing state. A reported preview is often the only
@@ -237,15 +223,6 @@ export function SessionInfoBar({
         return hasSchedule && scheduledTasks ? (
           <ScheduleChip key={key} tasks={scheduledTasks} {...itemMode} />
         ) : null;
-      case 'task':
-        return task ? (
-          <TaskChip
-            key={key}
-            title={task.title}
-            onOpen={onOpenTask ? () => onOpenTask(task.taskId) : undefined}
-            {...itemMode}
-          />
-        ) : null;
       case 'context':
         return hasContext ? (
           <ContextChip
@@ -268,7 +245,7 @@ export function SessionInfoBar({
     }
   };
 
-  const clusterKeys = (['status', 'goal', 'schedule', 'task', 'context'] as const).filter(
+  const clusterKeys = (['status', 'goal', 'schedule', 'context'] as const).filter(
     (key) => present[key] && key !== stagedKey
   );
   const clusterNonEmpty = clusterKeys.length > 0 || !!onOpenBrowser;

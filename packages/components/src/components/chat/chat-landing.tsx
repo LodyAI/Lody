@@ -80,7 +80,6 @@ import {
   setMobileDrawerOpenAtom,
   navigationSidebarHiddenAtom,
   showNavigationSidebarAtom,
-  tasksFeatureEnabledAtom,
   userAtom,
   workspaceReposCacheAtomFamily,
 } from '@/atoms';
@@ -580,7 +579,6 @@ function WorkspaceChatLanding({
   const multiWorkspaceAvailable = useAppCapability('multiWorkspace');
   const currentUser = useAtomValue(userAtom);
   const userId = currentUser?.id;
-  const tasksFeatureEnabled = useAtomValue(tasksFeatureEnabledAtom);
   const { activeOrganization, organizations, switchOrganization } = useOrganization({
     targetSlug: workspaceSlug,
   });
@@ -3084,7 +3082,6 @@ function WorkspaceChatLanding({
         configOptionValues: dispatchConfigOptionValues,
         issuePRMentions,
         mcpServerIds: mcpSelection.selectedIds,
-        taskToolsEnabled: tasksFeatureEnabled,
         agentRoleId: activeAgentRole?.id ?? null,
         agentRoleRevision: activeAgentRole?.revision,
       });
@@ -4268,7 +4265,6 @@ function WorkspaceChatLanding({
         modelId: modelOptions.length > 0 ? selectedModelId : null,
         configOptionValues: dispatchConfigOptionValues,
         mcpServerIds: mcpSelection.selectedIds,
-        taskToolsEnabled: tasksFeatureEnabled,
       }),
     [
       dispatchConfigOptionValues,
@@ -4277,7 +4273,6 @@ function WorkspaceChatLanding({
       modelOptions.length,
       selectedModeId,
       selectedModelId,
-      tasksFeatureEnabled,
     ]
   );
   const { handoffToSession: handoffSessionPreparation } = useSessionPreparation({
@@ -5168,10 +5163,7 @@ function WorkspaceChatLanding({
   const inboxFeatureEnabled = useAtomValue(inboxFeatureEnabledAtom);
   const showMobileInbox = showProjectSharing && inboxFeatureEnabled;
   const effectiveMobileHomeTab: MobileHomeTab =
-    (selectedMobileHomeTab === 'tasks' && !tasksFeatureEnabled) ||
-    (selectedMobileHomeTab === 'inbox' && !showMobileInbox)
-      ? 'chat'
-      : selectedMobileHomeTab;
+    selectedMobileHomeTab === 'inbox' && !showMobileInbox ? 'chat' : selectedMobileHomeTab;
   useEffect(() => {
     if (!showMobileInbox && selectedMobileHomeTab === 'inbox') {
       setSelectedMobileHomeTab('chat');
@@ -5334,16 +5326,12 @@ function WorkspaceChatLanding({
            since the feature isn't shipping yet and the user's actual
            "data context" is still whichever Chat / Projects state
            they were on.
-         - 'tasks': same as Inbox — the Tasks surface reads its own
-           atoms and has no session-context meaning, so the composer
-           context + URL stay on whatever Chat / Projects state the
-           user had before tapping across.
          - 'chat': mirror to `contextType` + URL so the composer's
            selectors line up with the visible list.
          - 'projects': delegate to whichever sub-tab is remembered
            (`persistedProjectsSubTab`), since 项目 isn't itself a
            contextType. */
-      if (nextTab === 'inbox' || nextTab === 'tasks') return;
+      if (nextTab === 'inbox') return;
       const nextContext: SessionContextType = nextTab === 'chat' ? 'chat' : persistedProjectsSubTab;
       setContextType(nextContext);
       void navigate({
@@ -6341,7 +6329,6 @@ function WorkspaceChatLanding({
           onPullToRefresh={handleMobileHomePullToRefresh}
           selectedTab={effectiveMobileHomeTab}
           showInboxTab={showMobileInbox}
-          showTasksTab={tasksFeatureEnabled}
           selectedProjectsSubTab={selectedProjectsSubTab}
           onProjectsSubTabSelect={handleMobileHomeProjectsSubTabSelect}
           onAddLocalProject={() => openAddProjectDialog()}
@@ -6399,7 +6386,6 @@ function WorkspaceChatLanding({
               'Connect a GitHub repository'
             ),
             chatTab: t('chat.contextSwitch.chat', 'Chat'),
-            tasksTab: t('tasks.title', 'Tasks'),
             recentProjectsHeading: t('chat.mobileHome.recentProjectsHeading', '最近常用'),
             settingsTab: t('settings.title', 'Settings'),
             projectRemoving: t('sidebar.localProjects.remove.removing', 'Removing…'),

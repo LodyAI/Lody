@@ -31,10 +31,8 @@ import {
 } from 'streamdown';
 import type { BundledLanguage } from 'shiki';
 import { Check, Copy } from 'lucide-react';
-import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import { parseTaskImageMarkdownUrl } from '@lody/shared';
-import { DEFAULT_CONVERSATION_FONT_SIZE, tasksFeatureEnabledAtom } from '@/atoms/settings';
+import { DEFAULT_CONVERSATION_FONT_SIZE } from '@/atoms/settings';
 import { MonochromeFileIcon } from '@/components/icons/file-icons';
 import {
   isMarkdownAgentFileHref,
@@ -53,7 +51,6 @@ import {
 import { findSessionSearchOccurrences } from '@/lib/session-chat-search';
 import { useResolvedTheme } from '../../theme-provider';
 import type { ConversationFontSize } from '@/atoms/settings';
-import { useTaskImageUrl } from '@/hooks/use-task-image';
 import { MarkdownDiffBlock } from './markdown-diff-block';
 import { createMarkdownMermaidConfig, createMarkdownMermaidPlugin } from './markdown-mermaid';
 import { MermaidDiagramViewer } from './mermaid-diagram-viewer';
@@ -942,9 +939,7 @@ const writeTextToClipboard = async (text: string): Promise<boolean> => {
 };
 
 const markdownUrlTransform: UrlTransform = (value, key, node) =>
-  isMarkdownAgentFileHref(value) || (key === 'src' && parseTaskImageMarkdownUrl(value))
-    ? value
-    : defaultUrlTransform(value, key, node);
+  isMarkdownAgentFileHref(value) ? value : defaultUrlTransform(value, key, node);
 
 type MarkdownTableProps = ComponentPropsWithoutRef<'table'> & {
   node?: unknown;
@@ -1131,16 +1126,16 @@ const createMarkdownComponents = ({
       </MarkdownExternalLink>
     );
   },
-  img: TaskMarkdownImage,
+  img: ConversationMarkdownImage,
   // <picture> just passes through its children (the <img> fallback);
   // <source> is suppressed since it's only meaningful inside a real browser <picture>.
   source: () => null,
   picture: (props: MarkdownPictureProps) => <>{props.children}</>,
 });
 
-function TaskMarkdownImage(props: MarkdownImageProps) {
+function ConversationMarkdownImage(props: MarkdownImageProps) {
   const readonly = useContext(SessionReadonlyContext);
-  // No workspace task hook or URI fetch is mounted for an anonymous publication.
+  // No workspace URI fetch is mounted for an anonymous publication.
   // Typed share images are handled separately through the manifest attachment reader.
   if (readonly) {
     const inline =
@@ -1162,31 +1157,11 @@ function TaskMarkdownImage(props: MarkdownImageProps) {
       </span>
     );
   }
-  return <WorkspaceMarkdownImage {...props} />;
-}
-
-function WorkspaceMarkdownImage(props: MarkdownImageProps) {
   const { node: _node, src, alt, ...rest } = props;
-  const taskImageId = src ? parseTaskImageMarkdownUrl(src) : null;
-  const tasksEnabled = useAtomValue(tasksFeatureEnabledAtom);
-  const resolvedUrl = useTaskImageUrl(taskImageId && tasksEnabled ? src : undefined);
-
-  if (taskImageId && !tasksEnabled) return null;
-
-  if (taskImageId && !resolvedUrl) {
-    return (
-      <span
-        role="img"
-        aria-label={alt || 'Task image'}
-        className="my-2 block h-24 w-full max-w-sm animate-pulse rounded-md bg-muted"
-      />
-    );
-  }
-
   return (
     <img
       {...rest}
-      src={taskImageId ? resolvedUrl : src}
+      src={src}
       alt={alt ?? ''}
       className={cn('my-2 max-h-[32rem] max-w-full rounded-md object-contain', rest.className)}
     />

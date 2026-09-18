@@ -12,8 +12,6 @@ again. Contract test: `packages/shared/tests/session-doc-forward-compat.test.ts`
 
 Session docs use `createSessionMirror`; only its HistoryWriter writes history.
 Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
-Task-proposal decisions locate the current item by proposal id after store acquisition
-and update only decision fields through HistoryWriter; never replace a rendered entry.
 
 ## Streams connection cardinality
 
@@ -72,9 +70,8 @@ and update only decision fields through HistoryWriter; never replace a rendered 
   force one immediate recovery attempt, but they must preserve the current outage's retry history;
   only a sustained healthy dwell resets backoff. Every attempt after the first is a `recovery`
   phase, including one prompted by a rotated token.
-- Workspace-level rooms without a machine owner use the platform fallback. Task rooms and
-  the Task Index depend on this behavior; returning no transport silently disables task
-  synchronization.
+- Workspace-level rooms without a machine owner use the platform fallback.
+  Returning no transport silently disables synchronization for those rooms.
 - Resource monitoring follows target ownership: local machines use the local monitor
   transport, remote machines use the optional remote transport, and unknown ownership
   remains pending.

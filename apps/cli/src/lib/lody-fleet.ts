@@ -74,11 +74,6 @@ import type { MachineProcessLifecycleAction } from '@/lib/machine-lifecycle';
 import { traceAsync } from '@/utils/trace-span';
 import { MemoryPressureSampler } from '@/monitor/memory-pressure-sampler';
 import { makePrStatusPoller, type PrStatusPollerShape } from '@/lib/pr-poller/pr-status-poller';
-import {
-  createTaskAutomationWorkspace,
-  type TaskAutomationWorkspaceHandle,
-} from '@/lib/task-automation/task-automation-workspace';
-import { startDelegatedTask } from '@/lib/task-automation/task-automation-start';
 import { ACP_PLAN_PERMISSION_MODE_ID } from '@lody/shared';
 import { createReviewAutomation } from '@/lib/review-automation/create-review-automation';
 import type { ReviewAutomationWorkspaceHandle } from '@/lib/review-automation/review-automation-workspace';
@@ -127,7 +122,6 @@ type WorkspaceRuntimeState = {
   lody: Lody;
   unsubscribeTerminalCleanup: () => void;
   prPollerWorkspace: PrPollerWorkspaceHandle | null;
-  taskAutomation: TaskAutomationWorkspaceHandle | null;
   reviewAutomation: ReviewAutomationWorkspaceHandle | null;
 };
 
@@ -566,7 +560,6 @@ export class LodyFleet {
         await runtime.lody.cleanup();
         runtime.unsubscribeTerminalCleanup();
         await runtime.prPollerWorkspace?.dispose();
-        await runtime.taskAutomation?.dispose();
         await runtime.reviewAutomation?.dispose();
       } catch (error) {
         runtime.unsubscribeTerminalCleanup();
@@ -794,45 +787,6 @@ export class LodyFleet {
               logger: workspaceLogger,
             })
           : null;
-        // Delegated automation: this machine drains the queues of the agents that
-        // live here, so entrusted work continues while nobody is looking.
-        const taskAutomation = createTaskAutomationWorkspace({
-          documentManager: startedLody.documentManager,
-          workspaceId: workspace.id as WorkspaceId,
-          machineId: this.machineId,
-          userId: this.userId,
-          logger: workspaceLogger,
-          startTask: async (taskId, agentConfigId) => {
-            const { createSessionResult, resolveTurnDispatchConfig } =
-              await import('@/commands/session');
-            await startDelegatedTask(
-              {
-                auth: {
-                  token: this.cliToken,
-                  userId: this.userId,
-                  userName: '',
-                  userEmail: '',
-                  machineId: this.machineId,
-                  machineName: this.machineName,
-                },
-                workspace,
-                manager: startedLody.documentManager,
-                logger: workspaceLogger,
-                createSession: async (args) =>
-                  createSessionResult(
-                    args.auth,
-                    args.workspace,
-                    args.manager,
-                    args.prompt,
-                    args.options as Parameters<typeof createSessionResult>[4],
-                    resolveTurnDispatchConfig({})
-                  ),
-              },
-              taskId,
-              agentConfigId
-            );
-          },
-        });
         // Auto review and merge. It runs here rather than through MCP because
         // the orchestration chain-depth guard caps a chain at five hops from the
         // last human input, and because CI and GitHub state are explicitly
@@ -910,7 +864,6 @@ export class LodyFleet {
           lody: startedLody,
           unsubscribeTerminalCleanup,
           prPollerWorkspace,
-          taskAutomation,
           reviewAutomation,
         });
         if (prPollerWorkspace) {

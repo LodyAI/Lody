@@ -18,16 +18,12 @@ import {
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
 } from 'react';
 import { cn } from '@/lib/utils';
 import { WINDOW_DRAG_EXEMPT_CLASS, WINDOW_DRAG_HEADER_CLASS } from '@/ui/window-drag-region';
 import { useElectronFullscreen } from '@/lib/electron';
 import { Badge } from '@/ui/badge';
 import { Button } from '@/ui/button';
-import { Kbd } from '@/ui/kbd';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
-import { commands, formatKeyBinding, type ShortcutCommandId } from '@/lib/commands';
 import { setCommandPaletteOpen } from '@/lib/commands/palette-state';
 import {
   DropdownMenu,
@@ -43,7 +39,6 @@ import { ScrollArea } from '@/ui/scroll-area';
 import {
   AppWindow,
   Archive,
-  ListTodo,
   BookOpen,
   Bug,
   CircleHelp,
@@ -76,7 +71,7 @@ import type { SidebarOrganizeMode } from '@/atoms/sidebar-state';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useStableNow } from '@/hooks/use-stable-now';
 
-export type LoroSidebarNavKey = 'home' | 'archive' | 'tasks';
+export type LoroSidebarNavKey = 'home' | 'archive';
 
 export type LoroSidebarChatScope = 'my' | 'team';
 export type LoroSidebarOrganizeMode = SidebarOrganizeMode;
@@ -118,8 +113,6 @@ export type LoroSidebarChatItem = {
 
 export type LoroSidebarLabels = {
   home: string;
-  tasks: string;
-  newTask: string;
   docs: string;
   joinCommunity: string;
   feedback: string;
@@ -250,15 +243,6 @@ export interface LoroSidebarProps {
   onLinkRepoClicked?: () => void;
   onHomeClicked?: () => void;
   onArchiveClicked?: () => void;
-  onTasksClicked?: () => void;
-  /** Capture a task without leaving where you are. Also gated by `showTasks`. */
-  onNewTaskClicked?: () => void;
-  /**
-   * Whether the Tasks entry exists at all. Defaults to false so a caller that
-   * forgets it hides the beta rather than leaking it — see
-   * `tasksFeatureEnabledAtom`.
-   */
-  showTasks?: boolean;
   onSettingsClicked?: () => void;
   onDocsClicked?: () => void;
   onJoinCommunityClicked?: () => void;
@@ -287,8 +271,6 @@ const COLLAPSE_DRAG_THRESHOLD = 160;
 
 const defaultLabels: LoroSidebarLabels = {
   home: 'Home',
-  tasks: 'Tasks',
-  newTask: 'New task',
   docs: 'Docs',
   joinCommunity: 'Join community',
   feedback: 'Feedback',
@@ -507,56 +489,6 @@ const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconB
   );
 });
 
-/**
- * The live binding for a command, formatted for this platform, or null when the
- * command is unbound (or not registered — Storybook, or the Tasks beta off).
- * Read from the registry rather than `COMMAND_SHORTCUTS` so a rebound key is
- * what the tooltip teaches.
- */
-function useCommandShortcutLabel(id: ShortcutCommandId): string | null {
-  const binding = useSyncExternalStore(
-    (onChange) => commands.subscribe(onChange),
-    // A string, not the array: `getKeybindingsFor` allocates, and an unstable
-    // snapshot would re-render forever.
-    () => commands.getKeybindingsFor(id)[0] ?? '',
-    () => ''
-  );
-  return binding ? formatKeyBinding(binding) : null;
-}
-
-/**
- * Quick capture from the Tasks row. Writing a task down has to stay cheaper
- * than starting a chat, so the entry sits where you already are instead of
- * behind a navigation; the tooltip is where its shortcut gets taught.
- */
-function SidebarNewTaskButton({ label, onClick }: { label: string; onClick: () => void }) {
-  const shortcut = useCommandShortcutLabel('tasks.quickAdd');
-  return (
-    <TooltipProvider delayDuration={400}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            aria-label={label}
-            onClick={onClick}
-            className={cn(
-              'flex h-6 w-6 items-center justify-center rounded-md text-sidebar-foreground-muted',
-              'transition-colors hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
-              'outline-hidden focus-visible:ring-1 focus-visible:ring-sidebar-ring/40'
-            )}
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="right" className="flex items-center gap-1.5">
-          <span>{label}</span>
-          {shortcut ? <Kbd>{shortcut}</Kbd> : null}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
-}
-
 function NavButton({
   active,
   label,
@@ -681,9 +613,6 @@ export const LoroSidebar = memo(function LoroSidebar({
   onLinkRepoClicked,
   onHomeClicked,
   onArchiveClicked,
-  onTasksClicked,
-  onNewTaskClicked,
-  showTasks = false,
   onSettingsClicked,
   onDocsClicked,
   onJoinCommunityClicked,
@@ -1078,22 +1007,6 @@ export const LoroSidebar = memo(function LoroSidebar({
             icon={<Search className="h-4 w-4" />}
             onClick={() => setCommandPaletteOpen(true)}
           />
-          {/* Tasks sits with New Chat rather than in the bottom icon rail: it is a
-             primary destination, and the rail reads as utilities (docs, feedback,
-             settings). Still gated — see `showTasks`. */}
-          {showTasks ? (
-            <NavButton
-              active={activeNav === 'tasks'}
-              label={mergedLabels.tasks}
-              icon={<ListTodo className="h-4 w-4" />}
-              onClick={onTasksClicked}
-              action={
-                onNewTaskClicked ? (
-                  <SidebarNewTaskButton label={mergedLabels.newTask} onClick={onNewTaskClicked} />
-                ) : undefined
-              }
-            />
-          ) : null}
         </div>
 
         <ScrollArea

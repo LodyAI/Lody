@@ -61,6 +61,6 @@ at cache-clear level; local file routes must never silently fall back to cloud.
   [src/ui/AGENTS.md](src/ui/AGENTS.md).
 - Hooks: [src/hooks/AGENTS.md](src/hooks/AGENTS.md). Workspace runtime, transports, and
   presence: [src/providers/AGENTS.md](src/providers/AGENTS.md).
-- Sessions, mobile, chat, mentions, tasks, onboarding, settings, and Codex reset
+- Sessions, mobile, chat, mentions, onboarding, settings, and Codex reset
   forecast each own an `AGENTS.md` under `src/components/`. Commands and shortcuts:
   [src/lib/commands/AGENTS.md](src/lib/commands/AGENTS.md).

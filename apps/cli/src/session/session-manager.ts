@@ -260,8 +260,7 @@ function createDeferred<T>(): Deferred<T> {
 function buildSessionPreparationCompatibility(
   launchSource: Partial<SessionLaunchConfig> | null | undefined,
   mcpServerIds: readonly McpServerId[] | undefined,
-  configOptionValues: SessionConfig['configOptionValues'],
-  taskToolsEnabled: boolean
+  configOptionValues: SessionConfig['configOptionValues']
 ) {
   return {
     launch: buildSessionLaunchConfig({
@@ -272,7 +271,6 @@ function buildSessionPreparationCompatibility(
     runConfig: normalizeSessionPreparationRunConfigForDedup({
       mcpServerIds: mcpServerIds ? [...mcpServerIds] : undefined,
       configOptionValues,
-      taskToolsEnabled,
     }),
   };
 }
@@ -611,8 +609,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         buildSessionPreparationCompatibility(
           current.config,
           resource.config.mcpServerIds,
-          resource.config.configOptionValues,
-          resource.config.taskToolsEnabled
+          resource.config.configOptionValues
         )
       )
     ) {
@@ -678,8 +675,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     const compatibility = buildSessionPreparationCompatibility(
       config,
       config.mcpServerIds,
-      config.configOptionValues,
-      config.taskToolsEnabled
+      config.configOptionValues
     );
     const claim = this.preparationService.claim({
       sessionId,
@@ -706,8 +702,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
             buildSessionPreparationCompatibility(
               current.config,
               config.mcpServerIds,
-              config.configOptionValues,
-              config.taskToolsEnabled
+              config.configOptionValues
             )
           )
         );
@@ -926,7 +921,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       agentType: spec.agentType,
       configOptionValues: spec.runConfig?.configOptionValues,
       mcpServerIds: spec.runConfig?.mcpServerIds ?? [],
-      taskToolsEnabled: spec.runConfig?.taskToolsEnabled === true,
       customAcp: agentConfig.customAcp,
       runtimeOverrides: agentConfig.runtimeOverrides,
       project: spec.project as ProjectRef | undefined,
@@ -944,8 +938,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     const compatibility = buildSessionPreparationCompatibility(
       config,
       config.mcpServerIds,
-      config.configOptionValues,
-      config.taskToolsEnabled
+      config.configOptionValues
     );
     const ghTokenInjected = await this.prepareGitHubRepoSessionConfig(config);
     signal.throwIfAborted();

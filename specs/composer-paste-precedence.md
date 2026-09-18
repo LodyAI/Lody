@@ -51,8 +51,7 @@ are independent: a clipboard carrying both produces both.
 
 - Decision: `packages/components/src/lib/file-drop.ts` (`selectPastedClipboardFiles`).
 - Callers: `session-chat-input-area.tsx`, `chat-landing.tsx`,
-  `use-chat-landing-image-draft.ts`, `task-thread.tsx`,
-  `task-body-editor-fallback.tsx`.
+  `use-chat-landing-image-draft.ts`.
 - Executed: `packages/components/tests/file-drop.test.ts` covers the precedence
   table; `packages/components/tests/session-chat-input-submission.test.tsx`
   asserts the session composer leaves a rich-text paste to the browser.
