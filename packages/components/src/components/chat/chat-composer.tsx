@@ -636,7 +636,7 @@ export function ChatComposer({
         'w-full',
         'focus-within:ring-1 focus-within:ring-offset-0',
         'focus-within:outline-hidden',
-        'rounded-2xl border border-foreground/[0.10] bg-background focus-within:ring-ring/30 dark:border-input-border/70 dark:bg-input/90',
+        'rounded-2xl border-[0.5px] border-foreground/[0.10] bg-background focus-within:ring-ring/30 dark:border-input-border/70 dark:bg-input/90',
         mentionSurfaceClassName
       )
     : undefined;
@@ -659,7 +659,7 @@ export function ChatComposer({
   const actionWidthClassName = isLanding ? 'w-auto shrink-0' : 'w-auto';
 
   const landingContainerClassName = cn(
-    '@container/composer-box flex flex-col gap-4 rounded-xl border px-4 pt-4 pb-3 transition-shadow focus-within:ring-1',
+    '@container/composer-box flex flex-col gap-4 rounded-xl border-[0.5px] px-4 pt-4 pb-3 transition-shadow focus-within:ring-1',
     'border-foreground/[0.10] bg-background shadow-[0_1px_2px_hsl(0_0%_0%/0.04),0_8px_24px_-12px_hsl(0_0%_0%/0.08)] focus-within:ring-ring/30',
     'dark:border-input-border/60 dark:bg-input/90 dark:shadow-[0_22px_70px_-48px_rgba(15,23,42,0.25)] dark:focus-within:ring-ring/40',
     mentionSurfaceClassName
