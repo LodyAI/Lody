@@ -1230,11 +1230,15 @@ pre,
   input[type='button'],
   input[type='submit'],
   input[type='reset'] {
-    cursor: default;
+    cursor: pointer;
   }
 
-  .cursor-pointer {
-    cursor: default !important;
+  button:disabled,
+  [role='button'][aria-disabled='true'],
+  input[type='button']:disabled,
+  input[type='submit']:disabled,
+  input[type='reset']:disabled {
+    cursor: default;
   }
 
   /* Pro focus style: only show on keyboard navigation */
@@ -1753,8 +1757,7 @@ pre,
     /* Smooth transitions */
     transition: all 0.15s ease-in-out;
 
-    /* Interactive cursor */
-    cursor: default;
+    cursor: pointer;
 
     /* Focus outline for accessibility */
     outline: none;
