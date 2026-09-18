@@ -91,16 +91,16 @@ function OptionItem({
         event.preventDefault();
         onSelect();
       }}
-      className="items-start gap-2 py-1"
+      className="items-center gap-2 py-1"
     >
       {icon}
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <span className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
         <span className={cn('truncate leading-tight', selected && 'font-medium')}>{label}</span>
         {description ? (
           <span className="text-xs leading-snug text-muted-foreground">{description}</span>
         ) : null}
       </span>
-      {selected ? <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" /> : null}
+      {selected ? <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> : null}
     </DropdownMenuItem>
   );
 }

@@ -105,26 +105,19 @@ function OptionItem({
         event.preventDefault();
         onSelect();
       }}
-      // Tighter vertical rhythm than the default menu item (py-2): these rows
-      // carry a two-line label + description, so a smaller pad keeps the list
-      // from getting tall enough to overflow.
-      className="items-start gap-2 py-1"
+      // items-center (not items-start): single-line agent/model/reasoning rows
+      // must sit in the middle of the min-h-8 item. py-1 is tighter than the
+      // default py-1.5.
+      className="items-center gap-2 py-1"
     >
-      {/* Center the icon/check on the label's first line box (text-[0.8rem] +
-          leading-tight = 16px): vertically centered on single-line rows, and
-          hugging the first line when a description wraps below. */}
-      {icon ? <span className="flex h-4 shrink-0 items-center">{icon}</span> : null}
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+      {icon}
+      <span className="flex min-w-0 flex-1 flex-col justify-center gap-0.5">
         <span className={cn('truncate leading-tight', selected && 'font-medium')}>{label}</span>
         {description ? (
           <span className="text-xs leading-snug text-muted-foreground">{description}</span>
         ) : null}
       </span>
-      {selected ? (
-        <span className="flex h-4 shrink-0 items-center">
-          <Check className="h-3.5 w-3.5" aria-hidden="true" />
-        </span>
-      ) : null}
+      {selected ? <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> : null}
     </DropdownMenuItem>
   );
 }
@@ -1062,12 +1055,12 @@ export function DesktopPermissionModeButton({
             key={opt.value}
             disabled={opt.disabled}
             onSelect={() => handleSelect(opt.value)}
-            className="items-start"
+            className="items-center"
           >
-            <span className="mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center">
+            <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center">
               {permissionModeIcon(opt.value)}
             </span>
-            <span className="flex min-w-0 flex-1 flex-col">
+            <span className="flex min-w-0 flex-1 flex-col justify-center">
               <span className={cn('truncate', opt.value === value && 'font-medium')}>
                 {opt.label}
               </span>
@@ -1080,7 +1073,7 @@ export function DesktopPermissionModeButton({
               ) : null}
             </span>
             {opt.value === value ? (
-              <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             ) : null}
           </DropdownMenuItem>
         ))}
