@@ -6,6 +6,7 @@ import { CarbonSettingsAdjust } from '@/components/icons/carbon-settings-adjust'
 import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
 import { Button } from '@/ui/button';
+import { menuSurfaceClassName, menuSurfaceStyle } from '@/ui/menu-styles';
 import type { SidebarOrganizeMode } from '@/atoms/sidebar-state';
 import type { SidebarChatScope } from '@/atoms/sidebar-state';
 
@@ -144,8 +145,12 @@ export function SidebarFilterPopover({
         side={side}
         align={align}
         sideOffset={8}
-        style={{ animation: 'none' }}
-        className={cn('w-56 rounded-xl p-1.5 shadow-2xl', className)}
+        style={{ ...menuSurfaceStyle, animation: 'none' }}
+        className={cn(
+          'w-56 border-0 bg-transparent p-1.5 shadow-none',
+          menuSurfaceClassName,
+          className
+        )}
       >
         <SectionHeading>{merged.organizeHeading}</SectionHeading>
         <FilterRow
