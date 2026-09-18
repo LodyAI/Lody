@@ -38,6 +38,35 @@ export function isSessionWindow(): boolean {
   return storage.getItem('lody:sessionWindow') === '1';
 }
 
+const WARM_WINDOW_STORAGE_KEY = 'lody:warmWindow';
+
+/**
+ * Whether this window is the hidden spare kept warm for the next open. It boots
+ * on a neutral route and must not redirect into a workspace until a target is
+ * bound through `app.windowTarget`.
+ */
+export function isWarmWindow(): boolean {
+  if (
+    !isElectronRenderer() ||
+    typeof location === 'undefined' ||
+    typeof sessionStorage === 'undefined'
+  )
+    return false;
+  if (/[?&]warm=1(?:&|$)/.test(location.href)) {
+    sessionStorage.setItem(WARM_WINDOW_STORAGE_KEY, '1');
+  }
+  return sessionStorage.getItem(WARM_WINDOW_STORAGE_KEY) === '1';
+}
+
+/**
+ * Clears the warm marker once the spare has been bound to a real target, so a
+ * later in-window navigation back to `/` behaves like a normal window.
+ */
+export function clearWarmWindowFlag(): void {
+  if (typeof sessionStorage === 'undefined') return;
+  sessionStorage.removeItem(WARM_WINDOW_STORAGE_KEY);
+}
+
 export function openDesktopWindow(
   sessionId?: string,
   workspace = jotaiStore.get(currentWorkspaceSlugAtom)

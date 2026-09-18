@@ -1,4 +1,8 @@
-import { isSessionWindow } from '@lody/components/lib/desktop-window'
+import {
+  isSessionWindow,
+  isWarmWindow,
+  clearWarmWindowFlag
+} from '@lody/components/lib/desktop-window'
 import { useLayoutEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createHashHistory, RouterProvider } from '@tanstack/react-router'
@@ -10,11 +14,12 @@ import {
   readStoredLanguagePreference
 } from '@lody/components/i18n'
 import { languageAtom } from '@lody/components/atoms/settings'
+import { sidebarCollapsedAtom } from '@lody/components/atoms/sidebar-state'
 import '@lody/components/tailwind/index.css'
 import { jotaiStore } from '@lody/components/lib'
 import { collectBootDiagnostics, renderBootFailure } from '@lody/components/lib/boot-failure'
 import { installResizeObserverLoopErrorHandler } from '@lody/components/lib/resize-observer'
-import { getIpcServices } from '@lody/components/lib/electron-ipc-client'
+import { getIpcServices, onIpcEvent, sendIpc } from '@lody/components/lib/electron-ipc-client'
 import { Provider } from 'jotai'
 
 import { ErrorBoundary } from '@/components/error-boundary'
@@ -104,8 +109,46 @@ function markRendererCommitted(): void {
 function RendererCommitSentinel(): null {
   useLayoutEffect(() => {
     markRendererCommitted()
+    if (isWarmWindow()) {
+      // A hidden window can miss animation frames, so signal through a timer.
+      // The spare only needs its committed shell before main can claim it.
+      const timer = window.setTimeout(() => sendIpc('app.windowReady', null), 0)
+      return () => window.clearTimeout(timer)
+    }
+    return undefined
   }, [])
   return null
+}
+
+/**
+ * Binds a claimed warm window to a concrete route without a reload. The renderer
+ * is already booted; this reproduces the storage flags a fresh auxiliary window
+ * would derive from its URL, then navigates client-side.
+ */
+function installWarmWindowBinding(router: ReturnType<typeof createRouter>): void {
+  onIpcEvent('app.windowTarget', (target) => {
+    sessionStorage.setItem('lody:auxiliaryWindow', '1')
+    sessionStorage.removeItem('lody:windowFocusConsumed')
+    if (target.sessionId) {
+      sessionStorage.setItem('lody:sessionWindow', '1')
+    }
+    jotaiStore.set(sidebarCollapsedAtom, Boolean(target.sessionId))
+
+    const navigation = target.sessionId
+      ? router.navigate({
+          to: '/$workspaceName/sessions/$sessionId',
+          params: { workspaceName: target.workspace, sessionId: target.sessionId },
+          search: { tab: `session:${target.sessionId}` },
+          state: { focusComposerSessionId: target.sessionId }
+        })
+      : router.navigate({
+          to: '/$workspaceName',
+          params: { workspaceName: target.workspace }
+        })
+    // Keep the neutral warm shell until the target route commits, so the home
+    // route cannot redirect the spare into a workspace mid-navigation.
+    void navigation.finally(() => clearWarmWindowFlag())
+  })
 }
 
 const rendererErrorReporting = createRendererErrorReporting({
@@ -150,6 +193,7 @@ try {
     authClient,
     history: usesHashHistory ? createHashHistory() : undefined
   })
+  installWarmWindowBinding(router)
   if (isSessionWindow() && !sessionStorage.getItem('lody:windowFocusConsumed')) {
     const sessionId = router.history.location.pathname.split('/sessions/')[1]?.split('/')[0]
     if (sessionId) {

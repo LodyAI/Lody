@@ -7,7 +7,9 @@ import {
   consumePendingDeepLink,
   getMainWindow,
   isAppQuitting,
+  isWarmWindow,
   isWindowsTrayAvailable,
+  markWarmWindow,
   setMainWindow,
   productWindows
 } from './window-state'
@@ -26,6 +28,7 @@ import { describeDeepLinkForAuthDebug } from './auth-debug'
 import { captureElectronMainException } from './posthog-error-reporting'
 import { createRendererProcessGoneHandling } from './renderer-process-gone'
 import { resolveMainWindowRuntimePolicy } from './window-runtime-policy'
+import { IPC_PUSH_CHANNELS, type ElectronWindowTarget } from '@lody/shared/electron-ipc'
 import { serializePreferredSystemLanguagesArgument } from '../system-language-argument'
 import { isDevbarRendererEnabled } from './services/devbar/service'
 import { devbarRendererEntry } from './services/devbar/control'
@@ -52,7 +55,18 @@ type CreateMainWindowOptions = {
   auxiliary?: boolean
   hideWindowOnAutoLaunch?: boolean
   onDidFinishLoad?: () => void
+  /**
+   * Keeps a hidden spare auxiliary window alive for the next open instead of
+   * showing it. The renderer binds a concrete target later, so the window boots
+   * on a neutral route and must never present itself to the user.
+   */
+  warm?: boolean
 }
+
+// Neutral route a warm spare boots on. `window=workspace` marks it auxiliary
+// (its own session storage); `warm=1` tells the renderer to keep the neutral
+// shell until a target is bound instead of redirecting into a workspace.
+export const WARM_WINDOW_INITIAL_PATH = '/?window=workspace&warm=1'
 
 const DEEP_LINK_DEBUG_PREFIX = '[electron-auth-debug]'
 
@@ -426,10 +440,30 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
     pendingInitialMaximize.add(window)
   }
   productWindows.add(window)
+  if (options.warm) markWarmWindow(window)
   window.once('closed', () => {
     productWindows.delete(window)
     if (getMainWindow() === window) {
-      setMainWindow([...productWindows].find((candidate) => !candidate.isDestroyed()) ?? null)
+      setMainWindow(
+        [...productWindows].find(
+          (candidate) => !candidate.isDestroyed() && !isWarmWindow(candidate)
+        ) ?? null
+      )
+    }
+    // A hidden spare must not keep the process alive once the last real window
+    // closes, and holding it while the app idles would only waste memory. It is
+    // re-primed when the next real window loads.
+    if (!isAppQuitting()) {
+      const hasRealWindow = [...productWindows].some(
+        (candidate) => !candidate.isDestroyed() && !isWarmWindow(candidate)
+      )
+      if (!hasRealWindow) {
+        for (const candidate of [...productWindows]) {
+          if (!candidate.isDestroyed() && isWarmWindow(candidate)) {
+            candidate.destroy()
+          }
+        }
+      }
     }
   })
   if (!options.auxiliary) trackMainWindowState(window)
@@ -459,6 +493,10 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
   window.on('leave-full-screen', sendFullscreenState)
 
   window.on('ready-to-show', () => {
+    // A warm spare stays hidden until it is claimed for a concrete target.
+    if (options.warm) {
+      return
+    }
     if (options.hideWindowOnAutoLaunch) {
       return
     }
@@ -493,7 +531,7 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
           MOUNT_WATCHDOG_TIMEOUT_MS,
           'ms — the boot may be stuck.'
         )
-        if (is.dev && !window.isDestroyed()) {
+        if (is.dev && !options.warm && !window.isDestroyed()) {
           try {
             window.webContents.openDevTools({ mode: 'detach' })
           } catch (error) {
@@ -609,4 +647,36 @@ export function openOrFocusMainWindow(options: OpenMainWindowOptions): BrowserWi
   }
 
   return openMainWindow(options)
+}
+
+/**
+ * Creates the hidden spare auxiliary window. It boots the renderer on a neutral
+ * route so the next `openSessionWindow` can bind a real target without paying
+ * the full cold-boot cost.
+ */
+export function createWarmWindow(options: { icon?: string } = {}): BrowserWindow {
+  return createMainWindow({
+    icon: options.icon,
+    auxiliary: true,
+    warm: true,
+    initialPath: WARM_WINDOW_INITIAL_PATH
+  })
+}
+
+/**
+ * Hands a claimed warm window its concrete route and presents it. The renderer
+ * navigates client-side; the themed shell is already painted, so the window is
+ * shown immediately without a blank frame.
+ */
+export function bindMainWindowTarget(window: BrowserWindow, target: ElectronWindowTarget): void {
+  if (window.isDestroyed()) return
+  window.webContents.send(IPC_PUSH_CHANNELS.appWindowTarget, target)
+  if (window.isMinimized()) {
+    window.restore()
+  }
+  if (!window.isVisible()) {
+    window.show()
+  }
+  app.focus({ steal: true })
+  window.focus()
 }

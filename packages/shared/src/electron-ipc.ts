@@ -30,6 +30,15 @@ export type RendererFatalErrorReport = {
 
 export type WindowBadgeInput = { unread: number; waiting: number };
 
+/**
+ * Route a product window should show. Sent to a pre-warmed auxiliary window
+ * when it is reused, so the renderer can bind the target without a reload.
+ */
+export type ElectronWindowTarget = {
+  workspace: string;
+  sessionId?: string;
+};
+
 export type SessionControlSendInput = {
   requestId: string;
   message: LocalSessionControlRequest;

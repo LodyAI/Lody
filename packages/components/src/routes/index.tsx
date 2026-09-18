@@ -2,6 +2,7 @@ import { createFileRoute, Navigate } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { useOrganization } from '@/hooks/useOrganization';
 import { getPreferredWorkspaceSlug, readPreferredWorkspaceSlug } from '@/lib/workspace';
+import { isWarmWindow } from '@/lib/desktop-window';
 import { RouteMessage } from '@/components/route-message';
 import { useEffect, useState } from 'react';
 import { useStableSession } from '@/hooks/useStableSession';
@@ -19,6 +20,11 @@ export const Route = createFileRoute('/')({
 });
 
 export function HomeRoute() {
+  // A hidden spare boots on `/`; redirecting into a workspace here would both
+  // show the wrong content and start workspace work before a target is bound.
+  if (isWarmWindow()) {
+    return <LoadingPlaceholder />;
+  }
   // Local (open-source) platform: no login route exists. Land straight on the
   // single implicit workspace once the CLI has provisioned it.
   if (isLocalAppPlatform()) {
