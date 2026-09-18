@@ -112,7 +112,12 @@ describe('ProjectSettingsView local-project remove', () => {
       );
     });
 
-    const deleteButtons = Array.from(container.querySelectorAll('button')).filter((button) =>
+    const projectRow = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('Lody')
+    );
+    expect(projectRow).toBeInstanceOf(HTMLButtonElement);
+    await act(async () => projectRow?.click());
+    const deleteButtons = Array.from(document.querySelectorAll('button')).filter((button) =>
       button.textContent?.includes('Delete project')
     );
     expect(deleteButtons.length).toBeGreaterThan(0);

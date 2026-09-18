@@ -162,6 +162,7 @@ function StoryWrapper({
   isLoading = false,
   canRemove = false,
   pendingKey = null,
+  initialProjectKey = null,
 }: {
   sections?: ProjectSettingsSection[];
   githubSections?: GithubProjectSettingsSection[];
@@ -169,6 +170,7 @@ function StoryWrapper({
   isLoading?: boolean;
   canRemove?: boolean;
   pendingKey?: string | null;
+  initialProjectKey?: string | null;
 }) {
   const [currentSections, setCurrentSections] = useState(sections);
   const [currentGithubSections, setCurrentGithubSections] = useState(githubSections);
@@ -180,6 +182,7 @@ function StoryWrapper({
         githubSections={currentGithubSections}
         isLoading={isLoading}
         githubProjectsLoading={false}
+        initialProjectKey={initialProjectKey}
         onSharedWithTeamChange={async (row, sharedWithTeam) => {
           setCurrentSections((prev) =>
             prev.map((section) => ({
@@ -467,6 +470,7 @@ export const InitialHistorySync: Story = {
       },
     ],
     githubSections: [],
+    initialProjectKey: 'machine-local:project-lody',
   },
 };
 
@@ -570,6 +574,7 @@ export const Loading: Story = {
 export const DangerZoneVisible: Story = {
   args: {
     canRemove: true,
+    initialProjectKey: 'machine-local:project-lody',
   },
 };
 
