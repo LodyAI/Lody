@@ -88,9 +88,9 @@ export function FileTreeStatePanel({
         />
       </div>
       <div className="space-y-1">
-        <p className="text-sm font-medium text-foreground">{title}</p>
+        <p className="text-[1em] font-medium text-foreground">{title}</p>
         {description ? (
-          <p className="mx-auto max-w-[240px] text-xs leading-5 text-muted-foreground">
+          <p className="mx-auto max-w-[240px] text-[0.8em] leading-5 text-muted-foreground">
             {description}
           </p>
         ) : null}

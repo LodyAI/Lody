@@ -102,7 +102,7 @@ interface SessionTabBarProps {
    tokens as the right side-panel tab strip. `border-transparent` on the base
    keeps every state on the same box model. */
 const TAB_ITEM_CLASS =
-  'group relative flex h-8 w-full min-w-0 items-center gap-1.5 overflow-hidden rounded-md border border-transparent px-3 text-[13px] transition-colors cursor-pointer';
+  'group relative flex h-8 w-full min-w-0 items-center gap-1.5 overflow-hidden rounded-md border border-transparent px-3 text-[0.9em] transition-colors cursor-pointer';
 const TAB_ITEM_ACTIVE_CLASS = TAB_PILL_ACTIVE_CLASS;
 const TAB_ITEM_INACTIVE_CLASS = TAB_PILL_INACTIVE_CLASS;
 const TAB_INLINE_ACTION_CLASS =
@@ -290,7 +290,7 @@ function TabContent({
             if (e.key === 'Enter') commitRename();
             if (e.key === 'Escape') cancelRename();
           }}
-          className="w-full min-w-0 bg-transparent outline-hidden text-[13px]"
+          className="w-full min-w-0 bg-transparent outline-hidden text-[0.9em]"
         />
       ) : (
         <span className="truncate">{label}</span>
@@ -877,7 +877,7 @@ export function ClosedTabsPopover({
       </Tooltip>
       <PopoverContent align="end" className="w-72 p-0" sideOffset={4}>
         <div className="border-b border-border px-3 py-2">
-          <p className="text-xs font-medium text-popover-foreground/70">
+          <p className="text-[0.8em] font-medium text-popover-foreground/70">
             {t('sessions.tabs.closedTabs', 'Closed conversations')}
           </p>
         </div>
@@ -890,7 +890,7 @@ export function ClosedTabsPopover({
                 <button
                   key={session.id}
                   type="button"
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-hover/60"
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[0.9em] transition-colors hover:bg-hover/60"
                   onClick={() => {
                     void onRestore(session.id);
                   }}

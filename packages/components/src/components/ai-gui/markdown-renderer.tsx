@@ -217,7 +217,7 @@ const MARKDOWN_BASE_CLASSNAME =
   '[&_tbody_tr:nth-child(even)]:bg-muted/15 [&_tbody_tr:last-child_td]:border-b-0 ' +
   '[&_:is(th,td):first-child]:w-px [&_:is(th,td):first-child]:whitespace-nowrap ' +
   '[&_tbody_td:first-child]:font-medium [&_tbody_td:first-child]:text-foreground/75 ' +
-  '[&_table_code]:!bg-muted/55 [&_table_code]:!ring-0';
+  '[&_table_code]:!bg-foreground/[0.08] [&_table_code]:!ring-0 dark:[&_table_code]:!bg-foreground/[0.14]';
 
 const MARKDOWN_SIZE_CLASSNAME =
   '[&_h1]:text-[length:var(--markdown-h1-font-size)] ' +
@@ -1033,17 +1033,20 @@ const AgentFileLink = ({
       title={href}
       aria-label={`${hasOpenAction ? openAgentFileLabel : copyAgentFileLabel}: ${href}`}
       className={cn(
-        'inline-flex max-w-full items-center gap-1 rounded-sm align-[-0.1em] text-markdown-link no-underline shadow-none transition-colors',
+        'm-0 inline-flex max-w-full items-baseline gap-1 rounded-sm border-0 bg-transparent p-0 align-baseline font-[inherit] leading-[inherit] text-markdown-link no-underline shadow-none transition-colors',
         'hover:underline underline-offset-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
       )}
     >
-      <MonochromeFileIcon filePath={iconPath} className="h-[1.1em] w-[1.1em] shrink-0" />
+      <MonochromeFileIcon
+        filePath={iconPath}
+        className="h-[1em] w-[1em] shrink-0 self-center"
+      />
       <span className="min-w-0 truncate">{children}</span>
       {!hasOpenAction ? (
         didCopy ? (
-          <Check className="h-3 w-3 shrink-0" />
+          <Check className="h-[0.85em] w-[0.85em] shrink-0 self-center" />
         ) : (
-          <Copy className="h-3 w-3 shrink-0" />
+          <Copy className="h-[0.85em] w-[0.85em] shrink-0 self-center" />
         )
       ) : null}
     </button>
@@ -1124,8 +1127,8 @@ const createMarkdownComponents = ({
     return (
       <code
         className={cn(
-          'rounded-sm bg-code px-1 py-px font-mono text-[0.85em] text-code-foreground ring-1 ring-inset ring-border/50',
-          className
+          className,
+          'rounded-sm bg-foreground/[0.08] px-1 py-px font-mono text-[0.85em] text-foreground ring-0 dark:bg-foreground/[0.14]',
         )}
         {...rest}
       >

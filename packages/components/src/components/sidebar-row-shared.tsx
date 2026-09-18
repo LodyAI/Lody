@@ -512,13 +512,13 @@ export function GitHubOwnerIcon({
 
 // Shared section-header metrics. Every sidebar organize mode (Workspace local
 // project / GitHub Worktrees sections and the flat Updated list) uses these so
-// section labels read identically (13px medium, muted — full muted token, not a
+// section labels read identically (0.9em medium, muted — full muted token, not a
 // further /55 fade: that made "Pinned"/"Chats" and the filter icon nearly
 // illegible on light sidebars).
 const SECTION_HEADER_BUTTON_CLASS = cn(
   'relative flex h-7 min-w-0 flex-1 select-none items-center gap-1.5 rounded-md px-2 text-left',
   'border border-transparent bg-transparent',
-  'text-[13px] font-medium text-sidebar-foreground-muted transition-colors',
+  'text-[0.9em] font-medium text-sidebar-foreground-muted transition-colors',
   // The outer row paints the focus ring; suppress the global :focus-visible
   // box-shadow here so the ring wraps the whole row (label + action).
   'focus-visible:shadow-none'

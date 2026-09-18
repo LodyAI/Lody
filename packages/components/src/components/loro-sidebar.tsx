@@ -682,7 +682,7 @@ function NavButton({
         type="button"
         onClick={onClick}
         className={cn(
-          'group flex w-full select-none items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm outline-hidden transition',
+          'group flex w-full select-none items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[0.9em] outline-hidden transition',
           'focus-visible:ring-1 focus-visible:ring-sidebar-ring/30',
           active
             ? 'bg-sidebar-selection text-sidebar-selection-foreground'
@@ -697,7 +697,7 @@ function NavButton({
         </span>
         <span className="truncate">{label}</span>
         {badge !== undefined && badge > 0 ? (
-          <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">
+          <span className="ml-auto shrink-0 text-[0.8em] tabular-nums text-muted-foreground">
             {badge > 99 ? '99+' : badge}
           </span>
         ) : null}
@@ -945,7 +945,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   );
   const windowDrag = isElectron && !isElectronFullscreen;
   const workspaceIdentityClassName = cn(
-    'flex w-full min-w-0 select-none items-center gap-2 rounded-lg px-2 py-1.5 text-left text-sm',
+    'flex w-full min-w-0 select-none items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[0.9em]',
     isMobile ? 'h-9' : 'h-8',
     'text-sidebar-foreground dark:text-sidebar-foreground/75',
     workspaceSwitcherEnabled &&
@@ -1346,7 +1346,7 @@ export const LoroSidebar = memo(function LoroSidebar({
               <div className="space-y-3 pt-1">
                 {repoSections.map((section, sectionIndex) => (
                   <div key={section.id} className="space-y-2">
-                    <div className="flex items-center gap-2 px-1 text-[12px] font-medium text-sidebar-foreground-muted">
+                    <div className="flex items-center gap-2 px-1 text-[0.9em] font-medium text-sidebar-foreground-muted">
                       <Github className="h-3.5 w-3.5" />
                       <span className="truncate">{section.repoFullName}</span>
                       {sectionIndex === 0 && sectionHeaderFilterPlaceholder ? (
@@ -1360,7 +1360,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                           <li key={item.id}>
                             <div
                               className={cn(
-                                'flex items-center gap-2 rounded-lg px-2 py-2 text-[12px]',
+                                'flex items-center gap-2 rounded-lg px-2 py-2 text-[0.9em]',
                                 item.isSelected
                                   ? 'bg-sidebar-selection text-sidebar-selection-foreground'
                                   : 'text-sidebar-foreground-muted hover:bg-sidebar-hover hover:text-sidebar-hover-foreground'
@@ -1369,7 +1369,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                               <span className="h-2 w-2 rounded-full bg-sidebar-border" />
                               <span className="min-w-0 flex-1 truncate">{item.title}</span>
                               {item.ageLabel ? (
-                                <span className="shrink-0 text-[11px] text-sidebar-foreground-muted">
+                                <span className="shrink-0 text-[0.75em] text-sidebar-foreground-muted">
                                   {item.ageLabel}
                                 </span>
                               ) : null}

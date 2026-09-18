@@ -712,7 +712,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
           openedByTree={openedByTree}
         />
         <div
-          className="min-w-0 flex-1 flex items-center gap-1 truncate text-sm text-current"
+          className="min-w-0 flex-1 flex items-center gap-1 truncate text-[0.9em] text-current"
           // Double-click to rename is scoped to the title only, so it can't be
           // triggered by double-clicking the Archive confirm button.
           onDoubleClick={(event) => {
@@ -731,7 +731,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
         {/* ③ A relative time on mobile only (no hover info card on touch); on desktop
             the time / branch live in the hover info card, so nothing sits here. */}
         {isMobile ? (
-          <span className="ml-auto flex shrink-0 select-none items-center gap-1 text-xs tabular-nums text-muted-foreground">
+          <span className="ml-auto flex shrink-0 select-none items-center gap-1 text-[0.8em] tabular-nums text-muted-foreground">
             {relativeTime}
           </span>
         ) : null}
@@ -1189,7 +1189,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                       'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground data-[menu-open]:bg-sidebar-hover data-[menu-open]:text-sidebar-hover-foreground',
                     showSelectedState &&
                       'border-sidebar-ring/30 bg-sidebar-selection hover:bg-sidebar-selection',
-                    'flex min-w-0 flex-1 select-none items-center gap-2 text-xs font-semibold transition-colors',
+                    'flex min-w-0 flex-1 select-none items-center gap-2 text-[0.9em] font-semibold transition-colors',
                     projectCanNavigate ? 'cursor-pointer' : 'cursor-default',
                     removalState && 'text-muted-foreground',
                     showSelectedState
@@ -1420,7 +1420,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
               data-scope-item="row"
               data-sidebar-show-more={groupKey}
               className={cn(
-                'flex select-none items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-sidebar-foreground-muted/80',
+                'flex select-none items-center gap-2 rounded-md px-2 py-2 text-left text-[0.8em] text-sidebar-foreground-muted/80',
                 'transition-colors',
                 'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
                 'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40'

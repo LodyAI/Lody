@@ -53,7 +53,7 @@ export function TabPillStrip<Key extends string>({
             aria-selected={active}
             onClick={() => onSelect(key)}
             className={cn(
-              'flex h-8 min-w-0 items-center gap-1.5 rounded-md border border-transparent px-3 text-[13px] font-medium transition-colors',
+              'flex h-8 min-w-0 items-center gap-1.5 rounded-md border border-transparent px-3 text-[0.9em] font-medium transition-colors',
               active ? TAB_PILL_ACTIVE_CLASS : TAB_PILL_INACTIVE_CLASS,
               itemClassName
             )}
