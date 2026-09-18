@@ -87,7 +87,7 @@ and that a following reader stays at the end.
 
 No timer was added. Device-scale cold-open flash remains the capture in
 `e2e/scripts/capture-conversation-open-flicker.mjs`; this change does not
-re-measure it.
+re-measure it. Shipped in https://github.com/LodyAI/Lody/pull/803.
 
 ## Trade-offs and limits
 

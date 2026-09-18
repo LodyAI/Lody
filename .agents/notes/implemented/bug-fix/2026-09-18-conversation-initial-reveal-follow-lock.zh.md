@@ -74,6 +74,7 @@ padding）以及 hook（同样两种恢复）。
 
 没有加入 timer。设备级冷开闪屏仍以
 `e2e/scripts/capture-conversation-open-flicker.mjs` 为准；本次未重测。
+随 https://github.com/LodyAI/Lody/pull/803 提交。
 
 ## 取舍与限制
 
