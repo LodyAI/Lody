@@ -2399,7 +2399,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       triggerAriaLabel: t('sidebar.filter.trigger', 'Filter sidebar'),
       organizeHeading: t('sidebar.filter.organizeHeading', 'Organize'),
       showHeading: t('sidebar.filter.showHeading', 'Show'),
-      organizeWorkspace: t('sidebar.filter.organizeWorkspace', 'Workspace'),
+      organizeProject: t('sidebar.filter.organizeProject', 'Project'),
       organizeUpdated: t('sidebar.filter.organizeUpdated', 'Updated'),
       showMyTasks: t('sessions.sidebar.my', 'My Tasks'),
       showAllTasks: t('sessions.sidebar.team', 'All Tasks'),

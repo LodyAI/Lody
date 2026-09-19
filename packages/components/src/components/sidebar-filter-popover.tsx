@@ -21,7 +21,7 @@ export type SidebarFilterLabels = {
   triggerAriaLabel: string;
   organizeHeading: string;
   showHeading: string;
-  organizeWorkspace: string;
+  organizeProject: string;
   organizeUpdated: string;
   showMyTasks: string;
   showAllTasks: string;
@@ -31,7 +31,7 @@ const defaultLabels: SidebarFilterLabels = {
   triggerAriaLabel: 'Filter sidebar',
   organizeHeading: 'Organize',
   showHeading: 'Show',
-  organizeWorkspace: 'Workspace',
+  organizeProject: 'Project',
   organizeUpdated: 'Updated',
   showMyTasks: 'My Tasks',
   showAllTasks: 'All Tasks',
@@ -157,7 +157,7 @@ export function SidebarFilterPopover({
       >
         <SectionHeading>{merged.organizeHeading}</SectionHeading>
         <FilterRow
-          label={merged.organizeWorkspace}
+          label={merged.organizeProject}
           icon={Folder}
           selected={organize === 'workspace'}
           onSelect={() => handleOrganizeSelect('workspace')}

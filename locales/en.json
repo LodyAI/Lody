@@ -3014,7 +3014,7 @@
   "sidebar.feedback": "Feedback",
   "sidebar.filter.organizeHeading": "Organize",
   "sidebar.filter.organizeUpdated": "Updated",
-  "sidebar.filter.organizeWorkspace": "Workspace",
+  "sidebar.filter.organizeProject": "Project",
   "sidebar.filter.showHeading": "Show",
   "sidebar.filter.trigger": "Filter sidebar",
   "sidebar.githubWorktrees": "GitHub Worktrees",

@@ -307,7 +307,7 @@ const defaultLabels: LoroSidebarLabels = {
     triggerAriaLabel: 'Filter sidebar',
     organizeHeading: 'Organize',
     showHeading: 'Show',
-    organizeWorkspace: 'Workspace',
+    organizeProject: 'Project',
     organizeUpdated: 'Updated',
     showMyTasks: 'My Tasks',
     showAllTasks: 'All Tasks',
