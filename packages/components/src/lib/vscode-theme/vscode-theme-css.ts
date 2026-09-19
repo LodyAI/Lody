@@ -859,22 +859,58 @@ export const createThemeCssVariables = (
   ...createLodyThemeCssVariables(theme),
 });
 
+const getTokenColorSelectors = (tokenColor: LodyResolvedVSCodeTheme['tokenColors'][number]) =>
+  Array.isArray(tokenColor.scope)
+    ? tokenColor.scope
+    : tokenColor.scope
+      ? tokenColor.scope.split(',').map((scope) => scope.trim())
+      : [];
+
+// TextMate matching: a selector applies to `scope` when it equals it or is a
+// dot-bounded prefix of it (`string` applies to `string.quoted`, while
+// `string.comment` does not apply to `string`). The most specific selector
+// wins; among equals the later rule wins, as in the editor.
+const findApplicableTokenForeground = (
+  theme: LodyResolvedVSCodeTheme,
+  scope: string
+): string | undefined => {
+  let best: { specificity: number; foreground: string } | undefined;
+  for (const tokenColor of theme.tokenColors) {
+    const foreground = tokenColor.settings.foreground;
+    if (!foreground) continue;
+    for (const selector of getTokenColorSelectors(tokenColor)) {
+      if (selector !== scope && !scope.startsWith(`${selector}.`)) continue;
+      if (!best || selector.length >= best.specificity) {
+        best = { specificity: selector.length, foreground };
+      }
+    }
+  }
+  return best?.foreground;
+};
+
+// Themes that only color specific sub-scopes (e.g. `string.quoted.double` but no
+// plain `string`) still get a representative color from the first such rule.
+const findDescendantTokenForeground = (
+  theme: LodyResolvedVSCodeTheme,
+  scope: string
+): string | undefined =>
+  theme.tokenColors.find(
+    (tokenColor) =>
+      tokenColor.settings.foreground &&
+      getTokenColorSelectors(tokenColor).some((selector) => selector.startsWith(`${scope}.`))
+  )?.settings.foreground;
+
 const findTokenForeground = (
   theme: LodyResolvedVSCodeTheme,
   desiredScopes: readonly string[]
 ): string | undefined => {
-  for (const tokenColor of theme.tokenColors) {
-    if (!tokenColor.settings.foreground) {
-      continue;
-    }
-    const scopes = Array.isArray(tokenColor.scope)
-      ? tokenColor.scope
-      : tokenColor.scope
-        ? tokenColor.scope.split(',').map((scope) => scope.trim())
-        : [];
-    if (scopes.some((scope) => desiredScopes.some((desired) => scope.startsWith(desired)))) {
-      return tokenColor.settings.foreground;
-    }
+  for (const scope of desiredScopes) {
+    const foreground = findApplicableTokenForeground(theme, scope);
+    if (foreground) return foreground;
+  }
+  for (const scope of desiredScopes) {
+    const foreground = findDescendantTokenForeground(theme, scope);
+    if (foreground) return foreground;
   }
   return undefined;
 };
