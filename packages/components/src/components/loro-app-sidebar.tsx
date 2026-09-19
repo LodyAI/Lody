@@ -118,6 +118,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 import { SwipeActionRow } from '@/components/shared/swipe-action-row';
 import {
+  getSidebarGroupSpacingClass,
   MAX_VISIBLE_SESSIONS,
   SessionList,
   shallowEqualExceptKeys,
@@ -1175,7 +1176,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                       'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground data-[menu-open]:bg-sidebar-hover data-[menu-open]:text-sidebar-hover-foreground',
                     showSelectedState &&
                       'border-sidebar-ring/30 bg-sidebar-selection hover:bg-sidebar-selection',
-                    'flex min-w-0 flex-1 select-none items-center gap-2 text-[0.9em] font-semibold transition-colors',
+                    'flex min-w-0 flex-1 select-none items-center gap-2 text-[0.9em] font-normal transition-colors',
                     projectCanNavigate ? 'cursor-pointer' : 'cursor-default',
                     removalState && 'text-muted-foreground',
                     showSelectedState
@@ -2440,7 +2441,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
           return (
             <div
               key={section.sectionKey}
-              className={cn('space-y-0.5', sectionCollapsed ? 'mb-1 last:mb-0' : 'mb-3 last:mb-0')}
+              className={cn('space-y-0.5', getSidebarGroupSpacingClass(sectionCollapsed))}
             >
               <SidebarSectionHeader
                 icon={
@@ -2457,7 +2458,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
               />
 
               {sectionCollapsed ? null : (
-                <div className="space-y-1">
+                <div className="space-y-0.5">
                   {section.projects.map((project) => {
                     const machineId = section.machineId;
                     if (!machineId) return null;
