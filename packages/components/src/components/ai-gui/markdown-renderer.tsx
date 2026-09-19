@@ -711,6 +711,10 @@ const FENCED_CODE_RENDERER_LANGUAGE_SET = new Set<string>([
   'txt',
 ]);
 
+// Fences another Streamdown plugin renders; rewriting them to `text` would turn
+// a diagram into a plain code block.
+const PLUGIN_OWNED_FENCE_LANGUAGES = new Set<string>(['mermaid']);
+
 const remarkDefaultFencedCodeLanguage = () => (tree: unknown) => {
   const walk = (node: MdastNode) => {
     if (node.type === 'code') {
@@ -718,6 +722,8 @@ const remarkDefaultFencedCodeLanguage = () => (tree: unknown) => {
       const lang = String(codeNode.lang ?? '').trim();
       if (!lang) {
         codeNode.lang = 'text';
+      } else if (PLUGIN_OWNED_FENCE_LANGUAGES.has(lang.toLowerCase())) {
+        // Left for its plugin.
       } else if (!FENCED_CODE_RENDERER_LANGUAGE_SET.has(lang.toLowerCase())) {
         codeNode.meta = [`highlight=${lang}`, codeNode.meta].filter(Boolean).join(' ');
         codeNode.lang = 'text';
@@ -1123,7 +1129,7 @@ const createMarkdownComponents = ({
       <code
         className={cn(
           className,
-          'rounded-sm bg-foreground/[0.08] px-1 py-px font-mono text-[0.85em] text-foreground ring-0 dark:bg-foreground/[0.14]',
+          'rounded-sm bg-foreground/[0.08] px-1 py-px font-mono text-[0.85em] text-foreground ring-0 dark:bg-foreground/[0.14]'
         )}
         {...rest}
       >
