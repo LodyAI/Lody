@@ -1865,7 +1865,7 @@ export class LodyFleet {
           result: await this.localProjectControlService.listProjectDirectory(
             rootPath,
             message.relativePath,
-            { limit: message.limit }
+            { limit: message.limit, sort: message.sort, include: message.include }
           ),
         };
       }

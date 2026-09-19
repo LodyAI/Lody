@@ -627,7 +627,11 @@ async function listFilesAtRootPath(
 async function listDirectoryAtRootPath(
   rootPath: string,
   relativePath: string,
-  limit: number
+  limit: number,
+  options?: {
+    sort?: { by: 'name' | 'mtime' | 'size'; order?: 'asc' | 'desc'; directoriesFirst?: boolean };
+    include?: readonly 'stat'[];
+  }
 ): Promise<LocalProjectDirectoryListResult> {
   const normalizedRootPath = normalizeRootPath(rootPath);
   const requestedRelativePath = normalizeProjectRelativePath(relativePath.trim());
@@ -652,8 +656,9 @@ async function listDirectoryAtRootPath(
     throw new Error('Project path is not a directory.');
   }
 
-  const entries: LocalProjectDirectoryListResult['entries'] = [];
-  let truncated = false;
+  const entries: Array<
+    LocalProjectDirectoryListResult['entries'][number] & { mtimeMs: number; size: number }
+  > = [];
   let entriesSinceYield = 0;
 
   const dir = await fs.promises.opendir(directoryRealPath);
@@ -698,25 +703,36 @@ async function listDirectoryAtRootPath(
     if (!childStat.isDirectory() && !childStat.isFile()) {
       continue;
     }
-    if (entries.length >= limit) {
-      truncated = true;
-      break;
-    }
-
     entries.push({
       name,
       type: childStat.isDirectory() ? 'directory' : 'file',
+      mtimeMs: childStat.mtimeMs,
+      size: childStat.size,
     });
   }
 
+  const sort = options?.sort ?? { by: 'name' as const, order: 'asc' as const, directoriesFirst: true };
+  const direction = sort.order === 'desc' ? -1 : 1;
   entries.sort((left, right) => {
-    if (left.type !== right.type) {
+    if ((sort.directoriesFirst ?? true) && left.type !== right.type) {
       return left.type === 'directory' ? -1 : 1;
     }
-    return left.name.localeCompare(right.name);
+    const comparison =
+      sort.by === 'mtime'
+        ? (left.mtimeMs ?? 0) - (right.mtimeMs ?? 0)
+        : sort.by === 'size'
+          ? (left.size ?? 0) - (right.size ?? 0)
+          : left.name.localeCompare(right.name, undefined, { numeric: true });
+    return comparison * direction || left.name.localeCompare(right.name, undefined, { numeric: true });
   });
 
-  return { entries, truncated };
+  const selected = entries.slice(0, limit);
+  return {
+    entries: options?.include?.includes('stat')
+      ? selected
+      : selected.map(({ name, type }) => ({ name, type })),
+    truncated: entries.length > limit,
+  };
 }
 
 type ResolvedProjectEntry =
@@ -1489,7 +1505,11 @@ export class LocalProjectControlService {
   async listProjectDirectory(
     rootPath: string,
     relativePath: string,
-    options?: { limit?: number }
+    options?: {
+      limit?: number;
+      sort?: { by: 'name' | 'mtime' | 'size'; order?: 'asc' | 'desc'; directoriesFirst?: boolean };
+      include?: readonly 'stat'[];
+    }
   ): Promise<LocalProjectDirectoryListResult> {
     const limit = clampInteger(
       options?.limit,
@@ -1498,7 +1518,7 @@ export class LocalProjectControlService {
       DEFAULT_LOCAL_PROJECT_LIST_DIR_LIMIT
     );
 
-    return await listDirectoryAtRootPath(rootPath, relativePath, limit);
+    return await listDirectoryAtRootPath(rootPath, relativePath, limit, options);
   }
 
   async listProjectSkills(

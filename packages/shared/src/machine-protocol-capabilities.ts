@@ -14,6 +14,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   localProjectRemoval: 'localProjectRemoval',
   providerSetup: 'providerSetup',
   localFileResources: 'localFileResources',
+  localProjectDirectoryMetadata: 'localProjectDirectoryMetadata',
   acpProtocolAuthentication: 'acpProtocolAuthentication',
 } as const;
 
@@ -22,6 +23,7 @@ export const SUBAGENT_CANCELLATION_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION = 1;
 export const PROVIDER_SETUP_PROTOCOL_VERSION = 1;
 export const LOCAL_FILE_RESOURCES_PROTOCOL_VERSION = 1;
+export const LOCAL_PROJECT_DIRECTORY_METADATA_PROTOCOL_VERSION = 1;
 export const ACP_PROTOCOL_AUTHENTICATION_VERSION = 2;
 
 type MachineProtocolCapabilityCarrier = {
@@ -68,6 +70,8 @@ export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities 
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectRemoval]: LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.providerSetup]: PROVIDER_SETUP_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localFileResources]: LOCAL_FILE_RESOURCES_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.localProjectDirectoryMetadata]:
+    LOCAL_PROJECT_DIRECTORY_METADATA_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.acpProtocolAuthentication]: ACP_PROTOCOL_AUTHENTICATION_VERSION,
 };
 
