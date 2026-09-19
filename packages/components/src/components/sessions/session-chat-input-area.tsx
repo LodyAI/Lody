@@ -87,6 +87,7 @@ import {
 } from '@/components/chat/visual-annotation-reference-state';
 import { SESSION_IMAGE_MAX_COUNT } from '@lody/shared';
 import { cn } from '@/lib/utils';
+import { COMPOSER_SEATED_ELEVATION_CLASS } from '@/components/chat/composer-surface';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { useIsMobile } from '@/hooks/use-mobile';
 import type {
@@ -447,6 +448,11 @@ export interface SessionChatInputAreaProps {
    * which may stack the queue directly on the composer), so skip the spacer.
    */
   hideTopSpacer?: boolean;
+  /**
+   * A queue sheet may sit on the composer's top edge: keep the composer's
+   * shadow below that edge so it does not fall across the sheet.
+   */
+  queueSeated?: boolean;
   /** One-shot guard for a viewport resize caused by the composer auto-growing. */
   skipNextViewportResizeAutoScrollRef?: MutableRefObject<boolean>;
   onModeChange: (value: string) => void;
@@ -546,6 +552,7 @@ export const SessionChatInputArea = memo(
       availableCommands,
       commandsEnabled = true,
       hideTopSpacer = false,
+      queueSeated = false,
       freeTurnLimitNotice,
       mcp,
       skipNextViewportResizeAutoScrollRef,
@@ -2547,6 +2554,7 @@ export const SessionChatInputArea = memo(
        coordinator). So the composer renders the same on both platforms. */
     const composerNode = (
       <ChatComposer
+        surfaceClassName={queueSeated ? COMPOSER_SEATED_ELEVATION_CLASS : undefined}
         tone={tone}
         variant="session"
         mentionSource={isArchived ? undefined : mentionSource}

@@ -187,6 +187,8 @@ export interface ChatComposerProps {
   primaryAction: ReactNode;
   secondaryAction?: ChatComposerAction;
   className?: string;
+  /** Extra classes on the input box surface (e.g. a seated elevation). */
+  surfaceClassName?: string;
   /** Enable auto-resize based on content. When enabled, the textarea grows up to maxRows. */
   autoResize?: boolean;
   /** Maximum number of rows when autoResize is enabled (default: 12) */
@@ -291,6 +293,7 @@ export function ChatComposer({
   primaryAction,
   secondaryAction,
   className,
+  surfaceClassName,
   autoResize = false,
   maxRows = 12,
   skipNextViewportResizeAutoScrollRef,
@@ -727,7 +730,12 @@ export function ChatComposer({
             ) : null}
             <div
               ref={composerBoxRef}
-              className={cn(boxContainerClassName, imageDropClassName, 'group relative')}
+              className={cn(
+                boxContainerClassName,
+                surfaceClassName,
+                imageDropClassName,
+                'group relative'
+              )}
               onDragEnter={canHandleImageDrop ? handleImageDragEnter : undefined}
               onDragOver={canHandleImageDrop ? handleImageDragOver : undefined}
               onDragLeave={canHandleImageDrop ? handleImageDragLeave : undefined}

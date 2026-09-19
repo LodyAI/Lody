@@ -6246,6 +6246,7 @@ export const SessionChatInterface = memo(
                         mcp={mcpSelection.menu}
                         // The info bar above owns this gap (and seats the queue).
                         hideTopSpacer
+                        queueSeated={messageQueue.length > 0}
                         skipNextViewportResizeAutoScrollRef={skipNextViewportResizeAutoScrollRef}
                         onModeChange={handleModeChange}
                         onModelChange={handleModelChange}
