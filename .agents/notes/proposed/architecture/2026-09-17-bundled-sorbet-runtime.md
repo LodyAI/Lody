@@ -45,7 +45,7 @@ Investigation baselines:
 - Sorbet ACP compatibility and conformance were tested after building the required workspace
   packages: 5 files and 36 tests passed. The generated compatibility matrix test also passed.
 
-Prototype integration pin: Sorbet `875da2768db0b3b5aa82bf69e1b80ad89f925571`. This revision also
+Prototype integration pin: Sorbet `93e7931a1b096c07a3097bbe0aa2c81746f9c49d`. This revision also
 contains the cross-process Journal writer lease and credential mutation lease described below, and
 passes the packaged Windows SRT helper path explicitly into sandbox readiness checks.
 
