@@ -15,6 +15,10 @@ import {
 
 import { getAllAgentConfigAtom } from '@/atoms';
 import { getModeIcon as getPermissionModeIcon } from '@/components/chat/chat-landing-selectors';
+import {
+  CONTEXT_PILL_HOVER_CLASS,
+  CONTEXT_PILL_SURFACE_CLASS,
+} from '@/components/chat/context-pill-class';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { ComposerAgentRolePanel } from '@/components/sessions/composer-agent-role-panel';
 import {
@@ -236,9 +240,10 @@ export function DesktopMachineMenu({
         <button
           type="button"
           className={cn(
-            'inline-flex h-6 min-w-0 select-none items-center gap-1.5 rounded-md bg-[#e7e7e7] px-2 dark:bg-foreground/[0.08]',
+            'inline-flex h-6 min-w-0 select-none items-center gap-1.5 rounded-md px-2',
+            CONTEXT_PILL_SURFACE_CLASS,
             'text-[0.9em] font-normal leading-tight text-foreground/80 transition-colors [&_svg]:text-current [&_svg]:opacity-100',
-            'hover:bg-[#dcdcdc] hover:text-foreground data-[state=open]:bg-[#dcdcdc] data-[state=open]:text-foreground dark:hover:bg-foreground/[0.12] dark:data-[state=open]:bg-foreground/[0.12]',
+            CONTEXT_PILL_HOVER_CLASS,
             'disabled:cursor-default disabled:opacity-70'
           )}
           disabled={isDisabled}

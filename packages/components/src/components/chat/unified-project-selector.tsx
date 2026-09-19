@@ -27,6 +27,7 @@ import {
 import type { MachineVisibilityAccess } from '@/lib/visible-machine-index';
 import type { VisibleLocalProjectIndex } from '@/lib/visible-local-project-index';
 import { cn } from '@/lib/utils';
+import { CONTEXT_PILL_HOVER_CLASS, CONTEXT_PILL_SURFACE_CLASS } from './context-pill-class';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -105,11 +106,7 @@ export function compareUnifiedProjectOptions(
 
 function selectUnifiedProjectOptionsForRender<
   TOption extends Pick<UnifiedProjectOption, 'label' | 'description' | 'selection'>,
->(
-  options: readonly TOption[],
-  query: string,
-  limit?: number
-): TOption[] {
+>(options: readonly TOption[], query: string, limit?: number): TOption[] {
   if (limit !== undefined && limit <= 0) return [];
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const visible: TOption[] = [];
@@ -231,11 +228,10 @@ export function buildUnifiedLocalProjectOptions({
   return visible;
 }
 
-export interface UnifiedProjectSelectorViewProps
-  extends Omit<
-    UnifiedProjectSelectorProps,
-    'selectedMachineId' | 'latestMessageAtByLocalProject' | 'projectSharing'
-  > {
+export interface UnifiedProjectSelectorViewProps extends Omit<
+  UnifiedProjectSelectorProps,
+  'selectedMachineId' | 'latestMessageAtByLocalProject' | 'projectSharing'
+> {
   localProjects: ReadonlyArray<UnifiedLocalProjectOption>;
   onShareLocalProjectWithTeam?: (selection: LocalProjectSelection) => Promise<void>;
   getShareErrorMessage?: (error: unknown, fallback: string) => string;
@@ -282,12 +278,15 @@ function ProjectAccessStatus({
   const isAction = variant === 'trigger' && Boolean(onShare);
   const sharedClassName = cn(
     'inline-flex shrink-0 select-none items-center gap-1 text-muted-foreground',
-    variant === 'trigger' &&
-      'h-6 rounded-r-md border-l border-border/60 bg-[#e7e7e7] px-2 text-[0.8em] font-medium transition-colors dark:bg-foreground/[0.08]',
+    variant === 'trigger' && [
+      'h-6 rounded-r-md px-2 text-[0.8em] font-medium transition-colors',
+      CONTEXT_PILL_SURFACE_CLASS,
+      // The pill's own left border doubles as the divider from the trigger.
+      'dark:border-l-border/60',
+    ],
     variant === 'option' && 'text-[0.8em] font-medium',
     'text-foreground/75',
-    isAction &&
-      'cursor-pointer hover:bg-[#dcdcdc] hover:text-foreground dark:hover:bg-foreground/[0.12]',
+    isAction && ['cursor-pointer', CONTEXT_PILL_HOVER_CLASS],
     variant === 'trigger' &&
       'outline-hidden focus-visible:relative focus-visible:z-20 focus-visible:ring-2 focus-visible:ring-ring/50'
   );
@@ -465,19 +464,16 @@ export function UnifiedProjectSelectorView({
     : undefined;
   const canShareSelectedProject = Boolean(
     selectedOption &&
-      selectedPrivateSharing?.canManage &&
-      selectedPrivateSharing.privateReason !== 'machine-not-registered' &&
-      onShareLocalProjectWithTeam
+    selectedPrivateSharing?.canManage &&
+    selectedPrivateSharing.privateReason !== 'machine-not-registered' &&
+    onShareLocalProjectWithTeam
   );
 
   const isPropertyRow = triggerVariant === 'property-row';
 
   return (
     <div
-      className={cn(
-        'group/project relative flex min-w-0 items-center',
-        isPropertyRow && 'w-full'
-      )}
+      className={cn('group/project relative flex min-w-0 items-center', isPropertyRow && 'w-full')}
     >
       {value.kind !== 'none' && !isPropertyRow ? (
         <button
@@ -521,10 +517,11 @@ export function UnifiedProjectSelectorView({
                     value.kind === 'none' && 'text-muted-foreground',
                   ]
                 : [
-                    'flex h-6 min-w-0 max-w-[18rem] items-center gap-1.5 rounded-md bg-[#e7e7e7] px-2 dark:bg-foreground/[0.08]',
-                    'text-[0.9em] font-normal text-foreground/80 transition-colors hover:bg-[#dcdcdc] hover:text-foreground dark:hover:bg-foreground/[0.12] [&_svg]:text-current [&_svg]:opacity-100',
-                    'data-[state=open]:bg-[#dcdcdc] data-[state=open]:text-foreground dark:data-[state=open]:bg-foreground/[0.12]',
-                    selectedPrivateSharing && 'rounded-r-none',
+                    'flex h-6 min-w-0 max-w-[18rem] items-center gap-1.5 rounded-md px-2',
+                    CONTEXT_PILL_SURFACE_CLASS,
+                    'text-[0.9em] font-normal text-foreground/80 transition-colors [&_svg]:text-current [&_svg]:opacity-100',
+                    CONTEXT_PILL_HOVER_CLASS,
+                    selectedPrivateSharing && 'rounded-r-none border-r-0',
                   ],
               className
             )}

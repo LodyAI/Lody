@@ -21,7 +21,11 @@ import {
   useSyncExternalStore,
 } from 'react';
 import { cn } from '@/lib/utils';
-import { WINDOW_DRAG_EXEMPT_CLASS, WINDOW_DRAG_HEADER_CLASS } from '@/ui/window-drag-region';
+import {
+  WINDOW_DRAG_EXEMPT_CLASS,
+  WINDOW_DRAG_HEADER_CLASS,
+  useMacTrafficLightRowPadClass,
+} from '@/ui/window-drag-region';
 import { useElectronFullscreen } from '@/lib/electron';
 import { Badge } from '@/ui/badge';
 import { Button } from '@/ui/button';
@@ -744,6 +748,7 @@ export const LoroSidebar = memo(function LoroSidebar({
 }: LoroSidebarProps) {
   const isMobile = useIsMobile();
   const isElectronFullscreen = useElectronFullscreen();
+  const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass();
   const { t } = useTranslation();
   const collapseShortcut = useCommandShortcutLabel('sidebar.toggle');
   const backShortcut = useCommandShortcutLabel('nav.back');
@@ -1056,7 +1061,7 @@ export const LoroSidebar = memo(function LoroSidebar({
             'group/sidebar-header relative flex items-center justify-between gap-2',
             isMobile
               ? 'pl-[calc(12px+var(--safe-area-left))] pr-[calc(12px+var(--safe-area-right))] pt-[calc(12px+var(--safe-area-top))]'
-              : 'h-11 px-1.5',
+              : cn('h-11 px-1.5', macTrafficLightRowPadClass),
             windowDrag && WINDOW_DRAG_HEADER_CLASS
           )}
         >

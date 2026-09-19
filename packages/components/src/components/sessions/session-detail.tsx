@@ -94,7 +94,7 @@ import {
   terminalDockOpenAtom,
 } from '@/components/terminal/terminal-controller';
 import { isElectronRenderer, isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
-import { useWindowsCaptionPadClass } from '@/ui/window-drag-region';
+import { useMacTrafficLightRowPadClass, useWindowsCaptionPadClass } from '@/ui/window-drag-region';
 import {
   getZenAwarePanelToggleState,
   navigationSidebarHiddenAtom,
@@ -746,6 +746,10 @@ const SessionDetail = ({
   const { openSettings } = useOpenSettings();
   const isElectronFullscreen = useElectronFullscreen();
   const windowsCaptionPadClass = useWindowsCaptionPadClass();
+  const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass();
+  const macTrafficLightBorderedRowPadClass = useMacTrafficLightRowPadClass({
+    bottomBorder: true,
+  });
   // Publish ephemeral "viewing this session" presence (drives the owning
   // machine's PR poller priority); actively cleared on switch/hide/unmount.
   usePublishSessionViewing(sessionId);
@@ -6019,8 +6023,10 @@ const SessionDetail = ({
         // never over this top bar — so it must not reserve vertical inset.
         //
         // Flush with the window/sidebar top so this h-11 row shares y=0 with
-        // the sidebar header. Re-derive if the row or pill height changes.
+        // the sidebar header; the macOS row pad centers its controls on the
+        // traffic-light centerline. Re-derive if the row or pill height changes.
         'h-11',
+        macTrafficLightRowPadClass,
         isLeftSidebarHidden && hasMacOSTitlebarInset && 'pl-[4.5rem]',
         !isSidebarVisible && windowsCaptionPadClass
       )}
@@ -6202,8 +6208,10 @@ const SessionDetail = ({
         className={cn(
           'border-b border-border/50 bg-background',
           // Right panel is never under the macOS traffic lights (top-left) —
-          // it must not reserve the titlebar inset the left sidebar needs.
+          // it must not reserve the titlebar inset the left sidebar needs. It
+          // still shares the traffic-light centerline with the main tab bar.
           'h-11',
+          macTrafficLightBorderedRowPadClass,
           windowsCaptionPadClass
         )}
       />

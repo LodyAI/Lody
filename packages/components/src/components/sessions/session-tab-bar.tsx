@@ -768,7 +768,8 @@ export const SessionTabBar = memo(function SessionTabBar({
         activeItemId={activeTabId}
         role="tablist"
         aria-label={t('sessions.tabs.label', 'Session tabs')}
-        className="h-11"
+        // max-h-full keeps the strip inside a padded h-11 bar (macOS row pad).
+        className="h-11 max-h-full"
         paddingLeft={variant === 'session' ? 4 : 8}
         paddingRight={8}
       >

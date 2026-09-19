@@ -229,7 +229,7 @@ export const SessionSidePanelTabBar = memo(function SessionSidePanelTabBar({
         horizontalScrollbarClassName="h-1 border-0 p-0"
         horizontalScrollbarThumbClassName="bg-[hsl(var(--scrollbar-thumb)/0.35)] hover:bg-[hsl(var(--scrollbar-thumb-hover)/0.5)]"
       >
-        <div role="tablist" className="flex h-11 w-max min-w-full items-center gap-1.5">
+        <div role="tablist" className="flex h-10 w-max min-w-full items-center gap-1.5">
           {tabs.map((tab) => {
             const active = tab.id === activeTabId;
             // A tab busy with its own lifecycle work (e.g. a side chat being
