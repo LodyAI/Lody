@@ -1147,6 +1147,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
       Boolean(revealPath) ||
       Boolean(onArchiveProjectChats));
   const showNewChatButton = Boolean(onNewChatInProject) && projectCanNavigate && !isMobile;
+  const ProjectFolderIcon = collapsed ? Folder : FolderOpen;
 
   return (
     <div className="space-y-0.5">
@@ -1205,7 +1206,8 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                       onToggleCollapsed(machineId, project.id);
                     }}
                   >
-                    <Folder
+                    {/* Open folder while expanded, closed while collapsed. */}
+                    <ProjectFolderIcon
                       className={cn(
                         'absolute left-0 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-current transition-opacity duration-100',
                         // Mobile: chevron is always visible so the folder icon must hide
@@ -1353,7 +1355,10 @@ export const LocalProjectItem = memo(function LocalProjectItem({
         </ContextMenu>
       </div>
 
-      {!collapsed ? (
+      {/* An expanded project with nothing to list renders no container: an empty
+          child of the space-y parent would still add its gap, so expanding an
+          empty folder would nudge everything below it. */}
+      {!collapsed && sessionNodes.length > 0 ? (
         <div className="flex flex-col gap-px">
           {sessionNodes.map((node) => {
             const session = node.item;
