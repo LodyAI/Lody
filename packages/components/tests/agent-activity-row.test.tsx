@@ -73,7 +73,8 @@ describe('live agent status', () => {
 
   const render = async (
     history: unknown[],
-    status: { label: string; tone?: 'primary' | 'warning' }
+    status: { label: string; tone?: 'primary' | 'warning' },
+    options: { withTurnFooter?: boolean } = {}
   ) => {
     const view = createConversationViewFromHistory({
       sessionId,
@@ -90,6 +91,8 @@ describe('live agent status', () => {
           renderMessageRow: () => null,
           agentActivityLabel: status.label,
           agentActivityTone: status.tone ?? 'primary',
+          // Copy-context makes a live turn render its footer (copy/fork actions).
+          ...(options.withTurnFooter ? { onCopyContext: () => {} } : {}),
         })
       )
     );
@@ -122,5 +125,25 @@ describe('live agent status', () => {
     });
     expect(statusRow()?.textContent).toBe('Waiting for permission');
     expect(shimmering()).toEqual([]);
+  });
+
+  it('places the status inside a live turn, above its footer actions', async () => {
+    await render(
+      liveTurn([toolCall('a'), toolCall('b'), { type: 'text', text: 'Now writing.' }]),
+      { label: 'Working' },
+      { withTurnFooter: true }
+    );
+    expect(statusRow()).toBeNull();
+    const status = container.querySelector('[data-agent-activity-status]');
+    expect(status?.textContent).toBe('Working');
+    expect(
+      status?.closest('[data-assistant-turn-id]')?.getAttribute('data-assistant-turn-id')
+    ).toBe('assistant-turn');
+    const copyContext = container.querySelector('[aria-label="Copy context as Markdown"]');
+    expect(copyContext).not.toBeNull();
+    // Status precedes the footer's actions in reading order.
+    expect(
+      status!.compareDocumentPosition(copyContext!) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
   });
 });

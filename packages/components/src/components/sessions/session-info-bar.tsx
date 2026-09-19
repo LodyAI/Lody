@@ -211,16 +211,19 @@ export function SessionInfoBar({
   // action or ambient syncing state. A reported preview is often the only
   // context a chat-only Session has, so dropping the Browser action here would
   // leave no visible path from the report to the preview.
+  // The bar owns the gap above the composer (the session composer skips its own
+  // spacer): 10px under the pill, none under a queue sheet (it sits on the
+  // composer), and the plain 4px when there is nothing to show.
   if (!defaultKey && !onOpenBrowser && !syncing && !privateAccessStatus) {
     return queue ? (
       <div className="w-full shrink-0 bg-background">
-        {/* `-mb-1` cancels the input area's 4px top spacer so the sheet sits
-            directly on the composer. */}
         <ConversationColumn>
-          <div className={cn(QUEUE_SHEET_INSET_CLASS, '-mb-1')}>{queue}</div>
+          <div className={QUEUE_SHEET_INSET_CLASS}>{queue}</div>
         </ConversationColumn>
       </div>
-    ) : null;
+    ) : (
+      <div aria-hidden="true" className="h-1 w-full shrink-0" />
+    );
   }
 
   // Derived, never null while any item is present: if the staged item's data
@@ -284,7 +287,7 @@ export function SessionInfoBar({
     // Light: same fill and lift as the session composer. Dark: recessed input.
     <div
       className={cn(
-        'w-full shrink-0 bg-background pb-1.5',
+        'w-full shrink-0 bg-background pb-2.5',
         /* Gutter is on ConversationColumn (same as stream + composer).
            The native session drawer's transparent edge-back strip is z-30 and
            spans the body's left 48px. Elevating this band keeps the leading

@@ -127,7 +127,7 @@ test('captures render work while streaming and while only the working indicator 
   await expect(page.getByText('Thinking', { exact: true })).toBeVisible();
   // The live status is a compositor-driven CSS shimmer on the status label.
   const statusAnimationName = await story.evaluate((element) => {
-    const label = element.querySelector('[data-agent-activity-row] .agent-shimmer');
+    const label = element.querySelector('.agent-shimmer');
     return label ? window.getComputedStyle(label, '::after').animationName : null;
   });
   expect(statusAnimationName).toBe('agent-shimmer-sweep');

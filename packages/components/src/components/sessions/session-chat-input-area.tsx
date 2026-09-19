@@ -442,6 +442,11 @@ export interface SessionChatInputAreaProps {
   } | null;
   /** Per-turn MCP selection, rendered inside the composer's "+" menu. */
   mcp?: AttachmentAddMenuMcp;
+  /**
+   * The host owns the gap above the composer (the session page's info bar,
+   * which may stack the queue directly on the composer), so skip the spacer.
+   */
+  hideTopSpacer?: boolean;
   /** One-shot guard for a viewport resize caused by the composer auto-growing. */
   skipNextViewportResizeAutoScrollRef?: MutableRefObject<boolean>;
   onModeChange: (value: string) => void;
@@ -540,6 +545,7 @@ export const SessionChatInputArea = memo(
       isRepoPublic,
       availableCommands,
       commandsEnabled = true,
+      hideTopSpacer = false,
       freeTurnLimitNotice,
       mcp,
       skipNextViewportResizeAutoScrollRef,
@@ -2638,7 +2644,7 @@ export const SessionChatInputArea = memo(
           />
         ) : null}
         <ConversationColumn>
-          <div aria-hidden="true" className="h-1" />
+          {hideTopSpacer ? null : <div aria-hidden="true" className="h-1" />}
           {externalHistorySyncNode}
           {freeTurnLimitNoticeNode}
           {attachmentAddEnabled ? (

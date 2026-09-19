@@ -647,6 +647,8 @@ function TourWindow({
                           />
                         </div>
                         <SessionChatInputArea
+                          // The info bar above owns this gap, as on the session page.
+                          hideTopSpacer
                           ref={composerRef}
                           session={session}
                           sessionLocalProjectRootPath={`/Users/you/Code/${identity.projectName}`}

@@ -538,30 +538,44 @@ const AgentActivityRow = ({
   shimmer: boolean;
   conversationFontSize: ConversationFontSize;
 }) => {
-  const isMobile = useIsMobile();
   return (
     <ConversationColumn className="pb-2 sm:pb-3" data-agent-activity-row="">
-      <div
-        className="max-w-[800px] text-muted-foreground"
-        style={conversationTextFontSizeStyle(conversationFontSize)}
-      >
-        <div
-          role="status"
-          aria-live="polite"
-          className={cn('flex w-full items-center py-0.5', isMobile ? 'gap-1.5 pr-1' : 'px-1')}
-        >
-          <span
-            className={cn(
-              ACTIVITY_GROUP_LABEL_CLASS(isMobile),
-              tone === 'warning' && 'text-status-warning',
-              shimmer && 'agent-shimmer'
-            )}
-          >
-            {label}
-          </span>
-        </div>
+      <div className="max-w-[800px]" style={conversationTextFontSizeStyle(conversationFontSize)}>
+        <AgentActivityStatus label={label} tone={tone} shimmer={shimmer} />
       </div>
     </ConversationColumn>
+  );
+};
+
+type AgentActivityStatusProps = {
+  label: string;
+  tone?: AgentActivityTone;
+  shimmer: boolean;
+};
+
+/** The status label itself, shaped like a collapsed activity-group label. */
+const AgentActivityStatus = ({ label, tone = 'primary', shimmer }: AgentActivityStatusProps) => {
+  const isMobile = useIsMobile();
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      data-agent-activity-status=""
+      className={cn(
+        'flex w-full items-center py-0.5 text-muted-foreground',
+        isMobile ? 'gap-1.5 pr-1' : 'px-1'
+      )}
+    >
+      <span
+        className={cn(
+          ACTIVITY_GROUP_LABEL_CLASS(isMobile),
+          tone === 'warning' && 'text-status-warning',
+          shimmer && 'agent-shimmer'
+        )}
+      >
+        {label}
+      </span>
+    </div>
   );
 };
 
@@ -1426,7 +1440,27 @@ export const SessionChatStreamView = forwardRef<
       }
       return null;
     }, [agentActivityLabel, agentActivityShimmer, virtualRows]);
-    const shouldShowAgentActivityRow = shouldShowAgentActivity && liveGroupHeaderRowKey === null;
+    // Otherwise, when the live turn ends in its footer, the status sits inside the
+    // turn above that footer's actions; only a turn without one (or no turn yet)
+    // gets the separate status row after the conversation.
+    const liveFooterRowKey = useMemo(() => {
+      if (!agentActivityLabel || liveGroupHeaderRowKey !== null) return null;
+      const last = virtualRows[virtualRows.length - 1];
+      return last?.type === 'assistant' &&
+        last.content.kind === 'footer' &&
+        last.item.message.finished !== true
+        ? last.key
+        : null;
+    }, [agentActivityLabel, liveGroupHeaderRowKey, virtualRows]);
+    const liveFooterStatus = useMemo<AgentActivityStatusProps | null>(
+      () =>
+        agentActivityLabel
+          ? { label: agentActivityLabel, tone: agentActivityTone, shimmer: agentActivityShimmer }
+          : null,
+      [agentActivityLabel, agentActivityShimmer, agentActivityTone]
+    );
+    const shouldShowAgentActivityRow =
+      shouldShowAgentActivity && liveGroupHeaderRowKey === null && liveFooterRowKey === null;
     const leadingRowCount = leadingContent == null ? 0 : 1;
 
     /**
@@ -1947,6 +1981,7 @@ export const SessionChatStreamView = forwardRef<
                         onTurnHoverChange={handleAssistantTurnHoverChange}
                         conversationFontSize={conversationFontSize}
                         shimmerGroupHeader={row.key === liveGroupHeaderRowKey}
+                        liveStatus={row.key === liveFooterRowKey ? liveFooterStatus : null}
                       />
                     </MessageSelectionRow>
                   );
@@ -4305,6 +4340,8 @@ interface AssistantChatItemProps {
   conversationFontSize: ConversationFontSize;
   /** This row is the live turn's collapsed bottom group: shimmer its label. */
   shimmerGroupHeader?: boolean;
+  /** This row is the live turn's footer: the status sits above its actions. */
+  liveStatus?: AgentActivityStatusProps | null;
 }
 
 // Rows for unchanged turns are reference-stable via `assistantTurnRowsCache`,
@@ -4392,7 +4429,10 @@ const areAssistantChatItemPropsEqual = (
   prev.isTurnHovered === next.isTurnHovered &&
   prev.onTurnHoverChange === next.onTurnHoverChange &&
   prev.conversationFontSize === next.conversationFontSize &&
-  prev.shimmerGroupHeader === next.shimmerGroupHeader;
+  prev.shimmerGroupHeader === next.shimmerGroupHeader &&
+  prev.liveStatus?.label === next.liveStatus?.label &&
+  prev.liveStatus?.tone === next.liveStatus?.tone &&
+  prev.liveStatus?.shimmer === next.liveStatus?.shimmer;
 
 const AssistantChatItem = memo(function AssistantChatItem({
   row,
@@ -4410,6 +4450,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
   onTurnHoverChange,
   conversationFontSize,
   shimmerGroupHeader = false,
+  liveStatus = null,
 }: AssistantChatItemProps) {
   const message = row.item.message;
   const { content } = row;
@@ -4498,20 +4539,29 @@ const AssistantChatItem = memo(function AssistantChatItem({
         return <AssistantSubagentTasksRow message={message} sessionId={row.item.sessionId} />;
       case 'footer':
         return (
-          <AssistantTurnFooter
-            message={message}
-            sessionId={row.item.sessionId}
-            fileDiffOverride={fileDiffOverride}
-            assistantActions={assistantActions}
-            onFileDiffClick={onFileDiffClick}
-            showDuration={content.showDuration}
-            isLive={content.isLive}
-            isTurnHovered={isTurnHovered}
-            onFork={onFork}
-            forkWorktreeAvailability={forkWorktreeAvailability}
-            onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
-            isForking={isForking}
-          />
+          <>
+            {/* Inside the turn, above its copy/fork actions: the status reads as
+                the turn's next step rather than something after it. */}
+            {liveStatus ? (
+              <div className="pb-1.5">
+                <AgentActivityStatus {...liveStatus} />
+              </div>
+            ) : null}
+            <AssistantTurnFooter
+              message={message}
+              sessionId={row.item.sessionId}
+              fileDiffOverride={fileDiffOverride}
+              assistantActions={assistantActions}
+              onFileDiffClick={onFileDiffClick}
+              showDuration={content.showDuration}
+              isLive={content.isLive}
+              isTurnHovered={isTurnHovered}
+              onFork={onFork}
+              forkWorktreeAvailability={forkWorktreeAvailability}
+              onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
+              isForking={isForking}
+            />
+          </>
         );
       default:
         return null;

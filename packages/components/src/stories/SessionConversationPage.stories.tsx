@@ -1100,6 +1100,8 @@ function StoryComposer({
 
   return (
     <SessionChatInputArea
+      // The info bar above owns this gap, as on the session page.
+      hideTopSpacer
       session={session}
       sessionLocalProjectRootPath="/Users/developer/Code/lody"
       isMachineRemoved={false}
