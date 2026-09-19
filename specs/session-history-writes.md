@@ -79,7 +79,9 @@ That tolerance must not authorize creating new malformed items locally.
   from Stop, transport failure, or local ownership state.
 - Stop and target-prompt completion end local document/preparation/configuration/verdict
   waits, releasing the steer queue and rewrite lease. This does not cancel the raw request
-  or discard its verdict. Already-applied ownership transfer finishes atomically; queued
+  or discard its verdict. Exception: a handoff adapter may answer the yielded prompt before
+  reporting a submitted steer's verdict, so its completion waits for that verdict; the
+  steered prompt is the next turn, never cancellation-drain work. Already-applied ownership transfer finishes atomically; queued
   steers must not begin preparation for a stopped target. Failed outcome persistence must
   still release the application lease and permit cancellation cleanup.
 - Execution owns steer status and exact-id recovery activations in `steerTurnStatuses`.

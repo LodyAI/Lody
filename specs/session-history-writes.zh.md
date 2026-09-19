@@ -55,7 +55,9 @@ Translation: current
   显式重发必须提示原消息可能已经执行，并创建新的用户轮次；不能改写原投递结论。
   Session execution 不根据 Stop、传输失败或本地 ownership 状态推断投递结果。
 - Stop 和目标 prompt 结束会中止本地文档加载、准备、配置及投递结论等待，释放 steer 队列
-  和 rewrite lease；不取消原始请求，也不丢弃其结论。已经进入 applied 所有权交接的操作
+  和 rewrite lease；不取消原始请求，也不丢弃其结论。例外：handoff adapter 可能先返回被让出的
+  prompt，再报告已提交 steer 的结论，因此其完成需等待该结论；引导 prompt 是下一轮本身，
+  绝不作为取消收尾的残留请求。已经进入 applied 所有权交接的操作
   必须完整结束；排队中的 steer 不得为已停止的目标开始准备。结果持久化失败仍须释放
   application lease，并允许取消收尾继续。
 - 执行端统一拥有 steer 状态，以及 `steerTurnStatuses` 中按消息 ID 记录的恢复激活。
