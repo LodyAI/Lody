@@ -679,9 +679,7 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
           'hover:bg-sidebar-hover data-[menu-open]:bg-sidebar-hover',
         showSelectedState &&
           'bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection',
-        showSelectedState
-          ? 'text-sidebar-selection-foreground'
-          : 'text-sidebar-foreground'
+        showSelectedState ? 'text-sidebar-selection-foreground' : 'text-sidebar-foreground'
       )}
       onClick={(event) => {
         if (openSessionOnModifiedClick(event, session.id)) return;
@@ -2621,8 +2619,10 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         name: org.name,
         logo: resolveWorkspaceIdentityLogo(org.logo, multiWorkspaceAvailable),
         planTier: planTierByWorkspaceId.get(org.id) ?? null,
+        memberCount:
+          org.id === activeOrganization?.id ? (activeOrganization.members?.length ?? null) : null,
       }));
-  }, [multiWorkspaceAvailable, organizations, planTierByWorkspaceId]);
+  }, [activeOrganization, multiWorkspaceAvailable, organizations, planTierByWorkspaceId]);
 
   // Sidebar task rows render as real anchors on web so middle/Cmd-click open the
   // session in a new browser tab. Electron deliberately returns undefined here:
@@ -2784,6 +2784,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       connectGithubRepo: t('sidebar.connectGithubRepo', 'Connect GitHub repo'),
       planPlus: t('billing.plan.plus', 'Plus'),
       planEnterprise: t('billing.plan.enterprise', 'Enterprise'),
+      planFree: t('billing.plan.free', 'Free'),
       pinned: t('sidebar.pinned', 'Pinned'),
       connectionLoading: t('chat.mobileHome.connectionBanner.loading', 'Connecting…'),
       connectionReconnecting: t('chat.mobileHome.connectionBanner.reconnecting', 'Reconnecting…'),

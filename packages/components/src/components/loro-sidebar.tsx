@@ -93,6 +93,8 @@ export type LoroSidebarWorkspace = {
   logo?: string | null;
   /** Paid plan tier for the Plus/Enterprise badge; null/undefined = free. */
   planTier?: 'plus' | 'enterprise' | null;
+  /** Member count, when known (the active workspace). Shown in the switcher header. */
+  memberCount?: number | null;
 };
 
 export type LoroSidebarRepoItemDelta = {
@@ -136,6 +138,7 @@ export type LoroSidebarLabels = {
   connectGithubRepo: string;
   planPlus: string;
   planEnterprise: string;
+  planFree: string;
   pinned: string;
   connectionLoading: string;
   connectionReconnecting: string;
@@ -294,6 +297,7 @@ const defaultLabels: LoroSidebarLabels = {
   connectGithubRepo: 'Connect GitHub repo',
   planPlus: 'Plus',
   planEnterprise: 'Enterprise',
+  planFree: 'Free',
   pinned: 'Pinned',
   connectionLoading: 'Loading',
   connectionReconnecting: 'Reconnecting',
@@ -905,6 +909,16 @@ export const LoroSidebar = memo(function LoroSidebar({
     workspaceSwitcherEnabled &&
       'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground focus-visible:outline-hidden focus-visible:bg-sidebar-hover'
   );
+  const currentWorkspace = workspaces.find((ws) => ws.id === currentWorkspaceId);
+  const getPlanLabel = (planTier: LoroSidebarWorkspace['planTier']) =>
+    planTier === 'enterprise'
+      ? mergedLabels.planEnterprise
+      : planTier === 'plus'
+        ? mergedLabels.planPlus
+        : mergedLabels.planFree;
+  const newWindowHint = t('workspace.openInNewWindowHint', {
+    key: isMacOSElectronRenderer() ? '⌘' : 'Ctrl',
+  });
   const renderWorkspaceControl = (menuSide: 'top' | 'bottom') =>
     workspaceSwitcherEnabled ? (
       <DropdownMenu modal={!isMobile}>
@@ -926,6 +940,33 @@ export const LoroSidebar = memo(function LoroSidebar({
             {userEmail}
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
+          {currentWorkspace ? (
+            <>
+              <div className="flex min-w-0 items-center gap-2.5 px-2 py-2" data-current-workspace>
+                <WorkspaceAvatar
+                  workspace={{ name: currentWorkspace.name, logo: currentWorkspace.logo }}
+                  className="h-9 w-9 shrink-0 rounded-lg text-sm"
+                  fallbackClassName="rounded-lg"
+                />
+                <div className="flex min-w-0 flex-col gap-0.5">
+                  <span className="truncate text-[0.95em] font-medium leading-tight text-foreground">
+                    {currentWorkspace.name}
+                  </span>
+                  <span className="truncate text-xs leading-tight text-muted-foreground">
+                    {typeof currentWorkspace.memberCount === 'number'
+                      ? t('workspace.switcher.planAndMembers', {
+                          plan: getPlanLabel(currentWorkspace.planTier),
+                          count: currentWorkspace.memberCount,
+                        })
+                      : t('workspace.switcher.plan', {
+                          plan: getPlanLabel(currentWorkspace.planTier),
+                        })}
+                  </span>
+                </div>
+              </div>
+              <DropdownMenuSeparator />
+            </>
+          ) : null}
 
           {workspaces.length > 0 ? (
             <>
@@ -942,6 +983,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     <DropdownMenuRadioItem
                       key={ws.id}
                       value={ws.id}
+                      indicator="check"
                       className="gap-2"
                       onClickCapture={(event) => {
                         if (!workspaceSlug || !isNewWindowClick(event)) return;
@@ -971,9 +1013,22 @@ export const LoroSidebar = memo(function LoroSidebar({
 
                   if (!isElectronRenderer() || !workspaceSlug) return row;
 
+                  // Other workspaces explain the modifier-click on hover, beside the row.
+                  const rowWithHint =
+                    ws.id === currentWorkspaceId ? (
+                      row
+                    ) : (
+                      <Tooltip>
+                        <TooltipTrigger asChild>{row}</TooltipTrigger>
+                        <TooltipContent side="right" sideOffset={8}>
+                          {newWindowHint}
+                        </TooltipContent>
+                      </Tooltip>
+                    );
+
                   return (
                     <ContextMenu key={ws.id}>
-                      <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+                      <ContextMenuTrigger asChild>{rowWithHint}</ContextMenuTrigger>
                       <ContextMenuContent>
                         <ContextMenuItem
                           onSelect={() => {
@@ -988,13 +1043,6 @@ export const LoroSidebar = memo(function LoroSidebar({
                   );
                 })}
               </DropdownMenuRadioGroup>
-              {isElectronRenderer() && workspaces.some((ws) => ws.slug) ? (
-                <p className="px-2 py-1.5 text-xs text-muted-foreground">
-                  {t('workspace.openInNewWindowHint', {
-                    key: isMacOSElectronRenderer() ? '⌘' : 'Ctrl',
-                  })}
-                </p>
-              ) : null}
               <DropdownMenuSeparator />
             </>
           ) : null}

@@ -539,7 +539,7 @@ export const Default: Story = {
     repoSections: [],
     chats: [],
     workspaces: [
-      { id: 'ws-1', name: 'Loro', planTier: 'plus' },
+      { id: 'ws-1', name: 'Loro', planTier: 'plus', memberCount: 3 },
       { id: 'ws-2', name: 'Lody' },
       { id: 'ws-3', name: 'Demo', planTier: 'enterprise' },
     ],
