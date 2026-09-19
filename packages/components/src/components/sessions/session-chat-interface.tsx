@@ -1603,12 +1603,12 @@ export function SessionSearchBar({
         type="button"
         variant="ghost"
         size="icon"
-        className="h-7 w-7 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground disabled:pointer-events-none disabled:text-muted-foreground/40"
+        className="h-6 w-6 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground disabled:pointer-events-none disabled:text-muted-foreground/40"
         disabled={!hasResults}
         onClick={onClick}
         aria-label={label}
       >
-        <Icon className="h-3.5 w-3.5" strokeWidth={2.25} />
+        <Icon className="h-3.5 w-3.5" strokeWidth={2} />
       </Button>
     );
     if (!hasResults) return button;
@@ -1626,23 +1626,22 @@ export function SessionSearchBar({
   };
 
   return (
-    <div className="pointer-events-auto absolute right-3 top-3 z-20 w-[min(440px,calc(100%-1.5rem))] sm:right-4 sm:top-4 sm:w-[min(440px,calc(100%-2rem))]">
+    <div className="pointer-events-auto absolute right-3 top-3 z-20 w-[min(360px,calc(100%-1.5rem))] sm:right-4 sm:top-4 sm:w-[min(360px,calc(100%-2rem))]">
       <div
         role="search"
         className={cn(
-          'group/search flex h-11 items-center gap-1 rounded-full border bg-background/95 pl-3.5 pr-1.5 shadow-[0_14px_40px_-18px_rgba(15,23,42,0.45),0_2px_10px_-4px_rgba(15,23,42,0.16)] backdrop-blur-md transition-colors supports-[backdrop-filter]:bg-background/85',
-          'border-border focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/20',
-          noResults &&
-            'border-destructive/30 focus-within:border-destructive/60 focus-within:ring-destructive/15'
+          'group/search flex h-9 items-center gap-0.5 rounded-lg border-[0.5px] bg-background/95 pl-2.5 pr-1 shadow-[0_4px_12px_-4px_rgba(15,23,42,0.16),0_1px_2px_rgba(15,23,42,0.06)] backdrop-blur-md transition-colors supports-[backdrop-filter]:bg-background/85',
+          'border-border focus-within:border-ring/60',
+          noResults && 'border-destructive/30 focus-within:border-destructive/60'
         )}
       >
         <Search
           className={cn(
-            'h-4 w-4 shrink-0 transition-colors',
+            'h-3.5 w-3.5 shrink-0 transition-colors',
             hasQuery ? 'text-foreground' : 'text-muted-foreground/80',
             noResults && 'text-destructive/80'
           )}
-          strokeWidth={2.25}
+          strokeWidth={2}
         />
         <Input
           ref={inputRef}
@@ -1651,7 +1650,7 @@ export function SessionSearchBar({
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder={t('sessions.findInConversation', 'Find in session')}
           aria-label={t('sessions.findInConversation', 'Find in session')}
-          className="h-9 min-w-0 flex-1 border-0 bg-transparent px-2 py-0 text-[13.5px] tracking-tight shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0 [&::-webkit-search-cancel-button]:hidden"
+          className="h-7 min-w-0 flex-1 border-0 bg-transparent px-1.5 py-0 text-[13px] tracking-tight shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0 [&::-webkit-search-cancel-button]:hidden"
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
               event.preventDefault();
@@ -1685,7 +1684,7 @@ export function SessionSearchBar({
           </span>
         )}
 
-        <Separator orientation="vertical" className="mx-0.5 h-5 bg-border/60" />
+        <Separator orientation="vertical" className="mx-0.5 h-4 bg-border/60" />
 
         <div className="flex items-center gap-px">
           {renderNavButton(
@@ -1701,11 +1700,11 @@ export function SessionSearchBar({
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+                className="h-6 w-6 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
                 onClick={onClose}
                 aria-label={t('common.close', 'Close')}
               >
-                <X className="h-3.5 w-3.5" strokeWidth={2.25} />
+                <X className="h-3.5 w-3.5" strokeWidth={2} />
               </Button>
             </TooltipTrigger>
             <TooltipContent
