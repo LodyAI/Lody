@@ -45,6 +45,8 @@ pnpm e2e:full
 pnpm e2e:scout
 pnpm e2e:scout -- --journey review --iterations 50
 pnpm e2e:scout:ablation -- --iterations 12
+pnpm e2e:load -- --sessions 24 --body-bytes 1024,8192,65536
+pnpm e2e:load -- --sessions 100 --samples 8
 pnpm e2e:acceptance -- --subject desktop-local-bootstrap
 pnpm e2e:acceptance -- --subject desktop-session-lifecycle \
   --before before.json --after after.json --retained-path retained-path.txt
@@ -67,6 +69,17 @@ Optional before/after JSON and a retained-path summary are copied into the
 round, then covered by its checksummed manifest.
 Scout operation, classification, and triage are specified in
 [the Scout contract](./SCOUT.md).
+
+The load lane first creates synthetic persisted Sessions through the real
+Electron/CLI/ACP path, then closes and relaunches the same isolated profile.
+The warm launch proves that the expected Session count, a representative
+message, an editable composer, and a scroll action remain usable while the
+harness records preload milestones, textless-frame/blank-surface samples, and
+process/resource snapshots. It writes
+`artifacts/load/<round>/load-result.json`, `seed/boot.json`,
+`reopen/boot.json`, `reopen/runtime.json`, `reopen/heavy-session.png`, and a
+Playwright `reopen/trace.zip`. The default 24-session run is a bounded baseline;
+larger counts are opt-in and do not establish a performance threshold.
 
 ## Journey registry
 

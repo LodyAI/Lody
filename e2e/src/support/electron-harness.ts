@@ -64,6 +64,29 @@ type LogRecord = {
   message: string;
 };
 
+export type BootProfilePoint = {
+  name: string;
+  atMs: number;
+};
+
+export type BootProfileSnapshot = {
+  timeOrigin: number;
+  points: BootProfilePoint[];
+  frames: Array<{
+    atMs: number;
+    bodyChildCount: number;
+    visibleTextLength: number;
+    backgroundColor: string;
+    blank: boolean;
+  }>;
+};
+
+export type ElectronLaunchOptions = {
+  reuseRoot?: string;
+  forceOnboarding?: boolean;
+  remoteDebuggingPort?: number;
+};
+
 const INHERITED_ENV_ALLOWLIST = [
   'APPDATA',
   'DBUS_SESSION_BUS_ADDRESS',
@@ -104,15 +127,18 @@ export class ElectronHarness {
   readonly logs: LogRecord[] = [];
   readonly snapshots: RuntimeSnapshot[] = [];
   private tempRoot: string | null = null;
+  private electronUserDataDir: string | null = null;
+  private lodyDataDir: string | null = null;
   private hostPort: number | null = null;
   private hostPipe: string | null = null;
   private traceStarted = false;
   private performanceSession: CDPSession | null = null;
   private rendererPaintCount = 0;
+  private bootProfile: BootProfileSnapshot | null = null;
 
   constructor(readonly artifacts: ScenarioArtifacts) {}
 
-  async launch(): Promise<void> {
+  async launch(options: ElectronLaunchOptions = {}): Promise<void> {
     if (!existsSync(MAIN_ENTRY) || !existsSync(BUNDLED_CLI_ENTRY)) {
       throw new Error(
         'Desktop E2E artifacts are missing. Run `pnpm e2e:build` before launching scenarios.'
@@ -120,11 +146,13 @@ export class ElectronHarness {
     }
 
     const tempBase = process.platform === 'win32' ? tmpdir() : '/tmp';
-    this.tempRoot = mkdtempSync(join(tempBase, 'lody-e2e-'));
-    const electronUserDataDir = join(this.tempRoot, 'electron-user-data');
-    const lodyDataDir = join(this.tempRoot, 'lody-data');
-    mkdirSync(electronUserDataDir, { recursive: true });
-    mkdirSync(lodyDataDir, { recursive: true });
+    this.tempRoot = options.reuseRoot
+      ? resolve(options.reuseRoot)
+      : mkdtempSync(join(tempBase, 'lody-e2e-'));
+    this.electronUserDataDir = join(this.tempRoot, 'electron-user-data');
+    this.lodyDataDir = join(this.tempRoot, 'lody-data');
+    mkdirSync(this.electronUserDataDir, { recursive: true });
+    mkdirSync(this.lodyDataDir, { recursive: true });
     if (process.platform === 'win32') {
       this.hostPipe = `\\\\.\\pipe\\lody-e2e-${randomUUID()}`;
     } else {
@@ -134,14 +162,17 @@ export class ElectronHarness {
     const env = createIsolatedEnvironment({
       LANG: 'en_US.UTF-8',
       LC_ALL: 'en_US.UTF-8',
-      LODY_DATA_DIR: lodyDataDir,
+      LODY_DATA_DIR: this.lodyDataDir,
       LODY_E2E: '1',
+      LODY_E2E_BOOT_PROFILE: '1',
       ...(this.hostPort !== null ? { LODY_E2E_LOCAL_CLI_HOST_PORT: String(this.hostPort) } : {}),
       ...(this.hostPipe ? { LODY_E2E_LOCAL_CLI_HOST_PIPE: this.hostPipe } : {}),
       LODY_ELECTRON_DISABLE_SHELL_ENV: '1',
       LODY_ELECTRON_DISABLE_SYSTEM_PROXY_ENV: '1',
-      LODY_ELECTRON_FORCE_ONBOARDING: '1',
-      LODY_ELECTRON_USER_DATA_DIR: electronUserDataDir,
+      ...(options.forceOnboarding === false || options.reuseRoot
+        ? {}
+        : { LODY_ELECTRON_FORCE_ONBOARDING: '1' }),
+      LODY_ELECTRON_USER_DATA_DIR: this.electronUserDataDir,
       NODE_ENV: 'test',
     });
     this.app = await _electron.launch({
@@ -150,8 +181,11 @@ export class ElectronHarness {
         // GitHub-hosted Linux runners restrict unprivileged user namespaces,
         // which breaks Electron's SUID sandbox from an unpacked dev tree.
         ...(process.platform === 'linux' && process.env.CI ? ['--no-sandbox'] : []),
+        ...(options.remoteDebuggingPort
+          ? [`--remote-debugging-port=${options.remoteDebuggingPort}`]
+          : []),
         MAIN_ENTRY,
-        `--user-data-dir=${electronUserDataDir}`,
+        `--user-data-dir=${this.electronUserDataDir}`,
         '--lang=en-US',
       ],
       cwd: ELECTRON_DIR,
@@ -185,6 +219,7 @@ export class ElectronHarness {
     }
 
     this.page = await this.app.firstWindow({ timeout: 60_000 });
+    this.bootProfile = await this.readBootProfile();
     this.page.on('console', (message) => this.record('renderer', message.type(), message.text()));
     this.page.on('pageerror', (error) =>
       this.record('page', 'error', error.stack ?? error.message)
@@ -201,9 +236,11 @@ export class ElectronHarness {
     await this.page.waitForFunction(() => document.readyState !== 'loading', undefined, {
       timeout: 60_000,
     });
+    await this.markBootPoint('document-ready-observed');
     await this.page.evaluate(
       () => new Promise<void>((resolveFrame) => requestAnimationFrame(() => resolveFrame()))
     );
+    await this.markBootPoint('harness-first-frame');
     const expectedWindowVisibility = env.LODY_E2E_SHOW_WINDOW === '1';
     if (expectedWindowVisibility) {
       await this.app.evaluate(async ({ BrowserWindow }) => {
@@ -264,6 +301,23 @@ export class ElectronHarness {
     );
     this.snapshots.push(snapshot);
     return snapshot;
+  }
+
+  async markBootPoint(name: string): Promise<BootProfileSnapshot | null> {
+    if (!this.page) return this.bootProfile;
+    await this.page.evaluate((point) => window.__LODY_E2E_BOOT__?.mark(point), name);
+    this.bootProfile = await this.readBootProfile();
+    return this.bootProfile;
+  }
+
+  async captureBootProfile(): Promise<BootProfileSnapshot | null> {
+    this.bootProfile = await this.readBootProfile();
+    return this.bootProfile;
+  }
+
+  getIsolatedRoot(): string {
+    if (!this.tempRoot) throw new Error('Electron harness has no isolated root');
+    return this.tempRoot;
   }
 
   async capturePostGcSnapshot(): Promise<RuntimeSnapshot> {
@@ -333,7 +387,7 @@ export class ElectronHarness {
     return { main: mainPath, renderer: rendererPath };
   }
 
-  async close(): Promise<void> {
+  async close(options: { preserveRoot?: boolean } = {}): Promise<void> {
     let closeError: unknown;
     const appProcess = this.app?.process();
     try {
@@ -368,14 +422,19 @@ export class ElectronHarness {
       closeError ??= error;
     }
     try {
-      if (this.tempRoot) rmSync(this.tempRoot, { recursive: true, force: true });
+      if (this.tempRoot && !options.preserveRoot) {
+        rmSync(this.tempRoot, { recursive: true, force: true });
+      }
     } catch (error) {
       closeError ??= error;
     }
     this.tempRoot = null;
+    this.electronUserDataDir = null;
+    this.lodyDataDir = null;
     this.hostPort = null;
     this.hostPipe = null;
     this.rendererPaintCount = 0;
+    this.bootProfile = null;
     if (closeError) throw closeError;
   }
 
@@ -390,6 +449,16 @@ export class ElectronHarness {
       `${JSON.stringify({ snapshots: this.snapshots }, null, 2)}\n`,
       'utf8'
     );
+    writeFileSync(
+      join(this.artifacts.scenarioDir, 'boot.json'),
+      `${JSON.stringify(this.bootProfile ?? { points: [], frames: [] }, null, 2)}\n`,
+      'utf8'
+    );
+  }
+
+  private async readBootProfile(): Promise<BootProfileSnapshot | null> {
+    if (!this.page) return null;
+    return await this.page.evaluate(() => window.__LODY_E2E_BOOT__?.snapshot() ?? null);
   }
 
   private record(source: LogRecord['source'], level: string, message: string): void {
@@ -406,6 +475,20 @@ declare global {
     __LODY_E2E_PERFORMANCE__?: {
       longTaskCount: number;
       longTaskDurationMs: number;
+    };
+    __LODY_E2E_BOOT__?: {
+      mark(name: string): void;
+      snapshot(): {
+        timeOrigin: number;
+        points: Array<{ name: string; atMs: number }>;
+        frames: Array<{
+          atMs: number;
+          bodyChildCount: number;
+          visibleTextLength: number;
+          backgroundColor: string;
+          blank: boolean;
+        }>;
+      };
     };
   }
 }
