@@ -92,6 +92,10 @@ export function MessageQueueRow(props: MessageQueueRowProps) {
       style={style}
       className={cn(
         'group/row relative flex items-start gap-2 px-2 py-1.5',
+        // Dividers go between rows only. (`divide-y` on the list also lined the
+        // last row, because dnd-kit appends hidden nodes after it, and that
+        // line doubled the composer's top border into a shadow-like band.)
+        '[&+&]:border-t [&+&]:border-border/30',
         'transition-colors',
         sortable.isDragging && 'z-10 bg-muted/40 opacity-90 shadow-sm',
         isEditing && 'bg-background/60'

@@ -1081,11 +1081,9 @@ function StoryComposer({
   isAgentBusy,
   onSendMessage,
   initialInputText = 'Tighten the mobile spacing after the permission flow is stable.',
-  queueSeated = false,
 }: {
   session: SessionMeta;
   isAgentBusy: boolean;
-  queueSeated?: boolean;
   onSendMessage?: ComponentProps<typeof SessionChatInputArea>['onSendMessage'];
   initialInputText?: string;
 }) {
@@ -1104,7 +1102,6 @@ function StoryComposer({
     <SessionChatInputArea
       // The info bar above owns this gap, as on the session page.
       hideTopSpacer
-      queueSeated={queueSeated}
       session={session}
       sessionLocalProjectRootPath="/Users/developer/Code/lody"
       isMachineRemoved={false}
@@ -1492,7 +1489,6 @@ function StoryShell({
                               glued above the composer — desktop AND mobile. */}
                               <StoryInfoBar session={session} queued={queued} />
                               <StoryComposer
-                                queueSeated={queued !== undefined}
                                 session={session}
                                 isAgentBusy={isWorking}
                                 initialInputText={

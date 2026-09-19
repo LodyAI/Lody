@@ -9,10 +9,7 @@ import type {
   SessionPullRequestMeta,
 } from '@lody/shared';
 import { sanitizeGoalObjective } from '@lody/shared';
-import {
-  INFO_BAR_ELEVATION_CLASS,
-  INFO_BAR_SEATED_ELEVATION_CLASS,
-} from '@/components/chat/composer-surface';
+import { INFO_BAR_ELEVATION_CLASS } from '@/components/chat/composer-surface';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { cn } from '@/lib/utils';
 import { ActionChip } from './info-chip';
@@ -305,8 +302,10 @@ export function SessionInfoBar({
         <div
           className={cn(
             '@container flex h-8 w-full min-w-0 select-none items-center gap-1.5 rounded-md border-[0.5px] border-foreground/[0.10] bg-[hsl(var(--composer))] px-2.5 text-xs dark:border-input-border/45 dark:bg-input/70',
-            // A seated queue sheet must not catch the pill's shadow.
-            queue ? INFO_BAR_SEATED_ELEVATION_CLASS : INFO_BAR_ELEVATION_CLASS
+            INFO_BAR_ELEVATION_CLASS,
+            // With the queue sheet seated on top, clip the shadow's upward bleed
+            // (its 1px spread) at the top edge only; sides and bottom keep it.
+            queue && '[clip-path:inset(0_-6px_-6px_-6px)]'
           )}
         >
           {privateAccessStatus ? (

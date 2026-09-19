@@ -139,7 +139,7 @@ export function MessageQueueDisplay({
 
         <div
           ref={scrollRef}
-          className="divide-y divide-border/30 overflow-y-auto border-t border-border/30"
+          className="overflow-y-auto border-t border-border/30"
           style={{
             maxHeight: 'min(25vh, 240px)',
             maskImage: fadeMask,
