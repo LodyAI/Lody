@@ -634,10 +634,8 @@ export function ChatComposer({
   // Avoid heavy bg-input fills that read as muddy gray on cool-white themes.
   const mentionContainerClassName = !isLanding
     ? cn(
-        'w-full',
-        'focus-within:ring-1 focus-within:ring-offset-0',
-        'focus-within:outline-hidden',
-        'rounded-2xl border border-foreground/[0.10] bg-[hsl(var(--composer))] focus-within:ring-ring/30 dark:border-input-border/70 dark:bg-input/90',
+        'w-full focus-within:outline-hidden',
+        'rounded-2xl border border-foreground/[0.10] bg-[hsl(var(--composer))] dark:border-input-border/70 dark:bg-input/90',
         mentionSurfaceClassName
       )
     : undefined;
@@ -659,19 +657,17 @@ export function ChatComposer({
 
   const actionWidthClassName = isLanding ? 'w-auto shrink-0' : 'w-auto';
 
+  // Focus stays quiet: the caret and placeholder already show where typing
+  // goes, so the composer keeps its resting border instead of an accent ring.
   const landingContainerClassName = cn(
-    '@container/composer-box flex flex-col gap-4 rounded-xl border px-4 pt-4 pb-3 transition-shadow focus-within:ring-1',
-    'border-foreground/[0.10] bg-[hsl(var(--composer))] focus-within:ring-ring/30',
+    '@container/composer-box flex flex-col gap-4 rounded-xl border px-4 pt-4 pb-3',
+    'border-foreground/[0.10] bg-[hsl(var(--composer))]',
     COMPOSER_ELEVATION_CLASS,
-    'dark:border-input-border/60 dark:bg-input/90 dark:focus-within:ring-ring/40',
+    'dark:border-input-border/60 dark:bg-input/90',
     mentionSurfaceClassName
   );
 
-  const sessionContainerClassName = cn(
-    COMPOSER_SESSION_SURFACE_CLASS,
-    'focus-within:border-ring/40',
-    mentionSurfaceClassName
-  );
+  const sessionContainerClassName = cn(COMPOSER_SESSION_SURFACE_CLASS, mentionSurfaceClassName);
 
   const boxContainerClassName = isLanding ? landingContainerClassName : sessionContainerClassName;
   const composerHasAttachments =
