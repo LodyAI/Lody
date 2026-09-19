@@ -1,21 +1,28 @@
 import { BrowserWindow } from 'electron'
 import type { ElectronWindowTarget } from '@lody/shared/electron-ipc'
+import type { DevbarWarmPool } from '@lody/shared/devbar'
+import type { ProcessMetric } from 'electron'
 import { WindowWarmPool, type WarmWindowEntry } from './window-warm-pool'
 import { bindMainWindowTarget, createWarmWindow } from './window'
 import { isAppQuitting } from './window-state'
+import {
+  isWindowWarmupEnabled as isWindowWarmupSettingEnabled,
+  isWindowWarmupEnvironmentAllowed,
+  setWindowWarmupSetting
+} from './window-warm-settings'
 
 /**
- * Keeps one hidden auxiliary renderer booted and ready for reuse. Opening an
- * auxiliary window claims the spare and immediately primes a replacement, so
- * the second and later windows skip the full renderer cold boot.
+ * Keeps one hidden auxiliary renderer booted and ready for reuse when the
+ * developer-only experiment is enabled. Opening an auxiliary window claims
+ * the spare and immediately primes a replacement, so the second and later
+ * windows skip the full renderer cold boot.
  *
  * The pool is disabled for E2E (the harness counts and inspects windows) and
- * can be turned off explicitly with `LODY_DISABLE_WINDOW_WARMUP=1`.
+ * It is off by default and can also be turned off explicitly with
+ * `LODY_DISABLE_WINDOW_WARMUP=1`.
  */
 export function isWindowWarmupEnabled(): boolean {
-  if (process.env['LODY_E2E'] === '1') return false
-  if (process.env['LODY_DISABLE_WINDOW_WARMUP'] === '1') return false
-  return true
+  return isWindowWarmupSettingEnabled()
 }
 
 // A spare that never reports ready (renderer crash, recovery page) must not
@@ -29,6 +36,7 @@ const pool = new WindowWarmPool((entry) => {
 
 const warmWindows = new Map<number, BrowserWindow>()
 let warmReadyTimer: NodeJS.Timeout | null = null
+let warmClaimCount = 0
 
 function clearWarmReadyTimer(): void {
   if (warmReadyTimer) {
@@ -71,6 +79,51 @@ function primeWindowWarmPool(): void {
   })
 }
 
+function discardWarmSpare(): void {
+  clearWarmReadyTimer()
+  for (const [windowId, window] of warmWindows) {
+    if (!window.isDestroyed()) window.destroy()
+    warmWindows.delete(windowId)
+  }
+}
+
+/** Enable or disable this developer-only experiment at runtime. */
+export function setWindowWarmupEnabled(enabled: boolean): void {
+  setWindowWarmupSetting(enabled && isWindowWarmupEnvironmentAllowed())
+  if (!isWindowWarmupEnabled()) {
+    discardWarmSpare()
+    return
+  }
+  scheduleWindowWarmUp()
+}
+
+function warmRendererRssBytes(metrics: ProcessMetric[]): number | null {
+  const spare = [...warmWindows.values()][0]
+  if (!spare || spare.isDestroyed()) return null
+  let pid: number
+  try {
+    pid = spare.webContents.getOSProcessId()
+  } catch {
+    return null
+  }
+  const metric = metrics.find((candidate) => candidate.pid === pid)
+  const workingSetSize = metric?.memory?.workingSetSize
+  return typeof workingSetSize === 'number' && Number.isFinite(workingSetSize)
+    ? workingSetSize * 1024
+    : null
+}
+
+export function getWindowWarmupMetrics(metrics: ProcessMetric[]): DevbarWarmPool {
+  const enabled = isWindowWarmupEnabled()
+  return {
+    enabled,
+    phase: enabled ? pool.phase : 'disabled',
+    spareRssBytes: enabled ? warmRendererRssBytes(metrics) : null,
+    spareCount: enabled ? warmWindows.size : 0,
+    claimCount: warmClaimCount
+  }
+}
+
 /**
  * Schedules a spare for the next open without competing with the visible
  * window's first paint. Safe to call repeatedly; an existing spare is kept.
@@ -97,6 +150,7 @@ export function claimWarmWindow(target: ElectronWindowTarget): BrowserWindow | n
   }
 
   bindMainWindowTarget(window, target)
+  warmClaimCount++
   scheduleWindowWarmUp()
   return window
 }

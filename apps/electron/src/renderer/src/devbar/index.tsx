@@ -122,6 +122,7 @@ export function DesktopDevbar(): JSX.Element {
             rssBytes: next?.rss ?? null,
             gpuCpu: next?.gpuCpu ?? null,
             gpuRssBytes: next?.gpuRss ?? null,
+            warmPool: next?.warmPool,
             longTasks: intervalLongTasks
           }
           void recordSample?.(sample).catch(() => setDevframeStatus('error'))
@@ -279,6 +280,19 @@ export function DesktopDevbar(): JSX.Element {
           label="GPU"
           value={`${percent(metrics?.gpuCpu)} ${memory(metrics?.gpuRss, 'M')}`}
           title="GPU process: CPU usage and resident working set (M = MiB), not GPU hardware utilization or VRAM"
+        />
+        <DevbarMetric
+          label="Warm"
+          value={
+            metrics?.warmPool == null
+              ? '—'
+              : `${metrics.warmPool.phase}${
+                  metrics.warmPool.spareRssBytes == null
+                    ? ''
+                    : ` ${memory(metrics.warmPool.spareRssBytes, 'M')}`
+                }`
+          }
+          title="Developer-only auxiliary-window warm pool phase and hidden spare renderer RSS"
         />
       </span>
     </footer>

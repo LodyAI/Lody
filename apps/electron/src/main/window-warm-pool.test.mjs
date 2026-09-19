@@ -1,6 +1,18 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { WindowWarmPool } from './window-warm-pool.ts'
+import { isWindowWarmupEnabled, setWindowWarmupSetting } from './window-warm-settings.ts'
+
+void test('warmup stays disabled until the developer setting is enabled', () => {
+  setWindowWarmupSetting(false)
+  assert.equal(isWindowWarmupEnabled(), false)
+
+  const environmentAllowsWarmup =
+    process.env['LODY_E2E'] !== '1' && process.env['LODY_DISABLE_WINDOW_WARMUP'] !== '1'
+  setWindowWarmupSetting(true)
+  assert.equal(isWindowWarmupEnabled(), environmentAllowsWarmup)
+  setWindowWarmupSetting(false)
+})
 
 function createPool(dead = new Set()) {
   return new WindowWarmPool((entry) => !dead.has(entry.windowId))

@@ -3,11 +3,12 @@ import type { DevframeAuthHandler } from 'devframe/node/auth'
 export type DevbarControlInput = {
   enabled: boolean
   agentAccess: boolean
+  warmupEnabled: boolean
 }
 
 export function initialDevbarControl(envValue: string | undefined): DevbarControlInput {
   const enabled = envValue === 'true'
-  return { enabled, agentAccess: enabled }
+  return { enabled, agentAccess: enabled, warmupEnabled: false }
 }
 
 export function parseDevbarControlInput(value: unknown): DevbarControlInput {
@@ -15,13 +16,21 @@ export function parseDevbarControlInput(value: unknown): DevbarControlInput {
     throw new TypeError('Devbar control input must be an object')
   }
   const candidate = value as Partial<DevbarControlInput>
-  if (typeof candidate.enabled !== 'boolean' || typeof candidate.agentAccess !== 'boolean') {
+  if (
+    typeof candidate.enabled !== 'boolean' ||
+    typeof candidate.agentAccess !== 'boolean' ||
+    typeof candidate.warmupEnabled !== 'boolean'
+  ) {
     throw new TypeError('Devbar control flags must be booleans')
   }
   if (!candidate.enabled && candidate.agentAccess) {
     throw new TypeError('Devbar agent access requires the Devbar to be enabled')
   }
-  return { enabled: candidate.enabled, agentAccess: candidate.agentAccess }
+  return {
+    enabled: candidate.enabled,
+    agentAccess: candidate.agentAccess,
+    warmupEnabled: candidate.warmupEnabled
+  }
 }
 
 export function devbarRendererEntry(enabled: boolean, auxiliary: boolean): string {

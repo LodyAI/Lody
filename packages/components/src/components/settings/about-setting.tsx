@@ -114,26 +114,29 @@ function DevbarSettingsControls() {
     };
   }, []);
 
-  const update = useCallback(async (enabled: boolean, agentAccess: boolean) => {
-    const app = getIpcServices()?.app;
-    if (!app) return;
-    setPending(true);
-    setFailed(false);
-    try {
-      const result = await app.setDevbarControl({ enabled, agentAccess });
-      if (!result.ok) {
+  const update = useCallback(
+    async (enabled: boolean, agentAccess: boolean, warmupEnabled: boolean) => {
+      const app = getIpcServices()?.app;
+      if (!app) return;
+      setPending(true);
+      setFailed(false);
+      try {
+        const result = await app.setDevbarControl({ enabled, agentAccess, warmupEnabled });
+        if (!result.ok) {
+          setFailed(true);
+          setPending(false);
+          return;
+        }
+        setConfig(result.config);
+        // The main process now reloads this window through the CSP-matched renderer
+        // entry. Keep the control busy so it cannot dispatch a conflicting toggle.
+      } catch {
         setFailed(true);
         setPending(false);
-        return;
       }
-      setConfig(result.config);
-      // The main process now reloads this window through the CSP-matched renderer
-      // entry. Keep the control busy so it cannot dispatch a conflicting toggle.
-    } catch {
-      setFailed(true);
-      setPending(false);
-    }
-  }, []);
+    },
+    []
+  );
 
   if (!supported) return null;
 
@@ -151,13 +154,29 @@ function DevbarSettingsControls() {
           size="sm"
           className="h-7 px-2.5"
           disabled={!config || pending}
-          onClick={() => void update(!config?.enabled, false)}
+          onClick={() => void update(!config?.enabled, false, config?.warmupEnabled ?? false)}
         >
           {pending && <Spinner className="mr-1 h-3.5 w-3.5" />}
           {config?.enabled
             ? t('settings.about.devbarStop', 'Stop Devbar')
             : t('settings.about.devbarStart', 'Open Devbar')}
         </Button>
+      </CompactRow>
+      <CompactRow
+        label={t('settings.about.devbarWarmup', 'Auxiliary window warmup')}
+        helper={t(
+          'settings.about.devbarWarmupHelper',
+          'Developer-only experiment: keep one hidden renderer ready for auxiliary windows.'
+        )}
+      >
+        <Switch
+          checked={config?.warmupEnabled ?? false}
+          disabled={!config || pending}
+          onCheckedChange={(checked) =>
+            void update(config?.enabled ?? false, config?.agentAccess ?? false, checked)
+          }
+          aria-label={t('settings.about.devbarWarmup', 'Auxiliary window warmup')}
+        />
       </CompactRow>
       {config?.enabled && (
         <CompactRow
@@ -170,7 +189,7 @@ function DevbarSettingsControls() {
           <Switch
             checked={config.agentAccess}
             disabled={pending}
-            onCheckedChange={(checked) => void update(true, checked)}
+            onCheckedChange={(checked) => void update(true, checked, config.warmupEnabled)}
             aria-label={t('settings.about.devbarAgentAccess', 'Agent and terminal access')}
           />
         </CompactRow>
@@ -302,12 +321,11 @@ export function AboutSettingsComponent() {
                 setDeveloperModeEnabled(checked);
                 if (!checked) {
                   setDeveloperModeRevealed(false);
-                  if (document.documentElement.hasAttribute('data-desktop-devbar')) {
-                    void getIpcServices()?.app.setDevbarControl({
-                      enabled: false,
-                      agentAccess: false,
-                    });
-                  }
+                  void getIpcServices()?.app.setDevbarControl({
+                    enabled: false,
+                    agentAccess: false,
+                    warmupEnabled: false,
+                  });
                 }
               }}
               aria-label={t('settings.about.developerMode', 'Developer mode')}

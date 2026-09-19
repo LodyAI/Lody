@@ -20,23 +20,44 @@ import { isDevbarDeepLink } from './renderer/src/devbar/deep-link.ts'
 import { devbarSampleRoute } from './renderer/src/devbar/route.ts'
 
 void test('environment activation remains an explicit automation override', () => {
-  assert.deepEqual(initialDevbarControl('true'), { enabled: true, agentAccess: true })
+  assert.deepEqual(initialDevbarControl('true'), {
+    enabled: true,
+    agentAccess: true,
+    warmupEnabled: false
+  })
   for (const value of [undefined, '', 'false', '0', '1', 'dev', 'staging', 'prod']) {
-    assert.deepEqual(initialDevbarControl(value), { enabled: false, agentAccess: false })
+    assert.deepEqual(initialDevbarControl(value), {
+      enabled: false,
+      agentAccess: false,
+      warmupEnabled: false
+    })
   }
 })
 
 void test('runtime control validates the secondary agent capability gate', () => {
-  assert.deepEqual(parseDevbarControlInput({ enabled: true, agentAccess: false }), {
-    enabled: true,
-    agentAccess: false
-  })
-  assert.deepEqual(parseDevbarControlInput({ enabled: true, agentAccess: true }), {
-    enabled: true,
-    agentAccess: true
-  })
-  assert.throws(() => parseDevbarControlInput({ enabled: false, agentAccess: true }))
-  assert.throws(() => parseDevbarControlInput({ enabled: 'true', agentAccess: false }))
+  assert.deepEqual(
+    parseDevbarControlInput({ enabled: true, agentAccess: false, warmupEnabled: false }),
+    {
+      enabled: true,
+      agentAccess: false,
+      warmupEnabled: false
+    }
+  )
+  assert.deepEqual(
+    parseDevbarControlInput({ enabled: true, agentAccess: true, warmupEnabled: true }),
+    {
+      enabled: true,
+      agentAccess: true,
+      warmupEnabled: true
+    }
+  )
+  assert.throws(() =>
+    parseDevbarControlInput({ enabled: false, agentAccess: true, warmupEnabled: false })
+  )
+  assert.throws(() =>
+    parseDevbarControlInput({ enabled: 'true', agentAccess: false, warmupEnabled: false })
+  )
+  assert.throws(() => parseDevbarControlInput({ enabled: true, agentAccess: false }))
 })
 
 void test('runtime activation selects the Devbar entry only for the primary product window', () => {
@@ -211,6 +232,13 @@ void test('devbar JSON-render state presents live metrics and bounded task rows'
     rssBytes: 300 * 1024 * 1024,
     gpuCpu: 4,
     gpuRssBytes: 50 * 1024 * 1024,
+    warmPool: {
+      enabled: true,
+      phase: 'ready',
+      spareRssBytes: 180 * 1024 * 1024,
+      spareCount: 1,
+      claimCount: 2
+    },
     longTasks: [
       {
         observedAtMs: 2_000,
@@ -262,6 +290,8 @@ void test('devbar JSON-render state presents live metrics and bounded task rows'
   })
   assert.equal(state.metrics['Electron CPU'], '12.5%')
   assert.equal(state.metrics['JavaScript heap'], '~20 MiB')
+  assert.equal(state.metrics['Warm pool'], 'ready (1 spare)')
+  assert.equal(state.metrics['Warm spare RSS'], '180 MiB')
   assert.deepEqual(state.longTasks, [
     { observed: '12:34:56', duration: '72.3 ms', attribution: 'self' }
   ])

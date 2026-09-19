@@ -44,7 +44,11 @@ export function createDevbarViewState(snapshot: DevbarSnapshot) {
       'JavaScript heap': memory(latest?.heapBytes ?? null, latest?.heapPrecise ?? true),
       'Layout shift (CLS)': decimal(latest?.cls ?? null, 4),
       'GPU process CPU': percent(latest?.gpuCpu ?? null),
-      'GPU process RSS': memory(latest?.gpuRssBytes ?? null)
+      'GPU process RSS': memory(latest?.gpuRssBytes ?? null),
+      'Warm pool': latest?.warmPool
+        ? `${latest.warmPool.phase} (${latest.warmPool.spareCount} spare)`
+        : 'Unavailable',
+      'Warm spare RSS': memory(latest?.warmPool?.spareRssBytes ?? null)
     },
     blocking: {
       'Samples retained': snapshot.summary.sampleCount,

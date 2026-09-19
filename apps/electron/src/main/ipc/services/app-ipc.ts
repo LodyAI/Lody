@@ -3,7 +3,7 @@ import { productWindows } from '../../window-state'
 import { parseWindowTarget, openSessionWindow, type WindowTarget } from '../../session-windows'
 import { access } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
-import { BrowserWindow, nativeTheme, shell, systemPreferences } from 'electron'
+import { app, BrowserWindow, nativeTheme, shell, systemPreferences } from 'electron'
 import { getIpcContext, IpcMethod, IpcService } from 'electron-ipc-decorator'
 import {
   GLOBAL_SHORTCUT_DEFAULTS,
@@ -18,6 +18,7 @@ import {
 import { getIpcServiceDeps } from '../ipc-service-deps'
 import { parseDevbarControlInput } from '../../services/devbar/control'
 import { getDevbarConfig, getDevbarMetrics, setDevbarControl } from '../../services/devbar/service'
+import { getWindowWarmupMetrics, setWindowWarmupEnabled } from '../../window-warm-service'
 import { setMenuLanguage } from '../../menu'
 import { localFileActionError } from '../../services/local-file-action-error'
 import { hasPathLauncher, launchLocalPath } from '../../services/local-path-launcher-service'
@@ -149,6 +150,10 @@ export class AppIpc extends IpcService {
     }
 
     const result = await setDevbarControl(input)
+    if (result.ok) {
+      setWindowWarmupEnabled(input.warmupEnabled)
+      result.config = getDevbarConfig()
+    }
     const reload = (enabled: boolean): void => {
       setImmediate(() => {
         if (window.isDestroyed()) return
@@ -171,7 +176,9 @@ export class AppIpc extends IpcService {
 
   @IpcMethod()
   async getDevbarMetrics() {
-    return getDevbarMetrics()
+    const snapshot = getDevbarMetrics()
+    if (!snapshot) return null
+    return { ...snapshot, warmPool: getWindowWarmupMetrics(app.getAppMetrics()) }
   }
 
   @IpcMethod()

@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { randomBytes } from 'node:crypto'
 import { desktopInstallationProfile } from '../../platform'
+import { isWindowWarmupEnabled } from '../../window-warm-settings'
 import { initialDevbarControl, type DevbarControlInput } from './control'
 import { summarizeDevbarMetrics } from './metrics'
 
@@ -10,6 +11,7 @@ type DevbarMetrics = ReturnType<typeof summarizeDevbarMetrics>
 interface DevbarConfig {
   enabled: boolean
   agentAccess: boolean
+  warmupEnabled: boolean
   preciseMemory: boolean
   devframe:
     | (Pick<DevbarRuntime, 'connection' | 'mcpUrl' | 'uiUrl' | 'embeddedScriptUrl'> & {
@@ -33,6 +35,7 @@ export function getDevbarConfig(): DevbarConfig {
   return {
     enabled: control.enabled,
     agentAccess: control.agentAccess,
+    warmupEnabled: isWindowWarmupEnabled(),
     preciseMemory,
     devframe: devframeRuntime
       ? {
@@ -123,7 +126,7 @@ export async function setDevbarControl(next: DevbarControlInput): Promise<{
   if (mustRestart) await stopDevbarDevframeService()
   const started = await startDevbarDevframeService()
   if (!started) {
-    control = { enabled: false, agentAccess: false }
+    control = { enabled: false, agentAccess: false, warmupEnabled: false }
   }
   return { ok: started, config: getDevbarConfig() }
 }

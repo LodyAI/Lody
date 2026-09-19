@@ -3,6 +3,16 @@ import { z } from 'zod';
 const finiteNonNegativeNumber = z.number().finite().nonnegative();
 const nullableMetric = finiteNonNegativeNumber.nullable();
 
+export const DevbarWarmPoolSchema = z.object({
+  enabled: z.boolean(),
+  phase: z.enum(['disabled', 'idle', 'warming', 'ready']),
+  spareRssBytes: nullableMetric,
+  spareCount: z.number().int().nonnegative(),
+  claimCount: z.number().int().nonnegative(),
+});
+
+export type DevbarWarmPool = z.infer<typeof DevbarWarmPoolSchema>;
+
 export const DevbarLongTaskSchema = z.object({
   observedAtMs: finiteNonNegativeNumber,
   startTimeMs: finiteNonNegativeNumber,
@@ -31,6 +41,7 @@ export const DevbarRendererSampleSchema = z.object({
   rssBytes: nullableMetric,
   gpuCpu: nullableMetric,
   gpuRssBytes: nullableMetric,
+  warmPool: DevbarWarmPoolSchema.optional(),
   longTasks: z.array(DevbarLongTaskSchema).max(50),
 });
 

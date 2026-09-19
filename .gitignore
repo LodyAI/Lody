@@ -122,6 +122,8 @@ logs/
 .lody-e2e/
 /.lody-artifacts/
 /e2e/artifacts/
+# Local acceptance captures and experiment bundles; do not commit generated evidence.
+/artifacts/
 
 # OS
 .DS_Store
