@@ -38,6 +38,7 @@ import {
   getSessionPullRequestLegacyFields,
   getSessionRoomId,
   getAcpCapabilityCacheEntryAuthority,
+  isLoroRepoDocDeleted,
   resolveProjectGitHubRepo,
   SessionForkOperationSchema,
   type CommentReferencePayload,
@@ -93,7 +94,7 @@ import {
   terminalDockOpenAtom,
 } from '@/components/terminal/terminal-controller';
 import { isElectronRenderer, isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
-import { useWindowsCaptionPadClass } from '@/ui/window-drag-region';
+import { useMacTrafficLightRowPadClass, useWindowsCaptionPadClass } from '@/ui/window-drag-region';
 import {
   getZenAwarePanelToggleState,
   navigationSidebarHiddenAtom,
@@ -745,6 +746,10 @@ const SessionDetail = ({
   const { openSettings } = useOpenSettings();
   const isElectronFullscreen = useElectronFullscreen();
   const windowsCaptionPadClass = useWindowsCaptionPadClass();
+  const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass();
+  const macTrafficLightBorderedRowPadClass = useMacTrafficLightRowPadClass({
+    bottomBorder: true,
+  });
   // Publish ephemeral "viewing this session" presence (drives the owning
   // machine's PR poller priority); actively cleared on switch/hide/unmount.
   usePublishSessionViewing(sessionId);
@@ -1747,17 +1752,12 @@ const SessionDetail = ({
 
   // A confirmed shared close invalidates this URL choice. Replace only that
   // exact choice, never a newer navigation, and never infer closure from a
-  // missing replica row. This is not URL/local-selection mirroring.
-  const previousSelectedTab = useRef({ sessionId, tabId: activeTabSessionId });
+  // missing replica row. This is not URL/local-selection mirroring. The close
+  // itself is the feedback: no toast, whether this or another client closed it.
   useEffect(() => {
     if (!docMetaCacheReady) return;
-    const previous = previousSelectedTab.current;
-    previousSelectedTab.current = { sessionId, tabId: activeTabSessionId };
     if (!closedConversationIds.has(requestedTabSessionId)) return;
     if (router.state.location.search.tab !== urlTab) return;
-    if (previous.sessionId === sessionId && previous.tabId === requestedTabSessionId) {
-      toast.info(t('sessions.tabs.remotelyClosed', 'This conversation tab was closed'));
-    }
     navigateToSessionTab(activeTabSessionId);
   }, [
     docMetaCacheReady,
@@ -1767,8 +1767,6 @@ const SessionDetail = ({
     urlTab,
     router,
     navigateToSessionTab,
-    sessionId,
-    t,
   ]);
 
   const replaceSessionUrlPr = useCallback(
@@ -2360,21 +2358,45 @@ const SessionDetail = ({
         is_active_tab: tabSessionId === activeTabSessionId,
       });
       try {
-        await setSessionTabClosed(tabSessionId, true);
-        // The shared-close effect chooses the neighbour once hydration finishes.
-        // Do not commit a fallback from this handler's partial metadata snapshot.
-        if (
-          docMetaCacheReady &&
-          tabSessionId === activeTabSessionId &&
-          router.state.location.search.tab === urlTab
-        ) {
-          navigateToSessionTab(
-            getSessionTabFallback(
-              tabSessionId,
-              allOrderedSessionTabIds,
-              orderedSessionTabIds.filter((id) => id !== tabSessionId)
-            )
-          );
+        // A tab that never had a message is exact-deleted instead of marked
+        // closed — isTabClosed would leave an invisible durable doc. Judge
+        // emptiness from getDocMeta directly: the meta scan cache can still
+        // be cold here, and exact deletion must bypass discovery.
+        const tabEntry = runtime
+          ? await runtime.repo.getDocMeta(getSessionRoomId(tabSessionId))
+          : undefined;
+        if (isLoroRepoDocDeleted(tabEntry)) throw new Error('Session was deleted');
+        const tabMeta = tabEntry?.meta as SessionMeta | undefined;
+        if (tabMeta && !tabMeta.lastMessageAt) {
+          await deleteSessions([tabSessionId]);
+          captureSessionDetailEvent('session/tab_deleted_empty', {
+            tab_session_id: tabSessionId,
+          });
+          // A deleted tab leaves no isTabClosed meta for the shared-close
+          // effect to react to, and resolveActiveSessionTab keeps a
+          // meta-missing tab active, so the handler must leave the dead URL
+          // itself: a child close returns to the route's session tab.
+          if (tabSessionId === activeTabSessionId) {
+            navigateToSessionTab(sessionId);
+          }
+        } else {
+          await setSessionTabClosed(tabSessionId, true);
+          // The shared-close effect chooses the neighbour once hydration
+          // finishes. Do not commit a fallback from this handler's partial
+          // metadata snapshot.
+          if (
+            docMetaCacheReady &&
+            tabSessionId === activeTabSessionId &&
+            router.state.location.search.tab === urlTab
+          ) {
+            navigateToSessionTab(
+              getSessionTabFallback(
+                tabSessionId,
+                allOrderedSessionTabIds,
+                orderedSessionTabIds.filter((id) => id !== tabSessionId)
+              )
+            );
+          }
         }
       } catch (error) {
         // A silent failure reads as "the close button does nothing" — surface
@@ -2390,6 +2412,7 @@ const SessionDetail = ({
     },
     [
       activeTabSessionId,
+      deleteSessions,
       setSessionTabClosed,
       docMetaCacheReady,
       captureSessionDetailEvent,
@@ -2398,6 +2421,8 @@ const SessionDetail = ({
       allOrderedSessionTabIds,
       orderedSessionTabIds,
       router,
+      runtime,
+      sessionId,
       urlTab,
       t,
     ]
@@ -5990,12 +6015,11 @@ const SessionDetail = ({
         // collapsed, over the horizontally-cleared `pl-[4.5rem]` gap below),
         // never over this top bar — so it must not reserve vertical inset.
         //
-        // `mt-0.5`, not `mt-2`: the tab pills share a top border line with the
-        // sidebar and side-panel cards, and both of those sit at `mt-2` (8px).
-        // The h-8 pills are centered inside this h-11 row, so the row must start
-        // 6px higher for them to land on that same line: 2 + (44 - 32) / 2 = 8.
-        // Re-derive this if the row or the pill height changes.
-        'mt-0.5 h-11',
+        // Flush with the window/sidebar top so this h-11 row shares y=0 with
+        // the sidebar header; the macOS row pad centers its controls on the
+        // traffic-light centerline. Re-derive if the row or pill height changes.
+        'h-11',
+        macTrafficLightRowPadClass,
         isLeftSidebarHidden && hasMacOSTitlebarInset && 'pl-[4.5rem]',
         !isSidebarVisible && windowsCaptionPadClass
       )}
@@ -6149,12 +6173,12 @@ const SessionDetail = ({
     });
 
   // White reading surface (not bg-sidebar): the file editor/monaco canvas is
-  // pure white, so a gray panel shell left a two-tone mismatch. Match the
-  // surrounding cool-white chrome; keep a light border + soft shadow for card lift.
+  // pure white, so a gray panel shell left a two-tone mismatch. Full-bleed
+  // panel with a left hairline against the conversation.
   const desktopSecondaryPanel = (
     <div
       data-lody-session-tab-region="side-panel"
-      className="mx-2 mb-2 mt-2 flex h-[calc(100%_-_1rem)] min-w-0 flex-col overflow-hidden rounded-xl border border-border/70 bg-background shadow-[0_1px_3px_-1px_rgba(15,17,21,0.08),0_1px_2px_rgba(15,17,21,0.04)]"
+      className="flex h-full min-w-0 flex-col overflow-hidden border-l border-border/70 bg-background"
     >
       <SessionSidePanelTabBar
         tabs={sidePanelTabs}
@@ -6177,8 +6201,10 @@ const SessionDetail = ({
         className={cn(
           'border-b border-border/50 bg-background',
           // Right panel is never under the macOS traffic lights (top-left) —
-          // it must not reserve the titlebar inset the left sidebar needs.
+          // it must not reserve the titlebar inset the left sidebar needs. It
+          // still shares the traffic-light centerline with the main tab bar.
           'h-11',
+          macTrafficLightBorderedRowPadClass,
           windowsCaptionPadClass
         )}
       />
@@ -6189,10 +6215,6 @@ const SessionDetail = ({
             panels={sidePanelOptions}
             onPanelOpen={handleSidePanelOptionOpen}
             title={t('sessions.sidebar.emptyTitle', 'Open a panel')}
-            description={t(
-              'sessions.sidebar.emptyDescription',
-              'Choose what you want to see in this sidebar.'
-            )}
           />
         ) : null}
         {desktopSideSessionSurfaces}

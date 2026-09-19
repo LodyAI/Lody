@@ -6,7 +6,6 @@ import {
   CheckCircle2,
   ChevronDown,
   CircleDashed,
-  Copy,
   CircleDot,
   GitMerge,
   GitPullRequestArrow,
@@ -143,7 +142,7 @@ function UserAvatar({
   const login = user?.login ?? 'ghost';
   const sizeClass = size === 'xs' ? 'h-4 w-4' : size === 'sm' ? 'h-5 w-5' : 'h-6 w-6';
   const fallbackTextClass =
-    size === 'xs' ? 'text-[8px]' : size === 'sm' ? 'text-[10px]' : 'text-[11px]';
+    size === 'xs' ? 'text-[8px]' : size === 'sm' ? 'text-[0.75em]' : 'text-[0.8em]';
   return (
     <Avatar className={cn('shrink-0', sizeClass)}>
       {user?.avatarUrl && <AvatarImage src={user.avatarUrl} alt={login} />}
@@ -154,7 +153,16 @@ function UserAvatar({
   );
 }
 
-function InlineCopyButton({ value, label }: { value: string; label: string }) {
+function BranchRefChip({
+  label,
+  value,
+  copyLabel,
+}: {
+  label: string;
+  value: string;
+  copyLabel: string;
+}) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const handleCopy = useCallback(() => {
     if (!value) return;
@@ -163,22 +171,21 @@ function InlineCopyButton({ value, label }: { value: string; label: string }) {
     window.setTimeout(() => setCopied(false), 1500);
   }, [value]);
   return (
-    <button
-      type="button"
-      onClick={handleCopy}
-      className={cn(
-        'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors',
-        'hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring'
-      )}
-      title={label}
-      aria-label={label}
-    >
-      {copied ? (
-        <CheckCircle2 className="h-3 w-3 text-status-success" />
-      ) : (
-        <Copy className="h-3 w-3" />
-      )}
-    </button>
+    <div className="grid min-w-0 grid-cols-[2.75rem_minmax(0,1fr)] items-center gap-x-2">
+      <span className="text-[0.8em] text-muted-foreground">{label}</span>
+      <button
+        type="button"
+        onClick={handleCopy}
+        title={copied ? t('common.copied', 'Copied') : copyLabel}
+        aria-label={copied ? t('common.copied', 'Copied') : copyLabel}
+        className={cn(
+          'min-w-0 truncate rounded-sm bg-foreground/[0.06] px-1.5 py-0.5 text-left font-mono text-[0.8em] font-normal text-foreground',
+          'hover:bg-foreground/[0.1] focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring'
+        )}
+      >
+        {copied ? t('common.copied', 'Copied') : value}
+      </button>
+    </div>
   );
 }
 
@@ -201,13 +208,13 @@ function CheckRunIcon({ run }: { run: GitHubCheckRun }) {
 const CheckRunRow = memo(function CheckRunRow({ run }: { run: GitHubCheckRun }) {
   const { t } = useTranslation();
   return (
-    <li className="flex items-center gap-2 px-3 py-1.5 text-xs">
+    <li className="flex items-center gap-2 px-3 py-1.5 text-[0.9em]">
       <CheckRunIcon run={run} />
       <span className="min-w-0 flex-1 truncate" title={run.name}>
         {run.name}
       </span>
       {run.appName && (
-        <span className="shrink-0 text-[11px] text-muted-foreground">{run.appName}</span>
+        <span className="shrink-0 text-[0.8em] text-muted-foreground">{run.appName}</span>
       )}
       {run.htmlUrl && (
         <a
@@ -270,11 +277,11 @@ const ChecksSection = memo(function ChecksSection({
           open && 'border-b border-border'
         )}
       >
-        <span className="flex min-w-0 items-center gap-2 text-xs font-medium">
+        <span className="flex min-w-0 items-center gap-2 text-[0.9em] font-medium">
           {headerIcon}
           <span className="truncate">{headerLabel}</span>
         </span>
-        <span className="flex shrink-0 items-center gap-1.5 text-[11px] tabular-nums text-muted-foreground">
+        <span className="flex shrink-0 items-center gap-1.5 text-[0.8em] tabular-nums text-muted-foreground">
           {countLabel}
           <ChevronDown
             className={cn('h-3.5 w-3.5 transition-transform', open && 'rotate-180')}
@@ -300,7 +307,7 @@ function ChecksPermissionNotice({
 }) {
   const { t } = useTranslation();
   return (
-    <section className="flex items-start gap-2 rounded-md border border-status-warning/40 bg-status-warning/5 px-3 py-2 text-xs">
+    <section className="flex items-start gap-2 rounded-md border border-status-warning/40 bg-status-warning/5 px-3 py-2 text-[0.9em]">
       <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-status-warning" />
       <div className="min-w-0 flex-1">
         <p className="font-medium text-foreground">
@@ -319,7 +326,7 @@ function ChecksPermissionNotice({
           size="sm"
           variant="outline"
           onClick={onGrantChecksPermission}
-          className="h-6 gap-1 text-[11px]"
+          className="h-6 gap-1 text-[0.8em]"
         >
           <Github className="h-3 w-3" />
           {t('sessions.prTab.checksPermissionCta', 'Update permissions')}
@@ -337,7 +344,7 @@ function MergeStatusNotice({ kind }: { kind: 'conflict' | 'blocked' | 'checking'
   const { t } = useTranslation();
   if (kind === 'conflict') {
     return (
-      <section className="flex items-start gap-2 rounded-md border border-status-danger/40 bg-status-danger/5 px-3 py-2 text-xs text-foreground">
+      <section className="flex items-start gap-2 rounded-md border border-status-danger/40 bg-status-danger/5 px-3 py-2 text-[0.9em] text-foreground">
         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-status-danger" />
         <p className="min-w-0 flex-1">
           {t(
@@ -350,7 +357,7 @@ function MergeStatusNotice({ kind }: { kind: 'conflict' | 'blocked' | 'checking'
   }
   if (kind === 'blocked') {
     return (
-      <section className="flex items-start gap-2 rounded-md border border-status-warning/40 bg-status-warning/5 px-3 py-2 text-xs text-foreground">
+      <section className="flex items-start gap-2 rounded-md border border-status-warning/40 bg-status-warning/5 px-3 py-2 text-[0.9em] text-foreground">
         <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-status-warning" />
         <p className="min-w-0 flex-1">
           {t(
@@ -362,7 +369,7 @@ function MergeStatusNotice({ kind }: { kind: 'conflict' | 'blocked' | 'checking'
     );
   }
   return (
-    <section className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+    <section className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2 text-[0.9em] text-muted-foreground">
       <Spinner className="h-4 w-4 shrink-0" />
       <p className="min-w-0 flex-1">
         {t('sessions.prTab.mergeCheckingNotice', 'Checking whether this branch can be merged…')}
@@ -385,8 +392,8 @@ const IssueCommentItem = memo(function IssueCommentItem({
           user={comment.user ? { login, avatarUrl: comment.user.avatarUrl } : null}
           size="md"
         />
-        <span className="text-sm font-medium leading-none">{login}</span>
-        <span className="text-[11px] text-muted-foreground leading-none">
+        <span className="text-[0.9em] font-medium leading-none">{login}</span>
+        <span className="text-[0.8em] text-muted-foreground leading-none">
           {t('sessions.prTab.commented', 'commented')} · {formatRelativeTime(comment.createdAt, t)}
         </span>
         <a
@@ -420,13 +427,13 @@ const ReviewThreadCard = memo(function ReviewThreadCard({
     <article
       className={cn('rounded-md border border-border', nested ? 'bg-muted/20' : 'bg-background')}
     >
-      <header className="flex items-center gap-2 border-b border-border px-3 py-1.5 text-[11px] text-muted-foreground">
+      <header className="flex items-center gap-2 border-b border-border px-3 py-1.5 text-[0.8em] text-muted-foreground">
         <span className="min-w-0 flex-1 truncate font-mono" title={thread.anchor.path}>
           {thread.anchor.path}
           <span className="ml-1 text-muted-foreground/70">:{thread.anchor.line}</span>
         </span>
         {thread.outdated && (
-          <span className="shrink-0 rounded-sm bg-muted px-1 py-px font-sans text-[10px] uppercase tracking-wide text-muted-foreground">
+          <span className="shrink-0 rounded-sm bg-muted px-1 py-px font-sans text-[0.75em] uppercase tracking-wide text-muted-foreground">
             {t('sessions.prTab.outdated', 'outdated')}
           </span>
         )}
@@ -440,7 +447,7 @@ function ReviewStateBadge({ state }: { state: GitHubReview['state'] }) {
   const { t } = useTranslation();
   if (state === 'approved') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-status-success/40 bg-status-success/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-status-success">
+      <span className="inline-flex items-center gap-1 rounded-full border border-status-success/40 bg-status-success/10 px-1.5 py-0.5 text-[0.75em] font-medium uppercase tracking-wide text-status-success">
         <CheckCircle2 className="h-3 w-3" />
         {t('sessions.prTab.reviewApproved', 'approved')}
       </span>
@@ -448,7 +455,7 @@ function ReviewStateBadge({ state }: { state: GitHubReview['state'] }) {
   }
   if (state === 'changes_requested') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-status-danger/40 bg-status-danger/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-status-danger">
+      <span className="inline-flex items-center gap-1 rounded-full border border-status-danger/40 bg-status-danger/10 px-1.5 py-0.5 text-[0.75em] font-medium uppercase tracking-wide text-status-danger">
         <CircleDot className="h-3 w-3" />
         {t('sessions.prTab.reviewChangesRequested', 'changes requested')}
       </span>
@@ -456,14 +463,14 @@ function ReviewStateBadge({ state }: { state: GitHubReview['state'] }) {
   }
   if (state === 'dismissed') {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+      <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-1.5 py-0.5 text-[0.75em] font-medium uppercase tracking-wide text-muted-foreground">
         <MinusCircle className="h-3 w-3" />
         {t('sessions.prTab.reviewDismissed', 'dismissed')}
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+    <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-1.5 py-0.5 text-[0.75em] font-medium uppercase tracking-wide text-muted-foreground">
       <MessageSquare className="h-3 w-3" />
       {t('sessions.prTab.reviewCommented', 'commented')}
     </span>
@@ -488,10 +495,10 @@ const ReviewSubmissionItem = memo(function ReviewSubmissionItem({
           user={review.user ? { login, avatarUrl: review.user.avatarUrl } : null}
           size="md"
         />
-        <span className="text-sm font-medium leading-none">{login}</span>
+        <span className="text-[0.9em] font-medium leading-none">{login}</span>
         <ReviewStateBadge state={review.state} />
         {when && (
-          <span className="text-[11px] leading-none text-muted-foreground">
+          <span className="text-[0.8em] leading-none text-muted-foreground">
             {formatRelativeTime(when, t)}
           </span>
         )}
@@ -634,7 +641,7 @@ interface PrHeaderActionProps {
   menuContentClassName?: string;
 }
 
-const PR_ACTION_BTN = 'h-7 gap-1.5 px-2.5 text-xs';
+const PR_ACTION_BTN = 'h-7 gap-1.5 px-2.5 text-[0.9em]';
 
 /**
  * Filled-green merge button. `--status-success` is authored as a FOREGROUND color
@@ -910,14 +917,21 @@ function PrHeaderActionButton({
         variant="outline"
         onClick={() => void onDeleteBranch?.()}
         disabled={busy}
-        className={PR_ACTION_BTN}
+        className={cn(
+          PR_ACTION_BTN,
+          '@max-[420px]/pr-tab:h-7 @max-[420px]/pr-tab:w-7 @max-[420px]/pr-tab:min-w-7 @max-[420px]/pr-tab:gap-0 @max-[420px]/pr-tab:px-0'
+        )}
+        aria-label={t('sessions.prTab.deleteBranch', 'Delete branch')}
+        title={t('sessions.prTab.deleteBranch', 'Delete branch')}
       >
         {isDeletingBranch ? (
           <Spinner className="h-3.5 w-3.5" />
         ) : (
           <Trash2 className="h-3.5 w-3.5" />
         )}
-        {t('sessions.prTab.deleteBranch', 'Delete branch')}
+        <span className="@max-[420px]/pr-tab:hidden">
+          {t('sessions.prTab.deleteBranch', 'Delete branch')}
+        </span>
       </Button>
     );
   }
@@ -1057,36 +1071,20 @@ function resolveMergeKind(pr: GitHubPullRequestDetails): MergeKind {
 
 function BranchRow({ pr }: { pr: GitHubPullRequestDetails }) {
   const { t } = useTranslation();
+  const copyLabel = t('sessions.prTab.copyBranch', 'Copy branch name');
   return (
     <div className="border-b border-border px-4 py-2">
-      <div className="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-        <span className="inline-flex items-center gap-1">
-          <span className="uppercase tracking-wide text-muted-foreground/80">
-            {t('sessions.prTab.base', 'base')}
-          </span>
-          <code className="rounded-sm bg-muted px-1 py-px font-mono text-foreground">
-            {pr.baseRef}
-          </code>
-          <InlineCopyButton
-            value={pr.baseRef}
-            label={t('sessions.prTab.copyBranch', 'Copy branch name')}
-          />
-        </span>
-        <span aria-hidden className="text-muted-foreground/60">
-          ←
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <span className="uppercase tracking-wide text-muted-foreground/80">
-            {t('sessions.prTab.head', 'head')}
-          </span>
-          <code className="rounded-sm bg-muted px-1 py-px font-mono text-foreground">
-            {pr.headRef}
-          </code>
-          <InlineCopyButton
-            value={pr.headRef}
-            label={t('sessions.prTab.copyBranch', 'Copy branch name')}
-          />
-        </span>
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-1">
+        <BranchRefChip
+          label={t('sessions.prTab.base', 'Base')}
+          value={pr.baseRef}
+          copyLabel={copyLabel}
+        />
+        <BranchRefChip
+          label={t('sessions.prTab.head', 'Head')}
+          value={pr.headRef}
+          copyLabel={copyLabel}
+        />
       </div>
     </div>
   );
@@ -1146,13 +1144,13 @@ export const PrTabView = memo(function PrTabView({
       {state === 'loading' && !pr && <PrBodySkeleton />}
 
       {state === 'error' && !pr && (
-        <div className="flex items-start gap-2 rounded-md border border-status-danger/40 bg-status-danger/5 px-3 py-2 text-xs text-status-danger">
+        <div className="flex items-start gap-2 rounded-md border border-status-danger/40 bg-status-danger/5 px-3 py-2 text-[0.9em] text-status-danger">
           <AlertCircle className="h-4 w-4 shrink-0" />
           <div className="min-w-0 flex-1">
             <p className="font-medium">
               {t('sessions.prTab.loadError', 'Failed to load pull request')}
             </p>
-            {error && <p className="mt-0.5 text-[11px] opacity-80">{error}</p>}
+            {error && <p className="mt-0.5 text-[0.8em] opacity-80">{error}</p>}
           </div>
           <div className="flex shrink-0 items-center gap-1.5">
             {onRefresh && (
@@ -1161,7 +1159,7 @@ export const PrTabView = memo(function PrTabView({
                 size="sm"
                 variant="outline"
                 onClick={onRefresh}
-                className="h-6 text-[11px]"
+                className="h-6 text-[0.8em]"
               >
                 {t('sessions.prTab.retry', 'Retry')}
               </Button>
@@ -1176,66 +1174,68 @@ export const PrTabView = memo(function PrTabView({
             <h2
               className={cn(
                 'font-semibold leading-snug text-pretty',
-                embedded ? 'text-[0.95rem]' : 'text-lg'
+                embedded ? 'text-[1em]' : 'text-[1.15em]'
               )}
             >
               {pr.title}
               <span
                 className={cn(
                   'ml-2 font-normal text-muted-foreground',
-                  embedded ? 'text-sm' : 'text-base'
+                  embedded ? 'text-[0.9em]' : 'text-[1em]'
                 )}
               >
                 #{pr.number}
               </span>
             </h2>
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
-              {pr.user && (
-                <>
-                  <UserAvatar
-                    user={{ login: pr.user.login, avatarUrl: pr.user.avatarUrl }}
-                    size="xs"
-                  />
-                  <span className="font-medium text-foreground">{pr.user.login}</span>
-                </>
-              )}
-              <span>
-                {t('sessions.prTab.opened', 'opened {{when}}', {
-                  when: formatRelativeTime(pr.createdAt, t),
-                })}
+            <div className="flex flex-col gap-1 text-[0.8em] text-muted-foreground @min-[420px]/pr-tab:flex-row @min-[420px]/pr-tab:flex-wrap @min-[420px]/pr-tab:items-center @min-[420px]/pr-tab:gap-x-2">
+              <span className="inline-flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                {pr.user && (
+                  <>
+                    <UserAvatar
+                      user={{ login: pr.user.login, avatarUrl: pr.user.avatarUrl }}
+                      size="xs"
+                    />
+                    <span className="font-normal text-foreground">{pr.user.login}</span>
+                  </>
+                )}
+                <span>
+                  {t('sessions.prTab.opened', 'opened {{when}}', {
+                    when: formatRelativeTime(pr.createdAt, t),
+                  })}
+                </span>
+                <span aria-hidden>·</span>
+                <span>
+                  {t('sessions.prTab.commitsSummary', '{{count}} commits', {
+                    count: pr.commits,
+                  })}
+                </span>
               </span>
-              <span>·</span>
-              <span>
-                {t('sessions.prTab.commitsSummary', '{{count}} commits', {
-                  count: pr.commits,
-                })}
-              </span>
-              <span>·</span>
-              <span className="tabular-nums">
+              <span className="inline-flex items-center gap-1.5 tabular-nums">
                 <span className="text-status-success">+{pr.additions}</span>
-                {' / '}
                 <span className="text-status-danger">-{pr.deletions}</span>
-                {' · '}
-                {t('sessions.prTab.filesChanged', '{{count}} files', {
-                  count: pr.changedFiles,
-                })}
+                <span aria-hidden>·</span>
+                <span>
+                  {t('sessions.prTab.filesChanged', '{{count}} files', {
+                    count: pr.changedFiles,
+                  })}
+                </span>
               </span>
             </div>
             {pr.body ? (
               embedded ? (
-                <div className="mt-1 text-[13px] leading-relaxed text-foreground/90">
+                <div className="mt-1 text-[0.9em] leading-relaxed text-foreground/90">
                   <SessionCommentMarkdown body={pr.body} allowHtml />
                 </div>
               ) : (
                 <div
                   data-pr-description=""
-                  className="mt-2.5 pr-1 text-sm leading-relaxed text-foreground/90"
+                  className="mt-2.5 pr-1 text-[1em] leading-relaxed text-foreground/90"
                 >
                   <SessionCommentMarkdown body={pr.body} allowHtml />
                 </div>
               )
             ) : (
-              <p className="mt-2.5 text-xs italic text-muted-foreground">
+              <p className="mt-2.5 text-[0.8em] italic text-muted-foreground">
                 {t('sessions.prTab.noDescription', 'No description provided.')}
               </p>
             )}
@@ -1311,13 +1311,13 @@ export const PrTabView = memo(function PrTabView({
     ) : null;
 
   return (
-    <div className={cn('flex h-full min-h-0 flex-col bg-background', className)}>
+    <div className={cn('@container/pr-tab flex h-full min-h-0 flex-col bg-background', className)}>
       {embedded ? (
         /* Landing: slim bar — badge + merge only (no branch row / github chrome). */
         <div className="flex h-12 shrink-0 items-center justify-between gap-2 border-b border-border/60 px-5">
           <div className="flex min-w-0 items-center gap-2">
             <PullRequestBadge pr={badgeMeta} size="sm" />
-            <span className="min-w-0 truncate text-xs font-medium text-muted-foreground">
+            <span className="min-w-0 truncate text-[0.9em] font-medium text-muted-foreground">
               {repoFullName}
             </span>
           </div>
@@ -1328,7 +1328,7 @@ export const PrTabView = memo(function PrTabView({
           <div className="mx-auto flex w-full max-w-3xl items-center gap-2">
             {leadingSlot}
             <PullRequestBadge pr={badgeMeta} size="md" />
-            <span className="min-w-0 truncate text-xs font-medium text-foreground">
+            <span className="min-w-0 truncate text-[0.9em] font-normal text-foreground @max-[280px]/pr-tab:hidden">
               {repoFullName}
             </span>
             <div className="ml-auto flex shrink-0 items-center gap-1">

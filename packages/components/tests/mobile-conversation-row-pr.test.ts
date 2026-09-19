@@ -75,16 +75,16 @@ describe('mobile ConversationRow PR status', () => {
 
     const prIcon = row.querySelector('svg[data-pr-ci-verdict="success"]');
     expect(prIcon).not.toBeNull();
-    expect(prIcon?.querySelector('.lucide-git-merge')?.classList.contains('text-github-merged')).toBe(
+    expect(prIcon?.querySelector('.lucide-git-merge')?.classList.contains('text-pr-merged')).toBe(
       true
     );
     expect(prIcon?.querySelector('.lucide-check')?.classList.contains('text-status-success')).toBe(
       true
     );
     // PR owns the right edge, with the line diff immediately before it.
-    expect(
-      Array.from(row.querySelectorAll('.text-github-deletion, [data-pr-ci-verdict]'))
-    ).toEqual([row.querySelector('.text-github-deletion'), prIcon]);
+    expect(Array.from(row.querySelectorAll('.text-github-deletion, [data-pr-ci-verdict]'))).toEqual(
+      [row.querySelector('.text-github-deletion'), prIcon]
+    );
   });
 
   it('renders a plain PR glyph when the poller has no CI record yet', () => {

@@ -48,8 +48,22 @@ strings on i18n rather than the registry's inline English.
   `collisionPadding`; Radix defaults it to 0, which parks a colliding surface flush
   against the screen edge and caps `--radix-*-available-height` there too.
 - A submenu's `sideOffset` is measured from its trigger ROW, so it must also clear the
-  parent surface's `p-1` (4px) and the 1px ring each surface paints outside its border
-  box. Default is `7` so the rings sit 1px apart; `6` welds the two surfaces together.
+  parent surface's `p-0.5` (2px) and the 0.5px ring each surface paints outside its border
+  box. Default is `7` so the rings sit 4px apart; `3` welds the two surfaces together.
+- Tooltips (`ui/tooltip.tsx`) use a `0.5px` border and
+  `0 0.5px 1px 1px rgba(0,0,0,0.04)`. Do not restore a 1px border.
+- Overlay list hover (menus, command palette, mention, select) is
+  `bg-foreground/[0.05]` in light and `bg-white/[0.10]` in dark. Do not use
+  `--hover` on popovers — it is sized for the page/sidebar and vanishes on the
+  near-black dark menu fill. Kbd chips use the same 6% ink fill and muted text
+  as the workspace Plus badge.
+- Menu chrome lives in `menu-styles.ts`. Items are `0.9em` of `--ui-font-size`
+  (the Appearance slider) / `py-1` / `min-h-7`. Settings chrome is `1em` of the
+  same token. Do not go back to `text-[13px]` or `text-xs` for menu rows.
+  The hairline is a `0.5px` shadow ring (not a CSS border). Separators are
+  `foreground/10` in light and `white/18` in dark. Dark menus use a brighter
+  ring (`rgb(80 80 80)`) and a tighter, darker drop. Do not restore bulky
+  `min-h-8` rows or a 1px ring.
 
 ## Spinner
 
@@ -73,6 +87,9 @@ strings on i18n rather than the registry's inline English.
   thumb polling on effect cleanup. Verify both ESM and CommonJS with
   `tests/scroll-area-lifecycle.test.tsx` when upgrading; removing a thumb during
   the scroll-end debounce must not retain a frame loop or detached viewport.
+- The desktop left sidebar (`loro-sidebar.tsx`) uses `type="scroll"` so the
+  overlay thumb appears only while scrolling, not on pointer move. Do not
+  revert it to the Radix default `hover`.
 
 ## Slider
 

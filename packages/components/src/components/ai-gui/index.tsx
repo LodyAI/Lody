@@ -16,7 +16,7 @@ import type {
 } from '@lody/shared';
 import { DEFAULT_CONVERSATION_FONT_SIZE, type ConversationFontSize } from '@/atoms/settings';
 import { cloudOperations } from '@/lib/cloud-api-operations';
-import type { AgentActivityTone } from '@/components/shared';
+import type { AgentActivityTone } from './view';
 import {
   MessageRowView,
   SessionChatStreamView,
@@ -70,6 +70,8 @@ export interface SessionChatStreamProps {
   showScrollToLatest?: boolean;
   agentActivityLabel?: string | null;
   agentActivityTone?: AgentActivityTone;
+  /** The status is live work (not waiting on the user): shimmer it. */
+  agentActivityShimmer?: boolean;
   onFileDiffClick?: (turnId: string, filePath: string) => void;
   onFilePathClick?: (filePath: string) => void;
   /** Routes HTML attachment clicks to a live file or Browser surface. */
@@ -158,6 +160,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       showScrollToLatest = true,
       agentActivityLabel = null,
       agentActivityTone = 'primary',
+      agentActivityShimmer,
       onFileDiffClick,
       onFilePathClick,
       onOpenHtmlFile,
@@ -284,6 +287,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
         forkingAssistantMessageId={forkingAssistantMessageId}
         agentActivityLabel={agentActivityLabel}
         agentActivityTone={agentActivityTone}
+        agentActivityShimmer={agentActivityShimmer}
         conversationFontSize={conversationFontSize}
         skipNextViewportResizeAutoScrollRef={skipNextViewportResizeAutoScrollRef}
         suppressStickyAutoScrollRef={suppressStickyAutoScrollRef}

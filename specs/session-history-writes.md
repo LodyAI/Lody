@@ -49,6 +49,13 @@ That tolerance must not authorize creating new malformed items locally.
   External provider imports remain new inputs, not privileged stored-history copies.
 - Acceptance here means a local CRDT write. Existing repo persistence and transport
   still own durability, permissions, and remote synchronization.
+- Provider updates classified as transient before the history boundary must never
+  reach `HistoryWriter`. Builtin Codex `agent_thought_chunk` is one such update:
+  it may publish a bounded live status through ephemeral presence, but it creates
+  no assistant `thought` item, is absent from exports and reopens, and clears when
+  the turn's presence is cleared. This is prospective only; opening a session does
+  not scrub thought items persisted by older clients. Standard thought chunks from
+  other ACP providers retain the normal history path.
 - Tool fields other than type/toolCallId
   parse only changed fields without reparsing untouched tool payloads; outcome-only
   edits retain existing request information. Identity changes require complete item parsing;
@@ -79,7 +86,9 @@ That tolerance must not authorize creating new malformed items locally.
   from Stop, transport failure, or local ownership state.
 - Stop and target-prompt completion end local document/preparation/configuration/verdict
   waits, releasing the steer queue and rewrite lease. This does not cancel the raw request
-  or discard its verdict. Already-applied ownership transfer finishes atomically; queued
+  or discard its verdict. Exception: a handoff adapter may answer the yielded prompt before
+  reporting a submitted steer's verdict, so its completion waits for that verdict; the
+  steered prompt is the next turn, never cancellation-drain work. Already-applied ownership transfer finishes atomically; queued
   steers must not begin preparation for a stopped target. Failed outcome persistence must
   still release the application lease and permit cancellation cleanup.
 - Execution owns steer status and exact-id recovery activations in `steerTurnStatuses`.

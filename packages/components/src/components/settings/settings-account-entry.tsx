@@ -34,8 +34,8 @@ export function SettingsAccountEntry({
         'flex w-full min-w-0 items-center text-start transition-colors',
         mobile
           ? 'gap-3 rounded-2xl border border-border/40 bg-card px-4 py-3 active:bg-muted/40'
-          : 'gap-2.5 rounded-md px-2.5 py-1 hover:bg-secondary/50',
-        !mobile && active && 'bg-secondary text-secondary-foreground'
+          : 'gap-2.5 rounded-md px-2.5 py-1 hover:bg-foreground/[0.04]',
+        !mobile && active && 'bg-foreground/[0.06]'
       )}
     >
       <UserAvatar
@@ -46,7 +46,7 @@ export function SettingsAccountEntry({
         )}
       />
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium text-foreground">
+        <span className="block truncate text-sm font-normal text-foreground">
           {user.name || user.email || t('settings.tabs.account')}
         </span>
         {mobile && user.email ? (

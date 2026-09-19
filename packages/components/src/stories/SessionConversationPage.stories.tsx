@@ -46,6 +46,7 @@ import {
   type MachineId,
   type MachineViewMeta,
   type MessageContent,
+  type MessageQueueItem,
   type SessionDoc,
   type SessionHistoryParsed,
   type SessionId,
@@ -53,6 +54,7 @@ import {
   type SessionPullRequestMeta,
   type WorkspaceId,
 } from '@lody/shared';
+import { MessageQueueDisplay } from '@/components/sessions/message-queue';
 
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom, userAtom } from '@/atoms';
 import {
@@ -928,7 +930,9 @@ const buildHistory = (
 };
 
 const toStreamItems = (sessionId: SessionId, messages: SessionHistoryParsed[]) =>
-  messages.map((message, turnIndex) => ({ type: 'message', sessionId, message, turnIndex }) as const);
+  messages.map(
+    (message, turnIndex) => ({ type: 'message', sessionId, message, turnIndex }) as const
+  );
 
 const renderMessageRow = (
   {
@@ -1004,9 +1008,47 @@ function createStoryStore(session: SessionMeta, state: PageState) {
   return store;
 }
 
-function StoryInfoBar({ session }: { session: SessionMeta }) {
+const STORY_QUEUED_TASKS = [
+  'After the permission flow lands, tighten the mobile composer spacing.',
+  'Then run the Storybook render budgets again.',
+];
+
+const storyQueueItems = (): MessageQueueItem[] =>
+  STORY_QUEUED_TASKS.map((task, i) => ({
+    $cid: `story-queue-${i}`,
+    task,
+    userId: 'user-1',
+    userTurnId: `story-queued-turn-${i}`,
+    timestamp: new Date(getServerNow() - i * 1000).toISOString(),
+    acpSessionConfig: { prompt: task, cliType: 'claude-code', agentType: 'claude-code' },
+  })) as unknown as MessageQueueItem[];
+
+function StoryInfoBar({
+  session,
+  queued,
+}: {
+  session: SessionMeta;
+  /** Queued turns stacked on the bar, or on the composer when the bar is empty. */
+  queued?: 'with-info-bar' | 'without-info-bar';
+}) {
+  const withoutBar = queued === 'without-info-bar';
+  const queue = queued ? (
+    <MessageQueueDisplay
+      sessionId={session.id}
+      items={storyQueueItems()}
+      onRemove={fn()}
+      onReorder={fn()}
+      onEditStart={fn()}
+      onEditCancel={fn()}
+      onEditSave={fn()}
+      onSteer={fn()}
+      showSteerAction
+    />
+  ) : undefined;
+  if (withoutBar) return <SessionInfoBar status={null} queue={queue} />;
   return (
     <SessionInfoBar
+      queue={queue}
       status={null}
       goal={{
         type: 'goal',
@@ -1058,6 +1100,8 @@ function StoryComposer({
 
   return (
     <SessionChatInputArea
+      // The info bar above owns this gap, as on the session page.
+      hideTopSpacer
       session={session}
       sessionLocalProjectRootPath="/Users/developer/Code/lody"
       isMachineRemoved={false}
@@ -1093,6 +1137,7 @@ function StoryShell({
   showCapacityRetry = false,
   shareImage = false,
   showCollaborators = false,
+  queued,
 }: {
   state: PageState;
   frame: DeviceFrame;
@@ -1100,6 +1145,7 @@ function StoryShell({
   showCapacityRetry?: boolean;
   shareImage?: boolean;
   showCollaborators?: boolean;
+  queued?: 'with-info-bar' | 'without-info-bar';
 }) {
   const { t } = useTranslation();
   const [streamChunkCount, setStreamChunkCount] = useState(0);
@@ -1441,7 +1487,7 @@ function StoryShell({
                             <div hidden={selection.active}>
                               {/* Mirrors the production info bar (cluster + stage)
                               glued above the composer — desktop AND mobile. */}
-                              <StoryInfoBar session={session} />
+                              <StoryInfoBar session={session} queued={queued} />
                               <StoryComposer
                                 session={session}
                                 isAgentBusy={isWorking}
@@ -1661,6 +1707,20 @@ export const DesktopShareImageDark: Story = {
 export const DesktopSessionMentionDrop: Story = {
   args: { dropActive: true },
   globals: { theme: 'dark' },
+  decorators: [withDesktopViewport],
+};
+
+/** Queued turns sit on the info bar as one attached stack. */
+export const DesktopQueuedMessages: Story = {
+  args: { state: 'working', queued: 'with-info-bar' },
+  globals: { theme: 'light' },
+  decorators: [withDesktopViewport],
+};
+
+/** With nothing for the info bar to show, the queue sits on the composer. */
+export const DesktopQueuedMessagesWithoutInfoBar: Story = {
+  args: { state: 'working', queued: 'without-info-bar' },
+  globals: { theme: 'light' },
   decorators: [withDesktopViewport],
 };
 

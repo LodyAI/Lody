@@ -24,6 +24,7 @@ import { AgentIcon } from '@/components/icons/agent-icon';
 import { buildAgentRoleRunConfigSummary, EMPTY_AGENT_ROLE_FORM_VALUE } from '@/lib/agent-role-form';
 import { AGENT_ROLE_UNAVAILABLE_REASON_KEYS } from '@/lib/composer-agent-roles';
 import { cn } from '@/lib/utils';
+import { SETTINGS_ROW_CARD_CLASS } from './compact-layout';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -112,7 +113,7 @@ export function AgentRolesSetting() {
       <section className="flex flex-col">
         <div className="flex items-center justify-between gap-2 pb-1 pt-0.5">
           <div className="flex min-w-0 items-center gap-2">
-            <h3 className="text-xs font-semibold text-muted-foreground">
+            <h3 className="text-xs font-normal text-muted-foreground">
               {t('settings.agentRoles.catalogTitle')}
             </h3>
             {roles.length > 0 ? (
@@ -249,7 +250,7 @@ export function AgentRoleRow({
   const runConfig = buildAgentRoleRunConfigSummary(role.runConfig);
 
   return (
-    <div className="overflow-hidden rounded-lg bg-foreground/[0.04]">
+    <div className={cn('overflow-hidden', SETTINGS_ROW_CARD_CLASS)}>
       <div className="flex w-full min-w-0 items-center transition-colors hover:bg-hover/40">
         <button
           type="button"
@@ -264,7 +265,7 @@ export function AgentRoleRow({
             <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
               {/* No `@token` here: it is derived from this very name, so printing
                   both says one thing twice. */}
-              <span className="min-w-0 truncate text-sm font-medium leading-tight">
+              <span className="min-w-0 truncate text-sm font-normal leading-tight">
                 {role.name}
               </span>
               <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px]">

@@ -25,13 +25,19 @@ Stop 可能使尚未完成准备或投递确认的 steer 一直占用会话操�
 
 | 状态                                | 所有者及释放边界                                                                           |
 | ----------------------------------- | ------------------------------------------------------------------------------------------ |
-| 本地准备或 application 等待         | 目标轮次的 abort signal；Stop 或 prompt 结束释放 steer 队列及 rewrite lease。              |
+| 本地准备或 application 等待         | 目标轮次的 abort signal；Stop 或 prompt 结束释放 steer 队列及 rewrite lease（handoff 见下）。 |
 | 已发送的 ACP 或配置调用             | 既有执行 owner；请求结束或确认终止，共用五秒收尾期限。                                     |
 | 明确拒绝的输入                      | daemon 独占的 `steerTurnStatuses` 精确 ID pending 激活；普通执行接管或历史缺失失败后清理。 |
 | 历史尚未到达的 applied/unknown 结果 | 同一 map 中的精确 ID 投影；终态投影后清理，applied processing 保留到执行收尾。             |
 | 前端 RPC 确认                       | 仅影响展示，绝不把终态历史回写成 processing。                                              |
 
-已经进入 applied 交接的操作先完整提交所有权，再允许完成处理通过队列。steer 配置在每次后续
+已经进入 applied 交接的操作先完整提交所有权，再允许完成处理通过队列。
+handoff adapter（内置 Claude，`upstreamTurn: 'handoff'`）会先返回被让出的 prompt，再报告
+`applied`：旧 turn 先结束，adapter 要等 SDK 回放引导消息时才确认。因此引导一旦已提交，prompt
+结束不会中止其结论等待，完成决策排在它之后：`applied` 交接给后继轮次，拒绝或未知结果走普通
+完成路径。若中止该等待，owner 会把引导 prompt（即下一轮本身）当作残留请求收尾，五秒后终止
+agent。Stop 与 same-turn（Codex）steer 不变。
+steer 配置在每次后续
 mutation 前检查目标 signal，但已经发出的配置调用仍纳入收尾。主 prompt 已返回、原始 steer
 尚未结束时，重复 Stop 也不能中断仍在收尾的 owner。结果写入失败通过 `finally` 释放 application lease。
 
@@ -58,7 +64,7 @@ mutation 前检查目标 signal，但已经发出的配置调用仍纳入收尾�
 ## 验证
 
 确定性 executor 测试覆盖文档加载、prompt block 和配置等待中的 Stop/自然结束、第二条排队
-steer、主 prompt 结束后的原始请求收尾、历史晚到前的 applied/refused/unknown 结果、较新激活
+steer、主 prompt 结束后的原始请求收尾、晚于被让出 prompt 返回的 handoff 结论（applied 或拒绝）、历史晚到前的 applied/refused/unknown 结果、较新激活
 不被覆盖，以及后续普通消息执行。共享测试通过真正的 HistoryWriter 和 Loro peer import 验证
 终态保护及 unknown 状态。前端测试覆盖终态之后的迟到 ACK 与 unknown 重发确认。原有终止失败
 和内部取消测试继续保留。

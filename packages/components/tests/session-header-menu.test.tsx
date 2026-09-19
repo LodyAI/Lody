@@ -11,6 +11,7 @@ import {
   reviewAgentExperimentEnabledAtom,
 } from '../src/atoms/settings';
 import { SessionHeaderMenu } from '../src/components/sessions/session-chat-interface';
+import { TooltipProvider } from '../src/ui/tooltip';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -120,11 +121,11 @@ describe('SessionHeaderMenu', () => {
     expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe('none');
   }
 
-  it('opens the submenu and forks into the current workspace', async () => {
+  it('opens the submenu and forks to a new tab', async () => {
     await act(async () => root?.render(<ForkMenuHarness />));
     await openForkMenu();
     expect(menuItem('Copy context as Markdown')).toBeDefined();
-    await act(async () => menuItem('Current workspace').click());
+    await act(async () => menuItem('Fork to new tab').click());
     expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe('shared');
     expect(document.querySelector('[role="menu"]')).toBeNull();
   });
@@ -132,7 +133,7 @@ describe('SessionHeaderMenu', () => {
   it('forks into a new worktree when that destination is available', async () => {
     await act(async () => root?.render(<ForkMenuHarness forkWorktreeAvailability="available" />));
     await openForkMenu();
-    await act(async () => menuItem('New worktree').click());
+    await act(async () => menuItem('Fork to new worktree').click());
     expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe(
       'new-worktree'
     );
@@ -144,7 +145,7 @@ describe('SessionHeaderMenu', () => {
       root?.render(<ForkMenuHarness isForking forkWorktreeAvailability="available" />)
     );
     await openForkMenu();
-    for (const label of ['Current workspace', 'New worktree']) {
+    for (const label of ['Fork to new tab', 'Fork to new worktree']) {
       const item = menuItem(label);
       expect(item.getAttribute('data-disabled')).not.toBeNull();
       await act(async () => item.click());
@@ -160,7 +161,7 @@ describe('SessionHeaderMenu', () => {
   it('keeps copying available without native fork support', async () => {
     await act(async () => root?.render(<ForkMenuHarness nativeForkAvailable={false} />));
     await openForkMenu();
-    expect(document.body.textContent).not.toContain('Current workspace');
+    expect(document.body.textContent).not.toContain('Fork to new tab');
     await act(async () => menuItem('Copy context as Markdown').click());
     expect(container?.querySelector('[data-testid="copy-result"]')?.textContent).toBe('copied');
   });
@@ -231,6 +232,52 @@ describe('SessionHeaderMenu', () => {
     ).find((button) => button.textContent?.includes('Open review settings'));
     await act(async () => openSettings?.click());
     expect(onOpenReviewSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('omits the Session group heading and keeps Team as a normal-weight row', async () => {
+    await act(async () => {
+      root?.render(
+        <TooltipProvider>
+          <SessionHeaderMenu
+            session={
+              {
+                ...session,
+                project: { kind: 'github', repoFullName: 'loro-dev/lody', branch: 'main' },
+                repoFullName: 'loro-dev/lody',
+                branchName: 'fix/ui',
+                baseBranch: 'main',
+              } as SessionMeta
+            }
+            machineName="MacBook"
+            sharing={{
+              visibility: 'team',
+              canManage: true,
+              machineId: null,
+              localProjectId: null,
+              machineName: 'MacBook',
+              projectName: 'lody',
+            }}
+            onCopyUrl={vi.fn()}
+            t={translate}
+          />
+        </TooltipProvider>
+      );
+    });
+    await openMenu();
+
+    expect(
+      Array.from(document.querySelectorAll('*')).some(
+        (el) => el.childNodes.length === 1 && el.textContent === 'Session'
+      )
+    ).toBe(false);
+
+    const teamLabel = Array.from(document.querySelectorAll('span')).find(
+      (el) => el.textContent === 'Team' && el.childElementCount === 0
+    );
+    expect(teamLabel?.className).toContain('font-normal');
+    expect(teamLabel?.className).not.toContain('font-medium');
+    expect(teamLabel?.closest('div')?.className).toContain('cursor-default');
+    expect(teamLabel?.closest('div')?.className).toContain('select-none');
   });
 
   it('omits Open in IDE when no launchers are provided', async () => {

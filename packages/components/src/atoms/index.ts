@@ -29,6 +29,7 @@ export const userAtom = atom<CurrentUser | null>(readBootstrappedCurrentUser());
 export const electronDeepLinkSignInInProgressAtom = atom(false);
 export const electronLoginPhaseAtom = atom<ElectronLoginState['phase']>('idle');
 export const electronLoginErrorAtom = atom<ElectronLoginState['error']>(null);
+export const electronLoginErrorDetailAtom = atom<ElectronLoginState['errorDetail']>(null);
 
 // Native sign-in finishes in the same WebView lifecycle. Keep root session
 // invalidation fenced from sign-in start through the successful navigation so a

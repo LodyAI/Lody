@@ -270,7 +270,7 @@ export function AgentRoleForm({
             )}
             {issues.length > 0 ? (
               <FormMessage tone="warning">
-                <span className="block font-medium">
+                <span className="block font-normal">
                   {t('settings.agentRoles.form.incompatibleTitle')}
                 </span>
                 <ul className="mt-1 list-disc space-y-0.5 pl-4">
@@ -409,7 +409,7 @@ function ConfigOptionField({
     return (
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
-          <Label htmlFor={fieldId} className="text-xs font-medium">
+          <Label htmlFor={fieldId} className="text-xs font-normal">
             {selector.label}
           </Label>
           {selector.description ? (

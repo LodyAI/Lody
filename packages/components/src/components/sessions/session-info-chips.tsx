@@ -28,6 +28,7 @@ import {
   type PrStatus,
   type SessionGoalCommand,
   type SessionGoalMessage,
+  type SessionPullRequestCiState,
   type SessionPullRequestMeta,
 } from '@lody/shared';
 import { cn } from '@/lib/utils';
@@ -47,6 +48,7 @@ import {
 } from '@/ui/dropdown-menu';
 import { GoalActionButton, formatTokensCompact } from './session-goal-banner';
 import { ScheduledTaskList, useResolvedScheduledTasks } from './scheduled-tasks-panel';
+import { SessionPrIcon } from '@/components/sidebar-row-shared';
 import { PR_STATUS_META } from './pull-request-badge';
 import { useSessionStatusPresentation, type SessionStatusStripState } from './session-status-strip';
 import { PrMergeButton, PrMergeMethodLabel } from './pr-merge-button';
@@ -330,7 +332,7 @@ export function ScheduleChip({
 
 const PR_STATUS_TEXT: Record<PrStatus, string> = {
   open: 'text-github-open',
-  merged: 'text-github-merged',
+  merged: 'text-pr-merged',
   closed: 'text-github-closed',
   draft: 'text-github-draft',
 };
@@ -537,6 +539,7 @@ export function ContextChip({
   diffStat,
   prCiRuns,
   onOpenPrCiRun,
+  prCiState,
   ...itemMode
 }: {
   projectName?: string | null;
@@ -555,6 +558,8 @@ export function ContextChip({
   diffStat?: { add: number; del: number } | null;
   prCiRuns?: readonly PrCiRun[];
   onOpenPrCiRun?: (run: PrCiRun) => void;
+  /** Compact CI state from the session row; live runs override it when present. */
+  prCiState?: SessionPullRequestCiState | null;
 } & InfoBarItemMode) {
   const { t } = useTranslation();
   const hasDiff = diffStat != null && diffStat.add + diffStat.del > 0;
@@ -581,6 +586,15 @@ export function ContextChip({
   // cluster stays uniform-width (the "#1234" label lived only here and caused
   // the layout jump on hand-off).
   const StatusIcon = statusMeta?.icon ?? LocationIcon;
+  const liveCiOverall = prCiRuns?.length ? summarizePrCiRuns(prCiRuns) : null;
+  const compactCiState: SessionPullRequestCiState | null | undefined =
+    liveCiOverall === 'failing'
+      ? 'f'
+      : liveCiOverall === 'running'
+        ? 'p'
+        : liveCiOverall === 'passing'
+          ? 's'
+          : prCiState;
   const statusText = status ? PR_STATUS_TEXT[status] : '';
   const prNumber = pr
     ? (getSessionPullRequestLegacyFields(pr).number ?? parseGitHubPrNumber(pr.url))
@@ -616,14 +630,14 @@ export function ContextChip({
           statusText
         )}
       >
-        <StatusIcon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <SessionPrIcon prStatus={status ?? 'open'} prCiState={compactCiState} />
         {value ? (
           <span className="hidden shrink-0 tabular-nums @[420px]:inline">{value}</span>
         ) : null}
       </button>
     ) : (
       <span className={cn('flex h-6 shrink-0 items-center gap-1 px-1 font-semibold', statusText)}>
-        <StatusIcon className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+        <SessionPrIcon prStatus={status ?? 'open'} prCiState={compactCiState} />
         {value ? (
           <span className="hidden shrink-0 tabular-nums @[420px]:inline">{value}</span>
         ) : null}

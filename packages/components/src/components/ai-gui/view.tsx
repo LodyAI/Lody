@@ -14,6 +14,7 @@ import {
   useContext,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -84,8 +85,10 @@ import { ConversationOutlineRail } from './conversation-outline-rail';
 import { useLatestRef } from '@/hooks/use-latest-ref';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import {
+  OUTLINE_MIN_USER_ROUNDS,
   buildConversationOutline,
   buildOutlineAnchors,
+  countUserDrivenRounds,
   resolveActiveOutlineIndex,
   reuseConversationOutline,
   reuseOutlineAnchors,
@@ -178,6 +181,7 @@ import { ConversationColumn } from '@/components/shared/conversation-column';
 import type { TurnIndexRow } from '@/lib/conversation-view';
 import { TurnPlaceholderRow } from './turn-placeholder-row';
 import { CreatedSessionOperationCard } from './created-session-operation-card';
+import { OperationReplyCard } from './operation-reply-card';
 import type { SessionNavigationTarget } from '@/lib/session-navigation';
 import { AcpAuthenticationPanel } from '@/components/settings/acp-authentication-panel';
 import { formatConversationTimestamp } from '@/lib/format-conversation-timestamp';
@@ -196,10 +200,6 @@ import {
   AlertDialogTitle,
 } from '@/ui/alert-dialog';
 import { Button } from '@/ui/button';
-import {
-  AgentActivityIndicator,
-  type AgentActivityTone,
-} from '@/components/shared/agent-activity-indicator';
 import { stripRecommended } from '@/components/shared/acp-selector-options';
 import { DiffViewer } from '@/ui/diff-viewer/diff-viewer';
 import { Skeleton } from '@/ui/skeleton';
@@ -370,8 +370,8 @@ type AssistantVirtualContent =
   | {
       kind: 'footer';
       showDuration: boolean;
-      /** The turn is the conversation's last one and has not ended: its
-       *  duration slot counts up instead of standing empty. */
+      /** The turn is the conversation's last one and has not ended, so an
+       *  available streaming copy action stays visibly active. */
       isLive: boolean;
     };
 
@@ -492,6 +492,8 @@ export interface SessionChatStreamViewProps {
   forkingAssistantMessageId?: string | null;
   agentActivityLabel?: string | null;
   agentActivityTone?: AgentActivityTone;
+  /** The status is live work (not waiting on the user): shimmer it. */
+  agentActivityShimmer?: boolean;
   conversationFontSize?: ConversationFontSize;
   /** Skips one auto-follow caused by the session composer changing height. */
   skipNextViewportResizeAutoScrollRef?: MutableRefObject<boolean>;
@@ -517,24 +519,70 @@ const SessionImagePreviewContext = createContext<{
   openImagePreview: (imageKey: string) => void;
 } | null>(null);
 
-const AgentActivityRow = ({
+/** Live work reads in the process tone; waiting on the user in the warning tone. */
+export type AgentActivityTone = 'primary' | 'warning';
+
+/**
+ * The live status at the bottom of the conversation ("Thinking", "Working",
+ * startup and permission states). It reads as the next collapsed activity-group
+ * label (same rail, type and tone) and shimmers while work is in progress;
+ * when the live turn already ends in a collapsed group, that label shimmers
+ * instead and this row is not rendered.
+ */
+export const AgentActivityRow = ({
   label,
   tone = 'primary',
-}: {
-  label: string;
-  tone?: AgentActivityTone;
+  shimmer,
+  message,
+  conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
+}: AgentActivityStatusProps & {
+  conversationFontSize?: ConversationFontSize;
 }) => {
   return (
-    <ConversationColumn className="flex items-start -mt-2 pb-1.5 pt-0.5">
-      <div className="flex h-6 items-center">
-        <AgentActivityIndicator
-          label={label}
-          tone={tone}
-          displaySize={14}
-          labelClassName="text-[12.5px] font-medium leading-snug"
-        />
+    <ConversationColumn className="pb-2 sm:pb-3" data-agent-activity-row="">
+      <div className="max-w-[800px]" style={conversationTextFontSizeStyle(conversationFontSize)}>
+        <AgentActivityStatus label={label} tone={tone} shimmer={shimmer} message={message} />
       </div>
     </ConversationColumn>
+  );
+};
+
+type AgentActivityStatusProps = {
+  label: string;
+  tone?: AgentActivityTone;
+  shimmer: boolean;
+  /** The live turn the status belongs to: its running duration joins the label. */
+  message?: LiveActivityMessage | null;
+};
+
+/** The status label itself, shaped like a collapsed activity-group label. */
+const AgentActivityStatus = ({
+  label,
+  tone = 'primary',
+  shimmer,
+  message,
+}: AgentActivityStatusProps) => {
+  const isMobile = useIsMobile();
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      data-agent-activity-status=""
+      className={cn(
+        'flex w-full items-center py-0.5 text-muted-foreground',
+        isMobile ? 'gap-1.5 pr-1' : 'px-1'
+      )}
+    >
+      <span
+        className={cn(
+          ACTIVITY_GROUP_LABEL_CLASS(isMobile),
+          tone === 'warning' && 'text-status-warning',
+          shimmer && 'agent-shimmer'
+        )}
+      >
+        {message ? <LiveActivityLabel label={label} message={message} /> : label}
+      </span>
+    </div>
   );
 };
 
@@ -831,6 +879,9 @@ const shouldRenderAssistantFooter = ({
   showDuration: boolean;
 }): boolean => {
   if ((assistantActions?.length ?? 0) > 0) return true;
+  // The run config (model, mode, options) is recorded when the turn opens, so
+  // its info button is available while the reply is still streaming.
+  if (hasAssistantTurnConfigInfo(message)) return true;
   if (message.finished !== true) return false;
   const visibleContentItems = renderEntries.map((entry) => entry.content);
   return (
@@ -1025,6 +1076,11 @@ export const buildChatVirtualRows = ({
         (lastEntry.content.type === 'thought' || lastEntry.content.kind === 'think')
       );
 
+      const toolEntries = block.entries.filter(
+        (entry) => isAssistantToolCallActivityEntry(entry) && entry.content.kind !== 'think'
+      );
+      if (toolEntries.length === 0) return;
+
       target.push({
         type: 'assistant',
         key: `assistant:${message.id}:${block.key}:header`,
@@ -1035,7 +1091,7 @@ export const buildChatVirtualRows = ({
         isLastRowForMessage: false,
       });
       if (expanded) {
-        for (const entry of block.entries) {
+        for (const entry of toolEntries) {
           const entrySuffix =
             entry.content.type === 'tool_call' ? entry.content.toolCallId : 'thought';
           target.push({
@@ -1048,8 +1104,8 @@ export const buildChatVirtualRows = ({
               kind: 'activity_detail',
               entry,
               groupKey: block.key,
-              showThoughtLabel: block.entries.length > 1,
-              isThinking: isThinking && entry === lastEntry,
+              showThoughtLabel: false,
+              isThinking: false,
             },
             isWorkedDetail,
             isLastRowForMessage: false,
@@ -1269,6 +1325,8 @@ export const SessionChatStreamView = forwardRef<
       forkingAssistantMessageId,
       agentActivityLabel = null,
       agentActivityTone = 'primary',
+      // Waiting on the user (warning tone) is not work in progress.
+      agentActivityShimmer = agentActivityTone !== 'warning',
       conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
       skipNextViewportResizeAutoScrollRef,
       suppressStickyAutoScrollRef,
@@ -1285,6 +1343,17 @@ export const SessionChatStreamView = forwardRef<
     const search = useSessionSearch();
     const activeSearchBlockId = search?.activeBlockId ?? null;
     const shouldShowAgentActivity = Boolean(agentActivityLabel);
+    const liveAgentActivityMessage = useMemo(
+      () =>
+        items.find(
+          (item): item is SessionMessageItem =>
+            item.type === 'message' &&
+            item.message.id === lastAssistantMessageId &&
+            item.message.role === 'assistant' &&
+            item.message.finished !== true
+        )?.message ?? null,
+      [items, lastAssistantMessageId]
+    );
     const [assistantExpansionVersion, setAssistantExpansionVersion] = useState(0);
     const [hoveredAssistantMessageId, setHoveredAssistantMessageId] = useState<string | null>(null);
     /**
@@ -1375,6 +1444,44 @@ export const SessionChatStreamView = forwardRef<
       lastAssistantMessageId,
       messageFileDiffEntriesByTurn,
     ]);
+    // While work is in progress, a live turn whose bottom (past its footer) is
+    // a collapsed activity group carries the status itself: that label
+    // shimmers and no separate status row is added below it.
+    const liveGroupHeaderRowKey = useMemo(() => {
+      if (!agentActivityLabel || !agentActivityShimmer) return null;
+      for (let index = virtualRows.length - 1; index >= 0; index -= 1) {
+        const row = virtualRows[index];
+        if (row?.type !== 'assistant') return null;
+        if (row.content.kind === 'footer') continue;
+        return row.item.message.finished !== true &&
+          row.content.kind === 'activity_group_header' &&
+          !row.content.expanded
+          ? row.key
+          : null;
+      }
+      return null;
+    }, [agentActivityLabel, agentActivityShimmer, virtualRows]);
+    // Otherwise, when the live turn ends in its footer, the status sits inside the
+    // turn above that footer's actions; only a turn without one (or no turn yet)
+    // gets the separate status row after the conversation.
+    const liveFooterRowKey = useMemo(() => {
+      if (!agentActivityLabel || liveGroupHeaderRowKey !== null) return null;
+      const last = virtualRows[virtualRows.length - 1];
+      return last?.type === 'assistant' &&
+        last.content.kind === 'footer' &&
+        last.item.message.finished !== true
+        ? last.key
+        : null;
+    }, [agentActivityLabel, liveGroupHeaderRowKey, virtualRows]);
+    const liveFooterStatus = useMemo<AgentActivityStatusProps | null>(
+      () =>
+        agentActivityLabel
+          ? { label: agentActivityLabel, tone: agentActivityTone, shimmer: agentActivityShimmer }
+          : null,
+      [agentActivityLabel, agentActivityShimmer, agentActivityTone]
+    );
+    const shouldShowAgentActivityRow =
+      shouldShowAgentActivity && liveGroupHeaderRowKey === null && liveFooterRowKey === null;
     const leadingRowCount = leadingContent == null ? 0 : 1;
 
     /**
@@ -1429,7 +1536,7 @@ export const SessionChatStreamView = forwardRef<
       hasVirtualizedRows,
       // `leadingContent` is a real first Virtua row, so it counts here — sticky
       // scroll otherwise targets an index short of the true bottom.
-      itemCount: virtualRows.length + leadingRowCount + (shouldShowAgentActivity ? 1 : 0),
+      itemCount: virtualRows.length + leadingRowCount + (shouldShowAgentActivityRow ? 1 : 0),
       onAtBottomChange,
       skipNextViewportResizeAutoScrollRef,
       suppressAutoScrollRef: autoScrollSuppressedRef,
@@ -1453,6 +1560,13 @@ export const SessionChatStreamView = forwardRef<
       previousOutlineRef.current = next;
       return next;
     }, [items]);
+    // Below the threshold a table of contents decorates rather than navigates,
+    // so the rail — and its arrival-intent listeners — stays unmounted until
+    // the conversation is long enough to need one.
+    const showOutlineRail = useMemo(
+      () => countUserDrivenRounds(outlineEntries) >= OUTLINE_MIN_USER_ROUNDS,
+      [outlineEntries]
+    );
     const previousAnchorsRef = useRef<readonly ConversationOutlineAnchor[] | undefined>(undefined);
     const outlineAnchors = useMemo(() => {
       // `virtualRows` is rebuilt per delta, so this runs at token rate too;
@@ -1763,7 +1877,12 @@ export const SessionChatStreamView = forwardRef<
                 )}
                 {agentActivityLabel && (
                   <div className="shrink-0 pt-2">
-                    <AgentActivityRow label={agentActivityLabel} tone={agentActivityTone} />
+                    <AgentActivityRow
+                      label={agentActivityLabel}
+                      tone={agentActivityTone}
+                      shimmer={agentActivityShimmer}
+                      conversationFontSize={conversationFontSize}
+                    />
                   </div>
                 )}
                 <div className="min-h-0 flex-1">
@@ -1889,12 +2008,20 @@ export const SessionChatStreamView = forwardRef<
                         isTurnHovered={hoveredAssistantMessageId === row.item.message.id}
                         onTurnHoverChange={handleAssistantTurnHoverChange}
                         conversationFontSize={conversationFontSize}
+                        shimmerGroupHeader={row.key === liveGroupHeaderRowKey}
+                        liveStatus={row.key === liveFooterRowKey ? liveFooterStatus : null}
                       />
                     </MessageSelectionRow>
                   );
                 })}
-                {shouldShowAgentActivity && agentActivityLabel && (
-                  <AgentActivityRow label={agentActivityLabel} tone={agentActivityTone} />
+                {shouldShowAgentActivityRow && agentActivityLabel && (
+                  <AgentActivityRow
+                    label={agentActivityLabel}
+                    tone={agentActivityTone}
+                    shimmer={agentActivityShimmer}
+                    message={liveAgentActivityMessage}
+                    conversationFontSize={conversationFontSize}
+                  />
                 )}
               </Virtualizer>
               <MessageSelectionOverlay />
@@ -1910,7 +2037,7 @@ export const SessionChatStreamView = forwardRef<
                 takes the content element from that div's `firstElementChild`.
                 Touch has no hover, so mobile is excluded rather than shipped
                 without its preview card. */}
-            {isMobile ? null : (
+            {isMobile || !showOutlineRail ? null : (
               <ConversationOutlineRail
                 entries={outlineEntries}
                 activeIndex={activeOutlineIndex}
@@ -1928,7 +2055,7 @@ export const SessionChatStreamView = forwardRef<
                   <Button
                     variant="secondary"
                     size="icon"
-                    className="pointer-events-auto rounded-full border border-border/70 shadow-lg"
+                    className="pointer-events-auto rounded-full border-[0.5px] border-border bg-white text-foreground shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.04)] hover:bg-white dark:bg-secondary dark:text-secondary-foreground dark:shadow-none"
                     onClick={scrollToBottom}
                     aria-label={t('sessions.scrollToLatest')}
                   >
@@ -2103,109 +2230,149 @@ const OperationCompletionView = ({
       : completion.completion.type === 'cancelled'
         ? (completion.completion.partial?.items ?? [])
         : [];
-  const succeeded = resultItems.filter((item) => item.status === 'succeeded').length;
-  const failed = resultItems.filter((item) => item.status === 'failed').length;
-  const cancelled = resultItems.filter((item) => item.status === 'cancelled').length;
   const failedCompletion = completion.completion.type === 'error';
   const cancelledCompletion = completion.completion.type === 'cancelled';
   const StatusIcon = failedCompletion ? AlertCircle : cancelledCompletion ? Circle : CheckCircle2;
-  const createdSessions =
-    !completion.progressMessageId &&
-    (completion.operationKind === 'session_create' ||
-      completion.operationKind === 'session_create_many')
-      ? resultItems.flatMap((item) =>
-          item.status === 'succeeded'
-            ? [
-                {
-                  sessionId: item.target.sessionId,
-                  fallbackTitle: item.label,
-                },
-              ]
-            : []
-        )
-      : [];
-
-  if (createdSessions.length > 0) {
-    return (
-      <div className="flex flex-col gap-2" data-session-create-completion="">
-        {createdSessions.map((created) => (
-          <CreatedSessionOperationCard
-            key={created.sessionId}
-            sessionId={created.sessionId}
-            fallbackTitle={created.fallbackTitle}
-            status="succeeded"
-            onNavigateSession={onNavigateSession}
-          />
-        ))}
-        {failedCompletion || cancelledCompletion || failed > 0 || cancelled > 0 ? (
-          <div className="px-1 text-xs text-muted-foreground">
-            {failedCompletion
-              ? t('orchestration.operationFailed', { id: completion.operationId })
-              : cancelledCompletion
-                ? t('orchestration.operationCancelled', { id: completion.operationId })
-                : t('orchestration.operationItemSummary', {
-                    total: resultItems.length,
-                    succeeded,
-                    failed,
-                    cancelled,
-                  })}
-          </div>
-        ) : null}
-        {completion.continuation ? (
-          <div className="px-1 text-xs text-muted-foreground">
-            {t(
-              completion.continuation.status === 'uncertain'
-                ? 'orchestration.continuationUncertain'
-                : 'orchestration.continuationNotStarted'
-            )}
-          </div>
-        ) : null}
-      </div>
-    );
-  }
+  const createsSessions =
+    completion.operationKind === 'session_create' ||
+    completion.operationKind === 'session_create_many';
+  // A create Operation that published progress already shows each target as a
+  // live card above; repeating them here would duplicate every Session.
+  const targetCards = createsSessions && completion.progressMessageId ? [] : resultItems;
+  const cards = targetCards.flatMap((item) =>
+    item.target
+      ? [
+          {
+            sessionId: item.target.sessionId,
+            fallbackTitle: item.label,
+            status: item.status === 'active' ? ('running' as const) : item.status,
+            // The reply preview (or the failure) says what happened at a glance;
+            // the card itself opens the Session for the rest.
+            reply: item.status === 'succeeded' ? item.output?.text : undefined,
+            error: item.status === 'failed' ? item.error.message : undefined,
+            detail:
+              item.status === 'succeeded'
+                ? summarizeOperationOutput(item.output?.text)
+                : item.status === 'failed'
+                  ? item.error.message
+                  : undefined,
+          },
+        ]
+      : []
+  );
+  const untargetedProblems = targetCards.flatMap((item) =>
+    !item.target && (item.status === 'failed' || item.status === 'cancelled')
+      ? [
+          {
+            label: item.label,
+            message:
+              item.status === 'failed'
+                ? item.error.message
+                : t('sessions.openedBy.status.cancelled', 'Cancelled'),
+          },
+        ]
+      : []
+  );
+  const continuationNotice = completion.continuation
+    ? t(
+        completion.continuation.status === 'uncertain'
+          ? 'orchestration.continuationUncertain'
+          : 'orchestration.continuationNotStarted'
+      )
+    : null;
+  // The status card carries only what the cards cannot: a whole-Operation
+  // failure or cancellation, targetless failures, the continuation outcome, or
+  // the plain outcome when there is no Session to show.
+  const showStatusCard =
+    cards.length === 0 ||
+    failedCompletion ||
+    cancelledCompletion ||
+    untargetedProblems.length > 0 ||
+    continuationNotice !== null;
 
   return (
-    <div className="border-border/70 bg-muted/30 flex items-start gap-2 border-y px-3 py-2 text-sm">
-      <StatusIcon
-        className={cn(
-          'mt-0.5 h-4 w-4 shrink-0',
-          failedCompletion ? 'text-destructive' : 'text-muted-foreground'
-        )}
-        aria-hidden="true"
-      />
-      <div className="min-w-0">
-        <div className="font-medium">
-          {t(
-            failedCompletion
-              ? 'orchestration.operationFailed'
-              : cancelledCompletion
-                ? 'orchestration.operationCancelled'
-                : 'orchestration.operationCompleted',
-            { id: completion.operationId }
-          )}
-        </div>
-        {resultItems.length > 0 ? (
-          <div className="text-muted-foreground mt-0.5">
-            {t('orchestration.operationItemSummary', {
-              total: resultItems.length,
-              succeeded,
-              failed,
-              cancelled,
-            })}
-          </div>
-        ) : null}
-        {completion.continuation ? (
-          <div className="text-muted-foreground mt-0.5">
-            {t(
-              completion.continuation.status === 'uncertain'
-                ? 'orchestration.continuationUncertain'
-                : 'orchestration.continuationNotStarted'
+    <div
+      className="flex flex-col gap-2"
+      data-operation-completion={completion.operationKind}
+      {...(createsSessions && cards.length > 0 ? { 'data-session-create-completion': '' } : {})}
+    >
+      {cards.map((card) =>
+        createsSessions ? (
+          <CreatedSessionOperationCard
+            key={card.sessionId}
+            sessionId={card.sessionId}
+            fallbackTitle={card.fallbackTitle}
+            status={card.status}
+            detail={card.detail}
+            onNavigateSession={onNavigateSession}
+          />
+        ) : (
+          // A message Operation reads from the sender's side: the target replied.
+          <OperationReplyCard
+            key={card.sessionId}
+            sessionId={card.sessionId}
+            fallbackTitle={card.fallbackTitle}
+            onNavigateSession={onNavigateSession}
+            {...(card.status === 'succeeded'
+              ? { status: 'succeeded' as const, reply: card.reply }
+              : card.status === 'failed'
+                ? { status: 'failed' as const, error: card.error ?? '' }
+                : card.status === 'cancelled'
+                  ? { status: 'cancelled' as const }
+                  : { status: 'running' as const })}
+          />
+        )
+      )}
+      {showStatusCard ? (
+        <div
+          className="flex items-start gap-2.5 rounded-lg border border-border/70 bg-muted/25 px-3 py-2.5 text-sm"
+          title={completion.operationId}
+        >
+          <StatusIcon
+            className={cn(
+              'mt-0.5 h-4 w-4 shrink-0',
+              failedCompletion ? 'text-destructive' : 'text-muted-foreground'
             )}
+            aria-hidden="true"
+          />
+          <div className="min-w-0 flex-1">
+            <div className="font-medium text-foreground">
+              {t(
+                failedCompletion
+                  ? 'orchestration.operationFailed'
+                  : cancelledCompletion
+                    ? 'orchestration.operationCancelled'
+                    : 'orchestration.operationCompleted'
+              )}
+            </div>
+            {completion.completion.type === 'error' ? (
+              <div className="mt-0.5 break-words text-xs text-muted-foreground">
+                {completion.completion.error.message}
+              </div>
+            ) : null}
+            {untargetedProblems.map((problem, index) => (
+              <div
+                key={`${problem.label ?? 'item'}-${index}`}
+                className="mt-0.5 break-words text-xs text-muted-foreground"
+              >
+                {problem.label ? `${problem.label}: ${problem.message}` : problem.message}
+              </div>
+            ))}
+            {continuationNotice ? (
+              <div className="mt-0.5 text-xs text-muted-foreground">{continuationNotice}</div>
+            ) : null}
           </div>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </div>
   );
+};
+
+/** One readable line from a reply preview: collapsed whitespace, capped length. */
+const summarizeOperationOutput = (text: string | undefined): string | undefined => {
+  const collapsed = text?.replace(/\s+/g, ' ').trim();
+  if (!collapsed) return undefined;
+  return collapsed.length > 240 ? `${collapsed.slice(0, 240)}…` : collapsed;
 };
 
 const DashedNoticeRule = () => (
@@ -2940,7 +3107,9 @@ const UserMessageRowView = ({
       <div
         className={cn(
           'group/usermsg flex min-w-0 flex-1 flex-col items-end text-left',
-          isMobile ? 'max-w-[min(100%,28rem)] gap-1' : 'max-w-[80%] gap-1.5 sm:max-w-[70%]'
+          isMobile
+            ? 'max-w-[min(100%,28rem)] gap-1'
+            : 'max-w-full gap-1.5 @[520px]:max-w-[80%] @[720px]:max-w-[70%]'
         )}
       >
         <div
@@ -3005,7 +3174,7 @@ const UserMessageRowView = ({
                 honors overflow-wrap here so it doesn't repro there — hence "only sometimes". */}
             <div className={cn('relative min-w-0 max-w-full', isEditing ? 'w-full' : 'w-fit')}>
               {showSendingSpinner && (
-                <Spinner className="absolute bottom-[13px] right-full mr-1.5 h-4 w-4 text-muted-foreground" />
+                <Spinner className="absolute bottom-[13px] right-full mr-1.5 hidden h-4 w-4 text-muted-foreground @[520px]:block" />
               )}
               <div
                 className={cn(
@@ -3413,26 +3582,127 @@ const ACTIVITY_STEP_BODY_CLASS =
   '[&_:is(h1,h2,h3,h4,h5,h6):first-child]:!mt-0 ' +
   '[&_p]:!mb-1 [&_p:last-child]:!mb-0 [&_li:not(:first-child)]:!mt-0.5';
 
+/* The collapsed activity group's label type; the live status row reuses it so
+   "Working" reads as the next group label, not a separate widget. */
+const ACTIVITY_GROUP_LABEL_CLASS = (isMobile: boolean) =>
+  cn(
+    'min-w-0',
+    isMobile
+      ? cn('flex-1', ACTIVITY_PROCESS_TEXT_CLASS)
+      : 'text-[length:var(--markdown-body-font-size,1em)] font-normal leading-[1.75]'
+  );
+
+/** Last intended rotate after a click. Survives Virtua remounting the row. */
+const pendingDisclosureRotate = new Map<string, boolean>();
+
+function ProcessDisclosureButton({
+  id,
+  label,
+  expanded,
+  onExpandedChange,
+  shimmer = false,
+  liveMessage,
+}: {
+  id: string;
+  label: string;
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
+  /** The group is the live bottom of a working turn: its label shimmers. */
+  shimmer?: boolean;
+  /** Set while the label carries the live status: it shows the running duration. */
+  liveMessage?: LiveActivityMessage;
+}) {
+  const isMobile = useIsMobile();
+  const chevronRef = useRef<HTMLSpanElement>(null);
+
+  const applyRotate = (next: boolean, animate: boolean) => {
+    const el = chevronRef.current;
+    if (!el) return;
+    el.style.transition = animate ? 'transform 200ms ease-out' : 'none';
+    el.style.transform = next ? 'rotate(90deg)' : 'rotate(0deg)';
+  };
+
+  useLayoutEffect(() => {
+    const pending = pendingDisclosureRotate.get(id);
+    const target = expanded ? 'rotate(90deg)' : 'rotate(0deg)';
+    if (pending === expanded) {
+      pendingDisclosureRotate.delete(id);
+      if (chevronRef.current?.style.transform === target) return undefined;
+      applyRotate(!expanded, false);
+      const frame = requestAnimationFrame(() => applyRotate(expanded, true));
+      return () => cancelAnimationFrame(frame);
+    }
+    applyRotate(expanded, false);
+    return undefined;
+  }, [id, expanded]);
+
+  const chevron = (
+    <span
+      className={cn(
+        'inline-flex flex-none shrink-0 origin-center text-muted-foreground',
+        !isMobile &&
+          'opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100'
+      )}
+    >
+      <span ref={chevronRef} className="inline-flex origin-center">
+        <ChevronRight className={isMobile ? ACTIVITY_PROCESS_ICON_CLASS : 'h-[1em] w-[1em]'} />
+      </span>
+    </span>
+  );
+  const title = (
+    <span className={cn(ACTIVITY_GROUP_LABEL_CLASS(isMobile), shimmer && 'agent-shimmer')}>
+      {liveMessage ? <LiveActivityLabel label={label} message={liveMessage} /> : label}
+    </span>
+  );
+  return (
+    <button
+      type="button"
+      className={cn(
+        'group flex w-full items-center py-0.5 text-left',
+        isMobile
+          ? cn('gap-1.5 rounded-md pr-1 hover:bg-hover/40', ACTIVITY_PROCESS_TEXT_CLASS)
+          : 'justify-start gap-0.5 px-1 text-muted-foreground'
+      )}
+      onClick={() => {
+        const next = !expanded;
+        pendingDisclosureRotate.set(id, next);
+        applyRotate(next, true);
+        onExpandedChange(next);
+      }}
+      aria-expanded={expanded}
+    >
+      {isMobile ? (
+        <>
+          {chevron}
+          {title}
+        </>
+      ) : (
+        <>
+          {title}
+          {chevron}
+        </>
+      )}
+    </button>
+  );
+}
+
 const ActivityGroupHeader = ({
+  id,
   summary,
   expanded,
-  isThinking,
   onExpandedChange,
+  shimmer,
+  liveMessage,
 }: {
+  id: string;
   summary: AssistantActivitySummary;
   expanded: boolean;
-  isThinking: boolean;
   onExpandedChange: (expanded: boolean) => void;
+  shimmer?: boolean;
+  liveMessage?: LiveActivityMessage;
 }) => {
   const { t } = useTranslation();
   const parts: string[] = [];
-  if (summary.hasThought) {
-    parts.push(
-      isThinking
-        ? t('sessions.toolActivity.thinking', 'Thinking…')
-        : t('sessions.toolActivity.thought', 'Thought')
-    );
-  }
   if (summary.commandCount > 0) {
     parts.push(t('sessions.toolActivity.commands', { count: summary.commandCount }));
   }
@@ -3451,35 +3721,27 @@ const ActivityGroupHeader = ({
   if (summary.otherCount > 0) {
     parts.push(t('sessions.toolActivity.tools', { count: summary.otherCount }));
   }
+  const label = parts.join(' · ');
+  if (!label) return null;
   return (
-    <button
-      type="button"
-      /* pl-0 so the chevron’s left edge lines up with the body text
-         under this group (shared process-rail content box). */
-      className={cn(
-        'group flex w-full items-center gap-1.5 rounded-md py-1 pl-0 pr-1 text-left transition-colors hover:bg-hover/40',
-        ACTIVITY_PROCESS_TEXT_CLASS
-      )}
-      onClick={() => onExpandedChange(!expanded)}
-      aria-expanded={expanded}
-    >
-      <ChevronRight
-        className={cn(
-          ACTIVITY_PROCESS_ICON_CLASS,
-          'flex-none transition-transform duration-200',
-          expanded && 'rotate-90'
-        )}
-      />
-      <span className={cn('min-w-0 flex-1', ACTIVITY_PROCESS_TEXT_CLASS)}>{parts.join(' · ')}</span>
-    </button>
+    <ProcessDisclosureButton
+      id={id}
+      label={label}
+      expanded={expanded}
+      onExpandedChange={onExpandedChange}
+      shimmer={shimmer}
+      liveMessage={liveMessage}
+    />
   );
 };
 
 const WorkedGroupHeader = ({
+  id,
   durationMs,
   expanded,
   onExpandedChange,
 }: {
+  id: string;
   durationMs: number | null;
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
@@ -3509,29 +3771,12 @@ const WorkedGroupHeader = ({
     : t('sessions.finishedWorking', 'Finished working');
 
   return (
-    <button
-      type="button"
-      className={cn(
-        'group flex w-full items-center gap-1 rounded-md py-0.5 text-left transition-colors',
-        /* Quieter than the answer body so process chrome does not compete. */
-        'text-muted-foreground hover:bg-hover/40 hover:text-foreground',
-        /* No leading pad: this chevron shares the turn's left rail with
-           `ActivityGroupHeader` and the answer prose. */
-        'sm:gap-1.5 sm:pr-1'
-      )}
-      onClick={() => onExpandedChange(!expanded)}
-      aria-expanded={expanded}
-    >
-      <ChevronRight
-        className={cn(
-          'h-3.5 w-3.5 flex-none shrink-0 text-muted-foreground transition-transform duration-200',
-          expanded && 'rotate-90'
-        )}
-      />
-      <span className="min-w-0 flex-1 text-[12.5px] font-medium leading-tight tracking-tight">
-        {label}
-      </span>
-    </button>
+    <ProcessDisclosureButton
+      id={id}
+      label={label}
+      expanded={expanded}
+      onExpandedChange={onExpandedChange}
+    />
   );
 };
 
@@ -3731,6 +3976,9 @@ export const MOBILE_TURN_ACTION_LEADING_INSET_PX = 48;
 
 /**
  * The live counterpart of the mobile footer's "Worked for {duration}" label.
+ * The live duration belongs in the active status itself (for example,
+ * "Exploring (Worked for 35s)") rather than in a separate desktop footer row.
+ * Mobile retains the explanatory label in its reserved action slot.
  *
  * While the turn runs, that leading slot used to stand empty — the slot is
  * reserved unconditionally (it is what pushes the copy button clear of the
@@ -3776,6 +4024,36 @@ const LiveTurnDurationLabel = ({
   });
   if (!duration) return null;
   return <>{t('sessions.workedFor', { duration, defaultValue: 'Worked for {{duration}}' })}</>;
+};
+
+type LiveActivityMessage = Pick<SessionHistoryParsed, 'timestamp' | 'permissionWaitMs'>;
+
+/**
+ * A live status label with the turn's running duration, e.g. "Exploring
+ * (Worked for 35s)". Only this text re-renders on each tick.
+ */
+const LiveActivityLabel = ({ label, message }: { label: string; message: LiveActivityMessage }) => {
+  const { t } = useTranslation();
+  const now = useStableNow(LIVE_TURN_DURATION_SAMPLE_MS);
+  const durationMs = resolveLiveSessionHistoryDurationMs(message, now.getTime());
+  const duration =
+    durationMs === null
+      ? ''
+      : formatDurationCompact(durationMs, {
+          hour: t('time.unitShort.hour', 'h'),
+          minute: t('time.unitShort.minute', 'm'),
+          second: t('time.unitShort.second', 's'),
+        });
+  if (!duration) return <>{label}</>;
+  return (
+    <>
+      {t('sessions.activityWithDuration', {
+        label,
+        duration,
+        defaultValue: '{{label}} (Worked for {{duration}})',
+      })}
+    </>
+  );
 };
 
 const AssistantForkButton = ({
@@ -3934,7 +4212,7 @@ export const AssistantTurnFooter = ({
           }
         />
       ) : null}
-      {(showFinishedMetadata || !!copyContext) && showActionBar ? (
+      {(showFinishedMetadata || !!copyContext || hasTurnConfigInfo) && showActionBar ? (
         <div
           className={cn(
             'flex flex-wrap items-center justify-start text-[11px] text-muted-foreground',
@@ -3969,14 +4247,21 @@ export const AssistantTurnFooter = ({
           ) : null}
           {/* Icon buttons are 28px boxes around 14px glyphs, so their own 7px of
              interior padding would push the glyph 7px inside the answer text
-             above. Pull the cluster back by that padding so the outermost glyph
-             sits on the text's edge (and the inner one keeps the row gap to the
-             timestamp). Keep it on the cluster, not the row: when no buttons
-             render, the timestamp must stay on the plain gutter. Mobile pulls
-             only the trailing edge — its leading glyph aligns to the duration
-             label, not to the answer text. */}
+             above. Pull the cluster back so the outermost glyph sits on the
+             text's edge (and the inner one keeps the row gap to the timestamp).
+             Desktop uses 5px on the leading edge (2px less than the raw padding)
+             so the copy glyph aligns with the body; trailing stay 7px. Keep it
+             on the cluster, not the row: when no buttons render, the timestamp
+             must stay on the plain gutter. Mobile pulls only the trailing edge
+             — its leading glyph aligns to the duration label, not to the answer
+             text. */}
           {hasCopyableText || hasTurnConfigInfo || onFork || copyContext ? (
-            <div className={cn('flex items-center gap-0.5', isMobile ? '-mr-[7px]' : '-mx-[7px]')}>
+            <div
+              className={cn(
+                'flex items-center gap-0.5',
+                isMobile ? '-mr-[7px]' : '-ml-[5px] -mr-[7px]'
+              )}
+            >
               {showStreamingContextCopy ? (
                 <TooltipProvider>
                   <Tooltip delayDuration={500}>
@@ -3997,7 +4282,7 @@ export const AssistantTurnFooter = ({
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
-              ) : hasCopyableText ? (
+              ) : showFinishedMetadata && hasCopyableText ? (
                 <TooltipProvider>
                   <Tooltip delayDuration={500}>
                     <TooltipTrigger asChild>
@@ -4026,8 +4311,9 @@ export const AssistantTurnFooter = ({
                   </Tooltip>
                 </TooltipProvider>
               ) : null}
-              {/* The turn config lives below the output on every layout. */}
-              {showFinishedMetadata && hasTurnConfigInfo ? (
+              {/* The turn config lives below the output on every layout, and is
+                  known from the moment the turn opens: no need to wait for it to end. */}
+              {hasTurnConfigInfo ? (
                 <AssistantTurnConfigInfoButton
                   message={message}
                   sessionId={sessionId}
@@ -4121,6 +4407,10 @@ interface AssistantChatItemProps {
   isTurnHovered: boolean;
   onTurnHoverChange: (messageId: string, hovered: boolean) => void;
   conversationFontSize: ConversationFontSize;
+  /** This row is the live turn's collapsed bottom group: shimmer its label. */
+  shimmerGroupHeader?: boolean;
+  /** This row is the live turn's footer: the status sits above its actions. */
+  liveStatus?: AgentActivityStatusProps | null;
 }
 
 // Rows for unchanged turns are reference-stable via `assistantTurnRowsCache`,
@@ -4207,7 +4497,11 @@ const areAssistantChatItemPropsEqual = (
   prev.isForking === next.isForking &&
   prev.isTurnHovered === next.isTurnHovered &&
   prev.onTurnHoverChange === next.onTurnHoverChange &&
-  prev.conversationFontSize === next.conversationFontSize;
+  prev.conversationFontSize === next.conversationFontSize &&
+  prev.shimmerGroupHeader === next.shimmerGroupHeader &&
+  prev.liveStatus?.label === next.liveStatus?.label &&
+  prev.liveStatus?.tone === next.liveStatus?.tone &&
+  prev.liveStatus?.shimmer === next.liveStatus?.shimmer;
 
 const AssistantChatItem = memo(function AssistantChatItem({
   row,
@@ -4224,6 +4518,8 @@ const AssistantChatItem = memo(function AssistantChatItem({
   isTurnHovered,
   onTurnHoverChange,
   conversationFontSize,
+  shimmerGroupHeader = false,
+  liveStatus = null,
 }: AssistantChatItemProps) {
   const message = row.item.message;
   const { content } = row;
@@ -4251,6 +4547,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
       case 'worked_group_header':
         return (
           <WorkedGroupHeader
+            id={`${message.id}:${content.segmentKey}:worked`}
             durationMs={content.durationMs}
             expanded={content.expanded}
             onExpandedChange={(expanded) =>
@@ -4273,12 +4570,14 @@ const AssistantChatItem = memo(function AssistantChatItem({
       case 'activity_group_header':
         return (
           <ActivityGroupHeader
+            id={`${message.id}:${content.block.key}`}
             summary={content.block.summary}
             expanded={content.expanded}
-            isThinking={content.isThinking}
             onExpandedChange={(expanded) =>
               onGroupExpandedChange(message.id, content.block.key, expanded)
             }
+            shimmer={shimmerGroupHeader}
+            liveMessage={shimmerGroupHeader ? message : undefined}
           />
         );
       case 'activity_detail': {
@@ -4310,20 +4609,29 @@ const AssistantChatItem = memo(function AssistantChatItem({
         return <AssistantSubagentTasksRow message={message} sessionId={row.item.sessionId} />;
       case 'footer':
         return (
-          <AssistantTurnFooter
-            message={message}
-            sessionId={row.item.sessionId}
-            fileDiffOverride={fileDiffOverride}
-            assistantActions={assistantActions}
-            onFileDiffClick={onFileDiffClick}
-            showDuration={content.showDuration}
-            isLive={content.isLive}
-            isTurnHovered={isTurnHovered}
-            onFork={onFork}
-            forkWorktreeAvailability={forkWorktreeAvailability}
-            onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
-            isForking={isForking}
-          />
+          <>
+            {/* Inside the turn, above its copy/fork actions: the status reads as
+                the turn's next step rather than something after it. */}
+            {liveStatus ? (
+              <div className="pb-1.5">
+                <AgentActivityStatus {...liveStatus} message={message} />
+              </div>
+            ) : null}
+            <AssistantTurnFooter
+              message={message}
+              sessionId={row.item.sessionId}
+              fileDiffOverride={fileDiffOverride}
+              assistantActions={assistantActions}
+              onFileDiffClick={onFileDiffClick}
+              showDuration={content.showDuration}
+              isLive={content.isLive}
+              isTurnHovered={isTurnHovered}
+              onFork={onFork}
+              forkWorktreeAvailability={forkWorktreeAvailability}
+              onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
+              isForking={isForking}
+            />
+          </>
         );
       default:
         return null;
@@ -5502,7 +5810,7 @@ const UserPlainTextBlock = ({
 
   return (
     <div className="flex max-w-full justify-end sm:pl-2">
-      <div className="min-w-0 max-w-full rounded-[1.15rem] border border-foreground/[0.08] bg-foreground/[0.05] px-3.5 py-2 sm:rounded-2xl sm:px-4 sm:py-2.5">
+      <div className="min-w-0 max-w-full rounded-[1.15rem] bg-foreground/[0.05] px-3.5 py-2 sm:rounded-2xl sm:px-4 sm:py-2.5">
         <div
           className={cn(
             // overflow-wrap:anywhere (not break-words) is load-bearing: only `anywhere`

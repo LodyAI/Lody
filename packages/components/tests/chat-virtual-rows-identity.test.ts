@@ -173,7 +173,7 @@ describe('buildChatVirtualRows per-turn row identity', () => {
   });
 });
 
-it('exposes copying during streaming and invalidates only when availability changes', () => {
+it('does not create an empty live footer without a copy action', () => {
   const item = wrap(makeMessage('stream-copy', 'assistant', [text('partial')], false));
   const args = { items: [item], lastAssistantMessageId: 'stream-copy', expansionVersion: 0 };
   const before = buildChatVirtualRows(args);
@@ -181,17 +181,24 @@ it('exposes copying during streaming and invalidates only when availability chan
     false
   );
   const withCopy = buildChatVirtualRows({ ...args, copyContextAvailable: true });
-  expect(withCopy.some((row) => row.type === 'assistant' && row.content.kind === 'footer')).toBe(
-    true
+  expect(withCopy).toContainEqual(
+    expect.objectContaining({
+      content: expect.objectContaining({ kind: 'footer', isLive: true }),
+    })
   );
   const unchanged = buildChatVirtualRows({ ...args, copyContextAvailable: true });
   expect(unchanged.every((row, index) => row === withCopy[index])).toBe(true);
+
+  const displaced = buildChatVirtualRows({ ...args, lastAssistantMessageId: 'newer-turn' });
+  expect(displaced.some((row) => row.type === 'assistant' && row.content.kind === 'footer')).toBe(
+    false
+  );
 });
 
-/* The live duration label is bound to ONE row by `isLive`. That bound is only as
-   good as the memo: a displaced turn's rebuilt row differs from the mounted one
-   by this flag alone, so if the comparison ignores it the old footer never
-   re-renders and keeps counting beside the new one. */
+/* An active copy action is bound to ONE footer by `isLive`. That bound is only
+   as good as the memo: a displaced turn's rebuilt row differs from the mounted
+   one by this flag alone, so if the comparison ignores it the old footer keeps
+   its active action state beside the new turn. */
 it('reports a displaced turn footer as changed when it stops being the live one', () => {
   const abandoned = wrap(makeMessage('turn-abandoned', 'assistant', [toolCall()], false));
   const footerOf = (rows: ReturnType<typeof build>, messageId: string) =>

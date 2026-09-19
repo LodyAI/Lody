@@ -8,6 +8,7 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import isEmail from 'validator/lib/isEmail';
 import {
   electronLoginErrorAtom,
+  electronLoginErrorDetailAtom,
   electronLoginPhaseAtom,
   nativeSignInInProgressAtom,
 } from '@/atoms';
@@ -600,6 +601,7 @@ export function LoginPage({
   // when this renderer mounts after the browser has returned.
   const electronLoginPhase = useAtomValue(electronLoginPhaseAtom);
   const electronLoginError = useAtomValue(electronLoginErrorAtom);
+  const electronLoginErrorDetail = useAtomValue(electronLoginErrorDetailAtom);
   const isCompletingElectronSignIn = electronLoginPhase === 'exchanging';
   const setNativeSignInInProgress = useSetAtom(nativeSignInInProgressAtom);
   const [providerContentWidth, setProviderContentWidth] = useState<number | null>(null);
@@ -652,6 +654,11 @@ export function LoginPage({
       ? t(`login.desktopErrors.${electronLoginError}`)
       : '';
   const effectiveError = error || desktopLoginError || expiredMessage;
+  // The category message says what to do; the detail is what support needs.
+  const effectiveErrorDetail =
+    !error && desktopLoginError && electronLoginErrorDetail
+      ? t('login.desktopErrors.detail', { detail: electronLoginErrorDetail })
+      : '';
   const isAnyLoading =
     loadingProvider !== null ||
     isEmailSubmitting ||
@@ -1971,6 +1978,11 @@ export function LoginPage({
                 className="mb-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-center text-xs text-destructive"
               >
                 {effectiveError}
+                {effectiveErrorDetail ? (
+                  <span className="mt-1 block select-text break-all text-[11px] opacity-80">
+                    {effectiveErrorDetail}
+                  </span>
+                ) : null}
               </motion.p>
             ) : null}
           </AnimatePresence>

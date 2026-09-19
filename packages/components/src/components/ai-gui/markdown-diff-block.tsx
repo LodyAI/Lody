@@ -1,10 +1,6 @@
-import { memo, useMemo } from 'react';
-import {
-  CodeBlockContainer,
-  CodeBlockCopyButton,
-  CodeBlockHeader,
-  type CustomRendererProps,
-} from 'streamdown';
+import { memo, useMemo, useState } from 'react';
+import { CodeBlockContainer, type CustomRendererProps } from 'streamdown';
+import { MarkdownCodeToolbar, parseMarkdownCodeBlockLabel } from './markdown-code-block';
 
 type MarkdownDiffLineKind = 'addition' | 'context' | 'deletion' | 'hunk' | 'metadata';
 
@@ -33,24 +29,25 @@ export const MarkdownDiffBlock = memo(function MarkdownDiffBlock({
   code,
   isIncomplete,
   language,
+  meta,
 }: CustomRendererProps) {
+  const [wrapped, setWrapped] = useState(false);
   const lines = useMemo(() => getVisibleDiffLines(code), [code]);
+  const label = useMemo(() => parseMarkdownCodeBlockLabel(language, meta), [language, meta]);
 
   return (
     <CodeBlockContainer
+      data-code-wrap={wrapped ? 'true' : undefined}
       data-markdown-diff-block="true"
       isIncomplete={isIncomplete}
       language={language}
     >
-      <CodeBlockHeader language={language} />
-      <div className="pointer-events-none sticky top-2 z-10 -mt-10 flex h-8 items-center justify-end">
-        <div
-          className="pointer-events-auto flex shrink-0 items-center gap-2 rounded-md border border-sidebar bg-sidebar/80 px-1.5 py-1 supports-[backdrop-filter]:bg-sidebar/70 supports-[backdrop-filter]:backdrop-blur"
-          data-streamdown="code-block-actions"
-        >
-          <CodeBlockCopyButton code={code} />
-        </div>
-      </div>
+      <MarkdownCodeToolbar
+        code={code}
+        label={label}
+        wrapped={wrapped}
+        onToggleWrap={() => setWrapped((current) => !current)}
+      />
       <div data-streamdown="code-block-body">
         <pre dir="ltr">
           <code>

@@ -148,7 +148,10 @@ labelClassName`) so the stage diffstat never clips. Wired from
   gate destructive history rewrites and expose an explicit Codex Pause control.
   ScheduleChip reuses `useResolvedScheduledTasks`/`ScheduledTaskList` from
   `scheduled-tasks-panel.tsx` (same adaptive countdown clock, cannot drift).
-  The message queue intentionally stays OUT of the bar. The bar renders on
+  The message queue intentionally stays OUT of the bar's items; the bar only
+  hosts it in the `queue` slot above the pill (or alone, glued to the composer,
+  when the bar is otherwise empty), because only the bar knows whether it renders.
+  The bar renders on
   BOTH desktop and mobile from `session-chat-interface.tsx` (status + goal +
   schedule + context); it fully replaced the sticky `SessionGoalBanner`, the
   in-composer `ScheduledTasksPanel`, the mobile `SessionStatusStrip`

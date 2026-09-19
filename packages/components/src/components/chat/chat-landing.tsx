@@ -202,6 +202,7 @@ import { ErrorBoundary } from '@/components/error-boundary';
 import { ChatLandingView, type ChatLandingHintType } from './chat-landing-view';
 import { getSessionCreationNavigation } from './submission/use-composer-navigation-focus';
 import { BranchSelector, getSelectorTagClassName } from './chat-landing-selectors';
+import { CONTEXT_PILL_SURFACE_CLASS } from './context-pill-class';
 import {
   extractIssuePRMentionsFromText,
   useKnownIssuePrItems,
@@ -2817,11 +2818,11 @@ function WorkspaceChatLanding({
       });
 
       if (renderedImages.length > 0) {
-        toast(t('composer.pastedRichTextAsText', 'Pasted as text.'), {
+        toast(t('composer.pastedRichTextAsText', 'Pasted as text'), {
           // One id, so pasting repeatedly replaces the hint instead of stacking it.
           id: 'composer-pasted-rich-text-as-text',
           action: {
-            label: t('composer.pastedRichTextAttachImage', 'Attach image instead'),
+            label: t('composer.pastedRichTextAttachImage', 'Attach image'),
             onClick: () => attachPastedFiles(renderedImages),
           },
         });
@@ -3407,7 +3408,7 @@ function WorkspaceChatLanding({
         emptyText={t('chat.branchEmpty', { defaultValue: 'No branches found' })}
         loading={contextType === 'local' ? loadingLocalGitState || runtimeInitializing : undefined}
         loadingText={t('chat.branchLoading', { defaultValue: 'Loading branches...' })}
-        className="h-6 min-w-0 max-w-full gap-1.5 rounded-none border-none bg-transparent px-2 text-xs font-normal text-foreground/80 hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-100 [&_span]:text-xs [&_span]:leading-tight [&_svg]:text-current [&_svg]:opacity-100"
+        className="h-6 min-w-0 max-w-full gap-1.5 rounded-none border-none bg-transparent px-2 text-[0.9em] font-normal text-foreground/80 hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-100 [&_span]:text-[0.9em] [&_span]:leading-tight [&_svg]:text-current [&_svg]:opacity-100"
         disabled={isBranchDisabled}
       />
     </span>
@@ -3465,7 +3466,12 @@ function WorkspaceChatLanding({
 
   const branchWorktreePill =
     branchSelectorNode || topWorktreeNode ? (
-      <div className="flex h-6 min-w-0 max-w-full items-center overflow-hidden rounded-md bg-input/60 dark:bg-foreground/[0.08]">
+      <div
+        className={cn(
+          'flex h-6 min-w-0 max-w-full items-center overflow-hidden rounded-md',
+          CONTEXT_PILL_SURFACE_CLASS
+        )}
+      >
         {branchSelectorNode}
         {branchSelectorNode && topWorktreeNode ? (
           <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border" />
@@ -3742,7 +3748,7 @@ function WorkspaceChatLanding({
           type="button"
           variant="ghost"
           size="sm"
-          className={cn(selectorTagClassName, 'text-xs leading-tight')}
+          className={cn(selectorTagClassName, 'text-[0.9em] leading-tight')}
           onClick={resetErrorBoundary}
           aria-label={t('chat.retryTargetSelector', 'Retry target selector')}
         >
@@ -6039,7 +6045,7 @@ function WorkspaceChatLanding({
       </div>
       <button
         type="button"
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-hover hover:text-foreground"
         onClick={() => void dismissInboxItem({ itemId: sharingReviewRow._id })}
         aria-label={t('common.dismiss', 'Dismiss')}
       >
@@ -6142,6 +6148,7 @@ function WorkspaceChatLanding({
             onImageDrop={submitting ? undefined : handleImageDrop}
             imageDropDisabled={submitting}
             promptPlaceholder={promptPlaceholder}
+            compactPlaceholderName={activeAgentRole?.name ?? selectedConfig?.name ?? null}
             promptDisabled={submitting}
             promptRows={4}
             promptEnterKeyHint={promptEnterKeyHint}
@@ -6579,6 +6586,7 @@ function WorkspaceChatLanding({
         onPromptPaste={handlePromptPaste}
         onImageDrop={handleImageDrop}
         promptPlaceholder={promptPlaceholder}
+        compactPlaceholderName={activeAgentRole?.name ?? selectedConfig?.name ?? null}
         promptEnterKeyHint={promptEnterKeyHint}
         promptRef={promptTextareaRef}
         pastedTextDrafts={pastedTextDrafts}

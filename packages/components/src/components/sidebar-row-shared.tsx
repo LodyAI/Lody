@@ -35,12 +35,12 @@ import { getGitHubOwnerAvatarUrl } from '@/lib/github-avatar';
  * flat Updated list in `sidebar-updated-task-list.tsx`) render the same anatomy,
  * so the pieces live here once instead of being copied three times.
  *
- * Row anatomy: `[① tree affordance | more][② author avatar? + title][③ status | diff/mergeable? + worktree? + PR icon? | archive]`.
+ * Row anatomy: `[① tree affordance | more][② author avatar? + title][③ status | mergeable? + worktree? + PR icon? | archive]`.
  * The author avatar (`SessionRowAuthorAvatar`) only appears in team ("All Tasks") scope on a
  * multi-member workspace; otherwise the title owns the leading edge of slot ②. The leading slot
  * stays reserved even when empty (the ⋯ menu button reveals there on hover). A local worktree
  * session shows a faint worktree glyph (`SessionRowWorktreeIndicator`) inside the metric cluster,
- * between the line diff and the PR icon (taking the PR's right-edge spot when there is no PR);
+ * immediately before the PR icon (taking the PR's right-edge spot when there is no PR);
  * GitHub sessions are always worktrees so they never show it. The full
  * repo / folder / worktree session-type detail still lives in the desktop hover info card
  * (`session-info-hover-card.tsx`).
@@ -48,8 +48,8 @@ import { getGitHubOwnerAvatarUrl } from '@/lib/github-avatar';
  * The END slot (③) is the row's single status channel: working / waiting / unread
  * REPLACES the whole resting metric cluster there, so an active row reads
  * `[title][status]` and nothing else competes with it. Only a resting row shows
- * metrics, where PR status owns the right edge when present with the line diff
- * immediately before it. Archive replaces the trailing content on hover, so the
+ * metrics, where PR status owns the right edge when present. Line totals stay
+ * off the row (hover card only). Archive replaces the trailing content on hover, so the
  * row's rightmost mark never shifts. The leading slot (①) is therefore free to
  * ALWAYS draw the opened-by tree: a running or unread child keeps its ├/└ and an
  * active opener keeps its disclosure.
@@ -61,9 +61,8 @@ type PrCiVerdict = 'success' | 'failure' | 'pending' | 'expected';
 /**
  * PR + CI use the original 14px PR / 10px verdict-slot geometry. The circular
  * mask removes the PR stroke beneath the verdict without painting a
- * sidebar-colored backdrop, so the cutout stays transparent on hover and
- * selected-row surfaces. The base keeps its PR-status tone; only the verdict
- * uses the CI-state tone. Running uses a static dot and a tighter cutout.
+ * sidebar-colored backdrop. The info bar ContextChip uses this same
+ * `SessionPrIcon`. Running uses a static dot and a tighter cutout.
  */
 function MaskedPrCiIcon({
   BaseIcon,
@@ -225,7 +224,7 @@ export function SessionPrIcon({
         VerdictIcon={VerdictIcon}
         baseToneClassName={meta.iconColorClassName}
         verdict={verdict}
-        className={className}
+        className={cn(prStatus === 'merged' && 'translate-x-px', className)}
       />
     );
   }
@@ -279,7 +278,7 @@ export function SessionRowAuthorAvatar({
 
 /**
  * A faint worktree glyph shown inside the end slot's metric cluster, sitting to
- * the LEFT of the PR icon and to the RIGHT of the line diff — so a worktree
+ * the LEFT of the PR icon — so a worktree
  * session with a PR reads `[diff][worktree][PR]`, and one without a PR keeps the
  * glyph at the right edge where the PR icon would otherwise be. It marks a
  * session running in an isolated git worktree, reusing the same glyph the
@@ -415,14 +414,14 @@ export function SidebarRowArchiveButton({
  * ③ The final slot at the row's right edge, and the row's ONE status channel.
  *
  * A working / waiting / unread session shows only its status mark here: the
- * resting content (line diff, `Mergeable`, worktree glyph, PR icon, time) is
+ * resting content (`Mergeable`, worktree glyph, PR icon, time) is
  * dropped for as long as the status lasts. That is deliberate — the status is the
  * fact the user is watching, the metrics are still one hover away in the desktop
  * info card, and collapsing them keeps the right edge to a single 14px mark
  * instead of a cluster that competes with it and eats the title.
  *
- * Archive is absolutely overlaid on hover, so a wide diff never causes layout
- * movement. When the rest content is absent but Archive is available, it still
+ * Archive is absolutely overlaid on hover, so a wide rest cluster never causes
+ * layout movement. When the rest content is absent but Archive is available, it still
  * reserves the action's 20px hit target.
  */
 export function SidebarRowEndSlot({
@@ -456,7 +455,7 @@ export function SidebarRowEndSlot({
   );
   const hasRest = Boolean(restContent);
   // Reserve the action hit target whenever something can occupy it; otherwise the
-  // slot sizes to its resting content (for example, a +/- line diff).
+  // slot sizes to its resting content (for example, a PR icon).
   const reserve = hasRest || Boolean(archive);
   return (
     // pointer-events-none so the resting PR icon area still passes clicks through to
@@ -513,13 +512,13 @@ export function GitHubOwnerIcon({
 
 // Shared section-header metrics. Every sidebar organize mode (Workspace local
 // project / GitHub Worktrees sections and the flat Updated list) uses these so
-// section labels read identically (13px medium, muted — full muted token, not a
+// section labels read identically (0.9em medium, muted — full muted token, not a
 // further /55 fade: that made "Pinned"/"Chats" and the filter icon nearly
 // illegible on light sidebars).
 const SECTION_HEADER_BUTTON_CLASS = cn(
   'relative flex h-7 min-w-0 flex-1 select-none items-center gap-1.5 rounded-md px-2 text-left',
   'border border-transparent bg-transparent',
-  'text-[13px] font-medium text-sidebar-foreground-muted transition-colors',
+  'text-[0.9em] font-medium text-sidebar-foreground-muted transition-colors',
   // The outer row paints the focus ring; suppress the global :focus-visible
   // box-shadow here so the ring wraps the whole row (label + action).
   'focus-visible:shadow-none'

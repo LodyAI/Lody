@@ -25,28 +25,28 @@ type StatusMeta = {
 export const PR_STATUS_META: Record<PrStatus, StatusMeta> = {
   open: {
     icon: GitPullRequest,
-    className: 'bg-github-open/[0.12] text-github-open hover:bg-github-open/[0.18]',
+    className: 'bg-foreground/[0.06] text-github-open hover:bg-foreground/[0.1]',
     iconColorClassName: 'text-github-open',
     labelKey: 'sessions.pr.statusOpen',
     labelFallback: 'Open',
   },
   merged: {
     icon: GitMerge,
-    className: 'bg-github-merged/[0.12] text-github-merged hover:bg-github-merged/[0.18]',
-    iconColorClassName: 'text-github-merged',
+    className: 'bg-foreground/[0.06] text-pr-merged hover:bg-foreground/[0.1]',
+    iconColorClassName: 'text-pr-merged',
     labelKey: 'sessions.pr.statusMerged',
     labelFallback: 'Merged',
   },
   closed: {
     icon: GitPullRequestClosed,
-    className: 'bg-github-closed/[0.12] text-github-closed hover:bg-github-closed/[0.18]',
+    className: 'bg-foreground/[0.06] text-github-closed hover:bg-foreground/[0.1]',
     iconColorClassName: 'text-github-closed',
     labelKey: 'sessions.pr.statusClosed',
     labelFallback: 'Closed',
   },
   draft: {
     icon: GitPullRequestDraft,
-    className: 'bg-github-draft/[0.12] text-github-draft hover:bg-github-draft/[0.18]',
+    className: 'bg-foreground/[0.06] text-github-draft hover:bg-foreground/[0.1]',
     iconColorClassName: 'text-github-draft',
     labelKey: 'sessions.pr.statusDraft',
     labelFallback: 'Draft',
@@ -90,7 +90,7 @@ export const PullRequestBadge = ({
   const statusLabel = t(statusMeta.labelKey, statusMeta.labelFallback);
 
   const sharedClassName = cn(
-    'inline-flex items-center gap-1 rounded-md font-semibold transition',
+    'inline-flex items-center gap-1 rounded-md font-normal transition',
     sizeMeta.wrapper,
     statusMeta.className,
     'focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-primary/30',

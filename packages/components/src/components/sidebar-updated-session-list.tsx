@@ -764,8 +764,6 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       canGoToOpener ||
       (showPr && Boolean(onOpenPullRequest)) ||
       Boolean(openedByOpener));
-  const titleFontClassName = item.isPinned ? 'font-normal' : 'font-medium';
-
   const handlePrOpen =
     onOpenPullRequest && prUrl
       ? () =>
@@ -780,11 +778,10 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   const titleNode = (
     <span
       className={cn(
-        'min-w-0 flex-1 truncate',
-        titleFontClassName,
+        'min-w-0 flex-1 truncate font-normal',
         showSelectedState
           ? 'text-sidebar-selection-foreground'
-          : 'text-sidebar-foreground dark:text-sidebar-foreground/75 group-hover/row:text-sidebar-hover-foreground'
+          : 'text-sidebar-foreground group-hover/row:text-sidebar-hover-foreground'
       )}
     >
       {item.title}
@@ -821,7 +818,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           !isMobile &&
           'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground data-[menu-open]:bg-sidebar-hover data-[menu-open]:text-sidebar-hover-foreground',
         showSelectedState &&
-          'border-sidebar-foreground/10 bg-sidebar-foreground/10 text-sidebar-foreground hover:bg-sidebar-foreground/10',
+          'bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection',
         // Keyboard-only focus ring — see SessionList: plain :focus-within also
         // matches after mouse clicks via the overlay <a> and left a permanent
         // inset ring on the selected row.
@@ -891,7 +888,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         >
           {titleNode}
         </div>
-        {/* Keep PR at the right edge, with All Changes totals immediately before it. */}
+        {/* Keep PR at the right edge. Line totals stay in the hover card. */}
         <SidebarRowEndSlot
           isWaitingPermission={item.isWaitingPermission}
           isWorking={item.isWorking}
@@ -899,7 +896,6 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           fadeClassName="group-hover/row:opacity-0"
           restIcon={
             showPr ||
-            hasChanges ||
             showMergeablePill ||
             isMobile ||
             (item.kind === 'local' && item.isWorktree) ? (
@@ -910,14 +906,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                 )}
               >
                 {isMobile ? <span>{relativeTime}</span> : null}
-                {showMergeablePill ? (
-                  <SessionMergeablePill />
-                ) : hasChanges && !isMergeable ? (
-                  <span className="flex items-center gap-1">
-                    <span className="text-code-added">+{addedLines}</span>
-                    <span className="text-code-removed">-{deletedLines}</span>
-                  </span>
-                ) : null}
+                {showMergeablePill ? <SessionMergeablePill /> : null}
                 <SessionRowWorktreeIndicator
                   isWorktree={item.kind === 'local' && item.isWorktree}
                 />

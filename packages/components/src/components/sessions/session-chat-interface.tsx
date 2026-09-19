@@ -236,6 +236,7 @@ import { AutoReviewMenuItem } from './auto-review-menu-item';
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
 import {
   getSessionForkDestinationOptions,
+  SessionForkOptionTooltip,
   type SessionForkDestination,
   type SessionForkWorktreeAvailability,
 } from './session-fork-destination-menu';
@@ -253,7 +254,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -776,7 +776,7 @@ export function SessionHistoryButton({
                 <button
                   key={session.id}
                   className={cn(
-                    'w-full rounded-lg border px-3 py-2 text-left transition-colors hover:bg-muted',
+                    'w-full rounded-lg border px-3 py-2 text-left transition-colors hover:bg-hover',
                     isActive && 'border-border/70 bg-selection text-selection-foreground'
                   )}
                   onClick={() => handleSelect(session.id as SessionId)}
@@ -927,6 +927,11 @@ export type SessionOpenedByMenuState = {
   opened?: Array<{ sessionId: SessionId; title: string; target: SessionNavigationTarget }>;
   onOpenSession: (target: SessionNavigationTarget) => void;
 };
+
+const SESSION_HEADER_MENU_CONTENT_CLASS =
+  'min-w-[200px] max-w-[290px] [&_[role=menuitem]]:min-h-8 [&_[role=menuitem]]:py-1.5';
+const SESSION_HEADER_MENU_STATIC_ROW_CLASS =
+  'flex min-h-8 w-full min-w-0 cursor-default select-none items-center gap-2 overflow-hidden rounded-md px-2 py-1.5 text-[13px] leading-4';
 
 /** Session header "···" menu — context, visibility, sharing, and session actions. */
 export function SessionHeaderMenu({
@@ -1140,19 +1145,14 @@ export function SessionHeaderMenu({
             <Ellipsis className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="min-w-[200px] max-w-[320px]">
+        <DropdownMenuContent align="end" className={SESSION_HEADER_MENU_CONTENT_CLASS}>
           <SessionWindowMenuItem sessionId={session.id} dropdown />
-          {/* One compact context group keeps useful identity visible. Separate labels make
-              every value pay for two rows, while a submenu hides context behind another step. */}
+          {/* Identity stays inline: a group label wastes a row, and a submenu hides
+              repo/branch/machine behind another step. */}
           {!compact && showSessionContext ? (
             <>
-              <DropdownMenuLabel className="pb-0.5 pt-1.5 text-[0.7rem] font-medium text-muted-foreground">
-                {t('sessions.sessionContextLabel', 'Session')}
-              </DropdownMenuLabel>
-
               {isGitHub && repoFullName ? (
                 <DropdownMenuItem
-                  className="py-1.5"
                   onClick={() =>
                     copyToClipboard(
                       repoFullName,
@@ -1164,13 +1164,13 @@ export function SessionHeaderMenu({
                 >
                   <Github className="h-3.5 w-3.5 text-muted-foreground" />
                   <span className="min-w-0 flex-1 truncate">{repoFullName}</span>
-                  <Copy className="ml-auto h-3 w-3 shrink-0 opacity-50" />
+                  <Copy className="ml-auto h-3 w-3 shrink-0 text-muted-foreground" />
                 </DropdownMenuItem>
               ) : null}
 
               {showBranchInfo ? (
                 <DropdownMenuItem
-                  className="items-start py-1.5"
+                  className="items-start"
                   onClick={() =>
                     copyToClipboard(
                       branchDisplayValue,
@@ -1205,11 +1205,10 @@ export function SessionHeaderMenu({
                       </span>
                     ) : null}
                   </span>
-                  <Copy className="ml-auto mt-0.5 h-3 w-3 shrink-0 opacity-50" />
+                  <Copy className="ml-auto mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
                 </DropdownMenuItem>
               ) : showProjectPath ? (
                 <DropdownMenuItem
-                  className="py-1.5"
                   onClick={() =>
                     copyToClipboard(
                       localPath,
@@ -1221,12 +1220,12 @@ export function SessionHeaderMenu({
                 >
                   <Folder className="h-3.5 w-3.5 text-muted-foreground" />
                   <span className="min-w-0 flex-1 truncate">{localPath}</span>
-                  <Copy className="ml-auto h-3 w-3 shrink-0 opacity-50" />
+                  <Copy className="ml-auto h-3 w-3 shrink-0 text-muted-foreground" />
                 </DropdownMenuItem>
               ) : null}
 
               {machineName ? (
-                <div className="flex min-w-0 items-center gap-2 px-2.5 py-1.5 text-[0.8rem]">
+                <div className={SESSION_HEADER_MENU_STATIC_ROW_CLASS}>
                   <Monitor className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <span className="sr-only">{t('sessions.machineLabel', 'Machine')}: </span>
                   <span className="min-w-0 flex-1 truncate">{machineName}</span>
@@ -1243,7 +1242,7 @@ export function SessionHeaderMenu({
               {sharing ? (
                 <Tooltip delayDuration={300}>
                   <TooltipTrigger asChild>
-                    <div className="flex min-w-0 items-center gap-2 px-2.5 py-1.5 text-[0.8rem]">
+                    <div className={SESSION_HEADER_MENU_STATIC_ROW_CLASS}>
                       {sharing.visibility === 'team' ? (
                         <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                       ) : sharing.visibility === 'private' ? (
@@ -1251,7 +1250,7 @@ export function SessionHeaderMenu({
                       ) : (
                         <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                       )}
-                      <span className="min-w-0 flex-1 truncate font-medium">
+                      <span className="min-w-0 flex-1 truncate font-normal">
                         {getSessionSharingLabel(t, sharing)}
                       </span>
                     </div>
@@ -1300,31 +1299,46 @@ export function SessionHeaderMenu({
                   {t('sessions.forkSession', 'Fork session')}
                 </span>
               </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="min-w-[16rem]">
+              <DropdownMenuSubContent className="min-w-[13rem]">
                 {onFork &&
                   !isArchived &&
-                  getSessionForkDestinationOptions(t, forkWorktreeAvailability).map((option) => (
-                    <DropdownMenuItem
-                      key={option.id}
-                      disabled={option.disabled || isForking}
-                      className="items-start py-1.5"
-                      onSelect={() => {
-                        void onFork(option.id);
-                      }}
-                    >
-                      {option.id === 'new-worktree' ? (
-                        <WorktreeIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                      ) : (
-                        <Folder className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                      )}
-                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                        <span className="leading-tight">{option.label}</span>
-                        <span className="text-xs font-normal leading-snug text-muted-foreground">
-                          {option.hint}
-                        </span>
-                      </span>
-                    </DropdownMenuItem>
-                  ))}
+                  getSessionForkDestinationOptions(t, forkWorktreeAvailability).map((option) => {
+                    const disabled = option.disabled || isForking;
+                    const item = (
+                      <DropdownMenuItem
+                        key={option.id}
+                        disabled={disabled}
+                        onSelect={() => {
+                          void onFork(option.id);
+                        }}
+                      >
+                        {option.id === 'new-worktree' ? (
+                          <WorktreeIcon className="h-3.5 w-3.5 shrink-0" />
+                        ) : (
+                          <Folder className="h-3.5 w-3.5 shrink-0" />
+                        )}
+                        <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                        {option.status ? (
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            {option.status}
+                          </span>
+                        ) : null}
+                      </DropdownMenuItem>
+                    );
+                    // The submenu usually opens toward the conversation, so the
+                    // explanation sits on that side instead of over the parent menu.
+                    return disabled ? (
+                      item
+                    ) : (
+                      <SessionForkOptionTooltip
+                        key={option.id}
+                        description={option.description}
+                        side="left"
+                      >
+                        {item}
+                      </SessionForkOptionTooltip>
+                    );
+                  })}
                 {onCopyConversationHistory && (
                   <DropdownMenuItem
                     onSelect={() => {
@@ -1605,12 +1619,12 @@ export function SessionSearchBar({
         type="button"
         variant="ghost"
         size="icon"
-        className="h-7 w-7 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground disabled:pointer-events-none disabled:text-muted-foreground/40"
+        className="h-6 w-6 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:pointer-events-none disabled:text-muted-foreground/40"
         disabled={!hasResults}
         onClick={onClick}
         aria-label={label}
       >
-        <Icon className="h-3.5 w-3.5" strokeWidth={2.25} />
+        <Icon className="h-3.5 w-3.5" strokeWidth={2} />
       </Button>
     );
     if (!hasResults) return button;
@@ -1628,23 +1642,22 @@ export function SessionSearchBar({
   };
 
   return (
-    <div className="pointer-events-auto absolute right-3 top-3 z-20 w-[min(440px,calc(100%-1.5rem))] sm:right-4 sm:top-4 sm:w-[min(440px,calc(100%-2rem))]">
+    <div className="pointer-events-auto absolute right-3 top-3 z-20 w-[min(360px,calc(100%-1.5rem))] sm:right-4 sm:top-4 sm:w-[min(360px,calc(100%-2rem))]">
       <div
         role="search"
         className={cn(
-          'group/search flex h-11 items-center gap-1 rounded-full border bg-background/95 pl-3.5 pr-1.5 shadow-[0_14px_40px_-18px_rgba(15,23,42,0.45),0_2px_10px_-4px_rgba(15,23,42,0.16)] backdrop-blur-md transition-colors supports-[backdrop-filter]:bg-background/85',
-          'border-border focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/20',
-          noResults &&
-            'border-destructive/30 focus-within:border-destructive/60 focus-within:ring-destructive/15'
+          'group/search flex h-9 items-center gap-0.5 rounded-lg border-[0.5px] bg-background/95 pl-2.5 pr-1 shadow-[0_4px_12px_-4px_rgba(15,23,42,0.16),0_1px_2px_rgba(15,23,42,0.06)] backdrop-blur-md transition-colors supports-[backdrop-filter]:bg-background/85',
+          'border-border focus-within:border-ring/60',
+          noResults && 'border-destructive/30 focus-within:border-destructive/60'
         )}
       >
         <Search
           className={cn(
-            'h-4 w-4 shrink-0 transition-colors',
+            'h-3.5 w-3.5 shrink-0 transition-colors',
             hasQuery ? 'text-foreground' : 'text-muted-foreground/80',
             noResults && 'text-destructive/80'
           )}
-          strokeWidth={2.25}
+          strokeWidth={2}
         />
         <Input
           ref={inputRef}
@@ -1653,7 +1666,7 @@ export function SessionSearchBar({
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder={t('sessions.findInConversation', 'Find in session')}
           aria-label={t('sessions.findInConversation', 'Find in session')}
-          className="h-9 min-w-0 flex-1 border-0 bg-transparent px-2 py-0 text-[13.5px] tracking-tight shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0 [&::-webkit-search-cancel-button]:hidden"
+          className="h-7 min-w-0 flex-1 border-0 bg-transparent px-1.5 py-0 text-[13px] tracking-tight shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0 [&::-webkit-search-cancel-button]:hidden"
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
               event.preventDefault();
@@ -1687,7 +1700,7 @@ export function SessionSearchBar({
           </span>
         )}
 
-        <Separator orientation="vertical" className="mx-0.5 h-5 bg-border/60" />
+        <Separator orientation="vertical" className="mx-0.5 h-4 bg-border/60" />
 
         <div className="flex items-center gap-px">
           {renderNavButton(
@@ -1703,11 +1716,11 @@ export function SessionSearchBar({
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+                className="h-6 w-6 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
                 onClick={onClose}
                 aria-label={t('common.close', 'Close')}
               >
-                <X className="h-3.5 w-3.5" strokeWidth={2.25} />
+                <X className="h-3.5 w-3.5" strokeWidth={2} />
               </Button>
             </TooltipTrigger>
             <TooltipContent
@@ -2825,6 +2838,10 @@ export const SessionChatInterface = memo(
       }
       return resolveActivityFromHistory(sessionHistory);
     }, [liveSessionStatus, sessionHistory]);
+    const runningReasoningLabel =
+      session.agentType === 'codex' && liveSessionStatus?.type === 'running'
+        ? (liveSessionStatus.detail ?? null)
+        : null;
 
     const activeAssistantTurnId = useMemo(() => {
       return resolveActiveAssistantTurnId(sessionHistory);
@@ -3618,7 +3635,15 @@ export const SessionChatInterface = memo(
         : isSessionActive
           ? liveSessionStatus?.type === 'requestPermission'
             ? t('sessions.statusIndicator.requestPermission')
-            : t(`sessions.statusIndicator.${runningActivity ?? 'thinking'}`)
+            : // Codex's transient reasoning summary, when it reports one.
+              (runningReasoningLabel ??
+              (runningActivity === 'imageGenerating'
+                ? t('sessions.statusIndicator.imageGenerating')
+                : // Reading, running and editing all read as "Working"; the
+                  // collapsed tool groups above already say which.
+                  runningActivity === 'exploring' || runningActivity === 'writing'
+                  ? t('sessions.working', 'Working')
+                  : t('sessions.statusIndicator.thinking')))
           : hasPendingDispatch && statusStripState == null
             ? // Pre-start only while the turn can actually start: any
               // connection/machine problem (browser offline, machine removed or
@@ -3627,6 +3652,8 @@ export const SessionChatInterface = memo(
             : null;
     const agentActivityTone =
       isSessionActive && liveSessionStatus?.type === 'requestPermission' ? 'warning' : 'primary';
+    // Waiting on the user is not work in progress: that status does not shimmer.
+    const agentActivityShimmer = agentActivityTone !== 'warning';
 
     const scrollChatToBottom = useCallback(() => {
       requestAnimationFrame(() => chatStreamRef.current?.scrollToBottom());
@@ -5999,6 +6026,7 @@ export const SessionChatInterface = memo(
                               emptyState={chatStreamEmptyState}
                               agentActivityLabel={agentActivityLabel}
                               agentActivityTone={agentActivityTone}
+                              agentActivityShimmer={agentActivityShimmer}
                               onFileDiffClick={onFileDiffClick}
                               onFilePathClick={onFilePathClick ? handleFilePathClick : undefined}
                               onOpenHtmlFile={handleOpenHtmlAttachment}
@@ -6115,6 +6143,7 @@ export const SessionChatInterface = memo(
                     scheduledTasks={pendingScheduledTasks}
                     prCiRuns={infoBarPrCiRuns}
                     onOpenPrCiRun={handleOpenPrCiRun}
+                    prCiState={latestPrState?.s}
                     projectName={repoFullName || resolvedLocalProjectMeta?.name || null}
                     branch={isMobile ? null : session.branchName?.trim() || null}
                     workspaceLocation={
@@ -6154,6 +6183,31 @@ export const SessionChatInterface = memo(
                     // Mobile keeps the bar above the session drawer's z-30
                     // edge-back strip so its leading chip stays tappable.
                     protectFromEdgeBackZone={isMobile}
+                    // Queued turns stack on the bar (or on the composer when the
+                    // bar is empty). Hidden with the composer: a pending
+                    // permission bypasses the queue, as does share selection.
+                    queue={
+                      messageQueue.length > 0 &&
+                      !shouldReplaceComposerWithPermission &&
+                      !shareSelection.active ? (
+                        <MessageQueueDisplay
+                          sessionId={session.id}
+                          items={messageQueue}
+                          onRemove={handleRemoveQueueItem}
+                          onReorder={handleReorderQueueItem}
+                          onEditStart={handleStartQueueItemEdit}
+                          onEditCancel={handleCancelQueueItemEdit}
+                          onEditSave={handleSaveQueueItemEdit}
+                          onSteer={handleSteerQueuedMessage}
+                          showSteerAction={
+                            isSessionActive &&
+                            !!activeAssistantTurnId &&
+                            !isExternalHistoryRefreshing
+                          }
+                          nativeSteerAvailable={shouldUseNativeQueueSteer}
+                        />
+                      ) : undefined
+                    }
                   />
 
                   {/* Input area - isolated component to prevent full re-renders on typing.
@@ -6195,27 +6249,9 @@ export const SessionChatInterface = memo(
                         availableCommands={availableCommands}
                         commandsEnabled={isVisible}
                         freeTurnLimitNotice={freeSessionTurnNotice}
-                        queueDisplay={
-                          messageQueue.length > 0 ? (
-                            <MessageQueueDisplay
-                              sessionId={session.id}
-                              items={messageQueue}
-                              onRemove={handleRemoveQueueItem}
-                              onReorder={handleReorderQueueItem}
-                              onEditStart={handleStartQueueItemEdit}
-                              onEditCancel={handleCancelQueueItemEdit}
-                              onEditSave={handleSaveQueueItemEdit}
-                              onSteer={handleSteerQueuedMessage}
-                              showSteerAction={
-                                isSessionActive &&
-                                !!activeAssistantTurnId &&
-                                !isExternalHistoryRefreshing
-                              }
-                              nativeSteerAvailable={shouldUseNativeQueueSteer}
-                            />
-                          ) : null
-                        }
                         mcp={mcpSelection.menu}
+                        // The info bar above owns this gap (and seats the queue).
+                        hideTopSpacer
                         skipNextViewportResizeAutoScrollRef={skipNextViewportResizeAutoScrollRef}
                         onModeChange={handleModeChange}
                         onModelChange={handleModelChange}

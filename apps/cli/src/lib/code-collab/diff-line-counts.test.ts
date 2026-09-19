@@ -82,6 +82,15 @@ describe('computeLineCounts (nullable sides)', () => {
   it('returns [0,0] when both sides are missing', () => {
     expect(computeLineCounts(null, null)).toEqual([0, 0]);
   });
+
+  it('returns [0,0] for empty-file creation and deletion', () => {
+    expect(computeLineCounts(null, '')).toEqual([0, 0]);
+    expect(computeLineCounts('', null)).toEqual([0, 0]);
+  });
+
+  it('returns [0,0] when an edit writes identical text', () => {
+    expect(computeLineCounts('same\n', 'same\n')).toEqual([0, 0]);
+  });
 });
 
 describe('countTextLines', () => {

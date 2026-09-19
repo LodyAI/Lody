@@ -10,6 +10,13 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
 
 ## Layout and components
 
+- Desktop overlay close is `absolute` on the RIGHT pane only, equal `top`/`right`
+  inset, no close row. Right-pane `padding-right` keeps chrome off that column;
+  apply it inside the scroll area so the scrollbar stays flush with the pane edge.
+- Light settings surfaces are white, not gray-on-gray: `data-settings-surface`
+  maps `--card` to `--popover`; list rows use `SETTINGS_ROW_CARD_CLASS`; header
+  bands fill only in dark. No new gray card fills.
+
 - `share-management-setting.tsx` lists published static copies via the scoped cloud
   query. Ordinary members see their publications; admins see the workspace inventory.
   Draft uploads are not published shares. Reuse `useSessionShareLinkActions` for
@@ -34,7 +41,7 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   remaining space and the control column hugs its content. Never size either column
   from a viewport breakpoint — settings render in a panel far narrower than the window,
   and the panel clips its overflow, so a `md:`-width label column silently hides the
-  control.
+  control. Copy is `font-normal` (size/muted, not weight).
 - Agent configuration lives in `agent-config-dialog.tsx` plus `env-vars-textarea.tsx`.
   DeepSeek Harness official vs custom endpoint is dialog form state only: persist
   `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` (official always writes
@@ -48,22 +55,18 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
 - Interface and terminal font choices exclude the known symbol families in
   `lib/local-fonts.ts`; persisted selections use the same filter. Font option names
   use the default interface font so they remain readable.
-- Conversation font size uses `conversation-font-size-slider.tsx` on desktop and
-  mobile. Keep the native range input keyboard-free on touch devices and the mobile
-  row stacked; clamping a number input on each keystroke breaks multi-digit editing.
+- Font size is five named tiers in `conversation-font-size-options.ts` writing
+  `--ui-font-size` (settings 1em; compact chrome 0.9em). No free-form number.
 - The Codex reset forecast chip in the provider row must not fetch on mount and must
   pass `nestedInDialog` for its dialog: [../codex-reset/AGENTS.md](../codex-reset/AGENTS.md).
-- The usage share card is a fixed-format report, not a second `ChatShareCard`: its two
-  aspects are exact pixel sizes, its period is the page's selected range, and its
-  headline is that range's timeline total, so page and image cannot disagree. Derive
-  every number through `usage-share-stats.ts`, which stamps the metric onto the stats
-  it derives — never pass a metric beside them — so the headline, cells, graphic
-  shading and both splits always read one unit. Money is formatted per slot:
-  `formatUsdCompact` for the headline, `formatUsdTight` for cells and legend rows;
-  never let `truncate` decide, because an ellipsis on a number is a wrong number. Tokens and member
-  anonymity are the defaults; cost substitutes for tokens rather than joining them,
-  and member slices carry display name and avatar only — never an email. Both share cards use the one capture pipeline in `lib/share-image-export.ts`
-  and the one theme pinning in `components/share-theme-scope.ts`; do not fork either.
+- The usage share card is a fixed-format report, not a second `ChatShareCard`:
+  exact pixel aspects, period = the page range, headline = that range's total.
+  Derive every number through `usage-share-stats.ts` (stamp the metric on the
+  stats; never pass it beside them). Money: `formatUsdCompact` headline,
+  `formatUsdTight` cells — never `truncate`. Tokens/member anonymity are
+  defaults; cost substitutes for tokens; member slices never include email.
+  Both share cards use `lib/share-image-export.ts` and
+  `components/share-theme-scope.ts`; do not fork either.
   `StatsSettingsView` keeps the entry behind the opt-in `shareCard` prop with a lazy
   dialog, because the public landing reuses that view. Typography and spacing come
   from the card's own `TEXT`, `PAD_X`, and `RHYTHM` constants — never a fresh

@@ -40,12 +40,14 @@ const meta = {
   decorators: [
     (Story, ctx) => {
       const width = (ctx.parameters as { containerWidth?: string }).containerWidth ?? 'w-[420px]';
-      // Mirror the real chat-input shell so the queue sits attached to a faux composer.
+      // Mirror production: the sheet is inset over a faux composer and sits on it.
       return (
         <div className="bg-background p-6">
           <div className={`${width}`}>
-            <Story />
-            <div className="rounded-md rounded-t-none border border-border/50 bg-muted/40 px-3 py-3 text-xs text-muted-foreground/60">
+            <div className="mx-3">
+              <Story />
+            </div>
+            <div className="rounded-xl border border-foreground/[0.10] bg-[hsl(var(--composer))] px-3 py-3 text-xs text-muted-foreground/60">
               Composer placeholder
             </div>
           </div>

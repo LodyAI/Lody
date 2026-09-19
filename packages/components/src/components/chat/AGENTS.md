@@ -27,13 +27,20 @@ Index and rationale: [README.md](README.md).
 - The sharing-review landing notice has two distinct durable actions: dismissal
   keeps the current source revision quiet, while "Don't remind me again"
   suppresses that user's notice for the workspace across future revisions.
+- The composer box border is 1px (`border`), not a 0.5px hairline. Light fill is
+  `--composer`; the session info bar uses the same fill. Both share
+  `COMPOSER_ELEVATION_CLASS`. The info bar uses `INFO_BAR_ELEVATION_CLASS`.
+  Dark fill stays `bg-input/90`.
 - Desktop footer order: run config → permission → usage. Provider interaction mode
   belongs inside run config; the standalone button is explicit permission mode,
-  falling back to legacy ACP modes. Mobile new-chat and in-session composers share
-  `MobileSessionRunConfig` face + sheet, with adjacent usage; see
-  [mobile rules](../mobile/AGENTS.md). Never restore separate model/thinking chips
-  or below-composer agent/permission rows. Usage reads the selected agent's Machine
-  Flock subscription limits; hide it for custom or environment-overridden providers.
+  falling back to legacy ACP modes. Plus / model / mode share `gap-x-1.5`; when
+  labels hide (`@max-[280px]/composer-face`) the two triggers are 28px squares
+  matching the plus hit box, and lucide mode/model glyphs use stroke 1.5. Mobile
+  new-chat and in-session composers share `MobileSessionRunConfig` face + sheet,
+  with adjacent usage; see [mobile rules](../mobile/AGENTS.md). Never restore
+  separate model/thinking chips or below-composer agent/permission rows. Usage
+  reads the selected agent's Machine Flock subscription limits; hide it for
+  custom or environment-overridden providers.
 - Desktop "Recently used" (`lib/recent-run-configs.ts`) is device-local localStorage
   history per workspace, recorded only on chat START, never on setting changes.
   Rows offer the entire agent/model/config combination, filter by selected machine,

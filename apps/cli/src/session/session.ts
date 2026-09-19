@@ -647,6 +647,7 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
           forkSessionTurnId: callbacks.forkSessionTurnId,
           onStartupStage: callbacks.onStartupStage,
           onUpdateMessage: callbacks.onUpdateMessage,
+          onLiveReasoningStatus: callbacks.onLiveReasoningStatus,
           onRequestPermission: callbacks.onRequestPermission,
           onUsageUpdate: callbacks.onUsageUpdate,
           onContextWindowUsageUpdate: callbacks.onContextWindowUsageUpdate,

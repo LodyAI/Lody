@@ -133,7 +133,7 @@ function SegmentedControl<Value extends string>({
           aria-selected={value === option.value}
           onClick={() => onChange(option.value)}
           className={cn(
-            'rounded-[5px] px-2.5 py-1 text-xs font-medium transition-colors',
+            'rounded-[5px] px-2.5 py-1 text-xs font-normal transition-colors',
             value === option.value
               ? 'bg-background text-foreground shadow-xs ring-1 ring-border/70'
               : 'text-muted-foreground hover:text-foreground'
@@ -656,7 +656,7 @@ function UsageCompositionBar({
 }) {
   return (
     <div className="min-w-0">
-      <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground/80">
+      <p className="text-[10px] font-normal uppercase tracking-[0.08em] text-muted-foreground/80">
         {label}
       </p>
       <div className="mt-1.5 flex h-1.5 gap-px overflow-hidden rounded-full bg-muted-foreground/10">
@@ -932,7 +932,7 @@ function UsageTokenRings({
           ))}
         </svg>
         <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-10 text-center">
-          <span className="w-full truncate text-[15px] font-semibold leading-none tabular-nums tracking-tight text-foreground sm:text-base">
+          <span className="w-full truncate text-[15px] font-normal leading-none tabular-nums tracking-tight text-foreground sm:text-base">
             {metric === 'tokens' ? (
               <NumberFlow
                 value={total}
@@ -943,13 +943,13 @@ function UsageTokenRings({
               formatCost(total, locale)
             )}
           </span>
-          <span className="mt-1 w-full truncate text-[9px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+          <span className="mt-1 w-full truncate text-[9px] font-normal uppercase tracking-[0.08em] text-muted-foreground">
             {totalLabel}
           </span>
         </div>
       </div>
 
-      <p className="mt-3 w-full text-[10px] font-medium uppercase tracking-[0.08em] text-muted-foreground/80">
+      <p className="mt-3 w-full text-[10px] font-normal uppercase tracking-[0.08em] text-muted-foreground/80">
         {caption}
       </p>
       <ul className="mt-1.5 grid w-full grid-cols-2 gap-x-3 gap-y-1">
@@ -1088,7 +1088,7 @@ function UsageRangePanel({
           {peakBucket && (values[peakIndex] ?? 0) > 0 ? (
             <p className="text-[11px] tabular-nums text-muted-foreground">
               <span className="text-muted-foreground/60">{`${t('workspace.usage.skyline.peakInterval')} `}</span>
-              <span className="font-medium text-foreground">
+              <span className="font-normal text-foreground">
                 {formatMetric(values[peakIndex] ?? 0, metric)}
               </span>
               <span className="text-muted-foreground/60">{` · ${peakBucket.bucketLabel}`}</span>
@@ -1462,7 +1462,7 @@ function UsageHeatmap({
           className="pointer-events-none absolute z-10 -translate-x-1/2 -translate-y-full whitespace-nowrap rounded-md bg-popover px-2 py-1.5 text-[11px] leading-tight text-popover-foreground shadow-md ring-1 ring-border/70"
           style={{ left: tooltip.left, top: tooltip.top }}
         >
-          <span className="font-medium tabular-nums">
+          <span className="font-normal tabular-nums">
             {detailCell.isFuture
               ? t('workspace.usage.skyline.future')
               : detailCell.value > 0
@@ -1553,7 +1553,7 @@ function RankedBars({ rows }: { rows: BreakdownRow[] }) {
           />
           <span className="relative flex h-full items-center gap-1.5 px-2">
             {row.icon}
-            <span className="truncate text-[11px] font-medium text-foreground">{row.label}</span>
+            <span className="truncate text-[11px] font-normal text-foreground">{row.label}</span>
             <span className="ml-auto shrink-0 pl-2 text-[11px] tabular-nums text-muted-foreground">
               {formatTokens(row.tokens)}
             </span>
@@ -1643,11 +1643,11 @@ function UsageDayDetailPanel({
         </Button>
         <div className="grid gap-x-6 gap-y-4 lg:grid-cols-[minmax(0,13rem)_1fr]">
           <div className="min-w-0">
-            <p className="text-[11px] font-medium text-muted-foreground">
+            <p className="text-[11px] font-normal text-muted-foreground">
               {formats.day.format(new Date(dayStartMs))}
             </p>
             <p className="mt-1 flex items-baseline gap-1.5">
-              <span className="text-2xl font-semibold leading-none tabular-nums text-foreground">
+              <span className="text-2xl font-normal leading-none tabular-nums text-foreground">
                 {day ? (
                   <NumberFlow
                     value={day.totals.tokens}
@@ -1722,7 +1722,7 @@ function UsageDayDetailPanel({
           {hasUsage && day ? (
             <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
               <div className="min-w-0">
-                <p className="mb-2 text-[11px] font-medium text-muted-foreground">
+                <p className="mb-2 text-[11px] font-normal text-muted-foreground">
                   {t('workspace.usage.byModel')}
                 </p>
                 <RankedBars
@@ -1740,7 +1740,7 @@ function UsageDayDetailPanel({
                 />
               </div>
               <div className="min-w-0">
-                <p className="mb-2 text-[11px] font-medium text-muted-foreground">
+                <p className="mb-2 text-[11px] font-normal text-muted-foreground">
                   {t('workspace.usage.byUser')}
                 </p>
                 <RankedBars
@@ -1754,7 +1754,7 @@ function UsageDayDetailPanel({
                       icon: (
                         <Avatar className="size-4 shrink-0">
                           {user?.image ? <AvatarImage src={user.image} alt="" /> : null}
-                          <AvatarFallback className="bg-foreground/15 text-[8px] font-medium uppercase text-foreground/80">
+                          <AvatarFallback className="bg-foreground/15 text-[8px] font-normal uppercase text-foreground/80">
                             {label.slice(0, 2)}
                           </AvatarFallback>
                         </Avatar>
@@ -1841,8 +1841,8 @@ function SceneOrbitControls({ targetY }: { targetY: number }) {
 function SummaryStat({ label, value, detail }: { label: string; value: string; detail?: string }) {
   return (
     <div className="min-w-0">
-      <dt className="truncate text-[11px] font-medium text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5 truncate text-sm font-semibold tabular-nums text-foreground">
+      <dt className="truncate text-[11px] font-normal text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5 truncate text-sm font-normal tabular-nums text-foreground">
         {value}
       </dd>
       {detail ? <p className="truncate text-[11px] text-muted-foreground/80">{detail}</p> : null}
@@ -2183,7 +2183,7 @@ export function UsageCalendarVisualization({
     <section className="overflow-hidden rounded-lg border border-border/60 bg-card/40">
       <header className="flex flex-wrap items-center justify-between gap-3 px-4 pt-4">
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold text-foreground">
+          <h3 className="text-sm font-normal text-foreground">
             {t('workspace.usage.skyline.title')}
           </h3>
           <p className="mt-0.5 text-xs text-muted-foreground">
@@ -2331,7 +2331,7 @@ export function UsageCalendarVisualization({
           <>
             <StlMetalView model={tokenModel} />
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/70 pt-3">
-              <div className="inline-flex items-center gap-2 text-xs font-medium text-muted-foreground">
+              <div className="inline-flex items-center gap-2 text-xs font-normal text-muted-foreground">
                 <FileText className="h-4 w-4" />
                 <span>{t('workspace.usage.skyline.asciiPreview')}</span>
               </div>

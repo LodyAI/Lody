@@ -212,7 +212,7 @@ export class ContextCopyPage {
     );
     await expect(forkMenu).toBeVisible();
     await expect(
-      forkMenu.getByRole('menuitem', { name: /^(Current workspace|当前工作区)$/u })
+      forkMenu.getByRole('menuitem', { name: /^(Fork to new tab|分叉到新标签页)$/u })
     ).toHaveCount(0);
     await forkMenu
       .getByRole('menuitem', { name: /(Copy context as Markdown|复制 Markdown 上下文)/u })

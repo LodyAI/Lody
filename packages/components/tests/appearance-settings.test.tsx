@@ -111,33 +111,43 @@ describe('AppearanceSettingsView', () => {
   it('shows theme and language while hiding Electron-only settings outside Electron', async () => {
     await act(async () => root?.render(<AppearanceHarness isElectron={false} />));
 
-    expect(container?.textContent).toContain('Conversation font size');
+    expect(container?.textContent).toContain('Font size');
     expect(container?.textContent).toContain('Theme');
     expect(container?.textContent).toContain('Language');
     expect(container?.textContent).not.toContain('Interface font');
     expect(container?.textContent).not.toContain('Terminal');
   });
 
-  it('updates the conversation font size readout while sliding', async () => {
+  it('offers the five named font size tiers and commits the picked one', async () => {
     await act(async () => root?.render(<AppearanceHarness isElectron={false} />));
 
-    const sizeInput = container?.querySelector<HTMLInputElement>(
-      'input[type="range"][aria-label="Conversation font size"]'
+    const sizeTrigger = Array.from(container?.querySelectorAll('button') ?? []).find((node) =>
+      node.textContent?.includes('Default')
     );
-    expect(sizeInput?.value).toBe('2');
+    expect(sizeTrigger).toBeTruthy();
 
     await act(async () => {
-      setInputValue(sizeInput!, '5');
+      sizeTrigger?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
 
-    expect(sizeInput?.value).toBe('5');
-    expect(container?.querySelector('output')?.textContent).toBe('24 px');
-    expect(
-      container?.querySelector<HTMLElement>('[aria-label="Conversation preview"] p')?.style.fontSize
-    ).toBe('24px');
+    const items = Array.from(document.body.querySelectorAll('[data-preview-item]'));
+    expect(items.map((node) => node.textContent)).toEqual([
+      'Smaller',
+      'Small',
+      'Default',
+      'Large',
+      'Larger',
+    ]);
+
+    const larger = items.find((node) => node.textContent === 'Larger');
+    await act(async () => {
+      larger?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(sizeTrigger?.textContent).toContain('Larger');
   });
 
-  it('persists mobile slider changes, including both limits, across remounts', async () => {
+  it('persists mobile font size picks, including both limits, across remounts', async () => {
     const store = createStore();
     store.set(conversationFontSizeAtom, 14);
     const renderMobile = (settingsStore: ReturnType<typeof createStore>) => (
@@ -147,26 +157,39 @@ describe('AppearanceSettingsView', () => {
     );
     await act(async () => root?.render(renderMobile(store)));
 
-    const slider = container?.querySelector<HTMLInputElement>('input[type="range"]');
-    expect(slider).toBeTruthy();
-    for (const [index, size] of [
-      [0, 8],
-      [7, 32],
-      [4, 20],
+    const pickSize = async (label: string) => {
+      const trigger = container?.querySelector<HTMLButtonElement>('button[aria-label="Font size"]');
+      expect(trigger).toBeTruthy();
+      await act(async () => {
+        trigger?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+      const option = Array.from(
+        container?.querySelectorAll<HTMLButtonElement>('[role="option"] button') ?? []
+      ).find((node) => node.textContent?.includes(label));
+      expect(option).toBeTruthy();
+      await act(async () => {
+        option?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      });
+    };
+
+    for (const [label, size] of [
+      ['Smaller', 12],
+      ['Larger', 16],
+      ['Default', 14],
     ]) {
-      await act(async () => setInputValue(slider!, String(index)));
+      await pickSize(label!);
       expect(store.get(conversationFontSizeAtom)).toBe(size);
-      expect(
-        container?.querySelector<HTMLElement>('[aria-label="Conversation preview"] p')?.style
-          .fontSize
-      ).toBe(`${size}px`);
-      expect(container?.querySelector('output')?.textContent).toBe(`${size} px`);
       expect(JSON.parse(localStorage.getItem('lody-conversation-font-size')!)).toBe(size);
+      expect(container?.querySelector('button[aria-label="Font size"]')?.textContent).toContain(
+        label
+      );
     }
 
     await act(async () => root?.render(null));
     await act(async () => root?.render(renderMobile(createStore())));
-    expect(container?.querySelector<HTMLInputElement>('input[type="range"]')?.value).toBe('4');
+    expect(container?.querySelector('button[aria-label="Font size"]')?.textContent).toContain(
+      'Default'
+    );
     localStorage.removeItem('lody-conversation-font-size');
   });
 
@@ -175,7 +198,7 @@ describe('AppearanceSettingsView', () => {
 
     expect(container?.textContent).toContain('Theme');
     expect(container?.textContent).toContain('Language');
-    expect(container?.textContent).toContain('Conversation font size');
+    expect(container?.textContent).toContain('Font size');
     expect(container?.textContent).not.toContain('Interface font');
     expect(container?.textContent).not.toContain('Terminal');
   });
@@ -183,7 +206,9 @@ describe('AppearanceSettingsView', () => {
   it('renders interface and terminal system font selectors in Electron', async () => {
     await act(async () => root?.render(<AppearanceHarness isElectron />));
 
-    const sizeInput = container?.querySelector<HTMLInputElement>('input[aria-label="Font size"]');
+    const sizeInput = container?.querySelector<HTMLInputElement>(
+      'input[type="number"][aria-label="Font size"]'
+    );
     const preview = Array.from(container?.querySelectorAll('code') ?? []).find(
       (node) => node.textContent === 'npx lody daemon start'
     );

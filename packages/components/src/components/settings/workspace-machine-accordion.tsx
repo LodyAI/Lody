@@ -8,6 +8,9 @@ import { UserAvatar } from '@/components/user-avatar';
 import { cn } from '@/lib/utils';
 import type { MachineTabOwner } from './machine-tab-list';
 
+export const MACHINE_META_PILL_CLASS =
+  'border-transparent bg-foreground/[0.06] px-1.5 py-0 text-[10px] font-normal text-muted-foreground';
+
 export type WorkspaceMachineAccordionMeta = {
   machine: MachineViewMeta;
   isOnline: boolean;
@@ -38,21 +41,21 @@ export function WorkspaceMachineAccordionSummary({
       )}
     >
       {isLocal ? (
-        <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
+        <Badge variant="secondary" className={MACHINE_META_PILL_CLASS}>
           {t('workspace.machines.thisDevice', 'This device')}
         </Badge>
       ) : null}
       {isPrivate ? (
-        <Badge variant="secondary" className="gap-1 px-1.5 py-0 text-[10px]">
+        <Badge variant="secondary" className={cn('gap-1', MACHINE_META_PILL_CLASS)}>
           <LockKeyhole className="h-2.5 w-2.5" aria-hidden />
           {t('workspace.machines.private', 'Private')}
         </Badge>
       ) : null}
-      <Badge variant="secondary" className="gap-1 px-1.5 py-0 text-[10px]">
+      <Badge variant="secondary" className={cn('gap-1', MACHINE_META_PILL_CLASS)}>
         <Laptop className="h-2.5 w-2.5" aria-hidden />
         <span className="max-w-24 truncate">{machine.os || '-'}</span>
       </Badge>
-      <Badge variant="secondary" className="px-1.5 py-0 font-mono text-[10px]">
+      <Badge variant="secondary" className={cn('font-mono', MACHINE_META_PILL_CLASS)}>
         {machine.cliVersion ? `v${machine.cliVersion}` : t('machines.never', 'Never')}
       </Badge>
       <span className="inline-flex shrink-0 items-center gap-1 px-1">
@@ -160,7 +163,7 @@ export function WorkspaceMachineAccordionRow({
               : 'bg-muted-foreground/50 ring-muted'
           )}
         />
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-foreground">
+        <span className="min-w-0 flex-1 truncate text-sm font-normal text-foreground">
           {machineName}
         </span>
         <WorkspaceMachineAccordionSummary

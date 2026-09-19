@@ -51,6 +51,7 @@ import {
 import { findSessionSearchOccurrences } from '@/lib/session-chat-search';
 import { useResolvedTheme } from '../../theme-provider';
 import type { ConversationFontSize } from '@/atoms/settings';
+import { MarkdownFencedCodeBlock } from './markdown-code-block';
 import { MarkdownDiffBlock } from './markdown-diff-block';
 import { createMarkdownMermaidConfig, createMarkdownMermaidPlugin } from './markdown-mermaid';
 import { MermaidDiagramViewer } from './mermaid-diagram-viewer';
@@ -190,7 +191,8 @@ const MARKDOWN_BASE_CLASSNAME =
   '[&_h5]:!mt-3 [&_h5]:!mb-1.5 [&_h5]:font-semibold [&_h5]:uppercase [&_h5]:tracking-wide ' +
   '[&_h6]:!mt-3 [&_h6]:!mb-1.5 [&_h6]:font-semibold [&_h6]:uppercase [&_h6]:tracking-wide [&_h6]:text-muted-foreground ' +
   '[&_:is(h1,h2,h3,h4,h5,h6):first-child]:!mt-0 ' +
-  '[&_a]:underline [&_a]:underline-offset-2 [&_a]:decoration-muted-foreground/40 [&_a:hover]:decoration-muted-foreground ' +
+  '[&_a]:text-markdown-link ' +
+  '[&_a]:underline [&_a]:underline-offset-2 [&_a]:decoration-current/35 [&_a:hover]:decoration-current/70 ' +
   '[&_.katex-display]:!my-5 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden [&_.katex-display]:py-1 ' +
   '[&_[data-streamdown="mermaid-block"]]:!my-5 ' +
   // Streamdown wraps every diagram in a pan/zoom canvas that claims the gesture
@@ -207,12 +209,12 @@ const MARKDOWN_BASE_CLASSNAME =
   '[&_[data-streamdown="mermaid"]]:overflow-hidden ' +
   '[&_[data-streamdown="code-block"]]:!my-4 ' +
   '[&_table]:!my-0 [&_table]:w-full [&_table]:border-collapse [&_table]:text-[0.92em] [&_table]:leading-[1.5] ' +
-  '[&_th]:border-b [&_th]:border-border/70 [&_th]:bg-muted/45 [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-semibold [&_th]:text-foreground/80 ' +
+  '[&_th]:border-b [&_th]:border-border/70 [&_th]:bg-muted/20 [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-semibold [&_th]:text-foreground/80 dark:[&_th]:bg-muted/40 ' +
   '[&_td]:border-b [&_td]:border-border/45 [&_td]:px-2.5 [&_td]:py-1.5 [&_td]:align-top ' +
   '[&_tbody_tr:nth-child(even)]:bg-muted/15 [&_tbody_tr:last-child_td]:border-b-0 ' +
   '[&_:is(th,td):first-child]:w-px [&_:is(th,td):first-child]:whitespace-nowrap ' +
   '[&_tbody_td:first-child]:font-medium [&_tbody_td:first-child]:text-foreground/75 ' +
-  '[&_table_code]:!bg-muted/55 [&_table_code]:!ring-0';
+  '[&_table_code]:!bg-foreground/[0.08] [&_table_code]:!ring-0 dark:[&_table_code]:!bg-foreground/[0.14]';
 
 const MARKDOWN_SIZE_CLASSNAME =
   '[&_h1]:text-[length:var(--markdown-h1-font-size)] ' +
@@ -657,13 +659,6 @@ const remarkLinkifyFilePaths = () => {
   };
 };
 
-const MARKDOWN_REMARK_PLUGINS = [
-  remarkGfm,
-  remarkRepairMalformedGfmAutolinks,
-  remarkLinkifyPlainUrls,
-  remarkLinkifyFilePaths,
-];
-
 const MARKDOWN_MATH_PLUGIN = createMathPlugin();
 
 type ShikiHighlighter = Awaited<ReturnType<(typeof import('shiki/core'))['createHighlighterCore']>>;
@@ -707,6 +702,45 @@ const MARKDOWN_CODE_LANGUAGE_SET = new Set<string>([
   ...MARKDOWN_CODE_LANGUAGES,
   ...Object.keys(MARKDOWN_CODE_LANGUAGE_ALIASES),
 ]);
+
+const FENCED_CODE_RENDERER_LANGUAGE_SET = new Set<string>([
+  ...MARKDOWN_CODE_LANGUAGE_SET,
+  'diff',
+  'text',
+  'plaintext',
+  'txt',
+]);
+
+// Fences rendered by other Streamdown plugins keep their language.
+const FENCED_CODE_PASSTHROUGH_LANGUAGE_SET = new Set<string>(['mermaid']);
+
+const remarkDefaultFencedCodeLanguage = () => (tree: unknown) => {
+  const walk = (node: MdastNode) => {
+    if (node.type === 'code') {
+      const codeNode = node as { lang?: string; meta?: string | null };
+      const lang = String(codeNode.lang ?? '').trim();
+      if (!lang) {
+        codeNode.lang = 'text';
+      } else if (
+        !FENCED_CODE_RENDERER_LANGUAGE_SET.has(lang.toLowerCase()) &&
+        !FENCED_CODE_PASSTHROUGH_LANGUAGE_SET.has(lang.toLowerCase())
+      ) {
+        codeNode.meta = [`highlight=${lang}`, codeNode.meta].filter(Boolean).join(' ');
+        codeNode.lang = 'text';
+      }
+    }
+    node.children?.forEach(walk);
+  };
+  if (typeof tree === 'object' && tree !== null) walk(tree as MdastNode);
+};
+
+const MARKDOWN_REMARK_PLUGINS = [
+  remarkGfm,
+  remarkRepairMalformedGfmAutolinks,
+  remarkLinkifyPlainUrls,
+  remarkLinkifyFilePaths,
+  remarkDefaultFencedCodeLanguage,
+];
 
 const normalizeCodeLanguage = (language: BundledLanguage): BundledLanguage | null => {
   const normalized = String(language).trim().toLowerCase();
@@ -877,6 +911,15 @@ const MARKDOWN_CODE_PLUGIN = createLazyShikiCodePlugin();
 
 const MARKDOWN_MERMAID_PLUGIN = createMarkdownMermaidPlugin();
 
+const FENCED_CODE_RENDERER_LANGUAGES = [
+  ...MARKDOWN_CODE_LANGUAGES,
+  ...Object.keys(MARKDOWN_CODE_LANGUAGE_ALIASES),
+  'diff',
+  'text',
+  'plaintext',
+  'txt',
+] as const;
+
 const STREAMDOWN_PLUGINS = {
   code: MARKDOWN_CODE_PLUGIN,
   math: MARKDOWN_MATH_PLUGIN,
@@ -885,6 +928,10 @@ const STREAMDOWN_PLUGINS = {
     {
       language: 'diff',
       component: MarkdownDiffBlock,
+    },
+    {
+      language: [...FENCED_CODE_RENDERER_LANGUAGES],
+      component: MarkdownFencedCodeBlock,
     },
   ],
 } satisfies PluginConfig;
@@ -987,17 +1034,20 @@ const AgentFileLink = ({
       title={href}
       aria-label={`${hasOpenAction ? openAgentFileLabel : copyAgentFileLabel}: ${href}`}
       className={cn(
-        'inline-flex max-w-full items-center gap-1 rounded-sm align-[-0.15em] text-sky-700 dark:text-sky-400 no-underline shadow-none transition-colors',
+        'm-0 inline-flex max-w-full items-baseline gap-1 rounded-sm border-0 bg-transparent p-0 align-baseline font-[inherit] leading-[inherit] text-markdown-link no-underline shadow-none transition-colors',
         'hover:underline underline-offset-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
       )}
     >
-      <MonochromeFileIcon filePath={iconPath} className="h-3.5 w-3.5 shrink-0" />
+      <MonochromeFileIcon
+        filePath={iconPath}
+        className="h-[1.38em] w-[1.38em] shrink-0 self-center"
+      />
       <span className="min-w-0 truncate">{children}</span>
       {!hasOpenAction ? (
         didCopy ? (
-          <Check className="h-3 w-3 shrink-0" />
+          <Check className="h-[0.85em] w-[0.85em] shrink-0 self-center" />
         ) : (
-          <Copy className="h-3 w-3 shrink-0" />
+          <Copy className="h-[0.85em] w-[0.85em] shrink-0 self-center" />
         )
       ) : null}
     </button>
@@ -1078,8 +1128,8 @@ const createMarkdownComponents = ({
     return (
       <code
         className={cn(
-          'rounded-sm bg-code px-1 py-px font-mono text-[0.85em] text-code-foreground ring-1 ring-inset ring-border/50',
-          className
+          className,
+          'rounded-sm bg-foreground/[0.08] px-1 py-px font-mono text-[0.85em] text-foreground ring-0 dark:bg-foreground/[0.14]'
         )}
         {...rest}
       >

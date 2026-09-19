@@ -33,7 +33,7 @@ vi.mock('react-i18next', async (importOriginal) => ({
 describe('getSessionForkDestinationOptions', () => {
   const t = (_key: string, fallback: string) => fallback;
 
-  it('only offers the current workspace when worktree support is hidden', () => {
+  it('only offers a new tab when worktree support is hidden', () => {
     expect(getSessionForkDestinationOptions(t, 'hidden').map((option) => option.id)).toEqual([
       'shared',
     ]);
@@ -44,7 +44,7 @@ describe('getSessionForkDestinationOptions', () => {
       (option) => option.id === 'new-worktree'
     );
     expect(worktree?.disabled).toBe(true);
-    expect(worktree?.hint).toBe('Checking Git status…');
+    expect(worktree?.status).toBe('Checking Git status…');
   });
 });
 
@@ -91,13 +91,26 @@ describe('SessionForkDestinationPopover', () => {
     });
   };
 
-  it('lists both destinations when a new worktree is available', async () => {
+  it('lists both destinations by name and explains each only on hover', async () => {
     await renderPopover();
-    const items = Array.from(document.querySelectorAll('[role="menuitem"]'));
+    const items = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'));
     expect(items.map((item) => item.textContent)).toEqual([
-      'Current workspaceNew tab · shares files and uncommitted changes',
-      'New worktreeNew session · from the latest committed HEAD',
+      'Fork to new tab',
+      'Fork to new worktree',
     ]);
+    const explanation = 'works in the same directory';
+    expect(document.body.textContent).not.toContain(explanation);
+    await act(async () => items[0]?.focus());
+    expect(document.body.textContent).toContain(explanation);
+  });
+
+  it('keeps the Git status check inline on the disabled worktree row', async () => {
+    await renderPopover({ worktreeAvailability: 'checking' });
+    const worktree = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
+    ).find((item) => item.textContent?.startsWith('Fork to new worktree'));
+    expect(worktree?.disabled).toBe(true);
+    expect(worktree?.textContent).toContain('Checking Git status…');
   });
 
   it('offers copying when native fork is unavailable', async () => {
@@ -123,14 +136,14 @@ describe('SessionForkDestinationPopover', () => {
     expect(document.activeElement).not.toBe(firstItem);
   });
 
-  it('selects the current workspace from a menu, not a modal dialog', async () => {
+  it('forks to a new tab from a menu, not a modal dialog', async () => {
     const onSelect = vi.fn();
     await renderPopover({ onSelect });
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     expect(document.querySelector('[role="menu"]')).not.toBeNull();
 
     const shared = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
-      (item) => item.textContent?.includes('Current workspace')
+      (item) => item.textContent === 'Fork to new tab'
     );
     await act(async () => shared?.click());
     expect(onSelect).toHaveBeenCalledWith('shared');

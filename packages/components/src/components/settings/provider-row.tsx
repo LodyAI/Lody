@@ -25,6 +25,7 @@ import {
   AlertDialogTitle,
 } from '@/ui/alert-dialog';
 import { cn } from '@/lib/utils';
+import { SETTINGS_ROW_CARD_CLASS } from './compact-layout';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
 import { AgentIcon } from '@/components/icons/agent-icon';
@@ -135,7 +136,7 @@ export function ProviderRow({
       className={cn(
         'overflow-hidden',
         variant === 'card'
-          ? '@container rounded-lg bg-foreground/[0.04]'
+          ? cn('@container', SETTINGS_ROW_CARD_CLASS)
           : 'bg-transparent [&+&]:border-t [&+&]:border-border',
         className
       )}
@@ -166,7 +167,7 @@ export function ProviderRow({
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-              <span className="min-w-0 truncate text-sm font-medium">{config.name}</span>
+              <span className="min-w-0 truncate text-sm font-normal">{config.name}</span>
               {typeBadge ? (
                 <Badge variant="secondary" className="text-[10px] capitalize">
                   {typeBadge}
@@ -304,7 +305,7 @@ function RateLimitMeter({
       className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground"
       title={`${label}: ${percentText}`}
     >
-      <span className="font-medium">{label}</span>
+      <span className="font-normal">{label}</span>
       <span className="relative h-1 w-10 overflow-hidden rounded-full bg-foreground/10">
         <span
           className="absolute inset-y-0 left-0 rounded-full bg-muted-foreground/60"

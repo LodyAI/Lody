@@ -112,7 +112,7 @@ export function SettingsCategoryList({ workspaceName }: SettingsCategoryListProp
           if (sectionTabs.length === 0) return null;
           return (
             <section key={section.id} aria-label={t(section.headingKey, section.defaultHeading)}>
-              <h2 className="px-5 pb-1.5 text-[0.82rem] font-semibold text-muted-foreground">
+              <h2 className="px-5 pb-1.5 text-[0.82rem] font-normal text-muted-foreground">
                 {t(section.headingKey, section.defaultHeading)}
               </h2>
               <div className="mx-3 overflow-hidden rounded-2xl border border-border/60 bg-card">
@@ -183,7 +183,7 @@ function SettingsCategoryRow({
           <Icon className="h-[1.05rem] w-[1.05rem] text-primary" aria-hidden="true" />
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="truncate text-[0.95rem] font-medium text-foreground">{label}</h3>
+          <h3 className="truncate text-[0.95rem] font-normal text-foreground">{label}</h3>
           <p className="mt-0.5 truncate text-[0.78rem] text-muted-foreground">{description}</p>
         </div>
         <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" aria-hidden="true" />
@@ -217,7 +217,7 @@ function SettingsActionRow({
             <Icon className="h-[1.05rem] w-[1.05rem] text-primary" aria-hidden="true" />
           </div>
           <div className="min-w-0 flex-1">
-            <h3 className="truncate text-[0.95rem] font-medium text-foreground">{label}</h3>
+            <h3 className="truncate text-[0.95rem] font-normal text-foreground">{label}</h3>
             <p className="mt-0.5 truncate text-[0.78rem] text-muted-foreground">{description}</p>
           </div>
         </div>
@@ -267,7 +267,7 @@ export function SettingsCategoryGrid() {
                     </div>
 
                     <div>
-                      <h3 className="font-semibold text-lg mb-1">{category.label}</h3>
+                      <h3 className="font-normal text-lg mb-1">{category.label}</h3>
                       <p className="text-sm text-muted-foreground">{category.description}</p>
                     </div>
                   </div>

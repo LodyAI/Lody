@@ -1,5 +1,6 @@
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { quoteCommandArgument } from './command-line.js';
 
 const fixtureDirectory = dirname(fileURLToPath(import.meta.url));
 const ACP_ENTRY = resolve(fixtureDirectory, '../../../fixtures/scripted-acp.mjs');
@@ -15,11 +16,6 @@ export const FOLLOW_UP_PROMPT =
 export const SECONDARY_SESSION_PROMPT =
   'Create a separate synthetic Session that must remain free of the primary attachment.';
 export const SESSION_RESPONSE_TEXT = 'Synthetic response started. Synthetic response complete.';
-
-function quoteCommandArgument(value: string): string {
-  if (/^[A-Za-z0-9_./:\\-]+$/u.test(value)) return value;
-  return `"${value.replace(/["\\$`]/gu, '\\$&')}"`;
-}
 
 export class TextAttachmentFixture {
   readonly agentCommandLine: string;

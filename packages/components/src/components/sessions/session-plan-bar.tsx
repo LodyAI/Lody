@@ -96,7 +96,7 @@ export const SessionPlanBar = ({
             {safeEntries.map((entry, index) => (
               <li
                 key={`${index}-${entry.content}`}
-                className="flex items-start gap-2 rounded-md px-1.5 py-1 text-sm hover:bg-muted"
+                className="flex items-start gap-2 rounded-md px-1.5 py-1 text-sm hover:bg-hover"
               >
                 <PlanStatusIcon status={entry.status} className="mt-0.5" />
                 <div className="min-w-0 flex-1">

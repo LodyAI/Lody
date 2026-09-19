@@ -97,7 +97,7 @@ export type PermissionRequestKind = 'permission' | 'ask_user_question';
 
 export type SessionStatus =
   | { type: 'idle' }
-  | { type: 'running'; activity?: SessionRunningActivity }
+  | { type: 'running'; activity?: SessionRunningActivity; detail?: string }
   | { type: 'requestPermission' }
   | {
       type: 'initializing';

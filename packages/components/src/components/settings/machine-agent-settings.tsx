@@ -1044,7 +1044,7 @@ export function MachineAgentSettings({
                           selectedIsOnline ? 'bg-status-success' : 'bg-muted-foreground/35'
                         )}
                       />
-                      <span className="truncate text-[0.95rem] font-medium leading-tight">
+                      <span className="truncate text-[0.95rem] font-normal leading-tight">
                         {resolvedSelectedMachine.name || resolvedSelectedMachine.id}
                       </span>
                     </div>
@@ -1126,7 +1126,7 @@ export function MachineAgentSettings({
                             )}
                           />
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-[0.95rem] font-medium">
+                            <span className="block truncate text-[0.95rem] font-normal">
                               {item.machine.name || item.machine.id}
                             </span>
                             <span className="mt-0.5 block truncate text-[0.78rem] text-muted-foreground">
@@ -1285,7 +1285,7 @@ export function MachineAgentSettings({
   const header = (
     <div className="min-w-0">
       <div className="flex items-center gap-1.5">
-        <h2 className="text-base font-semibold text-foreground">{title}</h2>
+        <h2 className="text-base font-normal text-foreground">{title}</h2>
         {mode === 'machines' && remoteMachinesAvailable ? (
           <MachineListFilterButton filter={effectiveFilter} onFilterChange={setFilter} />
         ) : null}
@@ -1469,7 +1469,7 @@ export function MachineAgentSettings({
           <section className="space-y-3 pt-3">
             <div className="px-1">
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-semibold text-foreground">
+                <h3 className="text-sm font-normal text-foreground">
                   {t('settings.machines.yourPrivateMachines', 'Your private machines')}
                 </h3>
                 <span className="text-xs tabular-nums text-muted-foreground">
@@ -1554,7 +1554,7 @@ function OwnPrivateMachines({
         ) : (
           <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         )}
-        <span className="min-w-0 flex-1 text-xs font-medium">
+        <span className="min-w-0 flex-1 text-xs font-normal">
           {t('settings.machines.yourPrivateMachines', 'Your private machines')}
         </span>
         <span className="text-[11px] text-muted-foreground">{items.length}</span>

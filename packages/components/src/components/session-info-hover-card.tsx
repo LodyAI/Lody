@@ -30,7 +30,7 @@ import type { PrStatus, SessionPullRequestCiState } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
-import { menuSurfaceStyle } from '@/ui/menu-styles';
+
 import { PR_STATUS_META } from '@/components/sessions/pull-request-badge';
 import {
   PR_CI_RUN_ICON,
@@ -68,21 +68,10 @@ const WARMUP_DELAY_MS = 650;
  */
 const WARM_WINDOW_MS = 3_000;
 
-// Dropdown-menu surface (rounded, border + layered float shadow). The card
-// describes a sidebar row, so base it on the SIDEBAR surface, not the page
-// background: in the light theme `sideBar.background` is a warmer greige than the
-// paler `editor.background`, and basing the card on the latter made it read washed
-// out next to the sidebar. A small nudge toward the foreground keeps it a distinct
-// elevated layer in every theme (in dark mode surfaces collapse onto --background,
-// so a plain sidebar bg would be invisible).
-// The card describes a sidebar row, so it uses the sidebar surface verbatim
-// (`hsl(var(--sidebar-background))`). Its own border + shadow — not a background
-// nudge — set it apart from the page it floats over. The shared menu edge is a
-// small step off the pale --background and would end up lighter than this surface,
-// so derive the card's edge from --sidebar-background with a bigger foreground step
-// so it reads in the light theme. Dark surfaces need a much quieter edge: the same
-// 24% foreground mix reads like a bright outline there, so dark mode uses the shared
-// menu surface's 10% step instead.
+// Sidebar-tinted surface with a 0.5px edge and a light composer-style drop.
+// The shared menu hairline is derived from --background and would wash out on
+// this warmer fill, so the edge is mixed from --sidebar-background instead.
+// Dark uses a quieter 10% foreground step so it does not read as a bright ring.
 const cardEdgeColor =
   'color-mix(in oklab, hsl(var(--sidebar-background)) 76%, hsl(var(--foreground)) 24%)';
 const cardDarkEdgeColor =
@@ -91,8 +80,8 @@ const cardSeparatorColor =
   'color-mix(in oklab, hsl(var(--sidebar-background)) 86%, hsl(var(--foreground)) 14%)';
 
 const cardSurfaceStyle: CSSProperties = {
-  ...menuSurfaceStyle,
   backgroundColor: 'hsl(var(--sidebar-background))',
+  boxShadow: '0px 3px 6px -2px lch(0% 0 0 / 0.02), 0px 1px 1px lch(0% 0 0 / 0.04)',
   '--session-info-card-edge': cardEdgeColor,
   '--session-info-card-dark-edge': cardDarkEdgeColor,
 } as CSSProperties;
@@ -439,7 +428,7 @@ export function SessionInfoCard({
     <div
       style={cardSurfaceStyle}
       className={cn(
-        'flex w-[16.5rem] flex-col rounded-lg border border-[var(--session-info-card-edge)] p-2.5 text-xs text-foreground dark:border-[var(--session-info-card-dark-edge)]',
+        'flex w-[16.5rem] flex-col rounded-lg border-[0.5px] border-[var(--session-info-card-edge)] p-2.5 text-xs text-foreground dark:border-[var(--session-info-card-dark-edge)]',
         className
       )}
     >

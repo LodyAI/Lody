@@ -703,6 +703,189 @@ describe('SessionExecutionService', () => {
     expect(onTurnSettled).toHaveBeenCalledOnce();
   });
 
+  it.each(['applied', 'not-applied'] as const)(
+    'waits for a handoff steer verdict that trails the yielded prompt (%s)',
+    async (verdict) => {
+      // Claude answers the yielded prompt first and confirms the steer only when
+      // the SDK replays it; the steered prompt is the next turn, not drain work.
+      const sessionId = 'session-steer-trailing-verdict' as SessionId;
+      const yielded = createDeferred<unknown>();
+      const steered = createDeferred<unknown>();
+      const unsettled = new Set<Promise<unknown>>();
+      const track = (promise: Promise<unknown>) => {
+        unsettled.add(promise);
+        const release = () => unsettled.delete(promise);
+        void promise.then(release, release);
+        return promise;
+      };
+      const outcome = createDeferred<
+        | { outcome: 'applied'; application: { release: () => void } }
+        | { outcome: 'not-applied'; error: unknown }
+      >();
+      const prompt = vi.fn(() => track(yielded.promise));
+      const steerPrompt = vi.fn(() => ({
+        completion: track(steered.promise),
+        outcome: outcome.promise,
+      }));
+      const agentClient = {
+        isCreated: vi.fn(() => true),
+        getAcknowledgedSteerCapability: vi.fn(() => ({
+          provider: 'claudeCode',
+          appliedNotificationMethod: 'claude/steerApplied',
+          upstreamTurn: 'handoff',
+          configPolicy: 'apply',
+        })),
+        get pendingPromptCompletion(): Promise<void> | null {
+          return unsettled.size > 0
+            ? Promise.allSettled([...unsettled]).then(() => undefined)
+            : null;
+        },
+        cancel: vi.fn(async () => {}),
+        prompt,
+        steerPrompt,
+        currentModel: undefined,
+      };
+      const terminate = vi.fn(async () => {});
+      const activeSession = {
+        sessionId,
+        acpSessionId: 'acp-steer-trailing-verdict' as ACPSessionId,
+        agentClient,
+        terminalManager: {} as unknown,
+        getWorkdir: () => '/tmp',
+        getHostWorkdir: () => '/tmp',
+        getParentSessionId: () => undefined,
+        exec: vi.fn(async () => ''),
+        terminate,
+        updateGitIdentity: vi.fn(),
+        createAgent: vi.fn(async () => 'acp-steer-trailing-verdict'),
+        applyExecutionPlaneLimits: vi.fn(async () => {}),
+      };
+      let history: Array<Record<string, unknown>> = [
+        { id: 'user-a', role: 'user', status: 'pending', read: false },
+        { id: 'user-b', role: 'user', status: 'pending_apply', read: false },
+      ];
+      const sessionDoc = withHistoryPort({
+        getMetaState: vi.fn(async () => ({ isArchived: false })),
+        setStatus: vi.fn(async () => {}),
+        setLastMessageAt: vi.fn(async () => {}),
+        getHistory: vi.fn(() => history),
+        updateHistory: vi.fn(async (updater: (prev: typeof history) => typeof history) => {
+          history = updater(history);
+        }),
+        waitUntilSynced: vi.fn(async () => {}),
+      });
+      let meta: Record<string, unknown> = {};
+      const deps = createBaseDeps({
+        sessionManager: {
+          getSession: vi.fn(() => activeSession),
+          getPendingSession: vi.fn(() => null),
+          createSession: vi.fn(),
+          setSessionError: vi.fn(),
+          terminateSession: vi.fn(),
+          refreshGhTokenForSession: vi.fn(async () => {}),
+        } as unknown as SessionManager,
+        workspaceDocument: {
+          repo: {
+            upsertDocMeta: vi.fn(async (_roomId: string, patch: Record<string, unknown>) => {
+              meta = { ...meta, ...patch };
+            }),
+            getDocMeta: vi.fn(async () => ({ meta })),
+          },
+          getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
+          getOrOpenSessionCode: vi.fn(async () => null),
+          updateAcpCapabilities: vi.fn(async () => {}),
+        } as unknown as LoroDocumentManager,
+        beginConversationTurn: vi.fn((_sessionId: SessionId, userTurnId?: string) =>
+          userTurnId ? `assistant:${userTurnId}` : 'assistant:unknown'
+        ),
+      });
+      const service = new SessionExecutionService(deps);
+      const onTurnSettled = vi.fn(async () => {});
+      const lifecycle = service.continueSession(
+        {
+          type: 'session/chat',
+          sessionId,
+          machineId: 'machine-1',
+          workspaceId: 'workspace-1' as WorkspaceId,
+          project: undefined,
+          acpSessionConfig: { prompt: 'A', cliType: 'builtin', agentType: 'claude' },
+          userTurnId: 'user-a',
+          userId: 'user-1',
+          userName: 'User',
+          userEmail: 'user@example.com',
+        },
+        { onTurnSettled }
+      );
+
+      await vi.waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
+      const steerB = service.steerSession({
+        sessionId,
+        expectedTurnId: 'assistant:user-a',
+        userTurnId: 'user-b',
+        userId: 'user-1',
+        timestamp: '2026-09-19T00:00:00.000Z',
+        inputConfig: { prompt: 'B' },
+      });
+      await vi.waitFor(() => expect(steerPrompt).toHaveBeenCalledTimes(1));
+
+      // The yielded prompt answers before the adapter reports the verdict.
+      yielded.resolve({ stopReason: 'end_turn' });
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(service.getExecutionSnapshot(sessionId)).toMatchObject({
+        activeTurnId: 'assistant:user-a',
+        hasActiveTurn: true,
+      });
+
+      if (verdict === 'applied') {
+        const release = vi.fn();
+        outcome.resolve({ outcome: 'applied', application: { release } });
+        await expect(steerB).resolves.toMatchObject({ applied: true, disposition: 'applied' });
+        expect(release).toHaveBeenCalledOnce();
+        await vi.waitFor(() =>
+          expect(service.getExecutionSnapshot(sessionId)).toMatchObject({
+            activeTurnId: 'assistant:user-b',
+            hasActiveTurn: true,
+          })
+        );
+        expect(deps.processMessageQueue).not.toHaveBeenCalled();
+
+        steered.resolve({ stopReason: 'end_turn' });
+        await lifecycle;
+        expect(deps.turnFinalization.finalizeACPState).toHaveBeenNthCalledWith(
+          2,
+          sessionId,
+          'assistant:user-b'
+        );
+        expect(history).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ id: 'user-a', status: 'handled' }),
+            expect.objectContaining({ id: 'user-b', status: 'handled' }),
+          ])
+        );
+        expect(meta).toMatchObject({ lastHandledUserMsgId: 'user-b' });
+      } else {
+        // A prompt-transport refusal is only proven once its own prompt settles.
+        steered.resolve({ stopReason: 'end_turn' });
+        outcome.resolve({ outcome: 'not-applied', error: new Error('steer refused') });
+        await expect(steerB).resolves.toMatchObject({
+          applied: false,
+          disposition: 'no-active-turn',
+        });
+        await lifecycle;
+        expect(meta).toMatchObject({
+          lastHandledUserMsgId: 'user-a',
+          steerTurnStatuses: { 'user-b': 'pending' },
+        });
+        expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(1);
+      }
+
+      expect(terminate).not.toHaveBeenCalled();
+      expect(onTurnSettled).toHaveBeenCalledOnce();
+      expect(deps.processMessageQueue).toHaveBeenCalledTimes(1);
+      expect(service.getExecutionSnapshot(sessionId)).toMatchObject({ hasActiveTurn: false });
+    }
+  );
+
   it('rejects steer without mutating the active turn when the agent lacks support', async () => {
     const deps = createBaseDeps({});
     vi.mocked(deps.workspaceDocument.getOrCreateSessionDoc).mockResolvedValue(

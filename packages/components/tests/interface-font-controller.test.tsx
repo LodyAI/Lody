@@ -6,10 +6,12 @@ import { createStore, Provider } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  conversationFontSizeAtom,
   interfaceFontFamilyAtom,
   INTERFACE_FONT_FAMILY_MAX_LENGTH,
   normalizeInterfaceFontFamily,
 } from '../src/atoms/settings';
+import { UI_FONT_SIZE_CSS_VARIABLE } from '../src/components/ai-gui/conversation-font-size-classes';
 import { InterfaceFontController } from '../src/components/interface-font-controller';
 import { INTERFACE_FONT_CSS_VARIABLE, listSystemFontFamilies } from '../src/lib/local-fonts';
 
@@ -34,14 +36,13 @@ describe('InterfaceFontController', () => {
     container?.remove();
     window.localStorage.clear();
     document.documentElement.style.removeProperty(INTERFACE_FONT_CSS_VARIABLE);
+    document.documentElement.style.removeProperty(UI_FONT_SIZE_CSS_VARIABLE);
     root = undefined;
     container = undefined;
   });
 
   it('normalizes persisted font family values', () => {
-    expect(normalizeInterfaceFontFamily('  Atkinson Hyperlegible  ')).toBe(
-      'Atkinson Hyperlegible'
-    );
+    expect(normalizeInterfaceFontFamily('  Atkinson Hyperlegible  ')).toBe('Atkinson Hyperlegible');
     expect(
       normalizeInterfaceFontFamily('a'.repeat(INTERFACE_FONT_FAMILY_MAX_LENGTH + 10))
     ).toHaveLength(INTERFACE_FONT_FAMILY_MAX_LENGTH);
@@ -116,5 +117,25 @@ describe('InterfaceFontController', () => {
     });
 
     expect(document.documentElement.style.getPropertyValue(INTERFACE_FONT_CSS_VARIABLE)).toBe('');
+  });
+
+  it('writes --ui-font-size from the appearance setting on every platform', async () => {
+    const store = createStore();
+    store.set(conversationFontSizeAtom, 16);
+
+    await act(async () => {
+      root?.render(
+        <Provider store={store}>
+          <InterfaceFontController enabled={false} />
+        </Provider>
+      );
+    });
+
+    expect(document.documentElement.style.getPropertyValue(UI_FONT_SIZE_CSS_VARIABLE)).toBe('16px');
+
+    await act(async () => {
+      store.set(conversationFontSizeAtom, 12);
+    });
+    expect(document.documentElement.style.getPropertyValue(UI_FONT_SIZE_CSS_VARIABLE)).toBe('12px');
   });
 });

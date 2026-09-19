@@ -112,19 +112,20 @@ export function MessageQueueDisplay({
 
   const fadeMask = buildScrollEdgeFadeMask(overflow, FADE_PX);
 
-  // Single rounded shell with header row; rows below use divide-y to feel like one continuous list
-  // rather than a stack of independent cards. Bottom corners stay square so it visually attaches
-  // to the chat composer below.
+  // A sheet tucked onto the surface below it (the info bar, or the composer when
+  // there is no bar): rounded top, square open bottom, and the composer's own
+  // fill and hairline so the stack reads as one piece rather than a gray slab.
+  // Rows use divide-y so the list feels continuous rather than stacked cards.
   return (
     <TooltipProvider>
       <div
         className={cn(
-          'overflow-hidden rounded-md rounded-b-none border border-b-0 border-border/50',
-          'bg-muted/40',
+          'overflow-hidden rounded-t-lg rounded-b-none border-[0.5px] border-b-0',
+          'border-foreground/[0.10] bg-[hsl(var(--composer))] dark:border-input-border/45 dark:bg-input/70',
           className
         )}
       >
-        <div className="flex items-center justify-between px-2.5 py-1 text-[11px] text-muted-foreground">
+        <div className="flex cursor-default select-none items-center justify-between px-2.5 py-1 text-[11px] text-muted-foreground">
           <span className="font-medium">
             {t('sessions.messageQueue.upNext', 'Up next')}
             <span className="ml-1.5 text-muted-foreground/60">
@@ -138,7 +139,7 @@ export function MessageQueueDisplay({
 
         <div
           ref={scrollRef}
-          className="divide-y divide-border/30 overflow-y-auto border-t border-border/30"
+          className="overflow-y-auto border-t border-border/30"
           style={{
             maxHeight: 'min(25vh, 240px)',
             maskImage: fadeMask,
