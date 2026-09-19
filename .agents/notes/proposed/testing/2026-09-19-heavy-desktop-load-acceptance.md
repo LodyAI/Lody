@@ -3,6 +3,7 @@
 Status: proposed
 Translation: current
 Language: [中文](2026-09-19-heavy-desktop-load-acceptance.zh.md)
+PR: https://github.com/LodyAI/Lody/pull/827
 
 ## Abstract
 
