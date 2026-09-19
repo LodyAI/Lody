@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { SessionId, SessionMeta } from '@lody/shared';
 import {
   computeDiscoveryFingerprint,
+  computePrPollMetaSignature,
   enumeratePrPollTargets,
   getCurrentPullRequest,
   resolveDiscoveryBranch,
@@ -318,5 +319,56 @@ describe('getCurrentPullRequest', () => {
         })
       )
     ).toEqual({ url: 'https://github.com/owner/repo/pull/2', status: 'open' });
+  });
+});
+
+describe('computePrPollMetaSignature', () => {
+  const base = makeMeta({
+    machineId: 'machine-1' as SessionMeta['machineId'],
+    project: githubProject,
+    branchName: 'feat/x',
+    lastMessageAt: 1_000,
+    pullRequests: [{ url: 'https://github.com/owner/repo/pull/1', status: 'open' }],
+  });
+  const signature = (overrides: Partial<SessionMeta>): string =>
+    computePrPollMetaSignature(makeMeta({ ...base, ...overrides }));
+
+  it('ignores metadata the poll projection never reads', () => {
+    // Title/status/read-marker churn is the bulk of session metadata traffic;
+    // none of it can move a target or a lane.
+    expect(signature({ title: 'renamed' })).toBe(computePrPollMetaSignature(base));
+    expect(signature({ status: 'running' as SessionMeta['status'] })).toBe(
+      computePrPollMetaSignature(base)
+    );
+    expect(signature({ lastReadAt: 9_999, isPinned: true, baseBranch: 'main' })).toBe(
+      computePrPollMetaSignature(base)
+    );
+  });
+
+  it('changes for every field the projection or the lane rule reads', () => {
+    const unchanged = computePrPollMetaSignature(base);
+    expect(signature({ machineId: 'machine-2' as SessionMeta['machineId'] })).not.toBe(unchanged);
+    expect(signature({ parentSessionId: sid('owner-1') })).not.toBe(unchanged);
+    expect(signature({ isArchived: true })).not.toBe(unchanged);
+    expect(signature({ lastMessageAt: 2_000 })).not.toBe(unchanged);
+    expect(signature({ branchName: 'feat/y' })).not.toBe(unchanged);
+    expect(
+      signature({
+        project: { kind: 'github', repoFullName: 'owner/other' } as SessionMeta['project'],
+      })
+    ).not.toBe(unchanged);
+    expect(
+      signature({
+        pullRequests: [{ url: 'https://github.com/owner/repo/pull/1', status: 'merged' }],
+      })
+    ).not.toBe(unchanged);
+  });
+
+  it('distinguishes PR order, because the current PR is the last item', () => {
+    const first = { url: 'https://github.com/owner/repo/pull/1', status: 'open' } as const;
+    const second = { url: 'https://github.com/owner/repo/pull/2', status: 'open' } as const;
+    expect(signature({ pullRequests: [first, second] })).not.toBe(
+      signature({ pullRequests: [second, first] })
+    );
   });
 });
