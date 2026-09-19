@@ -451,8 +451,8 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
       )
     }
     // A hidden spare must not keep the process alive once the last real window
-    // closes, and holding it while the app idles would only waste memory. It is
-    // re-primed when the next real window loads.
+    // closes, and holding it while the app idles would only waste memory. A
+    // later auxiliary request can prime a replacement when the option remains on.
     if (!isAppQuitting()) {
       const hasRealWindow = [...productWindows].some(
         (candidate) => !candidate.isDestroyed() && !isWarmWindow(candidate)

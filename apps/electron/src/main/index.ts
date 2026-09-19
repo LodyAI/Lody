@@ -340,10 +340,9 @@ if (hasSingleInstanceLock) {
     recordE2EBootDiagnostic('opening-main-window')
     openMainWindow({ icon, initialPath, hideWindowOnAutoLaunch })
     recordE2EBootDiagnostic('main-window-opened')
-    // Do not allocate a hidden renderer at startup. The first auxiliary-window
-    // request proves that the user needs one; session-windows then primes the
-    // spare for subsequent requests. This keeps the common single-window path
-    // free of an idle renderer while retaining warm reuse after intent.
+    // Warmup is off by default and only enabled from Developer mode. When it is
+    // enabled, session-windows primes the spare after an auxiliary request so
+    // ordinary single-window sessions never pay an idle renderer cost.
     ipcMain.on(IPC_SEND_CHANNELS.appWindowReady, (event) => handleWindowWarmReady(event.sender.id))
     console.info('[Electron] Initial desktop surface selected', {
       initialPath,

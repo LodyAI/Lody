@@ -9,13 +9,13 @@ Translation: current
 
 Every multi-window open previously cold-booted a full renderer, so a new window
 waited for bundle parse, providers, and auth before showing content and could
-flash a blank or wrong frame. The desktop now keeps one hidden auxiliary
+flash a blank or wrong frame. Developer mode can keep one hidden auxiliary
 renderer booted on a neutral route; opening a window claims that spare, binds
 the target through IPC and a client-side navigation, shows it immediately, and
-primes a replacement. The cold path is unchanged and remains the fallback. The
-spare warms the application shell and shared providers, not a specific
-workspace's data, and it costs one extra hidden renderer process; live desktop
-timing and memory were not measured. It builds on the earlier desktop
+primes a replacement. The option is off by default, so the cold path remains
+the ordinary fallback. The spare warms the application shell and shared
+providers, not a specific workspace's data, and it costs one extra hidden
+renderer process. It builds on the earlier desktop
 multi-window decision ([note](../../proposed/feature/2026-09-10-desktop-windows.md),
 [Spec](../../../../specs/desktop-windows.zh.md)).
 
@@ -38,6 +38,9 @@ multi-window decision ([note](../../proposed/feature/2026-09-10-desktop-windows.
   reproduces the storage flags a fresh auxiliary window would derive from its
   URL, collapses the sidebar for a session target, and navigates client-side.
   The same "new window" route and focus handoff are reused, not reimplemented.
+- The option is exposed only after Developer mode is revealed in Settings >
+  About. Turning it off destroys any hidden spare; it is runtime-only and
+  resets to off on the next process start.
 - Warm-up is disabled under `LODY_E2E` (the harness counts and inspects
   windows) and by `LODY_DISABLE_WINDOW_WARMUP=1`. Any failure falls back to the
   unchanged cold window.
@@ -60,9 +63,11 @@ multi-window decision ([note](../../proposed/feature/2026-09-10-desktop-windows.
   signals, dead spares, and one-shot claims.
 - Typechecks for `@lody/shared`, the Electron main/preload/renderer projects,
   and `@lody/components` pass.
-- Not verified: live Electron window timing, visual behavior, memory of the
-  extra hidden renderer, and the E2E suite (warm-up is disabled there, so the
-  suite exercises only the cold path).
+- A fresh Electron/CDP run verified one renderer and no hidden spare before the
+  developer option, then `phase=ready`, one spare, and 200,523,776 bytes of
+  spare working set after enabling it; disabling the option returned
+  `phase=disabled` and zero spares. The E2E suite keeps warm-up disabled, so it
+  exercises only the cold path.
 - The spare warms the app shell, router, i18n, and root providers. It does not
   pre-initialize a workspace runtime or its data, so the first bound window
   still loads its own route data.
