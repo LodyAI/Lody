@@ -78,13 +78,88 @@ function MainLayoutComponent() {
 function LocalPlatformLayoutContent({ workspaceName }: { workspaceName: string }) {
   // Same dock-badge / live-activity wiring as the cloud layout.
   useLodyLiveActivity({ workspaceName });
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const isChatLandingRoute = pathname.endsWith('/chat');
 
   return (
-    <RouteSuspense>
+    <RouteSuspense fallback={isChatLandingRoute ? <CriticalWorkspaceShell /> : null}>
       <LazyMainLayout>
         <AuthenticatedWorkspaceContent />
       </LazyMainLayout>
     </RouteSuspense>
+  );
+}
+
+/**
+ * Keep the first local workspace frame useful while the full layout chunk is
+ * loading. This is intentionally dependency-free: the real sidebar, dialogs,
+ * editor, and providers arrive through MainLayout after this frame commits.
+ */
+function CriticalWorkspaceShell() {
+  const { t } = useTranslation();
+  const newChatLabel = t('sidebar.newSession', 'New chat');
+  const searchLabel = t('common.search', 'Search');
+  const heading = t('chat.heading2', 'What should we work on?');
+  const messageLabel = t('sessions.typeMessage', 'Type a message...');
+
+  return (
+    <div
+      aria-busy="true"
+      data-critical-workspace-shell="true"
+      style={{
+        display: 'flex',
+        width: '100%',
+        height: '100%',
+        overflow: 'hidden',
+        backgroundColor: 'hsl(var(--background))',
+        color: 'hsl(var(--foreground))',
+        fontFamily: 'var(--font-sans)',
+      }}
+    >
+      <aside
+        aria-label="Workspace navigation"
+        style={{
+          display: 'flex',
+          width: 220,
+          flexDirection: 'column',
+          gap: 12,
+          borderRight: '1px solid hsl(var(--border) / 0.6)',
+          padding: 16,
+          fontSize: 13,
+        }}
+      >
+        <strong style={{ fontSize: 15 }}>Lody</strong>
+        <span style={{ opacity: 0.78 }}>{newChatLabel}</span>
+        <span style={{ opacity: 0.62 }}>{searchLabel}</span>
+        <span style={{ opacity: 0.62 }}>{t('settings.title', 'Settings')}</span>
+      </aside>
+      <main
+        style={{
+          display: 'flex',
+          minWidth: 0,
+          flex: 1,
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 28,
+          padding: 32,
+        }}
+      >
+        <h1 style={{ margin: 0, fontSize: 26, fontWeight: 600 }}>{heading}</h1>
+        <div
+          aria-label={messageLabel}
+          style={{
+            width: 'min(680px, 100%)',
+            border: '1px solid hsl(var(--border) / 0.8)',
+            borderRadius: 12,
+            padding: '14px 16px',
+            color: 'hsl(var(--muted-foreground))',
+          }}
+        >
+          {messageLabel}
+        </div>
+      </main>
+    </div>
   );
 }
 
