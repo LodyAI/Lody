@@ -105,10 +105,7 @@ pre,
     color: hsl(211 56% 72%);
   }
   .text-pr-merged {
-    color: hsl(214 85% 48%);
-  }
-  .dark .text-pr-merged {
-    color: hsl(211 78% 68%);
+    color: hsl(var(--github-merged));
   }
   .text-balance {
     text-wrap: balance;
