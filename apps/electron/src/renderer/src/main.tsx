@@ -199,7 +199,7 @@ function installWarmWindowBinding(
           state: { focusComposerSessionId: target.sessionId }
         })
       : router.navigate({
-          to: '/$workspaceName',
+          to: '/$workspaceName/chat',
           params: { workspaceName: target.workspace }
         })
     // Keep the opaque warm shell until the target route has committed and had
