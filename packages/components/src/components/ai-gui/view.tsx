@@ -4019,7 +4019,7 @@ export const AssistantTurnFooter = ({
             isMobile ? 'min-h-6 gap-1' : 'min-h-7 gap-2',
             !isMobile && 'opacity-0 transition-opacity duration-150 focus-within:opacity-100',
             !isMobile &&
-              (isLive || isTurnHovered || (showFinishedMetadata && isForking)) &&
+              (isTurnHovered || (showFinishedMetadata && isForking)) &&
               'opacity-100'
           )}
           data-assistant-turn-actions
