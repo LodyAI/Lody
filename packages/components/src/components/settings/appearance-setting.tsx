@@ -207,7 +207,7 @@ export function AppearanceSettingsView({
               )}
               emptyText={t('settings.terminal.fontFamily.empty', 'No matching fonts')}
               align="end"
-              className="w-full rounded-md border-input-border bg-input sm:w-[220px] hover:bg-input/80"
+              className="w-full rounded-md border-input-border bg-input-field text-input-foreground shadow-xs sm:w-[220px] hover:bg-hover"
               contentClassName="w-[320px]"
               onOpenChange={(open) => {
                 if (open) onSystemFontMenuOpen();
@@ -259,7 +259,7 @@ export function AppearanceSettingsView({
               )}
               emptyText={t('settings.terminal.fontFamily.empty', 'No matching fonts')}
               align="end"
-              className="w-full rounded-md border-input-border bg-input sm:w-[220px] hover:bg-input/80"
+              className="w-full rounded-md border-input-border bg-input-field text-input-foreground shadow-xs sm:w-[220px] hover:bg-hover"
               contentClassName="w-[320px]"
               onOpenChange={(open) => {
                 if (open) onSystemFontMenuOpen();

@@ -13,6 +13,9 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
 - Desktop overlay close is `absolute` on the RIGHT pane only, equal `top`/`right`
   inset, no close row. Right-pane `padding-right` keeps chrome off that column;
   apply it inside the scroll area so the scrollbar stays flush with the pane edge.
+- Light settings surfaces are white, not gray-on-gray: `data-settings-surface`
+  maps `--card` to `--popover`; list rows use `SETTINGS_ROW_CARD_CLASS`; header
+  bands fill only in dark. No new gray card fills.
 
 - `share-management-setting.tsx` lists published static copies via the scoped cloud
   query. Ordinary members see their publications; admins see the workspace inventory.

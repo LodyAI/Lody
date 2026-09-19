@@ -1,6 +1,13 @@
 import React, { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
+/**
+ * A standalone settings list row (MCP server, Agent role, provider). Light: the
+ * same lifted surface as a CompactSection; dark keeps a flat translucent fill.
+ */
+export const SETTINGS_ROW_CARD_CLASS =
+  'rounded-lg border-[0.5px] border-border bg-card shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.03)] dark:border-transparent dark:bg-foreground/[0.04] dark:shadow-none';
+
 interface CompactSectionProps {
   title?: string;
   description?: string;
@@ -33,14 +40,19 @@ export function CompactSection({
   return (
     <section
       className={cn(
-        'overflow-hidden rounded-lg border border-border/70 bg-card/60 text-[1em] shadow-none',
+        'overflow-hidden rounded-lg border border-border/70 bg-card/60 text-[1em]',
+        // Light: a lifted white section (see the settings surface scope in
+        // tailwind/index.css); dark keeps the flat translucent fill.
+        'shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.03)] dark:shadow-none',
         className
       )}
     >
       {title || headerRight ? (
-        <header className="flex min-h-10 items-center justify-between gap-2 border-b border-border/70 bg-muted/40 px-3 py-1.5">
+        <header className="flex min-h-10 items-center justify-between gap-2 border-b border-border/70 px-3 py-1.5 dark:bg-muted/40">
           <div className="min-w-0 flex-1 leading-tight">
-            {title ? <p className="text-[0.75em] font-normal text-muted-foreground">{title}</p> : null}
+            {title ? (
+              <p className="text-[0.75em] font-normal text-muted-foreground">{title}</p>
+            ) : null}
             {description && <p className="text-[0.8em] text-muted-foreground/90">{description}</p>}
           </div>
           {headerRight ? (

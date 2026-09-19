@@ -17,6 +17,7 @@ import {
   useWorkspaceMcpCatalogActions,
 } from '@/hooks/use-workspace-mcp-catalog';
 import { cn } from '@/lib/utils';
+import { SETTINGS_ROW_CARD_CLASS } from './compact-layout';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { MCP_TRANSPORT_LABELS, McpTransportIcon } from '@/components/shared/mcp-transport';
 import {
@@ -281,7 +282,7 @@ export function McpServerRow({
   const { t } = useTranslation();
   const defaultLabel = t('settings.mcp.defaultToggle', { name: server.name });
   return (
-    <div className="overflow-hidden rounded-lg bg-foreground/[0.04]">
+    <div className={cn('overflow-hidden', SETTINGS_ROW_CARD_CLASS)}>
       <div className="flex w-full min-w-0 items-center transition-colors hover:bg-hover/40">
         <button
           type="button"

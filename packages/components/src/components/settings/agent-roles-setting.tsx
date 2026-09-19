@@ -24,6 +24,7 @@ import { AgentIcon } from '@/components/icons/agent-icon';
 import { buildAgentRoleRunConfigSummary, EMPTY_AGENT_ROLE_FORM_VALUE } from '@/lib/agent-role-form';
 import { AGENT_ROLE_UNAVAILABLE_REASON_KEYS } from '@/lib/composer-agent-roles';
 import { cn } from '@/lib/utils';
+import { SETTINGS_ROW_CARD_CLASS } from './compact-layout';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -249,7 +250,7 @@ export function AgentRoleRow({
   const runConfig = buildAgentRoleRunConfigSummary(role.runConfig);
 
   return (
-    <div className="overflow-hidden rounded-lg bg-foreground/[0.04]">
+    <div className={cn('overflow-hidden', SETTINGS_ROW_CARD_CLASS)}>
       <div className="flex w-full min-w-0 items-center transition-colors hover:bg-hover/40">
         <button
           type="button"

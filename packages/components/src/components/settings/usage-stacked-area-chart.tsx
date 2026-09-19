@@ -169,10 +169,7 @@ function prepareChart(buckets: StackedAreaBucket[], maxSeries: number): Prepared
 function DefaultSeriesMarker({ color, size = 'sm' }: { color: string; size?: 'sm' | 'md' }) {
   return (
     <span
-      className={cn(
-        'inline-block shrink-0 rounded-xs',
-        size === 'sm' ? 'h-2 w-2' : 'h-2.5 w-2.5'
-      )}
+      className={cn('inline-block shrink-0 rounded-xs', size === 'sm' ? 'h-2 w-2' : 'h-2.5 w-2.5')}
       style={{ backgroundColor: color }}
     />
   );
@@ -271,7 +268,7 @@ export function UsageStackedAreaChart({
   if (!prepared) {
     return (
       <div className={cn('rounded-lg border border-border/70 bg-card/60 text-sm', className)}>
-        <header className="flex min-h-10 items-center gap-2 border-b border-border/70 bg-muted/40 px-3 py-1.5">
+        <header className="flex min-h-10 items-center gap-2 border-b border-border/70 dark:bg-muted/40 px-3 py-1.5">
           <p className="text-xs font-normal text-muted-foreground">{title}</p>
         </header>
         <div className="p-4">
@@ -287,7 +284,7 @@ export function UsageStackedAreaChart({
 
   return (
     <div className={cn('overflow-hidden rounded-lg border border-border/70 bg-card/60', className)}>
-      <header className="flex min-h-10 items-center gap-2 border-b border-border/70 bg-muted/40 px-3 py-1.5">
+      <header className="flex min-h-10 items-center gap-2 border-b border-border/70 dark:bg-muted/40 px-3 py-1.5">
         <p className="text-xs font-normal text-muted-foreground">{title}</p>
       </header>
       <div className="p-4">
@@ -434,7 +431,7 @@ export function UsagePerspectiveChart({
   if (!chart) {
     return (
       <div className={cn('rounded-lg border border-border/70 bg-card/60 text-sm', className)}>
-        <header className="flex min-h-10 items-center border-b border-border/70 bg-muted/40 px-3 py-1.5">
+        <header className="flex min-h-10 items-center border-b border-border/70 dark:bg-muted/40 px-3 py-1.5">
           <p className="text-xs font-normal text-muted-foreground">{title}</p>
         </header>
         <div className="p-4 text-muted-foreground">{emptyText}</div>
@@ -444,7 +441,7 @@ export function UsagePerspectiveChart({
 
   return (
     <div className={cn('overflow-hidden rounded-lg border border-border/70 bg-card/60', className)}>
-      <header className="flex min-h-10 items-center border-b border-border/70 bg-muted/40 px-3 py-1.5">
+      <header className="flex min-h-10 items-center border-b border-border/70 dark:bg-muted/40 px-3 py-1.5">
         <p className="text-xs font-normal text-muted-foreground">{title}</p>
       </header>
       <div className="relative h-[238px] overflow-hidden bg-muted/20 sm:h-[272px]">
@@ -501,11 +498,32 @@ export function UsagePerspectiveChart({
                 </text>
               </g>
             ))}
-            <line x1="98" x2="932" y1={chart.baseline} y2={chart.baseline} stroke="currentColor" strokeOpacity="0.35" />
-            <line x1="98" x2="98" y1="34" y2={chart.baseline} stroke="currentColor" strokeOpacity="0.35" />
+            <line
+              x1="98"
+              x2="932"
+              y1={chart.baseline}
+              y2={chart.baseline}
+              stroke="currentColor"
+              strokeOpacity="0.35"
+            />
+            <line
+              x1="98"
+              x2="98"
+              y1="34"
+              y2={chart.baseline}
+              stroke="currentColor"
+              strokeOpacity="0.35"
+            />
             {chart.xTicks.map((tick) => (
               <g key={tick.x}>
-                <line x1={tick.x} x2={tick.x} y1={chart.baseline} y2={chart.baseline + 6} stroke="currentColor" strokeOpacity="0.35" />
+                <line
+                  x1={tick.x}
+                  x2={tick.x}
+                  y1={chart.baseline}
+                  y2={chart.baseline + 6}
+                  stroke="currentColor"
+                  strokeOpacity="0.35"
+                />
                 <text
                   x={tick.x}
                   y={chart.baseline + 23}

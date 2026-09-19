@@ -438,7 +438,7 @@ export function BillingSettingsView({
       {/* Upgrade */}
       {showSubscriptionOffer ? (
         <Card className="overflow-hidden">
-          <div className="border-b border-border/70 bg-muted/30 px-5 py-3">
+          <div className="border-b border-border/70 dark:bg-muted/30 px-5 py-3">
             <p className="text-sm font-normal text-foreground">
               {checkoutInProgress
                 ? overview.subscriptionSetupPending
@@ -636,7 +636,7 @@ export function BillingSettingsView({
           inviting members. */}
       {canManage && overview.entitlementSource === 'stripe' && upcomingInvoice ? (
         <Card className="overflow-hidden">
-          <div className="border-b border-border/70 bg-muted/30 px-5 py-3">
+          <div className="border-b border-border/70 dark:bg-muted/30 px-5 py-3">
             <p className="text-sm font-normal text-foreground">{t('billing.upcomingTitle')}</p>
           </div>
           <div className="px-5 py-4">
@@ -714,7 +714,7 @@ export function BillingSettingsView({
       {/* Billing history */}
       {canManage && overview.billingAccountId ? (
         <Card className="overflow-hidden">
-          <div className="border-b border-border/70 bg-muted/30 px-5 py-3">
+          <div className="border-b border-border/70 dark:bg-muted/30 px-5 py-3">
             <p className="text-sm font-normal text-foreground">{t('billing.historyTitle')}</p>
           </div>
           <div className="px-5 py-4">
@@ -791,7 +791,7 @@ export function BillingSettingsView({
       overview.billingAccountId &&
       ['stripe', 'stripe_gift'].includes(overview.entitlementSource) &&
       onPaymentMethod ? (
-        <Card className="flex flex-wrap items-center justify-between gap-3 p-4">
+        <Card className="flex flex-wrap items-center justify-between gap-3 p-5">
           <div>
             <p className="text-sm font-normal">{t('billing.paymentMethod')}</p>
             <p className="mt-1 text-xs text-muted-foreground">

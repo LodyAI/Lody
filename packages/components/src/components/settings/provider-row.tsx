@@ -25,6 +25,7 @@ import {
   AlertDialogTitle,
 } from '@/ui/alert-dialog';
 import { cn } from '@/lib/utils';
+import { SETTINGS_ROW_CARD_CLASS } from './compact-layout';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
 import { AgentIcon } from '@/components/icons/agent-icon';
@@ -135,7 +136,7 @@ export function ProviderRow({
       className={cn(
         'overflow-hidden',
         variant === 'card'
-          ? '@container rounded-lg bg-foreground/[0.04]'
+          ? cn('@container', SETTINGS_ROW_CARD_CLASS)
           : 'bg-transparent [&+&]:border-t [&+&]:border-border',
         className
       )}

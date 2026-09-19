@@ -237,7 +237,7 @@ function SettingsModalBody() {
           {/* `pr-10` keeps every right-pane control off the close button's
               vertical column (10px inset + 20px control). It sits inside the
               scroll area so the scrollbar stays flush with the pane edge. */}
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col pt-5">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col pt-5" data-settings-surface="">
             {selfTitledTab ? (
               <DialogTitle className="sr-only">{t(activeTabConfig.labelKey)}</DialogTitle>
             ) : (

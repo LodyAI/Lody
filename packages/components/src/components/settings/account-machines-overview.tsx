@@ -160,7 +160,7 @@ export function AccountMachinesOverviewView({
   return (
     <TooltipProvider delayDuration={250}>
       <section className="mx-3 overflow-hidden rounded-xl border border-border/60 bg-card/60 md:mx-0 md:rounded-lg">
-        <header className="flex items-start justify-between gap-3 border-b border-border/60 bg-muted/30 px-3 py-2.5">
+        <header className="flex items-start justify-between gap-3 border-b border-border/60 dark:bg-muted/30 px-3 py-2.5">
           <div className="min-w-0">
             <h2 className="text-xs font-normal text-muted-foreground">
               {t('settings.account.machines.title', 'My machines')}
