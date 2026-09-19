@@ -405,42 +405,44 @@ function RemovedProjectArchive() {
           onRequestBulkDelete={() => {}}
           dialogs={null}
         >
-          <div className="mx-auto w-full max-w-5xl px-8 py-6">
-            <div className="mb-5 flex items-center gap-2">
-              <div className="relative max-w-sm flex-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input className="pl-9" placeholder="搜索归档对话" />
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <div className="mx-auto w-full max-w-5xl px-8 py-6">
+              <div className="mb-5 flex items-center gap-2">
+                <div className="relative max-w-sm flex-1">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input className="pl-9" placeholder="搜索归档对话" />
+                </div>
+                <Button variant="outline" size="icon" aria-label="筛选归档对话">
+                  <SlidersHorizontal className="h-4 w-4" />
+                </Button>
               </div>
-              <Button variant="outline" size="icon" aria-label="筛选归档对话">
-                <SlidersHorizontal className="h-4 w-4" />
-              </Button>
+              <div className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
+                <Archive className="h-4 w-4" />
+                <span>较早</span>
+              </div>
+              <ArchivedSessionGroupSection
+                group={removedProjectGroup}
+                now={new Date(now)}
+                onRestore={() => {}}
+                onDelete={() => {}}
+                onNavigate={() => {}}
+                onToggleCollapse={() => {}}
+                restoreLabel="恢复"
+                restoreUnavailableLabel="重新添加此本地项目后即可恢复其中的对话。"
+                removedProjectLabel="项目已移除"
+                restoreActionLabel="恢复"
+                deleteLabel="永久删除"
+                deleteActionLabel="删除"
+                chatLabel="对话"
+                isMobile={false}
+                isMultiSelectMode={false}
+                selectedIds={new Set()}
+                onToggleSelect={() => {}}
+                onToggleGroupSelect={() => {}}
+                onEnterMultiSelect={() => {}}
+                membersByUserId={new Map()}
+              />
             </div>
-            <div className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
-              <Archive className="h-4 w-4" />
-              <span>较早</span>
-            </div>
-            <ArchivedSessionGroupSection
-              group={removedProjectGroup}
-              now={new Date(now)}
-              onRestore={() => {}}
-              onDelete={() => {}}
-              onNavigate={() => {}}
-              onToggleCollapse={() => {}}
-              restoreLabel="恢复"
-              restoreUnavailableLabel="重新添加此本地项目后即可恢复其中的对话。"
-              removedProjectLabel="项目已移除"
-              restoreActionLabel="恢复"
-              deleteLabel="永久删除"
-              deleteActionLabel="删除"
-              chatLabel="对话"
-              isMobile={false}
-              isMultiSelectMode={false}
-              selectedIds={new Set()}
-              onToggleSelect={() => {}}
-              onToggleGroupSelect={() => {}}
-              onEnterMultiSelect={() => {}}
-              membersByUserId={new Map()}
-            />
           </div>
         </WebArchiveScreen>
       </div>
