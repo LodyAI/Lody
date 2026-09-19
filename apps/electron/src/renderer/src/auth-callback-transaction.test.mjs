@@ -2,9 +2,14 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import test from 'node:test'
 import { betterAuth } from 'better-auth'
+import { createAuthClient } from 'better-auth/client'
 import { memoryAdapter } from 'better-auth/adapters/memory'
 import { electron } from '@better-auth/electron'
-import { DesktopLogin, readDesktopLoginCallback } from '../../main/services/desktop-login.ts'
+import {
+  DesktopLogin,
+  DesktopLoginFailure,
+  readDesktopLoginCallback
+} from '../../main/services/desktop-login.ts'
 
 const session = { session: { token: 'synthetic-session' }, user: { id: 'synthetic-user' } }
 function deferred() {
@@ -194,6 +199,65 @@ void test('browser launch errors and expired waiting attempts settle with action
   await login.complete(callback())
   assert.equal(login.getState().error, 'authorization_expired')
   assert.equal(login.getState().session, null)
+})
+
+void test('exchange failures carry a credential-free, actionable detail', async (t) => {
+  const server = betterAuth({
+    baseURL: 'https://auth.example.test',
+    secret: 'synthetic-test-secret-not-a-real-secret-123456789',
+    database: memoryAdapter({ user: [], session: [], account: [], verification: [] }),
+    plugins: [electron()]
+  })
+  const client = createAuthClient({
+    baseURL: 'https://auth.example.test',
+    fetchOptions: { customFetchImpl: (input, init) => server.handler(new Request(input, init)) }
+  })
+  const reports = []
+  const rejected = harness(t, {
+    exchange: async (body, signal) =>
+      await client.$fetch('/electron/token', { method: 'POST', body, signal, throw: true }),
+    reportFailure: (report) => reports.push(report)
+  })
+  await rejected.login.start()
+  // An unknown/expired one-time code, as a real Better Auth 1.5.5 server rejects it.
+  await rejected.login.complete(rejected.callback())
+  const state = rejected.login.getState()
+  assert.equal(state.error, 'exchange_rejected')
+  assert.match(state.errorDetail, /^HTTP 4\d\d INVALID_TOKEN /)
+  assert.equal(reports.length, 1)
+  assert.deepEqual(
+    { error: reports[0].error, phase: reports[0].phase, detail: reports[0].detail },
+    { error: 'exchange_rejected', phase: 'exchanging', detail: state.errorDetail }
+  )
+  for (const secret of ['synthetic-code', rejected.browser[0].state]) {
+    assert.ok(!state.errorDetail.includes(secret))
+  }
+
+  const offline = harness(t, {
+    exchange: async () => {
+      throw new TypeError('fetch failed', { cause: { code: 'ENOTFOUND' } })
+    }
+  })
+  await offline.login.start()
+  await offline.login.complete(offline.callback())
+  assert.equal(offline.login.getState().error, 'exchange_failed')
+  assert.equal(offline.login.getState().errorDetail, 'TypeError: fetch failed ENOTFOUND')
+
+  // A fresh attempt clears the previous failure's detail.
+  await offline.login.start()
+  assert.equal(offline.login.getState().errorDetail, null)
+})
+
+void test('unavailable secure storage fails before the browser round trip', async (t) => {
+  const { login, browser } = harness(t, {
+    openBrowser: async () => {
+      throw new DesktopLoginFailure('secure_storage_unavailable', 'keychain locked')
+    }
+  })
+  await login.start()
+  assert.equal(browser.length, 0)
+  assert.equal(login.getState().error, 'secure_storage_unavailable')
+  assert.equal(login.getState().errorDetail, 'keychain locked')
 })
 
 void test('failure preserves an already authenticated session', async (t) => {

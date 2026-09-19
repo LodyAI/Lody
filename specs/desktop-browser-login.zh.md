@@ -26,7 +26,16 @@ attempt 不得再次交换，也不得注销有效身份。新 attempt 可以替
 主动退出会取消 attempt，并阻止迟到结果恢复身份。主进程重启会丢失内存中的 verifier，必须重新发起浏览器登录，不得绕过校验。
 
 浏览器等待期为五分钟，交换截止时间为 25 秒。交换超时意味着服务端结果未知；界面可以查询现有会话，但不得重复兑换同一授权码。
-打开浏览器失败、过期、交换失败、超时及重启分别提供本地化错误说明。诊断只记录 attempt id、阶段及错误分类，不含回调或会话凭据。
+打开浏览器失败、过期、交换失败、超时及重启分别提供本地化错误说明。服务端拒绝授权码（4xx）与传输失败、本地失败区分开；
+系统安全存储不可用时在打开浏览器前失败，而不是在授权码被兑换之后失败。每次失败还附带简短详情（HTTP 状态与服务端错误码，
+或本地错误名、消息及系统错误码）：登录页展示该详情，主进程记录日志并上报。诊断包含 attempt id、阶段、错误分类及该详情，
+不含回调、PKCE 或会话凭据。
+
+## 本地凭据存储
+
+桌面凭据存储（`userData/config.json`）只是服务端会话的缓存，不是身份来源。当前系统密钥已无法解密的已存凭据不得阻塞登录：
+应用就绪且安全存储可用时，将其复制为存储旁带时间戳的 `.bak`，删除该值，用户重新登录即可。无法解析的存储文件在启动时同样被移到一旁。
+钥匙串尚无法回答时（应用就绪前或加密不可用时）绝不丢弃已存值，因为之后仍可能可读。
 
 ## 认证与工作区准备
 
@@ -41,6 +50,9 @@ attempt 不得再次交换，也不得注销有效身份。新 attempt 可以替
 
 - 主进程协调器：[desktop-login.ts](../apps/electron/src/main/services/desktop-login.ts)。
 - renderer 状态投影：[auth.ts](../apps/electron/src/renderer/src/auth.ts)。
-- 行为测试：[回调测试](../apps/electron/src/renderer/src/auth-callback-transaction.test.mjs)。
-- 决策与验证：[记录](../.agents/notes/implemented/architecture/2026-09-17-desktop-login-coordinator.zh.md)。
+- 凭据存储恢复：[auth-storage.ts](../apps/electron/src/main/auth-storage.ts)。
+- 行为测试：[回调测试](../apps/electron/src/renderer/src/auth-callback-transaction.test.mjs)、
+  [存储测试](../apps/electron/src/main/auth-storage.test.mjs)。
+- 决策与验证：[记录](../.agents/notes/implemented/architecture/2026-09-17-desktop-login-coordinator.zh.md)；
+  [不可读凭据存储](../.agents/notes/implemented/bug-fix/2026-09-19-desktop-login-unreadable-credential-store.zh.md)。
 - 真实托管认证与操作系统协议分发仍需打包应用验收；合成测试不能证明这些边界。

@@ -411,9 +411,13 @@ export type ElectronLoginState = {
     | 'browser_open_failed'
     | 'authorization_expired'
     | 'exchange_failed'
+    | 'exchange_rejected'
     | 'exchange_timeout'
+    | 'secure_storage_unavailable'
     | 'restart_required'
     | null;
+  /** Credential-free failure summary (HTTP status/server code or local error) for support. */
+  errorDetail: string | null;
 };
 
 export type ElectronUpdaterPhase =
