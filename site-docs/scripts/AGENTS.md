@@ -9,10 +9,11 @@ Root `AGENTS.md` and `site-docs/AGENTS.md` also apply.
   `public/docs-search.json`. Docs search stays local and must not depend on a runtime
   API or hosted search service.
 - `generate-llms.mjs` validates docs title/description frontmatter and generates root
-  `public/llms.txt` + `public/llms-full.txt` from the ordered English docs and public
-  blog content. `llms.txt` also includes a short Answers section from
-  `llms-answers.mjs`; every answer link must resolve to a current English docs path on
-  this tree — do not invent pages that are still draft.
+  `public/llms.txt` + `public/llms-full.txt` from the sidebar-ordered English docs,
+  then any remaining English MDX (including `compare/`) so crawler-only pages still
+  appear when they are kept out of `meta.json`. `llms.txt` also includes a short
+  Answers section from `llms-answers.mjs`; every answer link must resolve to a
+  current English docs path on this tree — do not invent pages that are still draft.
 - `generate-docs-faq.mjs` extracts MDX `## FAQ` / `## 常见问题` sections into
   `lib/docs-faq.generated.ts` for FAQPage JSON-LD.
 - `generate-rss.mjs` writes `public/rss.xml` (en) and `public/rss-zh.xml` (zh) from the
