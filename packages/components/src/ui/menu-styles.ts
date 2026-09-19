@@ -35,8 +35,12 @@ export const menuItemIconClassName =
 // contains `h-`), so the rule silently skipped them and they rendered at the
 // library's 24px default. A caller that genuinely needs another size says so
 // with `!`.
+//
+// A leading svg passed as a direct child (instead of via the `icon` prop) gets
+// the same menu icon tone. `:where()` keeps that rule below any color class on
+// the svg itself, so status/brand icons that set their own color keep it.
 const menuItemBaseClassName =
-  'relative flex w-full min-h-7 cursor-default select-none items-center overflow-hidden gap-2 rounded-md px-2 py-1 text-[0.9em] leading-tight outline-hidden data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:size-3.5';
+  'relative flex w-full min-h-7 cursor-default select-none items-center overflow-hidden gap-2 rounded-md px-2 py-1 text-[0.9em] leading-tight outline-hidden data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg]:size-3.5 [:where(&)>svg]:text-[color:var(--menu-icon-color,hsl(var(--muted-foreground)))]';
 
 // An item that owns an open surface (a submenu trigger, or a trigger wired to a
 // nested menu) stays lit while that surface is open, so the pointer moving onto
@@ -58,7 +62,8 @@ export const menuItemDestructiveClassName =
   'data-[variant=destructive]:[--menu-icon-color:hsl(var(--destructive))] data-[variant=destructive]:text-destructive data-[variant=destructive]:focus:bg-destructive/10 dark:data-[variant=destructive]:focus:bg-destructive/20 data-[variant=destructive]:focus:text-destructive';
 
 /** Trailing metadata: a shortcut, a count, a hint. */
-export const menuItemExtraClassName = 'ms-auto ps-3 font-mono text-[0.8em] text-muted-foreground/80';
+export const menuItemExtraClassName =
+  'ms-auto ps-3 font-mono text-[0.8em] text-muted-foreground/80';
 
 export const menuGroupLabelClassName =
   'select-none px-2 pb-0.5 pt-1.5 text-[0.75em] font-normal uppercase leading-tight tracking-[0.6px] text-muted-foreground/80';

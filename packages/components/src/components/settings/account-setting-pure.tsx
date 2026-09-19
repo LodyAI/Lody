@@ -830,7 +830,7 @@ export function AccountSettingsPure({
                   {isEditable ? (
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
-                        <button className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-0.5 text-xs font-normal text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                        <button className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-0.5 text-xs font-normal text-muted-foreground transition-colors hover:bg-hover hover:text-foreground">
                           {t(`organization.role.${member.role}`)}
                           <ChevronDown className="h-3 w-3 opacity-50" />
                         </button>

@@ -56,7 +56,7 @@ const Toaster = ({
           actionButton: TOAST_BUTTON_CLASS_NAME,
           cancelButton: TOAST_BUTTON_CLASS_NAME,
           closeButton:
-            'relative! inset-auto! left-auto! right-auto! top-auto! order-last! ml-0! size-5! shrink-0! rounded-md! border-transparent! bg-transparent! text-muted-foreground! transition-colors! hover:bg-muted! hover:text-foreground!',
+            'relative! inset-auto! left-auto! right-auto! top-auto! order-last! ml-0! size-5! shrink-0! rounded-md! border-transparent! bg-transparent! text-muted-foreground! transition-colors! hover:bg-hover! hover:text-foreground!',
           ...toastOptions?.classNames,
         },
       }}
@@ -76,8 +76,7 @@ const Toaster = ({
           // elevated `color-mix` (same recipe as the app's dropdown surfaces in
           // `menu-styles.ts`) so the toast stays distinct from the page even in
           // themes where `--popover` equals `--background` (e.g. light mode).
-          '--normal-bg':
-            'color-mix(in oklab, hsl(var(--popover)) 92%, hsl(var(--foreground)) 8%)',
+          '--normal-bg': 'color-mix(in oklab, hsl(var(--popover)) 92%, hsl(var(--foreground)) 8%)',
           '--normal-text': 'hsl(var(--popover-foreground))',
           '--normal-border': 'hsl(var(--border))',
           // Cancel Sonner's default corner-float transform so the close button

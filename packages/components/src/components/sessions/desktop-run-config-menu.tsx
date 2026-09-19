@@ -196,8 +196,8 @@ export const COMPOSER_FACE_LABEL_CLASS = '@max-[280px]/composer-face:hidden';
 const TRIGGER_CLASS = cn(
   'inline-flex h-7 min-w-0 select-none items-center gap-1.5 rounded-[4px] px-2 text-[0.9em] leading-tight',
   '@max-[280px]/composer-face:w-7 @max-[280px]/composer-face:shrink-0 @max-[280px]/composer-face:justify-center @max-[280px]/composer-face:gap-0 @max-[280px]/composer-face:px-0',
-  'text-muted-foreground transition-colors hover:bg-muted hover:text-foreground',
-  'data-[state=open]:bg-muted data-[state=open]:text-foreground',
+  'text-muted-foreground transition-colors hover:bg-hover hover:text-foreground',
+  'data-[state=open]:bg-hover data-[state=open]:text-foreground',
   'disabled:cursor-default disabled:opacity-70'
 );
 

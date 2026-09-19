@@ -138,7 +138,7 @@ const SubagentTaskRow = ({
           <button
             type="button"
             disabled={cancelling}
-            className="shrink-0 rounded px-2 py-1 text-xs hover:bg-muted disabled:opacity-50"
+            className="shrink-0 rounded px-2 py-1 text-xs hover:bg-hover disabled:opacity-50"
             aria-label={t('sessions.subagentTasks.cancelNamed', {
               name: task.description || actor,
             })}

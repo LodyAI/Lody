@@ -356,7 +356,7 @@ export function FirstTaskScreen({
               onClick={() => setPrompt(seed)}
               className={cn(
                 'rounded-full border border-border px-3 py-1 text-xs text-muted-foreground',
-                'hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
+                'hover:bg-hover hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
               )}
             >
               {seed}

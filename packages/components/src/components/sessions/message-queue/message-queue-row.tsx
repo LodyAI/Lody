@@ -134,7 +134,7 @@ function LeadingHandle({
             'mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded',
             'text-[10px] font-medium tabular-nums text-muted-foreground/60',
             'cursor-grab transition-colors active:cursor-grabbing',
-            'hover:bg-muted hover:text-foreground',
+            'hover:bg-hover hover:text-foreground',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40'
           )}
           aria-label={label}
@@ -290,7 +290,16 @@ function RowBody(props: MessageQueueRowProps & EditCommitProps) {
 
 function RowActions(props: MessageQueueRowProps) {
   const { t } = useTranslation();
-  const { item, isFirst, showSteerAction, nativeSteerAvailable, isEditing, onStartEdit, onRemove, onSteer } = props;
+  const {
+    item,
+    isFirst,
+    showSteerAction,
+    nativeSteerAvailable,
+    isEditing,
+    onStartEdit,
+    onRemove,
+    onSteer,
+  } = props;
 
   // In edit mode the textarea owns the row: it carries its own confirm button, so we
   // render no row-level actions that would compete for the click mid-edit.
@@ -345,7 +354,7 @@ function TextAction({
       className={cn(
         'flex h-5 shrink-0 items-center justify-center rounded px-1.5',
         'text-[11px] font-medium text-muted-foreground transition-colors',
-        'hover:bg-muted hover:text-foreground',
+        'hover:bg-hover hover:text-foreground',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40'
       )}
       onClick={onClick}
@@ -378,7 +387,7 @@ function IconAction({
           className={cn(
             'flex h-5 w-5 items-center justify-center rounded',
             'text-muted-foreground/60 transition-colors',
-            'hover:bg-muted hover:text-foreground',
+            'hover:bg-hover hover:text-foreground',
             'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40',
             'disabled:pointer-events-none disabled:opacity-50',
             destructive && 'hover:text-destructive'

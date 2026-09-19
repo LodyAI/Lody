@@ -775,7 +775,7 @@ export function SessionHistoryButton({
                 <button
                   key={session.id}
                   className={cn(
-                    'w-full rounded-lg border px-3 py-2 text-left transition-colors hover:bg-muted',
+                    'w-full rounded-lg border px-3 py-2 text-left transition-colors hover:bg-hover',
                     isActive && 'border-border/70 bg-selection text-selection-foreground'
                   )}
                   onClick={() => handleSelect(session.id as SessionId)}
@@ -928,7 +928,7 @@ export type SessionOpenedByMenuState = {
 };
 
 const SESSION_HEADER_MENU_CONTENT_CLASS =
-  'min-w-[200px] max-w-[320px] [&_[role=menuitem]]:min-h-8 [&_[role=menuitem]]:py-1.5';
+  'min-w-[200px] max-w-[290px] [&_[role=menuitem]]:min-h-8 [&_[role=menuitem]]:py-1.5';
 const SESSION_HEADER_MENU_STATIC_ROW_CLASS =
   'flex min-h-8 w-full min-w-0 cursor-default select-none items-center gap-2 overflow-hidden rounded-md px-2 py-1.5 text-[13px] leading-4';
 
@@ -1163,7 +1163,7 @@ export function SessionHeaderMenu({
                 >
                   <Github className="h-3.5 w-3.5 text-muted-foreground" />
                   <span className="min-w-0 flex-1 truncate">{repoFullName}</span>
-                  <Copy className="ml-auto h-3 w-3 shrink-0 opacity-50" />
+                  <Copy className="ml-auto h-3 w-3 shrink-0 text-muted-foreground" />
                 </DropdownMenuItem>
               ) : null}
 
@@ -1204,7 +1204,7 @@ export function SessionHeaderMenu({
                       </span>
                     ) : null}
                   </span>
-                  <Copy className="ml-auto mt-0.5 h-3 w-3 shrink-0 opacity-50" />
+                  <Copy className="ml-auto mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
                 </DropdownMenuItem>
               ) : showProjectPath ? (
                 <DropdownMenuItem
@@ -1219,7 +1219,7 @@ export function SessionHeaderMenu({
                 >
                   <Folder className="h-3.5 w-3.5 text-muted-foreground" />
                   <span className="min-w-0 flex-1 truncate">{localPath}</span>
-                  <Copy className="ml-auto h-3 w-3 shrink-0 opacity-50" />
+                  <Copy className="ml-auto h-3 w-3 shrink-0 text-muted-foreground" />
                 </DropdownMenuItem>
               ) : null}
 
@@ -1603,7 +1603,7 @@ export function SessionSearchBar({
         type="button"
         variant="ghost"
         size="icon"
-        className="h-6 w-6 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground disabled:pointer-events-none disabled:text-muted-foreground/40"
+        className="h-6 w-6 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:pointer-events-none disabled:text-muted-foreground/40"
         disabled={!hasResults}
         onClick={onClick}
         aria-label={label}
@@ -1700,7 +1700,7 @@ export function SessionSearchBar({
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="h-6 w-6 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+                className="h-6 w-6 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
                 onClick={onClose}
                 aria-label={t('common.close', 'Close')}
               >

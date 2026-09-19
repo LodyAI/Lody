@@ -524,7 +524,7 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
                   }}
                   className={cn(
                     'inline-flex h-4 w-4 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors',
-                    'hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+                    'hover:bg-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
                   )}
                 >
                   <Info className="h-3 w-3" />

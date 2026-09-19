@@ -6045,7 +6045,7 @@ function WorkspaceChatLanding({
       </div>
       <button
         type="button"
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-hover hover:text-foreground"
         onClick={() => void dismissInboxItem({ itemId: sharingReviewRow._id })}
         aria-label={t('common.dismiss', 'Dismiss')}
       >
