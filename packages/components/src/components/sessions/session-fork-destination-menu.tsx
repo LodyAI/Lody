@@ -6,7 +6,12 @@ import { WorktreeIcon } from '@/components/icons/worktree-icon';
 import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
-import { menuItemClassName, menuSurfaceClassName, menuSurfaceStyle } from '@/ui/menu-styles';
+import {
+  menuItemClassName,
+  menuSeparatorClassName,
+  menuSurfaceClassName,
+  menuSurfaceStyle,
+} from '@/ui/menu-styles';
 
 export type SessionForkDestination = 'shared' | 'new-worktree';
 
@@ -162,7 +167,7 @@ export function SessionForkDestinationList({
         ))}
       {onCopyContext && (
         <>
-          {nativeForkAvailable && <div className="my-1 border-t border-border" />}
+          {nativeForkAvailable && <div className={cn(menuSeparatorClassName, 'my-1')} />}
           <DestinationRow
             icon={<Copy className="h-3.5 w-3.5" />}
             label={t('sessions.copyContextMarkdown', 'Copy context as Markdown')}
@@ -234,7 +239,11 @@ export function SessionForkDestinationPopover({
         sideOffset={6}
         role="menu"
         aria-label={t('sessions.forkDestination.title', 'Fork conversation')}
-        className={cn('w-64 p-1.5', menuSurfaceClassName)}
+        // Same surface as the dropdown menus: the 0.5px edge comes from
+        // `menuSurfaceStyle`, so drop Popover's own 1px border. Width follows
+        // the rows; 4px padding matches the separator's 4px margins, so every
+        // row sits the same distance from the edge or the divider next to it.
+        className={cn(menuSurfaceClassName, 'w-max min-w-0 border-0 p-1')}
         style={menuSurfaceStyle}
         onOpenAutoFocus={(event) => event.preventDefault()}
       >
