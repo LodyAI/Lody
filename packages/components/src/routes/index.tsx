@@ -20,11 +20,10 @@ export const Route = createFileRoute('/')({
 });
 
 export function HomeRoute() {
-  // A hidden spare boots on `/`; redirecting into a workspace here would both
-  // show the wrong content and start workspace work before a target is bound.
-  if (isWarmWindow()) {
-    return <LoadingPlaceholder />;
-  }
+  // A hidden spare boots on `/`; the Electron shell keeps an opaque surface
+  // above this route until the claimed target has painted. Returning no
+  // loading indicator here avoids flashing a second, non-native loading UI.
+  if (isWarmWindow()) return null;
   // Local (open-source) platform: no login route exists. Land straight on the
   // single implicit workspace once the CLI has provisioned it.
   if (isLocalAppPlatform()) {

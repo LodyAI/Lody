@@ -3,7 +3,7 @@ import {
   isWarmWindow,
   clearWarmWindowFlag
 } from '@lody/components/lib/desktop-window'
-import { useLayoutEffect } from 'react'
+import { useLayoutEffect, useState, type ReactElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createHashHistory, RouterProvider } from '@tanstack/react-router'
 import { createRouter } from '@lody/components/router'
@@ -121,11 +121,68 @@ function RendererCommitSentinel(): null {
 }
 
 /**
+ * A warm renderer must never expose its router's transition state. The router
+ * can briefly have no mounted route while it binds the claimed target, so keep
+ * an opaque, theme-matched surface above it until the target has painted.
+ *
+ * This is deliberately text-free: showing a spinner makes an auxiliary window
+ * feel like a second loading screen instead of a native window reveal.
+ */
+function WarmWindowSurface(): ReactElement | null {
+  const [visible, setVisible] = useState(() => isWarmWindow())
+  useLayoutEffect(() => {
+    const onTargetPainted = () => setVisible(false)
+    window.addEventListener('lody:warm-window-target-painted', onTargetPainted)
+    return () => window.removeEventListener('lody:warm-window-target-painted', onTargetPainted)
+  }, [])
+  if (!visible) return null
+  return (
+    <div
+      id="lody-warm-window-surface"
+      aria-hidden="true"
+      data-warm-window-surface="visible"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 2147483647,
+        backgroundColor: 'hsl(var(--background))',
+        pointerEvents: 'none',
+        isolation: 'isolate'
+      }}
+    />
+  )
+}
+
+function waitForTargetContentPainted(onTargetPainted: () => void): void {
+  let stableFrames = 0
+  const startedAt = performance.now()
+  const check = () => {
+    // `innerText` intentionally excludes route shells that are still hidden by
+    // Suspense/CSS. `textContent` becomes non-empty too early and would bring
+    // the exact blank-frame regression back under a slower renderer.
+    const hasContent = Boolean(rootElement?.innerText?.trim())
+    stableFrames = hasContent ? stableFrames + 1 : 0
+    // The first non-empty commit can still be followed by a layout pass that
+    // replaces the route shell. Require two consecutive frames so the opaque
+    // surface is removed only after a real target frame is on screen.
+    if (stableFrames >= 2 || performance.now() - startedAt >= 5000) {
+      onTargetPainted()
+      return
+    }
+    requestAnimationFrame(check)
+  }
+  requestAnimationFrame(check)
+}
+
+/**
  * Binds a claimed warm window to a concrete route without a reload. The renderer
  * is already booted; this reproduces the storage flags a fresh auxiliary window
  * would derive from its URL, then navigates client-side.
  */
-function installWarmWindowBinding(router: ReturnType<typeof createRouter>): void {
+function installWarmWindowBinding(
+  router: ReturnType<typeof createRouter>,
+  onTargetPainted: () => void
+): void {
   onIpcEvent('app.windowTarget', (target) => {
     sessionStorage.setItem('lody:auxiliaryWindow', '1')
     sessionStorage.removeItem('lody:windowFocusConsumed')
@@ -145,9 +202,13 @@ function installWarmWindowBinding(router: ReturnType<typeof createRouter>): void
           to: '/$workspaceName',
           params: { workspaceName: target.workspace }
         })
-    // Keep the neutral warm shell until the target route commits, so the home
-    // route cannot redirect the spare into a workspace mid-navigation.
-    void navigation.finally(() => clearWarmWindowFlag())
+    // Keep the opaque warm shell until the target route has committed and had
+    // two animation frames to paint. This covers both the router transition
+    // and the first layout/paint of the workspace surface.
+    void navigation.finally(() => {
+      clearWarmWindowFlag()
+      waitForTargetContentPainted(onTargetPainted)
+    })
   })
 }
 
@@ -193,7 +254,9 @@ try {
     authClient,
     history: usesHashHistory ? createHashHistory() : undefined
   })
-  installWarmWindowBinding(router)
+  installWarmWindowBinding(router, () =>
+    window.dispatchEvent(new Event('lody:warm-window-target-painted'))
+  )
   if (isSessionWindow() && !sessionStorage.getItem('lody:windowFocusConsumed')) {
     const sessionId = router.history.location.pathname.split('/sessions/')[1]?.split('/')[0]
     if (sessionId) {
@@ -213,6 +276,7 @@ try {
   }).render(
     <>
       <RendererCommitSentinel />
+      <WarmWindowSurface />
       <ErrorBoundary name="AppRoot" variant="page" showErrorDetails>
         <Provider store={jotaiStore}>
           <RouterProvider router={router} />
