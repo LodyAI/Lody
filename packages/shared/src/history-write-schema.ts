@@ -13,6 +13,7 @@ export const HistoryEntryWriteSchema = z.object({
   timestamp: z.string(),
   userTurnId: z.string().optional(),
   acpTurnId: z.string().optional(),
+  acpTurnOrigin: z.string().optional(),
   items: z.array(MessageContentSchema).optional(),
   plan: z.array(PlanEntrySchema).optional(),
   startedAt: z.number().optional(),

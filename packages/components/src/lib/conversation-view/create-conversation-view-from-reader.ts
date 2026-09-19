@@ -286,6 +286,7 @@ export function createConversationViewFromReader(
       old.sendStatus !== next.sendStatus ||
       old.userTurnId !== next.userTurnId ||
       old.acpTurnId !== next.acpTurnId ||
+      old.acpTurnOrigin !== next.acpTurnOrigin ||
       old.startedAt !== next.startedAt ||
       old.permissionWaitMs !== next.permissionWaitMs ||
       old.itemCount !== next.itemCount ||

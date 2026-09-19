@@ -93,6 +93,7 @@ export interface SessionChatStreamProps {
   /** Opens another session from an in-conversation link (e.g. a fork's origin). */
   onNavigateSession?: (target: SessionNavigationTarget) => void;
   onLastCompletedAssistantMessageIdChange?: (messageId: string | null) => void;
+  onLastForkableAssistantMessageIdChange?: (messageId: string | null) => void;
   conversationFontSize?: ConversationFontSize;
   /** Skips one auto-follow caused by the session composer changing height. */
   skipNextViewportResizeAutoScrollRef?: MutableRefObject<boolean>;
@@ -177,6 +178,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       onResendUndelivered,
       capacityRetry,
       onLastCompletedAssistantMessageIdChange,
+      onLastForkableAssistantMessageIdChange,
       conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
       skipNextViewportResizeAutoScrollRef,
       suppressStickyAutoScrollRef,
@@ -190,12 +192,16 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       items,
       lastAssistantMessageId,
       lastCompletedAssistantMessageId,
+      lastForkableAssistantMessageId,
       onVisibleTurnRangeChange: handleVisibleTurnRangeChange,
       onOutlinePreviewRound: handleOutlinePreviewRound,
     } = useConversationStreamItems(view, sessionId);
     useEffect(() => {
       onLastCompletedAssistantMessageIdChange?.(lastCompletedAssistantMessageId);
     }, [lastCompletedAssistantMessageId, onLastCompletedAssistantMessageIdChange]);
+    useEffect(() => {
+      onLastForkableAssistantMessageIdChange?.(lastForkableAssistantMessageId);
+    }, [lastForkableAssistantMessageId, onLastForkableAssistantMessageIdChange]);
 
     const stableOnFileDiffClick = useStableCallback((turnId: string, filePath: string) => {
       onFileDiffClick?.(turnId, filePath);
@@ -276,7 +282,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
         onFilePathClick={hasFilePathClick ? stableOnFilePathClick : undefined}
         onOpenHtmlFile={onOpenHtmlFile}
         lastAssistantMessageId={lastAssistantMessageId}
-        lastCompletedAssistantMessageId={lastCompletedAssistantMessageId}
+        lastForkableAssistantMessageId={lastForkableAssistantMessageId}
         messageFileDiffEntriesByTurn={messageFileDiffEntriesByTurn}
         assistantActions={assistantActions}
         assistantActionsMessageId={assistantActionsMessageId}

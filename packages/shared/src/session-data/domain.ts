@@ -35,6 +35,7 @@ export type SessionTurn = {
   readonly timestamp: string;
   readonly userTurnId?: string;
   readonly acpTurnId?: string;
+  readonly acpTurnOrigin?: string;
   readonly items?: readonly unknown[];
   readonly plan?: readonly unknown[];
   readonly read?: boolean;
@@ -58,6 +59,7 @@ export type SessionTurn = {
 export interface SessionTurnWritableValues {
   userTurnId: string | undefined;
   acpTurnId: string | undefined;
+  acpTurnOrigin: string | undefined;
   timestamp: string;
   role: SessionTurnRole;
   read: boolean | undefined;
@@ -120,6 +122,7 @@ export type SessionDirectoryScalars = {
   readonly sendStatus?: 'timeout';
   readonly userTurnId?: string;
   readonly acpTurnId?: string;
+  readonly acpTurnOrigin?: string;
   readonly startedAt?: number;
   readonly permissionWaitMs?: number;
 };

@@ -34,6 +34,10 @@ Translation: current
   内容变化，则拒绝覆盖；区间内唯一例外是本次新插入的 pending 用户轮次
   变成 seen/read，且其他字段完全不变；它不是崩溃恢复或分布式事务。
   外部 provider 导入仍是新输入，不能借用已存历史复制权限。
+- 当引擎自开轮次占用 ACP prompt slot 时，编辑后重发必须 fail closed：不能取消引擎 owner、接管已准备
+  的 replacement，或提交 replacement history/meta。准备前、提交前及持久化后都要复查；若本地历史/meta
+  写入后才出现标记，则关闭 prepared session，并执行现有的本地历史/meta 最佳努力补偿。这只能检测
+  provider admission 竞态；rewrite barrier 本身不是跨边界 admission lock。
 - 这里的接受表示本地 CRDT 写入。持久化、权限和远端同步仍由原有 repo 和传输层负责。
 - 在历史边界之前被归类为临时态的 provider 更新，绝不能进入 `HistoryWriter`。内置 Codex 的
   `agent_thought_chunk` 就属于这一类：它可以经由临时 presence 发布有长度上限的 live 状态，
@@ -134,5 +138,6 @@ UI）不在本次实现；本次只是保证将来出现这类骨架轮次时不
 - [中断时 pending input 的 exactly-once](../.agents/notes/implemented/bug-fix/2026-09-14-interrupt-pending-input-exactly-once.zh.md)
 - [Steer Stop 与恢复所有权](../.agents/notes/implemented/bug-fix/2026-09-16-steer-stop-recovery-ownership.zh.md)
 - [带版本轮次 hash 与 primitive 元数据插入](../.agents/notes/implemented/architecture/2026-09-14-versioned-history-hashes-and-primitive-metadata.zh.md)
+- [编辑后重发 admission 防线](../.agents/notes/implemented/bug-fix/2026-09-15-edit-resend-engine-admission.zh.md)
 
 这是供人工审阅的草稿；实现和测试通过不代表 Spec 已获批准。

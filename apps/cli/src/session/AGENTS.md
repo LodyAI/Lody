@@ -92,23 +92,23 @@ Contract: specs/session-orchestration.md.
   append history, or publish events before adoption.
 - Dispatch and claim rescan the current row and reject changed compatibility under canonical
   `buildSessionLaunchConfig` semantics; a published incompatible resource cleans up first.
-- Nested child Sessions are rejected: ownership resolves one parent hop only.
+- Nested child Sessions rejected: ownership is one parent hop only.
 - Fork commits at `LoroDocumentManager.persistPendingChanges()`; cloud `waitUntilSynced()` is
-  never a success condition. Persist the target placeholder before ACP; a failed final commit
-  terminates the fork and durably deletes the target.
-- Fork an active source turn only on an advertised `_meta.lody.forkAtTurn = { version: 1 }`, pass
-  the adapter's `_meta.lody.turnId` through unchanged as `acpTurnId`, and reuse the source Git
-  identity only on an exact requester match. New-worktree forks also require native fork support,
-  persist a target-doc `forkOperation` before returning, publish no target meta before the final
-  commit, clean up ACP and the worktree/branch with a durable failed receipt, and stay idempotent
-  on retry.
-- Fork recovery fail-closes interrupted operations and finds them ONLY in the machine-local marker
-  store under `withForkOperationLock`. Never enumerate rooms or open docs to find candidates, and
-  never `cleanSessionDoc` a doc you do not own.
-- Edit-and-resend prepares `forkAtTurn` (`session/new` for the first User), cancels the exact
-  turn, waits for release, then commits history/meta. Its barrier excludes queue promotion,
-  dispatch and steer. Keep the queue, User attribution/config/attachments; use new turn/ACP ids.
-  Never replay transcript or roll back files.
+  never success. Persist the target placeholder before ACP; a failed final commit
+  terminates and durably deletes the target.
+- Fork an active source turn only on advertised `_meta.lody.forkAtTurn = { version: 1 }`, pass
+  `_meta.lody.turnId` through unchanged as `acpTurnId`, and reuse the source Git
+  identity only on an exact requester match. New-worktree forks need native fork support, a
+  target-doc `forkOperation` before returning, no target meta before final commit, durable
+  failed-receipt cleanup of ACP/worktree/branch, idempotent retry. Engine turns (`auto:<n>`+
+  `turnOrigin`) are never fork positions (README).
+- Fork recovery fail-closes interrupted operations, found ONLY in the machine-local marker store
+  under `withForkOperationLock`; never enumerate rooms/docs or `cleanSessionDoc` an unowned doc.
+- Edit-and-resend uses `forkAtTurn` (`session/new` for first User), cancels the exact CLIENT
+  turn, commits history/meta once after release. Engine occupancy fails closed; late markers
+  close the prepared replacement and compensate. The barrier blocks queue promotion, dispatch
+  and steer; keep the queue, User attribution/config/attachments, new turn/ACP ids; never replay
+  transcript or roll back files.
 
 ## Access
 
@@ -116,7 +116,7 @@ Contract: specs/session-orchestration.md.
   resume and dispatch resolve from agent config/project, and the legacy row is fallback only.
 - Dispatch access is local policy first, optional-cloud three-state second: owner-cached policy
   may allow offline, `remote_missing` and a definitive `denied` fail the turn, `indeterminate`
-  leaves it pending behind `verifyMachineAccessWithRetry()`. Never collapse a thrown check into
+  stays pending behind `verifyMachineAccessWithRetry()`. Never collapse a thrown check into
   denial.
 - Every owner-allowed dispatch fires `fireOwnerAccessRecheck` with `forceBackendVerification`; a
   confirmed online allow is the ONLY writer of the access snapshot and `verifiedAt`, a deny clears

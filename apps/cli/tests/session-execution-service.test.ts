@@ -177,6 +177,11 @@ const createBaseDeps = (
     clearConversationTurn: vi.fn(),
     getActiveTurnId: vi.fn(() => undefined),
     clearActiveTurnId: vi.fn(() => {}),
+    isEngineTurnActive: vi.fn(() => false),
+    getEngineTurnOwnerForCancel: vi.fn((_, assistantEntryId: string) =>
+      assistantEntryId === 'assistant:autonomous-auto:41' ? 'auto:41' : undefined
+    ),
+    clearEngineTurnActivity: vi.fn(),
     buildAcpPromptBlocks: vi.fn(async () => [{ type: 'text', text: 'hello' }] as any),
     applyAcpModeAndModel: vi.fn(async () => {}),
     createAssistantEntryForTurn: vi.fn(async () => {}),
@@ -277,6 +282,257 @@ describe('SessionExecutionService', () => {
     expect(await service.cancelSession(request)).toEqual({ success: true });
     expect([...runningChildren]).toEqual(['child-2']);
     expect(deps.getActiveTurnId(request.sessionId)).toBe('parent-1');
+  });
+
+  it('routes a stop request matching no client turn to the active engine-opened turn', async () => {
+    const cancel = vi.fn(async () => {});
+    const sessionManager = {
+      getSession: vi.fn(() => ({
+        agentClient: { isCreated: () => true, cancel },
+        acpSessionId: 'acp-1',
+      })),
+      getPendingSession: vi.fn(() => null),
+    } as unknown as SessionManager;
+    const clearEngineTurnActivity = vi.fn();
+    const deps = createBaseDeps({
+      sessionManager,
+      isEngineTurnActive: vi.fn(() => true),
+      clearEngineTurnActivity,
+    });
+    const service = new SessionExecutionService(deps);
+
+    // The autonomous entry's id owns no client-turn state, so a naive stale
+    // check would report success without cancelling anything.
+    const result = await service.cancelSession({
+      type: 'session/cancel',
+      sessionId: 'session-1' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      turnId: 'assistant:autonomous-auto:41',
+    });
+
+    expect(result).toEqual({ success: true });
+    expect(cancel).toHaveBeenCalledWith('acp-1');
+    expect(clearEngineTurnActivity).toHaveBeenCalledWith('session-1', 'auto:41');
+  });
+
+  it('does not cancel a newer engine turn named by an older autonomous entry', async () => {
+    const cancel = vi.fn(async () => {});
+    const sessionManager = {
+      getSession: vi.fn(() => ({
+        agentClient: { isCreated: () => true, cancel },
+        acpSessionId: 'acp-1',
+      })),
+      getPendingSession: vi.fn(() => null),
+    } as unknown as SessionManager;
+    const clearEngineTurnActivity = vi.fn();
+    const deps = createBaseDeps({
+      sessionManager,
+      isEngineTurnActive: vi.fn(() => true),
+      getEngineTurnOwnerForCancel: vi.fn((_sessionId, assistantEntryId: string) =>
+        assistantEntryId === 'assistant:autonomous-auto:42' ? 'auto:42' : undefined
+      ),
+      clearEngineTurnActivity,
+    });
+    deps.workspaceDocument.getOrCreateSessionDoc = vi.fn(async () => ({
+      sessionData: { history: { readAll: () => [] } },
+    })) as never;
+    const service = new SessionExecutionService(deps);
+
+    const result = await service.cancelSession({
+      type: 'session/cancel',
+      sessionId: 'session-1' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      turnId: 'assistant:autonomous-auto:41',
+    });
+
+    expect(result).toEqual({ success: true });
+    expect(cancel).not.toHaveBeenCalled();
+    expect(clearEngineTurnActivity).not.toHaveBeenCalled();
+  });
+
+  it('keeps a stale stop request a no-op when no engine turn is active', async () => {
+    const deps = createBaseDeps({
+      isEngineTurnActive: vi.fn(() => false),
+    });
+    deps.workspaceDocument.getOrCreateSessionDoc = vi.fn(async () => ({
+      sessionData: { history: { readAll: () => [] } },
+    })) as never;
+    const service = new SessionExecutionService(deps);
+    const result = await service.cancelSession({
+      type: 'session/cancel',
+      sessionId: 'session-1' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      turnId: 'assistant:stale',
+    });
+    expect(result).toEqual({ success: true });
+    expect(deps.sessionManager.getSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps the engine-turn marker and reports failure when the ACP cancel fails', async () => {
+    const cancel = vi.fn(async () => {
+      throw new Error('connection lost');
+    });
+    const sessionManager = {
+      getSession: vi.fn(() => ({
+        agentClient: { isCreated: () => true, cancel },
+        acpSessionId: 'acp-1',
+      })),
+      getPendingSession: vi.fn(() => null),
+    } as unknown as SessionManager;
+    const clearEngineTurnActivity = vi.fn();
+    const deps = createBaseDeps({
+      sessionManager,
+      isEngineTurnActive: vi.fn(() => true),
+      clearEngineTurnActivity,
+    });
+    const service = new SessionExecutionService(deps);
+
+    const result = await service.cancelSession({
+      type: 'session/cancel',
+      sessionId: 'session-1' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      turnId: 'assistant:autonomous-auto:41',
+    });
+
+    expect(result).toMatchObject({ success: false });
+    expect(clearEngineTurnActivity).not.toHaveBeenCalled();
+  });
+
+  it('distinguishes an undeliverable cancel from a cancelled engine turn', async () => {
+    const sessionManager = {
+      getSession: vi.fn(() => null),
+      getPendingSession: vi.fn(() => null),
+    } as unknown as SessionManager;
+    const clearEngineTurnActivity = vi.fn();
+    const deps = createBaseDeps({
+      sessionManager,
+      isEngineTurnActive: vi.fn(() => true),
+      clearEngineTurnActivity,
+    });
+    const service = new SessionExecutionService(deps);
+
+    const result = await service.cancelSession({
+      type: 'session/cancel',
+      sessionId: 'session-1' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      turnId: 'assistant:autonomous-auto:41',
+    });
+
+    expect(result).toMatchObject({ success: false, error: 'The agent is no longer connected.' });
+    expect(clearEngineTurnActivity).not.toHaveBeenCalled();
+  });
+
+  it('does not cancel when the engine turn already ended before the barrier check', async () => {
+    const cancel = vi.fn(async () => {});
+    const sessionManager = {
+      getSession: vi.fn(() => ({
+        agentClient: { isCreated: () => true, cancel },
+        acpSessionId: 'acp-1',
+      })),
+      getPendingSession: vi.fn(() => null),
+    } as unknown as SessionManager;
+    // The Stop initially names the current owner, but the marker is gone by
+    // the barrier-guarded owner recheck — nothing may be cancelled.
+    const getEngineTurnOwnerForCancel = vi
+      .fn()
+      .mockReturnValueOnce('auto:41')
+      .mockReturnValue(undefined);
+    const deps = createBaseDeps({
+      sessionManager,
+      getEngineTurnOwnerForCancel,
+      clearEngineTurnActivity: vi.fn(),
+    });
+    const service = new SessionExecutionService(deps);
+
+    const result = await service.cancelSession({
+      type: 'session/cancel',
+      sessionId: 'session-1' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      turnId: 'assistant:autonomous-auto:41',
+    });
+
+    expect(result).toEqual({ success: true });
+    expect(cancel).not.toHaveBeenCalled();
+  });
+
+  it('does not clear an engine owner replaced while its cancel is in flight', async () => {
+    const cancelStarted = createDeferred<void>();
+    const allowCancel = createDeferred<void>();
+    let owner = 'auto:41';
+    const cancel = vi.fn(async () => {
+      cancelStarted.resolve();
+      await allowCancel.promise;
+    });
+    const sessionManager = {
+      getSession: vi.fn(() => ({
+        agentClient: { isCreated: () => true, cancel },
+        acpSessionId: 'acp-1',
+      })),
+      getPendingSession: vi.fn(() => null),
+    } as unknown as SessionManager;
+    const clearEngineTurnActivity = vi.fn();
+    const deps = createBaseDeps({
+      sessionManager,
+      isEngineTurnActive: vi.fn(() => true),
+      getEngineTurnOwnerForCancel: vi.fn((_sessionId, assistantEntryId: string) =>
+        assistantEntryId === `assistant:autonomous-${owner}` ? owner : undefined
+      ),
+      clearEngineTurnActivity,
+    });
+    const service = new SessionExecutionService(deps);
+    const stop = service.cancelSession({
+      type: 'session/cancel',
+      sessionId: 'session-1' as SessionId,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      turnId: 'assistant:autonomous-auto:41',
+    });
+
+    await cancelStarted.promise;
+    owner = 'auto:42';
+    allowCancel.resolve();
+
+    expect(await stop).toEqual({ success: true });
+    expect(clearEngineTurnActivity).not.toHaveBeenCalled();
+  });
+
+  it('does not lose an engine release between the activity check and waiter registration', async () => {
+    const isEngineTurnActive = vi.fn().mockReturnValueOnce(true).mockReturnValue(false);
+    const service = new SessionExecutionService(createBaseDeps({ isEngineTurnActive }));
+
+    await service.waitForEngineTurnRelease('session-1' as SessionId);
+
+    expect(isEngineTurnActive).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports engine-turn activity as active work in the execution snapshot', () => {
+    const deps = createBaseDeps({
+      isEngineTurnActive: vi.fn(() => true),
+    });
+    const service = new SessionExecutionService(deps);
+    const snapshot = service.getExecutionSnapshot('session-1' as SessionId);
+    // Dispatch admission reads hasActiveTurn to hold queued work — an engine
+    // turn must set it even though it owns no client-turn runtime.
+    expect(snapshot.engineTurnActive).toBe(true);
+    expect(snapshot.hasActiveTurn).toBe(true);
+    expect(snapshot.activeTurnId).toBeUndefined();
+  });
+
+  it('reports no active work in the execution snapshot when the engine turn is done', () => {
+    const deps = createBaseDeps({
+      isEngineTurnActive: vi.fn(() => false),
+    });
+    const service = new SessionExecutionService(deps);
+    expect(service.getExecutionSnapshot('session-1' as SessionId)).toMatchObject({
+      engineTurnActive: false,
+      hasActiveTurn: false,
+    });
   });
   it('advances one session owner through consecutive prompt handoffs', async () => {
     const steerPrompt = vi.fn(() => ({
@@ -8455,6 +8711,62 @@ describe('SessionExecutionService goal control', () => {
     completion.resolve();
     await released;
     expect(service.getExecutionSnapshot(goalSessionId).hasActiveTurn).toBe(false);
+  });
+
+  it('holds a queued goal until the engine-opened turn releases the prompt slot', async () => {
+    const { service, deps, submitted, completion, delivered } = createGoalService({
+      transport: 'promptMeta',
+    });
+    let engineTurnActive = true;
+    deps.isEngineTurnActive = () => engineTurnActive;
+
+    expect(await service.controlSessionGoal({ ...goalArgs, action: 'resume' })).toMatchObject({
+      accepted: true,
+      disposition: 'queued',
+    });
+    expect(delivered).toEqual([]);
+
+    engineTurnActive = false;
+    service.notifyEngineTurnReleased(goalSessionId);
+    await submitted.promise;
+    expect(delivered).toEqual([expect.objectContaining({ goalControl: { action: 'resume' } })]);
+
+    const released = service.waitForTurnRelease(goalSessionId, 'turn-1');
+    completion.resolve();
+    await released;
+  });
+
+  it('rechecks engine activity before submitting a goal after metadata loading', async () => {
+    const { service, deps, sessionDoc, submitted, completion, delivered } = createGoalService({
+      transport: 'promptMeta',
+    });
+    const metadataRead = createDeferred<void>();
+    const metadataReady = createDeferred<void>();
+    const originalMeta = sessionDoc.getMetaState;
+    sessionDoc.getMetaState = async () => {
+      metadataRead.resolve();
+      await metadataReady.promise;
+      return originalMeta();
+    };
+    let engineTurnActive = false;
+    deps.isEngineTurnActive = () => engineTurnActive;
+
+    await service.controlSessionGoal({ ...goalArgs, action: 'resume' });
+    await metadataRead.promise;
+    engineTurnActive = true;
+    metadataReady.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(delivered).toEqual([]);
+
+    engineTurnActive = false;
+    service.notifyEngineTurnReleased(goalSessionId);
+    await submitted.promise;
+    expect(delivered).toEqual([expect.objectContaining({ goalControl: { action: 'resume' } })]);
+
+    const released = service.waitForTurnRelease(goalSessionId, 'turn-1');
+    completion.resolve();
+    await released;
   });
 
   it('retains an accepted goal across more than three competing turns', async () => {

@@ -1,4 +1,5 @@
 import { isSessionGoalActive, resolveLatestSessionGoalFromHistory } from '../goal';
+import { isAutonomousTurnId } from '../acp/turn-identity';
 import type { PermissionOutcome } from '../message';
 import type {
   OpenAssistantTurnInput,
@@ -163,6 +164,9 @@ export function resolveEditableTail<T extends EditableTailTurn>(
     if (!entry) continue;
     if (entry.role === 'user') return null;
     if (entry.role !== 'assistant') continue;
+    // Engine-opened turns are display/history entries, not provider fork
+    // boundaries. Keep walking to the preceding client-dispatched turn.
+    if (typeof entry.acpTurnId === 'string' && isAutonomousTurnId(entry.acpTurnId)) continue;
     if (entry.finished !== true || typeof entry.acpTurnId !== 'string' || !entry.acpTurnId) {
       return null;
     }

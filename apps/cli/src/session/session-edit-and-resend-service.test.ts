@@ -76,6 +76,10 @@ const historyFixture = (): SessionHistoryInput[] => [
 function createHarness(
   options: {
     active?: boolean;
+    engineTurnActive?: boolean;
+    engineTurnActiveAfterPrepare?: boolean;
+    engineTurnActiveBeforeCommit?: boolean;
+    engineTurnActiveDuringPersist?: boolean;
     prepareError?: Error;
     persistError?: Error;
     beforeCommitFailure?: (doc: LoroDoc) => void;
@@ -120,8 +124,15 @@ function createHarness(
     agentConfigId: 'agent-config-1' as AgentConfigId,
     acpSessionId: 'acp-old',
   } as SessionMeta;
+  let metaReadCount = 0;
   const sessionDoc = withHistoryPort({
-    getMetaState: vi.fn(async () => meta),
+    getMetaState: vi.fn(async () => {
+      metaReadCount += 1;
+      if (options.engineTurnActiveBeforeCommit && metaReadCount === 3) {
+        options.engineTurnActive = true;
+      }
+      return meta;
+    }),
     getHistory: vi.fn(realDoc.sessionData.history.readAll.bind(realDoc.sessionData.history)),
     sessionData: {
       commands: {
@@ -155,6 +166,9 @@ function createHarness(
   const agentClient = {
     prepareReplacementSession: vi.fn(async () => {
       events.push('prepare');
+      if (options.engineTurnActiveAfterPrepare) {
+        options.engineTurnActive = true;
+      }
       if (options.prepareError) throw options.prepareError;
       return { sessionId: 'acp-new' };
     }),
@@ -168,8 +182,9 @@ function createHarness(
   let barrierHeld = false;
   const executionService = {
     getExecutionSnapshot: vi.fn(() => ({
-      hasActiveTurn: options.active === true,
+      hasActiveTurn: options.active === true || options.engineTurnActive === true,
       activeTurnId: options.active ? 'assistant-2' : undefined,
+      engineTurnActive: options.engineTurnActive === true,
       hasBlockingPendingCreate: false,
       hasReusableSession: true,
       hasRewriteBarrier: barrierHeld,
@@ -198,6 +213,9 @@ function createHarness(
       getOrCreateSessionDoc: vi.fn(async () => sessionDoc),
       persistPendingChanges: vi.fn(async (reason: string) => {
         events.push(reason.endsWith('rollback') ? 'persist-rollback' : 'persist');
+        if (options.engineTurnActiveDuringPersist && reason.endsWith('commit')) {
+          options.engineTurnActive = true;
+        }
         if (options.persistError && reason.endsWith('commit')) {
           options.beforeCommitFailure?.(loro);
           throw options.persistError;
@@ -223,6 +241,7 @@ function createHarness(
     // captured at the last explicit history write.
     getHistory: () => loro.getList('history').toJSON() as SessionHistoryInput[],
     logger,
+    meta,
     realDoc,
     repo,
     service,
@@ -247,6 +266,85 @@ const spec = {
 };
 
 describe('SessionEditAndResendService', () => {
+  it('refuses to prepare a replacement while an engine turn is active', async () => {
+    const harness = createHarness({ engineTurnActive: true });
+
+    const result = await harness.service.editAndResend(spec);
+
+    expect(result).toMatchObject({ success: false, error: { code: 'ACTIVE_AUTOMATION' } });
+    expect(harness.agentClient.prepareReplacementSession).not.toHaveBeenCalled();
+    expect(harness.agentClient.adoptPreparedSession).not.toHaveBeenCalled();
+    expect(harness.agentClient.closeDetachedSession).not.toHaveBeenCalled();
+    expect(harness.repo.upsertDocMeta).not.toHaveBeenCalled();
+    expect(harness.events).toEqual(['barrier-acquire', 'barrier-release', 'dispatch']);
+  });
+
+  it('closes a prepared replacement when an engine turn starts during preparation', async () => {
+    const harness = createHarness({ engineTurnActiveAfterPrepare: true });
+
+    const result = await harness.service.editAndResend(spec);
+
+    expect(result).toMatchObject({ success: false, error: { code: 'ACTIVE_AUTOMATION' } });
+    expect(harness.agentClient.prepareReplacementSession).toHaveBeenCalledWith('provider-turn-1');
+    expect(harness.agentClient.closeDetachedSession).toHaveBeenCalledWith('acp-new');
+    expect(harness.agentClient.adoptPreparedSession).not.toHaveBeenCalled();
+    expect(harness.repo.upsertDocMeta).not.toHaveBeenCalled();
+    expect(harness.events).toEqual(['barrier-acquire', 'prepare', 'barrier-release', 'dispatch']);
+  });
+
+  it('refuses the commit when an engine turn starts after replacement preparation', async () => {
+    const harness = createHarness({ engineTurnActiveBeforeCommit: true });
+
+    const result = await harness.service.editAndResend(spec);
+
+    expect(result).toMatchObject({ success: false, error: { code: 'ACTIVE_AUTOMATION' } });
+    expect(harness.agentClient.prepareReplacementSession).toHaveBeenCalledWith('provider-turn-1');
+    expect(harness.agentClient.closeDetachedSession).toHaveBeenCalledWith('acp-new');
+    expect(harness.agentClient.adoptPreparedSession).not.toHaveBeenCalled();
+    expect(harness.repo.upsertDocMeta).not.toHaveBeenCalled();
+    expect(harness.events).toEqual(['barrier-acquire', 'prepare', 'barrier-release', 'dispatch']);
+  });
+
+  it('rolls back when an engine turn starts while the replacement metadata is persisted', async () => {
+    const harness = createHarness({ engineTurnActiveDuringPersist: true });
+
+    const result = await harness.service.editAndResend(spec);
+
+    expect(result).toMatchObject({ success: false, error: { code: 'ACTIVE_AUTOMATION' } });
+    expect(harness.agentClient.prepareReplacementSession).toHaveBeenCalledWith('provider-turn-1');
+    expect(harness.agentClient.closeDetachedSession).toHaveBeenCalledWith('acp-new');
+    expect(harness.agentClient.adoptPreparedSession).not.toHaveBeenCalled();
+    expect(harness.sessionData.history.readAll().map((entry) => entry.id)).toEqual([
+      'user-1',
+      'assistant-1',
+      'user-2',
+      'assistant-2',
+    ]);
+    expect(harness.repo.upsertDocMeta).toHaveBeenCalledTimes(2);
+    expect(harness.repo.upsertDocMeta).toHaveBeenNthCalledWith(
+      2,
+      expect.any(String),
+      expect.objectContaining({
+        acpSessionId: 'acp-old',
+        latestUserMsgId: undefined,
+        lastHandledUserMsgId: undefined,
+      })
+    );
+  });
+
+  it('does not treat a client turn id as safe while an engine turn also occupies the session', async () => {
+    const harness = createHarness({ active: true, engineTurnActive: true });
+
+    const result = await harness.service.editAndResend(spec);
+
+    expect(result).toMatchObject({ success: false, error: { code: 'ACTIVE_AUTOMATION' } });
+    expect(harness.agentClient.prepareReplacementSession).not.toHaveBeenCalled();
+    expect(harness.executionService.cancelSession).not.toHaveBeenCalled();
+    expect(harness.executionService.waitForTurnRelease).not.toHaveBeenCalled();
+    expect(harness.agentClient.adoptPreparedSession).not.toHaveBeenCalled();
+    expect(harness.repo.upsertDocMeta).not.toHaveBeenCalled();
+  });
+
   it('forks before cancelling, then atomically replaces the history tail', async () => {
     const harness = createHarness({ active: true });
 
@@ -297,6 +395,30 @@ describe('SessionEditAndResendService', () => {
         lastHandledUserMsgId: 'user-1',
       })
     );
+  });
+
+  it('skips an engine-opened turn when resolving the fork boundary', async () => {
+    const history = [
+      historyFixture()[0]!,
+      historyFixture()[1]!,
+      {
+        id: 'assistant-autonomous',
+        timestamp: '2026-08-03T00:00:01.500Z',
+        role: 'assistant' as const,
+        items: [{ type: 'text' as const, text: 'cron status update' }],
+        fileDiff: [],
+        finished: true,
+        acpTurnId: 'auto:41',
+        acpTurnOrigin: 'cron_job',
+      },
+      historyFixture()[2]!,
+      historyFixture()[3]!,
+    ];
+    const harness = createHarness({ active: true, history });
+
+    const result = await harness.service.editAndResend(spec);
+    expect(result, JSON.stringify(result)).toMatchObject({ success: true });
+    expect(harness.agentClient.prepareReplacementSession).toHaveBeenCalledWith('provider-turn-1');
   });
 
   it('refuses the commit when the editable tail moved after the eligibility check', async () => {
@@ -454,6 +576,7 @@ describe('SessionEditAndResendService', () => {
         getPendingSession: vi.fn(() => undefined),
         getSession: vi.fn(() => undefined),
       },
+      isEngineTurnActive: vi.fn(() => false),
     } as never);
     await execution['transitionDispatchOwnership']({
       sessionId,

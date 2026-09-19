@@ -313,7 +313,9 @@ export type PendingInputCancellationPolicy = 'promote' | 'preserve';
 export type SessionExecutionSnapshot = {
   /** Assistant turn currently owned by this service, if any. */
   activeTurnId?: string;
-  /** True only while a turn runtime is registered and still owns cleanup. */
+  /** True while an engine-opened turn occupies this session's ACP prompt slot. */
+  engineTurnActive: boolean;
+  /** True while either a client-owned or engine-opened turn occupies the ACP prompt slot. */
   hasActiveTurn: boolean;
   /**
    * True when the active turn is waiting for session creation/restoration.
@@ -542,6 +544,15 @@ export type SessionExecutionServiceDeps = {
   clearConversationTurn: (sessionId: SessionId, turnId: string) => void;
   getActiveTurnId: (sessionId: SessionId) => string | undefined;
   clearActiveTurnId: (sessionId: SessionId, turnId: string) => void;
+  /** Whether an engine-opened turn (a cron fire, a task wake) is producing updates. */
+  isEngineTurnActive: (sessionId: SessionId) => boolean;
+  /** Resolve the current engine owner only when a Stop names its own assistant entry. */
+  getEngineTurnOwnerForCancel: (
+    sessionId: SessionId,
+    assistantEntryId: string
+  ) => string | undefined;
+  /** Drop the engine-turn activity marker (process exit, user stop, or its end marker). */
+  clearEngineTurnActivity: (sessionId: SessionId, acpTurnId?: string) => void;
   buildAcpPromptBlocks: (args: {
     workspaceId: WorkspaceId;
     sessionId: SessionId;
@@ -756,6 +767,7 @@ export class SessionExecutionService {
   private readonly rewriteBarrierSessions = new Set<SessionId>();
   private readonly rewriteConflictLeaseSessions = new Set<SessionId>();
   private readonly turnReleaseWaiters = new Map<SessionId, Map<string, Set<() => void>>>();
+  private readonly engineTurnReleaseWaiters = new Map<SessionId, Set<() => void>>();
   /** At most one goal action waits per session; a newer action replaces it. */
   private readonly pendingGoalTurnBySession = new Map<SessionId, SessionGoalTurnRequest>();
   private readonly goalTurnWaiterSessions = new Set<SessionId>();
@@ -1123,11 +1135,17 @@ export class SessionExecutionService {
     const runtime = this.turnRuntimeBySession.get(sessionId);
     const currentTurnId = this.currentTurnBySession.get(sessionId);
     const activeTurnId = runtime?.turnId ?? currentTurnId;
-    const hasActiveTurn = typeof activeTurnId === 'string' && activeTurnId.length > 0;
+    // An engine-opened turn registers no client-turn ownership, but it is live
+    // work on the same agent: dispatch admission (and every other
+    // hasActiveTurn consumer) must hold queued work until it ends.
+    const engineTurnActive = this.deps.isEngineTurnActive(sessionId);
+    const hasActiveTurn =
+      (typeof activeTurnId === 'string' && activeTurnId.length > 0) || engineTurnActive;
     const pendingSession = this.deps.sessionManager.getPendingSession(sessionId);
 
     return {
       ...(activeTurnId ? { activeTurnId } : {}),
+      engineTurnActive,
       hasActiveTurn,
       hasBlockingPendingCreate: Boolean(runtime?.pendingSession || (runtime && pendingSession)),
       hasReusableSession: Boolean(this.deps.sessionManager.getSession(sessionId)),
@@ -1193,6 +1211,33 @@ export class SessionExecutionService {
         this.resolveTurnReleaseWaiters(sessionId, turnId);
       }
     });
+  }
+
+  /**
+   * Wait until the current engine-opened turn releases the session. The second
+   * check closes the check/register race with an end marker arriving between
+   * the initial check and waiter registration.
+   */
+  async waitForEngineTurnRelease(sessionId: SessionId): Promise<void> {
+    if (!this.deps.isEngineTurnActive(sessionId)) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      let waiters = this.engineTurnReleaseWaiters.get(sessionId);
+      if (!waiters) {
+        waiters = new Set();
+        this.engineTurnReleaseWaiters.set(sessionId, waiters);
+      }
+      waiters.add(resolve);
+      if (!this.deps.isEngineTurnActive(sessionId)) {
+        this.resolveEngineTurnReleaseWaiters(sessionId);
+      }
+    });
+  }
+
+  /** Called by MessageHandler after the activity marker is actually cleared. */
+  notifyEngineTurnReleased(sessionId: SessionId): void {
+    this.resolveEngineTurnReleaseWaiters(sessionId);
   }
 
   getActiveTurnIds(): Array<{ sessionId: SessionId; turnId: string }> {
@@ -1295,8 +1340,12 @@ export class SessionExecutionService {
         const pending = this.pendingGoalTurnBySession.get(sessionId);
         if (!pending) return;
         const snapshot = this.getExecutionSnapshot(sessionId);
-        if (snapshot.hasActiveTurn && snapshot.activeTurnId) {
-          await this.waitForTurnRelease(sessionId, snapshot.activeTurnId);
+        if (snapshot.hasActiveTurn) {
+          if (snapshot.activeTurnId) {
+            await this.waitForTurnRelease(sessionId, snapshot.activeTurnId);
+          } else {
+            await this.waitForEngineTurnRelease(sessionId);
+          }
           continue;
         }
         try {
@@ -1375,11 +1424,20 @@ export class SessionExecutionService {
         dispatchSource: 'goal',
         goalControl: control,
         onTurnClaimed: async () => {
-          claimed = this.pendingGoalTurnBySession.get(sessionId) === request;
+          claimed =
+            this.pendingGoalTurnBySession.get(sessionId) === request &&
+            !this.deps.isEngineTurnActive(sessionId);
           return claimed;
         },
         onTurnStarted: async () => {
-          if (this.pendingGoalTurnBySession.get(sessionId) !== request) {
+          // Metadata/session preparation awaits before this fence. An
+          // engine-opened turn may have started in that gap, so recheck at the
+          // last point before prompt() can cross into the provider.
+          if (
+            this.pendingGoalTurnBySession.get(sessionId) !== request ||
+            this.deps.isEngineTurnActive(sessionId)
+          ) {
+            claimed = false;
             await this.handleTurnError(sessionId, sessionDoc);
             return false;
           }
@@ -2137,6 +2195,17 @@ export class SessionExecutionService {
     if (byTurn?.size === 0) {
       this.turnReleaseWaiters.delete(sessionId);
     }
+    for (const resolve of waiters) {
+      resolve();
+    }
+  }
+
+  private resolveEngineTurnReleaseWaiters(sessionId: SessionId): void {
+    const waiters = this.engineTurnReleaseWaiters.get(sessionId);
+    if (!waiters) {
+      return;
+    }
+    this.engineTurnReleaseWaiters.delete(sessionId);
     for (const resolve of waiters) {
       resolve();
     }
@@ -5522,6 +5591,65 @@ export class SessionExecutionService {
       // cleaning up: a turn that starts while getHistory() is awaited must keep
       // its presence and dispatch metadata.
       if (currentTurnId == null) {
+        // A stop request matching no client turn can target an engine-opened
+        // turn (a cron fire, a task wake) — but only when it names the current
+        // autonomous assistant entry. An old engine entry must be a no-op.
+        const engineTurnOwner = this.deps.getEngineTurnOwnerForCancel(sessionId, turnId);
+        if (engineTurnOwner) {
+          // The ACP cancel is session-wide and dispatch is not serialized
+          // behind a stop request: a client turn starting between the
+          // ownership snapshot and the awaited cancel would take the bullet
+          // meant for the engine turn, and this branch would then clear the
+          // new turn's presence. Hold the rewrite barrier across the whole
+          // check-cancel-clear sequence so no client turn can start inside it.
+          const releaseBarrier = this.tryAcquireSessionRewriteBarrier(sessionId);
+          if (!releaseBarrier) {
+            this.deps.logger.debug(
+              `[${sessionId}] Skipping engine-turn cancel: a rewrite is already in progress`
+            );
+          } else {
+            try {
+              const liveOwner = this.deps.getEngineTurnOwnerForCancel(sessionId, turnId);
+              const liveClientTurnId =
+                this.deps.getActiveTurnId(sessionId) ??
+                this.currentTurnBySession.get(sessionId) ??
+                this.turnRuntimeBySession.get(sessionId)?.turnId;
+              if (!liveOwner || liveClientTurnId) {
+                return { success: true };
+              }
+              const session = this.deps.sessionManager.getSession(sessionId);
+              if (!session?.agentClient?.isCreated() || !session.acpSessionId) {
+                // Cannot deliver a cancel to the engine turn. Keep the
+                // activity marker so status and the GC guard still see the
+                // work (process exit releases it) instead of reporting a
+                // phantom stop.
+                return { success: false, error: 'The agent is no longer connected.' };
+              }
+              try {
+                await session.agentClient.cancel(session.acpSessionId);
+                this.deps.logger.debug(
+                  `[${sessionId}] Cancel signal sent to agent for engine-opened turn`
+                );
+              } catch (error) {
+                // The turn may still be running: keep the marker and report
+                // the failure rather than releasing status/GC and claiming
+                // a stop.
+                return { success: false, error: formatErrorMessage(error) };
+              }
+              // Engine updates can replace the marker while ACP cancel is
+              // awaited. Never clear a replacement owner's activity.
+              if (this.deps.getEngineTurnOwnerForCancel(sessionId, turnId) === liveOwner) {
+                this.deps.clearEngineTurnActivity(sessionId, liveOwner);
+                this.deps.clearSessionActivePresence(sessionId);
+              }
+              await this.clearCancelRequest(sessionId);
+              this.clearTurnCancellation(sessionId, turnId);
+              return { success: true };
+            } finally {
+              releaseBarrier();
+            }
+          }
+        }
         const releaseConflict = this.tryAcquireSessionRewriteConflictLease(sessionId);
         if (releaseConflict) {
           try {

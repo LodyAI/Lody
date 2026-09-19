@@ -201,6 +201,58 @@ describe('MessageHandler ACP batching', () => {
     }
   });
 
+  it('records a stamped engine-turn start without creating a blank assistant entry', async () => {
+    const sessionId = 'engine-start-marker' as SessionId;
+    const { repo, docs, handler } = await createHandlerHarness([sessionId]);
+    const doc = docs.get(sessionId);
+    if (!doc) throw new Error('Missing synthetic doc');
+    const host = handler as unknown as {
+      enqueueACPUpdate(id: SessionId, update: AcpSessionNotification): void;
+      flushACPUpdatesNow(id: SessionId): Promise<void>;
+      store: {
+        get(id: SessionId): { engineTurn: { acpTurnId: string } | undefined };
+      };
+    };
+
+    try {
+      host.enqueueACPUpdate(sessionId, {
+        sessionId,
+        update: {
+          sessionUpdate: 'session_info_update',
+          _meta: { lody: { turnId: 'auto:41', turnOrigin: 'cron_job' } },
+        },
+      });
+
+      expect(host.store.get(sessionId).engineTurn).toEqual({
+        acpTurnId: 'auto:41',
+        lastUpdateMs: expect.any(Number),
+      });
+
+      await host.flushACPUpdatesNow(sessionId);
+      expect(await doc.sessionData.history.readAll()).toEqual([]);
+
+      host.enqueueACPUpdate(sessionId, {
+        sessionId,
+        update: {
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'cron ran' },
+          _meta: { lody: { turnId: 'auto:41', turnOrigin: 'cron_job' } },
+        },
+      });
+      await host.flushACPUpdatesNow(sessionId);
+
+      expect(await doc.sessionData.history.readAll()).toMatchObject([
+        {
+          id: 'assistant:autonomous-auto:41',
+          role: 'assistant',
+          items: [{ type: 'text', text: 'cron ran' }],
+        },
+      ]);
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
   beforeEach(() => {
     vi.useFakeTimers();
     process.env.LODY_SERVER_URL = 'https://server.example.test';

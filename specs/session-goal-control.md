@@ -66,11 +66,14 @@ Codex-specific product behavior, only Codex-first availability.
 - `pause` and `clear` are delivered without waiting for a turn. If the session
   has no live agent, they fall back to the turn path, which starts the agent and
   uses its advertised prompt transport even if it also advertises requests.
-- `resume` and `set` never run concurrently with another turn. When one is
-  running, the action waits for it and then executes; it is not dropped and does
-  not require the user to stop the session first. Only the newest queued action
-  survives, so a stale pause cannot undo a later resume. A newer out-of-band
-  Pause/Clear or a valid Stop also discards any goal action not yet submitted.
+- `resume` and `set` never run concurrently with another turn, including an
+  engine-opened turn reported by the provider. When one is running, the action
+  waits for it and then executes; it is not dropped and does not require the
+  user to stop the session first. The Kimi provider publishes engine ownership
+  at `turn.started`, before content, and publishes its release at turn end or
+  process termination. Only the newest queued action survives, so a stale pause
+  cannot undo a later resume. A newer out-of-band Pause/Clear or a valid Stop
+  also discards any goal action not yet submitted.
 - Work-starting button requests acknowledge acceptance as `queued`, without
   waiting for the persistent prompt to finish or claiming that execution already
   started. Startup failures appear through the session's normal failure history;

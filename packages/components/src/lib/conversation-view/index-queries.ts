@@ -1,4 +1,8 @@
-import { resolveActiveAssistantTurnId, type SessionHistory } from '@lody/shared';
+import {
+  isAutonomousTurnId,
+  resolveActiveAssistantTurnId,
+  type SessionHistory,
+} from '@lody/shared';
 import { isEmptyAssistantIndexRow } from './index-row';
 import {
   conversationTailStart,
@@ -47,9 +51,14 @@ export function resolveActiveAssistantTurnIdFromIndex(
  */
 export function resolveLastAssistantTurnIds(
   view: Pick<ConversationView, 'turnCount' | 'index' | 'indexOf'>
-): { lastAssistantMessageId: string | null; lastCompletedAssistantMessageId: string | null } {
+): {
+  lastAssistantMessageId: string | null;
+  lastCompletedAssistantMessageId: string | null;
+  lastForkableAssistantMessageId: string | null;
+} {
   let lastAssistantMessageId: string | null = null;
   let lastCompletedAssistantMessageId: string | null = null;
+  let lastForkableAssistantMessageId: string | null = null;
   for (let i = view.turnCount - 1; i >= 0; i -= 1) {
     const row = view.index(i);
     if (!row || row.role !== 'assistant' || isEmptyAssistantIndexRow(row)) continue;
@@ -57,11 +66,22 @@ export function resolveLastAssistantTurnIds(
     if (view.indexOf(row.id) !== i) continue;
     if (lastAssistantMessageId === null) lastAssistantMessageId = row.id;
     if (row.finished === true) {
-      lastCompletedAssistantMessageId = row.id;
-      break;
+      if (lastCompletedAssistantMessageId === null) lastCompletedAssistantMessageId = row.id;
+      if (lastForkableAssistantMessageId === null && !isAutonomousTurnId(row.acpTurnId ?? '')) {
+        // Engine-opened turns are rendered history, not fork positions. Keep
+        // walking so session-level Fork targets the latest real provider turn.
+        lastForkableAssistantMessageId = row.id;
+      }
+      if (lastCompletedAssistantMessageId !== null && lastForkableAssistantMessageId !== null) {
+        break;
+      }
     }
   }
-  return { lastAssistantMessageId, lastCompletedAssistantMessageId };
+  return {
+    lastAssistantMessageId,
+    lastCompletedAssistantMessageId,
+    lastForkableAssistantMessageId,
+  };
 }
 
 export function countUserTurns(view: Pick<ConversationView, 'turnCount' | 'index'>): number {

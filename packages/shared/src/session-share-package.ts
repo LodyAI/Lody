@@ -268,7 +268,7 @@ function projectShareHistory(
   return history.map((entry) => {
     const result = { ...entry };
     if (omitProposals) {
-      for (const key of ['read', 'userId', 'acpTurnId', 'userTurnId', 'fileDiff'])
+      for (const key of ['read', 'userId', 'acpTurnId', 'acpTurnOrigin', 'userTurnId', 'fileDiff'])
         delete result[key];
       // Sending/resuming/Role configuration is not conversation content. Keep
       // input blocks for older histories whose attachments live only here.

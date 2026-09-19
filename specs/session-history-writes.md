@@ -47,6 +47,12 @@ That tolerance must not authorize creating new malformed items locally.
   and edits inside that range, except a newly inserted pending user row becoming seen/read
   with every other field unchanged. It is not crash recovery or a distributed transaction.
   External provider imports remain new inputs, not privileged stored-history copies.
+- Edit-and-resend must fail closed when an engine-opened turn occupies the ACP prompt slot:
+  it must not cancel an engine owner, adopt a prepared replacement, or commit a replacement
+  history/meta state. Recheck before preparation, before commit, and after persistence; if the
+  marker appears after the local history/meta write, close the prepared session and run the
+  existing best-effort local history/meta compensation. This detects a provider-admission race;
+  the rewrite barrier alone is not a cross-boundary admission lock.
 - Acceptance here means a local CRDT write. Existing repo persistence and transport
   still own durability, permissions, and remote synchronization.
 - Provider updates classified as transient before the history boundary must never
@@ -173,5 +179,6 @@ sealed turn from looking like a hash conflict once such skeletons exist.
 - [Interrupt pending input exactly once](../.agents/notes/implemented/bug-fix/2026-09-14-interrupt-pending-input-exactly-once.md)
 - [Steer Stop and recovery ownership](../.agents/notes/implemented/bug-fix/2026-09-16-steer-stop-recovery-ownership.md)
 - [Versioned turn hashes and primitive metadata insertion](../.agents/notes/implemented/architecture/2026-09-14-versioned-history-hashes-and-primitive-metadata.md)
+- [Edit-and-resend admission guard](../.agents/notes/implemented/bug-fix/2026-09-15-edit-resend-engine-admission.md)
 
 Draft for human review; implementation and passing tests do not grant Spec approval.

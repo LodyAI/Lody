@@ -148,6 +148,62 @@ describe('SessionForkDestinationPopover', () => {
     await act(async () => shared?.click());
     expect(onSelect).toHaveBeenCalledWith('shared');
   });
+  it('keeps a legacy assistant forkable when an autonomous turn follows it', async () => {
+    await initI18n('en');
+    const sessionId = 'legacy-before-auto' as SessionId;
+    const history = [
+      {
+        id: 'legacy',
+        role: 'assistant',
+        timestamp: '2026-09-10T00:00:00Z',
+        items: [{ type: 'text', text: 'Earlier reply' }],
+        fileDiff: [],
+        finished: true,
+      },
+      {
+        id: 'autonomous',
+        role: 'assistant',
+        timestamp: '2026-09-10T00:01:00Z',
+        items: [{ type: 'text', text: 'Scheduled reply' }],
+        fileDiff: [],
+        acpTurnId: 'auto:41',
+        finished: true,
+      },
+    ] as never;
+    const { items, lastForkableAssistantMessageId } = buildFromView(
+      createConversationViewFromHistory({
+        sessionId,
+        getHistory: () => history,
+        subscribe: () => () => {},
+      }),
+      sessionId
+    );
+    const onFork = vi.fn();
+    await act(async () => {
+      root.render(
+        createElement(SessionChatStreamView, {
+          items,
+          sessionId,
+          renderMessageRow: () => null,
+          onForkLastAssistant: onFork,
+          lastForkableAssistantMessageId,
+        })
+      );
+    });
+
+    const forkButtons = container.querySelectorAll<HTMLButtonElement>(
+      '[aria-label="Fork session"]'
+    );
+    expect(forkButtons).toHaveLength(1);
+    await act(async () => forkButtons[0]?.click());
+    const shared = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) =>
+      item.textContent?.includes('Current workspace')
+    );
+    await act(async () => shared?.click());
+
+    expect(onFork).toHaveBeenCalledWith('legacy', 'shared');
+  });
+
   it.each([false, true])('exposes context copying for a turn (finished=%s)', async (finished) => {
     await initI18n('en');
     const sessionId = 'copy-stream' as SessionId;

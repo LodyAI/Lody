@@ -169,6 +169,7 @@ import {
   type LodyOperationItemResult,
   type StoredLodyOperation,
   hasPendingUserTurnActivation,
+  readLodyTurnEnded,
 } from '@lody/shared';
 import { getHostMachineProtocolCapabilities } from '../agent/managed-agent-runtime';
 import { ISession, SessionManager } from '../session/session-manager';
@@ -272,6 +273,7 @@ import { createWorktreeScriptHistoryRecorder } from '@/session/worktree/worktree
 import { runWorktreeCleanup } from '@/session/worktree/worktree-setup-runner';
 import {
   SessionTransientStore,
+  autonomousACPUpdateTargetFrom,
   type ACPUpdateTarget,
   type BufferedACPUpdate,
 } from '@/lib/session-transient-store';
@@ -2978,6 +2980,14 @@ export class MessageHandler {
         this.clearConversationTurnIfMatches(sessionId, turnId),
       getActiveTurnId: (sessionId) => this.store.getActiveTurnId(sessionId),
       clearActiveTurnId: (sessionId, turnId) => this.clearActiveTurnIdIfMatches(sessionId, turnId),
+      isEngineTurnActive: (sessionId) => this.store.isEngineTurnActive(sessionId),
+      getEngineTurnOwnerForCancel: (sessionId, assistantEntryId) =>
+        this.store.getEngineTurnOwnerForCancel(sessionId, assistantEntryId),
+      clearEngineTurnActivity: (sessionId, acpTurnId) => {
+        if (this.store.clearEngineTurnActivity(sessionId, acpTurnId)) {
+          this.executionService.notifyEngineTurnReleased(sessionId);
+        }
+      },
       hasPromptOutputForTurn: (sessionId, turnId) => this.hasPromptOutputForTurn(sessionId, turnId),
       observePromptOutputForTurn: (sessionId, turnId) =>
         this.observePromptOutputForTurn(sessionId, turnId),
@@ -3272,6 +3282,7 @@ export class MessageHandler {
             presence: this.sessionActivePresence.getStatus(sessionId),
             execution: this.executionService.getExecutionSnapshot(sessionId),
             hasPendingDispatch: this.sessionDispatchWatcher.hasPendingDispatch(sessionId),
+            engineTurnActive: this.store.isEngineTurnActive(sessionId),
           });
           return {
             type: 'session/live-status_response' as const,
@@ -3427,6 +3438,7 @@ export class MessageHandler {
           presence: this.sessionActivePresence.getStatus(sessionId),
           execution: this.executionService.getExecutionSnapshot(sessionId),
           hasPendingDispatch: this.sessionDispatchWatcher.hasPendingDispatch(sessionId),
+          engineTurnActive: this.store.isEngineTurnActive(sessionId),
         });
         return live.state !== 'unknown';
       },
@@ -3539,8 +3551,10 @@ export class MessageHandler {
         if (meta.machineId !== this.machineId) continue;
         // Skip sessions that are already idle
         if (meta.status?.type === 'idle') continue;
-        // Skip sessions that are still actively running locally.
+        // Skip sessions that are still actively running locally — a client
+        // turn's presence, or an engine-opened turn's activity marker.
         if (this.hasSessionActivePresence(sessionId)) continue;
+        if (this.store.isEngineTurnActive(sessionId)) continue;
 
         await sessionDoc.setStatus(SessionStatusFactory.idle());
         resetCount += 1;
@@ -4047,6 +4061,7 @@ export class MessageHandler {
     // Some best-effort deletion tails may consult transient session state for
     // diagnostics. Re-assert the deletion barrier before returning so those
     // reads cannot leave an empty state record behind.
+    this.clearEngineTurnActivity(sessionId);
     this.store.deleteSession(sessionId);
     void this.worktreeGc.schedule();
   }
@@ -4297,10 +4312,31 @@ export class MessageHandler {
       );
       return;
     }
-    if (this.store.recordSuppressedAcpReplay(sessionId)) {
+    // Updates from a turn the engine opened itself always take an autonomous
+    // target — never the active/finalized client turn's — so their content
+    // (including rich content, which bypasses turn-aware regrouping at write
+    // time) lands in that turn's own entry from the start. Resolve this FIRST:
+    // a live engine turn firing during the loadSession replay-suppression
+    // window carries its own identity (replay carries no autonomous marker)
+    // and must never be swallowed as replay.
+    const autonomousTarget = this.autonomousACPUpdateTarget(sessionId, update);
+    // Kimi publishes this metadata-only marker at `turn.started` so admission
+    // can see an engine owner before its first output. It is not history: the
+    // shared applier maps session_info_update to no content, but routing it to
+    // an autonomous target would still materialize a blank assistant entry.
+    if (
+      autonomousTarget !== undefined &&
+      update.update.sessionUpdate === 'session_info_update' &&
+      !readLodyTurnEnded(update.update) &&
+      !('title' in update.update) &&
+      !('updatedAt' in update.update)
+    ) {
       return;
     }
-    const target = this.store.getCurrentACPUpdateTarget(sessionId);
+    if (autonomousTarget === undefined && this.store.recordSuppressedAcpReplay(sessionId)) {
+      return;
+    }
+    const target = autonomousTarget ?? this.store.getCurrentACPUpdateTarget(sessionId);
     if (!target) {
       this.captureACPUpdateInvariant('out_of_turn_acp_update_without_target', sessionId, update);
       this.logger.debug(
@@ -4321,6 +4357,40 @@ export class MessageHandler {
     }
     this.store.get(sessionId).acpUpdateBuffer.push({ notification: update, target });
     this.scheduleFlushACPUpdates(sessionId);
+  }
+
+  /**
+   * Synthesize a routing target for an update from a turn the agent opened
+   * itself (see `autonomousACPUpdateTargetFrom`). Also maintains the
+   * engine-turn activity marker — the one place every engine-turn update
+   * passes — so busy status and the idle-GC guard can see the turn. Recorded
+   * as an invariant so autonomous-turn routing stays observable.
+   */
+  private autonomousACPUpdateTarget(
+    sessionId: SessionId,
+    update: AcpSessionNotification
+  ): ACPUpdateTarget | undefined {
+    const target = autonomousACPUpdateTargetFrom(update);
+    if (target) {
+      if (readLodyTurnEnded(update.update)) {
+        if (this.store.clearEngineTurnActivity(sessionId, target.turnId)) {
+          this.executionService?.notifyEngineTurnReleased(sessionId);
+        }
+      } else {
+        this.store.noteEngineTurnActivity(sessionId, target.turnId);
+      }
+      this.captureACPUpdateInvariant('autonomous_turn_acp_update_target', sessionId, update, {
+        acpTurnId: target.turnId,
+      });
+    }
+    return target;
+  }
+
+  /** Clear the engine-turn activity marker (ACP process termination). */
+  clearEngineTurnActivity(sessionId: SessionId): void {
+    if (this.store.clearEngineTurnActivity(sessionId)) {
+      this.executionService?.notifyEngineTurnReleased(sessionId);
+    }
   }
 
   private clearScheduledACPFlush(sessionId: SessionId): void {
@@ -4356,6 +4426,7 @@ export class MessageHandler {
       state.acpUpdateBuffer = [];
     }
     await this.quiesceCodeCollabTurnPersistenceForDeletion(sessionId);
+    this.clearEngineTurnActivity(sessionId);
     this.store.deleteSession(sessionId);
   }
 
@@ -4545,10 +4616,13 @@ export class MessageHandler {
   }
 
   private captureACPUpdateInvariant(
-    eventName: 'late_acp_update_routed_to_finalized_turn' | 'out_of_turn_acp_update_without_target',
+    eventName:
+      | 'late_acp_update_routed_to_finalized_turn'
+      | 'out_of_turn_acp_update_without_target'
+      | 'autonomous_turn_acp_update_target',
     sessionId: SessionId,
     notification: AcpSessionNotification,
-    extra?: { assistantEntryId?: string; turnEpoch?: number }
+    extra?: { assistantEntryId?: string; turnEpoch?: number; acpTurnId?: string }
   ): void {
     captureCli(
       eventName,
@@ -4558,6 +4632,7 @@ export class MessageHandler {
         session_update: notification.update.sessionUpdate,
         ...(extra?.assistantEntryId ? { assistant_entry_id: extra.assistantEntryId } : {}),
         ...(typeof extra?.turnEpoch === 'number' ? { turn_epoch: extra.turnEpoch } : {}),
+        ...(extra?.acpTurnId ? { acp_turn_id: extra.acpTurnId } : {}),
       },
       { tier: 'C' }
     );
@@ -9532,6 +9607,9 @@ export class MessageHandler {
       const turnPhase = this.store.getTurnPhase(sessionId);
       if (turnPhase === 'prompting') status = 'running';
       if (turnPhase === 'finalizing') status = 'finalizing';
+      // Engine-opened turns write no presence and own no client-turn phase,
+      // so only their activity marker can keep the monitor from reading idle.
+      if (this.store.isEngineTurnActive(sessionId)) status = 'running';
     }
     return {
       status,
@@ -9547,12 +9625,17 @@ export class MessageHandler {
   }
 
   /**
-   * Check if a session has an active turn (prompting or finalizing).
+   * Check if a session has an active turn (prompting or finalizing) or an
+   * engine-opened turn in flight.
    */
   hasActiveTurn(sessionId: SessionId): boolean {
     if (!this.store.has(sessionId)) return false;
     const state = this.store.get(sessionId);
-    return state.turn.phase !== 'idle' || this.hasSessionActivePresence(sessionId);
+    return (
+      state.turn.phase !== 'idle' ||
+      state.engineTurn !== undefined ||
+      this.hasSessionActivePresence(sessionId)
+    );
   }
 
   /**
@@ -9601,6 +9684,7 @@ export class MessageHandler {
 
     // 4. Drop transient tracking last — only after all cleanup succeeded,
     //    so getTrackedSessionIds() can still see it for retry if steps above throw.
+    this.clearEngineTurnActivity(sessionId);
     this.store.deleteSession(sessionId);
 
     this.logger.debug(`[GC] Session ${sessionId} cleaned`);

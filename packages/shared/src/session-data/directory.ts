@@ -28,6 +28,7 @@ export function pickDirectoryScalars(source: unknown): SessionDirectoryScalars |
   if (source.sendStatus === 'timeout') scalars.sendStatus = 'timeout';
   if (typeof source.userTurnId === 'string') scalars.userTurnId = source.userTurnId;
   if (typeof source.acpTurnId === 'string') scalars.acpTurnId = source.acpTurnId;
+  if (typeof source.acpTurnOrigin === 'string') scalars.acpTurnOrigin = source.acpTurnOrigin;
   if (typeof source.startedAt === 'number') scalars.startedAt = source.startedAt;
   if (typeof source.permissionWaitMs === 'number') scalars.permissionWaitMs = source.permissionWaitMs;
   return scalars as SessionDirectoryScalars;

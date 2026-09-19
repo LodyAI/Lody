@@ -374,7 +374,11 @@ import {
   getPerformanceNowMs,
 } from '@/lib/posthog-analytics';
 import type { AnalyticsOutcome } from '@lody/shared';
-import { collectPendingScheduledTasksFromHistory, type PendingScheduledTask } from '@lody/shared';
+import {
+  collectPendingScheduledTasksFromHistory,
+  isAutonomousTurnId,
+  type PendingScheduledTask,
+} from '@lody/shared';
 import { buildAuthorFixPrompt } from '@lody/shared';
 import {
   getPullRequestNumber,
@@ -1872,7 +1876,7 @@ export type SessionChatInterfaceHandle = {
    *  the share or an explicit Cancel ends it. */
   cancelShareImageSelection: () => void;
   openSearch: () => void;
-  getLastAssistantTurnId: () => string | null;
+  getLastForkableAssistantTurnId: () => string | null;
   insertSessionMention: (
     sessionId: string,
     options?: { at?: number; replaceEnd?: number }
@@ -2676,9 +2680,28 @@ export const SessionChatInterface = memo(
       lastCompletedAssistantTarget?.sessionId === session.id
         ? lastCompletedAssistantTarget.messageId
         : null;
+    const [lastForkableAssistantTarget, setLastForkableAssistantTarget] = useState<{
+      sessionId: SessionId;
+      messageId: string | null;
+    } | null>(null);
+    const lastForkableAssistantMessageId =
+      lastForkableAssistantTarget?.sessionId === session.id
+        ? lastForkableAssistantTarget.messageId
+        : null;
     const handleLastCompletedAssistantMessageIdChange = useCallback(
       (messageId: string | null) => {
         setLastCompletedAssistantTarget((current) => {
+          if (current?.sessionId === session.id && current.messageId === messageId) {
+            return current;
+          }
+          return { sessionId: session.id, messageId };
+        });
+      },
+      [session.id]
+    );
+    const handleLastForkableAssistantMessageIdChange = useCallback(
+      (messageId: string | null) => {
+        setLastForkableAssistantTarget((current) => {
           if (current?.sessionId === session.id && current.messageId === messageId) {
             return current;
           }
@@ -2693,14 +2716,14 @@ export const SessionChatInterface = memo(
           void onForkSessionExternal(destination);
           return;
         }
-        if (lastCompletedAssistantMessageId && onForkLastAssistant) {
-          onForkLastAssistant(lastCompletedAssistantMessageId, destination);
+        if (lastForkableAssistantMessageId && onForkLastAssistant) {
+          onForkLastAssistant(lastForkableAssistantMessageId, destination);
         }
       },
-      [lastCompletedAssistantMessageId, onForkLastAssistant, onForkSessionExternal]
+      [lastForkableAssistantMessageId, onForkLastAssistant, onForkSessionExternal]
     );
     const canForkFromMenu = Boolean(
-      onForkSessionExternal || (lastCompletedAssistantMessageId && onForkLastAssistant)
+      onForkSessionExternal || (lastForkableAssistantMessageId && onForkLastAssistant)
     );
     const isContextCompacting = useMemo(
       () => isSessionContextCompacting(sessionHistory),
@@ -2989,6 +3012,9 @@ export const SessionChatInterface = memo(
         if (!entry) continue;
         if (entry.role === 'user') return null;
         if (entry.role !== 'assistant') continue;
+        // Engine-opened turns (`auto:` ids) are history entries, not fork
+        // positions; keep walking to the real provider boundary.
+        if (entry.acpTurnId && isAutonomousTurnId(entry.acpTurnId)) continue;
         if (entry.finished !== true || !entry.acpTurnId || !session.agentConfigId) return null;
         const capability =
           sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)];
@@ -4918,7 +4944,7 @@ export const SessionChatInterface = memo(
         startShareImageSelection: shareSelection.start,
         cancelShareImageSelection: shareSelection.cancel,
         openSearch,
-        getLastAssistantTurnId: () => lastCompletedAssistantMessageId,
+        getLastForkableAssistantTurnId: () => lastForkableAssistantMessageId,
         insertSessionMention: (sessionId, options) => {
           return inputAreaRef.current?.insertSessionMention(sessionId, options) ?? false;
         },
@@ -4927,7 +4953,7 @@ export const SessionChatInterface = memo(
         handleCopyConversationHistory,
         shareSelection.start,
         shareSelection.cancel,
-        lastCompletedAssistantMessageId,
+        lastForkableAssistantMessageId,
         openSearch,
         session.cliType,
         sessionAgentConfig?.name,
@@ -6048,6 +6074,9 @@ export const SessionChatInterface = memo(
                               onNavigateSession={onNavigateSession}
                               onLastCompletedAssistantMessageIdChange={
                                 handleLastCompletedAssistantMessageIdChange
+                              }
+                              onLastForkableAssistantMessageIdChange={
+                                handleLastForkableAssistantMessageIdChange
                               }
                               conversationFontSize={conversationFontSize}
                               skipNextViewportResizeAutoScrollRef={
