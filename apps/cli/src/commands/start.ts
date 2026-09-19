@@ -67,6 +67,7 @@ import {
 import { consumeElectronBootstrapCredentials } from '../electron-bootstrap-env';
 import { createLocalCloudPort, type CloudPort, type PlatformKind } from '@lody/platform';
 import { createCloudCliPort } from '@/lib/cloud-cli-port';
+import { CloudSyncReconnectGate } from '@/lib/cloud-sync-reconnect';
 import { configureManagedAgentRuntimeManager } from '@/agent/managed-agent-runtime';
 import { configureManagedRuntimeUpdateCoordinator } from '@/agent/managed-runtime-update-coordinator';
 
@@ -542,6 +543,8 @@ async function startAgentService(
     null;
 
   let cloudPort: CloudPort;
+  // Only the cloud composition has a subscription socket to pace.
+  let syncReconnectGate: CloudSyncReconnectGate | null = null;
   if (platformKind === 'local') {
     cloudPort = createLocalCloudPort({
       identity: { userId },
@@ -555,6 +558,7 @@ async function startAgentService(
     if (!LODY_SERVER_URL) {
       throw new Error('Cloud platform startup requires LODY_SERVER_URL');
     }
+    syncReconnectGate = new CloudSyncReconnectGate({ logger });
     cloudPort = createCloudCliPort({
       identity: { userId },
       token,
@@ -563,6 +567,7 @@ async function startAgentService(
       serverBaseUrl: LODY_SERVER_URL,
       previewGatewayUrl: process.env.LODY_PREVIEW_GATEWAY_URL,
       runtimeArtifactsBaseUrl: process.env.LODY_RUNTIME_BASE_URL,
+      syncReconnectGate,
       logger,
     });
   }
@@ -591,6 +596,9 @@ async function startAgentService(
       startupTimeSync,
       machineLifecycleCapability,
       onFatalAuthFailure: (error) => triggerFatalAuthShutdown?.(error),
+      onStreamsOnline: (reason) => {
+        syncReconnectGate?.notifyOnline(reason);
+      },
       onProcessLifecycleAction: (action) => triggerProcessLifecycleAction?.(action),
     });
   } catch (error) {
