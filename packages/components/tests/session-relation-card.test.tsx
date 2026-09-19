@@ -132,7 +132,7 @@ describe('Session relation cards', () => {
     expect(onNavigateSession).toHaveBeenCalledWith({ sessionId: createdSessionId });
   });
 
-  it('shows which Session a message Operation reached, with its reply, instead of counts', async () => {
+  it('shows the reply a message Operation received, instead of its id and counts', async () => {
     const store = createStore();
     store.set(setDocMetaByRoomIdAtom, getSessionRoomId(createdSessionId), {
       id: createdSessionId,
@@ -180,7 +180,7 @@ describe('Session relation cards', () => {
     });
 
     const text = container.textContent ?? '';
-    expect(text).toContain('Message sent');
+    expect(text).toContain('Reply received');
     expect(text).toContain('Portal selection regression');
     expect(text).toContain('Fixed the portal selection test; CI is green.');
     expect(text).not.toContain('pr789-fix-regression-test-portal-selection-20260917');
@@ -300,5 +300,57 @@ describe('Session relation cards', () => {
     );
     expect(container.querySelector('[data-session-relation-card="opened"]')).toBeNull();
     expect(container.textContent).not.toBe('');
+  });
+
+  it('shows the opening and conclusion of a long reply and expands to all of it', async () => {
+    const opening =
+      'I will first read the failing Tests log and re-check the portal selection logic.';
+    const middle = ' Detail line.'.repeat(60);
+    const conclusion = 'Conclusion: the portal test now waits for mount, and CI is green.';
+    const reply = `${opening}${middle} ${conclusion}`;
+    await act(async () => {
+      root.render(
+        <Provider store={createStore()}>
+          <MessageRowView
+            message={{
+              ...completionMessage,
+              items: [
+                {
+                  type: 'operation_completion',
+                  deliveryId: 'operation:long:completion',
+                  operationId: 'long-reply',
+                  operationKind: 'session_chat',
+                  completion: {
+                    type: 'result',
+                    value: {
+                      items: [
+                        {
+                          status: 'succeeded',
+                          target: { sessionId: createdSessionId, userTurnId: 'user-turn' },
+                          assistantTurnId: 'assistant-turn',
+                          output: { text: reply },
+                        },
+                      ],
+                    },
+                  },
+                },
+              ],
+            }}
+            sessionId={openerSessionId}
+          />
+        </Provider>
+      );
+    });
+
+    const card = container.querySelector('[data-operation-reply-card="succeeded"]');
+    expect(card?.textContent).toContain('I will first read the failing Tests log');
+    expect(card?.textContent).toContain('Conclusion: the portal test now waits for mount');
+    expect(card?.textContent?.match(/Detail line\./g)?.length ?? 0).toBeLessThan(20);
+
+    const toggle = card?.querySelector<HTMLButtonElement>('button[aria-expanded]');
+    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
+    await act(async () => toggle?.click());
+    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
+    expect(card?.textContent?.match(/Detail line\./g)?.length).toBe(60);
   });
 });

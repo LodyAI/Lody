@@ -124,7 +124,6 @@ import {
   Pin,
   PinOff,
   Wrench,
-  MessageSquareText,
 } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import { MarkdownRenderer } from './markdown-renderer';
@@ -180,6 +179,7 @@ import { ConversationColumn } from '@/components/shared/conversation-column';
 import type { TurnIndexRow } from '@/lib/conversation-view';
 import { TurnPlaceholderRow } from './turn-placeholder-row';
 import { CreatedSessionOperationCard } from './created-session-operation-card';
+import { OperationReplyCard } from './operation-reply-card';
 import type { SessionNavigationTarget } from '@/lib/session-navigation';
 import { AcpAuthenticationPanel } from '@/components/settings/acp-authentication-panel';
 import { formatConversationTimestamp } from '@/lib/format-conversation-timestamp';
@@ -2128,6 +2128,8 @@ const OperationCompletionView = ({
             status: item.status === 'active' ? ('running' as const) : item.status,
             // The reply preview (or the failure) says what happened at a glance;
             // the card itself opens the Session for the rest.
+            reply: item.status === 'succeeded' ? item.output?.text : undefined,
+            error: item.status === 'failed' ? item.error.message : undefined,
             detail:
               item.status === 'succeeded'
                 ? summarizeOperationOutput(item.output?.text)
@@ -2174,20 +2176,33 @@ const OperationCompletionView = ({
       data-operation-completion={completion.operationKind}
       {...(createsSessions && cards.length > 0 ? { 'data-session-create-completion': '' } : {})}
     >
-      {cards.map((card) => (
-        <CreatedSessionOperationCard
-          key={card.sessionId}
-          sessionId={card.sessionId}
-          fallbackTitle={card.fallbackTitle}
-          status={card.status}
-          label={
-            createsSessions ? undefined : t('sessions.openedBy.messagedSession', 'Message sent')
-          }
-          detail={card.detail}
-          icon={createsSessions ? undefined : MessageSquareText}
-          onNavigateSession={onNavigateSession}
-        />
-      ))}
+      {cards.map((card) =>
+        createsSessions ? (
+          <CreatedSessionOperationCard
+            key={card.sessionId}
+            sessionId={card.sessionId}
+            fallbackTitle={card.fallbackTitle}
+            status={card.status}
+            detail={card.detail}
+            onNavigateSession={onNavigateSession}
+          />
+        ) : (
+          // A message Operation reads from the sender's side: the target replied.
+          <OperationReplyCard
+            key={card.sessionId}
+            sessionId={card.sessionId}
+            fallbackTitle={card.fallbackTitle}
+            onNavigateSession={onNavigateSession}
+            {...(card.status === 'succeeded'
+              ? { status: 'succeeded' as const, reply: card.reply }
+              : card.status === 'failed'
+                ? { status: 'failed' as const, error: card.error ?? '' }
+                : card.status === 'cancelled'
+                  ? { status: 'cancelled' as const }
+                  : { status: 'running' as const })}
+          />
+        )
+      )}
       {showStatusCard ? (
         <div
           className="flex items-start gap-2.5 rounded-lg border border-border/70 bg-muted/25 px-3 py-2.5 text-sm"
