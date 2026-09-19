@@ -108,6 +108,10 @@ describe('SessionTabBar drag sources', () => {
         onCreate: (draft) => setDrafts((prev) => [...prev, draft]),
         onSelect: setSelected,
       });
+      const closeParent = () => {
+        setParent({ ...parent, isTabClosed: true });
+        setSelected('empty');
+      };
       const reopen = (id: SessionId) => {
         if (id === parent.id) {
           setParent({ ...parent, isTabClosed: false });
@@ -125,14 +129,16 @@ describe('SessionTabBar drag sources', () => {
             onTabSelect={() => {}}
             onNewTab={() => {}}
             onTabClose={(id) => {
-              if (id === parent.id) {
-                setParent({ ...parent, isTabClosed: true });
-                setSelected('empty');
-              }
+              if (id === parent.id) closeParent();
             }}
             onTabRestore={reopen}
           />
           <output>{selected}</output>
+          {/* The lone tab shows no close button; close it the way a shortcut
+              or another client would. */}
+          <button type="button" data-close-parent onClick={() => closeParent()}>
+            close
+          </button>
         </>
       );
     }
@@ -147,10 +153,13 @@ describe('SessionTabBar drag sources', () => {
         </Provider>
       )
     );
+    expect(container.querySelector('#session-tab-session-parent button')).toBeNull();
     await act(async () =>
-      container.querySelector<HTMLButtonElement>('#session-tab-session-parent button')!.click()
+      container.querySelector<HTMLButtonElement>('[data-close-parent]')!.click()
     );
     expect(container.querySelectorAll('[role="tab"]')).toHaveLength(1);
+    // The draft that replaces it is also alone, so it has no close button either.
+    expect(container.querySelector('[role="tab"] button[aria-label^="Close"]')).toBeNull();
     expect(container.querySelector('output')?.textContent).toMatch(/^draft:/);
     await act(async () =>
       container.querySelector<HTMLButtonElement>('[aria-label="Closed conversations"]')!.click()

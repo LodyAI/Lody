@@ -202,7 +202,9 @@ function TabContent({
      would be a flash between the click and the read receipt landing. */
   const isUnread = !isActive && sessionHasUnreadMessages(session);
   const label = getTabLabel(session, isParent, defaultTitle, t);
-  const showClose = onTabClose && !isEditing;
+  // A lone tab has no close button: there is nothing to switch to, and closing
+  // it would only swap the conversation for an empty draft.
+  const showClose = onTabClose && !isEditing && !solo;
   const tabId = `session-tab-${session.id}`;
   const agentConfig = useAtomValue(getAgentMetaByIdAtomFamily(session.agentConfigId));
   const iconEnv = agentConfig?.env ?? getSessionLaunchConfigLegacyFields(session)?.env;
@@ -339,7 +341,7 @@ function DraftTabContent({
   onClose?: (tabId: string) => MaybePromiseVoid;
   t: (key: string, fallback: string) => string;
 }) {
-  const showClose = onClose;
+  const showClose = onClose && !solo;
   const closeIconVisibility = isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100';
   const label = getDraftTabLabel(draft, t('sessions.tabs.newTab', 'New Tab'));
   const tabId = `draft-tab-${draft.id}`;
@@ -418,7 +420,7 @@ function ViewerTabContent({
   onClose?: (tabId: string) => MaybePromiseVoid;
   t: (key: string, fallback: string, opts?: Record<string, unknown>) => string;
 }) {
-  const showClose = onClose;
+  const showClose = onClose && !solo;
   const closeIconVisibility = isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100';
   const tabId = `viewer-tab-${tab.id}`;
   const saveStateLabel = tab.saving
