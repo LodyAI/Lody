@@ -882,7 +882,7 @@ export function ClosedTabsPopover({
             {t('sessions.tabs.closedTabs', 'Closed conversations')}
           </p>
         </div>
-        <ScrollArea className="max-h-60">
+        <ScrollArea viewportClassName="max-h-60">
           <div className="py-1">
             {sorted.map((session) => {
               const label = session.title?.trim() || t('sessions.tabs.newTab', 'New Tab');
