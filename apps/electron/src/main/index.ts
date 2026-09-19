@@ -60,7 +60,7 @@ import { mainPlatformKind } from './platform'
 import { getLocalLoroDataPlaneSocketPath } from '@lody/shared/node/local-ipc'
 import { getLocalTerminalSocketPath } from '@lody/shared/node/local-terminal'
 import { getInitialDesktopPath, markOnboardingCompleted } from './onboarding-state'
-import { handleWindowWarmReady, scheduleWindowWarmUp } from './window-warm-service'
+import { handleWindowWarmReady } from './window-warm-service'
 import { extractDeepLinkFromArgv } from './deep-link-url'
 import { shouldHideMainWindowOnAutoLaunch } from './auto-launch-policy'
 import {
@@ -338,11 +338,12 @@ if (hasSingleInstanceLock) {
       hasInitialDeepLink: Boolean(extractDeepLinkFromArgv(process.argv))
     })
     recordE2EBootDiagnostic('opening-main-window')
-    const mainWindow = openMainWindow({ icon, initialPath, hideWindowOnAutoLaunch })
+    openMainWindow({ icon, initialPath, hideWindowOnAutoLaunch })
     recordE2EBootDiagnostic('main-window-opened')
-    // Warm the next auxiliary window only after the visible one has loaded, so
-    // the spare renderer never competes with the first paint.
-    mainWindow.webContents.once('did-finish-load', () => scheduleWindowWarmUp())
+    // Do not allocate a hidden renderer at startup. The first auxiliary-window
+    // request proves that the user needs one; session-windows then primes the
+    // spare for subsequent requests. This keeps the common single-window path
+    // free of an idle renderer while retaining warm reuse after intent.
     ipcMain.on(IPC_SEND_CHANNELS.appWindowReady, (event) => handleWindowWarmReady(event.sender.id))
     console.info('[Electron] Initial desktop surface selected', {
       initialPath,

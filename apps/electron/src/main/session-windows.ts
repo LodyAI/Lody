@@ -27,6 +27,8 @@ export function openSessionWindow(target: WindowTarget): void {
   const path = `/${target.workspace}` + (target.sessionId ? `/sessions/${target.sessionId}` : '')
   const search = new URLSearchParams({ window: target.sessionId ? 'session' : 'workspace' })
   if (target.sessionId) search.set('tab', `session:${target.sessionId}`)
-  createMainWindow({ auxiliary: true, initialPath: `${path}?${search}` })
-  scheduleWindowWarmUp()
+  const window = createMainWindow({ auxiliary: true, initialPath: `${path}?${search}` })
+  // Let the first requested auxiliary window reach its first paint before
+  // allocating a replacement renderer. Subsequent opens still reuse the spare.
+  window.once('ready-to-show', scheduleWindowWarmUp)
 }
