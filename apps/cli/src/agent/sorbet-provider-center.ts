@@ -54,7 +54,7 @@ async function runControlProcess(
     };
     const timeout = setTimeout(() => {
       child.kill();
-      finish(() => reject(new Error('Sorbet Provider Center timed out')));
+      finish(() => reject(new Error('Sorbet provider settings timed out')));
     }, OPERATION_TIMEOUT_MS);
     timeout.unref?.();
     child.stdout.on('data', (chunk: Buffer) => {
@@ -70,12 +70,12 @@ async function runControlProcess(
     child.on('exit', (code) => {
       finish(() => {
         if (stdoutBytes > OUTPUT_LIMIT_BYTES) {
-          reject(new Error('Sorbet Provider Center returned too much data'));
+          reject(new Error('Sorbet provider settings returned too much data'));
           return;
         }
         if (code !== 0) {
           const message = Buffer.concat(stderr).toString('utf8').trim();
-          reject(new Error(message || `Sorbet Provider Center exited with status ${code}`));
+          reject(new Error(message || `Sorbet provider settings exited with status ${code}`));
           return;
         }
         try {

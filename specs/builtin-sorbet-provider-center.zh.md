@@ -7,10 +7,10 @@ Translation: current
 
 ## 场景
 
-用户在某台 Machine 上添加 Agent 时，可以选择由 Lody 内置的 Sorbet。Sorbet 表单中包含这台
-Machine 专属的 Provider Center。新 Machine 默认没有自定义 Provider，也不会自行猜测连接。
-用户可以登录 Codex OAuth；也可以明确启用 Claude OAuth；或者添加兼容 OpenAI 或 Anthropic
-协议的自定义 Provider。
+用户在某台 Machine 上添加 Agent 时，可以选择由 Lody 内置的 Sorbet。Sorbet 表单直接展示这台
+Machine 的连接设置，不再额外显示一个命名为 Provider Center 的嵌套标题。新 Machine 默认没有
+自定义 Provider，也不会自行猜测连接。用户可以登录 Codex OAuth；也可以明确启用 Claude OAuth；
+或者添加兼容 OpenAI 或 Anthropic 协议的自定义 Provider。
 
 Codex 是推荐连接；如果它是第一个可用连接，就成为默认连接。Claude OAuth 在用户主动启用前
 保持关闭。用户可以显式选择已经连接的自定义 Provider。选中的连接为新的 Sorbet Session 提供

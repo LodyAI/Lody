@@ -8,9 +8,10 @@ Translation: current
 ## Scenario
 
 A user adding an Agent to a Machine can choose Sorbet as a Lody-bundled builtin. The Sorbet form
-contains a Provider Center for that Machine. A fresh Machine has no custom Provider and does not
-guess a connection. The user can sign in with Codex OAuth, explicitly enable Claude OAuth, or add a
-custom OpenAI-compatible or Anthropic-compatible Provider.
+presents that Machine's connection settings directly, without a separately named Provider Center
+heading. A fresh Machine has no custom Provider and does not guess a connection. The user can sign
+in with Codex OAuth, explicitly enable Claude OAuth, or add a custom OpenAI-compatible or
+Anthropic-compatible Provider.
 
 Codex is the recommended connection and becomes the default when it is the first usable connection.
 Claude OAuth remains disabled until the user enables it. A connected custom Provider can be selected

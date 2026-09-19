@@ -159,14 +159,21 @@ describe('SorbetProviderCenter', () => {
     return { requestSorbetProviderCenter, setSorbetProviderApiKey, onChanged };
   };
 
-  it('requires the Machine capability before issuing Provider Center RPCs', async () => {
+  it('requires the Machine capability before issuing provider settings RPCs', async () => {
     const requestSorbetProviderCenter = vi.fn(async () => response(oauthSnapshot()));
     await render({ supported: false, requestSorbetProviderCenter });
 
     expect(container.textContent).toContain(
-      'Update or restart this Machine before configuring Sorbet Providers.'
+      'Update or restart this Machine before configuring providers.'
     );
     expect(requestSorbetProviderCenter).not.toHaveBeenCalled();
+  });
+
+  it('renders the connections directly without a nested product heading', async () => {
+    await render();
+
+    await vi.waitFor(() => expect(container.textContent).toContain('Custom Providers'));
+    expect(container.textContent).not.toContain('Sorbet Provider Center');
   });
 
   it('enables Claude directly without a risk acknowledgement dialog', async () => {

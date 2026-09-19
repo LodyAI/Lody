@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Check, KeyRound, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Check, Pencil, Plus, Trash2 } from 'lucide-react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import {
@@ -94,7 +94,7 @@ export function SorbetProviderCenter({
 
   const acceptResponse = useCallback((response: SorbetProviderCenterResponse | null) => {
     if (!response?.success || !response.snapshot) {
-      throw new Error(response?.error ?? 'Sorbet Provider Center did not respond.');
+      throw new Error(response?.error ?? 'Provider settings did not respond.');
     }
     setSnapshot(response.snapshot);
     setError(null);
@@ -221,7 +221,7 @@ export function SorbetProviderCenter({
       <div className="rounded-xl border border-status-warning/30 bg-status-warning/[0.08] p-4 text-xs text-status-warning">
         {t(
           'settings.agent.sorbet.machineUpgradeRequired',
-          'Update or restart this Machine before configuring Sorbet Providers.'
+          'Update or restart this Machine before configuring providers.'
         )}
       </div>
     );
@@ -229,38 +229,10 @@ export function SorbetProviderCenter({
 
   return (
     <div className="space-y-4 rounded-xl border border-border/70 bg-muted/10 p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2">
-            <KeyRound className="h-4 w-4 text-primary" aria-hidden="true" />
-            <h3 className="text-sm font-semibold">
-              {t('settings.agent.sorbet.providerCenter.title', 'Sorbet Provider Center')}
-            </h3>
-          </div>
-          <p className="mt-1 text-xs text-muted-foreground">
-            {t(
-              'settings.agent.sorbet.providerCenter.description',
-              'Connections are stored on this Machine. Changes apply to new Sorbet sessions; running and resumed sessions keep their selected Provider.'
-            )}
-          </p>
-        </div>
-        <Button
-          type="button"
-          size="icon"
-          className="h-8 w-8"
-          variant="ghost"
-          disabled={loading || busyAction !== null}
-          aria-label={t('common.refresh', 'Refresh')}
-          onClick={() => void refresh()}
-        >
-          {loading ? <Spinner className="h-3.5 w-3.5" /> : <RefreshCw className="h-3.5 w-3.5" />}
-        </Button>
-      </div>
-
       {loading && !snapshot ? (
         <div className="flex items-center gap-2 py-3 text-xs text-muted-foreground">
           <Spinner className="h-3.5 w-3.5" />
-          {t('settings.agent.sorbet.providerCenter.loading', 'Loading Machine connections…')}
+          {t('settings.agent.sorbet.providerCenter.loading', 'Loading connections…')}
         </div>
       ) : null}
 
