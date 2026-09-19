@@ -253,7 +253,10 @@ export function DesktopMachineMenu({
           <Monitor className="h-4 w-4 shrink-0" aria-hidden="true" />
           <span className="max-w-32 truncate">{label}</span>
           {selectedIsLocal ? (
-            <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px]">
+            <Badge
+              variant="secondary"
+              className="shrink-0 border-transparent bg-foreground/[0.06] px-1.5 py-0 text-[10px] font-normal text-muted-foreground"
+            >
               {t('chat.machineSelector.local', 'Local')}
             </Badge>
           ) : null}
@@ -287,7 +290,10 @@ export function DesktopMachineMenu({
               {option.label}
             </span>
             {option.value === visibleLocalMachineId ? (
-              <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px]">
+              <Badge
+                variant="secondary"
+                className="shrink-0 border-transparent bg-foreground/[0.06] px-1.5 py-0 text-[10px] font-normal text-muted-foreground"
+              >
                 {t('chat.machineSelector.local', 'Local')}
               </Badge>
             ) : null}
