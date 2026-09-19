@@ -104,6 +104,11 @@ export function MessageQueueRow(props: MessageQueueRowProps) {
   );
 }
 
+/* The index sits on the task text's first line: its box is exactly that line
+   box (`text-xs leading-snug` = 0.75rem × 1.375), so both share one center. */
+const LEADING_HANDLE_BOX_CLASS =
+  'flex h-[calc(0.75rem*1.375)] w-4 shrink-0 items-center justify-center';
+
 function LeadingHandle({
   index,
   canReorder,
@@ -117,7 +122,10 @@ function LeadingHandle({
     return (
       <div
         aria-hidden="true"
-        className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center text-[10px] font-medium tabular-nums text-muted-foreground/60"
+        className={cn(
+          LEADING_HANDLE_BOX_CLASS,
+          'text-[10px] font-medium tabular-nums text-muted-foreground/60'
+        )}
       >
         {index + 1}
       </div>
@@ -131,7 +139,8 @@ function LeadingHandle({
           type="button"
           ref={sortable.setActivatorNodeRef}
           className={cn(
-            'mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded',
+            LEADING_HANDLE_BOX_CLASS,
+            'rounded',
             'text-[10px] font-medium tabular-nums text-muted-foreground/60',
             'cursor-grab transition-colors active:cursor-grabbing',
             'hover:bg-hover hover:text-foreground',
@@ -308,7 +317,9 @@ function RowActions(props: MessageQueueRowProps) {
   }
 
   return (
-    <div className="flex shrink-0 items-center gap-0.5">
+    // Centered on the task's first line, like the index: the 20px buttons keep
+    // their hit size and spill evenly into the row padding.
+    <div className="flex h-[calc(0.75rem*1.375)] shrink-0 items-center gap-0.5">
       {shouldShowQueuedItemSteer({ showSteerAction, isFirst, nativeSteerAvailable }) ? (
         <TextAction
           text={t('sessions.messageQueue.guideAction', 'Steer')}
