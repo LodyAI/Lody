@@ -711,6 +711,9 @@ const FENCED_CODE_RENDERER_LANGUAGE_SET = new Set<string>([
   'txt',
 ]);
 
+// Fences rendered by other Streamdown plugins keep their language.
+const FENCED_CODE_PASSTHROUGH_LANGUAGE_SET = new Set<string>(['mermaid']);
+
 const remarkDefaultFencedCodeLanguage = () => (tree: unknown) => {
   const walk = (node: MdastNode) => {
     if (node.type === 'code') {
@@ -718,7 +721,10 @@ const remarkDefaultFencedCodeLanguage = () => (tree: unknown) => {
       const lang = String(codeNode.lang ?? '').trim();
       if (!lang) {
         codeNode.lang = 'text';
-      } else if (!FENCED_CODE_RENDERER_LANGUAGE_SET.has(lang.toLowerCase())) {
+      } else if (
+        !FENCED_CODE_RENDERER_LANGUAGE_SET.has(lang.toLowerCase()) &&
+        !FENCED_CODE_PASSTHROUGH_LANGUAGE_SET.has(lang)
+      ) {
         codeNode.meta = [`highlight=${lang}`, codeNode.meta].filter(Boolean).join(' ');
         codeNode.lang = 'text';
       }

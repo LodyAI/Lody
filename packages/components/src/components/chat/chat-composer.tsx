@@ -341,6 +341,7 @@ export function ChatComposer({
       setUseCompactPlaceholder(width <= COMPOSER_COMPACT_PLACEHOLDER_MAX_PX);
     };
     update(box.getBoundingClientRect().width);
+    if (typeof ResizeObserver === 'undefined') return undefined;
     const observer = new ResizeObserver((entries) => {
       const width = entries[0]?.contentRect.width ?? 0;
       update(width);
