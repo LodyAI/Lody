@@ -2427,7 +2427,7 @@ const ChatFailedNoticeView = ({
       cliType: sessionMeta.cliType,
       agentType: sessionMeta.agentType,
     }) &&
-    (!usesAcpProtocolAuthentication(sessionMeta.cliType) ||
+    (!usesAcpProtocolAuthentication(sessionMeta.cliType, sessionMeta.agentType) ||
       machineSupportsAcpProtocolAuthentication(sessionMachineMeta));
   const [detailOpen, setDetailOpen] = useState(false);
 

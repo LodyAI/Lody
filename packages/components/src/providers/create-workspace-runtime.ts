@@ -1714,6 +1714,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestLocalProjectGitState,
     requestLocalProjectControl,
     requestMachineBugReport,
+    requestSorbetProviderCenter,
+    setSorbetProviderApiKey,
   } = createWorkspaceMachineRpcFacade({
     getMachineProtocolCapabilities: async (machineId) => {
       const entry = await repo.getDocMeta(getMachineRoomId(machineId));
@@ -4718,6 +4720,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestLocalProjectGitState,
     requestLocalProjectControl,
     requestMachineBugReport,
+    requestSorbetProviderCenter,
+    setSorbetProviderApiKey,
     dispose,
   };
 }

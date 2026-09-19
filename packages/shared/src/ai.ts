@@ -35,6 +35,7 @@ export type CliType = BuiltinCliType;
 
 export const BUILTIN_AGENTS = [
   ...MANAGED_BUILTIN_RUNTIMES.map(({ agentType, displayName }) => ({ agentType, displayName })),
+  { agentType: 'sorbet', displayName: 'Sorbet' },
   { agentType: 'deepseek', displayName: 'DeepSeek Harness' },
   { agentType: 'bub', displayName: 'Bub' },
 ] as const;
@@ -64,6 +65,7 @@ export type AgentType = string;
  */
 const BUILTIN_ACP_TITLE_OWNERSHIP: Record<BuiltinAgentType, 'none' | 'untagged' | 'tagged'> = {
   pi: 'none',
+  sorbet: 'none',
   claude: 'untagged',
   codex: 'tagged',
   grok: 'untagged',
@@ -499,11 +501,11 @@ export const isManagedBuiltinAgentType = (
 
 /**
  * Builtins that may be created through the durable provider-setup queue.
- * Managed runtimes use it for download + verification; Bub uses the same queue
- * only to keep its user-installed command unpublished until a live probe passes.
+ * Managed runtimes use it for download + verification; bundled Sorbet and Bub
+ * skip download and remain unpublished until a live probe passes.
  */
 export const supportsBuiltinProviderSetup = (agentType: string): agentType is BuiltinAgentType =>
-  isManagedBuiltinAgentType(agentType) || agentType === 'bub';
+  isManagedBuiltinAgentType(agentType) || agentType === 'bub' || agentType === 'sorbet';
 
 export const getManagedBuiltinRuntimeByAgentType = (
   agentType: string

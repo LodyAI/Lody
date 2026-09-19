@@ -46,9 +46,9 @@ export const hasBuiltinEnvAuthentication = (
   agentType === 'claude' && CLAUDE_ENV_AUTH_KEYS.some((key) => Boolean(env?.[key]?.trim()));
 
 /**
- * True when the provider config can run (and re-run) the built-in interactive
- * sign-in flow. Callers use it to decide whether to offer a sign-in action at
- * all; a live probe reporting `authRequired` is a separate, stronger signal.
+ * True when the provider config can run (and re-run) an interactive sign-in
+ * flow. Most builtins launch an official CLI; bundled Sorbet advertises its
+ * methods through ACP. A live `authRequired` probe remains the stronger signal.
  */
 export const supportsBuiltinAuthentication = (input: {
   cliType: AgentConfigCliType | null | undefined;
@@ -58,6 +58,7 @@ export const supportsBuiltinAuthentication = (input: {
 }): boolean => {
   if (input.cliType !== 'builtin') return false;
   const agentType = input.agentType;
+  if (agentType === 'sorbet') return true;
   if (agentType === 'pi') return false;
   if (!agentType || !isManagedBuiltinAgentType(agentType)) return false;
   if (hasBuiltinEnvAuthentication(agentType, input.env)) return false;
@@ -69,15 +70,17 @@ export const supportsBuiltinAuthentication = (input: {
 };
 
 /**
- * True when the config is a third-party ACP provider, which authenticates
- * through the standard ACP `initialize` → `authenticate` exchange. The methods
- * are advertised by the agent itself, so support cannot be known for certain
- * until it is asked — callers pair this with a live `authRequired` signal rather
- * than offering a sign-in nothing asked for.
+ * True when the config authenticates through the standard ACP
+ * `initialize` → `authenticate` exchange. The methods are advertised by the
+ * agent itself, so callers pair this with a live `authRequired` signal.
  */
 export const usesAcpProtocolAuthentication = (
-  cliType: AgentConfigCliType | null | undefined
-): boolean => cliType === 'registry' || cliType === 'custom';
+  cliType: AgentConfigCliType | null | undefined,
+  agentType?: string | null
+): boolean =>
+  cliType === 'registry' ||
+  cliType === 'custom' ||
+  (cliType === 'builtin' && agentType === 'sorbet');
 
 /**
  * True when Lody has any sign-in flow to offer for this config after the agent
@@ -87,7 +90,7 @@ export const supportsAuthenticationWhenRequired = (input: {
   cliType: AgentConfigCliType | null | undefined;
   agentType: string | null | undefined;
 }): boolean =>
-  usesAcpProtocolAuthentication(input.cliType) ||
+  usesAcpProtocolAuthentication(input.cliType, input.agentType) ||
   (input.cliType === 'builtin' &&
     !!input.agentType &&
     input.agentType !== 'pi' &&

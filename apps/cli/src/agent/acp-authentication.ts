@@ -997,7 +997,10 @@ export class AcpAuthenticationManager {
                     {
                       protocolVersion: acp.PROTOCOL_VERSION,
                       clientCapabilities: {
-                        auth: { terminal: false },
+                        auth: {
+                          terminal: false,
+                          _meta: { lody: { credentialForm: { version: 1 } } },
+                        },
                         elicitation: { form: {}, url: {} },
                       },
                       clientInfo: { name: 'lody', title: 'Lody', version: '1' },

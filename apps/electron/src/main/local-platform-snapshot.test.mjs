@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import installationProfile from '../../../../packages/shared/src/node/installation-profile.cjs'
 import { parseLocalPlatformSnapshot } from './local-platform-snapshot.ts'
+
+const { getInstallationProfile } = installationProfile
 
 const validCatalog = {
   identity: { userId: 'local:user-1' },
@@ -14,6 +18,12 @@ const validCatalog = {
     }
   ]
 }
+
+void test('keeps packaged Electron state in the local installation namespace', () => {
+  const manifest = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'))
+
+  assert.equal(manifest.productName, getInstallationProfile('local').desktopProductName)
+})
 
 void test('keeps CLI identity and workspace in one local platform snapshot', () => {
   assert.deepEqual(parseLocalPlatformSnapshot(validCatalog), {

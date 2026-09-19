@@ -266,6 +266,30 @@ export class MachineRuntime {
       } active=${this.messageProcessor.getActiveSessions()} waiting=${this.messageProcessor.getQueueSize()}`
     );
 
+    // An interactive authentication start remains open while the ACP process
+    // waits for a method choice, URL consent, form response, or browser code.
+    // Its replies must reach that live workflow directly: putting them on the
+    // same machine-level queue as the start creates a cycle where each side is
+    // waiting for the other. The authentication manager owns serialization of
+    // these request-scoped replies.
+    if (message.type === 'machine/acp-authenticate' && message.action !== 'start') {
+      const responses: LocalSessionControlResponse[] = [];
+      await handler.handleMessage(message, {
+        source: 'local',
+        send: (response) => {
+          const typed = response as LocalSessionControlResponse;
+          responses.push(typed);
+          options.onResponse?.(typed);
+        },
+      });
+      this.options.logger.debug(
+        `Local control authentication reply resolved action=${message.action} duration=${
+          Date.now() - dispatchStartedAt
+        }ms responses=${responses.length}`
+      );
+      return responses;
+    }
+
     return await new Promise<LocalSessionControlResponse[]>((resolve, reject) => {
       this.messageProcessor.enqueue(message, async (nextMessage) => {
         const responses: LocalSessionControlResponse[] = [];

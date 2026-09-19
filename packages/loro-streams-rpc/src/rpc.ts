@@ -64,6 +64,8 @@ import type {
   SessionTurnInputConfig,
   FilePreviewV3Request,
   FilePreviewV3Response,
+  SorbetProviderCenterOperation,
+  SorbetProviderCenterResponse,
 } from '@lody/shared';
 import {
   AgentConfigIdSchema,
@@ -112,11 +114,14 @@ import {
   SESSION_GOAL_ACTIONS,
   SessionPreviewCreateResponseSchema,
   SessionPreviewRevokeResponseSchema,
+  SorbetProviderCenterOperationSchema,
+  SorbetProviderCenterResponseSchema,
 } from '@lody/shared';
 import {
   encryptRpcSecret,
   getMachineAcpAuthenticationInputSecretContext,
   getMachineAcpAuthorizationCodeSecretContext,
+  getSorbetProviderApiKeySecretContext,
 } from './rpc-secret';
 import type {
   LoroStreamsLiveModeDiagnostics,
@@ -175,6 +180,7 @@ export const LoroStreamsRpcMethodSchema = z.enum([
   'machine/acp-capabilities-refresh',
   'machine/acp-capabilities-refresh-cancel',
   'machine/acp-authenticate',
+  'machine/sorbet-provider-center',
   'machine/acp-binary-status',
   'machine/acp-binary-install',
   'machine/bug-report',
@@ -318,6 +324,22 @@ export const LoroMachineAcpAuthenticateRpcRequestSchema = BaseRpcRequestSchema.e
         authenticationRequestId: z.string().trim().min(1).max(1024),
         interactionId: z.string().trim().min(1).max(1024),
         authenticationInputEnvelope: RpcSecretEnvelopeSchema,
+      })
+      .strict(),
+  ]),
+}).strict();
+
+export const LoroMachineSorbetProviderCenterRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('machine/sorbet-provider-center'),
+  params: z.discriminatedUnion('action', [
+    ...SorbetProviderCenterOperationSchema.options,
+    z.object({ action: z.literal('prepare-api-key') }).strict(),
+    z
+      .object({
+        action: z.literal('set-api-key'),
+        operationId: z.string().trim().min(1).max(1024),
+        providerId: z.string().trim().min(1).max(512),
+        apiKeyEnvelope: RpcSecretEnvelopeSchema,
       })
       .strict(),
   ]),
@@ -584,6 +606,7 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroMachineAcpCapabilitiesRefreshRpcRequestSchema,
   LoroMachineAcpCapabilitiesRefreshCancelRpcRequestSchema,
   LoroMachineAcpAuthenticateRpcRequestSchema,
+  LoroMachineSorbetProviderCenterRpcRequestSchema,
   LoroMachineAcpBinaryStatusRpcRequestSchema,
   LoroMachineAcpBinaryInstallRpcRequestSchema,
   LoroMachineBugReportRpcRequestSchema,
@@ -700,6 +723,9 @@ export type LoroMachineAcpCapabilitiesRefreshCancelRpcRequest = z.infer<
 >;
 export type LoroMachineAcpAuthenticateRpcRequest = z.infer<
   typeof LoroMachineAcpAuthenticateRpcRequestSchema
+>;
+export type LoroMachineSorbetProviderCenterRpcRequest = z.infer<
+  typeof LoroMachineSorbetProviderCenterRpcRequestSchema
 >;
 export type LoroMachineAcpBinaryStatusRpcRequest = z.infer<
   typeof LoroMachineAcpBinaryStatusRpcRequestSchema
@@ -1436,6 +1462,7 @@ export type LoroMachineRpcResult =
   | MachineAcpCapabilitiesRefreshResponse
   | MachineAcpAuthenticateResponse
   | MachineAcpAuthenticationProgressMessage
+  | SorbetProviderCenterResponse
   | MachineAcpBinaryStatusResponse
   | MachineAcpBinaryInstallResponse
   | MachineAcpBinaryProgressMessage
@@ -1545,6 +1572,15 @@ const toLegacyRpcErrorResponse = (
       agentType: binaryContext?.agentType ?? 'unknown',
       success: false,
       disposition: 'error',
+      error: `${error.code}: ${error.message}`,
+    };
+  }
+
+  if (method === 'machine/sorbet-provider-center') {
+    return {
+      type: 'machine/sorbet-provider-center_response',
+      machineId: machineId as SorbetProviderCenterResponse['machineId'],
+      success: false,
       error: `${error.code}: ${error.message}`,
     };
   }
@@ -1795,6 +1831,10 @@ const parseRpcSuccessResult = async (
   if (response.method === 'machine/acp-authenticate') {
     const parsed = MachineAcpAuthenticateResponseSchema.safeParse(response.result);
     return parsed.success ? (parsed.data as MachineAcpAuthenticateResponse) : null;
+  }
+  if (response.method === 'machine/sorbet-provider-center') {
+    const parsed = SorbetProviderCenterResponseSchema.safeParse(response.result);
+    return parsed.success ? (parsed.data as SorbetProviderCenterResponse) : null;
   }
   if (response.method === 'machine/acp-binary-status') {
     const parsed = MachineAcpBinaryStatusResponseSchema.safeParse(response.result);
@@ -2595,6 +2635,56 @@ export class LoroStreamsMachineRpcClient {
     }
   }
 
+  async requestSorbetProviderCenter(options: {
+    operation: SorbetProviderCenterOperation;
+    timeoutMs?: number;
+  }): Promise<SorbetProviderCenterResponse | null> {
+    return (await this.sendRequest({
+      method: 'machine/sorbet-provider-center',
+      timeoutMs: options.timeoutMs ?? 30_000,
+      params: options.operation,
+    })) as SorbetProviderCenterResponse | null;
+  }
+
+  async setSorbetProviderApiKey(options: {
+    providerId: string;
+    apiKey: string;
+    timeoutMs?: number;
+  }): Promise<SorbetProviderCenterResponse | null> {
+    if (!options.providerId.trim() || !options.apiKey.trim() || options.apiKey.length > 65_536) {
+      throw new Error('A Provider and API key are required.');
+    }
+    const preparation = (await this.sendRequest({
+      method: 'machine/sorbet-provider-center',
+      timeoutMs: options.timeoutMs ?? 30_000,
+      params: { action: 'prepare-api-key' },
+    })) as SorbetProviderCenterResponse | null;
+    if (!preparation?.success || !preparation.secretInput) {
+      throw new Error(preparation?.error ?? 'The target Machine did not accept secret input.');
+    }
+    const { operationId, publicKey } = preparation.secretInput;
+    const apiKeyEnvelope = await encryptRpcSecret(
+      publicKey,
+      options.apiKey,
+      getSorbetProviderApiKeySecretContext({
+        workspaceId: this.options.workspaceId,
+        machineId: this.options.machineId,
+        operationId,
+        providerId: options.providerId,
+      })
+    );
+    return (await this.sendRequest({
+      method: 'machine/sorbet-provider-center',
+      timeoutMs: options.timeoutMs ?? 30_000,
+      params: {
+        action: 'set-api-key',
+        operationId,
+        providerId: options.providerId,
+        apiKeyEnvelope,
+      },
+    })) as SorbetProviderCenterResponse | null;
+  }
+
   async requestMachineAcpBinaryStatus(options: {
     agentType: string;
     timeoutMs?: number;
@@ -3130,6 +3220,19 @@ export class LoroStreamsMachineRpcClient {
               };
         }
       | {
+          method: 'machine/sorbet-provider-center';
+          timeoutMs: number;
+          params:
+            | SorbetProviderCenterOperation
+            | { action: 'prepare-api-key' }
+            | {
+                action: 'set-api-key';
+                operationId: string;
+                providerId: string;
+                apiKeyEnvelope: RpcSecretEnvelope;
+              };
+        }
+      | {
           method: 'machine/acp-binary-status';
           timeoutMs: number;
           params: {
@@ -3495,6 +3598,9 @@ export class LoroStreamsMachineRpcClient {
           request = { ...envelope, method: args.method, params: args.params };
           break;
         case 'machine/acp-authenticate':
+          request = { ...envelope, method: args.method, params: args.params };
+          break;
+        case 'machine/sorbet-provider-center':
           request = { ...envelope, method: args.method, params: args.params };
           break;
         case 'machine/acp-binary-status':

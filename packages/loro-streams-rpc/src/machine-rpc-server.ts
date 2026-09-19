@@ -52,6 +52,8 @@ import type {
   SessionPreviewRevokeResponse,
   SessionTurnInputConfig,
   WorkspaceId,
+  SorbetProviderCenterLocalOperation,
+  SorbetProviderCenterResponse,
 } from '@lody/shared';
 import { LoroStreamsTokenAuthError } from '@lody/shared';
 import {
@@ -91,6 +93,7 @@ import {
   createRpcSecretRecipient,
   getMachineAcpAuthenticationInputSecretContext,
   getMachineAcpAuthorizationCodeSecretContext,
+  getSorbetProviderApiKeySecretContext,
   type RpcSecretRecipient,
 } from './rpc-secret';
 
@@ -133,7 +136,8 @@ const redactRpcRequestForLog = (raw: unknown): unknown => {
   const request = raw as { method?: unknown; params?: unknown };
   if (
     (request.method !== 'machine/acp-authenticate' &&
-      request.method !== 'machine/acp-capabilities-refresh') ||
+      request.method !== 'machine/acp-capabilities-refresh' &&
+      request.method !== 'machine/sorbet-provider-center') ||
     typeof request.params !== 'object' ||
     request.params === null
   ) {
@@ -155,6 +159,7 @@ const redactRpcRequestForLog = (raw: unknown): unknown => {
       ...(Object.hasOwn(params, 'authenticationInputEnvelope')
         ? { authenticationInputEnvelope: '[REDACTED]' }
         : {}),
+      ...(Object.hasOwn(params, 'apiKeyEnvelope') ? { apiKeyEnvelope: '[REDACTED]' } : {}),
     },
   };
 };
@@ -330,6 +335,9 @@ type RpcServerDeps = {
         }
     )
   ) => Promise<MachineAcpAuthenticateResponse>;
+  manageSorbetProviderCenter?: (
+    operation: SorbetProviderCenterLocalOperation
+  ) => Promise<SorbetProviderCenterResponse>;
   getMachineAcpBinaryStatus?: (args: {
     agentType: string;
   }) => Promise<MachineAcpBinaryStatusResponse>;
@@ -454,6 +462,7 @@ export class LoroStreamsMachineRpcServer {
   private readonly controlConcurrency = new Semaphore(DEFAULT_MAX_CONCURRENT_CONTROL_REQUESTS);
   private readonly inFlightRequests = new Set<Promise<void>>();
   private readonly acpAuthorizationCodeRecipients = new Map<string, RpcSecretRecipient>();
+  private readonly sorbetApiKeyRecipients = new Map<string, RpcSecretRecipient>();
   private readonly acpCapabilitiesRefreshControllers = new Map<string, AbortController>();
   private requestLoopFailure: {
     message: string;
@@ -509,6 +518,7 @@ export class LoroStreamsMachineRpcServer {
     }
     this.stopped = true;
     this.acpAuthorizationCodeRecipients.clear();
+    this.sorbetApiKeyRecipients.clear();
     for (const controller of this.acpCapabilitiesRefreshControllers.values()) {
       controller.abort();
     }
@@ -995,6 +1005,65 @@ export class LoroStreamsMachineRpcServer {
               this.acpAuthorizationCodeRecipients.delete(request.params.authenticationRequestId);
             }
           }
+        }
+        case 'machine/sorbet-provider-center': {
+          if (!this.deps.manageSorbetProviderCenter) {
+            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+              code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
+              message: 'Sorbet Provider Center is not available on this machine.',
+            });
+            return;
+          }
+          if (request.params.action === 'prepare-api-key') {
+            if (this.sorbetApiKeyRecipients.size >= 32) {
+              const oldest = this.sorbetApiKeyRecipients.keys().next().value;
+              if (oldest !== undefined) this.sorbetApiKeyRecipients.delete(oldest);
+            }
+            const recipient = await createRpcSecretRecipient();
+            const operationId = crypto.randomUUID();
+            this.sorbetApiKeyRecipients.set(operationId, recipient);
+            const expiration = setTimeout(() => {
+              if (this.sorbetApiKeyRecipients.get(operationId) === recipient) {
+                this.sorbetApiKeyRecipients.delete(operationId);
+              }
+            }, 5 * 60_000);
+            expiration.unref?.();
+            await this.appendResultResponse(request.replyTo, request.id, request.method, {
+              type: 'machine/sorbet-provider-center_response',
+              machineId: this.deps.machineId,
+              success: true,
+              secretInput: { operationId, publicKey: recipient.publicKey },
+            });
+            return;
+          }
+          let operation: SorbetProviderCenterLocalOperation;
+          if (request.params.action === 'set-api-key') {
+            const recipient = this.sorbetApiKeyRecipients.get(request.params.operationId);
+            this.sorbetApiKeyRecipients.delete(request.params.operationId);
+            if (!recipient) throw new Error('Sorbet API-key recipient is no longer active.');
+            const apiKey = await recipient.decrypt(
+              request.params.apiKeyEnvelope,
+              getSorbetProviderApiKeySecretContext({
+                workspaceId: this.deps.workspaceId,
+                machineId: this.deps.machineId,
+                operationId: request.params.operationId,
+                providerId: request.params.providerId,
+              })
+            );
+            if (!apiKey.trim() || apiKey.length > 65_536) {
+              throw new Error('Invalid decrypted Sorbet API key.');
+            }
+            operation = {
+              action: 'set-api-key',
+              providerId: request.params.providerId,
+              apiKey,
+            };
+          } else {
+            operation = request.params;
+          }
+          const response = await this.deps.manageSorbetProviderCenter(operation);
+          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          return;
         }
         case 'machine/acp-binary-status': {
           if (!this.deps.getMachineAcpBinaryStatus) {
@@ -1607,6 +1676,7 @@ export class LoroStreamsMachineRpcServer {
       | MachineAcpCapabilitiesRefreshResponse
       | MachineAcpAuthenticateResponse
       | MachineAcpAuthenticationProgressMessage
+      | SorbetProviderCenterResponse
       | MachineRestartResponse
       | MachineUpgradeResponse
       | MachineAcpBinaryStatusResponse

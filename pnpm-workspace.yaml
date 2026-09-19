@@ -3,6 +3,8 @@ packages:
   # Full upstream-derived runtime workspace; built and validated independently.
   - '!packages/acp-extension-kimi'
   - '!packages/acp-extension-pi'
+  # Full Sorbet runtime workspace; pinned as source and built independently.
+  - '!packages/sorbet'
   - apps/cli
   - apps/electron
   - e2e

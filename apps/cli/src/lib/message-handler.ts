@@ -16,6 +16,7 @@ import {
   LORO_STREAMS_RPC_VERSION,
   type LocalProjectGitStateRpcResponse,
 } from '@lody/loro-streams-rpc';
+import { runSorbetProviderCenterOperation } from '@/agent/sorbet-provider-center';
 import {
   HistoryWriteError,
   MachineId,
@@ -3216,6 +3217,27 @@ export class MessageHandler {
             onProgress: args.onProgress,
           });
         },
+        manageSorbetProviderCenter: async (operation) => {
+          try {
+            const result = await runSorbetProviderCenterOperation(operation);
+            return {
+              type: 'machine/sorbet-provider-center_response' as const,
+              machineId: this.machineId,
+              success: true,
+              snapshot: result.snapshot,
+              ...(result.affectedProviderId === undefined
+                ? {}
+                : { affectedProviderId: result.affectedProviderId }),
+            };
+          } catch (error) {
+            return {
+              type: 'machine/sorbet-provider-center_response' as const,
+              machineId: this.machineId,
+              success: false,
+              error: formatErrorMessage(error),
+            };
+          }
+        },
         getMachineAcpBinaryStatus: async ({ agentType }) =>
           await this.executionService.getMachineAcpBinaryStatus({
             type: 'machine/acp-binary-status',
@@ -6196,6 +6218,27 @@ export class MessageHandler {
     };
 
     switch (request.method) {
+      case 'machine/sorbet-provider-center': {
+        try {
+          const result = await runSorbetProviderCenterOperation(request.params);
+          return {
+            type: 'machine/sorbet-provider-center_response' as const,
+            machineId: this.machineId,
+            success: true,
+            snapshot: result.snapshot,
+            ...(result.affectedProviderId === undefined
+              ? {}
+              : { affectedProviderId: result.affectedProviderId }),
+          };
+        } catch (error) {
+          return {
+            type: 'machine/sorbet-provider-center_response' as const,
+            machineId: this.machineId,
+            success: false,
+            error: formatErrorMessage(error),
+          };
+        }
+      }
       case 'code-collab/get-file-index':
         await assertOwner(request.params.sessionId as SessionId);
         return await this.codeCollabV2Service.getFileIndex(request.params);

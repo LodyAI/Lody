@@ -190,6 +190,13 @@ describe('project skills helpers', () => {
     }
   });
 
+  it('maps Sorbet only to the workspace skill directory its guidance loader reads', () => {
+    const agent = { cliType: 'builtin' as const, agentType: 'sorbet' };
+    expect([...getRegisteredSkillDirs([agent])]).toEqual([DEFAULT_PROJECT_SKILL_DIR]);
+    expect([...getRegisteredGlobalSkillDirs([agent])]).toEqual([]);
+    expect([...getRegisteredSystemSkillDirs([agent])]).toEqual([]);
+  });
+
   it('exposes codex built-in system skill dirs separate from global dirs', () => {
     expect(ALL_KNOWN_SYSTEM_SKILL_DIRS).toContain('~/.codex/skills/.system');
     // System dirs are their own scope; they must not leak into the global list.

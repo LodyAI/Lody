@@ -31,6 +31,7 @@ import {
   CODEX_ACP_ADAPTER_VERSION,
   getManagedAgentRuntimeManager,
   GROK_ACP_ADAPTER_VERSION,
+  isNodeVersionAtLeast,
   KIMI_CODE_VERSION,
   PI_RUNTIME_VERSION,
   type ManagedRuntimeLaunch,
@@ -38,10 +39,15 @@ import {
   type ManagedRuntimeProgressCallback,
 } from '@/agent/managed-agent-runtime';
 import { getManagedRuntimeUpdateCoordinator } from '@/agent/managed-runtime-update-coordinator';
+import sorbetRuntimeManifestJson from '@/agent/sorbet-runtime-manifest.json';
 import {
   DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION,
   resolveDeepSeekHarnessProcessLaunch,
 } from '@/agent/deepseek-harness-runtime';
+import {
+  getSorbetDataDirectory,
+  getSorbetDefaultModelSelector,
+} from '@/agent/sorbet-provider-preferences';
 
 export interface ACPSetting {
   packageName: string;
@@ -245,6 +251,9 @@ export function getAcpCapabilitySourceVersion(
           ? `builtin-grok-acp:${GROK_ACP_ADAPTER_VERSION}+official-grok:${managedRuntimeVersion}`
           : `${BUILTIN_GROK_CAPABILITY_SOURCE_VERSION}${runtimeOverrideSuffix}`;
       }
+      if (input.agentType === 'sorbet') {
+        return `builtin-sorbet:${sorbetRuntimeManifestJson.version}`;
+      }
       if (input.agentType === 'deepseek') {
         const baseUrl = input.env?.[DEEPSEEK_HARNESS_BASE_URL_ENV];
         return baseUrl?.trim()
@@ -395,7 +404,14 @@ async function resolveManagedRuntimeForLaunch(
 }
 
 function resolveCliAdapterEntry(
-  adapter: 'claude-acp' | 'codex-acp' | 'deepseek-acp' | 'grok-acp'
+  adapter:
+    | 'claude-acp'
+    | 'codex-acp'
+    | 'deepseek-acp'
+    | 'grok-acp'
+    | 'sorbet/dist/filesystem-worker'
+    | 'sorbet/dist/stdio-cli'
+    | 'sorbet/dist/provider-control'
 ): [string] {
   const argvEntry = process.argv[1] ? resolve(process.argv[1]) : undefined;
   const candidates: string[] = [];
@@ -439,6 +455,29 @@ async function resolveBuiltinACPProcessLaunch(
     return {
       command: 'bub',
       args: ['acp', ...(input.extraArgs ?? [])],
+      capabilitySourceVersion: getAcpCapabilitySourceVersion(input),
+    };
+  }
+  if (input.agentType === 'sorbet') {
+    if (!isNodeVersionAtLeast(process.versions.node, sorbetRuntimeManifestJson.minNodeVersion)) {
+      throw new Error(
+        `Sorbet requires Node.js ${sorbetRuntimeManifestJson.minNodeVersion} or newer; current runtime is ${process.versions.node}`
+      );
+    }
+    const defaultModelSelector = await getSorbetDefaultModelSelector();
+    const [entryPath] = resolveCliAdapterEntry('sorbet/dist/stdio-cli');
+    const [filesystemWorkerPath] = resolveCliAdapterEntry('sorbet/dist/filesystem-worker');
+    return {
+      command: process.execPath,
+      args: [
+        entryPath,
+        ...(defaultModelSelector === undefined ? [] : ['--model', defaultModelSelector]),
+        ...(input.extraArgs ?? []),
+      ],
+      env: {
+        SORBET_DATA_DIR: getSorbetDataDirectory(),
+        SORBET_FILESYSTEM_WORKER_PATH: filesystemWorkerPath,
+      },
       capabilitySourceVersion: getAcpCapabilitySourceVersion(input),
     };
   }
@@ -511,6 +550,18 @@ async function resolveBuiltinACPProcessLaunch(
     ],
     env: { CLAUDE_CODE_EXECUTABLE: runtime.command },
     capabilitySourceVersion: getAcpCapabilitySourceVersion(input, runtime.version),
+  };
+}
+
+export function resolveBundledSorbetProviderControlLaunch(): {
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+} {
+  return {
+    command: process.execPath,
+    args: [...resolveCliAdapterEntry('sorbet/dist/provider-control')],
+    env: { SORBET_DATA_DIR: getSorbetDataDirectory() },
   };
 }
 

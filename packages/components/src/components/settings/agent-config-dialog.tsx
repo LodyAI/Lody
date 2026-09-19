@@ -79,6 +79,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { AcpAuthenticationPanel } from './acp-authentication-panel';
 import { BubInstallGuide } from './bub-install-guide';
 import { ProviderSetupRow } from './provider-setup-row';
+import { SorbetProviderCenter } from './sorbet-provider-center';
 import {
   getAgentMetaByIdAtomFamily,
   getProviderSetupsByMachineAtomFamily,
@@ -498,6 +499,15 @@ const BUILTIN_OPTIONS: AgentTypeOption[] = [
     cliType: 'builtin',
     agentType: 'codex',
     searchKeys: 'codex openai',
+  },
+  {
+    kind: 'builtin',
+    value: 'builtin:sorbet',
+    label: 'Sorbet',
+    descriptionDefault: 'Lody-bundled multi-provider coding agent',
+    cliType: 'builtin',
+    agentType: 'sorbet',
+    searchKeys: 'sorbet codex claude provider acp',
   },
   {
     kind: 'builtin',
@@ -1080,6 +1090,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   // `bub acp` becomes an actionable "install Bub" prompt instead of a
   // provider that fails later on its first turn.
   const isBubBuiltin = formData.cliType === 'builtin' && formData.agentType === 'bub';
+  const isSorbetBuiltin = formData.cliType === 'builtin' && formData.agentType === 'sorbet';
   const deepseekEndpointMode = getDeepSeekEndpointMode(formData);
   const isManagedBuiltin =
     formData.cliType === 'builtin' && isManagedBuiltinAgentType(formData.agentType);
@@ -1088,7 +1099,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     mode.kind === 'create' &&
     !publishedBub &&
     !isPreset &&
-    (isManagedBuiltin || isDeepSeekBuiltin || isBubBuiltin);
+    (isManagedBuiltin || isDeepSeekBuiltin || isBubBuiltin || isSorbetBuiltin);
   const builtinCreationVerified =
     !requiresBuiltinCreationVerification || verifiedBuiltinContext === builtinVerificationContext;
   const builtinCreationPending =
@@ -1102,14 +1113,14 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   // so a sign-in would do nothing for them. Creating one only surfaces the
   // panel when a live probe reported missing credentials, because that panel is
   // the single way to unblock the creation-time verification gate.
-  // Registry and custom providers authenticate through the standard ACP
-  // exchange, but only the agent knows whether it has anything to sign into —
-  // so their panel appears once a live probe reported that auth is required.
+  // Registry, custom, and bundled Sorbet providers authenticate through the
+  // standard ACP exchange, but only the agent knows whether it has anything to
+  // sign into — so their panel appears once a live probe reports auth is required.
   // The exchange runs entirely on the daemon, so a machine that predates it
   // answers "Authentication is not supported"; do not offer a button that can
   // only fail.
   const usesProtocolAuthentication =
-    usesAcpProtocolAuthentication(formData.cliType) &&
+    usesAcpProtocolAuthentication(formData.cliType, formData.agentType) &&
     machineSupportsAcpProtocolAuthentication(machine);
   const showAuthenticationPanel =
     mode.kind === 'edit'
@@ -2182,6 +2193,20 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
             />
           ) : null}
 
+          {isSorbetBuiltin ? (
+            <SorbetProviderCenter
+              machineId={machine.id}
+              configId={agentConfigId}
+              onBeforeAuthenticate={persistConfigBeforeMachineLaunch}
+              onChanged={() => {
+                setAuthRequired(false);
+                setProbeError(null);
+                setManuallyTested(false);
+                setVerifiedBuiltinContext(null);
+              }}
+            />
+          ) : null}
+
           {isCustom && (
             <div className="space-y-3 rounded-xl border border-primary/20 bg-primary/[0.04] p-4">
               <Field
@@ -2321,7 +2346,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           )}
           {probeError && isBubBuiltin && <BubInstallGuide />}
 
-          {showAuthenticationPanel ? (
+          {showAuthenticationPanel && !isSorbetBuiltin ? (
             <div className="rounded-xl border border-border/60 bg-muted/20 p-4">
               <Field
                 label={t('settings.agent.dialog.section.account', 'Account')}

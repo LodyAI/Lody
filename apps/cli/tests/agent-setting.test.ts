@@ -76,6 +76,7 @@ describe('resolveBuiltinACPSetting', () => {
     expect(() => resolveBuiltinACPSetting('codex')).toThrow(/resolveACPProcessLaunchAsync/);
     expect(() => resolveBuiltinACPSetting('kimi')).toThrow(/resolveACPProcessLaunchAsync/);
     expect(() => resolveBuiltinACPSetting('grok')).toThrow(/resolveACPProcessLaunchAsync/);
+    expect(() => resolveBuiltinACPSetting('sorbet')).toThrow(/resolveACPProcessLaunchAsync/);
     expect(() => resolveBuiltinACPSetting('bub')).toThrow(/resolveACPProcessLaunchAsync/);
   });
 
@@ -91,6 +92,9 @@ describe('resolveBuiltinACPSetting', () => {
     );
     expect(getAcpCapabilitySourceVersion({ cliType: 'builtin', agentType: 'grok' })).toBe(
       BUILTIN_GROK_CAPABILITY_SOURCE_VERSION
+    );
+    expect(getAcpCapabilitySourceVersion({ cliType: 'builtin', agentType: 'sorbet' })).toBe(
+      'builtin-sorbet:0.0.0-lody.875da27'
     );
     expect(
       getAcpCapabilitySourceVersion({
@@ -220,6 +224,23 @@ describe('resolveBuiltinACPSetting', () => {
       args: ['acp', '--verbose'],
       capabilitySourceVersion: 'builtin-bub:acp',
     });
+  });
+
+  it('launches bundled Sorbet with a Lody-owned machine data root', async () => {
+    const launch = await resolveACPProcessLaunchAsync({
+      cliType: 'builtin',
+      agentType: 'sorbet',
+      extraArgs: ['--version'],
+    });
+
+    expect(launch.command).toBe(process.execPath);
+    expect(launch.args[0]).toMatch(/sorbet[/\\]dist[/\\]stdio-cli\.js$/);
+    expect(launch.args.slice(1)).toEqual(['--version']);
+    expect(launch.env?.SORBET_DATA_DIR).toMatch(/agents[/\\]sorbet$/);
+    expect(launch.env?.SORBET_FILESYSTEM_WORKER_PATH).toMatch(
+      /sorbet[/\\]dist[/\\]filesystem-worker\.js$/
+    );
+    expect(launch.capabilitySourceVersion).toBe('builtin-sorbet:0.0.0-lody.875da27');
   });
 
   it('launches an overridden Kimi executable in ACP login mode', async () => {
