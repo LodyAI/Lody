@@ -36,7 +36,11 @@ import { type DraftSessionTab, getDraftTabLabel } from '@/lib/session-draft-tabs
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import { isSessionTabClosed } from '@/lib/session-tab-url';
 import { TAB_PILL_ACTIVE_CLASS, TAB_PILL_INACTIVE_CLASS } from '@/components/shared/tab-pill-strip';
-import { AdaptiveTabStrip, AdaptiveTabStripItem } from './adaptive-tab-strip';
+import {
+  ADAPTIVE_TAB_STRIP_GAP_PX,
+  AdaptiveTabStrip,
+  AdaptiveTabStripItem,
+} from './adaptive-tab-strip';
 import { SESSION_PAGE_CONTAINER_CLASS } from './session-conversation-page';
 import {
   armSessionMentionDrag,
@@ -772,7 +776,8 @@ export const SessionTabBar = memo(function SessionTabBar({
         aria-label={t('sessions.tabs.label', 'Session tabs')}
         // max-h-full keeps the strip inside a padded h-11 bar (macOS row pad).
         className="h-11 max-h-full"
-        paddingLeft={variant === 'session' ? 4 : 8}
+        // The first tab sits as far from the sidebar edge as tabs sit from each other.
+        paddingLeft={variant === 'session' ? ADAPTIVE_TAB_STRIP_GAP_PX : 8}
         paddingRight={8}
       >
         {showParentTab && (

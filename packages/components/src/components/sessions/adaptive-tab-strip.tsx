@@ -243,12 +243,15 @@ export type AdaptiveTabStripProps = Omit<ComponentPropsWithoutRef<'div'>, 'child
   activeMinWidth?: number;
 };
 
+/** Space between adjacent tabs. */
+export const ADAPTIVE_TAB_STRIP_GAP_PX = 6;
+
 export function AdaptiveTabStrip({
   itemIds,
   activeItemId,
   children,
   viewportClassName,
-  gap = 6,
+  gap = ADAPTIVE_TAB_STRIP_GAP_PX,
   paddingLeft = 8,
   paddingRight = 8,
   activeMinWidth = ACTIVE_TAB_MIN_WIDTH,
