@@ -124,6 +124,7 @@ import {
   Pin,
   PinOff,
   Wrench,
+  MessageSquareText,
 } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import { MarkdownRenderer } from './markdown-renderer';
@@ -2109,109 +2110,134 @@ const OperationCompletionView = ({
       : completion.completion.type === 'cancelled'
         ? (completion.completion.partial?.items ?? [])
         : [];
-  const succeeded = resultItems.filter((item) => item.status === 'succeeded').length;
-  const failed = resultItems.filter((item) => item.status === 'failed').length;
-  const cancelled = resultItems.filter((item) => item.status === 'cancelled').length;
   const failedCompletion = completion.completion.type === 'error';
   const cancelledCompletion = completion.completion.type === 'cancelled';
   const StatusIcon = failedCompletion ? AlertCircle : cancelledCompletion ? Circle : CheckCircle2;
-  const createdSessions =
-    !completion.progressMessageId &&
-    (completion.operationKind === 'session_create' ||
-      completion.operationKind === 'session_create_many')
-      ? resultItems.flatMap((item) =>
-          item.status === 'succeeded'
-            ? [
-                {
-                  sessionId: item.target.sessionId,
-                  fallbackTitle: item.label,
-                },
-              ]
-            : []
-        )
-      : [];
-
-  if (createdSessions.length > 0) {
-    return (
-      <div className="flex flex-col gap-2" data-session-create-completion="">
-        {createdSessions.map((created) => (
-          <CreatedSessionOperationCard
-            key={created.sessionId}
-            sessionId={created.sessionId}
-            fallbackTitle={created.fallbackTitle}
-            status="succeeded"
-            onNavigateSession={onNavigateSession}
-          />
-        ))}
-        {failedCompletion || cancelledCompletion || failed > 0 || cancelled > 0 ? (
-          <div className="px-1 text-xs text-muted-foreground">
-            {failedCompletion
-              ? t('orchestration.operationFailed', { id: completion.operationId })
-              : cancelledCompletion
-                ? t('orchestration.operationCancelled', { id: completion.operationId })
-                : t('orchestration.operationItemSummary', {
-                    total: resultItems.length,
-                    succeeded,
-                    failed,
-                    cancelled,
-                  })}
-          </div>
-        ) : null}
-        {completion.continuation ? (
-          <div className="px-1 text-xs text-muted-foreground">
-            {t(
-              completion.continuation.status === 'uncertain'
-                ? 'orchestration.continuationUncertain'
-                : 'orchestration.continuationNotStarted'
-            )}
-          </div>
-        ) : null}
-      </div>
-    );
-  }
+  const createsSessions =
+    completion.operationKind === 'session_create' ||
+    completion.operationKind === 'session_create_many';
+  // A create Operation that published progress already shows each target as a
+  // live card above; repeating them here would duplicate every Session.
+  const targetCards = createsSessions && completion.progressMessageId ? [] : resultItems;
+  const cards = targetCards.flatMap((item) =>
+    item.target
+      ? [
+          {
+            sessionId: item.target.sessionId,
+            fallbackTitle: item.label,
+            status: item.status === 'active' ? ('running' as const) : item.status,
+            // The reply preview (or the failure) says what happened at a glance;
+            // the card itself opens the Session for the rest.
+            detail:
+              item.status === 'succeeded'
+                ? summarizeOperationOutput(item.output?.text)
+                : item.status === 'failed'
+                  ? item.error.message
+                  : undefined,
+          },
+        ]
+      : []
+  );
+  const untargetedProblems = targetCards.flatMap((item) =>
+    !item.target && (item.status === 'failed' || item.status === 'cancelled')
+      ? [
+          {
+            label: item.label,
+            message:
+              item.status === 'failed'
+                ? item.error.message
+                : t('sessions.openedBy.status.cancelled', 'Cancelled'),
+          },
+        ]
+      : []
+  );
+  const continuationNotice = completion.continuation
+    ? t(
+        completion.continuation.status === 'uncertain'
+          ? 'orchestration.continuationUncertain'
+          : 'orchestration.continuationNotStarted'
+      )
+    : null;
+  // The status card carries only what the cards cannot: a whole-Operation
+  // failure or cancellation, targetless failures, the continuation outcome, or
+  // the plain outcome when there is no Session to show.
+  const showStatusCard =
+    cards.length === 0 ||
+    failedCompletion ||
+    cancelledCompletion ||
+    untargetedProblems.length > 0 ||
+    continuationNotice !== null;
 
   return (
-    <div className="border-border/70 bg-muted/30 flex items-start gap-2 border-y px-3 py-2 text-sm">
-      <StatusIcon
-        className={cn(
-          'mt-0.5 h-4 w-4 shrink-0',
-          failedCompletion ? 'text-destructive' : 'text-muted-foreground'
-        )}
-        aria-hidden="true"
-      />
-      <div className="min-w-0">
-        <div className="font-medium">
-          {t(
-            failedCompletion
-              ? 'orchestration.operationFailed'
-              : cancelledCompletion
-                ? 'orchestration.operationCancelled'
-                : 'orchestration.operationCompleted',
-            { id: completion.operationId }
-          )}
-        </div>
-        {resultItems.length > 0 ? (
-          <div className="text-muted-foreground mt-0.5">
-            {t('orchestration.operationItemSummary', {
-              total: resultItems.length,
-              succeeded,
-              failed,
-              cancelled,
-            })}
-          </div>
-        ) : null}
-        {completion.continuation ? (
-          <div className="text-muted-foreground mt-0.5">
-            {t(
-              completion.continuation.status === 'uncertain'
-                ? 'orchestration.continuationUncertain'
-                : 'orchestration.continuationNotStarted'
+    <div
+      className="flex flex-col gap-2"
+      data-operation-completion={completion.operationKind}
+      {...(createsSessions && cards.length > 0 ? { 'data-session-create-completion': '' } : {})}
+    >
+      {cards.map((card) => (
+        <CreatedSessionOperationCard
+          key={card.sessionId}
+          sessionId={card.sessionId}
+          fallbackTitle={card.fallbackTitle}
+          status={card.status}
+          label={
+            createsSessions ? undefined : t('sessions.openedBy.messagedSession', 'Message sent')
+          }
+          detail={card.detail}
+          icon={createsSessions ? undefined : MessageSquareText}
+          onNavigateSession={onNavigateSession}
+        />
+      ))}
+      {showStatusCard ? (
+        <div
+          className="flex items-start gap-2.5 rounded-lg border border-border/70 bg-muted/25 px-3 py-2.5 text-sm"
+          title={completion.operationId}
+        >
+          <StatusIcon
+            className={cn(
+              'mt-0.5 h-4 w-4 shrink-0',
+              failedCompletion ? 'text-destructive' : 'text-muted-foreground'
             )}
+            aria-hidden="true"
+          />
+          <div className="min-w-0 flex-1">
+            <div className="font-medium text-foreground">
+              {t(
+                failedCompletion
+                  ? 'orchestration.operationFailed'
+                  : cancelledCompletion
+                    ? 'orchestration.operationCancelled'
+                    : 'orchestration.operationCompleted'
+              )}
+            </div>
+            {completion.completion.type === 'error' ? (
+              <div className="mt-0.5 break-words text-xs text-muted-foreground">
+                {completion.completion.error.message}
+              </div>
+            ) : null}
+            {untargetedProblems.map((problem, index) => (
+              <div
+                key={`${problem.label ?? 'item'}-${index}`}
+                className="mt-0.5 break-words text-xs text-muted-foreground"
+              >
+                {problem.label ? `${problem.label}: ${problem.message}` : problem.message}
+              </div>
+            ))}
+            {continuationNotice ? (
+              <div className="mt-0.5 text-xs text-muted-foreground">{continuationNotice}</div>
+            ) : null}
           </div>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </div>
   );
+};
+
+/** One readable line from a reply preview: collapsed whitespace, capped length. */
+const summarizeOperationOutput = (text: string | undefined): string | undefined => {
+  const collapsed = text?.replace(/\s+/g, ' ').trim();
+  if (!collapsed) return undefined;
+  return collapsed.length > 240 ? `${collapsed.slice(0, 240)}…` : collapsed;
 };
 
 const DashedNoticeRule = () => (
@@ -3463,7 +3489,8 @@ function ProcessDisclosureButton({
     <span
       className={cn(
         'inline-flex flex-none shrink-0 origin-center text-muted-foreground',
-        !isMobile && 'opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100'
+        !isMobile &&
+          'opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100'
       )}
     >
       <span ref={chevronRef} className="inline-flex origin-center">
@@ -4046,7 +4073,12 @@ export const AssistantTurnFooter = ({
              — its leading glyph aligns to the duration label, not to the answer
              text. */}
           {hasCopyableText || hasTurnConfigInfo || onFork || copyContext ? (
-            <div className={cn('flex items-center gap-0.5', isMobile ? '-mr-[7px]' : '-ml-[5px] -mr-[7px]')}>
+            <div
+              className={cn(
+                'flex items-center gap-0.5',
+                isMobile ? '-mr-[7px]' : '-ml-[5px] -mr-[7px]'
+              )}
+            >
               {showStreamingContextCopy ? (
                 <TooltipProvider>
                   <Tooltip delayDuration={500}>

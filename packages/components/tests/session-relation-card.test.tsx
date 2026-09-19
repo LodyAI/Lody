@@ -132,6 +132,67 @@ describe('Session relation cards', () => {
     expect(onNavigateSession).toHaveBeenCalledWith({ sessionId: createdSessionId });
   });
 
+  it('shows which Session a message Operation reached, with its reply, instead of counts', async () => {
+    const store = createStore();
+    store.set(setDocMetaByRoomIdAtom, getSessionRoomId(createdSessionId), {
+      id: createdSessionId,
+      machineId: 'machine-1',
+      userId: 'user-1',
+      createdAt: '2026-08-14T12:00:00.000Z',
+      title: 'Portal selection regression',
+    });
+    const onNavigateSession = vi.fn();
+    const chatCompletion: SessionHistoryParsed = {
+      ...completionMessage,
+      items: [
+        {
+          type: 'operation_completion',
+          deliveryId: 'operation:pr789:completion',
+          operationId: 'pr789-fix-regression-test-portal-selection-20260917',
+          operationKind: 'session_chat',
+          completion: {
+            type: 'result',
+            value: {
+              items: [
+                {
+                  status: 'succeeded',
+                  target: { sessionId: createdSessionId, userTurnId: 'user-turn' },
+                  assistantTurnId: 'assistant-turn',
+                  output: { text: 'Fixed the portal\n\nselection test; CI is green.' },
+                },
+              ],
+            },
+          },
+        },
+      ],
+    };
+
+    await act(async () => {
+      root.render(
+        <Provider store={store}>
+          <MessageRowView
+            message={chatCompletion}
+            sessionId={openerSessionId}
+            onNavigateSession={onNavigateSession}
+          />
+        </Provider>
+      );
+    });
+
+    const text = container.textContent ?? '';
+    expect(text).toContain('Message sent');
+    expect(text).toContain('Portal selection regression');
+    expect(text).toContain('Fixed the portal selection test; CI is green.');
+    expect(text).not.toContain('pr789-fix-regression-test-portal-selection-20260917');
+    expect(text).not.toMatch(/items ·/);
+    await act(async () => {
+      Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
+        .find((button) => button.textContent?.includes('View session'))
+        ?.click();
+    });
+    expect(onNavigateSession).toHaveBeenCalledWith({ sessionId: createdSessionId });
+  });
+
   it('shows a navigable card before completion and updates the same card through target states', async () => {
     const store = createStore();
     const onNavigateSession = vi.fn();

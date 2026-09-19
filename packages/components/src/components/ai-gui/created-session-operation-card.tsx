@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, type ElementType } from 'react';
 import { useAtomValue } from 'jotai';
 import { selectAtom } from 'jotai/utils';
 import { CheckCircle2, Circle, CircleX, LoaderCircle } from 'lucide-react';
@@ -33,11 +33,18 @@ export function CreatedSessionOperationCard({
   sessionId,
   fallbackTitle,
   status,
+  label,
+  detail,
+  icon,
   onNavigateSession,
 }: {
   sessionId: SessionId;
   fallbackTitle?: string;
   status: CreatedSessionStatus;
+  /** What the Operation did to this Session; defaults to "Session created". */
+  label?: string;
+  detail?: string;
+  icon?: ElementType<{ className?: string }>;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
 }) {
   const { t } = useTranslation();
@@ -59,8 +66,10 @@ export function CreatedSessionOperationCard({
   return (
     <SessionRelationCard
       relation="opened"
-      label={t('sessions.openedBy.createdSession', 'Session created')}
+      label={label ?? t('sessions.openedBy.createdSession', 'Session created')}
       sessionTitle={title}
+      detail={detail}
+      icon={icon}
       actionLabel={t('sessions.openedBy.viewSession', 'View session')}
       onAction={onNavigateSession ? () => onNavigateSession({ sessionId }) : undefined}
       status={

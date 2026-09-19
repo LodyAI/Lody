@@ -88,6 +88,84 @@ export const InCreateOperation: Story = {
   ),
 };
 
+const operationStoryArgs = {
+  relation: 'opened',
+  label: '',
+  sessionTitle: '',
+  actionLabel: '',
+  onAction: () => {},
+} as const;
+
+const renderOperation = (message: SessionHistoryParsed) => (
+  <div className="w-[720px] max-w-[calc(100vw-2rem)]">
+    <MessageRowView
+      message={message}
+      sessionId={'storybook-opener' as SessionId}
+      onNavigateSession={() => {}}
+    />
+  </div>
+);
+
+/** A message Operation names the Session it reached and previews the reply. */
+export const MessageOperationCompleted: Story = {
+  args: operationStoryArgs,
+  render: () =>
+    renderOperation({
+      ...operationCompletion,
+      id: 'storybook-chat-completion',
+      items: [
+        {
+          type: 'operation_completion',
+          deliveryId: 'operation:pr789:completion',
+          operationId: 'pr789-fix-regression-test-portal-selection-20260917',
+          operationKind: 'session_chat',
+          completion: {
+            type: 'result',
+            value: {
+              items: [
+                {
+                  status: 'succeeded',
+                  label: 'Fix the portal selection regression test',
+                  target: { sessionId: operationSessionId, userTurnId: 'storybook-user-turn' },
+                  assistantTurnId: 'storybook-assistant-turn',
+                  output: {
+                    text: 'Fixed the portal selection regression: the test now waits for the portal to mount before asserting focus. Static checks, Tests and Desktop E2E all pass.',
+                  },
+                },
+              ],
+            },
+          },
+        },
+      ],
+    }),
+};
+
+/** A whole-Operation failure has no Session to show; it reads as one rounded status. */
+export const OperationFailed: Story = {
+  args: operationStoryArgs,
+  render: () =>
+    renderOperation({
+      ...operationCompletion,
+      id: 'storybook-failed-completion',
+      items: [
+        {
+          type: 'operation_completion',
+          deliveryId: 'operation:failed:completion',
+          operationId: 'storybook-failed-operation',
+          operationKind: 'session_chat',
+          completion: {
+            type: 'error',
+            error: {
+              code: 'TARGET_UNAVAILABLE',
+              message: 'The target machine is offline.',
+              retryable: true,
+            },
+          },
+        },
+      ],
+    }),
+};
+
 const openedSessionId = 'storybook-opened-session' as SessionId;
 const openedConversationItems: ChatStreamItem[] = [
   {

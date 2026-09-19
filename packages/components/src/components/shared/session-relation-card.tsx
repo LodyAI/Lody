@@ -14,6 +14,7 @@ export function SessionRelationCard({
   className,
   relation,
   status,
+  detail,
 }: {
   label: string;
   sessionTitle: string;
@@ -24,6 +25,8 @@ export function SessionRelationCard({
   className?: string;
   relation: 'opened' | 'opened-by';
   status?: ReactNode;
+  /** Optional one-glance context under the title (a reply preview, an error). */
+  detail?: ReactNode;
 }) {
   return (
     <div
@@ -40,6 +43,11 @@ export function SessionRelationCard({
           <div className="truncate text-sm font-medium text-foreground" title={sessionTitle}>
             {sessionTitle}
           </div>
+          {detail ? (
+            <div className="mt-0.5 line-clamp-2 break-words text-xs leading-4 text-muted-foreground">
+              {detail}
+            </div>
+          ) : null}
         </div>
       </div>
       {status}
