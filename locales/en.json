@@ -1850,6 +1850,7 @@
   "sessions.messageQueue.saveEdit": "Save changes (Enter)",
   "sessions.messageQueue.title": "Queued messages",
   "sessions.messageQueue.upNext": "Up next",
+  "sessions.messageQueue.previewImage": "Preview {{name}}",
   "sessions.messageStatus.deliverNow": "Deliver now",
   "sessions.messageStatus.deliverNowFailed": "Failed to deliver the message - please try again",
   "sessions.messageStatus.notDelivered": "Not delivered",

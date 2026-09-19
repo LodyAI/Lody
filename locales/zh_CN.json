@@ -1850,6 +1850,7 @@
   "sessions.messageQueue.saveEdit": "保存修改（回车）",
   "sessions.messageQueue.title": "排队中的消息",
   "sessions.messageQueue.upNext": "接下来",
+  "sessions.messageQueue.previewImage": "预览 {{name}}",
   "sessions.messageStatus.deliverNow": "重新发送",
   "sessions.messageStatus.deliverNowFailed": "送达失败，请重试",
   "sessions.messageStatus.notDelivered": "未送达",
