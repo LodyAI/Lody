@@ -3631,7 +3631,13 @@ export const SessionChatInterface = memo(
         : isSessionActive
           ? liveSessionStatus?.type === 'requestPermission'
             ? t('sessions.statusIndicator.requestPermission')
-            : t(`sessions.statusIndicator.${runningActivity ?? 'thinking'}`)
+            : runningActivity === 'imageGenerating'
+              ? t('sessions.statusIndicator.imageGenerating')
+              : // Reading, running and editing all read as "Working"; the
+                // collapsed tool groups above already say which.
+                runningActivity === 'exploring' || runningActivity === 'writing'
+                ? t('sessions.working', 'Working')
+                : t('sessions.statusIndicator.thinking')
           : hasPendingDispatch && statusStripState == null
             ? // Pre-start only while the turn can actually start: any
               // connection/machine problem (browser offline, machine removed or
@@ -3640,6 +3646,8 @@ export const SessionChatInterface = memo(
             : null;
     const agentActivityTone =
       isSessionActive && liveSessionStatus?.type === 'requestPermission' ? 'warning' : 'primary';
+    // Waiting on the user is not work in progress: that status does not shimmer.
+    const agentActivityShimmer = agentActivityTone !== 'warning';
 
     const scrollChatToBottom = useCallback(() => {
       requestAnimationFrame(() => chatStreamRef.current?.scrollToBottom());
@@ -6012,6 +6020,7 @@ export const SessionChatInterface = memo(
                               emptyState={chatStreamEmptyState}
                               agentActivityLabel={agentActivityLabel}
                               agentActivityTone={agentActivityTone}
+                              agentActivityShimmer={agentActivityShimmer}
                               onFileDiffClick={onFileDiffClick}
                               onFilePathClick={onFilePathClick ? handleFilePathClick : undefined}
                               onOpenHtmlFile={handleOpenHtmlAttachment}

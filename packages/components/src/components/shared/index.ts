@@ -11,7 +11,6 @@ export {
 } from './acp-inline-selector-group';
 export { buildAcpSelectorOptions } from './acp-selector-options';
 export type { AcpSelectorOptions } from './acp-selector-options';
-export { AgentActivityIndicator, type AgentActivityTone } from './agent-activity-indicator';
 export {
   WorkdirModeSelector,
   WorktreeCheckboxPill,

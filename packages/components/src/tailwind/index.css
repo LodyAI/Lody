@@ -165,7 +165,9 @@ pre,
     --card: var(--popover);
   }
 
-  .markdown-renderer :is(table, [data-streamdown='code-block'], [data-streamdown='mermaid-block']) :is(p, h1, h2, h3, h4, h5, h6) {
+  .markdown-renderer
+    :is(table, [data-streamdown='code-block'], [data-streamdown='mermaid-block'])
+    :is(p, h1, h2, h3, h4, h5, h6) {
     padding-inline: 0;
   }
 
@@ -2062,71 +2064,52 @@ pre,
   }
 }
 
-/* Agent activity stays on compositor-friendly transform/opacity animations.
-   The highlighted label is a pseudo-element so React remains idle while the
-   agent is working. */
-@keyframes agent-activity-dot-pulse {
-  0%,
-  100% {
-    opacity: 0.35;
-    transform: scale(0.7);
-  }
-  50% {
-    opacity: 0.8;
-    transform: scale(1);
-  }
+/* Live agent status shimmer (the look of shadcn's text shimmer, driven by the
+   compositor). A soft band in the page background color slides across the
+   label: over glyphs it fades them toward the background, over the empty
+   background it is invisible. Only `transform` animates, so a working turn
+   repaints nothing while it waits (see the streaming performance e2e budget);
+   shadcn's `background-position` shimmer repaints the text every frame. */
+.agent-shimmer {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  vertical-align: top;
 }
 
-@keyframes agent-activity-label-highlight {
-  0%,
-  12% {
-    opacity: 0;
-    transform: translateX(-0.08em);
-  }
-  24%,
-  42% {
-    opacity: 1;
-    transform: translateX(0);
-  }
-  58%,
-  100% {
-    opacity: 0;
-    transform: translateX(0.08em);
-  }
-}
-
-.agent-activity-dot-pulse {
-  animation: agent-activity-dot-pulse 3.5s ease-in-out infinite;
-  will-change: opacity, transform;
-}
-
-.agent-activity-label {
-  color: var(--agent-activity-label-base);
-}
-
-.agent-activity-label::after {
+.agent-shimmer::after {
   position: absolute;
-  inset: 0;
-  color: var(--agent-activity-label-highlight);
-  content: attr(data-highlight-label);
-  opacity: 0;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: 60%;
+  content: '';
   pointer-events: none;
-  text-shadow: var(--agent-activity-label-glow);
-  transform: translateX(-0.08em);
-  animation: agent-activity-label-highlight var(--agent-activity-label-duration) ease-in-out
-    infinite;
-  will-change: opacity, transform;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    hsl(var(--background) / 0.78),
+    transparent
+  );
+  transform: translateX(-100%);
+  animation: agent-shimmer-sweep 2.2s linear infinite;
+  will-change: transform;
+}
+
+@keyframes agent-shimmer-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    /* Band is 60% of the label: 100% / 0.6 carries it fully past the end. */
+    transform: translateX(167%);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .agent-activity-dot-pulse,
-  .agent-activity-label::after {
+  .agent-shimmer::after {
+    display: none;
     animation: none;
-  }
-
-  .agent-activity-dot-pulse {
-    opacity: 0.6;
-    transform: scale(0.85);
   }
 }
 

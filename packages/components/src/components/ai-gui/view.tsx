@@ -198,10 +198,6 @@ import {
   AlertDialogTitle,
 } from '@/ui/alert-dialog';
 import { Button } from '@/ui/button';
-import {
-  AgentActivityIndicator,
-  type AgentActivityTone,
-} from '@/components/shared/agent-activity-indicator';
 import { stripRecommended } from '@/components/shared/acp-selector-options';
 import { DiffViewer } from '@/ui/diff-viewer/diff-viewer';
 import { Skeleton } from '@/ui/skeleton';
@@ -494,6 +490,8 @@ export interface SessionChatStreamViewProps {
   forkingAssistantMessageId?: string | null;
   agentActivityLabel?: string | null;
   agentActivityTone?: AgentActivityTone;
+  /** The status is live work (not waiting on the user): shimmer it. */
+  agentActivityShimmer?: boolean;
   conversationFontSize?: ConversationFontSize;
   /** Skips one auto-follow caused by the session composer changing height. */
   skipNextViewportResizeAutoScrollRef?: MutableRefObject<boolean>;
@@ -519,22 +517,49 @@ const SessionImagePreviewContext = createContext<{
   openImagePreview: (imageKey: string) => void;
 } | null>(null);
 
+/** Live work reads in the process tone; waiting on the user in the warning tone. */
+export type AgentActivityTone = 'primary' | 'warning';
+
+/**
+ * The live status at the bottom of the conversation ("Thinking", "Working",
+ * startup and permission states). It reads as the next collapsed activity-group
+ * label (same rail, type and tone) and shimmers while work is in progress;
+ * when the live turn already ends in a collapsed group, that label shimmers
+ * instead and this row is not rendered.
+ */
 const AgentActivityRow = ({
   label,
   tone = 'primary',
+  shimmer,
+  conversationFontSize,
 }: {
   label: string;
   tone?: AgentActivityTone;
+  shimmer: boolean;
+  conversationFontSize: ConversationFontSize;
 }) => {
+  const isMobile = useIsMobile();
   return (
-    <ConversationColumn className="flex items-start -mt-2 pb-1.5 pt-0.5">
-      <div className="flex h-6 items-center">
-        <AgentActivityIndicator
-          label={label}
-          tone={tone}
-          displaySize={14}
-          labelClassName="text-[12.5px] font-medium leading-snug"
-        />
+    <ConversationColumn className="pb-2 sm:pb-3" data-agent-activity-row="">
+      <div
+        className="max-w-[800px] text-muted-foreground"
+        style={conversationTextFontSizeStyle(conversationFontSize)}
+      >
+        <div
+          role="status"
+          aria-live="polite"
+          className={cn('flex w-full items-center py-0.5', isMobile ? 'gap-1.5 pr-1' : 'px-1')}
+        >
+          <span
+            className={cn(
+              ACTIVITY_GROUP_LABEL_CLASS(isMobile),
+              tone === 'warning' && 'text-status-warning',
+              shimmer && 'agent-shimmer'
+            )}
+          >
+            {label}
+          </span>
+        </div>
       </div>
     </ConversationColumn>
   );
@@ -1276,6 +1301,8 @@ export const SessionChatStreamView = forwardRef<
       forkingAssistantMessageId,
       agentActivityLabel = null,
       agentActivityTone = 'primary',
+      // Waiting on the user (warning tone) is not work in progress.
+      agentActivityShimmer = agentActivityTone !== 'warning',
       conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
       skipNextViewportResizeAutoScrollRef,
       suppressStickyAutoScrollRef,
@@ -1382,6 +1409,24 @@ export const SessionChatStreamView = forwardRef<
       lastAssistantMessageId,
       messageFileDiffEntriesByTurn,
     ]);
+    // While work is in progress, a live turn whose bottom (past its footer) is
+    // a collapsed activity group carries the status itself: that label
+    // shimmers and no separate status row is added below it.
+    const liveGroupHeaderRowKey = useMemo(() => {
+      if (!agentActivityLabel || !agentActivityShimmer) return null;
+      for (let index = virtualRows.length - 1; index >= 0; index -= 1) {
+        const row = virtualRows[index];
+        if (row?.type !== 'assistant') return null;
+        if (row.content.kind === 'footer') continue;
+        return row.item.message.finished !== true &&
+          row.content.kind === 'activity_group_header' &&
+          !row.content.expanded
+          ? row.key
+          : null;
+      }
+      return null;
+    }, [agentActivityLabel, agentActivityShimmer, virtualRows]);
+    const shouldShowAgentActivityRow = shouldShowAgentActivity && liveGroupHeaderRowKey === null;
     const leadingRowCount = leadingContent == null ? 0 : 1;
 
     /**
@@ -1436,7 +1481,7 @@ export const SessionChatStreamView = forwardRef<
       hasVirtualizedRows,
       // `leadingContent` is a real first Virtua row, so it counts here — sticky
       // scroll otherwise targets an index short of the true bottom.
-      itemCount: virtualRows.length + leadingRowCount + (shouldShowAgentActivity ? 1 : 0),
+      itemCount: virtualRows.length + leadingRowCount + (shouldShowAgentActivityRow ? 1 : 0),
       onAtBottomChange,
       skipNextViewportResizeAutoScrollRef,
       suppressAutoScrollRef: autoScrollSuppressedRef,
@@ -1770,7 +1815,12 @@ export const SessionChatStreamView = forwardRef<
                 )}
                 {agentActivityLabel && (
                   <div className="shrink-0 pt-2">
-                    <AgentActivityRow label={agentActivityLabel} tone={agentActivityTone} />
+                    <AgentActivityRow
+                      label={agentActivityLabel}
+                      tone={agentActivityTone}
+                      shimmer={agentActivityShimmer}
+                      conversationFontSize={conversationFontSize}
+                    />
                   </div>
                 )}
                 <div className="min-h-0 flex-1">
@@ -1896,12 +1946,18 @@ export const SessionChatStreamView = forwardRef<
                         isTurnHovered={hoveredAssistantMessageId === row.item.message.id}
                         onTurnHoverChange={handleAssistantTurnHoverChange}
                         conversationFontSize={conversationFontSize}
+                        shimmerGroupHeader={row.key === liveGroupHeaderRowKey}
                       />
                     </MessageSelectionRow>
                   );
                 })}
-                {shouldShowAgentActivity && agentActivityLabel && (
-                  <AgentActivityRow label={agentActivityLabel} tone={agentActivityTone} />
+                {shouldShowAgentActivityRow && agentActivityLabel && (
+                  <AgentActivityRow
+                    label={agentActivityLabel}
+                    tone={agentActivityTone}
+                    shimmer={agentActivityShimmer}
+                    conversationFontSize={conversationFontSize}
+                  />
                 )}
               </Virtualizer>
               <MessageSelectionOverlay />
@@ -3462,6 +3518,16 @@ const ACTIVITY_STEP_BODY_CLASS =
   '[&_:is(h1,h2,h3,h4,h5,h6):first-child]:!mt-0 ' +
   '[&_p]:!mb-1 [&_p:last-child]:!mb-0 [&_li:not(:first-child)]:!mt-0.5';
 
+/* The collapsed activity group's label type; the live status row reuses it so
+   "Working" reads as the next group label, not a separate widget. */
+const ACTIVITY_GROUP_LABEL_CLASS = (isMobile: boolean) =>
+  cn(
+    'min-w-0',
+    isMobile
+      ? cn('flex-1', ACTIVITY_PROCESS_TEXT_CLASS)
+      : 'text-[length:var(--markdown-body-font-size,1em)] font-normal leading-[1.75]'
+  );
+
 /** Last intended rotate after a click. Survives Virtua remounting the row. */
 const pendingDisclosureRotate = new Map<string, boolean>();
 
@@ -3470,11 +3536,14 @@ function ProcessDisclosureButton({
   label,
   expanded,
   onExpandedChange,
+  shimmer = false,
 }: {
   id: string;
   label: string;
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
+  /** The group is the live bottom of a working turn: its label shimmers. */
+  shimmer?: boolean;
 }) {
   const isMobile = useIsMobile();
   const chevronRef = useRef<HTMLSpanElement>(null);
@@ -3514,14 +3583,7 @@ function ProcessDisclosureButton({
     </span>
   );
   const title = (
-    <span
-      className={cn(
-        'min-w-0',
-        isMobile
-          ? cn('flex-1', ACTIVITY_PROCESS_TEXT_CLASS)
-          : 'text-[length:var(--markdown-body-font-size,1em)] font-normal leading-[1.75]'
-      )}
-    >
+    <span className={cn(ACTIVITY_GROUP_LABEL_CLASS(isMobile), shimmer && 'agent-shimmer')}>
       {label}
     </span>
   );
@@ -3562,11 +3624,13 @@ const ActivityGroupHeader = ({
   summary,
   expanded,
   onExpandedChange,
+  shimmer,
 }: {
   id: string;
   summary: AssistantActivitySummary;
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
+  shimmer?: boolean;
 }) => {
   const { t } = useTranslation();
   const parts: string[] = [];
@@ -3596,6 +3660,7 @@ const ActivityGroupHeader = ({
       label={label}
       expanded={expanded}
       onExpandedChange={onExpandedChange}
+      shimmer={shimmer}
     />
   );
 };
@@ -4238,6 +4303,8 @@ interface AssistantChatItemProps {
   isTurnHovered: boolean;
   onTurnHoverChange: (messageId: string, hovered: boolean) => void;
   conversationFontSize: ConversationFontSize;
+  /** This row is the live turn's collapsed bottom group: shimmer its label. */
+  shimmerGroupHeader?: boolean;
 }
 
 // Rows for unchanged turns are reference-stable via `assistantTurnRowsCache`,
@@ -4324,7 +4391,8 @@ const areAssistantChatItemPropsEqual = (
   prev.isForking === next.isForking &&
   prev.isTurnHovered === next.isTurnHovered &&
   prev.onTurnHoverChange === next.onTurnHoverChange &&
-  prev.conversationFontSize === next.conversationFontSize;
+  prev.conversationFontSize === next.conversationFontSize &&
+  prev.shimmerGroupHeader === next.shimmerGroupHeader;
 
 const AssistantChatItem = memo(function AssistantChatItem({
   row,
@@ -4341,6 +4409,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
   isTurnHovered,
   onTurnHoverChange,
   conversationFontSize,
+  shimmerGroupHeader = false,
 }: AssistantChatItemProps) {
   const message = row.item.message;
   const { content } = row;
@@ -4397,6 +4466,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
             onExpandedChange={(expanded) =>
               onGroupExpandedChange(message.id, content.block.key, expanded)
             }
+            shimmer={shimmerGroupHeader}
           />
         );
       case 'activity_detail': {

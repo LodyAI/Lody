@@ -74,7 +74,7 @@ Ownership and explanations: [README.md](README.md).
 - Desktop changelogs open in-app as sanitized Markdown with raw HTML off. Only
   missing notes fall back to the website, via `getChangelogUrl` and
   `openExternalUrl`, never a hardcoded link.
-- `AgentActivityIndicator`, `ZoomableImageViewer`, and Electron image preview
+- The live agent status shimmer, `ZoomableImageViewer`, and Electron image preview
   copy/save keep their own rules in [shared/AGENTS.md](shared/AGENTS.md);
   `ZoomableImageViewer` is the ONE image viewer, so never add a second one.
 - `web-workspace-layout.tsx` owns top/side safe-area insets for desktop surfaces,
