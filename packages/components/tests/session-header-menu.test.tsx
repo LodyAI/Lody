@@ -121,11 +121,11 @@ describe('SessionHeaderMenu', () => {
     expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe('none');
   }
 
-  it('opens the submenu and forks into the current workspace', async () => {
+  it('opens the submenu and forks to a new tab', async () => {
     await act(async () => root?.render(<ForkMenuHarness />));
     await openForkMenu();
     expect(menuItem('Copy context as Markdown')).toBeDefined();
-    await act(async () => menuItem('Current workspace').click());
+    await act(async () => menuItem('Fork to new tab').click());
     expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe('shared');
     expect(document.querySelector('[role="menu"]')).toBeNull();
   });
@@ -133,7 +133,7 @@ describe('SessionHeaderMenu', () => {
   it('forks into a new worktree when that destination is available', async () => {
     await act(async () => root?.render(<ForkMenuHarness forkWorktreeAvailability="available" />));
     await openForkMenu();
-    await act(async () => menuItem('New worktree').click());
+    await act(async () => menuItem('Fork to new worktree').click());
     expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe(
       'new-worktree'
     );
@@ -145,7 +145,7 @@ describe('SessionHeaderMenu', () => {
       root?.render(<ForkMenuHarness isForking forkWorktreeAvailability="available" />)
     );
     await openForkMenu();
-    for (const label of ['Current workspace', 'New worktree']) {
+    for (const label of ['Fork to new tab', 'Fork to new worktree']) {
       const item = menuItem(label);
       expect(item.getAttribute('data-disabled')).not.toBeNull();
       await act(async () => item.click());
@@ -161,7 +161,7 @@ describe('SessionHeaderMenu', () => {
   it('keeps copying available without native fork support', async () => {
     await act(async () => root?.render(<ForkMenuHarness nativeForkAvailable={false} />));
     await openForkMenu();
-    expect(document.body.textContent).not.toContain('Current workspace');
+    expect(document.body.textContent).not.toContain('Fork to new tab');
     await act(async () => menuItem('Copy context as Markdown').click());
     expect(container?.querySelector('[data-testid="copy-result"]')?.textContent).toBe('copied');
   });

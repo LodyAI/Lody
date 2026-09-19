@@ -236,6 +236,7 @@ import { AutoReviewMenuItem } from './auto-review-menu-item';
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
 import {
   getSessionForkDestinationOptions,
+  SessionForkOptionTooltip,
   type SessionForkDestination,
   type SessionForkWorktreeAvailability,
 } from './session-fork-destination-menu';
@@ -1298,31 +1299,46 @@ export function SessionHeaderMenu({
                   {t('sessions.forkSession', 'Fork session')}
                 </span>
               </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="min-w-[16rem]">
+              <DropdownMenuSubContent className="min-w-[13rem]">
                 {onFork &&
                   !isArchived &&
-                  getSessionForkDestinationOptions(t, forkWorktreeAvailability).map((option) => (
-                    <DropdownMenuItem
-                      key={option.id}
-                      disabled={option.disabled || isForking}
-                      className="items-start py-1.5"
-                      onSelect={() => {
-                        void onFork(option.id);
-                      }}
-                    >
-                      {option.id === 'new-worktree' ? (
-                        <WorktreeIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                      ) : (
-                        <Folder className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                      )}
-                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                        <span className="leading-tight">{option.label}</span>
-                        <span className="text-xs font-normal leading-snug text-muted-foreground">
-                          {option.hint}
-                        </span>
-                      </span>
-                    </DropdownMenuItem>
-                  ))}
+                  getSessionForkDestinationOptions(t, forkWorktreeAvailability).map((option) => {
+                    const disabled = option.disabled || isForking;
+                    const item = (
+                      <DropdownMenuItem
+                        key={option.id}
+                        disabled={disabled}
+                        onSelect={() => {
+                          void onFork(option.id);
+                        }}
+                      >
+                        {option.id === 'new-worktree' ? (
+                          <WorktreeIcon className="h-3.5 w-3.5 shrink-0" />
+                        ) : (
+                          <Folder className="h-3.5 w-3.5 shrink-0" />
+                        )}
+                        <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                        {option.status ? (
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            {option.status}
+                          </span>
+                        ) : null}
+                      </DropdownMenuItem>
+                    );
+                    // The submenu usually opens toward the conversation, so the
+                    // explanation sits on that side instead of over the parent menu.
+                    return disabled ? (
+                      item
+                    ) : (
+                      <SessionForkOptionTooltip
+                        key={option.id}
+                        description={option.description}
+                        side="left"
+                      >
+                        {item}
+                      </SessionForkOptionTooltip>
+                    );
+                  })}
                 {onCopyConversationHistory && (
                   <DropdownMenuItem
                     onSelect={() => {
