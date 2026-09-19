@@ -202,6 +202,14 @@ export class MessageProcessor extends EventEmitter<ProcessorEvents> {
    */
   private extractQueueKey(message: QueuedControlMessage): MessageQueueKey | null {
     switch (message.type) {
+      case 'machine/acp-authenticate': {
+        // A login waits for these follow-up requests. Sharing its execution
+        // lane would queue the user's input or cancellation behind that wait.
+        const authenticationRequestId =
+          message.action === 'start' ? message.requestId : message.authenticationRequestId;
+        const lane = message.action === 'start' ? 'start' : 'input';
+        return `authentication:${message.machineId}:${authenticationRequestId}:${lane}`;
+      }
       case 'session/create':
       case 'session/chat':
         return `session:${message.sessionId}:main`;
