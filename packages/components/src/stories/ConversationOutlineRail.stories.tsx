@@ -254,6 +254,27 @@ const integrationItems: ChatStreamItem[] = Array.from({ length: 14 }, (_, round)
 ]).flat();
 
 /**
+ * Fewer than `OUTLINE_MIN_USER_ROUNDS` user rounds: the view mounts no rail at
+ * all, even though the isolated component would render one. Navigation through
+ * a handful of turns is easier without a TOC, so the rail waits for a longer
+ * conversation.
+ */
+export const ShortStreamHidesRail: Story = {
+  args: { entries: [], activeIndex: -1, onJumpToRound: () => {} },
+  render: () => (
+    <div className="h-[640px] w-full bg-background">
+      <SessionChatStreamView
+        items={integrationItems.slice(0, 8)}
+        sessionId={integrationSessionId}
+        className="h-full"
+        renderMessageRow={renderMessageRow}
+        showScrollToLatest={false}
+      />
+    </div>
+  ),
+};
+
+/**
  * Scroll the conversation and the highlighted tick follows; click a tick and
  * the list jumps to that round.
  */

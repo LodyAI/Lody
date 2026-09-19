@@ -51,6 +51,15 @@ export const OUTLINE_PREVIEW_MAX_LENGTH = 240;
 export const SUMMARY_SOURCE_WINDOW = 960;
 
 /**
+ * The rail stays hidden until the conversation reaches this many USER rounds.
+ * Below it a table of contents decorates a short conversation rather than
+ * navigating one. A leading agent round — an agent-initiated session such as
+ * a scheduled run or a fork — is not a turn the user drove, so it does not
+ * count toward the threshold; see {@link countUserDrivenRounds}.
+ */
+export const OUTLINE_MIN_USER_ROUNDS = 10;
+
+/**
  * Buckets for the tick width. A round's visual weight tracks how much was said
  * in it, which is what makes the rail scannable rather than a uniform comb.
  */
@@ -285,6 +294,19 @@ export function buildConversationOutline(
 
   closeRound();
   return entries.length ? entries : EMPTY_OUTLINE;
+}
+
+/**
+ * Rounds that began with a user turn. {@link OUTLINE_MIN_USER_ROUNDS} applies
+ * to this count: at most one entry can start with the agent (the leading round
+ * of an agent-initiated session), and it is not a round the user drove.
+ */
+export function countUserDrivenRounds(outline: readonly ConversationOutlineEntry[]): number {
+  let count = 0;
+  for (const entry of outline) {
+    if (!entry.startsWithAgent) count += 1;
+  }
+  return count;
 }
 
 /**

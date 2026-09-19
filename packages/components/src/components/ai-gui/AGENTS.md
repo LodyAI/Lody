@@ -12,7 +12,7 @@ File-by-file ownership and coverage pointers: [README.md](README.md).
   restore `searchBlockId` wiring to tool, terminal, or diff renderers.
 - `SessionChatStreamView` flattens turns into one main Virtua list. Collapsed
   activity is one row; expanded details are sibling rows, never a nested output
-  scroller or fixed-height process panel. Keep streaming keys stable and map
+  scroller or fixed-height process panel. Keep streaming keys stable; map
   history indexes to virtual rows.
 - Keep Virtua `shift={false}`.
 - `buildChatStreamItems()` must drop empty assistant entries and de-duplicate
@@ -21,11 +21,11 @@ File-by-file ownership and coverage pointers: [README.md](README.md).
   targets; never overlay or persist it.
 - Empty-state presentation stays outside Virtua, even with an empty leading Fragment:
   zero-height caches can hide the first user row. Preserve live activity labels/tones.
-  Apply the header inset once to the whole empty scroller.
+  Apply the header inset once to the whole scroller.
 - Create `operation_progress` cards update in place per materialized target; bind
   status to its exact Turn and subscribe only to its title. `progressMessageId`
   suppresses duplicate completion cards; legacy completions keep successful-target
-  cards. Ownership and rationale: [README.md](README.md#creation-progress).
+  cards. Rationale: [README.md](README.md#creation-progress).
 
 ## Turn Folding And Layout
 
@@ -42,13 +42,13 @@ File-by-file ownership and coverage pointers: [README.md](README.md).
   the last region may show a duration; earlier ones say "Finished working".
 - `shouldUseWorkedGroup` requires a finished turn, foldable work, and visible
   final content outside `workBlockKeys`. A cancelled/interrupted or tool-only
-  turn with no answer stays expanded, and `message.finished` cannot prove
+  turn with no answer stays expanded; `message.finished` cannot prove
   completion alone. A reused assistant entry that
   reopens upstream must clear `finished` and `endedAt` (see
   `apps/cli/src/session/AGENTS.md`).
 - Thought and tool rows share one compact transparent timeline, icon gutter, and
   13px hierarchy. Execute calls are not cards. Desktop disclosure headers use
-  body type, a hover-only trailing chevron, no fill, and omit thought rows.
+  body type, a hover-only trailing chevron, no fill, and no thought rows.
   Turns are avatar-free and full-width; run config lives in the footer.
 - Duration has one owner: desktop uses `WorkedGroupHeader` for folded turns and
   the footer after buttons otherwise; mobile always uses the footer before
@@ -58,22 +58,23 @@ File-by-file ownership and coverage pointers: [README.md](README.md).
   Fork controls and loading need a finished turn.
 - The gutter belongs to `ConversationColumn`, not Virtua. EVERY row shares one left rail with no shell pad, INCLUDING
   the contents of an expanded region: expanding reveals rows, it never shifts
-  them right, and the chevron carries the hierarchy. Hover pills bleed instead
+  them right; the chevron carries the hierarchy. Hover pills bleed instead
   (footer `-mx-[7px]`, steps `-mx-1`). See `AssistantTurnAlignment.stories`.
 
 ## Conversation Outline
 
-- Build entries from `items`, never DOM. Reader position uses Virtua offsets and
-  selects the last round whose anchor is above the viewport top; it never enters
-  tick-list props. Paint one arithmetic active bar and sync `aria-current`
-  imperatively. Pointer magnification may update the memoized ticks; scrolling
-  may not. `buildConversationOutline` runs at token rate, so memoize per message
+- Build entries from `items`, never DOM. The rail mounts only once user rounds
+  reach `OUTLINE_MIN_USER_ROUNDS`. Reader position is the last round
+  anchored above the viewport top, resolved from Virtua offsets; it never
+  enters tick-list props. Paint one arithmetic active bar; sync `aria-current`
+  imperatively. Pointer magnification may update memoized ticks; scrolling may
+  not. `buildConversationOutline` runs at token rate, so memoize per message
   and clean only a bounded markdown prefix.
 - The rail is a page-level absolute portal outside the shrinking message area,
-  not a Virtua row or viewport child. Keep it page-centred as the composer grows
-  and pane-local in splits; never use `position: fixed` or composer height. Blend
-  magnification into resting widths so the pointer's tick stays longest, and
-  derive `RAIL_TRACK_WIDTH` from the peak.
+  not a Virtua row or viewport child. It stays page-centred as the composer
+  grows, pane-local in splits; never `position: fixed` or composer height. Blend
+  magnification into resting widths so the pointer's tick stays longest; derive
+  `RAIL_TRACK_WIDTH` from the peak.
 - Arrival intent belongs to `conversation-outline-arrival-intent.ts`. A directed,
   braking approach gets one short-lived delay bypass; uncertainty waits 200ms.
   Only waiting out that delay arms rapid browsing and its 2.5s close window;
@@ -82,15 +83,14 @@ File-by-file ownership and coverage pointers: [README.md](README.md).
   lifecycle, telemetry, and platform capabilities. The Storybook Lab records only
   explicit in-memory, rail-relative data; it never persists or uploads.
 - `scrollRowToTop` is the only row-index-to-scroll conversion: it adds
-  `leadingRowCount` and compensates viewport top padding so reads and writes use
-  one coordinate space. Outline jumps, search, and imperative scrolling use it;
-  do not call `vlistRef.scrollToIndex` elsewhere. Group toggles never scroll —
-  expansion reveals rows in place.
-- Far jumps start from estimated offsets. After scroll settles, reissue the same
-  jump until it is within `OUTLINE_JUMP_TOLERANCE_PX`, bounded by
+  `leadingRowCount` and compensates viewport top padding so reads and writes
+  share one coordinate space. Outline jumps, search, and imperative scrolling
+  use it; do not call `vlistRef.scrollToIndex` elsewhere. Group toggles never
+  scroll — expansion reveals rows in place.
+- Far jumps start from estimated offsets; after scroll settles, reissue the
+  same jump until within `OUTLINE_JUMP_TOLERANCE_PX`, bounded by
   `OUTLINE_JUMP_MAX_CORRECTIONS`. Wheel, touch, or key input cancels correction
-  immediately. Keep
-  `OUTLINE_ANCHOR_TOLERANCE_PX` greater than jump tolerance.
+  immediately. Keep `OUTLINE_ANCHOR_TOLERANCE_PX` above jump tolerance.
 - Follow-output suppression is owned by `pendingOutlineJumpRef`, never a render.
 
 ## Content Contracts

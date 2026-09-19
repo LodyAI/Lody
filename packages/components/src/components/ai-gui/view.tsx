@@ -85,8 +85,10 @@ import { ConversationOutlineRail } from './conversation-outline-rail';
 import { useLatestRef } from '@/hooks/use-latest-ref';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import {
+  OUTLINE_MIN_USER_ROUNDS,
   buildConversationOutline,
   buildOutlineAnchors,
+  countUserDrivenRounds,
   resolveActiveOutlineIndex,
   reuseConversationOutline,
   reuseOutlineAnchors,
@@ -1558,6 +1560,13 @@ export const SessionChatStreamView = forwardRef<
       previousOutlineRef.current = next;
       return next;
     }, [items]);
+    // Below the threshold a table of contents decorates rather than navigates,
+    // so the rail — and its arrival-intent listeners — stays unmounted until
+    // the conversation is long enough to need one.
+    const showOutlineRail = useMemo(
+      () => countUserDrivenRounds(outlineEntries) >= OUTLINE_MIN_USER_ROUNDS,
+      [outlineEntries]
+    );
     const previousAnchorsRef = useRef<readonly ConversationOutlineAnchor[] | undefined>(undefined);
     const outlineAnchors = useMemo(() => {
       // `virtualRows` is rebuilt per delta, so this runs at token rate too;
@@ -2028,7 +2037,7 @@ export const SessionChatStreamView = forwardRef<
                 takes the content element from that div's `firstElementChild`.
                 Touch has no hover, so mobile is excluded rather than shipped
                 without its preview card. */}
-            {isMobile ? null : (
+            {isMobile || !showOutlineRail ? null : (
               <ConversationOutlineRail
                 entries={outlineEntries}
                 activeIndex={activeOutlineIndex}
