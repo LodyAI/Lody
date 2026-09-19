@@ -235,12 +235,13 @@ function SettingsModalBody() {
             <X className="h-3 w-3" strokeWidth={2} aria-hidden="true" />
           </DialogClose>
           {/* `pr-10` keeps every right-pane control off the close button's
-              vertical column (10px inset + 20px control). */}
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col pt-5 pr-10">
+              vertical column (10px inset + 20px control). It sits inside the
+              scroll area so the scrollbar stays flush with the pane edge. */}
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col pt-5">
             {selfTitledTab ? (
               <DialogTitle className="sr-only">{t(activeTabConfig.labelKey)}</DialogTitle>
             ) : (
-              <header className="flex h-10 shrink-0 items-center pl-8">
+              <header className="flex h-10 shrink-0 items-center pr-10 pl-8">
                 <DialogTitle className="text-xl font-normal leading-none">
                   {t(activeTabConfig.labelKey)}
                 </DialogTitle>
@@ -248,14 +249,14 @@ function SettingsModalBody() {
             )}
             <div className="min-h-0 flex-1">
               {usesInternalScrolling ? (
-                <div className="h-full pb-6 pl-6 pt-6">
+                <div className="h-full pt-6 pr-10 pb-6 pl-6">
                   <div className="mx-auto h-full max-w-5xl">
                     <SettingsTabContent tabId={resolvedActiveTab} />
                   </div>
                 </div>
               ) : (
                 <ScrollArea className="h-full">
-                  <div className={cn('pb-6 pl-6', selfTitledTab ? 'pt-6' : 'pt-0')}>
+                  <div className={cn('pr-10 pb-6 pl-6', selfTitledTab ? 'pt-6' : 'pt-0')}>
                     <div className="mx-auto max-w-5xl">
                       <SettingsTabContent tabId={resolvedActiveTab} />
                     </div>

@@ -11,7 +11,8 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
 ## Layout and components
 
 - Desktop overlay close is `absolute` on the RIGHT pane only, equal `top`/`right`
-  inset, no close row. Right-pane `padding-right` keeps chrome off that column.
+  inset, no close row. Right-pane `padding-right` keeps chrome off that column;
+  apply it inside the scroll area so the scrollbar stays flush with the pane edge.
 
 - `share-management-setting.tsx` lists published static copies via the scoped cloud
   query. Ordinary members see their publications; admins see the workspace inventory.
