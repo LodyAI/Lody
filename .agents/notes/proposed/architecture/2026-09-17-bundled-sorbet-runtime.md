@@ -83,11 +83,12 @@ testing but does not by itself satisfy the production gates below:
   credential-safe manual-code prompt. This exercises the OAuth module and Lody authentication
   extension in the final bundle instead of only checking metadata. The check also calls
   `providers/list` and verifies that `session/new` reports `auth_required` instead of guessing a
-  Provider. It then writes a temporary dummy OpenAI credential and proves that the same live worker
-  reloads it, creates a Session with model and permission configuration, and closes the Session. No
-  model request is made. The check also asserts that the packaged filesystem worker and sandbox
-  helper tree exist. It does not yet execute a sandboxed Tool or count as cross-platform helper
-  validation.
+  Provider. On a prepared sandbox host, it then configures a synthetic local OpenAI Responses
+  Provider through the bundled control entry and drives the final ACP bundle through dynamic
+  thinking and permission configuration, parallel model-requested Read Tools, a model-requested Bash
+  Tool, durable load/replay and resume after worker `SIGKILL`, and fork-at-turn/list/delete. The
+  filesystem worker and sandbox helper are therefore exercised rather than only checked for
+  presence. This is deterministic Darwin evidence, not packaged Windows/Linux helper validation.
 - Packaged Electron workers keep `ELECTRON_RUN_AS_NODE` only for Sorbet's trusted internal
   filesystem process while the sandbox credential filter continues to hide other Host variables.
   Lody also passes the emitted filesystem worker's absolute path explicitly because Vite may move
@@ -331,20 +332,23 @@ durability model with a smaller boundary.
   packaged Windows SRT helper profile regression test and the Electron Node-mode worker regression.
 - On Darwin arm64 with Node 24.14.0, the complete Lody CLI release build passed and produced a 23 MB
   Sorbet runtime tree. The exact bundled entry passed ACP initialize, OAuth advertisement, execution
-  through the first Codex login-method prompt, `providers/list`, empty-store `auth_required`,
-  same-worker credential reload, `session/new`, and `session/close` checks. Focused Lody shared and
-  CLI tests passed 52 assertions, and CLI typecheck passed. The repository-wide `pnpm check` also
-  passed, including the full shared, components, CLI, Electron, i18n, and source-boundary suites.
+  through the first Codex login-method prompt, `providers/list`, empty-store `auth_required`, custom
+  Provider control, model-driven parallel Read and Bash execution, dynamic Session configuration,
+  worker-crash load/replay and resume, and fork-at-turn/list/delete checks. Provider Center component
+  tests cover Machine capability gating, direct Claude enablement, custom-model deduplication, and
+  keeping API keys on the dedicated secret RPC. The repository-wide `pnpm check` also passed,
+  including the full shared, components, CLI, Electron, i18n, and source-boundary suites.
 - Electron's published 39.5.1 runtime reports Node 22.22.0. A Darwin arm64 installer was built with
   the bundled-runtime smoke check, ad-hoc signed for local testing, and launched alongside the
   production Lody app. The installed `Lody OSS` process used its own user-data directory and
   single-instance lock while the production process remained live.
 - On Darwin arm64, the Electron 39 Helper running in Node mode passed Sorbet's native SRT boundary
   test against the exact bundled filesystem worker: protected reads stayed denied and Workspace
-  reads/writes completed. No real Provider login, paid model request, model-driven Tool execution
-  through the installed UI, Lody-integration external side effect, or packaged Windows/Linux launch
-  was exercised. Runtime-level `SIGKILL` and two-worker contention are verified; their packaged
-  behavior remains a release gate.
+  reads/writes completed. The CLI-bundle lifecycle smoke additionally exercises model-driven Read and
+  Bash Tools and replacement-worker recovery. No real Provider login, paid model request,
+  model-driven Tool execution through the installed UI, Lody-integration external side effect, or
+  packaged Windows/Linux launch was exercised. Runtime-level `SIGKILL` and two-worker contention are
+  verified; their packaged behavior remains a release gate.
 
 ## Implementation entry points
 

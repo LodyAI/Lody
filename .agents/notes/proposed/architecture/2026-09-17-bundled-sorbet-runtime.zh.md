@@ -74,11 +74,12 @@ Lody 版本锁定 Sorbet 源码，构建内置的 `sorbet-acp` 入口，并为�
 - release-build smoke check 会从空数据目录启动最终打包入口，完成 ACP 协商，验证 Codex 与
   Anthropic OAuth 声明，实际启动 Codex OAuth，并执行到 Pi 的 credential-safe 手动 code 提示。
   这样会执行最终 bundle 中的 OAuth module 与 Lody 认证扩展，而不只是检查 metadata。检查还会
-  调用 `providers/list`，并确认 `session/new` 返回 `auth_required`，不会擅自猜测 Provider。随后
-  检查会写入一份临时的虚拟 OpenAI 凭据，确认同一个存活 worker 能够重新读取凭据、创建带模型
-  与权限配置的 Session，再正常关闭 Session；整个过程不会发起模型请求。检查也会确认
-  filesystem worker 与 sandbox helper 目录确实存在，但尚未真正执行 sandbox Tool，因此不能算
-  跨平台 helper 验证已经完成。
+  调用 `providers/list`，并确认 `session/new` 返回 `auth_required`，不会擅自猜测 Provider。在具备
+  sandbox 条件的 Host 上，检查随后通过打包后的 control entry 配置本地虚拟 OpenAI Responses
+  Provider，并驱动最终 ACP bundle 完成动态 thinking 与 permission 配置、模型请求的并行 Read
+  Tool、模型请求的 Bash Tool、worker `SIGKILL` 后的 durable load/replay 与 resume，以及
+  fork-at-turn/list/delete。filesystem worker 与 sandbox helper 因而会被真实执行，而不只是检查
+  文件存在。这是确定性的 Darwin 证据，不代表 Windows/Linux 打包 helper 已完成验证。
 - Electron 打包环境只为 Sorbet 可信的内部 filesystem 进程保留 `ELECTRON_RUN_AS_NODE`，sandbox
   的 credential filter 仍会隐藏其他 Host 环境变量。Lody 还会显式传入构建产物中 filesystem
   worker 的绝对路径，因为 Vite 可能把引用 Sorbet 的模块移动到共享 chunk，其相对位置与 worker
@@ -291,18 +292,20 @@ Lody 已经具备每 Session 的进程监管，因此只要明确处理共享文
   Windows SRT helper profile 回归测试与 Electron Node-mode worker 回归测试。
 - 在 Darwin arm64、Node 24.14.0 环境下，完整 Lody CLI release build 通过，生成的 Sorbet
   runtime 目录约 23 MB。最终打包入口通过 ACP initialize、OAuth 声明、执行到 Codex 第一个登录
-  方式提示、`providers/list` 和空 credential store 的 `auth_required` 检查，也通过同一 worker
-  的 credential reload、`session/new` 与 `session/close` 检查。Lody shared/CLI 定向测试共 52 个
-  断言通过，CLI typecheck 通过。仓库级 `pnpm check` 也已通过，包括 shared、components、CLI、
-  Electron、i18n 和源码边界的完整检查。
+  方式提示、`providers/list`、空 credential store 的 `auth_required`、自定义 Provider control、
+  模型驱动的并行 Read 与 Bash 执行、动态 Session 配置、worker crash 后的 load/replay 与 resume，
+  以及 fork-at-turn/list/delete 检查。Provider Center 组件测试覆盖 Machine capability 门控、Claude
+  直接启用、自定义模型去重，以及 API key 只进入专用 secret RPC。仓库级 `pnpm check` 也已通过，
+  包括 shared、components、CLI、Electron、i18n 和源码边界的完整检查。
 - Electron 官方发布信息显示 39.5.1 使用 Node 22.22.0。Darwin arm64 installer 已连同内置
   runtime smoke check 构建完成，并使用 ad-hoc 签名进行本机测试；安装后的 `Lody OSS` 已在正式版
   Lody 仍运行时成功启动，使用独立的用户数据目录和单实例锁。
 - 在 Darwin arm64 上，Electron 39 Helper 以 Node mode 运行 Sorbet 原生 SRT 边界测试，并调用
-  构建产物中的同一份 filesystem worker；受保护路径仍被拒绝，Workspace 读写正常完成。本次没有
-  执行真实 Provider 登录、付费模型请求、从已安装 UI 由模型驱动的 Tool 执行、Lody 集成层外部
-  副作用或打包后的 Windows/Linux 启动；Sorbet Runtime 层的 `SIGKILL` 与双 worker 竞态已经验证，
-  打包后的相同行为仍是发布门槛。
+  构建产物中的同一份 filesystem worker；受保护路径仍被拒绝，Workspace 读写正常完成。CLI bundle
+  lifecycle smoke 还覆盖了模型驱动的 Read、Bash Tool 与 replacement-worker 恢复。本次没有执行
+  真实 Provider 登录、付费模型请求、从已安装 UI 由模型驱动的 Tool 执行、Lody 集成层外部副作用
+  或打包后的 Windows/Linux 启动；Sorbet Runtime 层的 `SIGKILL` 与双 worker 竞态已经验证，打包后
+  的相同行为仍是发布门槛。
 
 ## 实现入口
 

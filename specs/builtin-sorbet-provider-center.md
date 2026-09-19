@@ -95,12 +95,18 @@ manual code, and Lody keeps the authorization link visible beside that form.
 - `apps/cli/src/sorbet-provider-control-entry.ts`
 - `apps/cli/tests/machine-runtime-acp-authentication.test.ts`
 - `packages/components/src/components/settings/sorbet-provider-center.tsx`
+- `packages/components/tests/sorbet-provider-center.test.tsx`
 - `packages/components/src/components/settings/agent-config-dialog.tsx`
 - `apps/cli/scripts/check-sorbet-runtime.mjs`
 - `packages/sorbet/packages/node-agent/src/network/http-proxy.ts`
 - `packages/sorbet/packages/node-agent/tests/http-proxy.test.ts`
 
-Executed validation: shared, Streams RPC, CLI, and component type checks; Streams RPC tests; the
-bundled Sorbet lifecycle and Provider Center smoke checks, including execution through the first
-Codex OAuth login prompt; and the interactive authentication queue regression test. Cross-platform
-packaging, sandbox Tool execution, and full Lody Session recovery remain separate production gates.
+Executed validation: shared, Streams RPC, CLI, and component type checks; Streams RPC and Provider
+Center component tests; the bundled Sorbet lifecycle and Provider Center smoke checks, including
+execution through the first Codex OAuth login prompt; and the interactive authentication queue
+regression test. On Darwin, the final CLI bundle also completes model-driven parallel Read and Bash
+Tools against a synthetic local Provider, applies thinking and permission configuration, recovers a
+durable Session after worker `SIGKILL`, and forks from a committed turn into an independent Session.
+The synthetic Provider does not exercise a real OAuth account, paid model request, installed desktop
+UI, packaged Windows/Linux runtime, or the full external-side-effect failure matrix; those remain
+separate production gates.

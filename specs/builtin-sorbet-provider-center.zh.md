@@ -85,12 +85,16 @@ capability，Sorbet 才会用表单传递 `secret` 与 `manual_code` prompt。So
 - `apps/cli/src/sorbet-provider-control-entry.ts`
 - `apps/cli/tests/machine-runtime-acp-authentication.test.ts`
 - `packages/components/src/components/settings/sorbet-provider-center.tsx`
+- `packages/components/tests/sorbet-provider-center.test.tsx`
 - `packages/components/src/components/settings/agent-config-dialog.tsx`
 - `apps/cli/scripts/check-sorbet-runtime.mjs`
 - `packages/sorbet/packages/node-agent/src/network/http-proxy.ts`
 - `packages/sorbet/packages/node-agent/tests/http-proxy.test.ts`
 
-已执行验证：shared、Streams RPC、CLI 与 components type check；Streams RPC 测试；打包后的
-Sorbet lifecycle 与 Provider Center smoke check（包括实际执行到 Codex OAuth 第一个登录提示）；
-以及交互式认证队列回归测试。跨平台打包、sandbox Tool 执行以及完整的 Lody Session 恢复仍是
-独立的生产门槛。
+已执行验证：shared、Streams RPC、CLI 与 components type check；Streams RPC 与 Provider
+Center 组件测试；打包后的 Sorbet lifecycle 与 Provider Center smoke check（包括实际执行到
+Codex OAuth 第一个登录提示）；以及交互式认证队列回归测试。在 Darwin 上，最终 CLI bundle
+还会连接本地虚拟 Provider，完成模型驱动的并行 Read 与 Bash Tool，应用 thinking 与 permission
+配置，在 worker `SIGKILL` 后恢复 durable Session，并从已提交 turn 创建独立 fork。虚拟 Provider
+不会覆盖真实 OAuth 账户、付费模型请求、已安装桌面 UI、打包后的 Windows/Linux runtime 或完整的
+外部副作用故障矩阵；这些仍是独立的生产门槛。
