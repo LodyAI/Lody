@@ -92,6 +92,12 @@ describe('LoroSidebar pinned section', () => {
         document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')
       ).find((item) => item.textContent?.includes('Second workspace'));
       expect(target).toBeDefined();
+      // The modifier-click hint is not a standing line; it explains itself on
+      // the other workspace's row.
+      expect(document.body.textContent).not.toContain('click to open in a new window');
+      flushSync(() => {
+        target?.focus();
+      });
       expect(document.body.textContent).toContain('click to open in a new window');
       flushSync(() => {
         target?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2 }));

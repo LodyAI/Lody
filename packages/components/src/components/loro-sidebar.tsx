@@ -977,71 +977,74 @@ export const LoroSidebar = memo(function LoroSidebar({
                 value={currentWorkspaceId}
                 onValueChange={(value) => onWorkspaceSelected?.(value)}
               >
-                {workspaces.map((ws) => {
-                  const workspaceSlug = ws.slug;
-                  const row = (
-                    <DropdownMenuRadioItem
-                      key={ws.id}
-                      value={ws.id}
-                      indicator="check"
-                      className="gap-2"
-                      onClickCapture={(event) => {
-                        if (!workspaceSlug || !isNewWindowClick(event)) return;
-                        if (openDesktopWindow(undefined, workspaceSlug)) {
-                          event.preventDefault();
-                          event.stopPropagation();
-                        }
-                      }}
-                    >
-                      <WorkspaceAvatar
-                        workspace={{ name: ws.name, logo: ws.logo }}
-                        className="h-5 w-5 shrink-0 text-[10px]"
-                      />
-                      <span className="min-w-0 truncate">{ws.name}</span>
-                      {ws.planTier ? (
-                        <Badge
-                          variant="secondary"
-                          className="ml-auto shrink-0 border-transparent bg-foreground/[0.06] px-1.5 py-0 text-[10px] font-normal text-muted-foreground"
-                        >
-                          {ws.planTier === 'enterprise'
-                            ? mergedLabels.planEnterprise
-                            : mergedLabels.planPlus}
-                        </Badge>
-                      ) : null}
-                    </DropdownMenuRadioItem>
-                  );
-
-                  if (!isElectronRenderer() || !workspaceSlug) return row;
-
-                  // Other workspaces explain the modifier-click on hover, beside the row.
-                  const rowWithHint =
-                    ws.id === currentWorkspaceId ? (
-                      row
-                    ) : (
-                      <Tooltip>
-                        <TooltipTrigger asChild>{row}</TooltipTrigger>
-                        <TooltipContent side="right" sideOffset={8}>
-                          {newWindowHint}
-                        </TooltipContent>
-                      </Tooltip>
+                {/* Local provider: hosts may render the sidebar without a root one. */}
+                <TooltipProvider delayDuration={400}>
+                  {workspaces.map((ws) => {
+                    const workspaceSlug = ws.slug;
+                    const row = (
+                      <DropdownMenuRadioItem
+                        key={ws.id}
+                        value={ws.id}
+                        indicator="check"
+                        className="gap-2"
+                        onClickCapture={(event) => {
+                          if (!workspaceSlug || !isNewWindowClick(event)) return;
+                          if (openDesktopWindow(undefined, workspaceSlug)) {
+                            event.preventDefault();
+                            event.stopPropagation();
+                          }
+                        }}
+                      >
+                        <WorkspaceAvatar
+                          workspace={{ name: ws.name, logo: ws.logo }}
+                          className="h-5 w-5 shrink-0 text-[10px]"
+                        />
+                        <span className="min-w-0 truncate">{ws.name}</span>
+                        {ws.planTier ? (
+                          <Badge
+                            variant="secondary"
+                            className="ml-auto shrink-0 border-transparent bg-foreground/[0.06] px-1.5 py-0 text-[10px] font-normal text-muted-foreground"
+                          >
+                            {ws.planTier === 'enterprise'
+                              ? mergedLabels.planEnterprise
+                              : mergedLabels.planPlus}
+                          </Badge>
+                        ) : null}
+                      </DropdownMenuRadioItem>
                     );
 
-                  return (
-                    <ContextMenu key={ws.id}>
-                      <ContextMenuTrigger asChild>{rowWithHint}</ContextMenuTrigger>
-                      <ContextMenuContent>
-                        <ContextMenuItem
-                          onSelect={() => {
-                            openDesktopWindow(undefined, workspaceSlug);
-                          }}
-                        >
-                          <AppWindow />
-                          {t('workspace.openInNewWindow')}
-                        </ContextMenuItem>
-                      </ContextMenuContent>
-                    </ContextMenu>
-                  );
-                })}
+                    if (!isElectronRenderer() || !workspaceSlug) return row;
+
+                    const contextTrigger = <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>;
+                    return (
+                      <ContextMenu key={ws.id}>
+                        {ws.id === currentWorkspaceId ? (
+                          contextTrigger
+                        ) : (
+                          // Other workspaces explain the modifier-click on hover,
+                          // beside the row. Tooltip and ContextMenu roots render no
+                          // DOM, so both triggers' props land on the row element.
+                          <Tooltip>
+                            <TooltipTrigger asChild>{contextTrigger}</TooltipTrigger>
+                            <TooltipContent side="right" sideOffset={8}>
+                              {newWindowHint}
+                            </TooltipContent>
+                          </Tooltip>
+                        )}
+                        <ContextMenuContent>
+                          <ContextMenuItem
+                            onSelect={() => {
+                              openDesktopWindow(undefined, workspaceSlug);
+                            }}
+                          >
+                            <AppWindow />
+                            {t('workspace.openInNewWindow')}
+                          </ContextMenuItem>
+                        </ContextMenuContent>
+                      </ContextMenu>
+                    );
+                  })}
+                </TooltipProvider>
               </DropdownMenuRadioGroup>
               <DropdownMenuSeparator />
             </>
