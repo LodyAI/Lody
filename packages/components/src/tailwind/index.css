@@ -324,9 +324,10 @@ pre,
 
   .markdown-renderer [data-streamdown='code-block-body'] code {
     font-family: var(--font-mono);
-    /* Multi-line code reads at the conversation body size (1em of the markdown
-       wrapper, i.e. `--ui-font-size`), not a shrunken 0.85em. */
-    font-size: 1em;
+    /* One step below the conversation body (0.9em of `--ui-font-size`, 12.6px
+       at the default 14px): distinct from prose without the 0.85em cramp, and
+       it scales with the user's font-size setting. */
+    font-size: 0.9em;
     line-height: 1.4;
     font-variant-ligatures: contextual;
   }
