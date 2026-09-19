@@ -8,7 +8,6 @@ import {
   memo,
   forwardRef,
   useImperativeHandle,
-  type ReactNode,
   type MutableRefObject,
 } from 'react';
 import { useAtomValue } from 'jotai';
@@ -441,7 +440,6 @@ export interface SessionChatInputAreaProps {
     limit: number;
     onUpgrade?: () => void;
   } | null;
-  queueDisplay?: ReactNode;
   /** Per-turn MCP selection, rendered inside the composer's "+" menu. */
   mcp?: AttachmentAddMenuMcp;
   /** One-shot guard for a viewport resize caused by the composer auto-growing. */
@@ -543,7 +541,6 @@ export const SessionChatInputArea = memo(
       availableCommands,
       commandsEnabled = true,
       freeTurnLimitNotice,
-      queueDisplay,
       mcp,
       skipNextViewportResizeAutoScrollRef,
       onModeChange,
@@ -2642,7 +2639,6 @@ export const SessionChatInputArea = memo(
         ) : null}
         <ConversationColumn>
           <div aria-hidden="true" className="h-1" />
-          {queueDisplay ? <div className="pb-2">{queueDisplay}</div> : null}
           {externalHistorySyncNode}
           {freeTurnLimitNoticeNode}
           {attachmentAddEnabled ? (

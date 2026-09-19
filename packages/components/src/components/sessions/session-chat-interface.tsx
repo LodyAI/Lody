@@ -6177,6 +6177,31 @@ export const SessionChatInterface = memo(
                     // Mobile keeps the bar above the session drawer's z-30
                     // edge-back strip so its leading chip stays tappable.
                     protectFromEdgeBackZone={isMobile}
+                    // Queued turns stack on the bar (or on the composer when the
+                    // bar is empty). Hidden with the composer: a pending
+                    // permission bypasses the queue, as does share selection.
+                    queue={
+                      messageQueue.length > 0 &&
+                      !shouldReplaceComposerWithPermission &&
+                      !shareSelection.active ? (
+                        <MessageQueueDisplay
+                          sessionId={session.id}
+                          items={messageQueue}
+                          onRemove={handleRemoveQueueItem}
+                          onReorder={handleReorderQueueItem}
+                          onEditStart={handleStartQueueItemEdit}
+                          onEditCancel={handleCancelQueueItemEdit}
+                          onEditSave={handleSaveQueueItemEdit}
+                          onSteer={handleSteerQueuedMessage}
+                          showSteerAction={
+                            isSessionActive &&
+                            !!activeAssistantTurnId &&
+                            !isExternalHistoryRefreshing
+                          }
+                          nativeSteerAvailable={shouldUseNativeQueueSteer}
+                        />
+                      ) : undefined
+                    }
                   />
 
                   {/* Input area - isolated component to prevent full re-renders on typing.
@@ -6218,26 +6243,6 @@ export const SessionChatInterface = memo(
                         availableCommands={availableCommands}
                         commandsEnabled={isVisible}
                         freeTurnLimitNotice={freeSessionTurnNotice}
-                        queueDisplay={
-                          messageQueue.length > 0 ? (
-                            <MessageQueueDisplay
-                              sessionId={session.id}
-                              items={messageQueue}
-                              onRemove={handleRemoveQueueItem}
-                              onReorder={handleReorderQueueItem}
-                              onEditStart={handleStartQueueItemEdit}
-                              onEditCancel={handleCancelQueueItemEdit}
-                              onEditSave={handleSaveQueueItemEdit}
-                              onSteer={handleSteerQueuedMessage}
-                              showSteerAction={
-                                isSessionActive &&
-                                !!activeAssistantTurnId &&
-                                !isExternalHistoryRefreshing
-                              }
-                              nativeSteerAvailable={shouldUseNativeQueueSteer}
-                            />
-                          ) : null
-                        }
                         mcp={mcpSelection.menu}
                         skipNextViewportResizeAutoScrollRef={skipNextViewportResizeAutoScrollRef}
                         onModeChange={handleModeChange}
