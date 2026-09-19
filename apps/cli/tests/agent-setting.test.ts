@@ -94,7 +94,7 @@ describe('resolveBuiltinACPSetting', () => {
       BUILTIN_GROK_CAPABILITY_SOURCE_VERSION
     );
     expect(getAcpCapabilitySourceVersion({ cliType: 'builtin', agentType: 'sorbet' })).toBe(
-      'builtin-sorbet:0.0.0-lody.93e7931'
+      'builtin-sorbet:0.0.0-lody.4e17a0d'
     );
     expect(
       getAcpCapabilitySourceVersion({
@@ -240,7 +240,7 @@ describe('resolveBuiltinACPSetting', () => {
     expect(launch.env?.SORBET_FILESYSTEM_WORKER_PATH).toMatch(
       /sorbet[/\\]dist[/\\]filesystem-worker\.js$/
     );
-    expect(launch.capabilitySourceVersion).toBe('builtin-sorbet:0.0.0-lody.93e7931');
+    expect(launch.capabilitySourceVersion).toBe('builtin-sorbet:0.0.0-lody.4e17a0d');
   });
 
   it('launches an overridden Kimi executable in ACP login mode', async () => {

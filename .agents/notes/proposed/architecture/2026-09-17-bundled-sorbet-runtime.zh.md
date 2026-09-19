@@ -40,7 +40,7 @@ Lody 版本锁定 Sorbet 源码，构建内置的 `sorbet-acp` 入口，并为�
 - 构建所需 workspace 包后，Sorbet ACP 兼容与一致性测试全部通过：5 个文件、36 个测试；
   单独生成的兼容矩阵测试也通过。
 
-当前原型锁定 Sorbet `93e7931a1b096c07a3097bbe0aa2c81746f9c49d`。该版本也包含下文所述
+当前原型锁定 Sorbet `4e17a0d045fa24374794175ef90b90c523e3286c`。该版本也包含下文所述
 的跨进程 Journal writer lease 与 credential mutation lease，并把打包的 Windows SRT helper
 路径显式传给 sandbox readiness 检查。
 
