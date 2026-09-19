@@ -332,6 +332,53 @@ describe('agent run config selection', () => {
     ).toThrow(/Invalid reasoning effort for model gpt-5\.4-mini.*Allowed values: low, medium/s);
   });
 
+  it("uses the target model's published config id and rejects models with no reasoning control", () => {
+    const capability: AcpCapabilityCacheEntry = {
+      ...codexCapability(),
+      configOptions: codexCapability().configOptions?.filter(
+        (option) => option.category !== 'thought_level'
+      ),
+      modelConfigOptions: {
+        'gpt-5.6-sol': [
+          {
+            id: 'thought_level',
+            name: 'Thinking level',
+            category: 'thought_level',
+            type: 'select',
+            currentValue: 'high',
+            options: [
+              { value: 'high', name: 'High' },
+              { value: 'max', name: 'Max' },
+            ],
+          },
+        ],
+        'gpt-5.4-mini': [],
+      },
+    };
+
+    expect(
+      resolveAgentRunConfigSelection({ modelId: 'gpt-5.6-sol', reasoningEffort: 'max' }, capability)
+    ).toEqual({
+      modelId: 'gpt-5.6-sol',
+      configOptionValues: { thought_level: 'max' },
+      validatedConfigIds: ['thought_level'],
+    });
+    expect(() =>
+      resolveAgentRunConfigSelection(
+        { modelId: 'gpt-5.4-mini', reasoningEffort: 'high' },
+        capability
+      )
+    ).toThrow(/Invalid reasoning effort for model gpt-5\.4-mini/);
+    expect(summarizeAgentRunConfigCapabilities(capability).models).toEqual([
+      {
+        id: 'gpt-5.6-sol',
+        name: 'GPT-5.6-Sol',
+        reasoningEffortValues: ['high', 'max'],
+      },
+      { id: 'gpt-5.4-mini', name: 'GPT-5.4-Mini' },
+    ]);
+  });
+
   it('flags selections it cannot verify offline instead of pretending they hold', () => {
     // No per-model breakdown: a model switch makes effort and fast unverifiable.
     const resolved = resolveAgentRunConfigSelection(

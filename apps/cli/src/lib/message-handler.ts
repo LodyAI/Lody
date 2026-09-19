@@ -8085,6 +8085,7 @@ export class MessageHandler {
     modes: NonNullable<MachineAcpCapabilitiesRefreshResponse['modes']>;
     models: NonNullable<MachineAcpCapabilitiesRefreshResponse['models']>;
     configOptions?: AcpConfigOptionSummary[];
+    modelConfigOptions?: Record<string, AcpConfigOptionSummary[]>;
     availableCommands?: NonNullable<MachineAcpCapabilitiesRefreshResponse['availableCommands']>;
     sessionFork: boolean;
     acknowledgedSteer: boolean;

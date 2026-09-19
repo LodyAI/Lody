@@ -47,7 +47,7 @@ Investigation baselines:
 - Sorbet ACP compatibility and conformance were tested after building the required workspace
   packages: 5 files and 36 tests passed. The generated compatibility matrix test also passed.
 
-Prototype integration pin: Sorbet `4e17a0d045fa24374794175ef90b90c523e3286c`. This revision also
+Prototype integration pin: Sorbet `ce5eb2f08a3041a30da9570574cebfa0fdef2c55`. This revision also
 contains the cross-process Journal writer lease and credential mutation lease described below, and
 passes the packaged Windows SRT helper path explicitly into sandbox readiness checks.
 
@@ -229,9 +229,12 @@ The unsupported compatibility rows do not all represent missing Lody product fea
   the Lody `rateLimits` extension is a production gate for that Provider. Lody must not synthesize
   quota data when the Provider has none.
 
-Sorbet publishes dynamic model, thinking-level, and permission-mode options. Lody already accepts
-config updates, but the integration must verify a model switch whose thinking-level ladder differs
-from the initially selected model; the initial capability probe alone is not enough evidence.
+Sorbet publishes the current Session's dynamic model, thinking-level, and permission-mode options
+through standard ACP. It additionally publishes complete model-dependent descriptors in
+`_meta.lody.modelConfigOptions`, keyed by exact model selector. Lody caches that table and replaces
+model-managed controls whenever the selected model changes, so it does not apply the initial probe
+model's thinking-level ladder to every model. Explicit empty entries remove those controls for
+models without configurable reasoning.
 
 ## Packaging and launch
 

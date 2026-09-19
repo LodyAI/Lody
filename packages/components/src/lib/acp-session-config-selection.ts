@@ -1,5 +1,6 @@
 import type { AcpCapabilityAuthority, AcpConfigOptionValue } from '@lody/shared';
 import {
+  applyModelConfigOptionSelectors,
   isConfigOptionValueValid,
   isThoughtLevelSelector,
   normalizeReasoningEffortSelectors,
@@ -166,6 +167,7 @@ export type AcpSessionSelectorOptionsInput = {
   defaultModeId: string | null;
   defaultModelId: string | null;
   configOptionSelectors: AcpConfigOptionSelector[];
+  modelConfigOptionSelectors?: Record<string, AcpConfigOptionSelector[]>;
   /** Per-model reasoning-effort ladders when the capability source publishes them. */
   modelReasoningEfforts: Record<string, string[]> | undefined;
 };
@@ -240,6 +242,7 @@ export const resolveAcpSessionConfigSelection = (
     defaultModeId,
     defaultModelId,
     configOptionSelectors,
+    modelConfigOptionSelectors,
     modelReasoningEfforts,
   } = selectorOptions;
 
@@ -259,7 +262,11 @@ export const resolveAcpSessionConfigSelection = (
     defaultModelId,
     capabilityAuthority
   );
-  let selectors = configOptionSelectors;
+  let selectors = applyModelConfigOptionSelectors(
+    configOptionSelectors,
+    modelConfigOptionSelectors,
+    selectedModelId
+  );
   if (target) {
     selectors = normalizeReasoningEffortSelectors(selectors, {
       cliType: target.cliType,

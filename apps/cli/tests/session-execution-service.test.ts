@@ -3179,6 +3179,8 @@ describe('SessionExecutionService', () => {
             options: [{ value: 'high', name: 'High' }],
           },
         ],
+        // Complete model-dependent config descriptors: absent for this fixture.
+        undefined,
         [{ name: 'review', description: 'Review changes' }],
         false,
         expect.any(String),
@@ -7782,6 +7784,7 @@ describe('SessionExecutionService', () => {
       [],
       capability.models,
       capability.configOptions,
+      capability.modelConfigOptions,
       [{ name: 'review', description: 'Review changes' }],
       false,
       'registry:deepseek:unknown',

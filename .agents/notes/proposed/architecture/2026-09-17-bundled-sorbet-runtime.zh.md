@@ -41,7 +41,7 @@ Lody 版本锁定 Sorbet 源码，构建内置的 `sorbet-acp` 入口，并为�
 - 构建所需 workspace 包后，Sorbet ACP 兼容与一致性测试全部通过：5 个文件、36 个测试；
   单独生成的兼容矩阵测试也通过。
 
-当前原型锁定 Sorbet `4e17a0d045fa24374794175ef90b90c523e3286c`。该版本也包含下文所述
+当前原型锁定 Sorbet `ce5eb2f08a3041a30da9570574cebfa0fdef2c55`。该版本也包含下文所述
 的跨进程 Journal writer lease 与 credential mutation lease，并把打包的 Windows SRT helper
 路径显式传给 sandbox readiness 检查。
 
@@ -202,9 +202,10 @@ Sorbet 已经支持 Lody 所需的以下 ACP 行为：
 - Provider rate-limit window 仍然缺失。如果某个内置 Sorbet Provider 能提供额度数据，则该
   Provider 上线前必须实现 Lody `rateLimits` 扩展；Provider 本来没有数据时，Lody 也不能伪造。
 
-Sorbet 会动态发布 model、thinking level 和 permission mode。Lody 已能接收 config update，
-但接入测试必须覆盖切换到 thinking level 列表与初始模型不同的模型；只看初次 capability probe
-不足以证明这条链路正确。
+Sorbet 通过标准 ACP 动态发布当前 Session 的 model、thinking level 和 permission mode，
+并在 `_meta.lody.modelConfigOptions` 中按精确 model selector 发布完整的模型相关配置描述。
+Lody 会缓存这张表，在模型变化时替换模型管理的控件，因此不会把初次探测模型的 thinking
+level 列表套用到所有模型；显式空数组会移除不支持可配置 reasoning 的模型控件。
 
 ## 打包与启动
 

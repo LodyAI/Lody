@@ -102,7 +102,7 @@ export type AgentRunConfigResolution = {
 
 type RunConfigCapabilitySource = Pick<
   AcpCapabilityCacheEntry,
-  'modes' | 'models' | 'configOptions' | 'modelReasoningEfforts'
+  'modes' | 'models' | 'configOptions' | 'modelConfigOptions' | 'modelReasoningEfforts'
 >;
 
 /**
@@ -183,6 +183,16 @@ const findReasoningEffortOption = (
     (option) => option.type === 'select' && isAcpThoughtLevelConfigOption(option)
   );
 
+const findModelReasoningEffortOption = (
+  capability: RunConfigCapabilitySource | undefined,
+  modelId: string | undefined
+): AcpConfigOptionSummary | undefined =>
+  modelId === undefined
+    ? undefined
+    : capability?.modelConfigOptions?.[modelId]?.find(
+        (option) => option.type === 'select' && isAcpThoughtLevelConfigOption(option)
+      );
+
 const findPlanModeOption = (
   capability: RunConfigCapabilitySource | undefined
 ): AcpConfigOptionSummary | undefined =>
@@ -259,14 +269,24 @@ export const summarizeAgentRunConfigCapabilities = (
 ): AgentRunConfigCapabilities => {
   const perModelEfforts = capability?.modelReasoningEfforts;
   const measuredForModelId = findCurrentModelId(capability);
+  const measuredModelOptions = measuredForModelId
+    ? capability?.modelConfigOptions?.[measuredForModelId]
+    : undefined;
+  const measuredReasoningOption =
+    measuredModelOptions !== undefined
+      ? findModelReasoningEffortOption(capability, measuredForModelId)
+      : findReasoningEffortOption(capability);
   return {
     models: listModels(capability).map((model) => {
-      const efforts = perModelEfforts?.[model.id];
+      const modelOptions = capability?.modelConfigOptions?.[model.id];
+      const modelOption = findModelReasoningEffortOption(capability, model.id);
+      const efforts =
+        modelOptions !== undefined
+          ? modelOption?.options.map((option) => option.value)
+          : perModelEfforts?.[model.id];
       return { ...model, ...(efforts ? { reasoningEffortValues: efforts } : {}) };
     }),
-    reasoningEffortValues: (findReasoningEffortOption(capability)?.options ?? []).map(
-      (value) => value.value
-    ),
+    reasoningEffortValues: (measuredReasoningOption?.options ?? []).map((value) => value.value),
     ...(measuredForModelId ? { measuredForModelId } : {}),
     fastMode: findFastModeOption(capability) !== undefined,
     planMode:
@@ -285,7 +305,8 @@ export const summarizeAgentRunConfigCapabilities = (
  * every time the model changes, and `configOptions` only ever describes the
  * model that was current at probe time. So effort is validated against the
  * model actually being selected whenever the agent published that breakdown
- * (`modelReasoningEfforts`); the ids validated that way come back in
+ * (`modelConfigOptions`, or the compatibility `modelReasoningEfforts` map); the
+ * ids validated that way come back in
  * `validatedConfigIds` for the caller to exclude from its snapshot check.
  * What cannot be checked offline is reported in `unverifiedSelections` and
  * dispatched as requested — the runtime surfaces a visible warning if the agent
@@ -313,15 +334,21 @@ export const resolveAgentRunConfigSelection = (
   let modeId: string | undefined;
 
   if (selection.reasoningEffort !== undefined) {
-    const option = findReasoningEffortOption(capability);
-    const targetModelEfforts = targetModelId
-      ? capability.modelReasoningEfforts?.[targetModelId]
-      : undefined;
+    const modelOptions = targetModelId ? capability.modelConfigOptions?.[targetModelId] : undefined;
+    const modelOption = findModelReasoningEffortOption(capability, targetModelId);
+    const option = modelOption ?? findReasoningEffortOption(capability);
+    const targetModelEfforts = modelOption
+      ? modelOption.options.map((value) => value.value)
+      : modelOptions !== undefined
+        ? []
+        : targetModelId
+          ? capability.modelReasoningEfforts?.[targetModelId]
+          : undefined;
     if (!option && !targetModelEfforts) {
       throw new Error('The selected agent does not offer a reasoning effort option.');
     }
     const configId = option?.id ?? ACP_REASONING_EFFORT_CONFIG_ID;
-    if (targetModelEfforts) {
+    if (targetModelEfforts !== undefined) {
       if (!targetModelEfforts.includes(selection.reasoningEffort)) {
         throw new Error(
           `Invalid reasoning effort for model ${targetModelId}: ${selection.reasoningEffort}. Allowed values: ${targetModelEfforts.join(', ')}.`

@@ -352,7 +352,9 @@ export type AcpCommandSummary = {
 // Codex-only carry a bogus ladder for every agent that spells other variants
 // with the same brackets — a Claude probe stored `{ opus: ['1m'] }` — and the
 // per-model effort picker would rebuild that model's ladder from it.
-export const ACP_CAPABILITY_CACHE_VERSION = 8;
+// 9: cache model-dependent config descriptors so switching models does not
+// reuse the probe model's controls or guess an agent-specific config id.
+export const ACP_CAPABILITY_CACHE_VERSION = 9;
 
 export type AcpCapabilityAuthority = 'unavailable' | 'provisional' | 'authoritative';
 
@@ -369,6 +371,8 @@ export type AcpCapabilityCacheEntry = {
   models: ModelInfo[];
   /** Session config options returned by the agent (supersedes modes/models when present). */
   configOptions?: AcpConfigOptionSummary[];
+  /** Model-dependent config options, keyed by the exact model selector value. */
+  modelConfigOptions?: Record<string, AcpConfigOptionSummary[]>;
   /**
    * Reasoning-effort values accepted per model id.
    *
@@ -521,6 +525,8 @@ export type StaticBuiltinAcpCapabilities = {
   modes: Array<{ id: string; name: string; description?: string }>;
   models: Array<{ modelId: string; name: string; description?: string }>;
   configOptions: AcpConfigOptionSummary[];
+  /** Model-dependent config options, keyed by the exact model selector value. */
+  modelConfigOptions?: Record<string, AcpConfigOptionSummary[]>;
   /** Per-model reasoning-effort ladders, mirroring the cached runtime map. */
   modelReasoningEfforts?: Record<string, string[]>;
 };
@@ -1037,6 +1043,16 @@ const cloneStaticCapabilities = (
   modes: capabilities.modes.map((mode) => ({ ...mode })),
   models: capabilities.models.map((model) => ({ ...model })),
   configOptions: capabilities.configOptions.map(cloneConfigOption),
+  ...(capabilities.modelConfigOptions
+    ? {
+        modelConfigOptions: Object.fromEntries(
+          Object.entries(capabilities.modelConfigOptions).map(([modelId, options]) => [
+            modelId,
+            options.map(cloneConfigOption),
+          ])
+        ),
+      }
+    : {}),
   ...(capabilities.modelReasoningEfforts
     ? {
         modelReasoningEfforts: Object.fromEntries(

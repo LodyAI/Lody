@@ -185,6 +185,8 @@ export type AcpSelectorOptions = {
   defaultModelId: string | null;
   /** Dynamic config option selectors for agents with configOptions (e.g. thought_level). */
   configOptionSelectors: AcpConfigOptionSelector[];
+  /** Prebuilt model-dependent selectors, keyed by the exact model selector value. */
+  modelConfigOptionSelectors?: Record<string, AcpConfigOptionSelector[]>;
   /** Per-model reasoning-effort ladders when the capability source publishes them. */
   modelReasoningEfforts: Record<string, string[]> | undefined;
 };
@@ -208,6 +210,7 @@ export type AcpSelectorTarget = {
 type ResolvedConfigOptions = {
   authority: AcpCapabilityAuthority;
   configOptions?: AcpConfigOptionSummary[];
+  modelConfigOptions?: Record<string, AcpConfigOptionSummary[]>;
   modelReasoningEfforts: Record<string, string[]> | undefined;
 };
 
@@ -230,7 +233,12 @@ const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions
       const authority = getAcpCapabilityCacheEntryAuthority(capability, target.runtimeOverrides);
       const modelReasoningEfforts = capability.modelReasoningEfforts;
       if (capability.configOptions?.length) {
-        return { authority, configOptions: capability.configOptions, modelReasoningEfforts };
+        return {
+          authority,
+          configOptions: capability.configOptions,
+          modelConfigOptions: capability.modelConfigOptions,
+          modelReasoningEfforts,
+        };
       }
       // Fallback: synthesize configOptions from legacy modes/models.
       const synthesized: AcpConfigOptionSummary[] = [];
@@ -264,6 +272,7 @@ const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions
       return {
         authority,
         configOptions: synthesized.length > 0 ? synthesized : undefined,
+        modelConfigOptions: capability.modelConfigOptions,
         modelReasoningEfforts,
       };
     }
@@ -278,6 +287,7 @@ const resolveConfigOptions = (target?: AcpSelectorTarget): ResolvedConfigOptions
     ? {
         authority: 'provisional',
         configOptions: staticCapabilities.configOptions,
+        modelConfigOptions: staticCapabilities.modelConfigOptions,
         modelReasoningEfforts: staticCapabilities.modelReasoningEfforts,
       }
     : { authority: 'unavailable', modelReasoningEfforts: undefined };
@@ -365,6 +375,75 @@ const resolveSelectedModelId = (
     (option) => option.category === 'model' && option.type === 'select'
   );
   return typeof modelOption?.currentValue === 'string' ? modelOption.currentValue : undefined;
+};
+
+/**
+ * Replaces the probe model's model-dependent controls with the controls for the
+ * selected model. The union of published ids/categories identifies managed
+ * controls, so an empty entry can explicitly remove a control.
+ */
+export const applyModelConfigOptions = (
+  configOptions: AcpConfigOptionSummary[] | undefined,
+  modelConfigOptions: Record<string, AcpConfigOptionSummary[]> | undefined,
+  selectedModelId: string | undefined
+): AcpConfigOptionSummary[] | undefined => {
+  if (!configOptions || !modelConfigOptions || !selectedModelId) return configOptions;
+  const selected = modelConfigOptions[selectedModelId];
+  if (selected === undefined) return configOptions;
+  const published = Object.values(modelConfigOptions).flat();
+  const managedIds = new Set(published.map((option) => option.id));
+  const managedCategories = new Set(
+    published.flatMap((option) => (option.category ? [option.category] : []))
+  );
+  const isManaged = (option: AcpConfigOptionSummary): boolean =>
+    managedIds.has(option.id) ||
+    (option.category !== undefined && managedCategories.has(option.category));
+  const result: AcpConfigOptionSummary[] = [];
+  let inserted = false;
+  for (const option of configOptions) {
+    if (!isManaged(option)) {
+      result.push(option);
+      continue;
+    }
+    if (!inserted) {
+      result.push(...selected);
+      inserted = true;
+    }
+  }
+  if (!inserted) result.push(...selected);
+  return result;
+};
+
+export const applyModelConfigOptionSelectors = (
+  selectors: AcpConfigOptionSelector[],
+  modelSelectors: Record<string, AcpConfigOptionSelector[]> | undefined,
+  selectedModelId: string | null | undefined
+): AcpConfigOptionSelector[] => {
+  if (!modelSelectors || !selectedModelId) return selectors;
+  const selected = modelSelectors[selectedModelId];
+  if (selected === undefined) return selectors;
+  const published = Object.values(modelSelectors).flat();
+  const managedIds = new Set(published.map((selector) => selector.configId));
+  const managedCategories = new Set(
+    published.flatMap((selector) => (selector.category ? [selector.category] : []))
+  );
+  const isManaged = (selector: AcpConfigOptionSelector): boolean =>
+    managedIds.has(selector.configId) ||
+    (selector.category !== undefined && managedCategories.has(selector.category));
+  const result: AcpConfigOptionSelector[] = [];
+  let inserted = false;
+  for (const selector of selectors) {
+    if (!isManaged(selector)) {
+      result.push(selector);
+      continue;
+    }
+    if (!inserted) {
+      result.push(...selected);
+      inserted = true;
+    }
+  }
+  if (!inserted) result.push(...selected);
+  return result;
 };
 
 const normalizeCodexReasoningEffortSelectors = (
@@ -577,8 +656,15 @@ export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelector
   const {
     authority: capabilityAuthority,
     configOptions,
+    modelConfigOptions,
     modelReasoningEfforts,
   } = resolveConfigOptions(target);
+  const selectedModelId = target ? resolveSelectedModelId(configOptions, target) : undefined;
+  const effectiveConfigOptions = applyModelConfigOptions(
+    configOptions,
+    modelConfigOptions,
+    selectedModelId
+  );
   // Custom providers are arbitrary ACP agents just like registry agents: their
   // modes/models come from the capability probe (configOptions), not the
   // builtin tables.
@@ -599,12 +685,12 @@ export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelector
   );
 
   const allSelectors = normalizeReasoningEffortSelectors(
-    buildConfigOptionSelectors(configOptions, target, capabilityAuthority),
+    buildConfigOptionSelectors(effectiveConfigOptions, target, capabilityAuthority),
     {
       cliType: target?.cliType,
       agentType: target?.agentType,
       modelReasoningEfforts,
-      selectedModelId: target ? resolveSelectedModelId(configOptions, target) : undefined,
+      selectedModelId,
     }
   );
   const configOptionSelectors = allSelectors.filter((selector) => {
@@ -617,6 +703,14 @@ export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelector
     }
     return isAcpProbed || !dedicatedCategories.has(category);
   });
+  const modelConfigOptionSelectors = modelConfigOptions
+    ? Object.fromEntries(
+        Object.entries(modelConfigOptions).map(([modelId, options]) => [
+          modelId,
+          buildConfigOptionSelectors(options, target, capabilityAuthority),
+        ])
+      )
+    : undefined;
 
   return {
     capabilityAuthority,
@@ -626,6 +720,7 @@ export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelector
     defaultModelId:
       typeof modelConfigOption?.currentValue === 'string' ? modelConfigOption.currentValue : null,
     configOptionSelectors,
+    modelConfigOptionSelectors,
     modelReasoningEfforts,
   };
 };
@@ -637,14 +732,21 @@ export const buildAcpSelectorOptions = (target?: AcpSelectorTarget): AcpSelector
 export const buildAllConfigOptionSelectors = (
   target?: AcpSelectorTarget
 ): AcpConfigOptionSelector[] => {
-  const { authority, configOptions, modelReasoningEfforts } = resolveConfigOptions(target);
+  const { authority, configOptions, modelConfigOptions, modelReasoningEfforts } =
+    resolveConfigOptions(target);
+  const selectedModelId = target ? resolveSelectedModelId(configOptions, target) : undefined;
+  const effectiveConfigOptions = applyModelConfigOptions(
+    configOptions,
+    modelConfigOptions,
+    selectedModelId
+  );
   return normalizeReasoningEffortSelectors(
-    buildConfigOptionSelectors(configOptions, target, authority),
+    buildConfigOptionSelectors(effectiveConfigOptions, target, authority),
     {
       cliType: target?.cliType,
       agentType: target?.agentType,
       modelReasoningEfforts,
-      selectedModelId: target ? resolveSelectedModelId(configOptions, target) : undefined,
+      selectedModelId,
     }
   );
 };

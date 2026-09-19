@@ -324,6 +324,18 @@ describe('message-schemas machine ACP capabilities refresh', () => {
             options: ['low', 'high', 'max'].map((value) => ({ value, name: value })),
           },
         ],
+        modelConfigOptions: {
+          'kimi-k3': [
+            {
+              id: 'reasoning_effort',
+              name: 'Thinking',
+              category: 'thought_level',
+              type: 'select',
+              currentValue: 'max',
+              options: ['low', 'high', 'max'].map((value) => ({ value, name: value })),
+            },
+          ],
+        },
         modelReasoningEfforts: { 'kimi-k3': ['low', 'high', 'max'] },
         sessionFork: false,
         fetchedAt: 1,

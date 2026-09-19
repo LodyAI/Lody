@@ -293,6 +293,42 @@ describe('ACP session config derivation', () => {
     expect(resolved.configOptionValues.reasoning_effort).toBe('medium');
   });
 
+  it("installs the resolved model's full config controls when the candidate model had none", () => {
+    const reasoningSelector = {
+      configId: 'thought_level',
+      label: 'Thinking level',
+      category: 'thought_level' as const,
+      type: 'select' as const,
+      currentValue: 'high',
+      options: [
+        { value: 'high', label: 'High' },
+        { value: 'max', label: 'Max' },
+      ],
+    };
+    const resolved = resolveAcpSessionConfigSelection(
+      {
+        edits: emptyEdits,
+        preferences: { modelId: 'sorbet/plain' },
+      },
+      {
+        ...baseOptions,
+        capabilityAuthority: 'authoritative',
+        modelOptions: [{ value: 'sorbet/astra', label: 'Astra' }],
+        defaultModelId: 'sorbet/astra',
+        configOptionSelectors: [],
+        modelConfigOptionSelectors: {
+          'sorbet/plain': [],
+          'sorbet/astra': [reasoningSelector],
+        },
+      },
+      { cliType: 'registry', agentType: 'sorbet' }
+    );
+
+    expect(resolved.selectedModelId).toBe('sorbet/astra');
+    expect(resolved.configOptionSelectors).toContainEqual(reasoningSelector);
+    expect(resolved.configOptionValues).toEqual({ thought_level: 'high' });
+  });
+
   it('returns the resolved-model selectors so dispatch filtering keeps resolved-valid values', () => {
     /* The resolver keeps `xhigh` for the resolved 4.6, but the caller's
        candidate-4.5 selector would drop it at dispatch. The resolved selectors
@@ -344,9 +380,8 @@ describe('ACP session config derivation', () => {
       ).reasoning_effort
     ).toBe('xhigh');
     expect(
-      filterAcpSessionConfigOptionValues(resolved.configOptionValues, [
-        staleGrokReasoningSelector,
-      ]).reasoning_effort
+      filterAcpSessionConfigOptionValues(resolved.configOptionValues, [staleGrokReasoningSelector])
+        .reasoning_effort
     ).toBeUndefined();
   });
 

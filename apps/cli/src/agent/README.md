@@ -190,11 +190,14 @@ installed. `ManagedRuntimeUpdateCoordinator` serially downloads stale targets in
 background and never hot-swaps a running ACP process. Real session creation also normalizes
 its `NewSessionResponse` through `acp-capability-normalization.ts`; the session execution
 service schedules a non-blocking cache update before the first prompt. Adapters may publish
-per-model reasoning-effort ladders on that session response as
-`_meta.lody.modelReasoningEfforts`. Normalization merges the map into the cached
-`modelReasoningEfforts`, together with the legacy `model[effort]` id derivation for builtin
-Codex only — other agents use the same brackets for unrelated variants (Claude's `opus[1m]`
-is a context window). Vendor model `_meta` never enters the CLI.
+complete model-dependent config descriptors on that session response as
+`_meta.lody.modelConfigOptions`. Normalization caches the table by exact model selector, so
+the UI and run-config dispatcher can switch controls and use the Agent's real config ids
+without applying the probe model's options to every model. The older
+`modelReasoningEfforts` map remains a compatibility path for Grok and the legacy
+`model[effort]` id derivation remains Codex-only — other agents use the same brackets for
+unrelated variants (Claude's `opus[1m]` is a context window). Vendor model `_meta` never
+enters the CLI.
 
 Capability cache versions are freshness markers, not read barriers. A newer client continues
 to render understood fields from an older daemon's parsed entry while scheduling a replacement

@@ -165,6 +165,64 @@ describe('ACP capability normalization', () => {
     });
   });
 
+  it('reads complete model-dependent config options from Lody session metadata', () => {
+    const capabilities = normalizeAcpSessionCapabilities({
+      modes: { availableModes: [] },
+      _meta: {
+        lody: {
+          modelConfigOptions: {
+            'sorbet/astra': [
+              {
+                id: 'thought_level',
+                name: 'Thinking level',
+                category: 'thought_level',
+                type: 'select',
+                currentValue: 'high',
+                options: [
+                  { value: 'high', name: 'high' },
+                  { value: 'xhigh', name: 'xhigh' },
+                ],
+              },
+            ],
+            'sorbet/plain': [],
+          },
+        },
+      },
+    });
+
+    expect(capabilities.modelConfigOptions).toEqual({
+      'sorbet/astra': [
+        {
+          id: 'thought_level',
+          name: 'Thinking level',
+          category: 'thought_level',
+          type: 'select',
+          currentValue: 'high',
+          options: [
+            { value: 'high', name: 'high' },
+            { value: 'xhigh', name: 'xhigh' },
+          ],
+        },
+      ],
+      'sorbet/plain': [],
+    });
+  });
+
+  it('ignores malformed model-dependent config metadata without dropping the legacy map', () => {
+    const capabilities = normalizeAcpSessionCapabilities({
+      modes: { availableModes: [] },
+      _meta: {
+        lody: {
+          modelConfigOptions: { 'sorbet/astra': [{ id: 'thought_level' }] },
+          modelReasoningEfforts: { 'grok-4.6': ['high'] },
+        },
+      },
+    });
+
+    expect(capabilities.modelConfigOptions).toBeUndefined();
+    expect(capabilities.modelReasoningEfforts).toEqual({ 'grok-4.6': ['high'] });
+  });
+
   it('ignores a malformed Lody reasoning-effort map', () => {
     const capabilities = normalizeAcpSessionCapabilities({
       modes: { availableModes: [] },

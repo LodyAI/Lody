@@ -12,6 +12,7 @@ export type AcpCapabilitiesResult = {
   modes: Array<{ id: string; name: string; description?: string }>;
   models: Array<{ modelId: string; name?: string; description?: string }>;
   configOptions?: AcpConfigOptionSummary[];
+  modelConfigOptions?: Record<string, AcpConfigOptionSummary[]>;
   availableCommands?: AcpCommandSummary[];
   sessionFork: boolean;
   acknowledgedSteer: boolean;
@@ -152,12 +153,48 @@ type AcpSessionCapabilitiesResponse = {
   _meta?: Record<string, unknown> | null;
 };
 
-const zLodySessionResponseMeta = z.object({
+const zLodyModelReasoningEffortsMeta = z.object({
   _meta: z
     .object({
       lody: z
         .object({
           modelReasoningEfforts: z.record(z.string(), z.array(z.string())),
+        })
+        .nullish(),
+    })
+    .nullish(),
+});
+
+const zLodyModelConfigOptionsMeta = z.object({
+  _meta: z
+    .object({
+      lody: z
+        .object({
+          modelConfigOptions: z.record(
+            z.string(),
+            z.array(
+              z
+                .object({
+                  id: z.string(),
+                  name: z.string(),
+                  description: z.string().optional(),
+                  category: z.string().optional(),
+                  type: z.enum(['select', 'boolean']),
+                  currentValue: z.union([z.string(), z.boolean()]),
+                  options: z.array(
+                    z
+                      .object({
+                        value: z.string(),
+                        name: z.string(),
+                        description: z.string().optional(),
+                        group: z.string().optional(),
+                      })
+                      .strict()
+                  ),
+                })
+                .strict()
+            )
+          ),
         })
         .nullish(),
     })
@@ -172,9 +209,22 @@ const zLodySessionResponseMeta = z.object({
 export function readLodyModelReasoningEfforts(
   sessionResponse: unknown
 ): Record<string, string[]> | undefined {
-  const parsed = zLodySessionResponseMeta.safeParse(sessionResponse);
+  const parsed = zLodyModelReasoningEffortsMeta.safeParse(sessionResponse);
   const map = parsed.success ? parsed.data._meta?.lody?.modelReasoningEfforts : undefined;
   return map && Object.keys(map).length > 0 ? map : undefined;
+}
+
+/** Model-dependent ACP config controls published in Lody's session-response namespace. */
+export function readLodyModelConfigOptions(
+  sessionResponse: unknown
+): Record<string, AcpConfigOptionSummary[]> | undefined {
+  const parsed = zLodyModelConfigOptionsMeta.safeParse(sessionResponse);
+  const map = parsed.success ? parsed.data._meta?.lody?.modelConfigOptions : undefined;
+  return map && Object.keys(map).length > 0
+    ? Object.fromEntries(
+        Object.entries(map).map(([modelId, options]) => [modelId, filterAcpConfigOptions(options)])
+      )
+    : undefined;
 }
 
 /**
@@ -212,6 +262,7 @@ export function normalizeAcpSessionCapabilities(
   const legacyModels = readLegacySessionModelState(sessionResponse)?.availableModels ?? [];
   const models = modelsFromConfigOptions.length > 0 ? modelsFromConfigOptions : legacyModels;
   const availableCommands = readSessionAvailableCommands(sessionResponse);
+  const modelConfigOptions = readLodyModelConfigOptions(sessionResponse);
   // `configOptions` only describes the model that is current right now — agents
   // rebuild the effort/fast options on every model switch. Two sources expose
   // the model-independent view: the legacy `model[effort]` list (Codex) and the
@@ -227,6 +278,7 @@ export function normalizeAcpSessionCapabilities(
     modes,
     models,
     configOptions,
+    modelConfigOptions,
     availableCommands,
     sessionFork: lifecycleCapabilities.sessionFork === true,
     acknowledgedSteer: lifecycleCapabilities.acknowledgedSteer === true,

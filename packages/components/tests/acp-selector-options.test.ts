@@ -112,6 +112,76 @@ const grokMachineWithLadderProbe = ({
   });
 
 describe('buildAcpSelectorOptions', () => {
+  it('switches model-dependent controls even when the probe model had no reasoning selector', () => {
+    const machine = machineWithCapabilities({
+      [agentConfigId]: {
+        cliType: 'registry',
+        agentType: 'sorbet',
+        cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+        provenance: 'runtime',
+        modes: [],
+        models: [],
+        configOptions: [
+          {
+            id: 'model',
+            name: 'Model',
+            category: 'model',
+            type: 'select',
+            currentValue: 'sorbet/plain',
+            options: [
+              { value: 'sorbet/plain', name: 'Plain' },
+              { value: 'sorbet/astra', name: 'Astra' },
+            ],
+          },
+        ],
+        modelConfigOptions: {
+          'sorbet/plain': [],
+          'sorbet/astra': [
+            {
+              id: 'thought_level',
+              name: 'Thinking level',
+              category: 'thought_level',
+              type: 'select',
+              currentValue: 'high',
+              options: [
+                { value: 'high', name: 'high' },
+                { value: 'xhigh', name: 'xhigh' },
+              ],
+            },
+          ],
+        },
+        fetchedAt: 1,
+      },
+    });
+
+    const astra = buildAcpSelectorOptions({
+      configId: agentConfigId,
+      cliType: 'registry',
+      agentType: 'sorbet',
+      selectedModelId: 'sorbet/astra',
+      machine,
+    });
+    expect(
+      astra.configOptionSelectors.find((selector) => selector.configId === 'thought_level')
+    ).toMatchObject({ currentValue: 'high' });
+    expect(
+      astra.configOptionSelectors
+        .find((selector) => selector.configId === 'thought_level')
+        ?.options.map((option) => option.value)
+    ).toEqual(['high', 'xhigh']);
+
+    const plain = buildAcpSelectorOptions({
+      configId: agentConfigId,
+      cliType: 'registry',
+      agentType: 'sorbet',
+      selectedModelId: 'sorbet/plain',
+      machine,
+    });
+    expect(
+      plain.configOptionSelectors.some((selector) => selector.configId === 'thought_level')
+    ).toBe(false);
+  });
+
   it('does not reuse registry Pi models after a same-ID builtin migration', () => {
     const options = buildAcpSelectorOptions({
       configId: agentConfigId,

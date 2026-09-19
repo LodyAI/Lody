@@ -1518,6 +1518,7 @@ export class LoroDocumentManager {
     modes: AcpModeSummary[],
     models: AcpModelSummary[],
     configOptions: AcpConfigOptionSummary[] | undefined,
+    modelConfigOptions: Record<string, AcpConfigOptionSummary[]> | undefined,
     availableCommands: AcpCommandSummary[] | undefined,
     sessionFork: boolean,
     sourceVersion: string,
@@ -1539,6 +1540,7 @@ export class LoroDocumentManager {
       modes,
       models,
       configOptions,
+      modelConfigOptions,
       availableCommands,
       sessionFork,
       sourceVersion,
@@ -2897,6 +2899,7 @@ const serializeAcpCapabilityWithoutFetchTime = (entry: AcpCapabilityCacheEntry):
     modes: entry.modes,
     models: entry.models,
     configOptions: entry.configOptions,
+    modelConfigOptions: entry.modelConfigOptions,
     modelReasoningEfforts: entry.modelReasoningEfforts,
     availableCommands: entry.availableCommands,
     sessionFork: entry.sessionFork,
@@ -2981,6 +2984,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
     modes: AcpModeSummary[],
     models: AcpModelSummary[],
     configOptions: AcpConfigOptionSummary[] | undefined,
+    modelConfigOptions: Record<string, AcpConfigOptionSummary[]> | undefined,
     availableCommands: AcpCommandSummary[] | undefined,
     sessionFork: boolean,
     sourceVersion: string,
@@ -3009,6 +3013,10 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
       modes: normalizedModes,
       models: normalizedModels,
       configOptions: configOptions?.length ? configOptions : undefined,
+      modelConfigOptions:
+        modelConfigOptions && Object.keys(modelConfigOptions).length > 0
+          ? modelConfigOptions
+          : undefined,
       availableCommands: availableCommands?.length ? availableCommands : undefined,
       sessionFork,
       acknowledgedSteer,
