@@ -772,7 +772,9 @@ export const SessionTabBar = memo(function SessionTabBar({
         aria-label={t('sessions.tabs.label', 'Session tabs')}
         // max-h-full keeps the strip inside a padded h-11 bar (macOS row pad).
         className="h-11 max-h-full"
-        paddingLeft={variant === 'session' ? 4 : 8}
+        // A little more than the 6px tab gap, so the first tab reads as part of
+        // the strip rather than attached to the sidebar edge.
+        paddingLeft={8}
         paddingRight={8}
       >
         {showParentTab && (

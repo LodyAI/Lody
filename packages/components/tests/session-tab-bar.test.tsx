@@ -515,44 +515,44 @@ describe('SessionTabBar rapid-close tab widths', () => {
 
   it('keeps surviving tab widths after closing a middle tab while hovered', async () => {
     await renderHarness([childA, childB]);
-    // 800px viewport, 4px/8px padding, 6px gaps: [259, 259, 258].
-    expect(tabWidths()).toEqual([259, 259, 258]);
+    // 800px viewport, 8px/8px padding, 6px gaps: [258, 257, 257].
+    expect(tabWidths()).toEqual([258, 257, 257]);
 
     await clickClose(childA.id);
 
     expect(container.querySelectorAll('[role="tab"]')).toHaveLength(2);
     // Frozen: the survivors keep their widths instead of re-expanding.
-    expect(tabWidths()).toEqual([259, 258]);
+    expect(tabWidths()).toEqual([258, 257]);
   });
 
   it('re-expands to the full width once the pointer leaves the slop region', async () => {
     await renderHarness([childA, childB]);
     await clickClose(childA.id);
-    expect(tabWidths()).toEqual([259, 258]);
+    expect(tabWidths()).toEqual([258, 257]);
 
     // Inside the expanded region (x∈[0,60], y∈[0,40] under the zero jsdom
     // rect) the freeze survives, like drifting toward the new-tab button.
     await movePointer(30, 20);
-    expect(tabWidths()).toEqual([259, 258]);
+    expect(tabWidths()).toEqual([258, 257]);
     await movePointer(59, 39);
-    expect(tabWidths()).toEqual([259, 258]);
+    expect(tabWidths()).toEqual([258, 257]);
 
     await movePointer(500, 500);
-    expect(tabWidths()).toEqual([391, 391]);
+    expect(tabWidths()).toEqual([389, 389]);
   });
 
   it('stays frozen across consecutive closes while hovered', async () => {
     await renderHarness([childA, childB, childC]);
-    // [parent, A, B, C] in a 770px budget: [193, 193, 192, 192].
-    expect(tabWidths()).toEqual([193, 193, 192, 192]);
+    // [parent, A, B, C] in a 766px budget: [192, 192, 191, 191].
+    expect(tabWidths()).toEqual([192, 192, 191, 191]);
 
     await clickClose(childA.id);
-    expect(tabWidths()).toEqual([193, 192, 192]);
+    expect(tabWidths()).toEqual([192, 191, 191]);
     await clickClose(childB.id);
-    expect(tabWidths()).toEqual([193, 192]);
+    expect(tabWidths()).toEqual([192, 191]);
 
     await leaveStrip();
-    expect(tabWidths()).toEqual([391, 391]);
+    expect(tabWidths()).toEqual([389, 389]);
   });
 
   it('slides the freed space closed over the surviving tab', async () => {
@@ -561,10 +561,10 @@ describe('SessionTabBar rapid-close tab widths', () => {
 
     // The survivor moving into the removed slot starts with the freed
     // width+gap as its inline-start margin, then eases it back to zero.
-    expect(itemMargins()).toEqual(['0', '265px']);
+    expect(itemMargins()).toEqual(['0', '263px']);
     await flushFrame();
     expect(itemMargins()).toEqual(['0', '0']);
-    expect(tabWidths()).toEqual([259, 258]);
+    expect(tabWidths()).toEqual([258, 257]);
     const settledCommits = commits;
     await flushFrame();
     await flushFrame();
@@ -577,48 +577,48 @@ describe('SessionTabBar rapid-close tab widths', () => {
     await clickClose(childB.id);
 
     // The new last tab already ends at the right edge, so no freeze is needed.
-    expect(tabWidths()).toEqual([391, 391]);
+    expect(tabWidths()).toEqual([389, 389]);
   });
 
   it('re-spreads survivors over the occupied width when the trailing tab closes while frozen', async () => {
     await renderHarness([childA, childB, childC, childD], childA.id);
     // [parent 146, A 180, B 146, C 146, D 146].
-    expect(tabWidths()).toEqual([146, 180, 146, 146, 146]);
+    expect(tabWidths()).toEqual([145, 180, 145, 145, 145]);
 
     await clickClose(childB.id);
-    expect(tabWidths()).toEqual([146, 180, 146, 146]);
+    expect(tabWidths()).toEqual([145, 180, 145, 145]);
 
     // Closing the last tab while frozen does not shrink the budget: survivors
     // re-spread over the occupied 648px so the new last tab's right edge —
     // and its close button — stays under the cursor.
     await clickClose(childD.id);
-    expect(tabWidths()).toEqual([208, 208, 208]);
+    expect(tabWidths()).toEqual([207, 207, 207]);
 
     await leaveStrip();
-    expect(tabWidths()).toEqual([259, 259, 258]);
+    expect(tabWidths()).toEqual([258, 257, 257]);
   });
 
   it('relayouts immediately when a close leaves a single tab', async () => {
     await renderHarness([childA, childB]);
     await clickClose(childA.id);
-    expect(tabWidths()).toEqual([259, 258]);
+    expect(tabWidths()).toEqual([258, 257]);
 
     // Closing the parent leaves one tab; Chromium exits close mode outright.
     await clickClose(parentSession.id);
-    expect(tabWidths()).toEqual([788]);
+    expect(tabWidths()).toEqual([784]);
   });
 
   it('keeps the freeze when the viewport grows and releases when it shrinks', async () => {
     await renderHarness([childA, childB]);
     await clickClose(childA.id);
-    expect(tabWidths()).toEqual([259, 258]);
+    expect(tabWidths()).toEqual([258, 257]);
 
     await resizeTo(1000);
-    expect(tabWidths()).toEqual([259, 258]);
+    expect(tabWidths()).toEqual([258, 257]);
 
     await resizeTo(700);
-    // 700 - 12px padding - 6px gap = 682, split evenly.
-    expect(tabWidths()).toEqual([341, 341]);
+    // 700 - 16px padding - 6px gap = 678, split evenly.
+    expect(tabWidths()).toEqual([339, 339]);
   });
 
   it('does not freeze for a programmatic close without a pointer gesture', async () => {
@@ -626,19 +626,19 @@ describe('SessionTabBar rapid-close tab widths', () => {
     await programmaticClose(childA.id);
 
     // No pointerdown armed the gesture, so the survivors relayout immediately.
-    expect(tabWidths()).toEqual([391, 391]);
+    expect(tabWidths()).toEqual([389, 389]);
   });
 
   it('promotes the newly active tab to the frozen active width after closing the active tab', async () => {
     await renderHarness([childA, childB, childC, childD], childA.id);
     // Below ACTIVE_TAB_MIN_WIDTH the active tab gets 180, inactives split the
     // rest: [parent 146, A 180, B 146, C 146, D 146].
-    expect(tabWidths()).toEqual([146, 180, 146, 146, 146]);
+    expect(tabWidths()).toEqual([145, 180, 145, 145, 145]);
 
     // Closing active A selects B; B takes the captured active width while the
     // rest keep their inactive widths.
     await clickClose(childA.id);
-    expect(tabWidths()).toEqual([146, 180, 146, 146]);
+    expect(tabWidths()).toEqual([145, 180, 145, 145]);
 
     // The promoted survivor widens in place — no slide margin, so it cannot
     // read as unfolding out of the emptied slot.
@@ -646,7 +646,7 @@ describe('SessionTabBar rapid-close tab widths', () => {
 
     await leaveStrip();
     // Released: four tabs split the full row evenly again.
-    expect(tabWidths()).toEqual([193, 193, 192, 192]);
+    expect(tabWidths()).toEqual([192, 192, 191, 191]);
   });
 
   it('never writes an unfrozen width to the active tab on the removal commit', async () => {
@@ -656,7 +656,7 @@ describe('SessionTabBar rapid-close tab widths', () => {
     // now, so the first DOM commit already carries frozen widths — the active
     // item's inline style must not be written at all.
     await renderHarness([childA, childB, childC, childD], childA.id);
-    expect(tabWidths()).toEqual([146, 180, 146, 146, 146]);
+    expect(tabWidths()).toEqual([145, 180, 145, 145, 145]);
 
     const mutations: MutationRecord[] = [];
     const observer = new MutationObserver((records) => mutations.push(...records));
@@ -674,30 +674,30 @@ describe('SessionTabBar rapid-close tab widths', () => {
     // Every style state the element held — each record's pre-mutation value
     // plus the final value — must carry the frozen 180px width. The old
     // effect-driven freeze let the unfrozen allocation commit first, so the
-    // sequence contained the fresh width (193px here) before snapping back.
+    // sequence contained the fresh, unfrozen width before snapping back.
     const widthOf = (cssText: string | null) => /width:\s*(\d+)px/.exec(cssText ?? '')?.[1];
     const heldStates = [...mutations.map((record) => record.oldValue), activeItem().style.cssText];
     expect(heldStates.map(widthOf).every((width) => width === '180')).toBe(true);
-    expect(tabWidths()).toEqual([146, 180, 146, 146]);
+    expect(tabWidths()).toEqual([145, 180, 145, 145]);
   });
 
   it('releases the freeze when a tab is added and grows the new tab into place', async () => {
     await renderHarness([childA, childB]);
     await clickClose(childA.id);
-    expect(tabWidths()).toEqual([259, 258]);
+    expect(tabWidths()).toEqual([258, 257]);
 
     await act(async () => container.querySelector<HTMLButtonElement>('#add-child')!.click());
     // The inserted tab animates from zero width like Chromium's insert
     // animation, then settles into the even relayout.
-    expect(tabWidths()).toEqual([259, 259, 0]);
+    expect(tabWidths()).toEqual([258, 257, 0]);
     await flushFrame();
-    expect(tabWidths()).toEqual([259, 259, 258]);
+    expect(tabWidths()).toEqual([258, 257, 257]);
   });
 
   it('morphs a same-commit substitution from the removed width instead of zero', async () => {
     await renderHarness([childA, childB, childC, childD], childB.id);
     // [parent 146, A 146, B 180, C 146, D 146].
-    expect(tabWidths()).toEqual([146, 146, 180, 146, 146]);
+    expect(tabWidths()).toEqual([145, 145, 180, 145, 145]);
 
     // childE replaces childB at the same index while the selection moves to
     // childC — the shape of a draft promoting into a session.
@@ -708,27 +708,27 @@ describe('SessionTabBar rapid-close tab widths', () => {
     // The replacement starts from the removed tab's width, not from zero.
     expect(itemE().style.width).toBe('180px');
     await flushFrame();
-    expect(itemE().style.width).toBe('146px');
-    expect(tabWidths()).toEqual([146, 146, 146, 180, 146]);
+    expect(itemE().style.width).toBe('145px');
+    expect(tabWidths()).toEqual([145, 145, 145, 180, 145]);
   });
 
   it('holds survivor geometry while the active selection moves in a later commit', async () => {
     await renderHarness([childA, childB, childC, childD], childA.id);
-    expect(tabWidths()).toEqual([146, 180, 146, 146, 146]);
+    expect(tabWidths()).toEqual([145, 180, 145, 145, 145]);
 
     await armPointer();
     // Phase 1 — the removal commits while the selection still names the dead
     // tab (the real app navigates after setSessionTabClosed resolves). The
     // survivor slides like any other neighbour for now.
     await act(async () => container.querySelector<HTMLButtonElement>('#close-two-phase')!.click());
-    expect(tabWidths()).toEqual([146, 146, 146, 146]);
+    expect(tabWidths()).toEqual([145, 145, 145, 145]);
     expect(itemMargins()).toEqual(['0', '186px', '0', '0']);
 
     // Phase 2 — the neighbour selection lands and promotes to the captured
     // active width; the slide drops so it widens in place rather than
     // unfolding out of the emptied slot, and it must never pass through zero.
     await act(async () => container.querySelector<HTMLButtonElement>('#select-b')!.click());
-    expect(tabWidths()).toEqual([146, 180, 146, 146]);
+    expect(tabWidths()).toEqual([145, 180, 145, 145]);
     expect(itemMargins()).toEqual(['0', '0', '0', '0']);
   });
 
@@ -743,6 +743,6 @@ describe('SessionTabBar rapid-close tab widths', () => {
     const item = container.querySelector<HTMLElement>(
       '[data-adaptive-tab-strip-item="session-parent"]'
     )!;
-    expect(item.style.width).toBe('788px');
+    expect(item.style.width).toBe('784px');
   });
 });
