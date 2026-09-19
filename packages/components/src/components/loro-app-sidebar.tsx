@@ -1407,7 +1407,8 @@ export const LocalProjectItem = memo(function LocalProjectItem({
               data-scope-item="row"
               data-sidebar-show-more={groupKey}
               className={cn(
-                'flex select-none items-center gap-2 rounded-md px-2 py-2 text-left text-[0.8em] text-sidebar-foreground-muted/80',
+                // Same 30px pitch as a conversation row (py-1 + 1px borders + 20px line).
+                'flex h-[30px] select-none items-center gap-2 rounded-md px-2 text-left text-[0.8em] text-sidebar-foreground-muted/80',
                 'transition-colors',
                 'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
                 'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40'
