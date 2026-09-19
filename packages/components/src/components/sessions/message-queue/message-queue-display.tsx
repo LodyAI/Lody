@@ -125,7 +125,7 @@ export function MessageQueueDisplay({
           className
         )}
       >
-        <div className="flex items-center justify-between px-2.5 py-1 text-[11px] text-muted-foreground">
+        <div className="flex cursor-default select-none items-center justify-between px-2.5 py-1 text-[11px] text-muted-foreground">
           <span className="font-medium">
             {t('sessions.messageQueue.upNext', 'Up next')}
             <span className="ml-1.5 text-muted-foreground/60">
