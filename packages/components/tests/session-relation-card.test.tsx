@@ -182,7 +182,9 @@ describe('Session relation cards', () => {
     const text = container.textContent ?? '';
     expect(text).toContain('Reply received');
     expect(text).toContain('Portal selection regression');
-    expect(text).toContain('Fixed the portal selection test; CI is green.');
+    // The card carries the reply's opening only; the rest lives in the dialog.
+    expect(text).toContain('Fixed the portal');
+    expect(text).not.toContain('CI is green');
     expect(text).not.toContain('pr789-fix-regression-test-portal-selection-20260917');
     expect(text).not.toMatch(/items ·/);
     await act(async () => {
@@ -302,12 +304,12 @@ describe('Session relation cards', () => {
     expect(container.textContent).not.toBe('');
   });
 
-  it('shows the opening and conclusion of a long reply and expands to all of it', async () => {
+  it('keeps a long reply to its opening line and shows all of it in a dialog', async () => {
     const opening =
       'I will first read the failing Tests log and re-check the portal selection logic.';
-    const middle = ' Detail line.'.repeat(60);
+    const middle = Array.from({ length: 6 }, (_, i) => `Detail paragraph ${i + 1}.`).join('\n\n');
     const conclusion = 'Conclusion: the portal test now waits for mount, and CI is green.';
-    const reply = `${opening}${middle} ${conclusion}`;
+    const reply = `${opening}\n\n${middle}\n\n${conclusion}`;
     await act(async () => {
       root.render(
         <Provider store={createStore()}>
@@ -343,14 +345,18 @@ describe('Session relation cards', () => {
     });
 
     const card = container.querySelector('[data-operation-reply-card="succeeded"]');
-    expect(card?.textContent).toContain('I will first read the failing Tests log');
-    expect(card?.textContent).toContain('Conclusion: the portal test now waits for mount');
-    expect(card?.textContent?.match(/Detail line\./g)?.length ?? 0).toBeLessThan(20);
+    expect(card?.textContent).toContain(opening);
+    expect(card?.textContent).not.toContain('Detail paragraph');
+    expect(card?.textContent).not.toContain(conclusion);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
 
-    const toggle = card?.querySelector<HTMLButtonElement>('button[aria-expanded]');
-    expect(toggle?.getAttribute('aria-expanded')).toBe('false');
-    await act(async () => toggle?.click());
-    expect(toggle?.getAttribute('aria-expanded')).toBe('true');
-    expect(card?.textContent?.match(/Detail line\./g)?.length).toBe(60);
+    await act(async () =>
+      Array.from(card?.querySelectorAll<HTMLButtonElement>('button') ?? [])
+        .find((button) => button.textContent === opening)
+        ?.click()
+    );
+    const dialog = document.querySelector('[role="dialog"]');
+    expect(dialog?.textContent).toContain('Detail paragraph 6.');
+    expect(dialog?.textContent).toContain(conclusion);
   });
 });
