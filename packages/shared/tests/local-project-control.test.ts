@@ -10,6 +10,10 @@ import {
 
 const codexProvider = { cliType: 'builtin', agentType: 'codex' } as const;
 const claudeProvider = { cliType: 'builtin', agentType: 'claude' } as const;
+const customProvider = {
+  cliType: 'custom',
+  agentType: 'custom-agent',
+} as const;
 
 describe('local project control request schema', () => {
   it('parses add request', () => {
@@ -196,6 +200,28 @@ describe('local project control request schema', () => {
       localProjectId: 'project-1',
       provider: codexProvider,
     });
+  });
+
+  it('parses custom provider history sync requests', () => {
+    const parsed = safeParseLocalProjectControlRequest(
+      JSON.stringify({
+        type: 'local-project/sync-history',
+        machineId: 'machine-1',
+        workspaceId: 'workspace-1',
+        localProjectId: 'project-1',
+        provider: customProvider,
+      })
+    );
+
+    expect(parsed.success).toBe(true);
+    if (!parsed.success) {
+      return;
+    }
+    if (parsed.data.type !== 'local-project/sync-history') {
+      throw new Error(`Unexpected request type: ${parsed.data.type}`);
+    }
+
+    expect(parsed.data.provider).toEqual(customProvider);
   });
 
   it('parses Codex provider history import request with selected sessions', () => {
