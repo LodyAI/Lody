@@ -8,18 +8,18 @@ Every synced Mirror must use `ignoreUnknownProperties: true`: otherwise an
 unknown root from a newer peer blocks writes on this client. Regression:
 `packages/shared/tests/session-doc-forward-compat.test.ts`.
 
-SessionDocument's private Mirror is control-only. HistoryWriter owns writes;
+SessionDocument's private Mirror is control-only: HistoryWriter owns writes,
 SessionData owns reads. CLI execution methods in `session-agent-writes.ts` reuse
-shared planners over that writer, not UI port methods or a second writer.
+shared planners over that writer, never UI port methods or a second writer.
 Replacement rules: [shared](../../../../../packages/shared/AGENTS.md#session-history).
 
 ## Opening a doc pulls its stream
 
 `LoroDocumentManager.getOrCreateSessionDoc()` is not a cheap read.
-`SessionDocument.init()` (`doc.ts`) calls `startDocRoomSync()` immediately: opening
-a doc joins its room and starts pulling the stream, and the doc stays in the
-manager's `sessions` cache with the room joined until `cleanSessionDoc` tears it
-down. Cost per call = one Streams subscription plus the doc's full initial sync.
+`SessionDocument.init()` (`doc.ts`) calls `startDocRoomSync()` immediately, joining
+the room and pulling the stream; the doc stays in the manager's `sessions` cache
+with the room joined until `cleanSessionDoc` tears it down. Cost per call = one
+Streams subscription plus the doc's full initial sync.
 
 Rules:
 
@@ -39,17 +39,16 @@ Rules:
 - To drop a doc you opened for inspection, first prove no other holder adopted
   it: `LoroDocumentManager.sessions` is a shared cache with **no refcounting**,
   and `cleanSessionDoc`/`destroy` disposes the mirror out from under every other
-  subscriber (the dispatch watcher, for one, unsubscribes before it cleans and
-  its `watchedSessions` guard would block a re-subscribe — a destroyed shared
-  instance silently kills doc-level signals for that session). When you cannot
+  subscriber (the dispatch watcher's `watchedSessions` guard then blocks its
+  re-subscribe, silently killing doc-level signals). When you cannot
   prove sole ownership, leave the doc cached. Never call
   `repo.unloadDoc`/`unloadDocRoom` on a live wrapper directly either (the room
   binding would leak; see `SessionDocument.destroy` in `doc.ts`), and never let
   teardown write status/meta for docs that must stay hidden (e.g. unfinished
   fork targets).
 
-The dispatch watcher's contract, "session metadata is the activation index", is
-documented in `../../session/AGENTS.md` and applies to any module enumerating rooms.
+The dispatch watcher's contract, "session metadata is the activation index"
+(`../../session/AGENTS.md`), binds any module enumerating rooms.
 
 ## Shared ACP runtime config contains no secrets
 
@@ -62,10 +61,10 @@ selector values to collaborators.
 ## Presence is ephemeral and partitioned by origin
 
 `presence.ts`: machine presence refreshes on `CliPresenceRuntime`'s own 30s timer.
-It keeps TWO stores and the distinction is load-bearing: `store` is the workspace-wide
-replica (own writes plus every peer seen in the shared room; read by machine-online
-checks and the PR poller), while `localOriginStore` holds ONLY entries this process
-authored and is the sole payload of the local data plane (`encodeLocalOriginPresence` /
+Its TWO stores are load-bearing: `store` is the workspace-wide replica (own writes
+plus every peer in the shared room; read by machine-online checks and the PR
+poller), while `localOriginStore` holds ONLY entries this process authored and is
+the sole payload of the local data plane (`encodeLocalOriginPresence` /
 `subscribeLocalOriginPresence`). Write locally-authored presence exclusively through
 `writeLocalOrigin`/`deleteLocalOrigin`, and never relay the replica —
 `specs/local-first-two-plane.md` explains the partition.
@@ -78,6 +77,10 @@ turn-finalization stages, so optional cloud side effects inside it (usage flush,
 completion notification, Live Activity sync) MUST go through
 `MessageHandler.runTurnCloudSideEffect`; third-party calls (GitHub, model APIs) are a
 different reachability domain and are NOT gated by it.
+
+INVARIANT: `initializing` is bounded per stage from the last phase/detail change; on
+expiry the heartbeat stops and `notifyInitializationStalled` fails the turn. Spec:
+`specs/session-initialization-deadline.md`.
 
 Never reintroduce periodic doc-meta writes (`lastSeen`/`lastRunningSeen`) — they stall
 Loro flush; meta timestamps are written only at status transitions. Durable
