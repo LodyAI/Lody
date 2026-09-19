@@ -877,6 +877,9 @@ const shouldRenderAssistantFooter = ({
   showDuration: boolean;
 }): boolean => {
   if ((assistantActions?.length ?? 0) > 0) return true;
+  // The run config (model, mode, options) is recorded when the turn opens, so
+  // its info button is available while the reply is still streaming.
+  if (hasAssistantTurnConfigInfo(message)) return true;
   if (message.finished !== true) return false;
   const visibleContentItems = renderEntries.map((entry) => entry.content);
   return (
@@ -4200,7 +4203,7 @@ export const AssistantTurnFooter = ({
           }
         />
       ) : null}
-      {(showFinishedMetadata || !!copyContext) && showActionBar ? (
+      {(showFinishedMetadata || !!copyContext || hasTurnConfigInfo) && showActionBar ? (
         <div
           className={cn(
             'flex flex-wrap items-center justify-start text-[11px] text-muted-foreground',
@@ -4270,7 +4273,7 @@ export const AssistantTurnFooter = ({
                     </TooltipContent>
                   </Tooltip>
                 </TooltipProvider>
-              ) : hasCopyableText ? (
+              ) : showFinishedMetadata && hasCopyableText ? (
                 <TooltipProvider>
                   <Tooltip delayDuration={500}>
                     <TooltipTrigger asChild>
@@ -4299,8 +4302,9 @@ export const AssistantTurnFooter = ({
                   </Tooltip>
                 </TooltipProvider>
               ) : null}
-              {/* The turn config lives below the output on every layout. */}
-              {showFinishedMetadata && hasTurnConfigInfo ? (
+              {/* The turn config lives below the output on every layout, and is
+                  known from the moment the turn opens: no need to wait for it to end. */}
+              {hasTurnConfigInfo ? (
                 <AssistantTurnConfigInfoButton
                   message={message}
                   sessionId={sessionId}

@@ -29,7 +29,7 @@ const toolCall = (id: string) => ({
 });
 
 /** A live (unfinished) assistant turn with the given items. */
-const liveTurn = (items: unknown[]) => [
+const liveTurn = (items: unknown[], assistant: Record<string, unknown> = {}) => [
   {
     id: 'user-turn',
     role: 'user',
@@ -43,6 +43,7 @@ const liveTurn = (items: unknown[]) => [
     items,
     fileDiff: [],
     finished: false,
+    ...assistant,
   },
 ];
 
@@ -150,5 +151,24 @@ describe('live agent status', () => {
     expect(
       status!.compareDocumentPosition(copyContext!) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
+  });
+
+  it('exposes the turn configuration while the reply is still streaming', async () => {
+    await render(
+      liveTurn([{ type: 'text', text: 'Partial answer' }], {
+        modelInfo: { modelId: 'claude-opus-5', name: 'Claude Opus 5' },
+      }),
+      { label: 'Working' }
+    );
+    const info = container.querySelector<HTMLButtonElement>('[aria-label="Turn configuration"]');
+    expect(info).not.toBeNull();
+    // The status joins the turn, above the actions that now exist while it runs.
+    const status = container.querySelector('[data-agent-activity-status]');
+    expect(status?.closest('[data-assistant-turn-id]')).not.toBeNull();
+    expect(status!.compareDocumentPosition(info!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Copying the whole response still waits for the reply to finish.
+    expect(container.querySelector('[aria-label="Copy response"]')).toBeNull();
+    await act(async () => info!.click());
+    expect(document.body.textContent).toContain('Claude Opus 5');
   });
 });
