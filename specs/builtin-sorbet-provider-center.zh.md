@@ -9,12 +9,13 @@ Translation: current
 
 用户在某台 Machine 上添加 Agent 时，可以选择由 Lody 内置的 Sorbet。Sorbet 表单直接展示这台
 Machine 的连接设置，不再额外显示一个命名为 Provider Center 的嵌套标题。新 Machine 默认没有
-自定义 Provider，也不会自行猜测连接。用户可以登录 Codex OAuth；也可以明确启用 Claude OAuth；
-或者添加兼容 OpenAI 或 Anthropic 协议的自定义 Provider。
+自定义 Provider，也不会自行猜测连接。用户可以登录内置 Sorbet runtime 声明的任意订阅 OAuth
+Provider——目前包括 Codex、Claude、GitHub Copilot、Kimi Code 和 xAI；也可以添加兼容 OpenAI
+或 Anthropic 协议的自定义 Provider。
 
 Codex 是推荐连接；如果它是第一个可用连接，就成为默认连接。Claude OAuth 在用户主动启用前
-保持关闭。用户可以显式选择已经连接的自定义 Provider。选中的连接为新的 Sorbet Session 提供
-默认模型。
+保持关闭；其他已声明的订阅连接可以直接登录。用户可以显式选择任意已连接的 Provider。选中的
+连接为新的 Sorbet Session 提供默认模型。
 
 ## 职责
 
@@ -36,15 +37,17 @@ CLI 版本或自身 UI 中是否有 Sorbet 来推断支持。旧 Machine 显示�
 
 - 新 Machine 默认启用并推荐 Codex OAuth。
 - 新 Machine 默认关闭 Claude OAuth，必须由用户明确启用。
+- 其他订阅 OAuth 连接来自 Sorbet 的 Provider metadata，而不是 Lody 维护的另一份 allowlist。
+  当前内置 runtime 除 Codex 和 Claude 外还声明 GitHub Copilot、Kimi Code 与 xAI。
 - 新 Machine 默认没有自定义 Provider。新增时必须提供名称、HTTP(S) endpoint、协议、至少一个
   模型和 API key，之后才能使用。
 - 断开或退出只作用于一个 Provider，不能清除其他 Sorbet 凭据。
 - 仍有已保存 Sorbet Session 或 approval reviewer 引用某个自定义 Provider 时，删除必须被拒绝。
 - “用于新 Session”只改变 Machine 默认值，不改变正在运行的 Session。
 
-已保存默认连接失效后，解析顺序依次为：可用的 Codex OAuth、用户已经明确启用的 Claude OAuth、
+已保存默认连接失效后，解析顺序依次为：可用的 Codex OAuth、其他已经连接且启用的订阅 OAuth、
 可用的自定义 Provider。解析过程绝不能自行启用 Claude。没有可用连接时，Session 创建停留在
-Provider Center，不能暗中切换 Provider 或降低认证要求。
+Provider 设置，不能暗中切换 Provider 或降低认证要求。
 
 每个 Sorbet worker 启动时接收解析后的默认模型。Sorbet 把实际 Provider 和模型记录在 Session
 metadata 中。加载或恢复 Session 时使用已记录的值，因此之后修改 Machine 默认值只影响新

@@ -28,8 +28,9 @@ Lody 版本锁定 Sorbet 源码，构建内置的 `sorbet-acp` 入口，并为�
 - 接入不能牺牲用户可见的 Lody 行为。能力门控可以表达 Sorbet 或 Provider 本来就没有某项能力，
   但不能用来隐藏接入造成的回退。
 - 新的 Sorbet 配置默认没有自定义 Provider。存在有效 Codex OAuth 时优先把它作为默认连接。
-  Claude OAuth 默认关闭，只有用户明确启用后才能选择。用户可以在已启用的 OAuth 连接和
-  自定义 Provider 之间显式切换。
+  Claude OAuth 默认关闭，只有用户明确启用后才能选择。其他订阅 OAuth 连接从 Sorbet 的
+  Provider metadata 动态发现；当前 runtime 还会显示 GitHub Copilot、Kimi Code 与 xAI。用户可以
+  在已启用的 OAuth 连接和自定义 Provider 之间显式切换。
 - 连接选择只决定新 Session 的默认值。运行中或恢复的 Session 继续固定使用已经记录的连接和
   模型，直到用户明确修改；Provider 失败绝不触发暗中的跨 Provider 重试。
 
@@ -64,15 +65,16 @@ Lody 版本锁定 Sorbet 源码，构建内置的 `sorbet-acp` 入口，并为�
 - Sorbet 已加入 builtin 校验、标题策略和 ACP 协议认证分流，并出现在 Agent 选择器中。它的 Agent
   表单包含 Machine 级 Provider Center，并通过版本化的 `sorbetProviderCenter` protocol
   capability 进行门控。
-- Provider Center 推荐 Codex OAuth；启用 Claude OAuth 前要求用户明确操作；支持自定义
-  Provider 的新增、编辑、删除和按 Provider 退出；默认值变更只影响新 Session。API key 使用
-  一次性加密 Machine RPC，通过 Sorbet credential 边界写入，不进入 Loro 或 Agent config。
+- Provider 设置推荐 Codex OAuth；启用 Claude OAuth 前要求用户明确操作；显示 Sorbet 声明的
+  每个订阅 OAuth Provider；支持自定义 Provider 的新增、编辑、删除和按 Provider 退出；默认值
+  变更只影响新 Session。API key 使用一次性加密 Machine RPC，通过 Sorbet credential 边界写入，
+  不进入 Loro 或 Agent config。
 - Lody 专用认证 client 会声明一项版本化的 credential-form 扩展，表单响应同样走一次性加密的
   Machine RPC。对其他 client，Sorbet 仍遵守 ACP 默认禁止 credential form 的规则；只有看到这项
   扩展时，才把 Pi 的 `secret` 与 `manual_code` prompt 标记为 secret。浏览器 URL 授权会先于备用
   表单完成，避免两个认证交互互相抢占。
-- release-build smoke check 会从空数据目录启动最终打包入口，完成 ACP 协商，验证 Codex 与
-  Anthropic OAuth 声明，实际启动 Codex OAuth，并执行到 Pi 的 credential-safe 手动 code 提示。
+- release-build smoke check 会从空数据目录启动最终打包入口，完成 ACP 协商，验证全部内置订阅
+  OAuth 声明，实际启动 Codex OAuth，并执行到 Pi 的 credential-safe 手动 code 提示。
   这样会执行最终 bundle 中的 OAuth module 与 Lody 认证扩展，而不只是检查 metadata。检查还会
   调用 `providers/list`，并确认 `session/new` 返回 `auth_required`，不会擅自猜测 Provider。在具备
   sandbox 条件的 Host 上，检查随后通过打包后的 control entry 配置本地虚拟 OpenAI Responses
@@ -154,6 +156,8 @@ Provider 配置属于实际执行任务的 Machine，并在 Lody 中通过独立
 
 - Codex OAuth 登录与状态，并把它作为推荐的默认连接；
 - 在 Claude OAuth 登录或选择前要求用户明确启用；
+- 通过 Sorbet Provider metadata 显示 GitHub Copilot、Kimi Code、xAI 以及未来新增的订阅 OAuth
+  连接，不在 Lody 中维护重复 allowlist；
 - 可信 API key 录入：secret 直接发送到目标 Machine，绝不进入 ACP elicitation、Loro state、
   prompt、Journal、保留的进度或日志；
 - 自定义 Provider 定义、endpoint、模型目录、非敏感连接状态，以及按 Provider 单独退出；
@@ -161,8 +165,8 @@ Provider 配置属于实际执行任务的 Machine，并在 Lody 中通过独立
 
 Agent config 可以记录可移植的连接偏好、模型、reasoning level 和其他执行参数；Session 记录本次
 实际解析出的连接与模型。新 Session 的解析顺序是：明确的 Agent/Session 选择、Machine 默认值、
-有效的 Codex OAuth。Claude OAuth 永远不会被隐式选中。没有可用选择时，Lody 打开配置入口，
-而不是自行猜测。
+有效的 Codex OAuth、其他已经连接且启用的订阅连接。Claude OAuth 永远不会被隐式启用。没有
+可用选择时，Lody 打开配置入口，而不是自行猜测。
 
 修改 Machine 默认连接只影响新 Session。恢复时继续使用该 Session 已记录的连接；如果连接不可用，
 Session 进入 blocked 状态并要求用户选择替代连接，Lody 不会在 turn 执行中自动 failover。用户
@@ -294,8 +298,9 @@ Lody 已经具备每 Session 的进程监管，因此只要明确处理共享文
   runtime 目录约 23 MB。最终打包入口通过 ACP initialize、OAuth 声明、执行到 Codex 第一个登录
   方式提示、`providers/list`、空 credential store 的 `auth_required`、自定义 Provider control、
   模型驱动的并行 Read 与 Bash 执行、动态 Session 配置、worker crash 后的 load/replay 与 resume，
-  以及 fork-at-turn/list/delete 检查。Provider Center 组件测试覆盖 Machine capability 门控、Claude
-  直接启用、自定义模型去重，以及 API key 只进入专用 secret RPC。仓库级 `pnpm check` 也已通过，
+  以及 fork-at-turn/list/delete 检查。Provider 设置组件测试覆盖 Machine capability 门控、订阅
+  OAuth 渲染、Claude 直接启用、自定义模型去重，以及 API key 只进入专用 secret RPC。仓库级
+  `pnpm check` 也已通过，
   包括 shared、components、CLI、Electron、i18n 和源码边界的完整检查。
 - Electron 官方发布信息显示 39.5.1 使用 Node 22.22.0。Darwin arm64 installer 已连同内置
   runtime smoke check 构建完成，并使用 ad-hoc 签名进行本机测试；安装后的 `Lody OSS` 已在正式版

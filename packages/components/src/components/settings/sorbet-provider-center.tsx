@@ -34,8 +34,9 @@ import { AcpAuthenticationPanel } from './acp-authentication-panel';
 
 const CODEX_PROVIDER_ID = 'openai-codex';
 const CLAUDE_PROVIDER_ID = 'anthropic';
-const CODEX_AUTH_METHOD_ID = 'sorbet:openai-codex:oauth';
-const CLAUDE_AUTH_METHOD_ID = 'sorbet:anthropic:oauth';
+
+const oauthMethodId = (providerId: string): string =>
+  `sorbet:${encodeURIComponent(providerId)}:oauth`;
 
 type CustomProviderDraft = {
   providerId?: string;
@@ -159,8 +160,7 @@ export function SorbetProviderCenter({
   );
 
   const providers = snapshot?.providers ?? [];
-  const codex = providers.find((provider) => provider.id === CODEX_PROVIDER_ID);
-  const claude = providers.find((provider) => provider.id === CLAUDE_PROVIDER_ID);
+  const oauthProviders = providers.filter((provider) => provider.kind === 'oauth');
   const customProviders = providers.filter((provider) => provider.kind === 'custom');
   const readyProviderCount = providers.filter(
     (provider) => provider.connected && provider.enabled
@@ -236,86 +236,61 @@ export function SorbetProviderCenter({
         </div>
       ) : null}
 
-      {codex ? (
-        <OAuthProviderCard
-          provider={codex}
-          recommended
-          isDefault={snapshot?.defaultProviderId === codex.id}
-          busy={busyAction !== null}
-          onMakeDefault={() =>
-            void run(`default:${codex.id}`, { action: 'set-default', providerId: codex.id })
-          }
-          onDisconnect={() =>
-            void run(`logout:${codex.id}`, { action: 'logout', providerId: codex.id })
-          }
-        >
-          <AcpAuthenticationPanel
-            machineId={machineId}
-            configId={configId}
-            cliType="builtin"
-            agentType="sorbet"
-            providerName="Codex"
-            preferredMethodId={CODEX_AUTH_METHOD_ID}
-            compact
-            reauthentication={codex.connected}
-            onBeforeStart={onBeforeAuthenticate}
-            onAuthenticated={async () => {
-              await refresh();
-              onChanged?.();
-            }}
-          />
-        </OAuthProviderCard>
-      ) : null}
-
-      {claude ? (
-        <OAuthProviderCard
-          provider={claude}
-          isDefault={snapshot?.defaultProviderId === claude.id}
-          busy={busyAction !== null}
-          onEnable={
-            claude.enabled
-              ? undefined
-              : () =>
-                  void run('enable-claude', {
-                    action: 'set-claude-oauth-enabled',
-                    enabled: true,
-                  })
-          }
-          onDisable={
-            claude.enabled
-              ? () =>
-                  void run('disable-claude', {
-                    action: 'set-claude-oauth-enabled',
-                    enabled: false,
-                  })
-              : undefined
-          }
-          onMakeDefault={() =>
-            void run(`default:${claude.id}`, { action: 'set-default', providerId: claude.id })
-          }
-          onDisconnect={() =>
-            void run(`logout:${claude.id}`, { action: 'logout', providerId: claude.id })
-          }
-        >
-          {claude.enabled ? (
+      {oauthProviders.map((provider) => {
+        const isClaude = provider.id === CLAUDE_PROVIDER_ID;
+        return (
+          <OAuthProviderCard
+            key={provider.id}
+            provider={provider}
+            recommended={provider.id === CODEX_PROVIDER_ID}
+            isDefault={snapshot?.defaultProviderId === provider.id}
+            busy={busyAction !== null}
+            onEnable={
+              isClaude && !provider.enabled
+                ? () =>
+                    void run('enable-claude', {
+                      action: 'set-claude-oauth-enabled',
+                      enabled: true,
+                    })
+                : undefined
+            }
+            onDisable={
+              isClaude && provider.enabled
+                ? () =>
+                    void run('disable-claude', {
+                      action: 'set-claude-oauth-enabled',
+                      enabled: false,
+                    })
+                : undefined
+            }
+            onMakeDefault={() =>
+              void run(`default:${provider.id}`, {
+                action: 'set-default',
+                providerId: provider.id,
+              })
+            }
+            onDisconnect={() =>
+              void run(`logout:${provider.id}`, { action: 'logout', providerId: provider.id })
+            }
+          >
             <AcpAuthenticationPanel
               machineId={machineId}
               configId={configId}
               cliType="builtin"
               agentType="sorbet"
-              providerName="Claude"
-              preferredMethodId={CLAUDE_AUTH_METHOD_ID}
+              providerName={provider.name}
+              preferredMethodId={oauthMethodId(provider.id)}
               compact
-              reauthentication={claude.connected}
+              reauthentication={provider.connected}
               onBeforeStart={onBeforeAuthenticate}
               onAuthenticated={async () => {
                 await refresh();
                 onChanged?.();
               }}
             />
-          ) : null}
-        </OAuthProviderCard>
-      ) : null}
+          </OAuthProviderCard>
+        );
+      })}
 
       <div className="space-y-2 border-t border-border/60 pt-4">
         <div className="flex items-center justify-between gap-3">
@@ -549,7 +524,7 @@ export function SorbetProviderCenter({
         <p className="text-xs text-status-warning">
           {t(
             'settings.agent.sorbet.providerRequired',
-            'Connect Codex, explicitly enable Claude, or configure a custom Provider before creating Sorbet.'
+            'Connect a subscription or configure a custom Provider before creating Sorbet.'
           )}
         </p>
       ) : null}

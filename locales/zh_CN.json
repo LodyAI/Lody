@@ -2514,7 +2514,7 @@
   "settings.agent.sorbet.modelsHint": "每行输入一个模型 ID。",
   "settings.agent.sorbet.apiKey.optionalReplace": "API key（留空则保留当前值）",
   "settings.agent.sorbet.apiKey.label": "API key",
-  "settings.agent.sorbet.providerRequired": "创建 Sorbet 前，请连接 Codex、明确启用 Claude，或配置一个自定义 Provider。",
+  "settings.agent.sorbet.providerRequired": "创建 Sorbet 前，请连接一个订阅账户或配置自定义 Provider。",
   "settings.agent.sorbet.claude.enable": "启用 Claude OAuth",
   "settings.agent.sorbet.custom.deleteTitle": "删除自定义 Provider？",
   "settings.agent.sorbet.custom.deleteDescription": "如果已保存的会话或审批 reviewer 仍引用此 Provider，Sorbet 会阻止删除。",

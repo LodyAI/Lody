@@ -2514,7 +2514,7 @@
   "settings.agent.sorbet.modelsHint": "Enter one model id per line.",
   "settings.agent.sorbet.apiKey.optionalReplace": "API key (leave empty to keep current)",
   "settings.agent.sorbet.apiKey.label": "API key",
-  "settings.agent.sorbet.providerRequired": "Connect Codex, explicitly enable Claude, or configure a custom Provider before creating Sorbet.",
+  "settings.agent.sorbet.providerRequired": "Connect a subscription or configure a custom Provider before creating Sorbet.",
   "settings.agent.sorbet.claude.enable": "Enable Claude OAuth",
   "settings.agent.sorbet.custom.deleteTitle": "Delete custom Provider?",
   "settings.agent.sorbet.custom.deleteDescription": "Sorbet blocks deletion when a saved session or approval reviewer still references this Provider.",

@@ -20,10 +20,8 @@ import {
 } from '@/agent/sorbet-provider-preferences';
 
 const MAX_INPUT_BYTES = 1_048_576;
-const OAUTH_PROVIDERS = [
-  { id: 'openai-codex', fallbackName: 'Codex' },
-  { id: 'anthropic', fallbackName: 'Claude' },
-] as const;
+const CODEX_PROVIDER_ID = 'openai-codex';
+const CLAUDE_PROVIDER_ID = 'anthropic';
 
 type ControlOutput = {
   snapshot: SorbetProviderCenterSnapshot;
@@ -91,17 +89,22 @@ async function snapshot(
   const runtimeProviders = new Map(
     agent.models.getProviders().map((provider) => [provider.id, provider])
   );
-  const oauthConnections: SorbetProviderConnection[] = OAUTH_PROVIDERS.map(
-    ({ id, fallbackName }) => ({
-      id,
-      name: runtimeProviders.get(id)?.name ?? fallbackName,
-      kind: 'oauth' as const,
-      credentialType: credentials.get(id),
-      connected: credentials.has(id),
-      enabled: id !== 'anthropic' || preferences.claudeOAuthEnabled,
-      models: providerModels(agent, id),
-    })
-  );
+  const subscriptionProviders = [...runtimeProviders.values()]
+    .filter((provider) => provider.auth.oauth?.isSubscription === true)
+    .sort((left, right) => {
+      if (left.id === CODEX_PROVIDER_ID) return -1;
+      if (right.id === CODEX_PROVIDER_ID) return 1;
+      return left.name.localeCompare(right.name);
+    });
+  const oauthConnections: SorbetProviderConnection[] = subscriptionProviders.map((provider) => ({
+    id: provider.id,
+    name: provider.name,
+    kind: 'oauth' as const,
+    credentialType: credentials.get(provider.id),
+    connected: credentials.has(provider.id),
+    enabled: provider.id !== CLAUDE_PROVIDER_ID || preferences.claudeOAuthEnabled,
+    models: providerModels(agent, provider.id),
+  }));
   const customConnections: SorbetProviderConnection[] = customProviders.map((provider) => ({
     id: provider.id,
     name: provider.name,
@@ -119,11 +122,9 @@ async function snapshot(
     (provider) => provider.id === preferences.defaultProviderId && ready(provider)
   );
   if (selected === undefined) {
-    selected = providers.find((provider) => provider.id === 'openai-codex' && ready(provider));
+    selected = providers.find((provider) => provider.id === CODEX_PROVIDER_ID && ready(provider));
   }
-  if (selected === undefined && preferences.claudeOAuthEnabled) {
-    selected = providers.find((provider) => provider.id === 'anthropic' && ready(provider));
-  }
+  if (selected === undefined) selected = oauthConnections.find(ready);
   if (selected === undefined) selected = customConnections.find(ready);
 
   const preferredModel =

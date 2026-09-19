@@ -86,6 +86,14 @@ async function checkProviderCenterControl() {
       ),
       'Provider Center did not keep Claude OAuth disabled'
     );
+    for (const providerId of ['github-copilot', 'kimi-coding', 'xai']) {
+      assert(
+        response.snapshot?.providers?.some(
+          (provider) => provider.id === providerId && provider.enabled === true
+        ),
+        `Provider Center is missing subscription OAuth Provider ${providerId}`
+      );
+    }
     const created = invoke({
       action: 'create-custom',
       provider: {
@@ -174,8 +182,18 @@ async function checkAcpLifecycle() {
     assert(initialized.agentCapabilities?.providers != null, 'missing Provider capability');
 
     const authMethodIds = new Set((initialized.authMethods ?? []).map((method) => method.id));
-    assert(authMethodIds.has('sorbet:openai-codex:oauth'), 'missing Codex OAuth method');
-    assert(authMethodIds.has('sorbet:anthropic:oauth'), 'missing Anthropic OAuth method');
+    for (const providerId of [
+      'openai-codex',
+      'anthropic',
+      'github-copilot',
+      'kimi-coding',
+      'xai',
+    ]) {
+      assert(
+        authMethodIds.has(`sorbet:${providerId}:oauth`),
+        `missing subscription OAuth method for ${providerId}`
+      );
+    }
 
     const providerResponse = await connection.unstable_listProviders({});
     const providerIds = new Set(providerResponse.providers.map((provider) => provider.providerId));

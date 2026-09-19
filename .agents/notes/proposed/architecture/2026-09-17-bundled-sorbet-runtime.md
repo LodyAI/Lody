@@ -33,7 +33,9 @@ investigation. It does not declare the runtime production-ready and is not an ap
   by the integration.
 - A fresh Sorbet configuration contains no custom Provider. Valid Codex OAuth is the preferred
   default. Claude OAuth is disabled by default and requires an explicit enable action before it can
-  be selected. Users can explicitly switch between enabled OAuth connections and custom Providers.
+  be selected. Other subscription OAuth connections are discovered from Sorbet's Provider metadata;
+  the current runtime also exposes GitHub Copilot, Kimi Code, and xAI. Users can explicitly switch
+  between enabled OAuth connections and custom Providers.
 - Selecting a connection sets the default for new Sessions. A running or resumed Session remains
   pinned to its recorded connection and model until the user explicitly changes it; Provider
   failures never trigger a silent cross-Provider retry.
@@ -70,16 +72,17 @@ testing but does not by itself satisfy the production gates below:
 - Sorbet is a known builtin for validation, title policy, and protocol-driven ACP authentication and
   appears in the Agent picker. Its Agent form contains a Machine-scoped Provider Center gated by the
   versioned `sorbetProviderCenter` protocol capability.
-- The Provider Center recommends Codex OAuth, requires an explicit action before enabling Claude
-  OAuth, supports custom Provider create/edit/delete and per-Provider logout, and changes the default
-  only for new Sessions. API keys use a one-time encrypted Machine RPC and are written through
-  Sorbet's credential boundary without entering Loro or Agent configuration.
+- The Provider settings recommend Codex OAuth, require an explicit action before enabling Claude
+  OAuth, render every subscription OAuth Provider advertised by Sorbet, support custom Provider
+  create/edit/delete and per-Provider logout, and change the default only for new Sessions. API keys
+  use a one-time encrypted Machine RPC and are written through Sorbet's credential boundary without
+  entering Loro or Agent configuration.
 - Lody's dedicated authentication client advertises a versioned credential-form extension backed by
   the same one-time encrypted Machine RPC. Sorbet preserves ACP's default ban on credential forms
   for other clients, marks Pi `secret` and `manual_code` prompts as secret only for this extension,
   and serializes browser URL consent before the fallback form so the two interactions cannot race.
 - A release-build smoke check launches the exact bundled entry from an empty data root, negotiates
-  ACP, verifies Codex and Anthropic OAuth advertisement, starts Codex OAuth, and cancels after Pi's
+  ACP, verifies every bundled subscription OAuth advertisement, starts Codex OAuth, and cancels after Pi's
   credential-safe manual-code prompt. This exercises the OAuth module and Lody authentication
   extension in the final bundle instead of only checking metadata. The check also calls
   `providers/list` and verifies that `session/new` reports `auth_required` instead of guessing a
@@ -170,6 +173,8 @@ form. It owns:
 
 - Codex OAuth login and status, presented as the recommended default connection;
 - an explicit enable action before Claude OAuth login or selection;
+- GitHub Copilot, Kimi Code, xAI, and future subscription OAuth connections advertised through
+  Sorbet Provider metadata rather than a duplicate Lody allowlist;
 - trusted API-key entry that sends the secret directly to the target Machine and never places it in
   ACP elicitation, Loro state, prompts, Journals, retained progress, or logs;
 - custom Provider definitions, endpoints, model catalogs, non-secret connection status, and
@@ -179,8 +184,9 @@ form. It owns:
 Agent configuration may record a portable connection preference, model, reasoning level, and other
 execution options. A Session records the resolved connection and model actually used. The
 resolution order for a new Session is an explicit Agent/Session selection, then the Machine default,
-then a valid Codex OAuth connection. Claude OAuth is never selected implicitly. With no usable
-selection, Lody opens configuration instead of guessing.
+then a valid Codex OAuth connection, then another connected and enabled subscription connection.
+Claude OAuth is never enabled implicitly. With no usable selection, Lody opens configuration instead
+of guessing.
 
 Changing the Machine default affects only new Sessions. Resume uses the connection already recorded
 for that Session. If it is unavailable, the Session becomes blocked and asks the user to choose a
@@ -334,9 +340,10 @@ durability model with a smaller boundary.
   Sorbet runtime tree. The exact bundled entry passed ACP initialize, OAuth advertisement, execution
   through the first Codex login-method prompt, `providers/list`, empty-store `auth_required`, custom
   Provider control, model-driven parallel Read and Bash execution, dynamic Session configuration,
-  worker-crash load/replay and resume, and fork-at-turn/list/delete checks. Provider Center component
-  tests cover Machine capability gating, direct Claude enablement, custom-model deduplication, and
-  keeping API keys on the dedicated secret RPC. The repository-wide `pnpm check` also passed,
+  worker-crash load/replay and resume, and fork-at-turn/list/delete checks. Provider settings component
+  tests cover Machine capability gating, subscription OAuth rendering, direct Claude enablement,
+  custom-model deduplication, and keeping API keys on the dedicated secret RPC. The repository-wide
+  `pnpm check` also passed,
   including the full shared, components, CLI, Electron, i18n, and source-boundary suites.
 - Electron's published 39.5.1 runtime reports Node 22.22.0. A Darwin arm64 installer was built with
   the bundled-runtime smoke check, ad-hoc signed for local testing, and launched alongside the

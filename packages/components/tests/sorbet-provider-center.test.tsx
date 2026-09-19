@@ -24,8 +24,17 @@ import { SorbetProviderCenter } from '../src/components/settings/sorbet-provider
 import { initI18n } from '../src/i18n';
 
 vi.mock('../src/components/settings/acp-authentication-panel', () => ({
-  AcpAuthenticationPanel: ({ providerName }: { providerName?: string }) => (
-    <div data-testid={`authenticate-${providerName ?? 'provider'}`}>
+  AcpAuthenticationPanel: ({
+    providerName,
+    preferredMethodId,
+  }: {
+    providerName?: string;
+    preferredMethodId?: string;
+  }) => (
+    <div
+      data-testid={`authenticate-${providerName ?? 'provider'}`}
+      data-method-id={preferredMethodId}
+    >
       Authenticate {providerName}
     </div>
   ),
@@ -58,6 +67,30 @@ const oauthSnapshot = (claudeOAuthEnabled = false): SorbetProviderCenterSnapshot
       connected: false,
       enabled: claudeOAuthEnabled,
       models: [{ id: 'claude-test', selector: 'anthropic/claude-test' }],
+    },
+    {
+      id: 'github-copilot',
+      name: 'GitHub Copilot',
+      kind: 'oauth',
+      connected: false,
+      enabled: true,
+      models: [{ id: 'copilot-test', selector: 'github-copilot/copilot-test' }],
+    },
+    {
+      id: 'kimi-coding',
+      name: 'Kimi Code',
+      kind: 'oauth',
+      connected: false,
+      enabled: true,
+      models: [{ id: 'kimi-test', selector: 'kimi-coding/kimi-test' }],
+    },
+    {
+      id: 'xai',
+      name: 'xAI',
+      kind: 'oauth',
+      connected: false,
+      enabled: true,
+      models: [{ id: 'grok-test', selector: 'xai/grok-test' }],
     },
   ],
 });
@@ -174,6 +207,27 @@ describe('SorbetProviderCenter', () => {
 
     await vi.waitFor(() => expect(container.textContent).toContain('Custom Providers'));
     expect(container.textContent).not.toContain('Sorbet Provider Center');
+  });
+
+  it('renders every subscription OAuth connection with its Sorbet authentication method', async () => {
+    await render();
+
+    const expected = [
+      ['Codex', 'sorbet:openai-codex:oauth'],
+      ['GitHub Copilot', 'sorbet:github-copilot:oauth'],
+      ['Kimi Code', 'sorbet:kimi-coding:oauth'],
+      ['xAI', 'sorbet:xai:oauth'],
+    ] as const;
+    await vi.waitFor(() => {
+      for (const [name, methodId] of expected) {
+        expect(
+          container
+            .querySelector(`[data-testid="authenticate-${name}"]`)
+            ?.getAttribute('data-method-id')
+        ).toBe(methodId);
+      }
+    });
+    expect(container.querySelector('[data-testid="authenticate-Claude"]')).toBeNull();
   });
 
   it('enables Claude directly without a risk acknowledgement dialog', async () => {

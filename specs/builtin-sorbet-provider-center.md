@@ -10,12 +10,14 @@ Translation: current
 A user adding an Agent to a Machine can choose Sorbet as a Lody-bundled builtin. The Sorbet form
 presents that Machine's connection settings directly, without a separately named Provider Center
 heading. A fresh Machine has no custom Provider and does not guess a connection. The user can sign
-in with Codex OAuth, explicitly enable Claude OAuth, or add a custom OpenAI-compatible or
+in with any subscription OAuth Provider advertised by the bundled Sorbet runtime—currently Codex,
+Claude, GitHub Copilot, Kimi Code, and xAI—or add a custom OpenAI-compatible or
 Anthropic-compatible Provider.
 
 Codex is the recommended connection and becomes the default when it is the first usable connection.
-Claude OAuth remains disabled until the user enables it. A connected custom Provider can be selected
-explicitly. The selected connection supplies the default model for new Sorbet Sessions.
+Claude OAuth remains disabled until the user enables it; the other advertised subscription
+connections are immediately available for login. Any connected Provider can be selected explicitly.
+The selected connection supplies the default model for new Sorbet Sessions.
 
 ## Responsibilities
 
@@ -39,6 +41,9 @@ fail.
 
 - Codex OAuth is enabled and recommended on a fresh Machine.
 - Claude OAuth is disabled on a fresh Machine and requires an explicit enable action.
+- Other subscription OAuth connections come from Sorbet's Provider metadata rather than a separate
+  Lody allowlist. The current bundled runtime advertises GitHub Copilot, Kimi Code, and xAI in
+  addition to Codex and Claude.
 - A fresh Machine has no custom Provider. Adding one requires a name, HTTP(S) endpoint, protocol,
   at least one model, and an API key before it is usable.
 - Disconnect and logout act on one Provider. They must not clear unrelated Sorbet credentials.
@@ -47,9 +52,9 @@ fail.
 - Choosing “Use for new sessions” changes the Machine default. It does not change a running Session.
 
 If the saved default is no longer usable, resolution prefers an available Codex OAuth connection,
-then an explicitly enabled Claude OAuth connection, then an available custom Provider. Claude is
-never enabled by resolution. If no connection is usable, Session creation remains blocked in the
-Provider Center instead of silently changing Provider or weakening authentication.
+then another connected and enabled subscription OAuth connection, then an available custom Provider.
+Claude is never enabled by resolution. If no connection is usable, Session creation remains blocked
+in the Provider settings instead of silently changing Provider or weakening authentication.
 
 Each Sorbet worker receives the resolved default model when it starts. Sorbet records the actual
 Provider and model in its Session metadata. Loading or resuming a Session uses that recorded value,
