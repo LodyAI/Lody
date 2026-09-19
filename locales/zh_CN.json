@@ -1415,7 +1415,6 @@
   "sessions.tabs.closedCount": "已关闭（{{count}}）",
   "sessions.tabs.reopenTab": "重新打开对话",
   "sessions.tabs.empty": "当前没有打开的对话",
-  "sessions.tabs.remotelyClosed": "此对话标签页已关闭",
   "sessions.tabWaitingForSync": "正在同步这个对话…",
   "sessions.usage.context": "上下文",
   "sessions.usage.compacting": "压缩中",

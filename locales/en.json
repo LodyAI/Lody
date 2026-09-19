@@ -1415,7 +1415,6 @@
   "sessions.tabs.closedCount": "Closed ({{count}})",
   "sessions.tabs.reopenTab": "Reopen conversation",
   "sessions.tabs.empty": "No conversation open",
-  "sessions.tabs.remotelyClosed": "This conversation tab was closed",
   "sessions.tabWaitingForSync": "Waiting for this conversation to sync…",
   "sessions.usage.context": "Context",
   "sessions.usage.compacting": "Compacting",

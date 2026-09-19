@@ -1752,17 +1752,12 @@ const SessionDetail = ({
 
   // A confirmed shared close invalidates this URL choice. Replace only that
   // exact choice, never a newer navigation, and never infer closure from a
-  // missing replica row. This is not URL/local-selection mirroring.
-  const previousSelectedTab = useRef({ sessionId, tabId: activeTabSessionId });
+  // missing replica row. This is not URL/local-selection mirroring. The close
+  // itself is the feedback: no toast, whether this or another client closed it.
   useEffect(() => {
     if (!docMetaCacheReady) return;
-    const previous = previousSelectedTab.current;
-    previousSelectedTab.current = { sessionId, tabId: activeTabSessionId };
     if (!closedConversationIds.has(requestedTabSessionId)) return;
     if (router.state.location.search.tab !== urlTab) return;
-    if (previous.sessionId === sessionId && previous.tabId === requestedTabSessionId) {
-      toast.info(t('sessions.tabs.remotelyClosed', 'This conversation tab was closed'));
-    }
     navigateToSessionTab(activeTabSessionId);
   }, [
     docMetaCacheReady,
@@ -1772,8 +1767,6 @@ const SessionDetail = ({
     urlTab,
     router,
     navigateToSessionTab,
-    sessionId,
-    t,
   ]);
 
   const replaceSessionUrlPr = useCallback(
