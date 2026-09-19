@@ -64,7 +64,11 @@ describe('SessionInfoBar syncing indicator', () => {
       root.render(<SessionInfoBar {...CONTEXT_LESS_PROPS} />);
     });
 
-    expect(container.innerHTML).toBe('');
+    // No bar is shown: only the hidden spacer that keeps the composer's gap.
+    expect(container.textContent).toBe('');
+    expect(container.querySelector('button, [role]')).toBeNull();
+    expect(container.children).toHaveLength(1);
+    expect(container.firstElementChild?.getAttribute('aria-hidden')).toBe('true');
   });
 
   it('renders and activates a reported preview action without staged context', () => {
