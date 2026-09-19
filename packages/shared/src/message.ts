@@ -327,6 +327,13 @@ export interface MachineAcpCapabilitiesRefreshRequest {
   machineId: MachineId;
   workspaceId: WorkspaceId;
   configId: AgentConfigId;
+  /**
+   * Start the agent even when the persisted entry still matches the launch
+   * inputs. Reserved for requests a user or a setup workflow made on purpose
+   * (Settings refresh, post-authentication verification, provider setup); the
+   * default path answers from the cache when it can.
+   */
+  force?: boolean;
 }
 
 export interface MachineAcpCapabilitiesRefreshResponse {

@@ -60,6 +60,7 @@ import {
   LoroStreamsMachineRpcClient,
   LoroStreamsRpcResponseDispatcher,
   LoroStreamsRpcRequestSchema,
+  LoroMachineAcpCapabilitiesRefreshRpcRequestSchema,
   createRpcSecretRecipient,
   createLoroStreamsJsonStreamClient,
   decryptCodeCollabV2RpcPayload,
@@ -250,6 +251,49 @@ const createFakeStreamClient = () => {
 };
 
 describe('LoroStreamsMachineRpcClient', () => {
+  describe('capability refresh force field', () => {
+    // How a daemon without the acpCapabilityRefreshCache capability parses this
+    // request: the same strict schema minus the params field that build never
+    // declared. Derived from the current schema so it cannot drift from what shipped.
+    const previousGenerationSchema = LoroMachineAcpCapabilitiesRefreshRpcRequestSchema.extend({
+      params: LoroMachineAcpCapabilitiesRefreshRpcRequestSchema.shape.params.omit({ force: true }),
+    });
+
+    const emitRefreshRequest = async (force: boolean | undefined): Promise<unknown> => {
+      const fake = createFakeStreamClient();
+      const client = new LoroStreamsMachineRpcClient({
+        workspaceId: 'workspace-1',
+        machineId: 'machine-1',
+        streamClient: fake.streamClient,
+      });
+      void client
+        .requestMachineAcpCapabilitiesRefresh({ configId, force, timeoutMs: 5_000 })
+        .catch(() => undefined);
+      await vi.waitFor(() => expect(fake.appended).toHaveLength(1));
+      return fake.appended[0]?.value;
+    };
+
+    it('omits the field entirely when the caller did not negotiate a forced refresh', async () => {
+      const request = await emitRefreshRequest(undefined);
+
+      // A strict schema rejects the key even when its value is undefined, so
+      // absence — not falsiness — is what keeps an older daemon able to answer.
+      expect(Object.keys((request as { params: object }).params)).not.toContain('force');
+      expect(previousGenerationSchema.safeParse(request).success).toBe(true);
+      expect(LoroStreamsRpcRequestSchema.safeParse(request).success).toBe(true);
+    });
+
+    it('sends the field when the caller negotiated a forced refresh', async () => {
+      const request = await emitRefreshRequest(true);
+
+      expect((request as { params: { force?: boolean } }).params.force).toBe(true);
+      expect(LoroStreamsRpcRequestSchema.safeParse(request).success).toBe(true);
+      // The regression negotiation prevents: an older daemon fails to parse the
+      // request and drops it without a reply, so the caller only sees a timeout.
+      expect(previousGenerationSchema.safeParse(request).success).toBe(false);
+    });
+  });
+
   it('sends minimal session preparation requests and resolves the response', async () => {
     const fake = createFakeStreamClient();
     const sessionId = SessionIdSchema.parse('session-1');

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   ACP_CAPABILITY_CACHE_VERSION,
+  ACP_CAPABILITY_REFRESH_CACHE_TTL_MS,
+  decideAcpCapabilityRefreshCache,
   getAcpCapabilityCacheEntryAuthority,
   getAcpCapabilityCacheStaleReason,
   getReadableAcpCapabilityCacheEntry,
@@ -68,5 +70,93 @@ describe('ACP capability cache compatibility', () => {
     const { modelReasoningEfforts: _incompatibleModelReasoningEfforts, ...compatible } = capability;
 
     expect(getReadableAcpCapabilityCacheEntry(capability)).toEqual(compatible);
+  });
+});
+
+describe('ACP capability refresh cache decision', () => {
+  const currentEntry = (
+    overrides: Partial<AcpCapabilityCacheEntry> = {}
+  ): AcpCapabilityCacheEntry => ({
+    ...entry(ACP_CAPABILITY_CACHE_VERSION),
+    fetchedAt: 1_000_000,
+    ...overrides,
+  });
+  const expectedSourceVersion = entry().sourceVersion;
+
+  it('reuses an entry whose source version and age still match', () => {
+    const capability = currentEntry();
+
+    expect(
+      decideAcpCapabilityRefreshCache({
+        entry: capability,
+        expectedSourceVersion,
+        nowMs: capability.fetchedAt + ACP_CAPABILITY_REFRESH_CACHE_TTL_MS,
+      })
+    ).toEqual({ hit: true, entry: capability });
+  });
+
+  it('refuses to reuse an entry once it is older than the cache lifetime', () => {
+    const capability = currentEntry();
+
+    expect(
+      decideAcpCapabilityRefreshCache({
+        entry: capability,
+        expectedSourceVersion,
+        nowMs: capability.fetchedAt + ACP_CAPABILITY_REFRESH_CACHE_TTL_MS + 1,
+      })
+    ).toEqual({ hit: false, reason: 'expired' });
+  });
+
+  it('treats an entry stamped ahead of the reader as fresh rather than re-probing', () => {
+    const capability = currentEntry();
+
+    expect(
+      decideAcpCapabilityRefreshCache({
+        entry: capability,
+        expectedSourceVersion,
+        nowMs: capability.fetchedAt - 60_000,
+      })
+    ).toEqual({ hit: true, entry: capability });
+  });
+
+  it.each([
+    {
+      name: 'a changed runtime override',
+      args: { expectedSourceVersion: 'builtin-codex:test+override:{"codexPath":"/other"}' },
+      reason: 'source-version-mismatch',
+    },
+    {
+      name: 'an unknowable expected version',
+      args: { expectedSourceVersion: undefined },
+      reason: 'source-version-unresolved',
+    },
+  ])('misses on $name', ({ args, reason }) => {
+    expect(
+      decideAcpCapabilityRefreshCache({
+        entry: currentEntry(),
+        nowMs: 1_000_000,
+        ...args,
+      })
+    ).toEqual({ hit: false, reason });
+  });
+
+  it('never answers a refresh with an entry no probe produced', () => {
+    expect(
+      decideAcpCapabilityRefreshCache({
+        entry: currentEntry({ provenance: undefined }),
+        expectedSourceVersion,
+        nowMs: 1_000_000,
+      })
+    ).toEqual({ hit: false, reason: 'not-runtime-provenance' });
+  });
+
+  it('misses when nothing has been persisted yet', () => {
+    expect(
+      decideAcpCapabilityRefreshCache({
+        entry: undefined,
+        expectedSourceVersion,
+        nowMs: 1_000_000,
+      })
+    ).toEqual({ hit: false, reason: 'missing' });
   });
 });

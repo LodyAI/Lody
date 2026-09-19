@@ -18,6 +18,8 @@ import {
 } from '../src/session/session-execution-service';
 import {
   ACP_CAPABILITY_CACHE_VERSION,
+  ACP_CAPABILITY_REFRESH_CACHE_TTL_MS,
+  type AcpCapabilityCacheEntry,
   getMachineRoomId,
   SessionStatusFactory,
   type ACPSessionId,
@@ -203,6 +205,9 @@ const createBaseDeps = (
       modes: [],
       models: [],
     })),
+    // Undefined means "cannot name the version a probe would stamp", so the
+    // default suite keeps probing; cache tests resolve a real version.
+    resolveAcpCapabilitySourceVersion: vi.fn(async () => undefined),
     evictForMemoryPressure: vi.fn(async () => ({
       availableMemoryBytes: 4 * 1024 * 1024 * 1024,
       thresholdBytes: 1024 * 1024 * 1024,
@@ -231,6 +236,14 @@ const createBaseDeps = (
     async (agentConfigId: AgentConfigId, machineId: MachineId) =>
       createLaunchConfig({ id: agentConfigId, machineId })
   );
+
+  const workspaceWithCapabilityCache = deps.workspaceDocument as unknown as {
+    getAcpCapabilities?: (
+      machineId: MachineId,
+      agentConfigId: AgentConfigId
+    ) => Promise<AcpCapabilityCacheEntry | undefined>;
+  };
+  workspaceWithCapabilityCache.getAcpCapabilities ??= vi.fn(async () => undefined);
 
   const workspaceWithDocFactory = deps.workspaceDocument as unknown as {
     getOrCreateSessionDoc: (...args: unknown[]) => Promise<unknown>;
@@ -7985,6 +7998,168 @@ describe('SessionExecutionService', () => {
         capability,
       })
     );
+  });
+
+  describe('ACP capability refresh cache', () => {
+    const cachedSourceVersion = 'registry:deepseek:9.9.9';
+    const createCachedCapability = (
+      overrides: Partial<AcpCapabilityCacheEntry> = {}
+    ): AcpCapabilityCacheEntry => ({
+      cliType: 'registry',
+      agentType: 'deepseek',
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      provenance: 'runtime',
+      sourceVersion: cachedSourceVersion,
+      modes: [{ id: 'default', name: 'Default' }],
+      models: [{ modelId: 'kimi-k3', name: 'Kimi K3' }],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select',
+          currentValue: 'kimi-k3',
+          options: [{ value: 'kimi-k3', name: 'Kimi K3' }],
+        },
+      ],
+      availableCommands: [{ name: 'review' }],
+      sessionFork: false,
+      acknowledgedSteer: true,
+      sessionForkWorktree: false,
+      fetchedAt: Date.now(),
+      ...overrides,
+    });
+
+    const createCacheService = (args: {
+      capability?: AcpCapabilityCacheEntry;
+      expectedSourceVersion?: string;
+    }) => {
+      const fetchAcpCapabilities = vi.fn(async () => ({ modes: [], models: [] }));
+      const updateAcpCapabilities = vi.fn(async () => args.capability);
+      const deps = createBaseDeps({
+        workspaceDocument: {
+          repo: {
+            upsertDocMeta: vi.fn(async () => {}),
+            getDocMeta: vi.fn(async () => undefined),
+          },
+          getOrCreateSessionDoc: vi.fn(),
+          updateAcpCapabilities,
+          getAcpCapabilities: vi.fn(async () => args.capability),
+          getAgentConfigForMachineLaunch: vi.fn(async () =>
+            createLaunchConfig({ agentType: 'deepseek' })
+          ),
+        } as unknown as LoroDocumentManager,
+        fetchAcpCapabilities,
+        resolveAcpCapabilitySourceVersion: vi.fn(
+          async () => args.expectedSourceVersion ?? cachedSourceVersion
+        ),
+      });
+      return {
+        service: new SessionExecutionService(deps),
+        fetchAcpCapabilities,
+        updateAcpCapabilities,
+      };
+    };
+
+    const request = {
+      type: 'machine/acp-capabilities-refresh' as const,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      configId: capabilityConfigId,
+    };
+
+    it('answers from the persisted entry without starting an agent', async () => {
+      const capability = createCachedCapability();
+      const { service, fetchAcpCapabilities, updateAcpCapabilities } = createCacheService({
+        capability,
+      });
+
+      await expect(service.refreshMachineAcpCapabilities(request)).resolves.toEqual({
+        type: 'machine/acp-capabilities-refresh_response',
+        machineId: 'machine-1',
+        configId: capabilityConfigId,
+        cliType: 'registry',
+        agentType: 'deepseek',
+        success: true,
+        modes: [{ id: 'default', name: 'Default', description: undefined }],
+        models: [{ modelId: 'kimi-k3', name: 'Kimi K3', description: undefined }],
+        configOptions: [{ id: 'model', name: 'Model', category: 'model', optionCount: 1 }],
+        capability,
+        availableCommands: [{ name: 'review' }],
+      });
+      expect(fetchAcpCapabilities).not.toHaveBeenCalled();
+      expect(updateAcpCapabilities).not.toHaveBeenCalled();
+    });
+
+    it('starts the agent when the launch inputs no longer produce the stored source version', async () => {
+      const { service, fetchAcpCapabilities } = createCacheService({
+        capability: createCachedCapability(),
+        expectedSourceVersion: `${cachedSourceVersion}+override:other-binary`,
+      });
+
+      await expect(service.refreshMachineAcpCapabilities(request)).resolves.toEqual(
+        expect.objectContaining({ success: true })
+      );
+      expect(fetchAcpCapabilities).toHaveBeenCalledTimes(1);
+    });
+
+    it('starts the agent when the stored entry is older than the cache lifetime', async () => {
+      const { service, fetchAcpCapabilities } = createCacheService({
+        capability: createCachedCapability({
+          fetchedAt: Date.now() - ACP_CAPABILITY_REFRESH_CACHE_TTL_MS - 1,
+        }),
+      });
+
+      await expect(service.refreshMachineAcpCapabilities(request)).resolves.toEqual(
+        expect.objectContaining({ success: true })
+      );
+      expect(fetchAcpCapabilities).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports a failed refresh when the persisted entry cannot be read', async () => {
+      const fetchAcpCapabilities = vi.fn(async () => ({ modes: [], models: [] }));
+      const deps = createBaseDeps({
+        workspaceDocument: {
+          repo: {
+            upsertDocMeta: vi.fn(async () => {}),
+            getDocMeta: vi.fn(async () => undefined),
+          },
+          getOrCreateSessionDoc: vi.fn(),
+          updateAcpCapabilities: vi.fn(async () => {}),
+          getAcpCapabilities: vi.fn(async () => {
+            throw new Error('machine flock document is unreadable');
+          }),
+          getAgentConfigForMachineLaunch: vi.fn(async () =>
+            createLaunchConfig({ agentType: 'deepseek' })
+          ),
+        } as unknown as LoroDocumentManager,
+        fetchAcpCapabilities,
+        resolveAcpCapabilitySourceVersion: vi.fn(async () => cachedSourceVersion),
+      });
+
+      await expect(
+        new SessionExecutionService(deps).refreshMachineAcpCapabilities(request)
+      ).resolves.toEqual(
+        expect.objectContaining({
+          type: 'machine/acp-capabilities-refresh_response',
+          success: false,
+          error: expect.stringContaining('machine flock document is unreadable'),
+        })
+      );
+      expect(fetchAcpCapabilities).not.toHaveBeenCalled();
+    });
+
+    it('starts the agent for a forced refresh even when the stored entry is current', async () => {
+      const { service, fetchAcpCapabilities, updateAcpCapabilities } = createCacheService({
+        capability: createCachedCapability(),
+      });
+
+      await expect(
+        service.refreshMachineAcpCapabilities({ ...request, force: true })
+      ).resolves.toEqual(expect.objectContaining({ success: true }));
+      expect(fetchAcpCapabilities).toHaveBeenCalledTimes(1);
+      expect(updateAcpCapabilities).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('deduplicates concurrent ACP capability refreshes for the same config and launch inputs', async () => {

@@ -14,6 +14,7 @@ import {
   getAcpCapabilitySourceVersion,
   mergeLoginShellEnv,
   resolveACPSetting,
+  resolveExpectedAcpCapabilitySourceVersion,
   resolveBuiltinAuthenticationProcessLaunch,
   resolveBuiltinACPSetting,
   resolveACPProcessLaunchAsync,
@@ -28,6 +29,7 @@ import {
   BUILTIN_KIMI_CAPABILITY_SOURCE_VERSION,
 } from '../src/agent/managed-agent-runtime';
 import * as managedRuntime from '../src/agent/managed-agent-runtime';
+import * as managedRuntimeUpdates from '../src/agent/managed-runtime-update-coordinator';
 import { parseNpxPackageSpecFromArgs } from '../src/agent/npx-cache';
 import {
   DEEPSEEK_HARNESS_CAPABILITY_SOURCE_VERSION,
@@ -388,6 +390,134 @@ describe('resolveBuiltinACPSetting', () => {
     } finally {
       managerSpy.mockRestore();
     }
+  });
+
+  describe('resolveExpectedAcpCapabilitySourceVersion', () => {
+    const managedKimiInstallation = {
+      runtimeName: 'kimi-code' as const,
+      version: '0.36.0',
+      targetVersion: '0.37.0',
+      platformArch: 'node',
+      command: '/managed/kimi/package/dist/main.mjs',
+      updateAvailable: false,
+    };
+
+    const withManagedRuntimeManager = async <T>(
+      manager: Partial<ReturnType<typeof managedRuntime.getManagedAgentRuntimeManager>>,
+      run: () => Promise<T>
+    ): Promise<T> => {
+      const managerSpy = vi
+        .spyOn(managedRuntime, 'getManagedAgentRuntimeManager')
+        .mockReturnValue(
+          manager as ReturnType<typeof managedRuntime.getManagedAgentRuntimeManager>
+        );
+      try {
+        return await run();
+      } finally {
+        managerSpy.mockRestore();
+      }
+    };
+
+    it('names the version a managed-runtime launch would stamp without resolving a launch', async () => {
+      const resolveRuntimeForLaunch = vi.fn().mockResolvedValue(managedKimiInstallation);
+      const getRuntimeStatus = vi.fn().mockResolvedValue({
+        kind: 'installed',
+        platformArch: 'node',
+        version: managedKimiInstallation.version,
+        targetVersion: managedKimiInstallation.targetVersion,
+        command: managedKimiInstallation.command,
+        updateAvailable: false,
+      });
+      const input = { cliType: 'builtin' as const, agentType: 'kimi' };
+
+      const { expected, launched } = await withManagedRuntimeManager(
+        { resolveRuntimeForLaunch, getRuntimeStatus },
+        async () => ({
+          expected: await resolveExpectedAcpCapabilitySourceVersion(input),
+          launched: (await resolveACPProcessLaunchAsync(input)).capabilitySourceVersion,
+        })
+      );
+
+      expect(expected).toBe(launched);
+      expect(getRuntimeStatus).toHaveBeenCalledWith('kimi-code');
+      expect(resolveRuntimeForLaunch).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses to name a version while the managed runtime is not installed', async () => {
+      const getRuntimeStatus = vi
+        .fn()
+        .mockResolvedValue({ kind: 'not-installed', platformArch: 'node', version: '0.37.0' });
+
+      await expect(
+        withManagedRuntimeManager({ getRuntimeStatus }, () =>
+          resolveExpectedAcpCapabilitySourceVersion({ cliType: 'builtin', agentType: 'kimi' })
+        )
+      ).resolves.toBeUndefined();
+    });
+
+    it('keeps a runtime override off the managed-runtime path', async () => {
+      const getRuntimeStatus = vi.fn();
+      const input = {
+        cliType: 'builtin' as const,
+        agentType: 'kimi',
+        runtimeOverrides: { kimiPath: '/opt/kimi' },
+      };
+
+      const { expected, launched } = await withManagedRuntimeManager(
+        { getRuntimeStatus },
+        async () => ({
+          expected: await resolveExpectedAcpCapabilitySourceVersion(input),
+          launched: (await resolveACPProcessLaunchAsync(input)).capabilitySourceVersion,
+        })
+      );
+
+      expect(expected).toBe(launched);
+      expect(getRuntimeStatus).not.toHaveBeenCalled();
+    });
+
+    it('matches a registry launch without consulting a managed runtime', async () => {
+      const getRuntimeStatus = vi.fn();
+      const input = { cliType: 'registry' as const, agentType: 'amp-acp' };
+
+      const { expected, launched } = await withManagedRuntimeManager(
+        { getRuntimeStatus },
+        async () => ({
+          expected: await resolveExpectedAcpCapabilitySourceVersion(input),
+          launched: (await resolveACPProcessLaunchAsync(input)).capabilitySourceVersion,
+        })
+      );
+
+      expect(expected).toBe(launched);
+      expect(getRuntimeStatus).not.toHaveBeenCalled();
+    });
+
+    it('still queues a managed-runtime update when it answers from the installed version', async () => {
+      const enqueue = vi.fn();
+      const getRuntimeStatus = vi.fn().mockResolvedValue({
+        kind: 'installed',
+        platformArch: 'node',
+        version: '0.36.0',
+        targetVersion: '0.37.0',
+        command: '/managed/kimi/package/dist/main.mjs',
+        updateAvailable: true,
+      });
+      const coordinatorSpy = vi
+        .spyOn(managedRuntimeUpdates, 'getManagedRuntimeUpdateCoordinator')
+        .mockReturnValue({ enqueue } as unknown as ReturnType<
+          typeof managedRuntimeUpdates.getManagedRuntimeUpdateCoordinator
+        >);
+      try {
+        await expect(
+          withManagedRuntimeManager({ getRuntimeStatus }, () =>
+            resolveExpectedAcpCapabilitySourceVersion({ cliType: 'builtin', agentType: 'kimi' })
+          )
+        ).resolves.toBe('builtin-kimi:0.36.0');
+      } finally {
+        coordinatorSpy.mockRestore();
+      }
+
+      expect(enqueue).toHaveBeenCalledWith('kimi-code');
+    });
   });
 
   it('ignores legacy local Codex ACP env overrides in the sync resolver', () => {

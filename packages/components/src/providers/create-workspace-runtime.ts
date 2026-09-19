@@ -1,7 +1,12 @@
 import { jotaiStore } from '@/lib/utils';
 import { desktopWindowId } from '@/lib/desktop-window';
 import { navigationSidebarHiddenAtom } from '@/atoms/layout-state';
-import { getMachineRoomId, type MachineMeta } from '@lody/shared';
+import {
+  getMachineRoomId,
+  type MachineMeta,
+  type MachineProtocolCapabilities,
+  negotiatedAcpCapabilitiesRefreshForce,
+} from '@lody/shared';
 import { LoroRepo, type RepoRoomSubscription, type RepoWatchHandle } from 'loro-repo';
 import { IndexedDBStorageAdaptor } from 'loro-repo/storage/indexeddb';
 import { StreamsTransportAdapter } from 'loro-repo/transport/streams';
@@ -1712,14 +1717,24 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestLocalProjectControl,
     requestMachineBugReport,
   } = createWorkspaceMachineRpcFacade({
-    getMachineProtocolCapabilities: async (machineId) => {
-      const entry = await repo.getDocMeta(getMachineRoomId(machineId));
-      return (entry?.meta as Partial<MachineMeta> | undefined)?.protocolCapabilities;
-    },
+    getMachineProtocolCapabilities,
     workspaceId,
     targetRouter,
     getMachineRpcClient,
   });
+
+  /**
+   * Protocol capabilities the target daemon advertised, from its machine doc meta.
+   * Absent meta means "unsupported", which is the only safe reading: a daemon that
+   * has not published a capability may be an older build that parses requests
+   * strictly.
+   */
+  async function getMachineProtocolCapabilities(
+    machineId: MachineId
+  ): Promise<MachineProtocolCapabilities | undefined> {
+    const entry = await repo.getDocMeta(getMachineRoomId(machineId));
+    return (entry?.meta as Partial<MachineMeta> | undefined)?.protocolCapabilities;
+  }
 
   const dispatchMachineStatusViaRpc = async (
     message: Extract<ClientToServer, { type: 'machine/status' }>
@@ -1858,6 +1873,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       const client = await getMachineRpcClient(message.machineId);
       const response = await client.requestMachineAcpCapabilitiesRefresh({
         configId: message.configId,
+        force: message.force,
         onProgress: (progress) => {
           if (!options.signal?.aborted) {
             handleMachineAcpBinaryProgress(progress);
@@ -1911,6 +1927,20 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     }
     if (signal?.aborted) return null;
 
+    // Both planes parse this request strictly on the machine, so `force` is
+    // negotiated once here rather than per transport. A daemon that did not
+    // advertise the capability has no cache to opt out of, so dropping the field
+    // still gives every forced caller the probe it asked for.
+    const { force: requestedForce, ...baseMessage } = message;
+    const negotiatedMessage = {
+      ...baseMessage,
+      ...negotiatedAcpCapabilitiesRefreshForce(
+        { protocolCapabilities: await getMachineProtocolCapabilities(message.machineId) },
+        requestedForce
+      ),
+    };
+    if (signal?.aborted) return null;
+
     if (targetRouter.getPlaneForMachine(message.machineId) === 'local') {
       if (!canUseLocalSessionControl(message)) {
         return {
@@ -1923,7 +1953,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           error: `Local session control cannot route ${message.type} to machine ${message.machineId}`,
         };
       }
-      const localRequest = requestLocalSessionControl(message, {
+      const localRequest = requestLocalSessionControl(negotiatedMessage, {
         onProgress: (progress) => {
           if (!signal?.aborted) options.onProgress?.(progress);
         },
@@ -1978,7 +2008,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         error: 'Cloud Machine RPC is disabled in local-only sync mode',
       };
     }
-    const request = performMachineAcpCapabilitiesRefreshViaRpc(message, options);
+    const request = performMachineAcpCapabilitiesRefreshViaRpc(negotiatedMessage, options);
     return signal ? waitForPromiseOrAbort(request, signal) : request;
   };
 
@@ -2454,6 +2484,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
   let workspaceMetaFirstSynced = false;
   let startupAcpCapabilitiesRefreshCompleted = false;
+  // Which configs this runtime has already refreshed. The boolean above only
+  // latches when a whole pass survives to its end, and presence leaving 'synced'
+  // aborts the pass and re-arms it, so without this set every presence reconnect
+  // re-probed every agent config — a real ACP process per config, forever.
+  const startupAcpCapabilitiesRefreshedConfigKeys = new Set<string>();
   let startupAcpCapabilitiesRefreshAbortController: AbortController | null = null;
   let cancelDelayedStartupAcpCapabilitiesRefresh: (() => void) | null = null;
   const startStartupAcpCapabilitiesRefresh = (): void => {
@@ -2536,6 +2571,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         },
       },
       {
+        refreshedConfigKeys: startupAcpCapabilitiesRefreshedConfigKeys,
         machineConcurrency: ACP_CAPABILITIES_STARTUP_MACHINE_CONCURRENCY,
         signal: abortController.signal,
       }

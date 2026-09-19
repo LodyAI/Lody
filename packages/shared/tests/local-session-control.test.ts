@@ -560,6 +560,20 @@ describe('local session control node validators', () => {
     ).toBe(false);
   });
 
+  it('carries the forced capability refresh flag through ts and cjs validators', () => {
+    const request = {
+      type: 'machine/acp-capabilities-refresh' as const,
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1',
+      configId: 'config-1',
+    };
+
+    expect(isLocalSessionControlRequest({ ...request, force: true })).toBe(true);
+    expect(isLocalSessionControlRequestCjs({ ...request, force: true })).toBe(true);
+    expect(isLocalSessionControlRequest({ ...request, force: 'yes' })).toBe(false);
+    expect(isLocalSessionControlRequestCjs({ ...request, force: 'yes' })).toBe(false);
+  });
+
   it('accepts machine ping requests and responses in ts and cjs validators', () => {
     const request = {
       type: 'machine/ping' as const,
