@@ -4,7 +4,6 @@ import { Check, ChevronRight, CircleDashed, X } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import type { MessageContent } from '@lody/shared';
 import { cn } from '@/lib/utils';
-import { Badge } from '@/ui/badge';
 
 /**
  * Renders the subagent/background tasks a turn spawned as a single grouped
@@ -89,17 +88,19 @@ const SubagentTaskRow = ({
   const meaningfulSummary =
     summary && (!description || !summary.includes(description)) ? summary : undefined;
 
-  let action: string | null;
+  // The leading status icon already says running/done/failed; the trailing text
+  // only carries information the icon cannot (an error, a summary, a live tool).
+  let action: string | undefined;
   if (task.status === 'failed') {
-    action = task.error || t('sessions.subagentTasks.failed', 'Failed');
+    action = task.error;
   } else if (task.status === 'completed') {
-    action = meaningfulSummary || t('sessions.subagentTasks.done', 'Done');
+    action = meaningfulSummary;
   } else if (task.lastToolName) {
     action = t('sessions.subagentTasks.runningTool', 'Running {{tool}}', {
       tool: task.lastToolName,
     });
   } else {
-    action = meaningfulSummary || t('sessions.subagentTasks.working', 'Working…');
+    action = meaningfulSummary;
   }
 
   const usageLabel = task.status === 'completed' ? formatUsage(task.usage) : null;
@@ -122,11 +123,6 @@ const SubagentTaskRow = ({
         ) : (
           <span className="min-w-0 flex-1" />
         )}
-        {task.isBackgrounded ? (
-          <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px] font-medium">
-            {t('sessions.subagentTasks.background', 'Background')}
-          </Badge>
-        ) : null}
         {action ? (
           <span
             className={cn(
@@ -197,9 +193,20 @@ export const SubagentTaskPanel = ({
   const expanded = hasRunning || userExpanded;
   const canToggle = !hasRunning;
 
-  const headerLabel = hasRunning
-    ? t('sessions.subagentTasks.waiting', { count: runningCount })
-    : t('sessions.subagentTasks.count', { count: tasks.length });
+  // Background-ness is stated once in the header rather than badged per row.
+  const backgroundCount = tasks.filter((task) => task.isBackgrounded).length;
+  const allBackground = backgroundCount === tasks.length;
+  const headerLabel = allBackground
+    ? hasRunning
+      ? t('sessions.subagentTasks.waitingBackground', { count: runningCount })
+      : t('sessions.subagentTasks.countBackground', { count: tasks.length })
+    : hasRunning
+      ? t('sessions.subagentTasks.waiting', { count: runningCount })
+      : t('sessions.subagentTasks.count', { count: tasks.length });
+  const mixedBackgroundLabel =
+    !allBackground && backgroundCount > 0
+      ? t('sessions.subagentTasks.backgroundCount', { count: backgroundCount })
+      : null;
 
   return (
     <div className="rounded-xl border border-border/60 bg-card/40 px-2 py-1.5">
@@ -222,7 +229,15 @@ export const SubagentTaskPanel = ({
             )}
           />
         )}
-        <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{headerLabel}</span>
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
+          {headerLabel}
+          {mixedBackgroundLabel ? (
+            <span className="font-normal text-muted-foreground/70">
+              {' · '}
+              {mixedBackgroundLabel}
+            </span>
+          ) : null}
+        </span>
       </button>
       {expanded ? (
         <div className="scrollbar-pro mt-0.5 max-h-[22rem] divide-y divide-border/40 overflow-y-auto pl-1 pr-1">
