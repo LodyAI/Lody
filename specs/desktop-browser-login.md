@@ -35,9 +35,23 @@ the in-memory verifier and requires a new browser attempt, not a verifier bypass
 The browser wait expires after five minutes; exchange has a 25-second deadline.
 An exchange timeout has an unknown server outcome. The UI may query the existing
 session but must not redeem the same code again. Browser-open, expiry, exchange,
-timeout and restart errors have localized, actionable messages. Diagnostic events
-contain only an attempt id, phase and error category, never callback or session
-credentials.
+timeout and restart errors have localized, actionable messages. A server rejection
+of the code (4xx) is distinguished from transport and local failures, and missing OS
+secure storage fails before the browser opens rather than after the code is spent.
+Each failure also carries a short detail (HTTP status and server error code, or the
+local error name, message and system code). The login page shows it and main logs and
+reports it. Diagnostics contain the attempt id, phase, error category and that detail,
+never callback, PKCE or session credentials.
+
+## Local credential store
+
+The desktop credential store (`userData/config.json`) is a cache of the server
+session, not the source of identity. A stored credential that the current OS key can
+no longer decrypt must not block sign-in: once the app is ready and secure storage is
+available, it is copied to a timestamped `.bak` next to the store, removed, and the
+user signs in again. An unparsable store is moved aside the same way at startup.
+Values are never discarded while the keychain cannot answer (before app readiness or
+while encryption is unavailable), because they may become readable again.
 
 ## Authentication and workspace preparation
 
@@ -58,7 +72,10 @@ map. The browser's callback payload remains `{ identifier, state }` in base64url
 
 - Main coordinator: [desktop-login.ts](../apps/electron/src/main/services/desktop-login.ts).
 - Renderer projection: [auth.ts](../apps/electron/src/renderer/src/auth.ts).
-- Behavioral tests: [callback suite](../apps/electron/src/renderer/src/auth-callback-transaction.test.mjs).
-- Decision and validation: [note](../.agents/notes/implemented/architecture/2026-09-17-desktop-login-coordinator.md).
+- Credential store recovery: [auth-storage.ts](../apps/electron/src/main/auth-storage.ts).
+- Behavioral tests: [callback suite](../apps/electron/src/renderer/src/auth-callback-transaction.test.mjs),
+  [store suite](../apps/electron/src/main/auth-storage.test.mjs).
+- Decision and validation: [note](../.agents/notes/implemented/architecture/2026-09-17-desktop-login-coordinator.md);
+  [unreadable store](../.agents/notes/implemented/bug-fix/2026-09-19-desktop-login-unreadable-credential-store.md).
 - Actual hosted authentication and OS protocol dispatch require packaged-app acceptance;
   synthetic tests do not establish them.

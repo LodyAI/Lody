@@ -14,6 +14,7 @@ import { jotaiStore } from '@lody/components/lib'
 import {
   electronDeepLinkSignInInProgressAtom,
   electronLoginErrorAtom,
+  electronLoginErrorDetailAtom,
   electronLoginPhaseAtom
 } from '@lody/components/atoms/index'
 import { readStoredAuthToken } from '@lody/components/lib/auth-bootstrap'
@@ -402,6 +403,7 @@ function applyLoginState(state: ElectronLoginState): void {
   loginPhase = state.phase
   jotaiStore.set(electronLoginPhaseAtom, state.phase)
   jotaiStore.set(electronLoginErrorAtom, state.error)
+  jotaiStore.set(electronLoginErrorDetailAtom, state.errorDetail)
   // The initial idle snapshot must not erase a persisted login from a previous run.
   if (state.revision === 0) return
   if (state.phase === 'waiting' || state.phase === 'exchanging') {
@@ -447,8 +449,12 @@ function ensureAuthListeners() {
   void getAuthApi()
     .getLoginState()
     .then(applyLoginState)
-    .catch(() => {
+    .catch((error: unknown) => {
       jotaiStore.set(electronLoginErrorAtom, 'exchange_failed')
+      jotaiStore.set(
+        electronLoginErrorDetailAtom,
+        `getLoginState: ${error instanceof Error ? error.message : String(error)}`
+      )
     })
 
   window.onUserUpdated(() => {

@@ -52,6 +52,9 @@ describe('live agent status', () => {
 
   beforeEach(async () => {
     await initI18n('en');
+    // The live turn started at 00:00:01, so every live status reads 30s in.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-19T00:00:31Z'));
     vi.stubGlobal(
       'ResizeObserver',
       class {
@@ -69,6 +72,7 @@ describe('live agent status', () => {
     await act(async () => root.unmount());
     container.remove();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
   });
 
   const render = async (
@@ -89,6 +93,7 @@ describe('live agent status', () => {
           items,
           sessionId,
           renderMessageRow: () => null,
+          lastAssistantMessageId: 'assistant-turn',
           agentActivityLabel: status.label,
           agentActivityTone: status.tone ?? 'primary',
           // Copy-context makes a live turn render its footer (copy/fork actions).
@@ -107,15 +112,15 @@ describe('live agent status', () => {
       label: 'Working',
     });
     expect(statusRow()).toBeNull();
-    expect(shimmering()).toEqual(['Ran 2 commands']);
+    expect(shimmering()).toEqual(['Ran 2 commands (Worked for 30s)']);
   });
 
   it('adds a shimmering status row when the working turn does not end in a collapsed group', async () => {
     await render(liveTurn([toolCall('a'), toolCall('b'), { type: 'text', text: 'Now writing.' }]), {
       label: 'Working',
     });
-    expect(statusRow()?.textContent).toBe('Working');
-    expect(shimmering()).toEqual(['Working']);
+    expect(statusRow()?.textContent).toBe('Working (Worked for 30s)');
+    expect(shimmering()).toEqual(['Working (Worked for 30s)']);
   });
 
   it('keeps a still status row while waiting on the user', async () => {
@@ -123,7 +128,7 @@ describe('live agent status', () => {
       label: 'Waiting for permission',
       tone: 'warning',
     });
-    expect(statusRow()?.textContent).toBe('Waiting for permission');
+    expect(statusRow()?.textContent).toBe('Waiting for permission (Worked for 30s)');
     expect(shimmering()).toEqual([]);
   });
 
@@ -135,7 +140,7 @@ describe('live agent status', () => {
     );
     expect(statusRow()).toBeNull();
     const status = container.querySelector('[data-agent-activity-status]');
-    expect(status?.textContent).toBe('Working');
+    expect(status?.textContent).toBe('Working (Worked for 30s)');
     expect(
       status?.closest('[data-assistant-turn-id]')?.getAttribute('data-assistant-turn-id')
     ).toBe('assistant-turn');

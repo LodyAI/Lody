@@ -368,8 +368,8 @@ type AssistantVirtualContent =
   | {
       kind: 'footer';
       showDuration: boolean;
-      /** The turn is the conversation's last one and has not ended: its
-       *  duration slot counts up instead of standing empty. */
+      /** The turn is the conversation's last one and has not ended, so an
+       *  available streaming copy action stays visibly active. */
       isLive: boolean;
     };
 
@@ -527,21 +527,19 @@ export type AgentActivityTone = 'primary' | 'warning';
  * when the live turn already ends in a collapsed group, that label shimmers
  * instead and this row is not rendered.
  */
-const AgentActivityRow = ({
+export const AgentActivityRow = ({
   label,
   tone = 'primary',
   shimmer,
-  conversationFontSize,
-}: {
-  label: string;
-  tone?: AgentActivityTone;
-  shimmer: boolean;
-  conversationFontSize: ConversationFontSize;
+  message,
+  conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
+}: AgentActivityStatusProps & {
+  conversationFontSize?: ConversationFontSize;
 }) => {
   return (
     <ConversationColumn className="pb-2 sm:pb-3" data-agent-activity-row="">
       <div className="max-w-[800px]" style={conversationTextFontSizeStyle(conversationFontSize)}>
-        <AgentActivityStatus label={label} tone={tone} shimmer={shimmer} />
+        <AgentActivityStatus label={label} tone={tone} shimmer={shimmer} message={message} />
       </div>
     </ConversationColumn>
   );
@@ -551,10 +549,17 @@ type AgentActivityStatusProps = {
   label: string;
   tone?: AgentActivityTone;
   shimmer: boolean;
+  /** The live turn the status belongs to: its running duration joins the label. */
+  message?: LiveActivityMessage | null;
 };
 
 /** The status label itself, shaped like a collapsed activity-group label. */
-const AgentActivityStatus = ({ label, tone = 'primary', shimmer }: AgentActivityStatusProps) => {
+const AgentActivityStatus = ({
+  label,
+  tone = 'primary',
+  shimmer,
+  message,
+}: AgentActivityStatusProps) => {
   const isMobile = useIsMobile();
   return (
     <div
@@ -573,7 +578,7 @@ const AgentActivityStatus = ({ label, tone = 'primary', shimmer }: AgentActivity
           shimmer && 'agent-shimmer'
         )}
       >
-        {label}
+        {message ? <LiveActivityLabel label={label} message={message} /> : label}
       </span>
     </div>
   );
@@ -1333,6 +1338,17 @@ export const SessionChatStreamView = forwardRef<
     const search = useSessionSearch();
     const activeSearchBlockId = search?.activeBlockId ?? null;
     const shouldShowAgentActivity = Boolean(agentActivityLabel);
+    const liveAgentActivityMessage = useMemo(
+      () =>
+        items.find(
+          (item): item is SessionMessageItem =>
+            item.type === 'message' &&
+            item.message.id === lastAssistantMessageId &&
+            item.message.role === 'assistant' &&
+            item.message.finished !== true
+        )?.message ?? null,
+      [items, lastAssistantMessageId]
+    );
     const [assistantExpansionVersion, setAssistantExpansionVersion] = useState(0);
     const [hoveredAssistantMessageId, setHoveredAssistantMessageId] = useState<string | null>(null);
     /**
@@ -1991,6 +2007,7 @@ export const SessionChatStreamView = forwardRef<
                     label={agentActivityLabel}
                     tone={agentActivityTone}
                     shimmer={agentActivityShimmer}
+                    message={liveAgentActivityMessage}
                     conversationFontSize={conversationFontSize}
                   />
                 )}
@@ -3572,6 +3589,7 @@ function ProcessDisclosureButton({
   expanded,
   onExpandedChange,
   shimmer = false,
+  liveMessage,
 }: {
   id: string;
   label: string;
@@ -3579,6 +3597,8 @@ function ProcessDisclosureButton({
   onExpandedChange: (expanded: boolean) => void;
   /** The group is the live bottom of a working turn: its label shimmers. */
   shimmer?: boolean;
+  /** Set while the label carries the live status: it shows the running duration. */
+  liveMessage?: LiveActivityMessage;
 }) {
   const isMobile = useIsMobile();
   const chevronRef = useRef<HTMLSpanElement>(null);
@@ -3619,7 +3639,7 @@ function ProcessDisclosureButton({
   );
   const title = (
     <span className={cn(ACTIVITY_GROUP_LABEL_CLASS(isMobile), shimmer && 'agent-shimmer')}>
-      {label}
+      {liveMessage ? <LiveActivityLabel label={label} message={liveMessage} /> : label}
     </span>
   );
   return (
@@ -3660,12 +3680,14 @@ const ActivityGroupHeader = ({
   expanded,
   onExpandedChange,
   shimmer,
+  liveMessage,
 }: {
   id: string;
   summary: AssistantActivitySummary;
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
   shimmer?: boolean;
+  liveMessage?: LiveActivityMessage;
 }) => {
   const { t } = useTranslation();
   const parts: string[] = [];
@@ -3696,6 +3718,7 @@ const ActivityGroupHeader = ({
       expanded={expanded}
       onExpandedChange={onExpandedChange}
       shimmer={shimmer}
+      liveMessage={liveMessage}
     />
   );
 };
@@ -3941,6 +3964,9 @@ export const MOBILE_TURN_ACTION_LEADING_INSET_PX = 48;
 
 /**
  * The live counterpart of the mobile footer's "Worked for {duration}" label.
+ * The live duration belongs in the active status itself (for example,
+ * "Exploring (Worked for 35s)") rather than in a separate desktop footer row.
+ * Mobile retains the explanatory label in its reserved action slot.
  *
  * While the turn runs, that leading slot used to stand empty — the slot is
  * reserved unconditionally (it is what pushes the copy button clear of the
@@ -3986,6 +4012,36 @@ const LiveTurnDurationLabel = ({
   });
   if (!duration) return null;
   return <>{t('sessions.workedFor', { duration, defaultValue: 'Worked for {{duration}}' })}</>;
+};
+
+type LiveActivityMessage = Pick<SessionHistoryParsed, 'timestamp' | 'permissionWaitMs'>;
+
+/**
+ * A live status label with the turn's running duration, e.g. "Exploring
+ * (Worked for 35s)". Only this text re-renders on each tick.
+ */
+const LiveActivityLabel = ({ label, message }: { label: string; message: LiveActivityMessage }) => {
+  const { t } = useTranslation();
+  const now = useStableNow(LIVE_TURN_DURATION_SAMPLE_MS);
+  const durationMs = resolveLiveSessionHistoryDurationMs(message, now.getTime());
+  const duration =
+    durationMs === null
+      ? ''
+      : formatDurationCompact(durationMs, {
+          hour: t('time.unitShort.hour', 'h'),
+          minute: t('time.unitShort.minute', 'm'),
+          second: t('time.unitShort.second', 's'),
+        });
+  if (!duration) return <>{label}</>;
+  return (
+    <>
+      {t('sessions.activityWithDuration', {
+        label,
+        duration,
+        defaultValue: '{{label}} (Worked for {{duration}})',
+      })}
+    </>
+  );
 };
 
 const AssistantForkButton = ({
@@ -4508,6 +4564,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
               onGroupExpandedChange(message.id, content.block.key, expanded)
             }
             shimmer={shimmerGroupHeader}
+            liveMessage={shimmerGroupHeader ? message : undefined}
           />
         );
       case 'activity_detail': {
@@ -4544,7 +4601,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
                 the turn's next step rather than something after it. */}
             {liveStatus ? (
               <div className="pb-1.5">
-                <AgentActivityStatus {...liveStatus} />
+                <AgentActivityStatus {...liveStatus} message={message} />
               </div>
             ) : null}
             <AssistantTurnFooter

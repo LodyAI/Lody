@@ -1,6 +1,7 @@
-import { app, shell } from 'electron'
+import { app, safeStorage, shell } from 'electron'
 import { authClient } from '../auth'
-import { DesktopLogin } from './desktop-login'
+import { captureElectronMainException } from '../posthog-error-reporting'
+import { DesktopLogin, DesktopLoginFailure } from './desktop-login'
 import { isLocalPlatform } from '../platform'
 import {
   ElectronAuthCallbackSessionSchema,
@@ -413,6 +414,15 @@ export class AuthService {
   ) {
     this.login = new DesktopLogin({
       openBrowser: async (query) => {
+        // The exchange response stores its session cookie through safeStorage.
+        // Fail before the browser round trip instead of after the one-time code
+        // has been redeemed and the cookie cannot be kept.
+        if (!safeStorage.isEncryptionAvailable()) {
+          throw new DesktopLoginFailure(
+            'secure_storage_unavailable',
+            'safeStorage.isEncryptionAvailable() returned false'
+          )
+        }
         const url = new URL('/login', import.meta.env.VITE_SITE_URL || 'https://lody.ai')
         url.search = new URLSearchParams(query).toString()
         await shell.openExternal(url.toString(), { activate: true })
@@ -440,7 +450,17 @@ export class AuthService {
           return session
         }),
       publish: onLoginState,
-      authenticated: () => onAuthenticated()
+      authenticated: () => onAuthenticated(),
+      reportFailure: ({ attemptId, phase, error, detail, cause }) => {
+        console.error(
+          `[Auth] Desktop login failed: ${error} during ${phase} (attempt ${attemptId ?? 'none'}): ${detail ?? 'no detail'}`,
+          cause
+        )
+        void captureElectronMainException(new Error(`Desktop login ${error}: ${detail ?? ''}`), {
+          component: 'desktop-login',
+          extra: { login_error: error, login_phase: phase, login_error_detail: detail }
+        })
+      }
     })
   }
 

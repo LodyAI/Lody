@@ -711,9 +711,8 @@ const FENCED_CODE_RENDERER_LANGUAGE_SET = new Set<string>([
   'txt',
 ]);
 
-// Fences another Streamdown plugin renders; rewriting them to `text` would turn
-// a diagram into a plain code block.
-const PLUGIN_OWNED_FENCE_LANGUAGES = new Set<string>(['mermaid']);
+// Fences rendered by other Streamdown plugins keep their language.
+const FENCED_CODE_PASSTHROUGH_LANGUAGE_SET = new Set<string>(['mermaid']);
 
 const remarkDefaultFencedCodeLanguage = () => (tree: unknown) => {
   const walk = (node: MdastNode) => {
@@ -722,9 +721,10 @@ const remarkDefaultFencedCodeLanguage = () => (tree: unknown) => {
       const lang = String(codeNode.lang ?? '').trim();
       if (!lang) {
         codeNode.lang = 'text';
-      } else if (PLUGIN_OWNED_FENCE_LANGUAGES.has(lang.toLowerCase())) {
-        // Left for its plugin.
-      } else if (!FENCED_CODE_RENDERER_LANGUAGE_SET.has(lang.toLowerCase())) {
+      } else if (
+        !FENCED_CODE_RENDERER_LANGUAGE_SET.has(lang.toLowerCase()) &&
+        !FENCED_CODE_PASSTHROUGH_LANGUAGE_SET.has(lang.toLowerCase())
+      ) {
         codeNode.meta = [`highlight=${lang}`, codeNode.meta].filter(Boolean).join(' ');
         codeNode.lang = 'text';
       }

@@ -96,6 +96,7 @@ export type CreateAcpClientOptions = {
   machineId?: MachineId;
   onStartupStage?: (event: AcpStartupStageEvent) => void;
   onUpdateMessage(message: AcpSessionNotification): void;
+  onLiveReasoningStatus?(label: string | null): void;
   onRequestPermission(
     requestId: string,
     request: RequestPermissionRequest
@@ -133,6 +134,7 @@ export const createAcpClient = async (options: CreateAcpClientOptions) => {
     terminalEnabled: options.terminalEnabled,
     onStartupStage: options.onStartupStage,
     onUpdateMessage: options.onUpdateMessage,
+    onLiveReasoningStatus: options.onLiveReasoningStatus,
     onRequestPermission: options.onRequestPermission,
     onUsageUpdate: options.onUsageUpdate,
     onContextWindowUsageUpdate: options.onContextWindowUsageUpdate,

@@ -11,13 +11,18 @@ import {
 
 describe('git diff stats', () => {
   it('parses git diff --numstat output', () => {
-    const output = ['10\t2\tsrc/app.ts', '0\t1\tREADME.md', '-\t-\tassets/image.png', ''].join(
-      '\n'
-    );
+    const output = [
+      '10\t2\tsrc/app.ts',
+      '0\t1\tREADME.md',
+      '0\t0\tREADME.md',
+      '-\t-\tassets/image.png',
+      '',
+    ].join('\n');
 
     expect(parseGitNumstat(output)).toEqual([
       { filePath: 'src/app.ts', add: 10, del: 2 },
       { filePath: 'README.md', add: 0, del: 1 },
+      { filePath: 'README.md', add: 0, del: 0 },
       { filePath: 'assets/image.png', add: 0, del: 0 },
     ]);
   });
@@ -236,11 +241,25 @@ describe('git diff stats', () => {
       if (key === 'diff --numstat --no-renames abc123 HEAD') return baseNumstat;
       if (key === 'diff --numstat --no-renames def456') return workingTreeDiffNumstat;
       if (key === 'ls-files --others --exclude-standard -z') {
-        return ['preexisting-untracked.ts', 'changed-untracked.ts', 'new-untracked.ts', ''].join(
-          '\0'
-        );
+        return [
+          'preexisting-untracked.ts',
+          'changed-untracked.ts',
+          'new-untracked.ts',
+          'unreadable-untracked.ts',
+          '',
+        ].join('\0');
       }
-      if (key === 'hash-object -- preexisting-untracked.ts changed-untracked.ts new-untracked.ts') {
+      if (
+        key ===
+        [
+          'hash-object',
+          '--',
+          'preexisting-untracked.ts',
+          'changed-untracked.ts',
+          'new-untracked.ts',
+          'unreadable-untracked.ts',
+        ].join(' ')
+      ) {
         return `${preexistingUntrackedHash}\n${changedUntrackedAfterHash}\n${newUntrackedHash}\n`;
       }
 
@@ -263,6 +282,8 @@ describe('git diff stats', () => {
               return 6;
             case 'new-untracked.ts':
               return 3;
+            case 'unreadable-untracked.ts':
+              return null;
             default:
               return null;
           }
@@ -275,6 +296,7 @@ describe('git diff stats', () => {
         { filePath: 'tracked.ts', add: 2, del: 0 },
         { filePath: 'changed-untracked.ts', add: 6, del: 0 },
         { filePath: 'new-untracked.ts', add: 3, del: 0 },
+        { filePath: 'unreadable-untracked.ts', add: 0, del: 0 },
       ],
       baseDiffStats: {
         allChange: { add: 5, del: 1 },
