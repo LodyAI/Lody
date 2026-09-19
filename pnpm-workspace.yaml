@@ -102,6 +102,7 @@ minimumReleaseAgeExclude:
   - '@devframes/vite@1.0.0'
   - '@openai/codex@0.154.0'
   - devframe@1.0.0
+  - electron-sparkle-updater@0.5.1
   - loro-mirror@2.3.2
   - loro-mirror-jotai@2.3.2
   - loro-mirror-react@2.3.2

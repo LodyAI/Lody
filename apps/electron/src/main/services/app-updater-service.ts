@@ -27,8 +27,6 @@ import {
   sparklePackageJsonPathFromModuleEntry
 } from './app-updater-sparkle-policy'
 
-const SPARKLE_ED_PUBLIC_KEY_PLACEHOLDER = 'SPARKLE_ED_PUBLIC_KEY_PLACEHOLDER'
-
 const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000
 const LODY_UPDATER_STATE_EVENT = IPC_PUSH_CHANNELS.updaterState
 
@@ -386,8 +384,7 @@ export class AppUpdaterService {
       appcastUrl: resolveSparkleAppcastUrl({
         configuredAppcastUrl: readNonEmptyString(process.env.SPARKLE_APPCAST_URL)
       }),
-      publicEdKey:
-        readNonEmptyString(process.env.SPARKLE_ED_PUBLIC_KEY) ?? SPARKLE_ED_PUBLIC_KEY_PLACEHOLDER
+      publicEdKey: readNonEmptyString(process.env.SPARKLE_ED_PUBLIC_KEY)
     })
     if (!initialized) {
       log('init failed')

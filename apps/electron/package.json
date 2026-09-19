@@ -58,7 +58,7 @@
     "devframe": "catalog:",
     "effect": "catalog:",
     "electron-ipc-decorator": "^1.0.2",
-    "electron-sparkle-updater": "0.3.0",
+    "electron-sparkle-updater": "0.5.1",
     "electron-updater": "^6.3.9",
     "image-dimensions": "^2.5.1",
     "jotai": "catalog:",
