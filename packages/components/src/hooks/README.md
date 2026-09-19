@@ -65,13 +65,22 @@ bottom correction and visibly jitters the conversation.
 
 First-window data readiness does not imply viewport readiness. A DOM `scrollTop`
 write can reach the estimated bottom while Virtua still has no destination rows,
-or has hidden unmeasured rows. Initial reveal waits for the virtualizer's offset,
-measured destination and visible-row geometry to agree. Direct row ResizeObserver
-records and spacer/row geometry commits drive this check without a settle timer.
-Those row records also correct following before the spacer's deferred resize;
-programmatic corrections use the library's scroll setter to preserve user-intent
-tracking. Only mounted rows are observed, and normal window loads never hide a
-previously revealed conversation.
+or has hidden unmeasured rows. Initial reveal waits for the virtualizer's offset
+and a measured destination row. End-restore intent uses viewport distance from
+the DOM bottom, not last-row `getBoundingClientRect` and not the library's
+near-bottom lock (`state.isAtBottom` includes ~70px of tolerance). Until that
+reveal, observers keep correcting an end restore to the real bottom even when
+the commit snapshot is not-following — first positioning is not the follow lock
+— and they skip `stopScroll()` only for that end restore. An offset restore
+still releases a same-delivery re-lock, so a shrink into the near-bottom band
+cannot pull the cached reading position to the end. After reveal, observers
+must not re-arm follow. Direct row
+ResizeObserver records and spacer/row geometry commits drive this check without
+a settle timer, including when the row count is unchanged. Those row records also correct following before the spacer's
+deferred resize; programmatic corrections use the library's scroll setter to
+preserve user-intent tracking. Only mounted rows are observed, and normal window
+loads never hide a previously revealed conversation. See
+[the stuck-hidden reveal note](../../../../.agents/notes/implemented/bug-fix/2026-09-18-conversation-initial-reveal-follow-lock.md).
 
 The composer one-shot ref preserves the reader's position while typing without
 changing keyboard, terminal, or window-resize follow behavior, which is why it is
