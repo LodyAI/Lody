@@ -13,6 +13,7 @@ import {
   menuSurfaceStyle,
 } from '@/ui/menu-styles';
 import { Switch } from '@/ui/switch';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
 import type { SidebarOrganizeMode } from '@/atoms/sidebar-state';
 import type { SidebarChatScope } from '@/atoms/sidebar-state';
 
@@ -25,6 +26,7 @@ export type SidebarFilterLabels = {
   organizeProject: string;
   organizeUpdated: string;
   updatedProjectNames: string;
+  updatedProjectNamesUnavailable: string;
   showMyTasks: string;
   showAllTasks: string;
 };
@@ -36,6 +38,7 @@ const defaultLabels: SidebarFilterLabels = {
   organizeProject: 'Project',
   organizeUpdated: 'Updated',
   updatedProjectNames: 'Origins',
+  updatedProjectNamesUnavailable: 'Available in Updated view',
   showMyTasks: 'My Tasks',
   showAllTasks: 'All Tasks',
 };
@@ -115,6 +118,7 @@ export function SidebarFilterPopover({
   const merged = { ...defaultLabels, ...labels };
   const [open, setOpen] = useState(false);
   const sourceLabelsSwitchId = useId();
+  const originsAvailable = organize === 'updated';
 
   const handleOrganizeSelect = (next: SidebarOrganizeMode) => {
     onOrganizeChange?.(next);
@@ -191,30 +195,60 @@ export function SidebarFilterPopover({
           />
         </div>
         <div className={menuSeparatorClassName} aria-hidden="true" />
-        <div
-          data-sidebar-filter-section="display"
-          className="flex min-h-7 items-center gap-2 rounded-md px-2 py-[3px]"
-        >
-          <Eye
-            className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
-            strokeWidth={1.75}
-            aria-hidden="true"
-          />
-          <label
-            htmlFor={sourceLabelsSwitchId}
-            className="min-w-0 flex-1 cursor-pointer select-none truncate text-[0.9em] leading-tight text-popover-foreground"
-          >
-            {merged.updatedProjectNames}
-          </label>
-          <Switch
-            id={sourceLabelsSwitchId}
-            checked={showUpdatedProjectNames}
-            onCheckedChange={onShowUpdatedProjectNamesChange}
-            aria-label={merged.updatedProjectNames}
-            data-sidebar-filter-project-names=""
-            className="h-4 w-7 [&>span]:h-3 [&>span]:w-3 [&>span]:data-[state=checked]:translate-x-3"
-          />
-        </div>
+        <TooltipProvider delayDuration={300}>
+          <Tooltip open={originsAvailable ? false : undefined}>
+            <TooltipTrigger asChild>
+              <div
+                data-sidebar-filter-section="display"
+                data-disabled={originsAvailable ? undefined : ''}
+                className={cn(
+                  'group flex min-h-7 items-center gap-2 rounded-md px-2 py-[3px]',
+                  originsAvailable ? 'text-popover-foreground' : 'text-muted-foreground/55'
+                )}
+              >
+                <Eye
+                  className={cn(
+                    'h-3.5 w-3.5 shrink-0',
+                    originsAvailable ? 'text-muted-foreground' : 'text-muted-foreground/55'
+                  )}
+                  strokeWidth={1.75}
+                  aria-hidden="true"
+                />
+                <label
+                  htmlFor={originsAvailable ? sourceLabelsSwitchId : undefined}
+                  className={cn(
+                    'min-w-0 flex-1 select-none truncate text-[0.9em] leading-tight',
+                    originsAvailable ? 'cursor-pointer' : 'cursor-default'
+                  )}
+                >
+                  {merged.updatedProjectNames}
+                </label>
+                <Switch
+                  id={sourceLabelsSwitchId}
+                  checked={showUpdatedProjectNames}
+                  disabled={!originsAvailable}
+                  onCheckedChange={onShowUpdatedProjectNamesChange}
+                  aria-label={merged.updatedProjectNames}
+                  aria-description={
+                    originsAvailable ? undefined : merged.updatedProjectNamesUnavailable
+                  }
+                  data-sidebar-filter-project-names=""
+                  className={cn(
+                    'h-4 w-7 transition-colors',
+                    'group-hover:data-[state=checked]:bg-primary/80',
+                    'group-hover:data-[state=unchecked]:bg-muted-foreground/40',
+                    '[&>span]:h-3 [&>span]:w-3 [&>span]:data-[state=checked]:translate-x-3'
+                  )}
+                />
+              </div>
+            </TooltipTrigger>
+            {!originsAvailable ? (
+              <TooltipContent side="right" sideOffset={8} className="max-w-48">
+                {merged.updatedProjectNamesUnavailable}
+              </TooltipContent>
+            ) : null}
+          </Tooltip>
+        </TooltipProvider>
       </PopoverContent>
     </Popover>
   );

@@ -21,7 +21,10 @@ with the same icon-label-check rows. `Origins` sits below both groups as a
 separate switch because it is a persistent display preference rather than a
 filter choice. Selecting a menu item closes the popover; changing the switch
 keeps it open. The switch remains visible in Project mode so its existence and
-saved state do not appear and disappear as the view changes.
+saved state do not appear and disappear as the view changes. Project mode
+disables the row and exposes an `Available in Updated view` tooltip to its
+right. Hovering anywhere on the row changes only the Switch track color; the
+row surface, icon, and label remain unchanged.
 
 `sidebarUpdatedShowProjectNamesAtom` persists the global display preference in
 local storage and defaults to `true`, preserving the behavior introduced by the

@@ -71,6 +71,23 @@ describe('SidebarFilterPopover Updated project-name preference', () => {
     expect(document.body.querySelector('[data-sidebar-filter-project-names]')).not.toBeNull();
   });
 
+  it('disables Origins outside Updated view and explains its availability', () => {
+    const { onShowUpdatedProjectNamesChange } = render('workspace');
+    const switchControl = document.body.querySelector<HTMLButtonElement>(
+      '[data-sidebar-filter-project-names]'
+    );
+    const row = document.body.querySelector('[data-sidebar-filter-section="display"]');
+
+    expect(switchControl?.disabled).toBe(true);
+    expect(switchControl?.getAttribute('aria-description')).toBe('Available in Updated view');
+    expect(row?.hasAttribute('data-disabled')).toBe(true);
+
+    flushSync(() => {
+      switchControl?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(onShowUpdatedProjectNamesChange).not.toHaveBeenCalled();
+  });
+
   it('closes the menu after changing the view', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
@@ -105,6 +122,7 @@ describe('SidebarFilterPopover Updated project-name preference', () => {
     expect(row?.getAttribute('aria-checked')).toBe('true');
     expect(row?.getAttribute('role')).toBe('switch');
     expect(row?.getAttribute('aria-label')).toBe('Origins');
+    expect((row as HTMLButtonElement | null)?.disabled).toBe(false);
 
     flushSync(() => {
       row?.dispatchEvent(new MouseEvent('click', { bubbles: true }));

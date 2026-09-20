@@ -2536,6 +2536,10 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       organizeProject: t('sidebar.filter.organizeProject', 'Project'),
       organizeUpdated: t('sidebar.filter.organizeUpdated', 'Updated'),
       updatedProjectNames: t('sidebar.filter.updatedProjectNames', 'Origins'),
+      updatedProjectNamesUnavailable: t(
+        'sidebar.filter.updatedProjectNamesUnavailable',
+        'Available in Updated view'
+      ),
       showMyTasks: t('sessions.sidebar.my', 'My Tasks'),
       showAllTasks: t('sessions.sidebar.team', 'All Tasks'),
     }),

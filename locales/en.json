@@ -3031,6 +3031,7 @@
   "sidebar.filter.organizeProject": "Project",
   "sidebar.filter.showHeading": "Tasks",
   "sidebar.filter.updatedProjectNames": "Origins",
+  "sidebar.filter.updatedProjectNamesUnavailable": "Available in Updated view",
   "sidebar.filter.trigger": "Filter sidebar",
   "sidebar.githubWorktrees": "GitHub Worktrees",
   "sidebar.pinned": "Pinned",

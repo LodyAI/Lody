@@ -313,6 +313,7 @@ const defaultLabels: LoroSidebarLabels = {
     organizeProject: 'Project',
     organizeUpdated: 'Updated',
     updatedProjectNames: 'Origins',
+    updatedProjectNamesUnavailable: 'Available in Updated view',
     showMyTasks: 'My Tasks',
     showAllTasks: 'All Tasks',
   },
