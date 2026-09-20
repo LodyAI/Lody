@@ -4173,7 +4173,7 @@ const SessionDetail = ({
 
   const jotaiStore = useStore();
   useLayoutEffect(() => {
-    if (isMobile) return;
+    if (isMobile) return undefined;
     const panel = { open: isSidebarOpen, reveal: revealRightSidebar };
     jotaiStore.set(zenRightPanelAtom, panel);
     return () => {
