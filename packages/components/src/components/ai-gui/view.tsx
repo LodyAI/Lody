@@ -601,7 +601,7 @@ const AgentActivityStatus = ({
       data-agent-activity-status=""
       className={cn(
         'flex w-full items-center py-0.5 text-muted-foreground',
-        isMobile ? 'gap-1.5 pr-1' : 'px-1'
+        isMobile ? 'gap-1.5 pr-1' : 'px-[4px]'
       )}
     >
       <span
@@ -3743,12 +3743,9 @@ const ACTIVITY_PROCESS_ICON_CLASS = 'h-3.5 w-3.5 shrink-0 text-muted-foreground'
 /* One tone for every icon in a turn — see `ACTIVITY_PROCESS_ICON_CLASS`. Only
    the optical nudge is local; no per-icon opacity. */
 const ACTIVITY_STEP_ICON_CLASS = cn(ACTIVITY_PROCESS_ICON_CLASS, 'mt-0.5');
-/* `px-1` alone: prose and the group header that owns these steps carry the same
-   4px inset with no negative margin, so the step keeps their shared left edge and
-   its hover pill already bleeds 4px past the text. Adding `-mx-1` double-counted
-   that inset and pulled every expanded step 4px LEFT of the rail. */
+/* Match the prose's fixed 4px inset, independent of the root font size. */
 const ACTIVITY_STEP_BUTTON_CLASS = cn(
-  'min-h-7 items-start rounded-md px-1 py-1 hover:bg-hover/40',
+  'min-h-7 items-start rounded-md px-[4px] py-1 hover:bg-hover/40',
   ACTIVITY_PROCESS_TEXT_CLASS
 );
 const ACTIVITY_STEP_TITLE_CLASS = cn('min-w-0 flex-1', ACTIVITY_PROCESS_TEXT_CLASS);
@@ -3838,7 +3835,7 @@ function ProcessDisclosureButton({
         'group flex w-full items-center py-0.5 text-left',
         isMobile
           ? cn('gap-1.5 rounded-md pr-1 hover:bg-hover/40', ACTIVITY_PROCESS_TEXT_CLASS)
-          : 'justify-start gap-0.5 px-1 text-muted-foreground'
+          : 'justify-start gap-0.5 px-[4px] text-muted-foreground'
       )}
       onClick={() => {
         const next = !expanded;
@@ -3970,9 +3967,8 @@ function ActivityProcessStep({
   return (
     <div
       className={cn(
-        /* No horizontal shell pad: a step inside an expanded region starts on
-           the rail, like the group header above it. */
-        'flex w-full min-h-7 items-start gap-1.5 py-1',
+        /* Keep the leading icon on the same inset as tool steps and prose. */
+        'flex w-full min-h-7 items-start gap-1.5 px-[4px] py-1',
         ACTIVITY_PROCESS_TEXT_CLASS,
         className
       )}
@@ -4438,24 +4434,10 @@ export const AssistantTurnFooter = ({
               )}
             </span>
           ) : null}
-          {/* Icon buttons are 28px boxes around 14px glyphs, so their own 7px of
-             interior padding would push the glyph 7px inside the answer text
-             above. Pull the cluster back so the outermost glyph sits on the
-             text's edge (and the inner one keeps the row gap to the timestamp).
-             The leading edge is pulled back only 1px: the button's own 7px then
-             carries the glyph to +6, against the answer text at +4 (prose adds
-             `padding-inline: 4px` over the column). This is optical, not
-             geometric — earlier values chased exact alignment (5px left the
-             glyph 2px short of the text, 3px landed exactly on it) and both
-             still read left-heavy, because a 14px glyph in a 28px box carries
-             less weight than a text edge. Trailing stays 7px. Keep it on the
-             row: when no buttons render, the timestamp must stay on the plain
-             gutter. Mobile arrives at the same leading edge for its own reason
-             — its glyph aligns to the duration label, not to the answer text. */}
+          {/* Keep the leading button inside the column; only the trailing hover
+             area bleeds into the metadata gap. Mobile retains its leading slot. */}
           {hasCopyableText || hasTurnConfigInfo || onFork || copyContext ? (
-            <div
-              className="flex items-center gap-0.5 -ml-px -mr-[7px]"
-            >
+            <div className="flex items-center gap-0.5 -mr-[7px]">
               {showStreamingContextCopy ? (
                 <TooltipProvider>
                   <Tooltip delayDuration={500}>

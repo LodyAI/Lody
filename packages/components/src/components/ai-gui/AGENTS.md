@@ -56,10 +56,10 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
   Fork controls and loading need a finished turn.
 - The gutter belongs to `ConversationColumn`, not Virtua. EVERY row shares one left rail with no shell pad, INCLUDING
   the contents of an expanded region: expanding reveals rows, it never shifts
-  them right; the chevron carries the hierarchy. Hover pills bleed instead
-  (footer `-mx-[7px]`; steps bleed through their own `px-1`, never a negative
-  margin — prose and the owning group header carry that same 4px inset, so
-  `-mx-1` double-counted it). See `AssistantTurnAlignment.stories`.
+  them right; the chevron carries the hierarchy. Prose, desktop group/status
+  labels, and step icons share a fixed 4px inset. Steps use `px-[4px]` with
+  no negative margin; the footer bleeds only on the trailing edge (`-mr-[7px]`).
+  See `AssistantTurnAlignment.stories`.
 
 ## Conversation Outline
 
