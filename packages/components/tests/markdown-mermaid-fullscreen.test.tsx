@@ -465,8 +465,7 @@ describe('mermaid full-screen viewer', () => {
     await pressWith(diagram, 'mouse');
 
     expect(diagram.getAttribute('data-lody-canvas')).toBe('active');
-    // The ring is the only sign that the click did anything.
-    expect(diagram.style.outline).toContain('2px solid');
+    expect(diagram.style.outline).toBe('');
     // Activation is not the viewer: the diagram stays in the conversation.
     expect(viewer()).toBeNull();
 
@@ -544,6 +543,8 @@ describe('mermaid full-screen viewer', () => {
     expect(readTranslate(svg).x).toBe(zoomed.x - 30);
     expect(readTranslate(svg).y).toBe(zoomed.y - 20);
 
+    const retainedTransform = svg.style.transform;
+
     // Escape belongs to the canvas only while the canvas has focus. An
     // activated diagram sitting in the scrollback must not answer the Escape
     // that dismisses a dialog, nor prevent its default.
@@ -570,9 +571,9 @@ describe('mermaid full-screen viewer', () => {
       );
     });
 
-    // Escape hands the diagram back as the still preview it was.
+    // Escape stops interaction without moving the view.
     expect(diagram.getAttribute('data-lody-canvas')).toBeNull();
-    expect(svg.style.transform).toBe('');
+    expect(svg.style.transform).toBe(retainedTransform);
     expect(diagram.style.outline).toBe('');
   });
 
@@ -669,19 +670,63 @@ describe('mermaid full-screen viewer', () => {
     expect(diagram.getAttribute('data-lody-canvas')).toBeNull();
   });
 
-  it('releases the canvas when the reader presses somewhere else', async () => {
-    const diagram = await renderMarkdown();
-    const svg = diagram.querySelector('svg') as SVGSVGElement;
-    stubCanvasRects(diagram, svg);
-    await pressWith(diagram, 'mouse');
-    expect(diagram.getAttribute('data-lody-canvas')).toBe('active');
+  it.each(['outside press', 'focus out', 'Enter', 'viewer'])(
+    'preserves the view across %s and resumes from its last transform',
+    async (exit) => {
+      const diagram = await renderMarkdown();
+      const svg = diagram.querySelector('svg') as SVGSVGElement;
+      stubCanvasRects(diagram, svg);
+      await pressWith(diagram, 'mouse');
+      await act(async () => {
+        diagram.focus();
+        diagram.dispatchEvent(new KeyboardEvent('keydown', { key: '+', bubbles: true }));
+        diagram.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+      });
+      const retainedTransform = svg.style.transform;
+      const scale = readScale(svg);
+      expect(scale).toBeGreaterThan(1);
 
-    await act(async () => {
-      document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
-    });
+      if (exit === 'viewer') {
+        await openViewer();
+        const viewerSvg = viewerSurface()?.querySelector('svg') as SVGSVGElement;
+        expect(viewerSvg.style.transform).toBe('');
+        await clickOn(viewerClose() as HTMLElement);
+      } else {
+        await act(async () => {
+          if (exit === 'outside press') {
+            document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }));
+          } else if (exit === 'focus out') {
+            diagram.blur();
+          } else {
+            diagram.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+          }
+        });
+      }
+      expect(diagram.getAttribute('data-lody-canvas')).toBeNull();
+      expect(svg.style.transform).toBe(retainedTransform);
+      const pinch = new WheelEvent('wheel', {
+        bubbles: true,
+        cancelable: true,
+        ctrlKey: true,
+        deltaY: -20,
+        clientX: 200,
+        clientY: 150,
+      });
+      await act(async () => {
+        svg.dispatchEvent(pinch);
+      });
+      expect(pinch.defaultPrevented).toBe(false);
+      expect(svg.style.transform).toBe(retainedTransform);
 
-    expect(diagram.getAttribute('data-lody-canvas')).toBeNull();
-  });
+      await pressWith(diagram, 'mouse');
+      expect(svg.style.transform).toBe(retainedTransform);
+      await act(async () => {
+        diagram.focus();
+        diagram.dispatchEvent(new KeyboardEvent('keydown', { key: '+', bubbles: true }));
+      });
+      expect(readScale(svg)).toBeCloseTo(scale * scale, 5);
+    }
+  );
 
   it('leaves a wheel over a diagram in a message to the page', async () => {
     const diagram = await renderMarkdown();
