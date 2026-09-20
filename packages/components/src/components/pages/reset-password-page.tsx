@@ -6,7 +6,7 @@ import { Alert } from '@lody/ui/alert';
 import { Button } from '@lody/ui/button';
 import { Card } from '@lody/ui/card';
 import { Field as UiField } from '@lody/ui/field';
-import { PasswordInput } from '@/ui/password-input';
+import { PasswordInput } from '@lody/ui/password-input';
 
 export interface ResetPasswordPageProps {
   password: string;
@@ -95,8 +95,10 @@ export function ResetPasswordPage({
                 'resetPassword.passwordPlaceholder',
                 'Letters and numbers, 8+ characters'
               )}
-              showPasswordLabel={t('resetPassword.showPassword', 'Show password')}
-              hidePasswordLabel={t('resetPassword.hidePassword', 'Hide password')}
+              labels={{
+                show: t('resetPassword.showPassword', 'Show password'),
+                hide: t('resetPassword.hidePassword', 'Hide password'),
+              }}
             />
           </div>
 
@@ -111,8 +113,10 @@ export function ResetPasswordPage({
               value={confirmPassword}
               onChange={(event) => onConfirmPasswordChange(event.target.value)}
               disabled={submitting || success || !tokenAvailable}
-              showPasswordLabel={t('resetPassword.showPassword', 'Show password')}
-              hidePasswordLabel={t('resetPassword.hidePassword', 'Hide password')}
+              labels={{
+                show: t('resetPassword.showPassword', 'Show password'),
+                hide: t('resetPassword.hidePassword', 'Hide password'),
+              }}
             />
           </div>
 

@@ -1,6 +1,8 @@
 import * as stylex from '@stylexjs/stylex';
 import {
   Fragment,
+  useEffect,
+  useRef,
   useState,
   type ComponentProps,
   type ReactNode,
@@ -49,6 +51,8 @@ import { ContextMenu } from '../menu/context-menu';
 import { Menu } from '../menu/menu';
 import { Menubar } from '../menu/menubar';
 import { Input } from '../field/input';
+import { NumberField, type NumberFieldSize } from '../field/number-field';
+import { PasswordInput, type PasswordInputSize } from '../field/password-input';
 import { Radio, RadioGroup } from '../field/radio';
 import { Select } from '../field/select';
 import { Separator } from '../separator/separator';
@@ -1208,6 +1212,116 @@ function InvalidFieldRow() {
         <Field.Label>Session title</Field.Label>
         <Input ref={ref} placeholder="Describe the task" />
         <Field.Error match>Enter a title before starting the session.</Field.Error>
+      </Field.Root>
+    </FieldRow>
+  );
+}
+
+const NUMBER_SIZES: { name: string; size: NumberFieldSize }[] = [
+  { name: 'small \u00b7 28', size: 'small' },
+  { name: 'large \u00b7 36', size: 'large' },
+];
+
+const PASSWORD_SIZES: { name: string; size: PasswordInputSize }[] = [
+  { name: 'password \u00b7 small \u00b7 28', size: 'small' },
+  { name: 'password \u00b7 large \u00b7 36', size: 'large' },
+];
+
+/** The number, with the steppers a person nudges it with. */
+function NumberStepperRow({ name, size }: { name: string; size: NumberFieldSize }) {
+  const { ref, value } = useMeasured<HTMLDivElement>('height');
+  return (
+    <FieldRow legend={name} readout={value}>
+      <Field.Root>
+        <Field.Label>Conversation font size</Field.Label>
+        <NumberField.Root defaultValue={14} min={8} max={32}>
+          <NumberField.Group ref={ref} size={size}>
+            <NumberField.Input />
+            <NumberField.Decrement />
+            <NumberField.Increment />
+          </NumberField.Group>
+        </NumberField.Root>
+      </Field.Root>
+    </FieldRow>
+  );
+}
+
+/**
+ * The same number with nothing beside it. A value somebody types once — a
+ * budget, a threshold — does not need a control for nudging it, and the input
+ * is then the whole well, the same one an `Input` is.
+ */
+function NumberBareRow() {
+  const { ref, value } = useMeasured<HTMLInputElement>('box-shadow');
+  return (
+    <FieldRow legend="bare" readout={value}>
+      <Field.Root>
+        <Field.Label>Review rounds</Field.Label>
+        <NumberField.Root defaultValue={3} min={1} max={20}>
+          <NumberField.Input ref={ref} />
+        </NumberField.Root>
+        <Field.Description>The reviewer hands work back this many times.</Field.Description>
+      </Field.Root>
+    </FieldRow>
+  );
+}
+
+/** The ring is the group's, because the group is the well. */
+function NumberInvalidRow() {
+  const { ref, value } = useMeasured<HTMLDivElement>('box-shadow');
+  return (
+    <FieldRow legend="invalid" readout={value}>
+      <Field.Root invalid>
+        <Field.Label>Conversation font size</Field.Label>
+        <NumberField.Root defaultValue={64} min={8} max={32}>
+          <NumberField.Group ref={ref}>
+            <NumberField.Input />
+            <NumberField.Decrement />
+            <NumberField.Increment />
+          </NumberField.Group>
+        </NumberField.Root>
+        <Field.Error match>Pick a size between 8 and 32.</Field.Error>
+      </Field.Root>
+    </FieldRow>
+  );
+}
+
+/**
+ * The password, and the control that reveals it. The eye is live on the board:
+ * whether a secret is showing is the control's own state, so the revealed row
+ * is one press away rather than a second sample.
+ */
+function PasswordRow({ legend, children }: { legend: string; children: ReactNode }) {
+  return (
+    <FieldRow legend={legend}>
+      <Field.Root>{children}</Field.Root>
+    </FieldRow>
+  );
+}
+
+/**
+ * The well around a control whose own ref points at the value inside it: a
+ * `PasswordInput` forwards its ref to the input, because that is the thing a
+ * surface focuses, and the shell is what the size ladder is read off.
+ */
+function useMeasuredShell(property: string) {
+  const ref = useRef<HTMLInputElement>(null);
+  const [value, setValue] = useState('');
+  useEffect(() => {
+    const shell = ref.current?.parentElement;
+    if (!shell) return;
+    setValue(window.getComputedStyle(shell).getPropertyValue(property).trim());
+  }, [property]);
+  return { ref, value };
+}
+
+function PasswordSizeRow({ name, size }: { name: string; size: PasswordInputSize }) {
+  const { ref, value } = useMeasuredShell('height');
+  return (
+    <FieldRow legend={name} readout={value}>
+      <Field.Root>
+        <Field.Label>Password</Field.Label>
+        <PasswordInput ref={ref} size={size} defaultValue="hunter2" />
       </Field.Root>
     </FieldRow>
   );
@@ -3979,6 +4093,55 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
           </Grid>
         </PaletteSplit>
       </Section>
+      <Section
+        title="NumberField and PasswordInput · a number, and a secret"
+        rule="Both are the field family’s well with something beside the value, the way a Combobox holds a chevron: one control with one ring, not a control and a button next to it. A NumberField is the range rather than a text control that happens to hold digits — it owns min, max and step, clamps what a stepper and the arrow keys do, and hands a surface a number or null instead of a string to parse. The steppers are for a value somebody nudges; a value typed once takes the bare input and is the whole well. Base UI names the steppers Increase and Decrease in English and marks an invalid number field data-invalid without ever saying aria-invalid, so this package states both itself. A PasswordInput is the one control here with no Base UI primitive under it: the input builds its own shell, which is how a Field.Root’s disabled reaches the eye and not only the value. Whether the secret is showing is the control’s own state — the eye on this board is live, and the revealed row is one press away."
+      >
+        <PaletteSplit palettes={palettes}>
+          <Rows>
+            <NumberStepperRow name="stepped" size="medium" />
+            <NumberBareRow />
+            {NUMBER_SIZES.map((entry) => (
+              <NumberStepperRow key={entry.size} {...entry} />
+            ))}
+            <NumberInvalidRow />
+            <FieldRow legend="disabled">
+              <Field.Root disabled>
+                <Field.Label>Conversation font size</Field.Label>
+                <NumberField.Root defaultValue={14} min={8} max={32}>
+                  <NumberField.Group>
+                    <NumberField.Input />
+                    <NumberField.Decrement />
+                    <NumberField.Increment />
+                  </NumberField.Group>
+                </NumberField.Root>
+              </Field.Root>
+            </FieldRow>
+            <PasswordRow legend="password">
+              <Field.Label>Password</Field.Label>
+              <PasswordInput defaultValue="hunter2" />
+              <Field.Description>At least 8 characters.</Field.Description>
+            </PasswordRow>
+            {PASSWORD_SIZES.map((entry) => (
+              <PasswordSizeRow key={entry.size} {...entry} />
+            ))}
+            <FieldRow legend={'password \u00b7 invalid'}>
+              <Field.Root invalid>
+                <Field.Label>Password</Field.Label>
+                <PasswordInput defaultValue="short" />
+                <Field.Error match>Use at least 8 characters.</Field.Error>
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend={'password \u00b7 disabled'}>
+              <Field.Root disabled>
+                <Field.Label>Password</Field.Label>
+                <PasswordInput defaultValue="hunter2" />
+              </Field.Root>
+            </FieldRow>
+          </Rows>
+        </PaletteSplit>
+      </Section>
+
       <Section
         title="Select · trigger and list"
         rule="A trigger is a control on the well rung, so it takes the field family's size ladder, ring, invalid ring and disabled opacity; the list it opens is on the floating rung and reads the popup group instead. A row states two facts: selected is the row that holds the value, highlighted is where the keyboard or the pointer is, and the highlight wins the fill because it is the one that moves. The open list below is a stand-in built from the same rules the popup applies, because a board cannot show a popup without covering what is under it."

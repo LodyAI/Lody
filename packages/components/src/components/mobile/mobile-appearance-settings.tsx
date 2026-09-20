@@ -20,7 +20,7 @@ import {
 } from '@/components/mobile/mobile-inline-picker';
 import { MobileSettingsPickerTrigger } from '@/components/mobile/mobile-settings-picker-trigger';
 import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
-import { Input } from '@lody/ui/input';
+import { NumberField } from '@lody/ui/number-field';
 import { currentSupportedLanguages, languageCodeToName } from '../../i18n';
 import { cn } from '@/lib/utils';
 import { withOneSignal } from '@/lib/onesignal';
@@ -103,20 +103,21 @@ export function MobileAppearanceSettings() {
             'Adjusts message body text in conversations.'
           )}
         >
-          <Input
-            type="number"
+          <NumberField.Root
             min={CONVERSATION_FONT_SIZE_MIN}
             max={CONVERSATION_FONT_SIZE_MAX}
             step={1}
             value={conversationFontSize}
-            aria-label={t('settings.conversationFontSize.label', 'Conversation font size')}
-            className="h-8 w-20 text-center"
-            onChange={(event) => {
-              if (Number.isFinite(event.target.valueAsNumber)) {
-                setConversationFontSize(normalizeConversationFontSize(event.target.valueAsNumber));
-              }
+            onValueChange={(value) => {
+              if (value == null) return;
+              setConversationFontSize(normalizeConversationFontSize(value));
             }}
-          />
+          >
+            <NumberField.Input
+              aria-label={t('settings.conversationFontSize.label', 'Conversation font size')}
+              className="w-20 text-center"
+            />
+          </NumberField.Root>
         </MobileSettingsRow>
       </MobileSettingsSection>
     </MobileInlinePickerCoordinator>

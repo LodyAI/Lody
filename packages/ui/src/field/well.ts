@@ -106,6 +106,37 @@ export const well = stylex.create({
     cursor: { default: 'auto', ':disabled': 'default' },
     '::placeholder': { color: field.placeholder, opacity: 1 },
   },
+  /**
+   * A glyph sharing a well with the value: a Combobox chevron or cross, a
+   * number field's steppers, a password field's reveal. It is a box holding a
+   * glyph rather than a button with a fill of its own — the well is the one
+   * control, and a filled button inside it would read as a second one. It
+   * carries no disabled opacity: the shell already dims, and a dimmed glyph
+   * inside a dimmed shell is dimmed twice.
+   *
+   * It states no edge of its own. The app shell rings any focused `[tabindex]`
+   * with an inset box-shadow, and the shell around this one already rings on
+   * `:focus-within` — so without this, focusing a chevron or an eye draws a
+   * second ring inside the field's own.
+   */
+  adornment: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    boxSizing: 'border-box',
+    width: field.iconSize,
+    height: field.iconSize,
+    margin: 0,
+    padding: 0,
+    borderWidth: 0,
+    borderStyle: 'none',
+    backgroundColor: 'transparent',
+    boxShadow: 'none',
+    color: { default: field.icon, ':hover': field.value },
+    cursor: { default: 'default', ':disabled': 'default' },
+    outlineStyle: 'none',
+  },
   /** The family's one disabled value, for a part `:disabled` cannot reach. */
   dimmed: { opacity: field.disabledOpacity },
   /**

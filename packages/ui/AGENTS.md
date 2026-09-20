@@ -25,6 +25,11 @@ with this package's `stylex-options.ts`.
   invalid ring follows `aria-invalid`, so it and what a screen reader announces
   are one fact; `src/field/invalid.ts` owns it — StyleX has no attribute
   selector.
+- `NumberField` and `PasswordInput` join the field family. **A number is a
+  range, not digits in a box**: the root clamps and returns `number | null`, and
+  its input states the `aria-invalid` Base UI omits. A secret's shell is the
+  input's own `render`, so `Field.Root` reaches the eye too; `Field.Item`
+  orphans the label.
 - A trigger reads `field` and the list it opens reads `popup`: different rungs,
   and the list's vocabulary is a menu's, not an input's. `src/popup/surface.ts`
   holds what floating parts share, as `src/field/well.ts` does for controls and
@@ -40,14 +45,14 @@ with this package's `stylex-options.ts`.
   and re-export its rows. A menu reads `popup` and replaces one declaration,
   `--anchor-width`; surface and rows come from `src/popup/surface.ts`.
 - Whatever holds a glyph gives it a box, because this package's glyphs state
-  100% and StyleX has no descendant selector: a menu row's leading box, a
-  badge's, an avatar's, an icon-only `Button`'s. A caller's icon states 100%
-  too; a checkbox row's box holds its mark only.
+  100% and StyleX has no descendant selector: a menu row's, a badge's, an
+  avatar's, an icon-only `Button`'s. A caller's icon states 100% too; a
+  checkbox row's box holds its mark only.
 - Every trigger here is Base UI's, unstyled: a surface opens a menu, popover or
   modal with what it had there, `render={<Button …/>}`. Post-close focus is the
   product's, as `finalFocus`.
-- `Popover` reads `popup` too and replaces five of a list's declarations (anchor
-  width, row inset, the three making type prose); `test/popover.test.tsx` pins it.
+- `Popover` reads `popup` too and replaces five of a list's declarations;
+  `test/popover.test.tsx` names them and pins them.
 - Dialog, AlertDialog and Drawer are one family on the modal rung sharing
   `dialog/surface.ts`; only their way in and dismissal differ. An outside press
   does not answer an alert dialog; Escape does. `Content` names its panel to
@@ -77,16 +82,16 @@ with this package's `stylex-options.ts`.
   Switch (no name, no `Field.Root`, no validity). **On is the well, not ink**:
   ink is what a control already in a well becomes; this rests on nothing. A
   set is no `Tabs` strip — two can be on at once, so no track — and a bar draws
-  nothing at all, existing to be one tab stop.
+  nothing, existing to be one tab stop.
 - Card, Badge and Separator answer "what is an edge?": a card's is its shadow
   (Dialog's parts, no nesting; `interactive` only marks it pressable), a badge
-  is on **no rung** — tone a film, word that tone halfway to ink — and a
-  `Separator` _is_ the one allowed line: no token group, announced, no margin.
+  is on **no rung** — tone a film, word halfway to ink — and a `Separator` _is_
+  the one allowed line: no token group, announced, no margin.
 - Avatar and Kbd stand for something outside the interface, so both take a
   gray. **An avatar's rung picks its letters**; its box is a ceiling too, or a
-  flex minimum widens a 16px circle. Circle is a person, tile a thing; identity
-  colour is a `style`. A `Kbd` is never a menu row's shortcut;
-  `Tooltip.Content`'s `kbdOnInvertedTheme` inverts a cap on a chip.
+  flex minimum widens a 16px circle. Identity colour is a `style`. A `Kbd` is
+  never a menu row's shortcut; `Tooltip.Content`'s `kbdOnInvertedTheme` inverts
+  a cap on a chip.
 - A forced palette travels to a portalled popup: `ThemeRoot` publishes its mode
   and `Content` re-declares it on the positioner, since a popup mounts outside
   the subtree declaring it — a light panel would otherwise open a dark list.

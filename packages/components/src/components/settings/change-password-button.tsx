@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import { validateNewPassword } from '@lody/shared';
 import { Button } from '@lody/ui/button';
 import { Field as UiField } from '@lody/ui/field';
-import { PasswordInput } from '@/ui/password-input';
+import { PasswordInput } from '@lody/ui/password-input';
 import {
   Dialog,
   DialogContent,

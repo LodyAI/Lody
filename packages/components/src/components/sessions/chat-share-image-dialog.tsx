@@ -7,7 +7,7 @@ import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { cn } from '@/lib/utils';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui/dialog';
 import { Field as UiField } from '@lody/ui/field';
-import { Input } from '@lody/ui/input';
+import { NumberField } from '@lody/ui/number-field';
 import { Button } from '@lody/ui/button';
 import { copyChatShareImage, exportChatShareImage } from '@/lib/chat-share-image-export';
 import { Switch } from '@lody/ui/switch';
@@ -449,16 +449,19 @@ export function ChatShareImageDialog({
                 >
                   {t('sessions.shareImage.collapseAfter', 'Collapse code blocks after (lines)')}
                 </UiField.Label>
-                <Input
-                  id="chat-share-collapse"
-                  type="number"
+                <NumberField.Root
                   min={0}
                   value={collapseAfter}
-                  onChange={(event) => {
-                    const next = Number.parseInt(event.target.value, 10);
-                    setCollapseAfter(Number.isFinite(next) && next > 0 ? next : 0);
+                  onValueChange={(value) => {
+                    // `min` clamps what the arrow keys do, but direct typing is
+                    // clamped on blur, so the floor is still applied here: an
+                    // empty box and a half-typed "-" both read as "never
+                    // collapse", which is what this field's 0 means.
+                    setCollapseAfter(value != null && value > 0 ? value : 0);
                   }}
-                />
+                >
+                  <NumberField.Input id="chat-share-collapse" />
+                </NumberField.Root>
               </div>
             </div>
           </fieldset>

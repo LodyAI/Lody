@@ -110,6 +110,21 @@ export type {
 } from './menu/menu';
 export { Menubar } from './menu/menubar';
 export type { MenubarRootProps, MenubarTriggerProps } from './menu/menubar';
+export { NumberField } from './field/number-field';
+export type {
+  NumberFieldGroupProps,
+  NumberFieldInputProps,
+  NumberFieldRootProps,
+  NumberFieldScrubAreaProps,
+  NumberFieldSize,
+  NumberFieldStepperProps,
+} from './field/number-field';
+export { PasswordInput } from './field/password-input';
+export type {
+  PasswordInputLabels,
+  PasswordInputProps,
+  PasswordInputSize,
+} from './field/password-input';
 export { Progress } from './feedback/progress';
 export type { ProgressProps, ProgressTone } from './feedback/progress';
 export { Pagination } from './table/pagination';

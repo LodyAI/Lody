@@ -21,7 +21,7 @@ import { OptionSelector, type OptionSelectorOption } from '@/components/shared/o
 import { buildTerminalFontPreviewFamily } from '@/components/terminal/terminal-theme';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { listSystemFontFamilies } from '@/lib/local-fonts';
-import { Input } from '@lody/ui/input';
+import { NumberField } from '@lody/ui/number-field';
 import { LanguageSelector } from '../../i18n';
 import { useTheme, type Theme } from '../../theme-provider';
 import { settingContainerClass } from '.';
@@ -230,22 +230,24 @@ export function AppearanceSettingsView({
             'Adjusts message body text in conversations.'
           )}
         >
-          <Input
-            type="number"
+          <NumberField.Root
             min={CONVERSATION_FONT_SIZE_MIN}
             max={CONVERSATION_FONT_SIZE_MAX}
             step={1}
             value={conversationFontSize}
-            aria-label={t('settings.conversationFontSize.label', 'Conversation font size')}
-            className="w-24"
-            onChange={(event) => {
-              if (Number.isFinite(event.target.valueAsNumber)) {
-                onConversationFontSizeChange(
-                  normalizeConversationFontSize(event.target.valueAsNumber)
-                );
-              }
+            onValueChange={(value) => {
+              // The field clamps to the range and hands back a number, or null
+              // while the box is empty mid-edit; normalize still rounds it to
+              // the whole step the stored setting is in.
+              if (value == null) return;
+              onConversationFontSizeChange(normalizeConversationFontSize(value));
             }}
-          />
+          >
+            <NumberField.Input
+              aria-label={t('settings.conversationFontSize.label', 'Conversation font size')}
+              className="w-24"
+            />
+          </NumberField.Root>
         </CompactRow>
       </CompactSection>
 
@@ -291,20 +293,21 @@ export function AppearanceSettingsView({
             />
           </CompactRow>
           <CompactRow label={t('settings.terminal.fontSize.label', 'Font size')}>
-            <Input
-              type="number"
+            <NumberField.Root
               min={TERMINAL_FONT_SIZE_MIN}
               max={TERMINAL_FONT_SIZE_MAX}
               step={1}
               value={terminalFontSize}
-              aria-label={t('settings.terminal.fontSize.label', 'Font size')}
-              className="w-24"
-              onChange={(event) => {
-                if (Number.isFinite(event.target.valueAsNumber)) {
-                  onTerminalFontSizeChange(normalizeTerminalFontSize(event.target.valueAsNumber));
-                }
+              onValueChange={(value) => {
+                if (value == null) return;
+                onTerminalFontSizeChange(normalizeTerminalFontSize(value));
               }}
-            />
+            >
+              <NumberField.Input
+                aria-label={t('settings.terminal.fontSize.label', 'Font size')}
+                className="w-24"
+              />
+            </NumberField.Root>
           </CompactRow>
           <div
             aria-label={t('settings.terminal.preview', 'Terminal preview')}

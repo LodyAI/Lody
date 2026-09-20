@@ -104,24 +104,6 @@ const styles = stylex.create({
   },
   /** The controls beside the input keep the shell's end padding off them. */
   shell: { gap: field.triggerGap },
-  /** A chevron or a cross beside the input: a glyph, not a filled button. */
-  adornment: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexShrink: 0,
-    boxSizing: 'border-box',
-    width: field.iconSize,
-    height: field.iconSize,
-    margin: 0,
-    padding: 0,
-    borderWidth: 0,
-    borderStyle: 'none',
-    backgroundColor: 'transparent',
-    color: { default: field.icon, ':hover': field.value },
-    cursor: { default: 'default', ':disabled': 'default' },
-    outlineStyle: 'none',
-  },
   positioner: { outlineStyle: 'none' },
 });
 
@@ -208,7 +190,7 @@ export const ComboboxInput = forwardRef<HTMLInputElement, ComboboxInputProps>(
 /** The chevron beside the input: it opens the list without clearing the query. */
 export const ComboboxTrigger = forwardRef<HTMLButtonElement, ComboboxTriggerProps>(
   function ComboboxTrigger({ className, children, ...rest }, ref) {
-    const sx = stylex.props(styles.adornment);
+    const sx = stylex.props(well.adornment);
     return (
       <BaseCombobox.Trigger
         ref={ref}
@@ -226,7 +208,7 @@ export const ComboboxTrigger = forwardRef<HTMLButtonElement, ComboboxTriggerProp
 /** Drops the value. Base UI unmounts it while there is nothing to drop. */
 export const ComboboxClear = forwardRef<HTMLButtonElement, ComboboxClearProps>(
   function ComboboxClear({ className, children, ...rest }, ref) {
-    const sx = stylex.props(styles.adornment);
+    const sx = stylex.props(well.adornment);
     return (
       <BaseCombobox.Clear
         ref={ref}

@@ -42,6 +42,7 @@ import {
 import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
+import { NumberField } from '@lody/ui/number-field';
 import { Switch } from '@lody/ui/switch';
 import { Table, type TableColumn } from '@lody/ui/table';
 import { Textarea } from '@lody/ui/textarea';
@@ -50,14 +51,6 @@ import { CompactRow, CompactSection } from './compact-layout';
 
 /** Long enough to coalesce typing, short enough to feel saved. */
 const POLICY_WRITE_DEBOUNCE_MS = 600;
-
-const clampBudget = (value: string, min: number, max: number, fallback: number): number => {
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed)) {
-    return fallback;
-  }
-  return Math.min(max, Math.max(min, parsed));
-};
 
 const workspacePolicyOnly = (policy: ReviewPolicy): ReviewPolicy => {
   const { reviewer: _frozenReviewer, ...workspacePolicy } = policy;
@@ -585,22 +578,25 @@ export function ReviewPolicySection() {
         'How many times the reviewer may hand work back before stopping and asking you.'
       ),
       control: (
-        <Input
-          type="number"
+        <NumberField.Root
+          value={current.budget.reviewRounds}
           min={1}
           max={20}
-          className="h-8 w-20"
-          value={current.budget.reviewRounds}
-          onChange={(event) =>
+          onValueChange={(value) => {
+            // The field hands back a clamped number, or null while the box is
+            // empty mid-edit; only a number is worth persisting.
+            if (value == null) return;
             persist({
               ...current,
-              budget: {
-                ...current.budget,
-                reviewRounds: clampBudget(event.target.value, 1, 20, current.budget.reviewRounds),
-              },
-            })
-          }
-        />
+              budget: { ...current.budget, reviewRounds: value },
+            });
+          }}
+        >
+          <NumberField.Input
+            className="w-20"
+            aria-label={t('settings.review.reviewRounds', 'Review rounds')}
+          />
+        </NumberField.Root>
       ),
     },
     {
@@ -611,22 +607,25 @@ export function ReviewPolicySection() {
         'Counted separately from review rounds, so flaky CI cannot use up the review budget.'
       ),
       control: (
-        <Input
-          type="number"
+        <NumberField.Root
+          value={current.budget.ciFixAttempts}
           min={0}
           max={10}
-          className="h-8 w-20"
-          value={current.budget.ciFixAttempts}
-          onChange={(event) =>
+          onValueChange={(value) => {
+            // The field hands back a clamped number, or null while the box is
+            // empty mid-edit; only a number is worth persisting.
+            if (value == null) return;
             persist({
               ...current,
-              budget: {
-                ...current.budget,
-                ciFixAttempts: clampBudget(event.target.value, 0, 10, current.budget.ciFixAttempts),
-              },
-            })
-          }
-        />
+              budget: { ...current.budget, ciFixAttempts: value },
+            });
+          }}
+        >
+          <NumberField.Input
+            className="w-20"
+            aria-label={t('settings.review.ciFixAttempts', 'CI fix attempts')}
+          />
+        </NumberField.Root>
       ),
     },
     {
@@ -637,27 +636,25 @@ export function ReviewPolicySection() {
         'How many times the session may be asked to resolve conflicts with the base branch.'
       ),
       control: (
-        <Input
-          type="number"
+        <NumberField.Root
+          value={current.budget.conflictAttempts}
           min={0}
           max={10}
-          className="h-8 w-20"
-          value={current.budget.conflictAttempts}
-          onChange={(event) =>
+          onValueChange={(value) => {
+            // The field hands back a clamped number, or null while the box is
+            // empty mid-edit; only a number is worth persisting.
+            if (value == null) return;
             persist({
               ...current,
-              budget: {
-                ...current.budget,
-                conflictAttempts: clampBudget(
-                  event.target.value,
-                  0,
-                  10,
-                  current.budget.conflictAttempts
-                ),
-              },
-            })
-          }
-        />
+              budget: { ...current.budget, conflictAttempts: value },
+            });
+          }}
+        >
+          <NumberField.Input
+            className="w-20"
+            aria-label={t('settings.review.conflictAttempts', 'Conflict attempts')}
+          />
+        </NumberField.Root>
       ),
     },
     {

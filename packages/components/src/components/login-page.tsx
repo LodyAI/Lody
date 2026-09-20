@@ -9,7 +9,7 @@ import { electronDeepLinkSignInInProgressAtom, nativeSignInInProgressAtom } from
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
-import { PasswordInput } from '@/ui/password-input';
+import { PasswordInput } from '@lody/ui/password-input';
 import { isDevEmailPasswordLoginEnabled } from '@lody/shared/electron-ipc';
 import { setLoginHintCookie } from '@/lib/login-hint-cookie';
 import { formatPasswordValidationFailure, validateNewPassword } from '@/lib/password-validation';
@@ -1500,8 +1500,10 @@ export function LoginPage({
                   : t('login.passwordPlaceholder', 'At least 8 characters')
               }
               className="h-10"
-              showPasswordLabel={t('login.showPassword', 'Show password')}
-              hidePasswordLabel={t('login.hidePassword', 'Hide password')}
+              labels={{
+                show: t('login.showPassword', 'Show password'),
+                hide: t('login.hidePassword', 'Hide password'),
+              }}
             />
             {!isSignUp ? (
               <div className="flex justify-end">
