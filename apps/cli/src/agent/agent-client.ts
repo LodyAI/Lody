@@ -1,4 +1,4 @@
-import type { LodyWorktreeProject } from 'acp-extension-core';
+import type { LodyClientExtensionCapabilities, LodyWorktreeProject } from 'acp-extension-core';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
@@ -1909,9 +1909,12 @@ export class AgentClient implements acp.Client {
               elicitation: {
                 form: {},
               },
-              ...(devinClientCapabilitiesMeta !== undefined
-                ? { _meta: devinClientCapabilitiesMeta }
-                : {}),
+              _meta: {
+                ...devinClientCapabilitiesMeta,
+                lody: {
+                  elicitation: { version: 1, answerNotes: true },
+                } satisfies LodyClientExtensionCapabilities,
+              },
             },
           }),
           startupAbort

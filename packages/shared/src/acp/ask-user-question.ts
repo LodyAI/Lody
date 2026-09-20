@@ -71,6 +71,7 @@ export function parseAskUserQuestionPermissionMeta(
   if (lody) {
     const parsed = parseLodyElicitationPermissionMeta(lody);
     if (parsed) return parsed;
+    if (isRecord(lody.elicitation) && lody.elicitation.version === 1) return null;
   }
 
   const claudeCode = getClaudeCodeMeta(meta);
@@ -117,6 +118,17 @@ function parsePermissionQuestions(rawQuestions: unknown[]): AskUserQuestion[] | 
       return null;
     }
     if (!Array.isArray(rawQuestion.options)) return null;
+    const note = rawQuestion.note;
+    if (
+      note !== undefined &&
+      (!isRecord(note) ||
+        typeof note.fieldId !== 'string' ||
+        !note.fieldId.trim() ||
+        (note.title !== undefined && typeof note.title !== 'string') ||
+        (note.description !== undefined && typeof note.description !== 'string') ||
+        (note.isSecret !== undefined && typeof note.isSecret !== 'boolean'))
+    )
+      return null;
     const options: AskUserQuestionOption[] = [];
     for (const rawOption of rawQuestion.options) {
       if (!isRecord(rawOption) || typeof rawOption.label !== 'string') return null;
@@ -134,11 +146,42 @@ function parsePermissionQuestions(rawQuestions: unknown[]): AskUserQuestion[] | 
       header: rawQuestion.header,
       options,
       multiSelect: rawQuestion.multiSelect === true,
-      ...(rawQuestion.allowCustomAnswer === true ? { allowCustomAnswer: true } : {}),
+      ...(typeof rawQuestion.allowCustomAnswer === 'boolean'
+        ? { allowCustomAnswer: rawQuestion.allowCustomAnswer }
+        : {}),
       ...(rawQuestion.isSecret === true ? { isSecret: true } : {}),
+      ...(isRecord(note)
+        ? {
+            note: {
+              fieldId: note.fieldId as string,
+              ...(typeof note.title === 'string' ? { title: note.title } : {}),
+              ...(typeof note.description === 'string' ? { description: note.description } : {}),
+              ...(note.isSecret === true ? { isSecret: true } : {}),
+            },
+          }
+        : {}),
     });
   }
-  return questions;
+  return hasValidNoteKeys(questions) ? questions : null;
+}
+
+/** Stored metadata must not let an auxiliary field shadow any question or note. */
+function hasValidNoteKeys(questions: readonly AskUserQuestion[]): boolean {
+  if (!questions.some((question) => question.note)) return true;
+  const keys = questions.map((_, index) => getAskUserQuestionAnswerKey(questions, index));
+  const used = new Set(keys);
+  if (
+    used.size !== questions.length ||
+    new Set(questions.map((question) => question.id)).size !== questions.length
+  )
+    return false;
+  for (const question of questions) {
+    if (!question.id?.trim() || !used.has(question.id)) return false;
+    if (!question.note) continue;
+    if (!question.note.fieldId.trim() || used.has(question.note.fieldId)) return false;
+    used.add(question.note.fieldId);
+  }
+  return true;
 }
 
 function parseClaudeAskUserQuestionPermissionMeta(
@@ -324,7 +367,7 @@ export function extractAskUserQuestionAnswersFromOutcome(
   meta: AskUserQuestionPermissionMeta,
   outcome: { _meta?: Record<string, unknown> | null } | null | undefined
 ): AskUserQuestionAnswers | null {
-  if (!outcome || !isRecord(outcome._meta)) return null;
+  if (!outcome || !isRecord(outcome._meta) || !hasValidNoteKeys(meta.questions)) return null;
 
   // Permission requests are durable and may be answered by a renderer from
   // before the Core metadata migration. Prefer the canonical response, then
@@ -338,8 +381,12 @@ export function extractAskUserQuestionAnswersFromOutcome(
   const answerSource = answerSources.find(({ answers }) => answers !== null);
   if (!answerSource?.answers) return null;
 
-  const result: AskUserQuestionAnswers = {};
+  const result: AskUserQuestionAnswers = Object.create(null);
   for (const [index, question] of meta.questions.entries()) {
+    if (question.note && answerSource.source === 'lody') {
+      const note = answerSource.answers[question.note.fieldId];
+      if (typeof note === 'string' && note.trim()) result[question.note.fieldId] = note;
+    }
     const key = getAskUserQuestionAnswerKey(meta.questions, index);
     // Legacy Claude answers were keyed without the Core field id, normally by
     // question text. Translate that lookup back onto the canonical answer key.
@@ -534,20 +581,49 @@ export function parseAskUserQuestionElicitationRequest(
   const entries = Object.entries(schema.properties);
   const requestMeta = getLodyElicitationMeta(request._meta);
   const customFieldKeyByQuestionId = new Map<string, string>();
+  const noteFieldKeyByQuestionId = new Map<string, string>();
+  const associatedFields = new Set<string>();
   for (const [key, prop] of entries) {
     if (!isRecord(prop)) continue;
+    const rawMeta = getLodyMeta(prop._meta)?.elicitation;
+    if (isRecord(rawMeta) && rawMeta.noteFor !== undefined && rawMeta.version !== 1) return null;
     const meta = getLodyElicitationMeta(prop._meta);
-    if (typeof meta?.customAnswerFor === 'string' && meta.customAnswerFor.length > 0) {
-      customFieldKeyByQuestionId.set(meta.customAnswerFor, key);
-    }
+    if (!meta || (meta.noteFor === undefined && meta.customAnswerFor === undefined)) continue;
+    if (meta.noteFor !== undefined && meta.customAnswerFor !== undefined) return null;
+    const target = meta.noteFor ?? meta.customAnswerFor;
+    const fields =
+      meta.noteFor !== undefined ? noteFieldKeyByQuestionId : customFieldKeyByQuestionId;
+    if (
+      typeof target !== 'string' ||
+      !target.trim() ||
+      !key.trim() ||
+      key === target ||
+      !isFreeTextProperty(prop) ||
+      fields.has(target)
+    )
+      return null;
+    if (
+      meta.noteFor !== undefined &&
+      Array.isArray(schema.required) &&
+      schema.required.includes(key)
+    )
+      return null;
+    fields.set(target, key);
+    associatedFields.add(key);
   }
-  const isLodyForm = requestMeta !== null || customFieldKeyByQuestionId.size > 0;
+  const isLodyForm = requestMeta !== null || associatedFields.size > 0;
   const questionEntries = entries.filter(([, prop]) => {
     if (!isRecord(prop)) return false;
-    if (getLodyElicitationMeta(prop._meta)?.customAnswerFor) return false;
+    const meta = getLodyElicitationMeta(prop._meta);
+    if (meta?.customAnswerFor !== undefined || meta?.noteFor !== undefined) return false;
     return isQuestionProperty(prop) || (isLodyForm && isFreeTextProperty(prop));
   });
   if (questionEntries.length === 0) return null;
+  const questionIds = new Set(questionEntries.map(([key]) => key));
+  for (const target of [...customFieldKeyByQuestionId.keys(), ...noteFieldKeyByQuestionId.keys()]) {
+    if (!questionIds.has(target) || associatedFields.has(target)) return null;
+  }
+  if (associatedFields.size > 0 && questionEntries.some(([key]) => !key.trim())) return null;
 
   const singleQuestion = questionEntries.length === 1;
   const allowCustomAnswer = isLodyForm
@@ -567,6 +643,8 @@ export function parseAskUserQuestionElicitationRequest(
     const source = getEnumOptionSource(prop);
     const header = typeof prop.title === 'string' ? prop.title : '';
     const description = typeof prop.description === 'string' ? prop.description : '';
+    const noteFieldId = noteFieldKeyByQuestionId.get(key);
+    const noteProp = noteFieldId === undefined ? undefined : schema.properties[noteFieldId];
     // For a single-question form the prompt rides on the request `message`;
     // multi-question forms carry each prompt in the field `description`.
     const question = singleQuestion
@@ -579,11 +657,25 @@ export function parseAskUserQuestionElicitationRequest(
       header,
       options: source ? parseElicitationOptions(source) : [],
       multiSelect: isMultiSelectProperty(prop),
-      ...(isLodyForm && (source === null || customFieldKeyByQuestionId.has(key))
-        ? { allowCustomAnswer: true }
+      ...(isLodyForm
+        ? { allowCustomAnswer: source === null || customFieldKeyByQuestionId.has(key) }
         : {}),
       ...(isLodyForm && getLodyElicitationMeta(prop._meta)?.secret === true
         ? { isSecret: true }
+        : {}),
+      ...(noteFieldId !== undefined && isRecord(noteProp)
+        ? {
+            note: {
+              fieldId: noteFieldId,
+              ...(typeof noteProp.title === 'string' ? { title: noteProp.title } : {}),
+              ...(typeof noteProp.description === 'string'
+                ? { description: noteProp.description }
+                : {}),
+              ...(getLodyElicitationMeta(noteProp._meta)?.secret === true
+                ? { isSecret: true }
+                : {}),
+            },
+          }
         : {}),
     });
     fieldKeys.push(key);
@@ -637,8 +729,12 @@ export function buildAskUserQuestionElicitationResponse(
     return { action: 'accept', content: {} };
   }
 
-  const content: Record<string, AskUserQuestionAnswerValue> = {};
+  const content: Record<string, AskUserQuestionAnswerValue> = Object.create(null);
   elicitation.meta.questions.forEach((_question, index) => {
+    if (_question.note) {
+      const note = answers[_question.note.fieldId];
+      if (typeof note === 'string' && note.trim()) content[_question.note.fieldId] = note;
+    }
     const fieldKey = elicitation.fieldKeys[index];
     if (!fieldKey) return;
     const value = answers[getAskUserQuestionAnswerKey(elicitation.meta.questions, index)];

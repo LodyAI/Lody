@@ -1306,6 +1306,7 @@
   "sessions.activity.contextCompactionFailed": "Context compaction failed",
   "sessions.askQuestion.answered": "Answered",
   "sessions.askQuestion.autoContinueIn": "Continues in {{seconds}}s",
+  "sessions.askQuestion.noteLabel": "Additional context (optional)",
   "sessions.askQuestion.continuing": "Continuing",
   "sessions.askQuestion.counter": "Question {{current}}/{{total}}",
   "sessions.askQuestion.goToQuestion": "Go to question {{n}}",

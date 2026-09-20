@@ -1357,6 +1357,53 @@ describe('unstable_createElicitation (AskUserQuestion bridge)', () => {
     });
   });
 
+  it('bridges separate selection and note fields through the real permission boundary', async () => {
+    const { client, onRequestPermission } = createTestClient();
+    onRequestPermission.mockResolvedValueOnce({
+      outcome: {
+        outcome: 'selected',
+        optionId: 'answer',
+        _meta: {
+          lody: {
+            elicitation: {
+              version: 1,
+              answers: { approach: 'Ship', context: 'Preserve compatibility' },
+            },
+          },
+        },
+      },
+    } as unknown as Awaited<ReturnType<typeof onRequestPermission>>);
+    const result = await client.unstable_createElicitation({
+      mode: 'form',
+      sessionId: 'acp-test',
+      message: 'What next?',
+      requestedSchema: {
+        type: 'object',
+        required: ['approach'],
+        properties: {
+          approach: { type: 'string', enum: ['Ship', 'None of the above'] },
+          context: {
+            type: 'string',
+            title: 'Context',
+            _meta: { lody: { elicitation: { version: 1, noteFor: 'approach', secret: true } } },
+          },
+        },
+      },
+    } as unknown as CreateElicitationRequest);
+    const request = (
+      onRequestPermission.mock.calls as unknown as [string, RequestPermissionRequest][]
+    )[0]?.[1];
+    expect(parseAskUserQuestionPermissionMeta(request?._meta)?.questions[0]).toMatchObject({
+      id: 'approach',
+      allowCustomAnswer: false,
+      note: { fieldId: 'context', title: 'Context', isSecret: true },
+    });
+    expect(result).toEqual({
+      action: 'accept',
+      content: { approach: 'Ship', context: 'Preserve compatibility' },
+    });
+  });
+
   it('declines non-AskUserQuestion elicitations without prompting', async () => {
     const { client, onRequestPermission } = createTestClient({ agentType: 'claude' });
 

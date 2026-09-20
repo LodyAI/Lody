@@ -135,7 +135,10 @@ describe('AgentClient Kimi authentication and resume', () => {
     expect(connectionMocks.initialize).toHaveBeenCalledWith(
       expect.objectContaining({
         clientCapabilities: expect.objectContaining({
-          _meta: { 'cognition.ai/subagentSupport': true },
+          _meta: {
+            'cognition.ai/subagentSupport': true,
+            lody: { elicitation: { version: 1, answerNotes: true } },
+          },
         }),
       })
     );
@@ -144,7 +147,11 @@ describe('AgentClient Kimi authentication and resume', () => {
     await createClient('claude').startSession({} as never, '/tmp');
 
     const capabilities = connectionMocks.initialize.mock.calls[0]?.[0]?.clientCapabilities;
-    expect(capabilities).not.toHaveProperty('_meta');
+    expect(capabilities._meta).not.toHaveProperty('cognition.ai/subagentSupport');
+    expect(capabilities).toMatchObject({
+      elicitation: { form: {} },
+      _meta: { lody: { elicitation: { version: 1, answerNotes: true } } },
+    });
   });
 
   it('lets builtin Grok use its local terminal runner', async () => {

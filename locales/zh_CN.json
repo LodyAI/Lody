@@ -1306,6 +1306,7 @@
   "sessions.activity.contextCompactionFailed": "上下文压缩失败",
   "sessions.askQuestion.answered": "已回答",
   "sessions.askQuestion.autoContinueIn": "{{seconds}} 秒后自动继续",
+  "sessions.askQuestion.noteLabel": "补充说明（可选）",
   "sessions.askQuestion.continuing": "正在继续",
   "sessions.askQuestion.counter": "问题 {{current}}/{{total}}",
   "sessions.askQuestion.goToQuestion": "前往第 {{n}} 题",
