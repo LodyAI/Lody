@@ -14,7 +14,7 @@ the reasoning behind those rules.
 | User rows | `view.tsx`                                       | Multi-member sender metadata and desktop profile.                                 |
 | Turns     | `assistant-turn-render-blocks.ts`                | Activity groups and foldable segments.                                            |
 | Outline   | `conversation-outline-*`                         | Round ticks and navigation.                                                       |
-| Selection | [`message-selection.tsx`](message-selection.tsx) | Temporary message selection, drag rectangle, range modifiers, and edge scrolling. |
+| Image sharing selection | [`message-selection.tsx`](message-selection.tsx) | Temporary message selection, drag rectangle, range modifiers, and edge scrolling. |
 
 - `conversation-outline-rail.tsx` renders one tick per round (a user turn plus its
   work) and a hover preview; `conversation-outline-arrival-intent.ts` decides when
@@ -95,3 +95,15 @@ Coverage: `SessionRelationCard.stories.tsx`, `tests/session-relation-card.test.t
 and CLI `tests/operation-progress-history.test.ts`. The latter uses real Loro Mirror
 validation and snapshot reloads, because schema-free document fakes cannot detect
 a missing persisted-history message variant.
+
+## Native text selection
+
+[`use-conversation-text-selection.ts`](../../hooks/use-conversation-text-selection.ts)
+owns native range retention, history leases, and incomplete-copy protection.
+`view.tsx` supplies stable row identities, `keepMounted`, folding snapshots, and
+follow suppression; `markdown-renderer.tsx` holds selected prose presentation.
+Session data and action controls continue updating. This is independent of
+`message-selection.tsx`, which selects messages for image sharing.
+
+The [decision note](../../../../../.agents/notes/implemented/bug-fix/2026-09-20-conversation-text-selection.md)
+records lifecycle, alternatives, and platform verification limits.

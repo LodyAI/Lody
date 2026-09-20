@@ -6,9 +6,9 @@
   "kind": "node-package",
   "minNodeVersion": "22.19.0",
   "artifact": {
-    "fileName": "lody-pi-0.1.0-lody.d91f9db0c6dc-3a2e0030b4b2e926.tar.zst",
-    "sha256": "3a2e0030b4b2e926ca10f8cdc55799cef84125837cc6f5863281cbaa3b63b929",
-    "size": 39451286,
+    "fileName": "lody-pi-0.1.0-lody.d91f9db0c6dc-a77777e554326765.tar.zst",
+    "sha256": "a77777e554326765defdaee121971979814a59c6e936be325468e4eff7f3437e",
+    "size": 39451191,
     "compression": "zstd",
     "cmd": "package/dist/index.js"
   }

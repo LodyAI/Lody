@@ -7,12 +7,13 @@
  * "Worked for …" group to check that expansion still lands rows under the
  * same rail.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import type { SessionHistory, SessionId } from '@lody/shared';
 import { LoroDoc } from 'loro-crdt';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
 import type { SessionChatStreamViewProps } from '@/components/ai-gui/view';
+import type { SessionChatStreamHandle } from '@/components/ai-gui/view';
 import { useConversationStreamItems } from '@/hooks/use-conversation-stream-items';
 import { createConversationSession, type ConversationView } from '@/lib/conversation-view';
 
@@ -161,6 +162,7 @@ function WindowedStream({
   return (
     <div className="h-[720px] w-full bg-background">
       <SessionChatStreamView
+        conversationView={view}
         initialWindowReady={initialWindowReady}
         items={items}
         sessionId={streamSessionId}
@@ -253,6 +255,7 @@ function OpenedStream({
   } = useConversationStreamItems(view, streamSessionId);
   return (
     <SessionChatStreamView
+      conversationView={view}
       initialWindowReady={initialWindowReady}
       items={items}
       sessionId={streamSessionId}
@@ -414,3 +417,113 @@ export const WorkedGroupExpandJump: Story = {
     <WindowedStream history={buildWorkedGroupJumpHistory()} streamSessionId={JUMP_SESSION_ID} />
   ),
 };
+
+const SELECTION_SESSION_ID = 'native-text-selection-story' as SessionId;
+const selectionHistory = Array.from({ length: 120 }, (_, index) => ({
+  id: `selection-${index}`,
+  role: 'assistant',
+  finished: index !== 0,
+  read: true,
+  timestamp: at(index),
+  items: [
+    {
+      type: 'text',
+      text: `SELECT-${index}-START\n\n这是用于验证跨屏复制的固定文本。 This paragraph must survive virtual row recycling.\n\nSELECT-${index}-END`,
+    },
+    ...(index === 0
+      ? [
+          {
+            type: 'tool_call',
+            toolCallId: 'selection-tool',
+            title: 'Selection tool running',
+            kind: 'other',
+            status: 'in_progress',
+          },
+          { type: 'text', text: 'UNSELECTED-FINAL-ANSWER' },
+        ]
+      : []),
+  ],
+})) as SessionHistory[];
+
+function NativeTextSelectionStory() {
+  const [session, setSession] = useState<ReturnType<typeof createConversationSession> | null>(null);
+  const streamRef = useRef<SessionChatStreamHandle>(null);
+  useEffect(() => {
+    const doc = new LoroDoc();
+    doc.getMap('session').set('id', SELECTION_SESSION_ID);
+    const next = createConversationSession(doc, {
+      sessionId: SELECTION_SESSION_ID,
+      maxHydrated: 8,
+      tailKeep: 2,
+    });
+    for (const entry of selectionHistory) next.historyWriter.append(entry);
+    setSession(next);
+    return () => {
+      next.dispose();
+      doc.free();
+    };
+  }, []);
+  const stream = useConversationStreamItems(session?.history ?? null, SELECTION_SESSION_ID);
+  return (
+    <div className="flex h-screen flex-col bg-background">
+      <div className="flex gap-3 p-2">
+        <button
+          data-testid="selection-start"
+          onClick={() => streamRef.current?.scrollToIndex(0, false)}
+        >
+          Start
+        </button>
+        <button
+          data-testid="selection-clear"
+          onClick={() => window.getSelection()?.removeAllRanges()}
+        >
+          Clear selection
+        </button>
+        <button
+          data-testid="selection-finish"
+          data-finished={
+            session?.history.turn(session.history.indexOf('selection-0'))?.finished ?? false
+          }
+          onClick={() =>
+            session?.historyWriter.replace('selection-0', {
+              ...selectionHistory[0]!,
+              finished: true,
+              items: [
+                { type: 'text', text: 'UPDATED-PROSE' },
+                {
+                  type: 'tool_call',
+                  toolCallId: 'selection-tool',
+                  title: 'Selection tool completed',
+                  kind: 'other',
+                  status: 'completed',
+                },
+                { type: 'text', text: 'UNSELECTED-FINAL-ANSWER' },
+              ],
+            } as SessionHistory)
+          }
+        >
+          Finish first turn
+        </button>
+        <textarea data-testid="selection-paste" aria-label="Paste copied text" className="border" />
+      </div>
+      <div className="min-h-0 flex-1" data-testid="native-selection-story">
+        <SessionChatStreamView
+          ref={streamRef}
+          conversationView={session?.history}
+          sessionId={SELECTION_SESSION_ID}
+          initialWindowReady={stream.initialWindowReady}
+          items={stream.items}
+          lastAssistantMessageId={stream.lastAssistantMessageId}
+          lastCompletedAssistantMessageId={stream.lastCompletedAssistantMessageId}
+          onVisibleTurnRangeChange={stream.onVisibleTurnRangeChange}
+          onOutlinePreviewRound={stream.onOutlinePreviewRound}
+          leadingContent={<div>Selection regression fixture</div>}
+          renderMessageRow={renderMessageRow}
+          className="h-full"
+        />
+      </div>
+    </div>
+  );
+}
+
+export const NativeTextSelection: Story = { render: () => <NativeTextSelectionStory /> };

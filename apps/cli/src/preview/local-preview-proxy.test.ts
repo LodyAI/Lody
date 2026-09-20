@@ -16,7 +16,9 @@ const createLogger = () => ({
   close: () => {},
 });
 
-const listenHtmlServer = async (): Promise<{
+const listenHtmlServer = async (
+  checkFetchMetadata = false
+): Promise<{
   server: http.Server;
   target: PreviewTarget;
   requestUrls: string[];
@@ -26,6 +28,18 @@ const listenHtmlServer = async (): Promise<{
   const styleReferers: Array<string | undefined> = [];
   const server = http.createServer((request, response) => {
     requestUrls.push(request.url ?? '');
+    // Astro's dev server permits navigations but rejects cross-site subresources.
+    if (
+      checkFetchMetadata &&
+      request.headers['sec-fetch-site'] === 'cross-site' &&
+      !['navigate', 'nested-navigate', 'websocket'].includes(
+        String(request.headers['sec-fetch-mode'])
+      )
+    ) {
+      response.writeHead(403, { 'content-type': 'text/plain' });
+      response.end('Cross-origin request blocked');
+      return;
+    }
     if (request.url?.startsWith('/external-redirect')) {
       response.writeHead(302, { location: 'https://example.com/outside' });
       response.end();
@@ -146,6 +160,59 @@ describe('LocalPreviewProxyManager', () => {
       )
     );
   });
+
+  it.each(['navigate', 'nested-navigate', 'cors', 'no-cors'])(
+    'preserves dev-server navigation access and subresource rejection for %s',
+    async (mode) => {
+      const { server, target, requestUrls } = await listenHtmlServer(true);
+      servers.push(server);
+      const manager = new LocalPreviewProxyManager({ logger: createLogger() });
+      managers.push(manager);
+      const endpoint = await manager.acquire({
+        sessionId: 'session-fetch-metadata' as SessionId,
+        target,
+      });
+      // fetch() cannot simulate browser navigation: it overwrites Sec-Fetch-Mode.
+      const request = (url: string) =>
+        new Promise<{ status: number | undefined; body: string }>((resolve, reject) => {
+          http
+            .get(
+              url,
+              {
+                headers: {
+                  'Sec-Fetch-Site': 'cross-site',
+                  'Sec-Fetch-Mode': mode,
+                  'Sec-Fetch-Dest': 'iframe',
+                },
+              },
+              (response) => {
+                let body = '';
+                response.setEncoding('utf8');
+                response.on('data', (chunk: string) => {
+                  body += chunk;
+                });
+                response.on('error', reject);
+                response.on('end', () => resolve({ status: response.statusCode, body }));
+              }
+            )
+            .on('error', reject);
+        });
+
+      const unauthorized = await request(new URL('/', endpoint.viewerUrl).toString());
+      expect(unauthorized.status).toBe(403);
+      expect(unauthorized.body).toContain('token is missing or invalid');
+      expect(requestUrls).toEqual([]);
+
+      const result = await request(endpoint.viewerUrl);
+      if (mode === 'navigate' || mode === 'nested-navigate') {
+        expect(result.status).toBe(200);
+        expect(result.body).toContain('data-testid="cta"');
+      } else {
+        expect(result.status).toBe(403);
+        expect(result.body).toBe('Cross-origin request blocked');
+      }
+    }
+  );
 
   it('serves local preview HTML through an annotated ephemeral proxy endpoint', async () => {
     const { server, target, requestUrls, styleReferers } = await listenHtmlServer();
