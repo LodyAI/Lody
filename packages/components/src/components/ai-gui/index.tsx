@@ -292,6 +292,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
         skipNextViewportResizeAutoScrollRef={skipNextViewportResizeAutoScrollRef}
         suppressStickyAutoScrollRef={suppressStickyAutoScrollRef}
         outlineOverlayRoot={outlineOverlayRoot}
+        conversationView={view}
         onVisibleTurnRangeChange={handleVisibleTurnRangeChange}
         onOutlinePreviewRound={handleOutlinePreviewRound}
       />

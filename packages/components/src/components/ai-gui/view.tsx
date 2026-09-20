@@ -30,6 +30,14 @@ import {
 } from '@/components/shared/zoomable-image-viewer';
 import { useIsMessageSendingVisible } from './message-send-status-context';
 import {
+  CONVERSATION_OVERSCAN,
+  NativeTextSelectionHoldContext,
+  useSelectionStableValue,
+  useConversationTextSelection,
+  type SelectableConversationRow,
+} from '@/hooks/use-conversation-text-selection';
+import type { ConversationView } from '@/lib/conversation-view';
+import {
   getCopyTextFromMessageItems,
   getTextContentFromMessageItems,
   getUserTextRenderSlice,
@@ -270,6 +278,11 @@ interface BubbleExpandState {
   expandedByIndex: Record<number, boolean>;
   planOpen: boolean;
 }
+export type SelectionTurnLayout = {
+  finished: boolean;
+  expandState: BubbleExpandState;
+  activeSearchBlockId: string | null;
+};
 type SearchContainerProps = ComponentPropsWithoutRef<'div'> & {
   'data-search-block-id'?: string;
   'data-search-result-id'?: string;
@@ -452,11 +465,29 @@ export type GoalCommand = SessionGoalCommand;
 export type VisibleTurnRange = { from: number; to: number };
 
 /** Exposes row identity at the measurement boundary without inspecting message DOM. */
+const NativeSelectionRowsContext = createContext<{
+  rows: readonly SelectableConversationRow[];
+  leading: number;
+  held: ReadonlySet<string>;
+}>({ rows: [], leading: 0, held: new Set() });
 function ConversationVirtualRow({ index, ...props }: CustomItemComponentProps) {
-  return <div {...props} data-virtual-index={index} />;
+  const { rows, leading, held } = useContext(NativeSelectionRowsContext);
+  const row = rows[index - leading];
+  return (
+    <NativeTextSelectionHoldContext.Provider value={!!row && held.has(row.turnId)}>
+      <div
+        {...props}
+        data-virtual-index={index}
+        data-conversation-row-key={row?.key}
+        data-conversation-turn-id={row?.turnId}
+      />
+    </NativeTextSelectionHoldContext.Provider>
+  );
 }
 
 export interface SessionChatStreamViewProps {
+  /** Optional for static readers; the connected stream supplies its windowed history. */
+  conversationView?: ConversationView | null;
   initialWindowReady?: boolean;
   items: ChatStreamItem[];
   sessionId: SessionId;
@@ -926,6 +957,7 @@ const getAssistantTurnLayout = (message: SessionHistoryParsed): AssistantTurnLay
 // each streamed token re-allocates every row, the shallow prop compare fails
 // for the whole mounted window, and long sessions freeze the renderer.
 type AssistantTurnRowsCacheEntry = {
+  selectionLayout?: SelectionTurnLayout;
   rows: AssistantChatVirtualRow[];
   messageIndex: number;
   isLastAssistantMessage: boolean;
@@ -947,7 +979,9 @@ export const buildChatVirtualRows = ({
   activeSearchBlockId,
   expansionVersion,
   copyContextAvailable = false,
+  selectionLayouts,
 }: {
+  selectionLayouts?: ReadonlyMap<string, SelectionTurnLayout>;
   items: ChatStreamItem[];
   lastAssistantMessageId: string | null;
   messageFileDiffEntriesByTurn?: MessageFileDiffEntriesByTurn;
@@ -994,9 +1028,14 @@ export const buildChatVirtualRows = ({
       assistantActionsMessageId,
       assistantActions
     );
+    const selectionLayout = selectionLayouts?.get(message.id);
+    const selectionSearchBlockId = selectionLayout
+      ? selectionLayout.activeSearchBlockId
+      : activeSearchBlockId;
     const cachedRows = assistantTurnRowsCache.get(item);
     if (
       cachedRows &&
+      cachedRows.selectionLayout === selectionLayout &&
       cachedRows.messageIndex === messageIndex &&
       cachedRows.isLastAssistantMessage === isLastAssistantMessage &&
       cachedRows.fileDiffs === fileDiffs &&
@@ -1010,7 +1049,7 @@ export const buildChatVirtualRows = ({
     }
 
     const { blocks, segments, entries, subagentTasks } = getAssistantTurnLayout(message);
-    const cachedState = getExpandState(message.id);
+    const cachedState = selectionLayout?.expandState ?? getExpandState(message.id);
     const cachedExpansion = cachedState.expandedGroups;
     // Collapse into a "Worked for …" summary ONLY when the turn both finished and
     // produced a genuine final answer to show. `hasVisibleFinalContent` = there is at
@@ -1025,7 +1064,7 @@ export const buildChatVirtualRows = ({
     //
     // Evaluated PER SEGMENT: a plan-approval turn has two regions and each needs
     // its own verdict, or the implementation would fold into the plan's row.
-    const isTurnFinished = message.finished === true;
+    const isTurnFinished = selectionLayout?.finished ?? message.finished === true;
     // Subagent tasks are message-scoped, so they ride the LAST segment.
     const lastSegmentIndex = segments.length - 1;
     const assistantRows: AssistantChatVirtualRow[] = [];
@@ -1064,7 +1103,7 @@ export const buildChatVirtualRows = ({
       const isSearchExpanded = assistantGroupHasActiveSearch(
         message.id,
         block.entries,
-        activeSearchBlockId
+        selectionSearchBlockId
       );
       const expanded = isSearchExpanded || cachedExpansion[block.key] === true;
       const isActive =
@@ -1167,7 +1206,7 @@ export const buildChatVirtualRows = ({
       const isWorkedSearchExpanded = assistantGroupHasActiveSearch(
         message.id,
         workedSearchEntries,
-        activeSearchBlockId
+        selectionSearchBlockId
       );
       const isWorkedGroupExpanded =
         shouldUseWorkedGroup &&
@@ -1269,6 +1308,7 @@ export const buildChatVirtualRows = ({
     const lastRow = assistantRows[assistantRows.length - 1];
     if (lastRow) lastRow.isLastRowForMessage = true;
     assistantTurnRowsCache.set(item, {
+      selectionLayout,
       rows: assistantRows,
       messageIndex,
       isLastAssistantMessage,
@@ -1302,6 +1342,7 @@ export const SessionChatStreamView = forwardRef<
     {
       items,
       sessionId,
+      conversationView,
       initialWindowReady = true,
       className,
       leadingContent,
@@ -1338,6 +1379,9 @@ export const SessionChatStreamView = forwardRef<
   ) => {
     const vlistRef = useRef<VirtualizerHandle>(null);
     const messageSelection = useContext(MessageSelectionContext);
+    const nativeTextSelectionActiveRef = useRef(false);
+    const selectionLayoutsRef = useRef(new Map<string, SelectionTurnLayout>());
+    const [, setSelectionVersion] = useState(0);
     const scrollRootRef = useRef<HTMLDivElement>(null);
     const { t } = useTranslation();
     const search = useSessionSearch();
@@ -1372,6 +1416,7 @@ export const SessionChatStreamView = forwardRef<
       () => ({
         get current() {
           return (
+            nativeTextSelectionActiveRef.current ||
             messageSelection !== null ||
             pendingOutlineJumpRef.current !== null ||
             Boolean(suppressStickyAutoScrollRef?.current)
@@ -1420,6 +1465,7 @@ export const SessionChatStreamView = forwardRef<
     }, []);
 
     const copyContextAvailable = onCopyContext !== undefined;
+    const selectionLayouts = selectionLayoutsRef.current;
     const virtualRows = useMemo(() => {
       // Expansion lives in the module cache so virtualized child rows retain
       // their state after unmounting; this counter is its React invalidation
@@ -1433,8 +1479,10 @@ export const SessionChatStreamView = forwardRef<
         activeSearchBlockId,
         expansionVersion: assistantExpansionVersion,
         copyContextAvailable,
+        selectionLayouts,
       });
     }, [
+      selectionLayouts,
       activeSearchBlockId,
       assistantActions,
       assistantActionsMessageId,
@@ -1541,6 +1589,65 @@ export const SessionChatStreamView = forwardRef<
       skipNextViewportResizeAutoScrollRef,
       suppressAutoScrollRef: autoScrollSuppressedRef,
     });
+    const selectableRows = useMemo(
+      () =>
+        virtualRows.map((row) => ({
+          key: row.key,
+          turnId:
+            row.type === 'placeholder'
+              ? row.item.row.id
+              : row.item.type === 'message'
+                ? row.item.message.id
+                : row.key,
+          turnIndex: row.messageIndex,
+          ready: row.type !== 'placeholder',
+        })),
+      [virtualRows]
+    );
+    const nativeTextSelection = useConversationTextSelection({
+      sessionId,
+      view: conversationView,
+      viewport: scrollViewportElement,
+      virtualizer: vlistRef,
+      rows: selectableRows,
+      leadingRowCount,
+      activeRef: nativeTextSelectionActiveRef,
+      captureTurn: (id) => {
+        const item = items.find(
+          (candidate) => candidate.type === 'message' && candidate.message.id === id
+        );
+        if (item?.type !== 'message') return undefined;
+        const layout = {
+          finished: item.message.finished === true,
+          expandState: getExpandState(id),
+          activeSearchBlockId,
+        };
+        selectionLayoutsRef.current = new Map(selectionLayoutsRef.current).set(id, layout);
+        return layout;
+      },
+      onChange: () => {
+        if (nativeTextSelectionActiveRef.current) pendingOutlineJumpRef.current = null;
+        setSelectionVersion((version) => version + 1);
+      },
+      onRelease: () => {
+        selectionLayoutsRef.current = new Map();
+      },
+      onCopyUnavailable: () =>
+        toast.error(
+          t(
+            'sessions.selectionCopyUnavailable',
+            'The selected text is still loading or could not be loaded. Wait and try copying again.'
+          )
+        ),
+    });
+    const nativeSelectionRows = useMemo(
+      () => ({
+        rows: selectableRows,
+        leading: leadingRowCount,
+        held: new Set(nativeTextSelection.holds.keys()),
+      }),
+      [selectableRows, leadingRowCount, nativeTextSelection.holds]
+    );
 
     // ---- Outline rail ------------------------------------------------------
     // The left table of contents. Everything here is derived from `items` and
@@ -1928,102 +2035,105 @@ export const SessionChatStreamView = forwardRef<
                 paddingTop: 'calc(var(--conversation-top-inset, 0px) + 1.5rem)',
               }}
             >
-              <Virtualizer
-                ref={vlistRef}
-                item={ConversationVirtualRow}
-                // Row heights measured the last time this session was open, so
-                // the first layout is the real one instead of an estimate that
-                // has to be corrected before the conversation can be shown.
-                cache={initialVirtualizerCache}
-                shift={false}
-                onScroll={handleStreamScroll}
-                onScrollEnd={handleStreamScrollEnd}
-                // Pre-render extra items outside the viewport to reduce blank areas
-                // during fast scrolling (especially on mobile). This is 4x Virtua's
-                // default (200px) — generous, but deliberately not the previous 2000px:
-                // an oversized buffer keeps a huge set of still-resizing rows mounted,
-                // which widens the window where Virtua's offsets are mid-recompute and
-                // rows can transiently overlap. 800 keeps ~2 viewports of headroom.
-                bufferSize={800}
-              >
-                {leadingContent == null ? null : (
-                  <div data-conversation-leading-content="">{leadingContent}</div>
-                )}
-                {virtualRows.map((row, rowIndex) => {
-                  if (row.type === 'placeholder') {
-                    return <TurnPlaceholderRow key={row.key} row={row.item.row} />;
-                  }
-                  if (row.type === 'standard') {
-                    // Standard rows are only ever system or user messages
-                    // (assistant turns are flattened into `assistant` rows below),
-                    // so they carry no per-turn file diffs or last-assistant
-                    // quick actions.
+              <NativeSelectionRowsContext.Provider value={nativeSelectionRows}>
+                <Virtualizer
+                  ref={vlistRef}
+                  item={ConversationVirtualRow}
+                  // Row heights measured the last time this session was open, so
+                  // the first layout is the real one instead of an estimate that
+                  // has to be corrected before the conversation can be shown.
+                  cache={initialVirtualizerCache}
+                  shift={false}
+                  onScroll={handleStreamScroll}
+                  onScrollEnd={handleStreamScrollEnd}
+                  // Pre-render extra items outside the viewport to reduce blank areas
+                  // during fast scrolling (especially on mobile). This is 4x Virtua's
+                  // default (200px) — generous, but deliberately not the previous 2000px:
+                  // an oversized buffer keeps a huge set of still-resizing rows mounted,
+                  // which widens the window where Virtua's offsets are mid-recompute and
+                  // rows can transiently overlap. 800 keeps ~2 viewports of headroom.
+                  bufferSize={CONVERSATION_OVERSCAN}
+                  keepMounted={nativeTextSelection.keepMounted}
+                >
+                  {leadingContent == null ? null : (
+                    <div data-conversation-leading-content="">{leadingContent}</div>
+                  )}
+                  {virtualRows.map((row, rowIndex) => {
+                    if (row.type === 'placeholder') {
+                      return <TurnPlaceholderRow key={row.key} row={row.item.row} />;
+                    }
+                    if (row.type === 'standard') {
+                      // Standard rows are only ever system or user messages
+                      // (assistant turns are flattened into `assistant` rows below),
+                      // so they carry no per-turn file diffs or last-assistant
+                      // quick actions.
+                      return (
+                        <MessageSelectionRow
+                          key={row.key}
+                          id={row.item.type === 'message' ? row.item.message.id : undefined}
+                          first
+                        >
+                          <ChatItem
+                            item={row.item}
+                            renderMessageRow={renderMessageRow}
+                            noMessagesLabel={noMessagesLabel}
+                            emptyState={emptyState}
+                          />
+                        </MessageSelectionRow>
+                      );
+                    }
+
+                    const canForkAssistantMessage =
+                      row.item.message.finished === true &&
+                      (row.item.message.id === lastCompletedAssistantMessageId ||
+                        Boolean(row.item.message.acpTurnId));
+                    const fileDiffOverride =
+                      messageFileDiffEntriesByTurn === undefined
+                        ? undefined
+                        : (messageFileDiffEntriesByTurn[row.item.message.id] ??
+                          EMPTY_EDITED_FILE_ENTRIES);
                     return (
                       <MessageSelectionRow
                         key={row.key}
-                        id={row.item.type === 'message' ? row.item.message.id : undefined}
-                        first
+                        id={row.item.message.id}
+                        first={virtualRows[rowIndex - 1]?.messageIndex !== row.messageIndex}
                       >
-                        <ChatItem
-                          item={row.item}
-                          renderMessageRow={renderMessageRow}
-                          noMessagesLabel={noMessagesLabel}
-                          emptyState={emptyState}
+                        <AssistantChatItem
+                          row={row}
+                          fileDiffOverride={fileDiffOverride}
+                          assistantActions={resolveAssistantMessageActions(
+                            row.item.message.id,
+                            assistantActionsMessageId,
+                            assistantActions
+                          )}
+                          onFork={canForkAssistantMessage ? onForkLastAssistant : undefined}
+                          forkWorktreeAvailability={forkWorktreeAvailability}
+                          onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
+                          isForking={forkingAssistantMessageId === row.item.message.id}
+                          onFileDiffClick={onFileDiffClick}
+                          onFilePathClick={onFilePathClick}
+                          onGroupExpandedChange={handleAssistantGroupExpandedChange}
+                          onWorkedGroupExpandedChange={handleAssistantWorkedGroupExpandedChange}
+                          isTurnHovered={hoveredAssistantMessageId === row.item.message.id}
+                          onTurnHoverChange={handleAssistantTurnHoverChange}
+                          conversationFontSize={conversationFontSize}
+                          shimmerGroupHeader={row.key === liveGroupHeaderRowKey}
+                          liveStatus={row.key === liveFooterRowKey ? liveFooterStatus : null}
                         />
                       </MessageSelectionRow>
                     );
-                  }
-
-                  const canForkAssistantMessage =
-                    row.item.message.finished === true &&
-                    (row.item.message.id === lastCompletedAssistantMessageId ||
-                      Boolean(row.item.message.acpTurnId));
-                  const fileDiffOverride =
-                    messageFileDiffEntriesByTurn === undefined
-                      ? undefined
-                      : (messageFileDiffEntriesByTurn[row.item.message.id] ??
-                        EMPTY_EDITED_FILE_ENTRIES);
-                  return (
-                    <MessageSelectionRow
-                      key={row.key}
-                      id={row.item.message.id}
-                      first={virtualRows[rowIndex - 1]?.messageIndex !== row.messageIndex}
-                    >
-                      <AssistantChatItem
-                        row={row}
-                        fileDiffOverride={fileDiffOverride}
-                        assistantActions={resolveAssistantMessageActions(
-                          row.item.message.id,
-                          assistantActionsMessageId,
-                          assistantActions
-                        )}
-                        onFork={canForkAssistantMessage ? onForkLastAssistant : undefined}
-                        forkWorktreeAvailability={forkWorktreeAvailability}
-                        onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
-                        isForking={forkingAssistantMessageId === row.item.message.id}
-                        onFileDiffClick={onFileDiffClick}
-                        onFilePathClick={onFilePathClick}
-                        onGroupExpandedChange={handleAssistantGroupExpandedChange}
-                        onWorkedGroupExpandedChange={handleAssistantWorkedGroupExpandedChange}
-                        isTurnHovered={hoveredAssistantMessageId === row.item.message.id}
-                        onTurnHoverChange={handleAssistantTurnHoverChange}
-                        conversationFontSize={conversationFontSize}
-                        shimmerGroupHeader={row.key === liveGroupHeaderRowKey}
-                        liveStatus={row.key === liveFooterRowKey ? liveFooterStatus : null}
-                      />
-                    </MessageSelectionRow>
-                  );
-                })}
-                {shouldShowAgentActivityRow && agentActivityLabel && (
-                  <AgentActivityRow
-                    label={agentActivityLabel}
-                    tone={agentActivityTone}
-                    shimmer={agentActivityShimmer}
-                    message={liveAgentActivityMessage}
-                    conversationFontSize={conversationFontSize}
-                  />
-                )}
-              </Virtualizer>
+                  })}
+                  {shouldShowAgentActivityRow && agentActivityLabel && (
+                    <AgentActivityRow
+                      label={agentActivityLabel}
+                      tone={agentActivityTone}
+                      shimmer={agentActivityShimmer}
+                      message={liveAgentActivityMessage}
+                      conversationFontSize={conversationFontSize}
+                    />
+                  )}
+                </Virtualizer>
+              </NativeSelectionRowsContext.Provider>
               <MessageSelectionOverlay />
             </div>
             {/* Top fade into the bg-background canvas above (desktop only),
@@ -4737,6 +4847,7 @@ const UserChatBubble = ({
   conversationFontSize: ConversationFontSize;
   variant?: 'full' | 'attachments';
 }) => {
+  message = { ...message, items: useSelectionStableValue(message.items) };
   if (!message.items.length) {
     return variant === 'attachments' ? null : (
       <span className="text-xs text-muted-foreground">No Message</span>

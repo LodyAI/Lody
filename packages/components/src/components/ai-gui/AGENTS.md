@@ -1,20 +1,18 @@
-# components/ai-gui - Maintainer Guide
+# components/ai-gui
 
-`CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
-File-by-file ownership and coverage pointers: [README.md](README.md).
+Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md).
 
 ## Stream And Search
 
 - Search indexes prose only: user/assistant text, thinking, and proposed-plan
-  markdown. Never index tool titles/JSON/output, terminal data, diffs, plan
-  checklists, goals, or worktree script output. Search still reaches prose inside
-  folded work and activity, and matches force their owning groups open. Do not
-  restore `searchBlockId` wiring to tool, terminal, or diff renderers.
-- `SessionChatStreamView` flattens turns into one main Virtua list. Collapsed
-  activity is one row; expanded details are sibling rows, never a nested output
-  scroller or fixed-height process panel. Keep streaming keys stable; map
-  history indexes to virtual rows.
-- Keep Virtua `shift={false}`.
+  markdown, including folded prose; matches open their groups. Never index tools
+  (titles/JSON/output), terminals, diffs, plan checklists, goals, or worktree script
+  output. Never wire `searchBlockId` to tool, terminal, or diff renderers.
+- `SessionChatStreamView` uses one Virtua list with stable keys and `shift={false}`.
+  Map history indexes to rows. Collapsed activity is one row; expanded details
+  are siblings, never nested scrollers or fixed-height process panels.
+- Native text selection retains its complete row corridor and history leases;
+  hold prose/folding, keep actions live, and release on clear. See [README.md](README.md#native-text-selection).
 - `buildChatStreamItems()` must drop empty assistant entries and de-duplicate
   history ids.
 - `leadingContent` is a real first row: include it in sticky counts and scroll
@@ -32,7 +30,7 @@ File-by-file ownership and coverage pointers: [README.md](README.md).
 - Finished turns keep the answer/result tail visible and fold earlier work;
   streaming turns stay expanded.
 - The final answer is the final contiguous run of text before trailing
-  never-collapsed items, not necessarily the last item: walk backward through
+  never-collapsed items, not always the last item: walk backward through
   adjacent text blocks until a non-text boundary.
 - A turn may hold several `AssistantTurnRenderSegment`s; a plan approval inside a
   running turn cuts a segment. Match ACP kind `switch_mode`, never a title
