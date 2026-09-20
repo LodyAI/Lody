@@ -158,6 +158,9 @@ describe('SidebarUpdatedSessionList project context', () => {
     const githubProject = github?.querySelector('[data-sidebar-updated-project="github"]');
     expect(githubProject).not.toBeNull();
     expect(githubProject?.textContent).toContain('loro-dev/lody');
+    expect(githubProject?.querySelector('img')?.getAttribute('src') ?? '').toContain(
+      'avatars.githubusercontent.com/loro-dev'
+    );
 
     const chatProject = chat?.querySelector('[data-sidebar-updated-project="chat"]');
     expect(chatProject).not.toBeNull();

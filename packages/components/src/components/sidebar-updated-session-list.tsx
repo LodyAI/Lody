@@ -660,20 +660,28 @@ SidebarUpdatedSessionList.displayName = 'SidebarUpdatedSessionList';
 function UpdatedItemProjectLine({ item }: { item: SidebarUpdatedItem }) {
   const label = resolveUpdatedItemProjectLabel(item);
   if (!label) return null;
-  const mark =
-    item.kind === 'github' ? (
-      <GitHubOwnerIcon repoFullName={item.repoFullName ?? label} className="h-3 w-3" />
-    ) : item.kind === 'local' ? (
-      <Folder className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
-    ) : (
-      <MessageCircle className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
-    );
+  const repoFullName = item.repoFullName ?? (item.kind === 'github' ? label : null);
+  const isGithub = item.kind === 'github';
+  const mark = isGithub ? (
+    <GitHubOwnerIcon repoFullName={repoFullName} className="h-3.5 w-3.5" />
+  ) : item.kind === 'local' ? (
+    <Folder className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
+  ) : (
+    <MessageCircle className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
+  );
   return (
     <div
       data-sidebar-updated-project={item.kind}
       className="flex min-w-0 items-center gap-1 text-[11px] leading-tight text-sidebar-foreground-muted"
     >
-      <span className="flex h-3 w-3 shrink-0 items-center justify-center opacity-80">{mark}</span>
+      <span
+        className={cn(
+          'flex shrink-0 items-center justify-center',
+          isGithub ? 'h-3.5 w-3.5 overflow-hidden rounded-sm' : 'h-3 w-3 opacity-80'
+        )}
+      >
+        {mark}
+      </span>
       <span className="min-w-0 truncate">{label}</span>
     </div>
   );
