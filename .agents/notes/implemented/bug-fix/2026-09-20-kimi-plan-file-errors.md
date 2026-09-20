@@ -45,3 +45,5 @@ Kimi is a separately built managed runtime. Source and gitlink changes alone do
 not update installed runtimes: build and publish the fixed checksummed artifact
 before advancing the runtime manifest. No production artifact is published by
 this source fix. Whole-workspace verification limitations are recorded in the PR.
+
+Lody PR: [#846](https://github.com/LodyAI/Lody/pull/846).

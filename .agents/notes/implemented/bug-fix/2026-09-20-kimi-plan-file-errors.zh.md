@@ -37,3 +37,5 @@ Kimi 测试覆盖使用和不使用 ACP 文件访问时重复开启、关闭 Pla
 Kimi 是单独构建的托管运行包。只更新源码和 gitlink 不会升级已安装的运行时；
 推进运行包 manifest 前，需要构建并发布包含修复的校验和制品。本次源码修复
 不发布生产制品。全仓验证的限制在 PR 中记录。
+
+Lody PR：[#846](https://github.com/LodyAI/Lody/pull/846)。
