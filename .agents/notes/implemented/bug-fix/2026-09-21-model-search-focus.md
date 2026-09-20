@@ -1,4 +1,4 @@
-# Preserve model search focus while opening its submenu
+# Preserve composer model and project search focus
 
 Status: implemented
 Translation: current
@@ -7,13 +7,13 @@ Translation: current
 
 ## Abstract
 
-The desktop model search initially received focus, but subsequent mouse movement
-or a click over its parent Model row returned focus to that row. Typing then
-missed the search field. The shared submenu trigger now directs precise-pointer
-interaction to its own open search field instead of allowing Radix to refocus
-the trigger. Browser regression coverage exercises opening, continued pointer
-movement, reopening, filtering, and keyboard navigation; touch keeps explicit
-field activation.
+Desktop model and project menus could lose search focus to Radix menu items,
+so typing missed the search field. The model submenu trigger now preserves its
+own search focus during pointer interaction, and the project picker uses the
+shared menu search input to claim typing after a row takes focus. Search
+initialization belongs to the mounted input rather than a pre-mount open callback.
+Browser regressions cover opening, pointer movement, reopening, filtering, and
+keyboard navigation; the shared field leaves touch activation explicit.
 
 ## Cause and decision
 
@@ -31,13 +31,27 @@ owns the implementation overview; the earlier
 [submenu geometry decision](2026-09-15-menu-submenu-gap-and-viewport-margin.md)
 remains independent.
 
+The project picker used a plain `Input` and scheduled focus from `onOpenChange`,
+before the field was mounted. Its key handler only protected an already-focused
+input: hovering a project row moved focus away, and subsequent typing drove
+Radix typeahead. Reusing `DropdownMenuSearchInput` gives the picker mount-owned
+autofocus, typing recovery from rows, and arrow navigation without another focus
+listener. Project matching, recency, selection, and the render cap remain owned
+by `UnifiedProjectSelectorView`.
+
 ## Evidence
 
 The existing Playwright
 [composer focus suite](../../../../packages/components/tests/e2e/composer-submission-focus.spec.ts)
-uses the real `ComposerRunConfigMenu/ModelSearch` story. Before the fix, continued
+uses the real `ComposerRunConfigMenu/ModelSearch` and
+`UnifiedProjectSelector/SelectedPrivate` stories. Before the fix, continued
 movement over Model failed the focus assertion in both mouse cases while keyboard
 opening passed. After the fix, all three cases passed, including reopening and
 typing `54m` without clicking the field. The suite also covers ArrowDown into the
-filtered result and touch activation. These are renderer browser tests, not a
+filtered result and touch activation. Both project cases failed before the fix
+when typing after hovering a row; all six browser cases now pass. Project tests
+also verify that reopening resets the query and immediate typing filters the list.
+These are renderer browser tests, not a
 full Electron/CLI journey; no model service or captured conversation is used.
+
+PR: [#864](https://github.com/LodyAI/Lody/pull/864).

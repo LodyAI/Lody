@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useDeferredValue, useMemo, useState, type ReactNode } from 'react';
 import type { LocalProjectId, MachineId } from '@lody/shared';
 import {
   ArrowUpRight,
@@ -8,7 +8,6 @@ import {
   FolderPlus,
   Github,
   LockKeyhole,
-  Search,
   X,
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
@@ -32,10 +31,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSearchInput,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/ui/dropdown-menu';
-import { Input } from '@/ui/input';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 
 function GitHubOwnerAvatarIcon({ repoFullName }: { repoFullName: string }) {
@@ -400,7 +399,6 @@ export function UnifiedProjectSelectorView({
   const [pendingProjectShare, setPendingProjectShare] = useState<UnifiedProjectOption | null>(null);
   const [isSharingProject, setIsSharingProject] = useState(false);
   const deferredQuery = useDeferredValue(query);
-  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const options = useMemo<UnifiedProjectOption[]>(() => {
     const combined: UnifiedProjectOption[] = [];
@@ -496,11 +494,7 @@ export function UnifiedProjectSelectorView({
         open={open}
         onOpenChange={(nextOpen) => {
           setOpen(nextOpen);
-          if (nextOpen) {
-            requestAnimationFrame(() => searchInputRef.current?.focus());
-          } else {
-            setQuery('');
-          }
+          if (!nextOpen) setQuery('');
         }}
       >
         <DropdownMenuTrigger asChild>
@@ -546,19 +540,12 @@ export function UnifiedProjectSelectorView({
           className={cn('w-[min(20rem,calc(100vw-2rem))]', contentClassName)}
           style={contentStyle}
         >
-          <div className="relative mb-1">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              ref={searchInputRef}
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key !== 'Escape') event.stopPropagation();
-              }}
-              placeholder={t('chat.projectPicker.searchPlaceholder', 'Search projects')}
-              className="h-8 border-border/50 bg-background/45 pl-8 text-[0.9em] shadow-none"
-            />
-          </div>
+          <DropdownMenuSearchInput
+            value={query}
+            onValueChange={setQuery}
+            placeholder={t('chat.projectPicker.searchPlaceholder', 'Search projects')}
+            className="mb-1 h-8 rounded-md border border-border/50 bg-input-field py-0"
+          />
           <div className="scrollbar-pro max-h-[min(50vh,13rem)] overflow-y-auto">
             {filteredOptions.length > 0 ? (
               filteredOptions.map((option) => {

@@ -1,5 +1,32 @@
 import { expect, test } from '@playwright/test';
 
+for (const openWith of ['click', 'keyboard'] as const) {
+  test(`project search receives focus on ${openWith} and on reopening`, async ({ page }) => {
+    await page.goto('/iframe.html?id=chat-unifiedprojectselector--selected-private&viewMode=story');
+    const trigger = page.getByRole('button', { name: 'lody', exact: true });
+    const search = page.getByPlaceholder('Search projects', { exact: true });
+    for (let opening = 0; opening < 2; opening += 1) {
+      if (openWith === 'keyboard') {
+        await trigger.focus();
+        await page.keyboard.press('Enter');
+      } else {
+        await trigger.click();
+      }
+      await expect(search).toBeFocused();
+      await expect(search).toHaveValue('');
+      await page.getByRole('menuitem').first().hover();
+      await page.keyboard.type('loro-inspector');
+      await expect(search).toHaveValue('loro-inspector');
+      await expect(
+        page.getByRole('menuitem', { name: 'loro-inspector', exact: true })
+      ).toBeVisible();
+      await expect(page.getByRole('menuitem')).toHaveCount(4);
+      await page.keyboard.press('Escape');
+      await expect(search).toBeHidden();
+    }
+  });
+}
+
 for (const openWith of ['hover', 'click', 'keyboard'] as const) {
   test(`model search receives focus on ${openWith} and on reopening`, async ({ page }) => {
     await page.goto('/iframe.html?id=sessions-composerrunconfigmenu--model-search&viewMode=story');
