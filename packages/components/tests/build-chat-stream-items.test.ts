@@ -283,4 +283,64 @@ describe('live create progress in the stream', () => {
     expect(next.items[0]).toMatchObject({ message: { items: [running] } });
     expect(next.lastAssistantMessageId).toBeNull();
   });
+
+  describe('agent notices fold onto the turn that emitted them', () => {
+    const notice = (id: string, name: string, message: string): SessionHistory =>
+      ({
+        id,
+        role: 'system',
+        timestamp: '2026-06-18T00:00:00.000Z',
+        fileDiff: [],
+        items: [{ type: 'system_notice', name, meta: { message } }],
+      }) as unknown as SessionHistory;
+
+    const itemTypes = (items: ReturnType<typeof buildChatStreamItems>['items'], id: string) =>
+      items
+        .flatMap((item) => (item.type === 'message' && item.message.id === id ? [item.message] : []))
+        .flatMap((message) => message.items.map((entryItem) => entryItem.type));
+
+    it('merges a warning into the preceding assistant turn instead of trailing it', () => {
+      const { items } = buildChatStreamItems(
+        [
+          entry({ id: 'user-1', role: 'user', items: [text('go')] }),
+          entry({ id: 'assistant-1', role: 'assistant', items: [text('answer')] }),
+          notice('warn-1', 'agent_warning', 'fell back to the default model'),
+        ],
+        sessionId
+      );
+
+      // No standalone row: on its own the notice lands after the turn footer.
+      expect(renderedIds(items)).toEqual(['user-1', 'assistant-1']);
+      expect(itemTypes(items, 'assistant-1')).toEqual(['text', 'system_notice']);
+    });
+
+    it('keeps a notice in place when the previous turn is not an assistant turn', () => {
+      const { items } = buildChatStreamItems(
+        [
+          entry({ id: 'user-1', role: 'user', items: [text('go')] }),
+          notice('fail-1', 'chat_failed', 'the agent exited'),
+        ],
+        sessionId
+      );
+
+      expect(renderedIds(items)).toEqual(['user-1', 'fail-1']);
+    });
+
+    it('does not lose a later notice to a cached copy of its host turn', () => {
+      const history = [
+        entry({ id: 'user-1', role: 'user', items: [text('go')] }),
+        entry({ id: 'assistant-1', role: 'assistant', items: [text('answer')] }),
+      ];
+      const first = buildChatStreamItems(history, sessionId);
+      // The host entry is untouched by the notice arriving, so a cache keyed on
+      // it alone would happily serve the pre-merge copy forever.
+      const { items } = buildChatStreamItems(
+        [...history, notice('warn-1', 'agent_warning', 'fell back')],
+        sessionId,
+        first.cache
+      );
+
+      expect(itemTypes(items, 'assistant-1')).toEqual(['text', 'system_notice']);
+    });
+  });
 });

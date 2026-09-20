@@ -194,7 +194,7 @@ export function SessionRowLeadingSlot({
             revealClassName
           )}
         >
-          <MoreHorizontal className="relative -top-px h-3.5 w-3.5" />
+          <MoreHorizontal className="h-3.5 w-3.5" />
         </button>
       ) : null}
     </div>

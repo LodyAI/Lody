@@ -1191,7 +1191,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                   // `asChild`, so their `data-state` values collide here.
                   data-menu-open={projectMenuOpen ? '' : undefined}
                   className={cn(
-                    'group relative w-full rounded-md pl-2 pr-3 py-1 text-left',
+                    'group relative w-full rounded-md px-2 py-1 text-left',
                     'border border-transparent bg-transparent',
                     !showSelectedState &&
                       !isMobile &&
@@ -1239,7 +1239,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                     <ChevronDown
                       className={cn(
                         'absolute left-0 top-1/2 h-4 w-4 -translate-y-1/2 text-current',
-                        'transition-[opacity,translate,scale] duration-100',
+                        'transition-[opacity,translate,scale,rotate] duration-100',
                         isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
                         collapsed ? '-rotate-90' : 'rotate-0'
                       )}

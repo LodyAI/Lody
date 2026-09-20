@@ -50,7 +50,7 @@ const phaseToStatus = (
 ): SessionStatus => {
   switch (phase ?? 'thinking') {
     case 'thinking':
-      return SessionStatusFactory.running(undefined, detail);
+      return SessionStatusFactory.running();
     case 'initializing':
       return SessionStatusFactory.initializing(undefined, detail);
     case 'git-clone':
@@ -142,6 +142,16 @@ export class SessionActivePresenceController {
     this.tick(sessionId, state.epoch);
   }
 
+  /**
+   * Publishes immediately on any CHANGED (phase, detail) pair.
+   *
+   * The equality check below is de-duplication, NOT a rate limit: a `detail` that
+   * differs on every call — a percentage, a counter, a streaming label — passes it
+   * every time and publishes at the caller's rate. Presence is a shared serial queue
+   * that the machine heartbeat also uses, so a caller driven by a stream must throttle
+   * to a fixed ceiling BEFORE calling here.
+   * Bounds: `specs/loro-ephemeral-presence-channel.md`.
+   */
   setPhase(sessionId: SessionId, phase: SessionActivePresencePhase | null, detail?: string): void {
     const state = this.active.get(sessionId);
     if (!state) return;

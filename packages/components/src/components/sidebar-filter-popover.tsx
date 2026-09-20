@@ -92,9 +92,7 @@ const FilterRow = forwardRef<HTMLButtonElement, RowProps>(function FilterRow(
 });
 
 function SectionHeading({ children }: { children: ReactNode }) {
-  return (
-    <div className={cn(menuGroupLabelClassName, 'normal-case tracking-normal')}>{children}</div>
-  );
+  return <div className={menuGroupLabelClassName}>{children}</div>;
 }
 
 export function SidebarFilterPopover({

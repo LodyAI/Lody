@@ -6,8 +6,8 @@ over 200 without its prior Issue adds a size-specific finding. Same-repository
 branches do not create an Issue solely for contribution intake.
 
 The Issue is for tracking context; maintainers review the contribution through
-the normal PR process. Context handoff is public and cannot use N/A or redacted
-answers; an invalid body is closed after seven days and must then be resubmitted.
+the normal PR process. Context handoff is public and cannot use placeholders or entirely redacted
+evidence; an invalid body is closed after seven days and must then be resubmitted.
 -->
 
 ## Related issue
@@ -59,8 +59,8 @@ Any supporting artifact must be reachable by reviewers; a local HTML file is not
 
 <!--
 Required for every fork-based pull request. Give maintainers and their reviewing
-agents the minimum public context needed to assess intent and risk. N/A and
-redacted answers are not accepted. Never paste private transcripts, secrets, or
+agents the minimum public context needed to assess intent and risk. Placeholders and
+entirely redacted evidence are not accepted. Never paste private transcripts, secrets, or
 tool logs; link a published shared conversation instead of copying its text.
 -->
 
@@ -91,14 +91,27 @@ unrelated transcript turns, tool logs, or attachment bytes.
 ### Shared conversation
 
 <!--
-Optional. If the authoring conversation was published as a shared Lody
-conversation, paste the public link here so reviewers can inspect the complete
-authoring context the summary omits. Otherwise delete this section entirely.
+Required for every fork-based PR. Keep this section and choose exactly one status:
 
-An Agent asks its user to publish the conversation before opening the pull
-request and pastes the returned public link here. Publication needs the user's
-confirmation in the app; the Agent requests it but never approves it and never
-invents a URL.
+Status: shared
+Link: <public HTTP(S) conversation URL from Lody or another authoring tool>
+
+Status: user-declined
+Reason: <why no link is provided>
+
+Status: unavailable
+Reason: <which authoring tool cannot publish the conversation and why>
+
+Status: not-used
+Reason: <confirm that no Agent was used to author this contribution>
+
+Before opening the PR, an Agent asks its user to publish the authoring conversation.
+Only the user confirms publication; never invent a URL, refusal, or tool limitation.
+A pending or unanswered request is not a refusal; wait for the user's response.
+If the user declines, also append `#### Sharing refusal (verbatim)` under
+`### Original user prompt`, with their exact reply in a separate fenced text block.
+Keep the triggering prompt unchanged. Redact only private spans with explicit
+markers; a placeholder or entirely redacted refusal is not evidence.
 -->
 
 <!-- context-handoff:end -->

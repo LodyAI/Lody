@@ -2152,26 +2152,47 @@ const resolveInvokingTurnContext = async (session: SessionMeta): Promise<Invokin
   };
 };
 
-const makeMachineOnlineLookupForMcp = (
+/**
+ * Machine liveness is THREE-state, and the states are not interchangeable.
+ *
+ * `getOnlineMachineIds()` returns null when the presence room could not be joined,
+ * which means "status unknown", never "offline" (`lib/loro/AGENTS.md`). Collapsing
+ * null to offline made every guard below refuse a healthy Machine with a false
+ * reason whenever presence was merely unavailable — a cold daemon start or a
+ * reconnect backoff is enough. Only a positive absence from a joined presence room
+ * may block work; `commands/agent-config.ts` takes the same position.
+ */
+type McpMachineLiveness = 'online' | 'offline' | 'unknown';
+
+const makeMachineLivenessLookupForMcp = (
   manager: LoroDocumentManager,
   ctx: ReturnType<typeof getSessionContext>
-): ((machineId: MachineId) => Promise<boolean>) => {
+): ((machineId: MachineId) => Promise<McpMachineLiveness>) => {
   let onlineMachineIds: ReturnType<LoroDocumentManager['getOnlineMachineIds']> | undefined;
   return async (machineId) => {
     if (machineId === (ctx.machineId as MachineId)) {
-      return true;
+      return 'online';
     }
     onlineMachineIds ??= manager.getOnlineMachineIds();
-    return (await onlineMachineIds)?.has(machineId) === true;
+    const resolved = await onlineMachineIds;
+    if (resolved === null) {
+      return 'unknown';
+    }
+    return resolved.has(machineId) ? 'online' : 'offline';
   };
 };
 
-const assertMachineOnlineForSingleCommand = async (
+/**
+ * Blocks only what is KNOWN to be offline. An unknown Machine proceeds and fails
+ * later against its own deadline if it really is down, which is a truthful slow
+ * failure instead of a fast wrong one.
+ */
+const assertMachineNotOfflineForSingleCommand = async (
   manager: LoroDocumentManager,
   machineId: MachineId,
   ctx: ReturnType<typeof getSessionContext>
 ): Promise<void> => {
-  if (!(await makeMachineOnlineLookupForMcp(manager, ctx)(machineId))) {
+  if ((await makeMachineLivenessLookupForMcp(manager, ctx)(machineId)) === 'offline') {
     throw new LodyOperationStoreError(
       'MACHINE_OFFLINE',
       `Target Machine is offline: ${machineId}`,
@@ -2377,13 +2398,21 @@ const buildSessionCreateOptions = async (
     const requesterUserId = invoking.identity.userId;
     const delegatedRequester = toDelegatedSessionRequester(invoking.identity);
     const machineEntries = await listAliveDocMetas<MachineMeta>(manager, isMachineDocRoomId);
+    // Null here is "presence unavailable", so liveness is UNKNOWN for every remote
+    // Machine; see makeMachineLivenessLookupForMcp. Treating that as offline used to
+    // drop healthy Machines out of the candidate list with no warning at all.
     const onlineMachineIds = await manager.getOnlineMachineIds();
-    const isMachineOnline = (machineId: MachineId): boolean =>
-      machineId === auth.machineId || onlineMachineIds?.has(machineId) === true;
+    const machineLivenessOf = (machineId: MachineId): McpMachineLiveness => {
+      if (machineId === auth.machineId) return 'online';
+      if (onlineMachineIds === null) return 'unknown';
+      return onlineMachineIds.has(machineId) ? 'online' : 'offline';
+    };
     const machineCandidates = selectMachineMetasForOptions(
       machineEntries.map((entry) => entry.meta),
       input.machineId
-    ).filter((machine) => input.machineId !== undefined || isMachineOnline(machine.id));
+    ).filter(
+      (machine) => input.machineId !== undefined || machineLivenessOf(machine.id) !== 'offline'
+    );
     const machines = await filterAuthorizedMachinesForOptions(
       auth,
       workspaceId,
@@ -2452,7 +2481,7 @@ const buildSessionCreateOptions = async (
           selectedMachine,
           project,
           requesterUserId,
-          isMachineOnline(selectedMachine.id)
+          machineLivenessOf(selectedMachine.id) !== 'offline'
         )
       )
     );
@@ -2477,7 +2506,10 @@ const buildSessionCreateOptions = async (
       machines: machines.map((machine) => ({
         id: machine.id,
         name: machine.name,
-        online: isMachineOnline(machine.id),
+        // `online` keeps its meaning (known online). `onlineStatus` is additive so a
+        // caller can tell "we checked and it is down" from "we could not check".
+        online: machineLivenessOf(machine.id) === 'online',
+        onlineStatus: machineLivenessOf(machine.id),
         canUse: true,
       })),
       agentConfigs: agentConfigs.map((config) =>
@@ -2534,7 +2566,7 @@ const startSessionCreateOperation = async (args: SessionCreateCommandInput): Pro
       return await withOperationStore((store) => store.snapshot(retry));
     }
     const targetMachineId = (resolved.input.machineId ?? currentSession.machineId) as MachineId;
-    await assertMachineOnlineForSingleCommand(manager, targetMachineId, ctx);
+    await assertMachineNotOfflineForSingleCommand(manager, targetMachineId, ctx);
     const createOptions = buildMcpCreateOptions(resolved.input, ctx);
     bindMcpCreateContext(createOptions, invoking.identity, currentSession);
     bindAgentRoleCreateOptions(createOptions, resolved.role);
@@ -2694,7 +2726,7 @@ const startSessionChatOperation = async (args: SessionChatToolInput): Promise<un
       );
     }
     assertDifferentMcpSession(currentSession, targetSession);
-    await assertMachineOnlineForSingleCommand(manager, targetSession.machineId, ctx);
+    await assertMachineNotOfflineForSingleCommand(manager, targetSession.machineId, ctx);
     try {
       await validateSessionChatTarget({
         auth,
@@ -2996,7 +3028,7 @@ const startSessionCreateManyOperation = async (
     if (retry) {
       return await withOperationStore((store) => store.snapshot(retry));
     }
-    const isMachineOnline = makeMachineOnlineLookupForMcp(manager, ctx);
+    const machineLiveness = makeMachineLivenessLookupForMcp(manager, ctx);
     const validatedItems = await mapWithConcurrency(
       expanded,
       5,
@@ -3054,7 +3086,7 @@ const startSessionCreateManyOperation = async (
           };
         }
         const targetMachineId = (resolved.input.machineId ?? requester.machineId) as MachineId;
-        if (!(await isMachineOnline(targetMachineId))) {
+        if ((await machineLiveness(targetMachineId)) === 'offline') {
           return {
             operationItem: batchFailure(
               'MACHINE_OFFLINE',
@@ -3248,7 +3280,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
     if (retry) {
       return await withOperationStore((store) => store.snapshot(retry));
     }
-    const isMachineOnline = makeMachineOnlineLookupForMcp(manager, ctx);
+    const machineLiveness = makeMachineLivenessLookupForMcp(manager, ctx);
     const initialItems = await mapWithConcurrency(
       expanded,
       5,
@@ -3278,7 +3310,7 @@ const startSessionChatManyOperation = async (args: SessionChatManyToolInput): Pr
             item.label
           );
         }
-        if (!(await isMachineOnline(target.machineId))) {
+        if ((await machineLiveness(target.machineId)) === 'offline') {
           return batchFailure(
             'MACHINE_OFFLINE',
             `Target Machine is offline: ${target.machineId}`,
@@ -3489,7 +3521,7 @@ export const __lodyMcpServerInternals = {
   summarizeProjectRefForMcp,
   resolveSessionExecutionSnapshot,
   readSessionExecutionSnapshot,
-  makeMachineOnlineLookupForMcp,
+  makeMachineLivenessLookupForMcp,
   startSessionChatOperation,
   startSessionChatManyOperation,
   getSessionContext,

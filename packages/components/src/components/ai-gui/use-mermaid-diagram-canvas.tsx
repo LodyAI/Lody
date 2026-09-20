@@ -38,20 +38,6 @@ const MERMAID_BLOCK_ACTIONS_SELECTOR = '[data-streamdown="mermaid-block-actions"
 /** Marks the activated diagram; the grab cursor hangs off it in `index.css`. */
 const CANVAS_STATE_ATTRIBUTE = 'data-lody-canvas';
 
-/**
- * The ring is the only sign that a click did anything, and it cannot come from
- * a stylesheet: activating focuses the diagram, and `tailwind/index.css` carries
- * a global `*:focus, *:focus-visible { outline: none !important }`. No rule of
- * ours can outrank that — specificity does not beat `important` — so the ring is
- * written inline with `important` of its own. The element carries no
- * React-managed `style`, so nothing overwrites it.
- */
-const CANVAS_ACTIVE_STYLE = [
-  ['outline', '2px solid hsl(var(--ring))'],
-  ['outline-offset', '2px'],
-  ['border-radius', 'var(--radius-md)'],
-] as const;
-
 const BLOCK_ID_ATTRIBUTE = 'data-lody-diagram-id';
 
 /** A drag this short is a click that wobbled, not a pan. */
@@ -99,6 +85,7 @@ export function useMermaidDiagramCanvas({
   // Written before the state commit so the listeners below, which are not
   // re-registered per activation, always read the current canvas.
   const canvasRef = useRef<ActiveCanvas | null>(null);
+  const transformsRef = useRef(new WeakMap<SVGSVGElement, MermaidCanvasTransform>());
   const panRef = useRef<{ pointerId: number; lastX: number; lastY: number } | null>(null);
   const pannedRef = useRef(false);
   // A `click` does not say which device produced it in every engine, so the
@@ -110,13 +97,16 @@ export function useMermaidDiagramCanvas({
     if (!canvas) {
       return;
     }
-    applyCanvasTransform(canvas.svg, MERMAID_CANVAS_IDENTITY);
-    for (const [property] of CANVAS_ACTIVE_STYLE) {
-      canvas.diagram.style.removeProperty(property);
+    transformsRef.current.set(canvas.svg, canvas.transform);
+    canvas.svg.style.removeProperty('will-change');
+    const pan = panRef.current;
+    if (pan && canvas.diagram.hasPointerCapture?.(pan.pointerId)) {
+      canvas.diagram.releasePointerCapture(pan.pointerId);
     }
     canvas.diagram.removeAttribute(CANVAS_STATE_ATTRIBUTE);
     canvasRef.current = null;
     panRef.current = null;
+    pannedRef.current = false;
     setActiveDiagram(null);
   }, []);
 
@@ -131,10 +121,11 @@ export function useMermaidDiagramCanvas({
       }
       deactivate();
       diagram.setAttribute(CANVAS_STATE_ATTRIBUTE, 'active');
-      for (const [property, value] of CANVAS_ACTIVE_STYLE) {
-        diagram.style.setProperty(property, value, 'important');
-      }
-      canvasRef.current = { diagram, svg, transform: MERMAID_CANVAS_IDENTITY };
+      canvasRef.current = {
+        diagram,
+        svg,
+        transform: transformsRef.current.get(svg) ?? MERMAID_CANVAS_IDENTITY,
+      };
       setActiveDiagram(diagram);
     },
     [deactivate]
@@ -184,14 +175,16 @@ export function useMermaidDiagramCanvas({
       if (!svg) {
         return;
       }
-      // The rendered size of the copy in the message is the diagram's natural
-      // size, so an activated canvas is reset before it is measured.
       deactivate();
       const rect = svg.getBoundingClientRect();
+      const scale = transformsRef.current.get(svg)?.scale ?? 1;
+      const clone = svg.cloneNode(true) as SVGSVGElement;
+      // The viewer starts at natural size without changing the inline view.
+      applyCanvasTransform(clone, MERMAID_CANVAS_IDENTITY);
       setSelection({
-        svg: svg.cloneNode(true) as SVGSVGElement,
-        naturalWidth: rect.width,
-        naturalHeight: rect.height,
+        svg: clone,
+        naturalWidth: rect.width / scale,
+        naturalHeight: rect.height / scale,
       });
     },
     [deactivate]
@@ -289,7 +282,11 @@ export function useMermaidDiagramCanvas({
       // The portalled button below is itself a child-list mutation, so an
       // unconditional update would re-enter this observer forever.
       setBlocks((current) => (sameBlocks(current, found) ? current : found));
-      if (canvasRef.current && !root.contains(canvasRef.current.diagram)) {
+      if (
+        canvasRef.current &&
+        (!root.contains(canvasRef.current.diagram) ||
+          canvasRef.current.diagram.querySelector('svg') !== canvasRef.current.svg)
+      ) {
         deactivate();
       }
     };

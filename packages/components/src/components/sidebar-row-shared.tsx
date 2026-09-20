@@ -526,7 +526,7 @@ const SECTION_HEADER_BUTTON_CLASS = cn(
 
 const SECTION_HEADER_CHEVRON_CLASS = cn(
   'h-3.5 w-3.5 shrink-0 text-current opacity-0',
-  'transition-[opacity,translate,scale] duration-150 ease-out'
+  'transition-[opacity,translate,scale,rotate] duration-150 ease-out'
 );
 
 /**
@@ -560,7 +560,7 @@ export function SidebarSectionHeader({
     if (canToggle) onToggleCollapsed?.();
   };
   return (
-    <div className="group flex h-7 items-center gap-1 rounded-md pr-2 has-[[role=button]:focus-visible]:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.5)]">
+    <div className="group flex h-7 items-center gap-1 rounded-md has-[[role=button]:focus-visible]:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.5)]">
       <div
         role={canToggle ? 'button' : undefined}
         tabIndex={canToggle ? 0 : -1}

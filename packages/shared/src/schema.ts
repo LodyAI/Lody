@@ -97,7 +97,7 @@ export type PermissionRequestKind = 'permission' | 'ask_user_question';
 
 export type SessionStatus =
   | { type: 'idle' }
-  | { type: 'running'; activity?: SessionRunningActivity; detail?: string }
+  | { type: 'running'; activity?: SessionRunningActivity }
   | { type: 'requestPermission' }
   | {
       type: 'initializing';
@@ -847,6 +847,8 @@ export type PendingScheduledTask = {
 };
 
 export type SessionMeta = {
+  /** Latest assistant's actual model; null means no assistant history, absent means unknown. */
+  lastModel?: { modelId?: string; name?: string } | null;
   id: SessionId;
   machineId: MachineId;
   createdAt: string;

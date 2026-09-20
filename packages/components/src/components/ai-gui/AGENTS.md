@@ -57,39 +57,16 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
 - The gutter belongs to `ConversationColumn`, not Virtua. EVERY row shares one left rail with no shell pad, INCLUDING
   the contents of an expanded region: expanding reveals rows, it never shifts
   them right; the chevron carries the hierarchy. Hover pills bleed instead
-  (footer `-mx-[7px]`, steps `-mx-1`). See `AssistantTurnAlignment.stories`.
+  (footer `-mx-[7px]`; steps bleed through their own `px-1`, never a negative
+  margin — prose and the owning group header carry that same 4px inset, so
+  `-mx-1` double-counted it). See `AssistantTurnAlignment.stories`.
 
 ## Conversation Outline
 
-- Build entries from `items`, never DOM. The rail mounts only once user rounds
-  reach `OUTLINE_MIN_USER_ROUNDS`. Reader position is the last round
-  anchored above the viewport top, resolved from Virtua offsets; it never
-  enters tick-list props. Paint one arithmetic active bar; sync `aria-current`
-  imperatively. Pointer magnification may update memoized ticks; scrolling may
-  not. `buildConversationOutline` runs at token rate, so memoize per message
-  and clean only a bounded markdown prefix.
-- The rail is a page-level absolute portal outside the shrinking message area,
-  not a Virtua row or viewport child. It stays page-centred as the composer
-  grows, pane-local in splits; never `position: fixed` or composer height. Blend
-  magnification into resting widths so the pointer's tick stays longest; derive
-  `RAIL_TRACK_WIDTH` from the peak.
-- Arrival intent belongs to `conversation-outline-arrival-intent.ts`. A directed,
-  braking approach gets one short-lived delay bypass; uncertainty waits 200ms.
-  Only waiting out that delay arms rapid browsing and its 2.5s close window;
-  predictor-opened cards never do. Removing `enableArrivalIntent` installs no
-  detector/listener. Keep inputs numeric and replayable, independent of Session,
-  lifecycle, telemetry, and platform capabilities. The Storybook Lab records only
-  explicit in-memory, rail-relative data; it never persists or uploads.
-- `scrollRowToTop` is the only row-index-to-scroll conversion: it adds
-  `leadingRowCount` and compensates viewport top padding so reads and writes
-  share one coordinate space. Outline jumps, search, and imperative scrolling
-  use it; do not call `vlistRef.scrollToIndex` elsewhere. Group toggles never
-  scroll — expansion reveals rows in place.
-- Far jumps start from estimated offsets; after scroll settles, reissue the
-  same jump until within `OUTLINE_JUMP_TOLERANCE_PX`, bounded by
-  `OUTLINE_JUMP_MAX_CORRECTIONS`. Wheel, touch, or key input cancels correction
-  immediately. Keep `OUTLINE_ANCHOR_TOLERANCE_PX` above jump tolerance.
-- Follow-output suppression is owned by `pendingOutlineJumpRef`, never a render.
+- Before changing the outline rail, its arrival intent, or any row-index-to-scroll
+  conversion, read [conversation-outline.md](conversation-outline.md). It binds
+  every caller: `scrollRowToTop` is the ONE such conversion, group toggles never
+  scroll, and follow-output suppression is owned by `pendingOutlineJumpRef`.
 
 ## Content Contracts
 
@@ -102,16 +79,16 @@ Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Ownership: [README.md](README.md)
   word-level `animated`.
 - A Mermaid diagram in a message is a still preview until a pointer click
   activates it, and an unmodified wheel is NEVER taken — activated or not.
+  Deactivation preserves pan/zoom and activation adds no outline; see the
+  [inline view contract](../../../../../specs/mermaid-inline-view.md).
   `mermaid-diagram-viewer.tsx` stays the only full-screen surface, reached from
   the block's action bar. Invariants:
   [mermaid-diagram-rendering.md](mermaid-diagram-rendering.md).
-- `chat_failed` raw errors use a modal; extraction/copy live in
-  `chat-failed-error-report.ts`.
-- Capacity retry targets only the latest notice: the first click consents, and
-  bounded countdowns send a new continuation turn rather than replaying the
-  failed input. A visible countdown keeps consent reversible without a second
-  control — reveal stop-auto-retry on hover or keyboard focus, and show it
-  directly on touch devices.
+- `chat_failed` and `agent_warning` share ONE always-open `AgentNoticeBanner`,
+  never a modal, and fold onto the emitting assistant row at RENDER time only —
+  never into the `ConversationView` that copy/share/replay read. Extraction
+  stays in `chat-failed-error-report.ts`. Invariants, tones, and capacity-retry
+  consent: [agent-notices.md](agent-notices.md).
 - Terminal persistence and legacy preview bounds live in
   `context/terminal-output-lifecycle.md`. Never send full legacy output through
   ANSI parsing, search, or React rendering.

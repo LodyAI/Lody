@@ -919,7 +919,7 @@ function ArchivedSessionGroupHeader({
         <ChevronDown
           className={cn(
             'absolute h-4 w-4 text-muted-foreground/70 opacity-0',
-            'transition-[opacity,translate,scale] duration-100',
+            'transition-[opacity,translate,scale,rotate] duration-100',
             isMultiSelectMode ? '' : 'group-hover/header:opacity-100',
             group.collapsed ? '-rotate-90' : 'rotate-0'
           )}

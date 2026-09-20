@@ -27,9 +27,15 @@ the reasoning behind those rules.
   surface. Invariants live in
   [mermaid-diagram-rendering.md](mermaid-diagram-rendering.md).
 - `message-content-guards.ts` gates which shared `MessageContent` variants render.
-- `chat-failed-error-report.ts` / `chat-failed-detail-dialog.tsx` own raw error
-  extraction and its modal; `terminal-component.tsx` / `terminal-preview.ts` own
-  terminal output.
+- `chat-failed-error-report.ts` owns raw error extraction; `view.tsx`'s
+  `AgentNoticeBanner` renders warnings and failures, and
+  `build-chat-stream-items.ts` folds them onto the emitting turn. Invariants live
+  in [agent-notices.md](agent-notices.md). `chat-failed-detail-dialog.tsx` is the
+  retired modal, no longer reached from the conversation.
+  `terminal-component.tsx` / `terminal-preview.ts` own terminal output.
+- `conversation-outline-rail.tsx`, `conversation-outline-rail-geometry.ts`, and
+  `conversation-outline-arrival-intent.ts` own the reader-position rail.
+  Invariants live in [conversation-outline.md](conversation-outline.md).
 - `session-file-card.tsx`, `session-file-preview-dialog.tsx`, and
   [session-files-rendering.md](session-files-rendering.md) own attachment and
   image-preview rendering.

@@ -19,13 +19,6 @@ describe('session-status-machine', () => {
       expect(status).toEqual({ type: 'running', activity: 'image_generation' });
     });
 
-    it('creates running status with ephemeral detail', () => {
-      expect(SessionStatusFactory.running(undefined, 'Inspecting workspace')).toEqual({
-        type: 'running',
-        detail: 'Inspecting workspace',
-      });
-    });
-
     it('creates initializing status without stage', () => {
       const status = SessionStatusFactory.initializing();
       expect(status).toEqual({ type: 'initializing', stage: undefined, detail: undefined });

@@ -105,6 +105,7 @@ import {
 } from '@/lib/conversation-outline';
 import {
   AlertCircle,
+  CircleX,
   ArrowDown,
   BookOpen,
   Brain,
@@ -234,7 +235,6 @@ import { usePermissionResponse } from '@/hooks/use-permission-response';
 import { shouldRenderSystemRowItem } from './message-content-guards';
 import { getChatFailedDiagnosticCopy } from './chat-failed-diagnostic-copy';
 import { extractReadableChatFailedMessage } from './chat-failed-error-report';
-import { ChatFailedDetailDialog } from './chat-failed-detail-dialog';
 import { DEFAULT_CONVERSATION_FONT_SIZE, type ConversationFontSize } from '@/atoms/settings';
 import {
   conversationMonoFontSizeStyle,
@@ -2128,13 +2128,15 @@ export const SessionChatStreamView = forwardRef<
                     );
                   })}
                   {shouldShowAgentActivityRow && agentActivityLabel && (
-                    <AgentActivityRow
-                      label={agentActivityLabel}
-                      tone={agentActivityTone}
-                      shimmer={agentActivityShimmer}
-                      message={liveAgentActivityMessage}
-                      conversationFontSize={conversationFontSize}
-                    />
+                    <div className="shrink-0 pt-1" data-agent-activity-row-spacer="">
+                      <AgentActivityRow
+                        label={agentActivityLabel}
+                        tone={agentActivityTone}
+                        shimmer={agentActivityShimmer}
+                        message={liveAgentActivityMessage}
+                        conversationFontSize={conversationFontSize}
+                      />
+                    </div>
                   )}
                 </Virtualizer>
               </NativeSelectionRowsContext.Provider>
@@ -2502,26 +2504,126 @@ const DashedNoticeRule = () => (
 /**
  * Renders a single system notice as a divider with tooltip
  */
+/**
+ * The one banner an agent notice takes, whatever its tone.
+ *
+ * Shaped like a fenced code block — the conversation already embeds those, so a
+ * filled, hairline-ringed block reads as part of the prose rather than as chrome
+ * dropped on top of it.
+ *
+ * Always open, and only as wide as it needs to be. A notice is a short aside,
+ * so hiding it behind a disclosure asked for a click to read two lines, and
+ * stretching it across the column gave a subordinate message the same visual
+ * weight as the answer it comments on. The width cap keeps a long payload to a
+ * readable measure instead of one very wide line.
+ *
+ * Tone is carried by the glyph and the leading sentence: amber is warning and
+ * red is failure, by convention, over a ~6% fill that stays out of the way.
+ */
+const AgentNoticeBanner = ({
+  tone,
+  label,
+  detail,
+  action,
+}: {
+  tone: 'error' | 'warning' | 'muted';
+  label: string;
+  detail?: string;
+  action?: ReactNode;
+}) => {
+  // Error is a cross, warning a triangle, muted an info circle — an octagon
+  // with an exclamation inside still read as "notice" at 14px.
+  const Icon = tone === 'error' ? CircleX : tone === 'warning' ? TriangleAlert : AlertCircle;
+
+  // `--status-warning` resolves to a brown (24.9 58.9% 41%) in this theme and
+  // reads as neither warning nor anything else at 14px, so warning uses amber —
+  // the convention; failure keeps the semantic `--destructive`.
+  const accentClass =
+    tone === 'error'
+      ? 'text-destructive'
+      : tone === 'warning'
+        ? 'text-amber-600 dark:text-amber-400'
+        : 'text-muted-foreground';
+
+  // The surface keeps the tone but at a fraction of its saturation: the colour
+  // is mixed toward the neutral border rather than merely faded, so the card
+  // still reads as "warning" or "failure" at a glance without a vivid slab
+  // competing with the answer it comments on.
+  const toneColor =
+    tone === 'error'
+      ? 'hsl(var(--destructive))'
+      : tone === 'warning'
+        ? 'rgb(245 158 11)'
+        : 'hsl(var(--muted-foreground))';
+  // A hairline: Chromium rounds a 0.5px BORDER up to 1px at any DPR, so every
+  // `border-[0.5px]` in the app actually paints 1px. `ui/AGENTS.md` settled on
+  // this same shadow ring for menus. The rule under the header reuses it, so
+  // edge and divider are one material rather than two greys.
+  const ringColor = `color-mix(in srgb, ${toneColor} 14%, hsl(var(--border)))`;
+  const fillColor = `color-mix(in srgb, ${toneColor} 3.5%, transparent)`;
+
+  return (
+    <div
+      style={{ boxShadow: `0 0 0 0.5px ${ringColor}`, background: fillColor }}
+      className="w-fit max-w-full overflow-hidden rounded-lg"
+    >
+      {/* Header band, rule, body — the same three-part split a fenced code block
+          uses, so the two read as the same kind of embedded object. The detail
+          is a sibling of the header rather than a child of the column beside the
+          glyph: hanging it off the label indented every line past the icon, which
+          cost width the card does not have. */}
+      <div className="flex items-center gap-2 px-2 py-1.5">
+        <Icon className={cn('h-3.5 w-3.5 shrink-0', accentClass)} aria-hidden="true" />
+        <span className={cn('min-w-0 text-xs font-medium leading-4', accentClass)}>{label}</span>
+      </div>
+      {detail ? (
+        <div style={{ boxShadow: `inset 0 0.5px 0 ${ringColor}` }} className="px-2 py-1.5">
+          <span className="block min-w-0 whitespace-pre-wrap break-words text-xs leading-5 text-muted-foreground">
+            {detail}
+          </span>
+        </div>
+      ) : null}
+      {action ? (
+        <div style={{ boxShadow: `inset 0 0.5px 0 ${ringColor}` }} className="px-2 py-1.5">
+          {action}
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
 const SystemNoticeView = ({
   notice,
   sessionId,
   onNavigateSession,
   capacityRetry,
+  inTurn = false,
 }: {
   notice: Extract<MessageContent, { type: 'system_notice' }>;
   sessionId: SessionId;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
   capacityRetry?: CapacityRetryControl;
+  /**
+   * The notice was folded onto the turn that emitted it, so it is already on
+   * the turn's content rail. A system ROW indents itself to sit apart from the
+   * conversation; inside a turn that same indent is just a broken left edge.
+   */
+  inTurn?: boolean;
 }) => {
   const { t } = useTranslation();
 
   switch (notice.name) {
     case 'chat_failed':
       return (
-        <ChatFailedNoticeView notice={notice} sessionId={sessionId} capacityRetry={capacityRetry} />
+        <ChatFailedNoticeView
+          notice={notice}
+          sessionId={sessionId}
+          capacityRetry={capacityRetry}
+          inTurn={inTurn}
+        />
       );
     case 'agent_warning':
-      return <AgentWarningNoticeView notice={notice} />;
+      return <AgentWarningNoticeView notice={notice} inTurn={inTurn} />;
     case 'resume_from_external_chat_history':
       break;
     case 'session_fork_origin': {
@@ -2635,10 +2737,12 @@ const ChatFailedNoticeView = ({
   notice,
   sessionId,
   capacityRetry,
+  inTurn = false,
 }: {
   notice: Extract<MessageContent, { type: 'system_notice' }>;
   sessionId: SessionId;
   capacityRetry?: CapacityRetryControl;
+  inTurn?: boolean;
 }) => {
   const { t } = useTranslation();
   const sessionMeta = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId)));
@@ -2657,7 +2761,6 @@ const ChatFailedNoticeView = ({
     }) &&
     (!usesAcpProtocolAuthentication(sessionMeta.cliType) ||
       machineSupportsAcpProtocolAuthentication(sessionMachineMeta));
-  const [detailOpen, setDetailOpen] = useState(false);
 
   const meta = notice.meta as
     | {
@@ -2783,53 +2886,11 @@ const ChatFailedNoticeView = ({
     const extracted = extractReadableChatFailedMessage(rawMessage);
     return extracted !== reasonMessage ? extracted : undefined;
   })();
-  // The raw error only lives behind the modal, so open it whenever there is a
-  // raw message at all — even one whose readable extract equals the title, the
-  // full payload (stack, upstream JSON) is still worth reading and copying.
+  // Unfold whenever there is a raw message at all: even one whose readable
+  // extract equals the title, the full payload (stack, upstream JSON) is worth
+  // reading.
   const hasDetail = Boolean(rawMessage && rawMessage.trim() !== reasonMessage);
   const isProviderOverloaded = meta?.reason === 'acp_provider_overloaded';
-
-  const noticeBody = (
-    <>
-      <AlertCircle
-        className={cn('mt-0.5 h-4 w-4 shrink-0', isProviderOverloaded && 'text-muted-foreground')}
-        aria-hidden="true"
-      />
-      <span className="flex min-w-0 flex-col items-start">
-        <span
-          className={cn(
-            'break-words text-left text-xs leading-5',
-            isProviderOverloaded ? 'font-normal text-foreground/80' : 'font-medium'
-          )}
-        >
-          {reasonMessage}
-        </span>
-        {actionMessage ? (
-          <span className="max-w-xl break-words text-left text-xs font-normal leading-5 text-muted-foreground">
-            {actionMessage}
-          </span>
-        ) : null}
-        {hasDetail ? (
-          <span
-            className={cn(
-              'mt-0.5 inline-flex items-center gap-0.5 text-xs font-normal leading-5 underline underline-offset-2',
-              isProviderOverloaded ? 'text-muted-foreground' : 'text-destructive/80'
-            )}
-          >
-            {t('sessions.systemNotices.chatFailed.viewDetails', 'View details')}
-            <ChevronRight className="h-3 w-3" aria-hidden="true" />
-          </span>
-        ) : null}
-      </span>
-    </>
-  );
-
-  const rowClassName = cn(
-    'flex w-fit max-w-full items-start gap-2 rounded-md px-2 py-1 text-left focus-visible:outline-none',
-    isProviderOverloaded
-      ? 'text-muted-foreground hover:bg-muted/40 focus-visible:bg-muted/40'
-      : 'text-destructive hover:bg-destructive/10 focus-visible:bg-destructive/10'
-  );
 
   const retryInSeconds = capacityRetry?.retryInSeconds ?? null;
   const isRetryCountdown = retryInSeconds !== null;
@@ -2881,41 +2942,29 @@ const ChatFailedNoticeView = ({
       </button>
     ) : null;
 
+  // Same banner as the agent warning; only the tone and the "more" path differ.
+  // A raw provider payload is a document, so it opens the report dialog instead
+  // of unfolding, and the clipboard gets the untouched text.
+  const noticeRow = (
+    <AgentNoticeBanner
+      tone={isProviderOverloaded ? 'muted' : 'error'}
+      label={reasonMessage}
+      // The readable extract first, then the untouched payload behind it.
+      detail={
+        [actionMessage, detailMessage, hasDetail ? rawMessage : null]
+          .filter((part, index, all) => Boolean(part) && all.indexOf(part) === index)
+          .join('\n\n') || undefined
+      }
+      action={retryAction}
+    />
+  );
+
   return (
-    <div className="space-y-2 py-1 @[640px]:pl-3">
-      {/* Tapping the notice opens a modal instead of a hover tooltip: a tooltip
-          is unreachable on touch devices, which left mobile users with no way to
-          read or copy the actual agent error. */}
-      <div role="alert" className="flex w-fit max-w-full flex-wrap items-center gap-2">
-        {hasDetail ? (
-          <button
-            type="button"
-            aria-haspopup="dialog"
-            className={cn(rowClassName, 'cursor-pointer')}
-            onClick={() => setDetailOpen(true)}
-          >
-            {noticeBody}
-          </button>
-        ) : (
-          <div className={rowClassName}>{noticeBody}</div>
-        )}
-        {retryAction}
-      </div>
-      {hasDetail ? (
-        <ChatFailedDetailDialog
-          open={detailOpen}
-          onOpenChange={setDetailOpen}
-          title={reasonMessage}
-          action={actionMessage}
-          summary={detailMessage}
-          reason={meta?.reason}
-          code={meta?.code}
-          message={rawMessage}
-          sessionId={sessionId}
-          agentType={sessionMeta?.agentType}
-          machineId={sessionMeta?.machineId}
-        />
-      ) : null}
+    <div className={cn('space-y-2 py-1', !inTurn && '@[640px]:pl-3')}>
+      {/* The full provider payload unfolds inside the banner itself, so there
+          is no dialog to open and nothing to reach only by hover — which is
+          what made the old tooltip unusable on touch in the first place. */}
+      <div role="alert">{noticeRow}</div>
       {meta?.reason === 'acp_auth_required' && sessionMeta && canAuthenticateSessionAgent ? (
         <AcpAuthenticationPanel
           machineId={sessionMeta.machineId}
@@ -2935,31 +2984,44 @@ const ChatFailedNoticeView = ({
 
 const AgentWarningNoticeView = ({
   notice,
+  inTurn = false,
 }: {
   notice: Extract<MessageContent, { type: 'system_notice' }>;
+  inTurn?: boolean;
 }) => {
-  const { t } = useTranslation();
   const meta = notice.meta as { message?: string; source?: string } | undefined;
   if (!meta?.message) {
     return null;
   }
 
+  return <AgentWarningNoticeBody message={meta.message} inTurn={inTurn} />;
+};
+
+/**
+ * One line by default, opened on demand.
+ *
+ * A warning IS genuine status, so it keeps a colour — but only on the triangle.
+ * A filled, tinted, tint-bordered box made an amber slab of a conversation whose
+ * own language is a compact transparent timeline where even execute calls are
+ * not cards. And the message is arbitrary agent text: left expanded it can run
+ * for paragraphs between two turns, which is why it collapses to its first line
+ * and the reader opens it if it matters.
+ */
+const AgentWarningNoticeBody = ({
+  message,
+  inTurn = false,
+}: {
+  message: string;
+  inTurn?: boolean;
+}) => {
+  const { t } = useTranslation();
   return (
-    <div className="py-1 @[640px]:pl-3">
-      <div
-        role="alert"
-        className="flex w-fit max-w-full items-start gap-2 rounded-md border border-status-warning/30 bg-status-warning/10 px-2.5 py-1.5"
-      >
-        <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-status-warning" aria-hidden="true" />
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <span className="text-xs font-medium leading-4 text-status-warning">
-            {t('sessions.systemNotices.agentWarning.title', 'Agent warning')}
-          </span>
-          <span className="min-w-0 whitespace-pre-wrap break-words text-xs leading-5 text-muted-foreground">
-            {meta.message}
-          </span>
-        </div>
-      </div>
+    <div className={cn('py-1', !inTurn && '@[640px]:pl-3')} role="alert">
+      <AgentNoticeBanner
+        tone="warning"
+        label={t('sessions.systemNotices.agentWarning.title', 'Agent warning')}
+        detail={message}
+      />
     </div>
   );
 };
@@ -3681,11 +3743,12 @@ const ACTIVITY_PROCESS_ICON_CLASS = 'h-3.5 w-3.5 shrink-0 text-muted-foreground'
 /* One tone for every icon in a turn — see `ACTIVITY_PROCESS_ICON_CLASS`. Only
    the optical nudge is local; no per-icon opacity. */
 const ACTIVITY_STEP_ICON_CLASS = cn(ACTIVITY_PROCESS_ICON_CLASS, 'mt-0.5');
-/* `-mx-1` + `px-1`: the hover pill still bleeds a little past the text, but the
-   icon starts ON the rail. A plain `px-1` pushed every expanded step 4px right
-   of the group header that owns it. */
+/* `px-1` alone: prose and the group header that owns these steps carry the same
+   4px inset with no negative margin, so the step keeps their shared left edge and
+   its hover pill already bleeds 4px past the text. Adding `-mx-1` double-counted
+   that inset and pulled every expanded step 4px LEFT of the rail. */
 const ACTIVITY_STEP_BUTTON_CLASS = cn(
-  '-mx-1 min-h-7 items-start rounded-md px-1 py-1 hover:bg-hover/40',
+  'min-h-7 items-start rounded-md px-1 py-1 hover:bg-hover/40',
   ACTIVITY_PROCESS_TEXT_CLASS
 );
 const ACTIVITY_STEP_TITLE_CLASS = cn('min-w-0 flex-1', ACTIVITY_PROCESS_TEXT_CLASS);
@@ -4379,18 +4442,19 @@ export const AssistantTurnFooter = ({
              interior padding would push the glyph 7px inside the answer text
              above. Pull the cluster back so the outermost glyph sits on the
              text's edge (and the inner one keeps the row gap to the timestamp).
-             Desktop uses 5px on the leading edge (2px less than the raw padding)
-             so the copy glyph aligns with the body; trailing stay 7px. Keep it
-             on the cluster, not the row: when no buttons render, the timestamp
-             must stay on the plain gutter. Mobile pulls only the trailing edge
-             — its leading glyph aligns to the duration label, not to the answer
-             text. */}
+             The leading edge is pulled back only 1px: the button's own 7px then
+             carries the glyph to +6, against the answer text at +4 (prose adds
+             `padding-inline: 4px` over the column). This is optical, not
+             geometric — earlier values chased exact alignment (5px left the
+             glyph 2px short of the text, 3px landed exactly on it) and both
+             still read left-heavy, because a 14px glyph in a 28px box carries
+             less weight than a text edge. Trailing stays 7px. Keep it on the
+             row: when no buttons render, the timestamp must stay on the plain
+             gutter. Mobile arrives at the same leading edge for its own reason
+             — its glyph aligns to the duration label, not to the answer text. */}
           {hasCopyableText || hasTurnConfigInfo || onFork || copyContext ? (
             <div
-              className={cn(
-                'flex items-center gap-0.5',
-                isMobile ? '-mr-[7px]' : '-ml-[5px] -mr-[7px]'
-              )}
+              className="flex items-center gap-0.5 -ml-px -mr-[7px]"
             >
               {showStreamingContextCopy ? (
                 <TooltipProvider>
@@ -5149,6 +5213,11 @@ const renderAssistantContent = (
       );
     case 'available_commands':
       return null;
+    // A warning/failure the stream folded back onto its emitting turn. Only the
+    // agent's own notices arrive here; `buildChatStreamItems` leaves every other
+    // kind on its own system row, where `SystemMessageItems` renders it.
+    case 'system_notice':
+      return <SystemNoticeView notice={content} sessionId={sessionId} inTurn />;
     default:
       return null;
   }

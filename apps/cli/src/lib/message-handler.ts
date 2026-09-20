@@ -3571,10 +3571,6 @@ export class MessageHandler {
       this.enqueueACPUpdate(sessionId, update);
     });
 
-    this.sessionManager.on('onCodexLiveReasoningStatus', (sessionId, label) => {
-      this.setSessionActivePresencePhase(sessionId, 'thinking', label ?? undefined);
-    });
-
     this.sessionManager.on('onWriteTextFile', (sessionId, event) => {
       this.trackCodeCollabEvidenceWrite(
         sessionId,

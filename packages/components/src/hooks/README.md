@@ -71,7 +71,13 @@ records and spacer/row geometry commits drive this check without a settle timer.
 Those row records also correct following before the spacer's deferred resize;
 programmatic corrections use the library's scroll setter to preserve user-intent
 tracking. Only mounted rows are observed, and normal window loads never hide a
-previously revealed conversation.
+previously revealed conversation. `use-conversation-stream-items.ts` keys that
+readiness and the visible hydration range by `factSource ?? view`. Accepted-history
+projection wrappers may change while the underlying conversation stays the same;
+resetting on wrapper identity would hide the chat again and discard an off-tail
+reading window. A new underlying source, even with the same session id, must pass
+initial loading again. Range acquisition still uses the current projection so its
+turn positions and content remain current.
 
 The composer one-shot ref preserves the reader's position while typing without
 changing keyboard, terminal, or window-resize follow behavior, which is why it is
