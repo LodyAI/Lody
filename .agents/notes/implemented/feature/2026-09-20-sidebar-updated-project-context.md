@@ -9,12 +9,13 @@ PR: https://github.com/LodyAI/Lody/pull/838
 ## Abstract
 
 Updated organize mode is a recency firehose across every project, so a one-line
-title no longer says where a Session lives. Top-level rows now add a second
-line with the same identity mark the Project headers already use (folder,
-GitHub owner avatar, or chat glyph) plus the project or section name. Nested
-opened Sessions stay a single title line so the opened-by tree trunk still
-meets the 30px row contract. Workspace-mode Pinned omits the line because those
-rows still sit next to their project groups.
+title no longer says where a Session lives. When Updated is selected, the
+filter menu nests a "Show project" checkbox (on by default) that adds a second
+line with the same identity mark Project headers already use (folder, GitHub
+owner avatar, or chat glyph) plus the project or section name. Nested opened
+Sessions stay a single title line so the opened-by tree trunk still meets the
+30px row contract. Workspace-mode Pinned omits the line because those rows
+still sit next to their project groups.
 
 ## Problem and decision
 
@@ -24,12 +25,15 @@ mode drops that structure on purpose. The mixed list then showed only titles,
 and a recently updated Session from another folder was indistinguishable from
 one in the current project.
 
-`SidebarUpdatedSessionList` now accepts `showProjectContext`.
-`LoroSidebar` turns it on for both the Pinned section and the Updated bucket
-when `organizeMode === 'updated'`. The second line uses `subtitle` when
-present (local folder name, GitHub `owner/repo`) and falls back to
-`sectionLabel` for chats. Nested children (`openedByTree.kind === 'child'`)
-skip the line: they inherit the opener's project visually through nesting.
+`SidebarUpdatedSessionList` accepts `showProjectContext`.
+`LoroSidebar` turns it on for the Pinned section and the Updated bucket when
+`organizeMode === 'updated'` and the nested "Show project" checkbox is on
+(`sidebarUpdatedShowProjectAtom`, default true). Selecting Updated keeps the
+filter menu open so the checkbox is reachable in the same gesture. The second
+line uses `subtitle` when present (local folder name, GitHub `owner/repo`) and
+falls back to `sectionLabel` for chats. Nested children
+(`openedByTree.kind === 'child'`) skip the line: they inherit the opener's
+project visually through nesting.
 
 The title line keeps the existing 20px content height so disclosure, connector,
 and end-slot geometry stay on that line. A first child under a two-line opener

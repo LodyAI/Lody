@@ -23,6 +23,7 @@ export type SidebarFilterLabels = {
   showHeading: string;
   organizeProject: string;
   organizeUpdated: string;
+  showUpdatedProject: string;
   showMyTasks: string;
   showAllTasks: string;
 };
@@ -33,6 +34,7 @@ const defaultLabels: SidebarFilterLabels = {
   showHeading: 'Show',
   organizeProject: 'Project',
   organizeUpdated: 'Updated',
+  showUpdatedProject: 'Show project',
   showMyTasks: 'My Tasks',
   showAllTasks: 'All Tasks',
 };
@@ -42,6 +44,9 @@ export type SidebarFilterPopoverProps = {
   scope: SidebarChatScope;
   onOrganizeChange?: (next: SidebarOrganizeMode) => void;
   onScopeChange?: (next: SidebarChatScope) => void;
+  /** Whether Updated-mode rows show project identity. Ignored unless organize is `updated`. */
+  showUpdatedProject?: boolean;
+  onShowUpdatedProjectChange?: (next: boolean) => void;
   labels?: Partial<SidebarFilterLabels>;
   className?: string;
   triggerClassName?: string;
@@ -102,6 +107,8 @@ export function SidebarFilterPopover({
   scope,
   onOrganizeChange,
   onScopeChange,
+  showUpdatedProject = true,
+  onShowUpdatedProjectChange,
   labels,
   className,
   triggerClassName,
@@ -114,7 +121,9 @@ export function SidebarFilterPopover({
 
   const handleOrganizeSelect = (next: SidebarOrganizeMode) => {
     onOrganizeChange?.(next);
-    setOpen(false);
+    // Keep the menu open on Updated so the nested "Show project" row is
+    // reachable in the same gesture. Project has no nested control.
+    if (next !== 'updated') setOpen(false);
   };
   const handleScopeSelect = (next: SidebarChatScope) => {
     onScopeChange?.(next);
@@ -168,6 +177,31 @@ export function SidebarFilterPopover({
           selected={organize === 'updated'}
           onSelect={() => handleOrganizeSelect('updated')}
         />
+        {organize === 'updated' ? (
+          <button
+            type="button"
+            role="menuitemcheckbox"
+            aria-checked={showUpdatedProject}
+            data-sidebar-filter-show-project=""
+            className={cn(
+              'flex w-full min-h-7 select-none items-center gap-2 rounded-md py-1 pr-2 text-left text-[0.9em] leading-tight',
+              // Align with the parent row's label: 8px pad + 14px icon + 8px gap.
+              'pl-[30px]',
+              'text-popover-foreground',
+              'hover:bg-foreground/[0.05] hover:text-foreground',
+              'focus-visible:bg-foreground/[0.05] focus-visible:text-foreground focus-visible:outline-hidden',
+              'dark:hover:bg-white/[0.10] dark:focus-visible:bg-white/[0.10]'
+            )}
+            onClick={() => onShowUpdatedProjectChange?.(!showUpdatedProject)}
+          >
+            <span className="min-w-0 flex-1 truncate">{merged.showUpdatedProject}</span>
+            {showUpdatedProject ? (
+              <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+            ) : (
+              <span className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            )}
+          </button>
+        ) : null}
         <div className={menuSeparatorClassName} aria-hidden="true" />
         <SectionHeading>{merged.showHeading}</SectionHeading>
         <FilterRow

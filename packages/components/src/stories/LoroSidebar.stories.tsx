@@ -291,6 +291,7 @@ function StoryLayout(args: Parameters<typeof LoroSidebar>[0]) {
     args.organizeMode ?? 'workspace'
   );
   const [chatScope, setChatScope] = useState<LoroSidebarChatScope>(args.chatScope ?? 'my');
+  const [showUpdatedProject, setShowUpdatedProject] = useState(true);
   const [updatedBucketsCollapsed, setUpdatedBucketsCollapsed] = useState<
     Partial<Record<SidebarUpdatedBucketKey, boolean>>
   >({});
@@ -390,6 +391,8 @@ function StoryLayout(args: Parameters<typeof LoroSidebar>[0]) {
       updatedSelectedItemId={selectedSessionId}
       updatedBucketsCollapsed={updatedBucketsCollapsed}
       onOrganizeModeChange={setOrganizeMode}
+      showUpdatedProject={showUpdatedProject}
+      onShowUpdatedProjectChange={setShowUpdatedProject}
       onChatScopeChange={setChatScope}
       onSelectUpdatedItem={setSelectedSessionId}
       onTogglePinnedSection={() => setPinnedSectionCollapsed((prev) => !prev)}

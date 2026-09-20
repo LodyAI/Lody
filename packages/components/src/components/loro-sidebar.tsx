@@ -223,6 +223,12 @@ export interface LoroSidebarProps {
    * the visual contract aligned with `SessionList.isLoading` in Workspace mode.
    */
   updatedIsLoading?: boolean;
+  /**
+   * Updated-mode rows show folder / GitHub mark + project name under the title.
+   * Nested opened Sessions stay one line. Ignored in Workspace mode.
+   */
+  showUpdatedProject?: boolean;
+  onShowUpdatedProjectChange?: (next: boolean) => void;
   onOrganizeModeChange?: (mode: LoroSidebarOrganizeMode) => void;
   onChatScopeChange?: (scope: LoroSidebarChatScope) => void;
   onSelectUpdatedItem?: (id: string, tabSessionId?: string) => void;
@@ -309,6 +315,7 @@ const defaultLabels: LoroSidebarLabels = {
     showHeading: 'Show',
     organizeProject: 'Project',
     organizeUpdated: 'Updated',
+    showUpdatedProject: 'Show project',
     showMyTasks: 'My Tasks',
     showAllTasks: 'All Tasks',
   },
@@ -720,6 +727,8 @@ export const LoroSidebar = memo(function LoroSidebar({
   updatedBucketsCollapsed,
   updatedShowFullBuckets,
   updatedIsLoading = false,
+  showUpdatedProject = true,
+  onShowUpdatedProjectChange,
   onOrganizeModeChange,
   onChatScopeChange,
   onSelectUpdatedItem,
@@ -867,6 +876,8 @@ export const LoroSidebar = memo(function LoroSidebar({
       scope={chatScope}
       onOrganizeChange={onOrganizeModeChange}
       onScopeChange={onChatScopeChange}
+      showUpdatedProject={showUpdatedProject}
+      onShowUpdatedProjectChange={onShowUpdatedProjectChange}
       labels={mergedLabels.filter}
       side="bottom"
       align="end"
@@ -1245,7 +1256,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                   now={now}
                   isMobile={isMobile}
                   showPinnedIcon={false}
-                  showProjectContext={organizeMode === 'updated'}
+                  showProjectContext={organizeMode === 'updated' && showUpdatedProject}
                   selectedItemId={updatedSelectedItemId ?? null}
                   collapsedBuckets={pinnedSectionCollapsed ? PINNED_BUCKETS_COLLAPSED : undefined}
                   labels={{
@@ -1287,7 +1298,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     now={now}
                     isMobile={isMobile}
                     isLoading={updatedIsLoading}
-                    showProjectContext
+                    showProjectContext={showUpdatedProject}
                     selectedItemId={updatedSelectedItemId ?? null}
                     labels={mergedLabels.updated}
                     collapsedBuckets={updatedBucketsCollapsed}
@@ -1442,6 +1453,8 @@ export const LoroSidebar = memo(function LoroSidebar({
               scope={chatScope}
               onOrganizeChange={onOrganizeModeChange}
               onScopeChange={onChatScopeChange}
+              showUpdatedProject={showUpdatedProject}
+              onShowUpdatedProjectChange={onShowUpdatedProjectChange}
               labels={mergedLabels.filter}
             />
           ) : null}

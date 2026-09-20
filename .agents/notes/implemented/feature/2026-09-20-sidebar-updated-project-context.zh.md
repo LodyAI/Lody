@@ -8,13 +8,13 @@ PR: https://github.com/LodyAI/Lody/pull/838
 
 ## 摘要
 
-Updated 组织模式把所有 project 混成一条按最近更新排序的列表，只显示标题就看不出会话属于哪里。顶层行现在多一行，用 Project 分组头已经在用的识别标记（文件夹、GitHub owner 头像或对话图标）加上项目名或分区名。嵌套的 opened Session 仍只显示标题，好让 opened-by 树干继续按 30px 行高对齐。Workspace 模式的置顶区不加这行，因为那些行旁边仍是各自的 project 分组。
+Updated 组织模式把所有 project 混成一条按最近更新排序的列表，只显示标题就看不出会话属于哪里。选中「最近更新」后，筛选菜单会嵌一套默认打开的「显示项目」勾选项，给顶层行加上 Project 分组头已经在用的识别标记（文件夹、GitHub owner 头像或对话图标）和项目名或分区名。嵌套的 opened Session 仍只显示标题，好让 opened-by 树干继续按 30px 行高对齐。Workspace 模式的置顶区不加这行，因为那些行旁边仍是各自的 project 分组。
 
 ## 问题与决定
 
 Project 组织模式把会话放在本地文件夹、GitHub 仓库或 Chats 标题下，分组头已经回答「属于哪个 project」。Updated 模式故意丢掉这层结构。混排之后只剩标题，刚更新的另一个文件夹里的会话和当前项目的会话无法区分。
 
-`SidebarUpdatedSessionList` 新增 `showProjectContext`。`LoroSidebar` 在 `organizeMode === 'updated'` 时对置顶区和 Updated 列表都打开它。第二行优先用 `subtitle`（本地文件夹名、GitHub `owner/repo`），Chat 回退到 `sectionLabel`。嵌套子行（`openedByTree.kind === 'child'`）不加这行：它们通过缩进继承父行的 project。
+`SidebarUpdatedSessionList` 接受 `showProjectContext`。`LoroSidebar` 在 `organizeMode === 'updated'` 且嵌套的「显示项目」勾选打开时（`sidebarUpdatedShowProjectAtom`，默认 true）对置顶区和 Updated 列表打开它。选中「最近更新」时筛选菜单不关掉，好让勾选项能在同一次手势里碰到。第二行优先用 `subtitle`（本地文件夹名、GitHub `owner/repo`），Chat 回退到 `sectionLabel`。嵌套子行（`openedByTree.kind === 'child'`）不加这行：它们通过缩进继承父行的 project。
 
 标题行仍占 20px 内容高，好让展开控件、连接线和尾槽留在那一行。两行父行下面的第一个子行把向上的树干从 `-top-2` 拉到 `-top-6`，补上 subtitle 多出来的高度；后续兄弟仍用单行树干。
 

@@ -3020,6 +3020,7 @@
   "sidebar.filter.organizeUpdated": "Updated",
   "sidebar.filter.organizeProject": "Project",
   "sidebar.filter.showHeading": "Show",
+  "sidebar.filter.showUpdatedProject": "Show project",
   "sidebar.filter.trigger": "Filter sidebar",
   "sidebar.githubWorktrees": "GitHub Worktrees",
   "sidebar.pinned": "Pinned",
