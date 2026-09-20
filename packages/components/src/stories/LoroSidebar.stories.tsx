@@ -719,10 +719,10 @@ const demoUpdatedTaskListProps: SessionListProps = {
 };
 
 /**
- * Demonstrates the "Updated" organize mode: a flat recency-sorted list. Each row
- * is a single line — leading status slot (PR status at rest), title, a trailing
- * mode icon (FolderTree/Folder for github/local worktrees), and diff — with a
- * desktop hover info card carrying the time / repo / branch / PR / diff.
+ * Demonstrates the "Updated" organize mode: a flat recency-sorted list. Top-level
+ * rows are two lines — title, then folder / GitHub owner mark + project name —
+ * because the list mixes every project. Nested opened Sessions stay one line.
+ * Hover info card still carries time / repo / branch / PR / diff.
  */
 export const UpdatedMode: Story = {
   render: (args) => <StoryLayout {...args} />,

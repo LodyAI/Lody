@@ -6,6 +6,12 @@ What each file in this directory is responsible for. Binding rules live in
 
 ## Page shell and tabs
 
+`ask-user-question-card.tsx` owns interactive and read-only question presentation,
+including independent optional notes and secret masking. Its dedicated
+`AskUserQuestionCard` stories cover editing, replay, multiple questions and legacy
+replacement answers. The [answer notes Spec](../../../../../specs/ask-question-answer-notes.md)
+describes the shared parsing and persistence boundary.
+
 | File                                         | Responsibility                                                              |
 | -------------------------------------------- | --------------------------------------------------------------------------- |
 | `session-detail.tsx`                         | Outer session shell: top tabs, side panel, session-switch reset, tab closer |

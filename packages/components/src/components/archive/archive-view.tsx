@@ -73,7 +73,11 @@ import {
 } from '@lody/shared';
 import { useMachineFlockRowsByMachineIds } from '@/hooks/use-machine-flock-rows';
 import { buildArchivedSessionTree } from '@/lib/archived-session-tree';
-import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
+import {
+  flattenVisibleArchiveRows,
+  type ArchiveVirtualRow,
+} from '@/lib/archive-list-virtualization';
+import { ArchiveListWindow } from './archive-list-window';
 
 export type ArchivedSessionGroup = {
   key: string;
@@ -839,6 +843,116 @@ function MobileArchivedSessionItem({
   );
 }
 
+type ArchivedSessionGroupHeaderProps = {
+  group: ArchivedSessionGroup;
+  chatLabel: string;
+  removedProjectLabel: string;
+  isMultiSelectMode: boolean;
+  selectedIds: Set<SessionId>;
+  onToggleCollapse: () => void;
+  onToggleGroupSelect: (groupKey: string, sessionIds: SessionId[]) => void;
+};
+
+function ArchivedSessionGroupHeader({
+  group,
+  chatLabel,
+  removedProjectLabel,
+  isMultiSelectMode,
+  selectedIds,
+  onToggleCollapse,
+  onToggleGroupSelect,
+}: ArchivedSessionGroupHeaderProps) {
+  const isChat = group.kind === 'chat';
+  const isLocal = group.kind === 'local';
+  const restoreAvailable = !isLocal || group.local?.available === true;
+  const HeaderIcon = isChat ? MessageCircle : isLocal ? Folder : Github;
+  const label = isChat ? chatLabel : group.label;
+  const groupKey = group.key;
+  const groupSessionIds = useMemo(() => group.sessions.map((s) => s.id), [group.sessions]);
+  const selectedInGroup = useMemo(
+    () => groupSessionIds.filter((id) => selectedIds.has(id)).length,
+    [groupSessionIds, selectedIds]
+  );
+  const allSelected = selectedInGroup === group.sessions.length && group.sessions.length > 0;
+  const someSelected = selectedInGroup > 0 && !allSelected;
+  const groupCheckboxState: boolean | 'indeterminate' = allSelected
+    ? true
+    : someSelected
+      ? 'indeterminate'
+      : false;
+
+  return (
+    <button
+      type="button"
+      data-id={`archive-group:${groupKey}`}
+      data-scope-item="row"
+      onClick={onToggleCollapse}
+      className={cn(
+        'group/header relative flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5',
+        'text-sm font-medium text-foreground/80',
+        'cursor-pointer transition-colors hover:bg-hover/40'
+      )}
+    >
+      {isMultiSelectMode && (
+        <div
+          className="absolute left-1.5 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+          }}
+        >
+          <Checkbox
+            checked={groupCheckboxState}
+            onCheckedChange={() => onToggleGroupSelect(groupKey, groupSessionIds)}
+            aria-label={`Select all in ${label}`}
+            className={ARCHIVE_MULTI_SELECT_CHECKBOX_CLASS}
+          />
+        </div>
+      )}
+      <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
+        <HeaderIcon
+          className={cn(
+            'absolute h-4 w-4 text-muted-foreground/80 transition-opacity duration-100',
+            isMultiSelectMode ? 'opacity-0' : 'group-hover/header:opacity-0'
+          )}
+        />
+        <ChevronDown
+          className={cn(
+            'absolute h-4 w-4 text-muted-foreground/70 opacity-0',
+            'transition-[opacity,translate,scale] duration-100',
+            isMultiSelectMode ? '' : 'group-hover/header:opacity-100',
+            group.collapsed ? '-rotate-90' : 'rotate-0'
+          )}
+        />
+      </span>
+      {isLocal ? (
+        <span className="min-w-0 flex-1 truncate text-left">
+          <span className="flex min-w-0 items-baseline gap-2">
+            <span className="max-w-[40%] shrink-0 truncate">{group.local?.name ?? label}</span>
+            <span
+              className="min-w-0 flex-1 truncate font-normal text-muted-foreground/60 [direction:rtl] [unicode-bidi:plaintext]"
+              title={group.local?.title ?? undefined}
+            >
+              {group.local?.path ?? label}
+            </span>
+          </span>
+        </span>
+      ) : (
+        <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+      )}
+      <span className="text-xs tabular-nums text-muted-foreground/60">
+        ({group.sessions.length})
+      </span>
+      {!restoreAvailable ? (
+        <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+          <CircleAlert className="h-3 w-3" aria-hidden="true" />
+          {removedProjectLabel}
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
 export type ArchivedSessionGroupSectionProps = {
   group: ArchivedSessionGroup;
   now: Date;
@@ -887,27 +1001,6 @@ export function ArchivedSessionGroupSection({
   membersByUserId,
   hideGroupHeader = false,
 }: ArchivedSessionGroupSectionProps) {
-  const isChat = group.kind === 'chat';
-  const isLocal = group.kind === 'local';
-  const restoreAvailable = !isLocal || group.local?.available === true;
-  const HeaderIcon = isChat ? MessageCircle : isLocal ? Folder : Github;
-  const label = isChat ? chatLabel : group.label;
-  const groupKey = group.key;
-
-  const groupSessionIds = useMemo(() => group.sessions.map((s) => s.id), [group.sessions]);
-  const selectedInGroup = useMemo(
-    () => groupSessionIds.filter((id) => selectedIds.has(id)).length,
-    [groupSessionIds, selectedIds]
-  );
-  const allSelected = selectedInGroup === group.sessions.length && group.sessions.length > 0;
-  const someSelected = selectedInGroup > 0 && !allSelected;
-
-  const groupCheckboxState: boolean | 'indeterminate' = allSelected
-    ? true
-    : someSelected
-      ? 'indeterminate'
-      : false;
-
   const showHeader = !hideGroupHeader;
   const showSessions = hideGroupHeader || !group.collapsed;
   const sessionTree = useMemo(() => buildArchivedSessionTree(group.sessions), [group.sessions]);
@@ -915,134 +1008,273 @@ export function ArchivedSessionGroupSection({
   return (
     <div className={cn('mb-4 w-full min-w-0', group.collapsed && showHeader ? 'mb-2' : '')}>
       {showHeader ? (
-        <button
-          type="button"
-          data-id={`archive-group:${groupKey}`}
-          data-scope-item="row"
-          onClick={onToggleCollapse}
-          className={cn(
-            'group/header relative flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5',
-            'text-sm font-medium text-foreground/80',
-            'cursor-pointer transition-colors hover:bg-hover/40'
-          )}
-        >
-          {isMultiSelectMode && (
-            <div
-              className="absolute left-1.5 top-1/2 z-10 flex -translate-y-1/2 items-center justify-center"
-              onClick={(e) => e.stopPropagation()}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
-              }}
-            >
-              <Checkbox
-                checked={groupCheckboxState}
-                onCheckedChange={() => onToggleGroupSelect(groupKey, groupSessionIds)}
-                aria-label={`Select all in ${label}`}
-                className={ARCHIVE_MULTI_SELECT_CHECKBOX_CLASS}
-              />
-            </div>
-          )}
-          <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
-            <HeaderIcon
-              className={cn(
-                'absolute h-4 w-4 text-muted-foreground/80 transition-opacity duration-100',
-                isMultiSelectMode ? 'opacity-0' : 'group-hover/header:opacity-0'
-              )}
-            />
-            <ChevronDown
-              className={cn(
-                'absolute h-4 w-4 text-muted-foreground/70 opacity-0',
-                'transition-[opacity,translate,scale] duration-100',
-                isMultiSelectMode ? '' : 'group-hover/header:opacity-100',
-                group.collapsed ? '-rotate-90' : 'rotate-0'
-              )}
-            />
-          </span>
-          {isLocal ? (
-            <span className="min-w-0 flex-1 truncate text-left">
-              <span className="flex min-w-0 items-baseline gap-2">
-                <span className="max-w-[40%] shrink-0 truncate">{group.local?.name ?? label}</span>
-                <span
-                  className="min-w-0 flex-1 truncate font-normal text-muted-foreground/60 [direction:rtl] [unicode-bidi:plaintext]"
-                  title={group.local?.title ?? undefined}
-                >
-                  {group.local?.path ?? label}
-                </span>
-              </span>
-            </span>
-          ) : (
-            <span className="min-w-0 flex-1 truncate text-left">{label}</span>
-          )}
-          <span className="text-xs tabular-nums text-muted-foreground/60">
-            ({group.sessions.length})
-          </span>
-          {!restoreAvailable ? (
-            <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-              <CircleAlert className="h-3 w-3" aria-hidden="true" />
-              {removedProjectLabel}
-            </span>
-          ) : null}
-        </button>
+        <ArchivedSessionGroupHeader
+          group={group}
+          chatLabel={chatLabel}
+          removedProjectLabel={removedProjectLabel}
+          isMultiSelectMode={isMultiSelectMode}
+          selectedIds={selectedIds}
+          onToggleCollapse={onToggleCollapse}
+          onToggleGroupSelect={onToggleGroupSelect}
+        />
       ) : null}
 
       {showSessions ? (
         <div className={cn('flex w-full min-w-0 flex-col', showHeader && 'mt-1')}>
-          {sessionTree.map(({ item: session, depth }) =>
-            isMobile ? (
-              <MobileArchivedSessionItem
-                key={session.id}
-                session={session}
-                depth={depth}
-                now={now}
-                onRestore={onRestore}
-                onDelete={onDelete}
-                onNavigate={onNavigate}
-                restoreLabel={restoreLabel}
-                restoreAvailable={restoreAvailable}
-                restoreUnavailableLabel={restoreUnavailableLabel}
-                removedProjectLabel={removedProjectLabel}
-                restoreActionLabel={restoreActionLabel}
-                deleteLabel={deleteLabel}
-                deleteActionLabel={deleteActionLabel}
-                hideActionLabels={group.kind !== 'repo'}
-                isMultiSelectMode={isMultiSelectMode}
-                isSelected={selectedIds.has(session.id)}
-                onToggleSelect={onToggleSelect}
-                onEnterMultiSelect={onEnterMultiSelect}
-                owner={membersByUserId.get(session.userId)}
-              />
-            ) : (
-              <DesktopArchivedSessionItem
-                key={session.id}
-                session={session}
-                depth={depth}
-                now={now}
-                onRestore={onRestore}
-                onDelete={onDelete}
-                onNavigate={onNavigate}
-                restoreLabel={restoreLabel}
-                restoreAvailable={restoreAvailable}
-                restoreUnavailableLabel={restoreUnavailableLabel}
-                removedProjectLabel={removedProjectLabel}
-                deleteLabel={deleteLabel}
-                isMultiSelectMode={isMultiSelectMode}
-                isSelected={selectedIds.has(session.id)}
-                onToggleSelect={onToggleSelect}
-                onEnterMultiSelect={onEnterMultiSelect}
-                owner={membersByUserId.get(session.userId)}
-              />
-            )
-          )}
+          {sessionTree.map(({ item: session, depth }) => (
+            <ArchivedSessionRow
+              key={session.id}
+              group={group}
+              session={session}
+              depth={depth}
+              now={now}
+              isMobile={isMobile}
+              onRestore={onRestore}
+              onDelete={onDelete}
+              onNavigate={onNavigate}
+              restoreLabel={restoreLabel}
+              restoreUnavailableLabel={restoreUnavailableLabel}
+              removedProjectLabel={removedProjectLabel}
+              restoreActionLabel={restoreActionLabel}
+              deleteLabel={deleteLabel}
+              deleteActionLabel={deleteActionLabel}
+              isMultiSelectMode={isMultiSelectMode}
+              isSelected={selectedIds.has(session.id)}
+              onToggleSelect={onToggleSelect}
+              onEnterMultiSelect={onEnterMultiSelect}
+              owner={membersByUserId.get(session.userId)}
+            />
+          ))}
         </div>
       ) : null}
     </div>
   );
 }
 
+function ArchivedSessionRow({
+  group,
+  session,
+  depth,
+  now,
+  isMobile,
+  onRestore,
+  onDelete,
+  onNavigate,
+  restoreLabel,
+  restoreUnavailableLabel,
+  removedProjectLabel,
+  restoreActionLabel,
+  deleteLabel,
+  deleteActionLabel,
+  isMultiSelectMode,
+  isSelected,
+  onToggleSelect,
+  onEnterMultiSelect,
+  owner,
+}: {
+  group: ArchivedSessionGroup;
+  session: SessionMeta;
+  depth: 0 | 1;
+  now: Date;
+  isMobile: boolean;
+  onRestore: (sessionId: SessionId) => void;
+  onDelete: (session: SessionMeta) => void;
+  onNavigate: (sessionId: SessionId) => void;
+  restoreLabel: string;
+  restoreUnavailableLabel: string;
+  removedProjectLabel: string;
+  restoreActionLabel: string;
+  deleteLabel: string;
+  deleteActionLabel: string;
+  isMultiSelectMode: boolean;
+  isSelected: boolean;
+  onToggleSelect: (sessionId: SessionId) => void;
+  onEnterMultiSelect: (sessionId: SessionId) => void;
+  owner?: { name?: string | null; image?: string | null } | null;
+}) {
+  const restoreAvailable = group.kind !== 'local' || group.local?.available === true;
+  if (isMobile) {
+    return (
+      <MobileArchivedSessionItem
+        session={session}
+        depth={depth}
+        now={now}
+        onRestore={onRestore}
+        onDelete={onDelete}
+        onNavigate={onNavigate}
+        restoreLabel={restoreLabel}
+        restoreAvailable={restoreAvailable}
+        restoreUnavailableLabel={restoreUnavailableLabel}
+        removedProjectLabel={removedProjectLabel}
+        restoreActionLabel={restoreActionLabel}
+        deleteLabel={deleteLabel}
+        deleteActionLabel={deleteActionLabel}
+        hideActionLabels={group.kind !== 'repo'}
+        isMultiSelectMode={isMultiSelectMode}
+        isSelected={isSelected}
+        onToggleSelect={onToggleSelect}
+        onEnterMultiSelect={onEnterMultiSelect}
+        owner={owner}
+      />
+    );
+  }
+  return (
+    <DesktopArchivedSessionItem
+      session={session}
+      depth={depth}
+      now={now}
+      onRestore={onRestore}
+      onDelete={onDelete}
+      onNavigate={onNavigate}
+      restoreLabel={restoreLabel}
+      restoreAvailable={restoreAvailable}
+      restoreUnavailableLabel={restoreUnavailableLabel}
+      removedProjectLabel={removedProjectLabel}
+      deleteLabel={deleteLabel}
+      isMultiSelectMode={isMultiSelectMode}
+      isSelected={isSelected}
+      onToggleSelect={onToggleSelect}
+      onEnterMultiSelect={onEnterMultiSelect}
+      owner={owner}
+    />
+  );
+}
+
+export type ArchiveSessionListProps = Omit<
+  ArchivedSessionGroupSectionProps,
+  'group' | 'onToggleCollapse' | 'hideGroupHeader'
+> & {
+  groups: ArchivedSessionGroup[];
+  hideGroupHeader: boolean;
+  listScopeId: string;
+  onToggleCollapse: (groupKey: string) => void;
+  resetScrollKey?: string;
+};
+
+export function ArchiveSessionList({
+  groups,
+  now,
+  onRestore,
+  onDelete,
+  onNavigate,
+  onToggleCollapse,
+  restoreLabel,
+  restoreUnavailableLabel,
+  removedProjectLabel,
+  restoreActionLabel,
+  deleteLabel,
+  deleteActionLabel,
+  chatLabel,
+  isMobile,
+  isMultiSelectMode,
+  selectedIds,
+  onToggleSelect,
+  onToggleGroupSelect,
+  onEnterMultiSelect,
+  membersByUserId,
+  hideGroupHeader,
+  listScopeId,
+  resetScrollKey,
+}: ArchiveSessionListProps) {
+  const rows = useMemo(
+    () => flattenVisibleArchiveRows(groups, { hideGroupHeader }),
+    [groups, hideGroupHeader]
+  );
+  const groupByKey = useMemo(() => {
+    const map = new Map<string, ArchivedSessionGroup>();
+    for (const group of groups) map.set(group.key, group);
+    return map;
+  }, [groups]);
+  const sessionById = useMemo(() => {
+    const map = new Map<SessionId, SessionMeta>();
+    for (const group of groups) {
+      for (const session of group.sessions) map.set(session.id, session);
+    }
+    return map;
+  }, [groups]);
+
+  const renderRow = useCallback(
+    (row: ArchiveVirtualRow) => {
+      const group = groupByKey.get(row.groupKey);
+      if (!group) return null;
+      if (row.kind === 'header') {
+        return (
+          <ArchivedSessionGroupHeader
+            group={group}
+            chatLabel={chatLabel}
+            removedProjectLabel={removedProjectLabel}
+            isMultiSelectMode={isMultiSelectMode}
+            selectedIds={selectedIds}
+            onToggleCollapse={() => onToggleCollapse(row.groupKey)}
+            onToggleGroupSelect={onToggleGroupSelect}
+          />
+        );
+      }
+      const session = sessionById.get(row.sessionId);
+      if (!session) return null;
+      return (
+        <ArchivedSessionRow
+          group={group}
+          session={session}
+          depth={row.depth}
+          now={now}
+          isMobile={isMobile}
+          onRestore={onRestore}
+          onDelete={onDelete}
+          onNavigate={onNavigate}
+          restoreLabel={restoreLabel}
+          restoreUnavailableLabel={restoreUnavailableLabel}
+          removedProjectLabel={removedProjectLabel}
+          restoreActionLabel={restoreActionLabel}
+          deleteLabel={deleteLabel}
+          deleteActionLabel={deleteActionLabel}
+          isMultiSelectMode={isMultiSelectMode}
+          isSelected={selectedIds.has(session.id)}
+          onToggleSelect={onToggleSelect}
+          onEnterMultiSelect={onEnterMultiSelect}
+          owner={membersByUserId.get(session.userId)}
+        />
+      );
+    },
+    [
+      chatLabel,
+      deleteActionLabel,
+      deleteLabel,
+      groupByKey,
+      isMobile,
+      isMultiSelectMode,
+      membersByUserId,
+      now,
+      onDelete,
+      onEnterMultiSelect,
+      onNavigate,
+      onRestore,
+      onToggleCollapse,
+      onToggleGroupSelect,
+      onToggleSelect,
+      removedProjectLabel,
+      restoreActionLabel,
+      restoreLabel,
+      restoreUnavailableLabel,
+      selectedIds,
+      sessionById,
+    ]
+  );
+
+  return (
+    <ArchiveListWindow
+      rows={rows}
+      isMobile={isMobile}
+      listScopeId={listScopeId}
+      renderRow={renderRow}
+      resetScrollKey={resetScrollKey}
+    />
+  );
+}
+
 export function ArchiveView() {
   const { t } = useTranslation();
   const listScopeId = useId();
-  useListKeyboardNavigation({ scopeId: listScopeId });
   const router = useRouter();
   const isMobile = useIsMobile();
   const user = useAtomValue(userAtom);
@@ -1605,43 +1837,40 @@ export function ArchiveView() {
   );
 
   const archiveContent = (
-    <div className="box-border w-full min-w-full px-4 py-4 sm:px-6">
-      {archiveToolbar}
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
+      <div className="box-border w-full shrink-0 px-4 pt-4 sm:px-6">{archiveToolbar}</div>
       {groupedSessions.length === 0 || filteredArchivedSessions.length === 0 ? (
-        <div className="flex w-full flex-col items-center justify-center py-12 text-center">
+        <div className="flex min-h-0 w-full flex-1 flex-col items-center justify-center overflow-x-hidden overflow-y-auto px-4 pb-4 text-center sm:px-6">
           <Archive className="h-12 w-12 text-muted-foreground/40" />
           <p className="mt-4 text-sm font-medium text-muted-foreground">{emptyLabel}</p>
           <p className="mt-1 text-xs text-muted-foreground/70">{emptyDescription}</p>
         </div>
       ) : (
-        <FocusScope id={listScopeId} className="flex w-full min-w-0 flex-col">
-          {groupedSessions.map((group) => (
-            <ArchivedSessionGroupSection
-              key={group.key}
-              group={group}
-              now={now}
-              onRestore={handleRestore}
-              onDelete={handleDelete}
-              onNavigate={handleNavigateToSession}
-              onToggleCollapse={() => handleToggleCollapse(group.key)}
-              restoreLabel={restoreLabel}
-              restoreUnavailableLabel={restoreUnavailableLabel}
-              removedProjectLabel={removedProjectLabel}
-              restoreActionLabel={restoreActionLabel}
-              deleteLabel={deleteLabel}
-              deleteActionLabel={deleteActionLabel}
-              chatLabel={chatLabel}
-              isMobile={isMobile}
-              isMultiSelectMode={isMultiSelectMode}
-              selectedIds={selectedIds}
-              onToggleSelect={handleToggleSelect}
-              onToggleGroupSelect={handleToggleGroupSelect}
-              onEnterMultiSelect={handleEnterMultiSelect}
-              membersByUserId={membersByUserId}
-              hideGroupHeader={groupMode === 'flat'}
-            />
-          ))}
-        </FocusScope>
+        <ArchiveSessionList
+          groups={groupedSessions}
+          now={now}
+          onRestore={handleRestore}
+          onDelete={handleDelete}
+          onNavigate={handleNavigateToSession}
+          onToggleCollapse={handleToggleCollapse}
+          restoreLabel={restoreLabel}
+          restoreUnavailableLabel={restoreUnavailableLabel}
+          removedProjectLabel={removedProjectLabel}
+          restoreActionLabel={restoreActionLabel}
+          deleteLabel={deleteLabel}
+          deleteActionLabel={deleteActionLabel}
+          chatLabel={chatLabel}
+          isMobile={isMobile}
+          isMultiSelectMode={isMultiSelectMode}
+          selectedIds={selectedIds}
+          onToggleSelect={handleToggleSelect}
+          onToggleGroupSelect={handleToggleGroupSelect}
+          onEnterMultiSelect={handleEnterMultiSelect}
+          membersByUserId={membersByUserId}
+          hideGroupHeader={groupMode === 'flat'}
+          listScopeId={listScopeId}
+          resetScrollKey={`${archiveScope}:${groupMode}:${sortMode}:${normalizedSearchQuery}`}
+        />
       )}
     </div>
   );

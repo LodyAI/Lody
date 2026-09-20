@@ -1,4 +1,8 @@
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { RequestError } from '@agentclientprotocol/sdk';
 import type { MachineId, SessionId, WorkspaceId } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 
@@ -13,7 +17,8 @@ const connectionMocks = vi.hoisted(() => ({
   cancel: vi.fn(),
 }));
 
-vi.mock('@agentclientprotocol/sdk', () => ({
+vi.mock('@agentclientprotocol/sdk', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@agentclientprotocol/sdk')>()),
   PROTOCOL_VERSION: 1,
   ClientSideConnection: class {
     readonly initialize = connectionMocks.initialize;
@@ -60,6 +65,45 @@ describe('AgentClient session preparation gate', () => {
     vi.clearAllMocks();
     connectionMocks.initialize.mockResolvedValue({ agentCapabilities: {} });
     connectionMocks.newSession.mockResolvedValue({ sessionId: 'acp-session-1' });
+  });
+
+  it('returns ACP resource-not-found for missing files while preserving reads and other failures', async () => {
+    const workdir = await mkdtemp(join(tmpdir(), 'lody-acp-files-'));
+    const client = new AgentClient({
+      logger: createLogger(),
+      sessionId: 'file-read-session' as SessionId,
+      terminalManager: {} as never,
+      onUpdateMessage: vi.fn(),
+      onRequestPermission: vi.fn(),
+    });
+    try {
+      await client.startSession({} as never, workdir);
+      const missing = join(workdir, 'missing-plan.md');
+      await expect(
+        client.readTextFile({ sessionId: 'acp-session-1', path: missing })
+      ).rejects.toMatchObject({
+        code: -32002,
+        data: { uri: missing },
+      });
+      await expect(
+        client.readTextFile({ sessionId: 'acp-session-1', path: missing })
+      ).rejects.toBeInstanceOf(RequestError);
+      const path = join(workdir, 'plan.md');
+      await writeFile(path, 'first\nsecond\nthird\n');
+      await expect(
+        client.readTextFile({ sessionId: 'acp-session-1', path, line: 2, limit: 1 })
+      ).resolves.toEqual({ content: 'second' });
+      const notDirectory = join(path, 'child');
+      await expect(readFile(notDirectory)).rejects.toMatchObject({ code: 'ENOTDIR' });
+      await expect(
+        client.readTextFile({ sessionId: 'acp-session-1', path: notDirectory })
+      ).rejects.toMatchObject({ code: 'ENOTDIR' });
+      await expect(
+        client.readTextFile({ sessionId: 'other-session', path: missing })
+      ).rejects.toThrow('Mismatched ACP session');
+    } finally {
+      await rm(workdir, { recursive: true, force: true });
+    }
   });
 
   it('keeps Codex reasoning out of history while publishing a transient status label', async () => {

@@ -5768,12 +5768,8 @@ describe('SessionExecutionService', () => {
       } as unknown as LoroDocumentManager,
       turnFinalization: {
         ...createBaseDeps({}).turnFinalization,
-        finalizeACPState: vi.fn(async (_sessionId, turnId, options) => {
-          history = markAssistantTurnFinished(history, {
-            turnId,
-            endedAt: 42,
-            settleContextCompactionAsFailed: options?.settleContextCompactionAsFailed,
-          });
+        finalizeACPState: vi.fn(async (_sessionId, turnId) => {
+          history = markAssistantTurnFinished(history, { turnId, endedAt: 42 });
         }),
       },
     });
@@ -6571,11 +6567,10 @@ describe('SessionExecutionService', () => {
       processMessageQueue: vi.fn(async () => {}),
     });
     vi.mocked(deps.turnFinalization.finalizeACPState).mockImplementation(
-      async (_sessionId, turnId, options) => {
+      async (_sessionId, turnId) => {
         history = markAssistantTurnFinished(history as SessionHistoryInput[], {
           turnId,
           endedAt: 42,
-          settleContextCompactionAsFailed: options?.settleContextCompactionAsFailed,
         }) as Array<Record<string, unknown>>;
         expect(history[0]).toMatchObject({ id: 'turn-prompt-cancel', status: 'canceled' });
       }
@@ -6932,11 +6927,10 @@ describe('SessionExecutionService', () => {
         buildAcpPromptBlocks: async ({ inputBlocks }) => inputBlocks as ContentBlock[],
       });
       vi.mocked(deps.turnFinalization.finalizeACPState).mockImplementation(
-        async (_sessionId, turnId, options) => {
+        async (_sessionId, turnId) => {
           history = markAssistantTurnFinished(history as SessionHistoryInput[], {
             turnId,
             endedAt: 42,
-            settleContextCompactionAsFailed: options?.settleContextCompactionAsFailed,
           }) as Array<Record<string, unknown>>;
         }
       );
@@ -6988,13 +6982,18 @@ describe('SessionExecutionService', () => {
           processingUserMsgId: undefined,
         });
         expect(service.getExecutionSnapshot(sessionId)).toMatchObject({ hasActiveTurn: true });
+        // The entry is already stamped finished here, so its compaction marker
+        // is settled with it — a still-spinning row on a finished turn is the
+        // state finalization exists to remove. A compaction that does reach a
+        // terminal update during the drain still lands: history merges tool
+        // calls by id, so the provider's own status wins afterwards.
         expect(history[1]).toMatchObject({
           id: `assistant:${userTurnId}`,
           finished: true,
           items: [
             expect.objectContaining({
               toolCallId: 'compact-cancel-drain',
-              status: 'in_progress',
+              status: 'failed',
             }),
           ],
         });
@@ -7146,8 +7145,7 @@ describe('SessionExecutionService', () => {
     expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(2);
     expect(deps.turnFinalization.finalizeACPState).toHaveBeenLastCalledWith(
       'session-prompt-cancel-resolved',
-      'assistant-prompt-cancel-resolved',
-      { settleContextCompactionAsFailed: true }
+      'assistant-prompt-cancel-resolved'
     );
     expect(deps.turnFinalization.notifySessionCompleted).not.toHaveBeenCalled();
     expect(deps.processMessageQueue).not.toHaveBeenCalled();

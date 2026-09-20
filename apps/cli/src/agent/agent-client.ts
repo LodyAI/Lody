@@ -1,4 +1,4 @@
-import type { LodyWorktreeProject } from 'acp-extension-core';
+import type { LodyClientExtensionCapabilities, LodyWorktreeProject } from 'acp-extension-core';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
@@ -1338,7 +1338,15 @@ export class AgentClient implements acp.Client {
     // ACP file reads can return large payloads; they are streamed to the UI via notifications,
     this.ensureSessionMatch(params.sessionId as ACPSessionId);
     const resolvedPath = this.resolvePath(params.path);
-    const content = await fs.readFile(resolvedPath, 'utf8');
+    let content: string;
+    try {
+      content = await fs.readFile(resolvedPath, 'utf8');
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+        throw acp.RequestError.resourceNotFound(resolvedPath);
+      }
+      throw error;
+    }
     const sliced = sliceTextByLines(content, params.line ?? null, params.limit ?? null);
     return { content: sliced };
   }
@@ -1909,9 +1917,12 @@ export class AgentClient implements acp.Client {
               elicitation: {
                 form: {},
               },
-              ...(devinClientCapabilitiesMeta !== undefined
-                ? { _meta: devinClientCapabilitiesMeta }
-                : {}),
+              _meta: {
+                ...devinClientCapabilitiesMeta,
+                lody: {
+                  elicitation: { version: 1, answerNotes: true },
+                } satisfies LodyClientExtensionCapabilities,
+              },
             },
           }),
           startupAbort

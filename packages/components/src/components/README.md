@@ -1,7 +1,7 @@
 # Product surfaces
 
 Binding rules live in [AGENTS.md](AGENTS.md); this index explains ownership.
-Child directories such as `sessions/`, `mobile/`, and `chat/` own their scoped rules.
+Child directories such as `sessions/`, `mobile/`, `chat/`, and `archive/` own their scoped rules.
 
 ## Sidebar and session rows
 
@@ -9,10 +9,21 @@ The sidebar spans `loro-sidebar.tsx`, `loro-app-sidebar.tsx`, `session-list.tsx`
 `sidebar-*.tsx`. `sessions/session-list-rows.ts` resolves row relationships, while
 `lib/session-opened-by-tree.ts` builds the presentation tree.
 
+GitHub repository groups and local project folders both expose a desktop drag handle.
+Their orders are persisted per workspace; local project keys also include the owning
+machine so projects from different devices cannot collide. See the
+[sidebar project ordering Spec](../../../../specs/sidebar-project-ordering.md).
+
 [Sidebar relationship rationale](../../../../.agents/docs/components-sidebar-session-tree.md)
 explains why exact opener navigation and root-row indentation use separate ids.
 A child Tab may open an independent Session: the row sits under the root, but its
 navigation must still return to the precise creating Tab.
+
+Updated organize mode is a mixed recency list, so a top-level row shows a second
+line with folder / GitHub owner mark + project name. Nested opened Sessions stay
+one title line so the 30px tree trunk still meets. Workspace-mode Pinned omits
+the line. Decision:
+[updated project context](../../../../.agents/notes/implemented/feature/2026-09-20-sidebar-updated-project-context.md).
 
 ## Entry points and layout
 

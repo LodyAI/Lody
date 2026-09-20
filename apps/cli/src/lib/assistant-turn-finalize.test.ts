@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { SessionHistoryInput } from '@lody/shared';
+import type { MessageContent, SessionHistoryInput } from '@lody/shared';
 
 import { markAssistantTurnFinished } from './assistant-turn-finalize';
 
@@ -15,6 +15,17 @@ const assistantEntry = (
   items: [],
   fileDiff: [],
   ...overrides,
+});
+
+const compactionMarker = (
+  toolCallId: string,
+  status: 'pending' | 'in_progress' | 'completed' | 'failed'
+): MessageContent => ({
+  type: 'tool_call',
+  toolCallId,
+  title: status === 'completed' ? 'Context compacted' : 'Compacting context',
+  status,
+  activityKind: 'context_compaction',
 });
 
 describe('markAssistantTurnFinished', () => {
@@ -67,55 +78,90 @@ describe('markAssistantTurnFinished', () => {
     expect(history[0]?.permissionWaitMs).toBe(4_000);
   });
 
-  it('settles an incomplete compaction only with provider failure evidence', () => {
+  it('settles a compaction the finished turn left open', () => {
+    // Nothing but a notification for the same toolCallId can move a synthetic
+    // compaction marker off `in_progress`, and the turn is over — so it would
+    // spin forever. Unconditional: adapters ship separately from the host, so
+    // the paths that happen to know the provider failed are not the only ones
+    // that can strand a marker.
+    const history = [
+      assistantEntry({
+        id: 'assistant:u1',
+        items: [compactionMarker('compact-1', 'in_progress')],
+      }),
+    ];
+
+    markAssistantTurnFinished(history, { endedAt: TURN_ENDED_AT });
+
+    expect(history[0]).toMatchObject({ finished: true, endedAt: TURN_ENDED_AT });
+    expect(history[0]?.items).toMatchObject([{ toolCallId: 'compact-1', status: 'failed' }]);
+  });
+
+  it('preserves a compaction the provider already settled', () => {
+    const history = [
+      assistantEntry({
+        id: 'assistant:u1',
+        items: [compactionMarker('compact-1', 'completed')],
+      }),
+    ];
+
+    markAssistantTurnFinished(history, { endedAt: TURN_ENDED_AT });
+
+    expect(history[0]?.items).toMatchObject([{ toolCallId: 'compact-1', status: 'completed' }]);
+  });
+
+  it('drops the duplicate markers one compaction episode minted', () => {
+    // An adapter that re-opens a compaction already in flight (Claude Code
+    // repeats `status: "compacting"`) mints a fresh toolCallId each time.
+    // History merges tool calls by id, so every duplicate became its own
+    // "Compacting context" row — n stacked spinners for one compaction. Only
+    // the marker that carries the episode's outcome survives.
     const history = [
       assistantEntry({
         id: 'assistant:u1',
         items: [
-          {
-            type: 'tool_call',
-            toolCallId: 'compact-1',
-            title: 'Context compacting',
-            status: 'in_progress',
-            activityKind: 'context_compaction',
-          },
+          compactionMarker('compact-1', 'in_progress'),
+          compactionMarker('compact-2', 'in_progress'),
+          compactionMarker('compact-3', 'completed'),
         ],
       }),
     ];
 
     markAssistantTurnFinished(history, { endedAt: TURN_ENDED_AT });
-    expect(history[0]?.items?.[0]).toMatchObject({ status: 'in_progress' });
 
-    markAssistantTurnFinished(history, {
-      endedAt: APP_CLOSED_AT,
-      settleContextCompactionAsFailed: true,
-    });
-    expect(history[0]).toMatchObject({ finished: true, endedAt: TURN_ENDED_AT });
-    expect(history[0]?.items?.[0]).toMatchObject({ status: 'failed' });
+    expect(history[0]?.items).toMatchObject([{ toolCallId: 'compact-3', status: 'completed' }]);
   });
 
-  it('preserves a provider terminal compaction during failure finalization', () => {
+  it('keeps an earlier compaction that reported its own outcome', () => {
+    // A long turn legitimately compacts more than once. Those markers each
+    // reached a terminal status, so none of them is a duplicate identity.
     const history = [
       assistantEntry({
         id: 'assistant:u1',
         items: [
-          {
-            type: 'tool_call',
-            toolCallId: 'compact-1',
-            title: 'Context compacting',
-            status: 'completed',
-            activityKind: 'context_compaction',
-          },
+          compactionMarker('compact-1', 'completed'),
+          { type: 'text', text: 'work between compactions' },
+          compactionMarker('compact-2', 'in_progress'),
         ],
       }),
     ];
 
-    markAssistantTurnFinished(history, {
-      endedAt: TURN_ENDED_AT,
-      settleContextCompactionAsFailed: true,
-    });
+    markAssistantTurnFinished(history, { endedAt: TURN_ENDED_AT });
 
-    expect(history[0]?.items?.[0]).toMatchObject({ status: 'completed' });
+    expect(history[0]?.items).toMatchObject([
+      { toolCallId: 'compact-1', status: 'completed' },
+      { type: 'text' },
+      { toolCallId: 'compact-2', status: 'failed' },
+    ]);
+  });
+
+  it('leaves an entry without compaction markers untouched', () => {
+    const items: MessageContent[] = [{ type: 'text', text: 'hello' }];
+    const history = [assistantEntry({ id: 'assistant:u1', items })];
+
+    markAssistantTurnFinished(history, { endedAt: TURN_ENDED_AT });
+
+    expect(history[0]?.items).toBe(items);
   });
 
   it('never stamps a user or system entry standing after the turn', () => {

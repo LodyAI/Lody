@@ -1245,6 +1245,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                   now={now}
                   isMobile={isMobile}
                   showPinnedIcon={false}
+                  showProjectContext={organizeMode === 'updated'}
                   selectedItemId={updatedSelectedItemId ?? null}
                   collapsedBuckets={pinnedSectionCollapsed ? PINNED_BUCKETS_COLLAPSED : undefined}
                   labels={{
@@ -1286,6 +1287,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     now={now}
                     isMobile={isMobile}
                     isLoading={updatedIsLoading}
+                    showProjectContext
                     selectedItemId={updatedSelectedItemId ?? null}
                     labels={mergedLabels.updated}
                     collapsedBuckets={updatedBucketsCollapsed}
