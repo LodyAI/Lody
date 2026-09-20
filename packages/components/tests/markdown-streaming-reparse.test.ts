@@ -140,6 +140,34 @@ describe('MarkdownRenderer streaming rendering', () => {
     throw new Error(`Expected element matching ${selector}`);
   };
 
+  it('preserves the rest of a math document after a less-than comparison', async () => {
+    await renderMarkdown(String.raw`# Synthetic calculation
+
+Inline notation \(p<q\) stays in the document.
+
+\[
+ T(e_p\otimes e_q)=c_{pq}(e_q\otimes e_p)\quad(p<q),
+\]
+
+## Later section
+
+The entire document remains readable.
+
+\[
+\begin{aligned}
+ f_0&=b_0-c,\\
+ f_1&=b_1-c.
+\end{aligned}
+\]
+
+## References
+
+End of synthetic document.`);
+
+    expect(container?.textContent).toContain('End of synthetic document.');
+    expect(container?.querySelectorAll('.katex-display')).toHaveLength(2);
+  });
+
   it('uses the GFM autolink path for email literals', async () => {
     await renderMarkdown('Contact agent-000@example.com before checking https://example.com.');
 

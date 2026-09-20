@@ -74,8 +74,14 @@ That tolerance must not authorize creating new malformed items locally.
   This deadline does not wait for cancel acknowledgement or restart on repeated Stop.
   Failed termination retains ownership until ACP ends. Start and interrupt
   acknowledgements, like compaction-item completion, do not release execution ownership.
-  The CLI persists unresolved compaction as failed after confirmed cancellation,
-  before accepting another turn.
+  Finalizing an assistant turn settles the context-compaction markers it leaves
+  open, on every path and not only after confirmed cancellation: a marker the
+  provider never carried to a terminal status is persisted as failed before
+  another turn is accepted. Markers superseded by a later compaction marker in
+  the same turn are duplicate identities for one compaction episode — an adapter
+  re-announcing a compaction already in flight — and are removed instead, so one
+  episode renders as one row. A provider update that later arrives for the same
+  `toolCallId` still wins.
   Opening a Session does not trigger a history-repair RPC or rewrite old outcomes.
 - A steer adapter reports one final delivery outcome: `applied`, `not-applied`, or
   `unknown`. Only `not-applied` may return the same user turn to ordinary dispatch;

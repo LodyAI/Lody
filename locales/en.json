@@ -3062,6 +3062,7 @@
   "sidebar.localProjects.forbidden": "Local project is not available",
   "sidebar.localProjects.import": "Import local project folder",
   "sidebar.localProjects.newChat": "New chat in this project",
+  "sidebar.localProjects.reorder": "Reorder project",
   "sidebar.localProjects.settings": "Project settings",
   "sidebar.localProjects.archiveChats": "Archive chats",
   "sidebar.localProjects.reveal": "Reveal in file manager",

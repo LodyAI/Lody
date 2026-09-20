@@ -3062,6 +3062,7 @@
   "sidebar.localProjects.forbidden": "无法访问本地项目",
   "sidebar.localProjects.import": "导入本地项目文件夹",
   "sidebar.localProjects.newChat": "在此项目中新建对话",
+  "sidebar.localProjects.reorder": "调整项目顺序",
   "sidebar.localProjects.settings": "项目设置",
   "sidebar.localProjects.archiveChats": "归档所有对话",
   "sidebar.localProjects.reveal": "在文件管理器中显示",

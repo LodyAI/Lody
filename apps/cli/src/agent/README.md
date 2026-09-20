@@ -50,6 +50,14 @@ context/message-flow.md "Upstream".
 
 ## Background
 
+### ACP file errors
+
+`fs/read_text_file` maps a missing local file to ACP resource-not-found (`-32002`).
+Other I/O errors propagate, and session validation runs before file access. Provider
+filesystem adapters translate that protocol error to their engine's native missing-file
+semantics. In particular, Kimi may enter Plan before a plan file exists; reading its
+status must retain the distinction between an absent file and an unreadable one.
+
 ### Grok permission handling
 
 Grok's TUI combines the runtime YOLO setting with client-side `AllowOnce` responses.
