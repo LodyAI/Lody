@@ -7,6 +7,8 @@ Translation: current
 
 PR: [Lody #840](https://github.com/LodyAI/Lody/pull/840)
 
+Provider PR: [acp-extension-dsh #21](https://github.com/LodyAI/acp-extension-dsh/pull/21)
+
 ## Abstract
 
 Harness presets exposed `ask_user_question`, but the ACP adapter supplied no
