@@ -46,6 +46,10 @@ the previous hook reveals while held; the fixed hook stays hidden and opens at
 the measured tail after release, including remount. Unit coverage retains cached
 reading positions, user escape, composer resize suppression and row growth.
 
+A later defect could leave that hidden viewport stuck after destination rows
+were already measured. First end-restore is not the follow lock; see
+[initial conversation reveal](../bug-fix/2026-09-18-conversation-initial-reveal-follow-lock.md).
+
 ## Cold virtualizer blank on open
 
 Waiting for the measured destination hides the viewport, and a virtualizer that

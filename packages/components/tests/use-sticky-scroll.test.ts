@@ -8,6 +8,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionId } from '@lody/shared';
 import type { CacheSnapshot, VirtualizerHandle } from 'virtua';
 import {
+  isInitialScrollLayoutReady,
+  visibleContentBottomOffset,
+} from '../src/hooks/sticky-scroll-dom';
+import {
   clearAllScrollPositions,
   getScrollPosition,
   saveScrollPosition,
@@ -292,6 +296,89 @@ async function renderHarness(props: HarnessProps): Promise<void> {
   });
 }
 
+describe('isInitialScrollLayoutReady', () => {
+  function mountReadyViewport(options: {
+    scrollTop?: number;
+    scrollHeight?: number;
+    clientHeight?: number;
+    paddingTop?: string;
+    paddingBottom?: string;
+    lastIndex?: number;
+    lastRowHidden?: boolean;
+  }): {
+    viewport: HTMLDivElement;
+    findItemIndex: ReturnType<typeof vi.fn>;
+    virtualizer: { scrollOffset: number; findItemIndex: (offset: number) => number };
+    cleanup: () => void;
+  } {
+    const scrollTop = options.scrollTop ?? 240;
+    const scrollHeight = options.scrollHeight ?? 640;
+    const clientHeight = options.clientHeight ?? 400;
+    const lastIndex = options.lastIndex ?? 3;
+    const viewport = document.createElement('div');
+    viewport.style.paddingTop = options.paddingTop ?? '0px';
+    viewport.style.paddingBottom = options.paddingBottom ?? '24px';
+    const content = document.createElement('div');
+    const lastRow = document.createElement('div');
+    lastRow.dataset.virtualIndex = String(lastIndex);
+    if (options.lastRowHidden) lastRow.style.visibility = 'hidden';
+    content.append(lastRow);
+    viewport.append(content);
+    document.body.append(viewport);
+    Object.defineProperty(viewport, 'scrollTop', { configurable: true, get: () => scrollTop });
+    Object.defineProperty(viewport, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeight,
+    });
+    Object.defineProperty(viewport, 'clientHeight', {
+      configurable: true,
+      get: () => clientHeight,
+    });
+    const findItemIndex = vi.fn(() => lastIndex);
+    return {
+      viewport,
+      findItemIndex,
+      virtualizer: { scrollOffset: scrollTop, findItemIndex },
+      cleanup: () => viewport.remove(),
+    };
+  }
+
+  it('uses restore-intent following and viewport distance, not last-row boxes', () => {
+    const end = mountReadyViewport({});
+    const originalRect = end.viewport.firstElementChild!.firstElementChild!.getBoundingClientRect;
+    (end.viewport.firstElementChild!.firstElementChild as HTMLElement).getBoundingClientRect =
+      () => {
+        const rect = originalRect.call(end.viewport.firstElementChild!.firstElementChild);
+        return new DOMRect(rect.x, rect.y + 50, rect.width, rect.height);
+      };
+    expect(isInitialScrollLayoutReady(end.viewport, end.virtualizer, 4, true)).toBe(true);
+    end.cleanup();
+
+    const short = mountReadyViewport({ scrollTop: 200 });
+    expect(isInitialScrollLayoutReady(short.viewport, short.virtualizer, 4, true)).toBe(false);
+    expect(isInitialScrollLayoutReady(short.viewport, short.virtualizer, 4, false)).toBe(true);
+    short.cleanup();
+  });
+
+  it('stays unready while the destination row is unmeasured', () => {
+    const hidden = mountReadyViewport({ lastRowHidden: true });
+    expect(isInitialScrollLayoutReady(hidden.viewport, hidden.virtualizer, 4, true)).toBe(false);
+    hidden.cleanup();
+  });
+
+  it('subtracts both paddings when resolving the visible-bottom item', () => {
+    const mounted = mountReadyViewport({
+      scrollTop: 96,
+      paddingTop: '32px',
+      paddingBottom: '24px',
+    });
+    expect(visibleContentBottomOffset(mounted.viewport, 96)).toBe(96 + 400 - 32 - 24);
+    isInitialScrollLayoutReady(mounted.viewport, mounted.virtualizer, 4, false);
+    expect(mounted.findItemIndex).toHaveBeenCalledWith(96 + 400 - 32 - 24);
+    mounted.cleanup();
+  });
+});
+
 describe('useStickyScroll Virtua adapter', () => {
   beforeEach(() => {
     resizeObserverInstances.length = 0;
@@ -393,20 +480,74 @@ describe('useStickyScroll Virtua adapter', () => {
     expect(latestResult?.initialScrollRestored).toBe(true);
   });
 
-  it('accepts the subpixel geometry of a measured tail', async () => {
+  it('reveals an end restore when the last row box is not flush with the viewport', async () => {
     const fixture = createScrollFixture();
     const originalRect = fixture.lastRow.getBoundingClientRect;
     fixture.lastRow.getBoundingClientRect = () => {
       const rect = originalRect();
-      return new DOMRect(rect.x, rect.y + 1.5, rect.width, rect.height);
+      return new DOMRect(rect.x, rect.y + 50, rect.width, rect.height);
     };
     await renderHarness({
-      sessionId: 'session-fractional-tail' as SessionId,
+      sessionId: 'session-hidden-scroller-rect' as SessionId,
       vlist: createMockVirtualizerHandle(fixture.scrollElement),
       scrollElement: fixture.scrollElement,
       itemCount: 4,
     });
+    expect(fixture.getScrollTop()).toBe(240);
     expect(latestResult?.initialScrollRestored).toBe(true);
+  });
+
+  it('releases a near-bottom relock during an unrestored offset restore', async () => {
+    const sessionId = 'session-offset-pre-reveal-relock' as SessionId;
+    saveScrollPosition(sessionId, { type: 'offset', scrollOffset: 96 });
+    const fixture = createScrollFixture();
+    fixture.lastRow.style.visibility = 'hidden';
+    await renderHarness({
+      sessionId,
+      vlist: createMockVirtualizerHandle(fixture.scrollElement),
+      scrollElement: fixture.scrollElement,
+      itemCount: 4,
+    });
+    expect(latestResult?.initialScrollRestored).toBe(false);
+    expect(fixture.getScrollTop()).toBe(96);
+
+    // max offset 120, so 96 sits 24px from the bottom — inside the library's
+    // ~70px near-bottom band. A shrink here re-locks follow unless stopScroll
+    // still runs before reveal.
+    fixture.setScrollHeight(520);
+    fixture.setContentHeight(496);
+    await act(async () => {
+      emitResize(fixture.contentElement);
+      emitResize(fixture.lastRow);
+      await advanceAnimationFrames();
+    });
+    expect(fixture.getScrollTop()).toBe(96);
+    expect(getScrollPosition(sessionId)).toEqual({ type: 'offset', scrollOffset: 96 });
+    expect(latestResult?.isSticky).toBe(false);
+
+    await act(async () => {
+      fixture.lastRow.style.visibility = '';
+      emitResize(fixture.lastRow);
+    });
+    expect(fixture.getScrollTop()).toBe(96);
+    expect(latestResult?.initialScrollRestored).toBe(true);
+    expect(latestResult?.isSticky).toBe(false);
+    expect(getScrollPosition(sessionId)).toEqual({ type: 'offset', scrollOffset: 96 });
+  });
+
+  it('reveals a near-bottom offset restore without requiring a 2px flush', async () => {
+    const sessionId = 'session-near-bottom-offset' as SessionId;
+    saveScrollPosition(sessionId, { type: 'offset', scrollOffset: 200 });
+    const fixture = createScrollFixture();
+    await renderHarness({
+      sessionId,
+      vlist: createMockVirtualizerHandle(fixture.scrollElement),
+      scrollElement: fixture.scrollElement,
+      itemCount: 4,
+    });
+    expect(fixture.getScrollTop()).toBe(200);
+    expect(latestResult?.initialScrollRestored).toBe(true);
+    expect(latestResult?.isSticky).toBe(false);
   });
 
   it('follows row growth before the spacer resize is delivered', async () => {
