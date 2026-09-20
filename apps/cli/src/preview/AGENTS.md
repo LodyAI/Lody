@@ -4,6 +4,11 @@
 
 Managed preview tunnels and the local proxy. [apps/cli/AGENTS.md](../../AGENTS.md) applies.
 
+- Node fetch overwrites navigation `Sec-Fetch-Mode` with `cors`. The shared HTTP
+  header builder removes browser Fetch Metadata only for navigation requests;
+  preserve subresource metadata and Origin so cross-site resource/CSRF checks
+  still apply. Test this through real HTTP, since a mocked fetch hides the rewrite.
+
 - Annotation is optional: probe proxy reachability independently of runtime injection.
   Preserve valid page bytes when injection alone would exceed the response limit.
 

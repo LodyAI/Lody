@@ -1332,6 +1332,16 @@ export function buildLocalPreviewRequestHeaders(
   options?: LocalPreviewRequestHeaderOptions
 ): Headers {
   const proxyHeaders = new Headers(stripLocalPreviewRequestHeaders(headers));
+  const fetchMode = proxyHeaders.get('sec-fetch-mode');
+  if (fetchMode === 'navigate' || fetchMode === 'nested-navigate') {
+    // Node fetch replaces navigation mode with "cors". Forwarding the browser's
+    // cross-site metadata alongside that mode makes Astro reject an otherwise
+    // permitted iframe navigation. Treat this hop as a server-side navigation
+    // fetch, while retaining metadata on subresources and preserving Origin.
+    for (const name of ['sec-fetch-site', 'sec-fetch-mode', 'sec-fetch-dest', 'sec-fetch-user']) {
+      proxyHeaders.delete(name);
+    }
+  }
   if (options) {
     const rewrittenReferer = rewriteLocalPreviewReferer(getHeaderValue(headers, 'referer') ?? '', {
       localOrigin: options.localOrigin,

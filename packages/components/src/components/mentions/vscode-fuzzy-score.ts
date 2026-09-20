@@ -9,7 +9,8 @@
  *
  * Lody modification: the small `CharCode` and `isUpper` dependencies used by
  * this scorer are inlined so the browser package does not depend on VS Code's
- * base layer. The scoring algorithm is otherwise unchanged.
+ * base layer. createFuzzyScoreOnly uses the same recurrence with reusable rows
+ * and no position backtracking for file ranking; scoreFuzzy is unchanged.
  */
 
 const CharCode = {
@@ -261,4 +262,55 @@ function scoreSeparatorAtPos(charCode: number): number {
     default:
       return 0;
   }
+}
+
+/** Score-only non-contiguous matcher. Each caller owns its reusable scratch rows. */
+export function createFuzzyScoreOnly() {
+  let previousScores = new Float64Array(0);
+  let currentScores = new Float64Array(0);
+  let previousMatches = new Float64Array(0);
+  let currentMatches = new Float64Array(0);
+  return (
+    target: string,
+    query: string,
+    queryLower: string,
+    targetLower = target.toLowerCase()
+  ): number => {
+    if (!target || !query || target.length < query.length) return 0;
+    // A subsequence is necessary, including VS Code's interchangeable slashes.
+    // Bound by original UTF-16 lengths, exactly as the scoring matrix does.
+    let matched = 0;
+    for (let i = 0; i < target.length && matched < query.length; i++) {
+      if (considerAsEqual(queryLower[matched], targetLower[i])) matched++;
+    }
+    if (matched < query.length) return 0;
+    if (previousScores.length < target.length) {
+      const capacity = Math.max(target.length, previousScores.length * 2);
+      previousScores = new Float64Array(capacity);
+      currentScores = new Float64Array(capacity);
+      previousMatches = new Float64Array(capacity);
+      currentMatches = new Float64Array(capacity);
+    }
+    for (let q = 0; q < query.length; q++) {
+      for (let t = 0; t < target.length; t++) {
+        const left = t > 0 ? currentScores[t - 1] : 0;
+        const diagonal = q > 0 && t > 0 ? previousScores[t - 1] : 0;
+        const sequence = q > 0 && t > 0 ? previousMatches[t - 1] : 0;
+        const score =
+          !diagonal && q > 0
+            ? 0
+            : computeCharScore(query[q], queryLower[q], target, targetLower, t, sequence);
+        if (score && diagonal + score >= left) {
+          currentScores[t] = diagonal + score;
+          currentMatches[t] = sequence + 1;
+        } else {
+          currentScores[t] = left;
+          currentMatches[t] = 0;
+        }
+      }
+      [previousScores, currentScores] = [currentScores, previousScores];
+      [previousMatches, currentMatches] = [currentMatches, previousMatches];
+    }
+    return previousScores[target.length - 1];
+  };
 }
