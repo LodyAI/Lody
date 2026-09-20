@@ -86,11 +86,8 @@ const buildDraftsFromAnswers = (
   meta.questions.map((question, index) => {
     const noteValue = question.note ? answers?.[question.note.fieldId] : undefined;
     const note = typeof noteValue === 'string' ? noteValue : '';
-    if (!answers) {
-      return { selectedLabels: [], customAnswer: '', note };
-    }
     const key = getAskUserQuestionAnswerKey(meta.questions, index);
-    const value = answers[key];
+    const value = answers?.[key];
     if (value === undefined) {
       return { selectedLabels: [], customAnswer: '', note };
     }

@@ -168,15 +168,12 @@ function parsePermissionQuestions(rawQuestions: unknown[]): AskUserQuestion[] | 
 /** Stored metadata must not let an auxiliary field shadow any question or note. */
 function hasValidNoteKeys(questions: readonly AskUserQuestion[]): boolean {
   if (!questions.some((question) => question.note)) return true;
-  const keys = questions.map((_, index) => getAskUserQuestionAnswerKey(questions, index));
-  const used = new Set(keys);
-  if (
-    used.size !== questions.length ||
-    new Set(questions.map((question) => question.id)).size !== questions.length
-  )
+  // Note-bearing records require explicit ids, so legacy answer-key fallback
+  // and its repeated uniqueness scans cannot contribute a valid key here.
+  const used = new Set(questions.map((question) => question.id));
+  if (used.size !== questions.length || questions.some((question) => !question.id?.trim()))
     return false;
   for (const question of questions) {
-    if (!question.id?.trim() || !used.has(question.id)) return false;
     if (!question.note) continue;
     if (!question.note.fieldId.trim() || used.has(question.note.fieldId)) return false;
     used.add(question.note.fieldId);
@@ -612,16 +609,15 @@ export function parseAskUserQuestionElicitationRequest(
     associatedFields.add(key);
   }
   const isLodyForm = requestMeta !== null || associatedFields.size > 0;
-  const questionEntries = entries.filter(([, prop]) => {
+  const questionEntries = entries.filter(([key, prop]) => {
     if (!isRecord(prop)) return false;
-    const meta = getLodyElicitationMeta(prop._meta);
-    if (meta?.customAnswerFor !== undefined || meta?.noteFor !== undefined) return false;
+    if (associatedFields.has(key)) return false;
     return isQuestionProperty(prop) || (isLodyForm && isFreeTextProperty(prop));
   });
   if (questionEntries.length === 0) return null;
   const questionIds = new Set(questionEntries.map(([key]) => key));
   for (const target of [...customFieldKeyByQuestionId.keys(), ...noteFieldKeyByQuestionId.keys()]) {
-    if (!questionIds.has(target) || associatedFields.has(target)) return null;
+    if (!questionIds.has(target)) return null;
   }
   if (associatedFields.size > 0 && questionEntries.some(([key]) => !key.trim())) return null;
 
@@ -730,22 +726,20 @@ export function buildAskUserQuestionElicitationResponse(
   }
 
   const content: Record<string, AskUserQuestionAnswerValue> = Object.create(null);
-  elicitation.meta.questions.forEach((_question, index) => {
-    if (_question.note) {
-      const note = answers[_question.note.fieldId];
-      if (typeof note === 'string' && note.trim()) content[_question.note.fieldId] = note;
+  elicitation.meta.questions.forEach((question, index) => {
+    if (question.note) {
+      const note = answers[question.note.fieldId];
+      if (typeof note === 'string') content[question.note.fieldId] = note;
     }
     const fieldKey = elicitation.fieldKeys[index];
     if (!fieldKey) return;
     const value = answers[getAskUserQuestionAnswerKey(elicitation.meta.questions, index)];
     if (value === undefined) return;
     const customFieldKey = elicitation.customFieldKeys?.[index];
-    const selectedQuestion = elicitation.meta.questions[index];
     const isCustomValue =
       typeof value === 'string' &&
-      selectedQuestion !== undefined &&
-      selectedQuestion.options.length > 0 &&
-      !selectedQuestion.options.some((option) => option.label === value);
+      question.options.length > 0 &&
+      !question.options.some((option) => option.label === value);
     content[isCustomValue && customFieldKey ? customFieldKey : fieldKey] = value;
   });
 

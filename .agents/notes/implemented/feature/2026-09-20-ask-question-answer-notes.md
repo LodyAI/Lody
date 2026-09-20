@@ -44,6 +44,29 @@ without changing storage ownership. Product intent is in the
 
 ## Verification and limits
 
+### Ablation of the implementation
+
+Each candidate was applied separately and tested before retaining it; removals
+were cumulative after passing. The baseline passed 47 shared and 15 component
+tests. Five additional persisted-metadata cases (duplicate/missing/blank question
+ids, duplicate notes and collision with a later question) passed before and after
+the explicit-id simplification. Test success is paired with the data-flow argument
+below; it is not treated as proof that arbitrary validation is removable.
+
+| Candidate | Observation and decision |
+| --- | --- |
+| Remove duplicate-association rejection | One existing test failed: the later note overwrote the first. Restored the guard. |
+| Reuse the collected auxiliary-field set when filtering questions | 47 shared tests passed. The filtered question set already excludes auxiliary keys, so its membership check also rejects chains without another auxiliary lookup. Kept. |
+| Remove legacy answer-key derivation from note-key validation | 52 shared tests passed. Note-bearing records require unique, nonempty explicit ids, making fallback derivation and its repeated uniqueness scans redundant. Kept direct id validation. |
+| Remove repeated note trimming and question lookup in response construction | 52 shared, 15 component and 60 CLI tests passed. Extraction already omits blank notes; the iteration already supplies the current question. Kept. |
+| Merge absent-answers and absent-value draft initialization | 15 component tests passed. Optional lookup reaches the same empty-draft branch while retaining note-only data. Kept. |
+
+Association rejection, read-boundary validation, separate note drafts, masking
+and legacy compatibility remain. This cleanup changes no Spec guarantee and
+makes no measured performance claim.
+
+### End-to-end validation
+
 Behavioral coverage exercises shared parsing, malformed associations, suffix
 collisions, replacement answers, cancellation, HistoryWriter snapshot reopen,
 real React editing, readonly secret masking, CLI bridging and initialization.

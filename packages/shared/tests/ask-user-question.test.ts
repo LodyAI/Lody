@@ -895,4 +895,38 @@ describe('Core answer notes', () => {
       })
     ).toBeNull();
   });
+
+  it.each([
+    'duplicate question',
+    'missing question id',
+    'empty question id',
+    'duplicate note',
+    'later question collision',
+  ])('rejects %s in persisted question metadata before reading answers', (invalid) => {
+    const parsed = parse();
+    const first = parsed.meta.questions[0]!;
+    const second = { ...first, id: 'second', note: { fieldId: 'second_note' } };
+    parsed.meta.questions.push(second);
+    if (invalid === 'duplicate question') second.id = first.id!;
+    if (invalid === 'missing question id') delete first.id;
+    if (invalid === 'empty question id') first.id = ' ';
+    if (invalid === 'duplicate note') second.note.fieldId = first.note!.fieldId;
+    if (invalid === 'later question collision') first.note!.fieldId = second.id;
+    const outcome = createAskUserQuestionPermissionOutcome(
+      'answer',
+      {
+        approach: 'Small change',
+        approach_note: 'First',
+        second: 'None of the above',
+        second_note: 'Second',
+      },
+      parsed.meta
+    );
+    expect(
+      parseAskUserQuestionPermissionMeta({
+        lody: { elicitation: { version: 1, questions: parsed.meta.questions } },
+      })
+    ).toBeNull();
+    expect(extractAskUserQuestionAnswersFromOutcome(parsed.meta, outcome)).toBeNull();
+  });
 });
