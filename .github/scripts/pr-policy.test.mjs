@@ -46,7 +46,8 @@ Simplify the pull request contribution policy.
 
 ### Shared conversation
 
-https://lody.example/s/demo#access=v1.demo
+Status: shared
+Link: https://lody.example/s/demo#access=v1.demo
 
 <!-- context-handoff:end -->
 `;
@@ -301,6 +302,26 @@ void describe('pull request reconciliation', () => {
     );
     assert.ok(activity.removedLabels.some((input) => input.name === NEEDS_ATTENTION_LABEL));
     assert.ok(activity.removedLabels.every((input) => input.name !== BYPASS_LABEL));
+  });
+
+  void it('routes omitted sharing disclosure through the existing attention policy', async () => {
+    const { activity, github } = createGithub();
+    const body = validBody.replace(
+      /### Shared conversation[\s\S]*?(?=<!-- context-handoff:end -->)/,
+      ''
+    );
+    const result = await reconcilePullRequest({
+      github,
+      owner: 'LodyAI',
+      repo: 'Lody',
+      pullRequest: { ...externalPullRequest, body },
+      defaultBranch: 'main',
+      now: new Date('2026-08-30T00:00:00.000Z'),
+    });
+    assert.equal(result.state, 'invalid');
+    assert.deepEqual(activity.addedLabels.at(-1).labels, [NEEDS_ATTENTION_LABEL]);
+    assert.match(activity.createdComments[0].body, /Shared conversation/);
+    assert.match(activity.createdComments[0].body, /invalid-since="2026-08-30T00:00:00.000Z"/);
   });
 
   void it('puts an invalid external PR into one attention state', async () => {
