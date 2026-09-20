@@ -514,7 +514,7 @@ export function MentionTwoLevelMenu({
       : view.level === 'categories'
         ? `categories:${view.categories.length}`
         : view.level === 'aggregate'
-          ? `aggregate:${view.term}:${view.groups.length}`
+          ? `aggregate:${view.term}:${view.groups.map((group) => `${group.category.id}:${group.candidates.length}`).join(',')}`
           : `category:${view.category.id}:${view.term}:${view.candidates.length}`;
   const shouldHighlightFirst = useFireOnKeyChange<string | null>();
   const { getEnabledItems, onHighlightedItemChange } = context;
