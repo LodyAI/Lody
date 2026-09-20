@@ -97,9 +97,10 @@ Keep these claims separate, in this order:
 
 1. Read liveness independently of the browser with `lody machine list --workspace <selector> --json`. A presence-room warning means unknown, not offline.
 2. Compare another workspace on the same machine. Each workspace has its own transport and queue, so one workspace offline while another is online points at a per-workspace publisher, not at the host.
-3. Heartbeat log lines prove LOCAL production only. `writeMachineHeartbeat` logs after the local store write and awaits no publish acknowledgement.
-4. Count presence writes per second per session in `~/.lody/logs/`. Hundreds or thousands of writes from one session in a few seconds is the signature; correlate its onset with the offline interval.
-5. Room status `joined` with a backlog is indistinguishable from healthy. Connection health is not delivery freshness.
+3. Read the counters on the heartbeat line itself. `writeMachineHeartbeat` appends `queued=` (shared-queue depth), `room=`, `sinceLastAppendMs=` (how long the write path has made no progress) and, when uploads are stuck, `writeError=`/`writeErrorRetryable=`. The line still proves only a LOCAL store write — it is emitted without awaiting any publish acknowledgement — but the counters describe the queue that write just entered.
+4. A `Loro presence machine heartbeat delivered` line reports `ageAtSendMs`, the heartbeat's age when it actually left the process, and `queuedAhead`. At or past the freshness window it is logged at WARN: that heartbeat reached readers already expired, so they still report this machine offline. One delivery probe runs at a time; while one is outstanding, later heartbeat lines carry `unackedHeartbeatSeq=`/`unackedForMs=`, which is how a permanently stalled queue surfaces instead of going silent.
+5. Count presence writes per second per session in `~/.lody/logs/`. Hundreds or thousands of writes from one session in a few seconds is the signature; correlate its onset with the offline interval.
+6. Room status `joined` with a backlog is indistinguishable from healthy on the room status alone. Connection health is not delivery freshness — read `queued=` and `ageAtSendMs` instead.
 
 Restarting the daemon destroys the evidence and the backlog returns with the next
 burst; it is not a fix.
