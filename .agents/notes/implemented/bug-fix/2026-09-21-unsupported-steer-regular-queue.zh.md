@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: [#861](https://github.com/LodyAI/Lody/pull/861)
+
 [English](2026-09-21-unsupported-steer-regular-queue.md)
 
 ## 摘要
