@@ -148,7 +148,7 @@ const CLOSE_MODE_EXIT_SLOP_TRAILING = 60;
  * complete class literal in the source. The pinned length itself arrives
  * through the item's custom property.
  */
-const ACTIVE_MIN_WIDTH_CLASS = '@container-[366px]:min-w-(--tab-active-min-width)';
+const ACTIVE_MIN_WIDTH_CLASS = '@[366px]:min-w-(--tab-active-min-width)';
 
 const EMPTY_MARGIN_MAP: ReadonlyMap<string, number> = new Map();
 
@@ -261,8 +261,7 @@ function captureStripGeometry(
   for (const [index, id] of itemIds.entries()) {
     const element = strip.querySelector<HTMLElement>(`[data-adaptive-tab-strip-item="${id}"]`);
     if (!element) return null;
-    // The resting gap is the strip's `gap`, not a per-item margin (only a
-    // slide margin lands on the item), so fall back to the configured value.
+    // Each item owns the trailing gap in both resting and frozen layouts.
     const style = getComputedStyle(element);
     const marginRight = index === itemIds.length - 1 ? 0 : parseFloat(style.marginRight) || gap;
     items.push({ id, width: element.getBoundingClientRect().width, marginRight });
@@ -334,13 +333,11 @@ export function AdaptiveTabStrip({
       // A shrink past the captured width releases the freeze: Chromium caps
       // the override at the real width but keeps it when the strip grows. The
       // rest of the resize needs no state — flex has already resized the tabs.
-      setFrozenLayout((frozen) =>
-        frozen !== null &&
-        capturedWidthRef.current > 0 &&
-        viewportWidthRef.current < capturedWidthRef.current
-          ? null
-          : frozen
-      );
+      // Do not enqueue identity updates: React can replay an eagerly computed
+      // null after the discrete close event has established a frozen layout.
+      if (capturedWidthRef.current > 0 && viewportWidthRef.current < capturedWidthRef.current) {
+        setFrozenLayout(null);
+      }
     };
     measure();
     if (typeof ResizeObserver !== 'undefined') {
@@ -621,7 +618,6 @@ export function AdaptiveTabStrip({
             {
               ...style,
               boxSizing: 'border-box',
-              gap,
               paddingLeft: layout?.paddingLeft ?? paddingLeft,
               paddingRight: layout?.paddingRight ?? paddingRight,
             } as CSSProperties
@@ -671,19 +667,17 @@ export const AdaptiveTabStripItem = forwardRef<HTMLDivElement, AdaptiveTabStripI
             : null),
         };
 
-    // margin-inline-start plays the removal slide; width plays the insert
-    // grow-in and the release re-expansion. Reduced-motion users get the same
-    // resting geometry without the animation. The transition only ever fires
-    // for those: the browser's own flex sizing needs no easing to keep up with
-    // the panel it lives in.
+    // Only explicitly frozen geometry transitions. Initial mount, restored
+    // tabs and container resizes use flex directly, without an opening tween.
     return (
       <div
         {...props}
         ref={ref}
         className={cn(
           'min-w-0 overflow-hidden',
-          'transition-[width,margin-inline-start] duration-200 motion-reduce:transition-none',
-          isActive && ACTIVE_MIN_WIDTH_CLASS,
+          itemLayout &&
+            'transition-[width,margin-inline-start] duration-200 motion-reduce:transition-none',
+          !itemLayout && isActive && ACTIVE_MIN_WIDTH_CLASS,
           className
         )}
         style={{ ...style, ...layoutStyle }}
