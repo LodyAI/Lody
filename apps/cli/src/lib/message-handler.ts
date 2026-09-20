@@ -8096,6 +8096,7 @@ export class MessageHandler {
     model?: ModelInfo,
     agentClient?: Pick<AgentClient, 'getAutomaticToolPermissionOutcome' | 'subscribeConfigOptions'>
   ): Promise<RequestPermissionResponse> {
+    const permissionTurnId = this.store.getTurnId(sessionId);
     const isAskUserQuestionRequest = isAskUserQuestionPermissionRequest(request);
     const askUserQuestionMeta = isAskUserQuestionRequest
       ? parseAskUserQuestionPermissionMeta(request._meta)
@@ -8162,6 +8163,23 @@ export class MessageHandler {
     let permissionRequestPersisted = false;
 
     try {
+      // Notifications only enqueue on receipt. A permission request is a
+      // separate RPC and must not synthesize its tool row ahead of that queue:
+      // doing so splits an already-started text block at a batch boundary.
+      await this.awaitTurnHistoryGate(sessionId);
+      await this.flushACPUpdatesNow(sessionId);
+      if (
+        this.deletedSessionIds.has(sessionId) ||
+        this.store.getTurnId(sessionId) !== permissionTurnId
+      ) {
+        throw new Error('Permission owner changed while draining ACP history');
+      }
+      const acpState = this.store.get(sessionId);
+      if (acpState.acpUpdateBuffer.length > 0 || acpState.acpFlushInFlight) {
+        // The bounded drain can return with failed writes still queued. Do not
+        // overtake them; use the existing unobservable-permission cancellation.
+        throw new Error('ACP history has not drained before permission persistence');
+      }
       permissionRequestPersisted = await ensurePermissionRequestOnToolCall(
         doc,
         requestId,
