@@ -293,6 +293,17 @@ export const sidebarOrganizeModeAtom = atomWithStorage<SidebarOrganizeMode>(
 );
 
 /**
+ * Updated mode mixes every project into one recency list. When true, top-level
+ * rows show the project mark and name under the title. Nested opened Sessions
+ * stay one line. Workspace mode ignores this preference because its group
+ * headers already identify each project.
+ */
+export const sidebarUpdatedShowProjectNamesAtom = atomWithStorage<boolean>(
+  'lody-sidebar-updated-show-project-names',
+  true
+);
+
+/**
  * Per-bucket collapse state for the Updated organize mode.
  * Keyed by the single 'all' bucket; value is whether collapsed. (Persisted
  * entries from the retired today/week/older buckets are simply ignored.)

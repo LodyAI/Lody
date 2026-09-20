@@ -291,6 +291,7 @@ function StoryLayout(args: Parameters<typeof LoroSidebar>[0]) {
     args.organizeMode ?? 'workspace'
   );
   const [chatScope, setChatScope] = useState<LoroSidebarChatScope>(args.chatScope ?? 'my');
+  const [showUpdatedProjectNames, setShowUpdatedProjectNames] = useState(true);
   const [updatedBucketsCollapsed, setUpdatedBucketsCollapsed] = useState<
     Partial<Record<SidebarUpdatedBucketKey, boolean>>
   >({});
@@ -390,6 +391,8 @@ function StoryLayout(args: Parameters<typeof LoroSidebar>[0]) {
       updatedSelectedItemId={selectedSessionId}
       updatedBucketsCollapsed={updatedBucketsCollapsed}
       onOrganizeModeChange={setOrganizeMode}
+      showUpdatedProjectNames={showUpdatedProjectNames}
+      onShowUpdatedProjectNamesChange={setShowUpdatedProjectNames}
       onChatScopeChange={setChatScope}
       onSelectUpdatedItem={setSelectedSessionId}
       onTogglePinnedSection={() => setPinnedSectionCollapsed((prev) => !prev)}
@@ -663,15 +666,80 @@ const demoUpdatedTaskListProps: SessionListProps = {
     {
       sessionId: 'task-4',
       title: 'Fix Data Persistence Issue',
-      repoFullName: 'loro-dev/lody',
+      repoFullName: 'wibus-wee/lody',
       branchName: 'fix/data-persistence',
-      prUrl: 'https://github.com/loro-dev/lody/pull/78',
+      prUrl: 'https://github.com/wibus-wee/lody/pull/78',
       prStatus: 'open',
       latestMessageAt: NOW - 4 * 24 * 60 * 60 * 1000, // 4d -> this week
       addedLines: 456,
       deletedLines: 12,
       isWorking: false,
       hasUnreadMessages: true,
+      isOffline: false,
+      isWaitingPermission: false,
+    },
+    {
+      sessionId: 'task-8',
+      title: 'Polish repository identity',
+      repoFullName: 'wibus-wee/lody',
+      branchName: 'feat/repository-identity',
+      latestMessageAt: NOW - 45 * 60 * 1000,
+      addedLines: 84,
+      deletedLines: 21,
+      isWorking: false,
+      hasUnreadMessages: false,
+      isOffline: false,
+      isWaitingPermission: false,
+    },
+    {
+      sessionId: 'task-9',
+      title: 'Reduce sidebar visual weight',
+      repoFullName: 'LodyAI/Lody',
+      branchName: 'fix/sidebar-visual-weight',
+      latestMessageAt: NOW - 5 * 60 * 60 * 1000,
+      addedLines: 36,
+      deletedLines: 18,
+      isWorking: true,
+      hasUnreadMessages: false,
+      isOffline: false,
+      isWaitingPermission: false,
+    },
+    {
+      sessionId: 'task-10',
+      title: 'Tune virtualized list rendering',
+      repoFullName: 'facebook/react',
+      branchName: 'perf/virtualized-list',
+      latestMessageAt: NOW - 26 * 60 * 60 * 1000,
+      addedLines: 212,
+      deletedLines: 97,
+      isWorking: false,
+      hasUnreadMessages: true,
+      isOffline: false,
+      isWaitingPermission: false,
+    },
+    {
+      sessionId: 'task-11',
+      title: 'Review deployment preview',
+      repoFullName: 'vercel/next.js',
+      branchName: 'chore/preview-review',
+      latestMessageAt: NOW - 3 * 24 * 60 * 60 * 1000,
+      addedLines: 19,
+      deletedLines: 4,
+      isWorking: false,
+      hasUnreadMessages: false,
+      isOffline: false,
+      isWaitingPermission: true,
+    },
+    {
+      sessionId: 'task-12',
+      title: 'Improve formatter diagnostics',
+      repoFullName: 'biomejs/biome',
+      branchName: 'feat/formatter-diagnostics',
+      latestMessageAt: NOW - 8 * 24 * 60 * 60 * 1000,
+      addedLines: 148,
+      deletedLines: 63,
+      isWorking: false,
+      hasUnreadMessages: false,
       isOffline: false,
       isWaitingPermission: false,
     },

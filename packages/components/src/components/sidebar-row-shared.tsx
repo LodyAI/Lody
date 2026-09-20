@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from 'react';
+import { useId, useState, type CSSProperties, type ReactEventHandler, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { SessionRowOpenedByTreeSlot } from './session-row-leading-slot';
 export {
@@ -489,15 +489,21 @@ export function SidebarRowEndSlot({
 export function GitHubOwnerIcon({
   repoFullName,
   className,
+  style,
+  crossOrigin,
+  onImageLoad,
 }: {
   repoFullName: string | null;
   className?: string;
+  style?: CSSProperties;
+  crossOrigin?: 'anonymous' | 'use-credentials' | '';
+  onImageLoad?: ReactEventHandler<HTMLImageElement>;
 }) {
   const ownerHandle = repoFullName ? (repoFullName.split('/')[0] ?? '').trim() : '';
   const [failed, setFailed] = useState(false);
 
   if (!ownerHandle || failed) {
-    return <Github className={className} aria-hidden="true" />;
+    return <Github className={className} style={style} aria-hidden="true" />;
   }
   return (
     <CachedAvatarImg
@@ -505,6 +511,9 @@ export function GitHubOwnerIcon({
       alt=""
       aria-hidden="true"
       className={cn('rounded-sm object-cover', className)}
+      style={style}
+      crossOrigin={crossOrigin}
+      onLoad={onImageLoad}
       onError={() => setFailed(true)}
     />
   );

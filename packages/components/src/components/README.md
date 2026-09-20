@@ -19,11 +19,16 @@ explains why exact opener navigation and root-row indentation use separate ids.
 A child Tab may open an independent Session: the row sits under the root, but its
 navigation must still return to the precise creating Tab.
 
-Updated organize mode is a mixed recency list, so a top-level row shows a second
-line with folder / GitHub owner mark + project name. Nested opened Sessions stay
-one title line so the 30px tree trunk still meets. Workspace-mode Pinned omits
-the line. Decision:
-[updated project context](../../../../.agents/notes/implemented/feature/2026-09-20-sidebar-updated-project-context.md).
+Updated organize mode is a mixed recency list. The sidebar view popover exposes
+`Origins` as a switch below the View and Tasks menu groups. It controls the
+second line with folder / muted GitHub owner mark +
+project name. GitHub marks sample their source luminance, leave pale avatars at
+their original luminance, and lift only dark avatars. The active row restores
+the original color with a short transition. Nested opened Sessions stay one
+title line so the 30px tree trunk still meets. Workspace-mode Pinned omits the
+line. Decisions:
+[project context](../../../../.agents/notes/implemented/feature/2026-09-20-sidebar-updated-project-context.md)
+and [display preference](../../../../.agents/notes/implemented/feature/2026-09-20-sidebar-updated-project-display-preference.md).
 
 ## Entry points and layout
 

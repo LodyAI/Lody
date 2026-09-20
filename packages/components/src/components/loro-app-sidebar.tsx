@@ -92,6 +92,7 @@ import {
   sidebarCollapsedAtom,
   sidebarLastWidthAtom,
   sidebarOrganizeModeAtom,
+  sidebarUpdatedShowProjectNamesAtom,
   sidebarUpdatedBucketCollapseStateAtom,
   sidebarUpdatedBucketShowFullStateAtom,
   type SidebarOrganizeMode,
@@ -1676,6 +1677,9 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     [scope, isMultiMemberWorkspace, membersByUserId]
   );
   const [organizeMode, setOrganizeMode] = useAtom(sidebarOrganizeModeAtom);
+  const [showUpdatedProjectNames, setShowUpdatedProjectNames] = useAtom(
+    sidebarUpdatedShowProjectNamesAtom
+  );
   const setSidebarCollapsed = useSetAtom(sidebarCollapsedAtom);
   const [sidebarLastWidth, setSidebarLastWidth] = useAtom(sidebarLastWidthAtom);
   const handleChatScopeChanged = useCallback(
@@ -2527,10 +2531,11 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   const filterLabels = useMemo(
     () => ({
       triggerAriaLabel: t('sidebar.filter.trigger', 'Filter sidebar'),
-      organizeHeading: t('sidebar.filter.organizeHeading', 'Organize'),
-      showHeading: t('sidebar.filter.showHeading', 'Show'),
+      organizeHeading: t('sidebar.filter.organizeHeading', 'View'),
+      showHeading: t('sidebar.filter.showHeading', 'Tasks'),
       organizeProject: t('sidebar.filter.organizeProject', 'Project'),
       organizeUpdated: t('sidebar.filter.organizeUpdated', 'Updated'),
+      updatedProjectNames: t('sidebar.filter.updatedProjectNames', 'Origins'),
       showMyTasks: t('sessions.sidebar.my', 'My Tasks'),
       showAllTasks: t('sessions.sidebar.team', 'All Tasks'),
     }),
@@ -3361,6 +3366,8 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         updatedShowFullBuckets={updatedBucketShowFullState}
         updatedIsLoading={organizeMode === 'updated' && sessionsListLoading}
         onOrganizeModeChange={handleOrganizeModeChange}
+        showUpdatedProjectNames={showUpdatedProjectNames}
+        onShowUpdatedProjectNamesChange={setShowUpdatedProjectNames}
         onChatScopeChange={handleChatScopeChanged}
         onSelectUpdatedItem={handleSelectUpdatedItem}
         onTogglePinnedSection={handleTogglePinnedSection}

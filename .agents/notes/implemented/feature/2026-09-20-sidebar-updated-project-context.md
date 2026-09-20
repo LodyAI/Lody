@@ -42,6 +42,10 @@ A nested "Show project" checkbox under Updated was tried and dropped: the extra
 control made the filter noisier without changing the default, which is to show
 the project line whenever Updated is selected.
 
+The later [display-preference decision](2026-09-20-sidebar-updated-project-display-preference.md)
+reintroduces that control with revised wording and muted avatar treatment after
+the product requirement changed.
+
 ## Alternatives and trade-offs
 
 Putting project identity in the hover card was already true and is not enough:

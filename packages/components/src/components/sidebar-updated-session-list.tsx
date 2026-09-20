@@ -6,8 +6,10 @@ import {
   useCallback,
   useMemo,
   useState,
+  type CSSProperties,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
+  type SyntheticEvent,
 } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { startSessionMentionDrag } from '@/lib/session-mention-drag';
@@ -657,13 +659,128 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
 
 SidebarUpdatedSessionList.displayName = 'SidebarUpdatedSessionList';
 
-function UpdatedItemProjectLine({ item }: { item: SidebarUpdatedItem }) {
+type SidebarAvatarTone = {
+  brightness: number;
+  contrast: number;
+};
+
+const SIDEBAR_AVATAR_LIGHT_SOURCE_THRESHOLD = 0.65;
+const SIDEBAR_AVATAR_DARK_TARGET_LUMINANCE = 0.68;
+const SIDEBAR_AVATAR_TRANSPARENT_TARGET_LUMINANCE = 0.76;
+const SIDEBAR_AVATAR_DEFAULT_TONE: SidebarAvatarTone = { brightness: 1.36, contrast: 0.83 };
+const sidebarAvatarToneCache = new Map<string, SidebarAvatarTone>();
+
+/**
+ * Leave pale sources at their original luminance and lift only darker images.
+ */
+export function resolveSidebarAvatarTone(rgba: ArrayLike<number>): SidebarAvatarTone {
+  let weightedLuminance = 0;
+  let alphaWeight = 0;
+  let pixelCount = 0;
+
+  for (let index = 0; index + 3 < rgba.length; index += 4) {
+    const alpha = Number(rgba[index + 3]) / 255;
+    pixelCount += 1;
+    if (alpha <= 0.02) continue;
+    const red = Number(rgba[index]) / 255;
+    const green = Number(rgba[index + 1]) / 255;
+    const blue = Number(rgba[index + 2]) / 255;
+    const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+    weightedLuminance += luminance * alpha;
+    alphaWeight += alpha;
+  }
+
+  if (alphaWeight === 0) return SIDEBAR_AVATAR_DEFAULT_TONE;
+
+  const averageLuminance = weightedLuminance / alphaWeight;
+  if (averageLuminance >= SIDEBAR_AVATAR_LIGHT_SOURCE_THRESHOLD) {
+    return { brightness: 1, contrast: 1 };
+  }
+
+  const darkness = Math.min(
+    1,
+    Math.max(0, (SIDEBAR_AVATAR_LIGHT_SOURCE_THRESHOLD - averageLuminance) / 0.45)
+  );
+  const hasTransparentBackground = alphaWeight / pixelCount < 0.9;
+  const contrastReduction = hasTransparentBackground ? 0.68 : 0.5;
+  const targetLuminance = hasTransparentBackground
+    ? SIDEBAR_AVATAR_TRANSPARENT_TARGET_LUMINANCE
+    : SIDEBAR_AVATAR_DARK_TARGET_LUMINANCE;
+  const maximumBrightness = hasTransparentBackground ? 2 : 1.8;
+  const contrast = 1 - darkness * contrastReduction;
+  const compressedLuminance = contrast * averageLuminance + (1 - contrast) / 2;
+  return {
+    brightness: Math.min(maximumBrightness, targetLuminance / compressedLuminance),
+    contrast,
+  };
+}
+
+function sampleSidebarAvatarTone(image: HTMLImageElement): SidebarAvatarTone {
+  if (image.naturalWidth <= 0 || image.naturalHeight <= 0) {
+    return SIDEBAR_AVATAR_DEFAULT_TONE;
+  }
+
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = 16;
+    canvas.height = 16;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) return SIDEBAR_AVATAR_DEFAULT_TONE;
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return resolveSidebarAvatarTone(context.getImageData(0, 0, canvas.width, canvas.height).data);
+  } catch {
+    return SIDEBAR_AVATAR_DEFAULT_TONE;
+  }
+}
+
+function UpdatedGitHubOwnerMark({
+  repoFullName,
+  active,
+}: {
+  repoFullName: string | null;
+  active: boolean;
+}) {
+  const cacheKey = repoFullName ?? '';
+  const [tone, setTone] = useState(
+    () => sidebarAvatarToneCache.get(cacheKey) ?? SIDEBAR_AVATAR_DEFAULT_TONE
+  );
+  const handleImageLoad = useCallback(
+    (event: SyntheticEvent<HTMLImageElement>) => {
+      const nextTone = sampleSidebarAvatarTone(event.currentTarget);
+      sidebarAvatarToneCache.set(cacheKey, nextTone);
+      setTone(nextTone);
+    },
+    [cacheKey]
+  );
+
+  return (
+    <GitHubOwnerIcon
+      repoFullName={repoFullName}
+      crossOrigin="anonymous"
+      onImageLoad={handleImageLoad}
+      className={cn(
+        'h-4 w-4 transition-[filter,opacity] duration-200 ease-out motion-reduce:transition-none',
+        active
+          ? 'opacity-100 [filter:grayscale(0)_contrast(1)_brightness(1)]'
+          : 'opacity-80 [filter:grayscale(1)_contrast(var(--sidebar-avatar-contrast))_brightness(var(--sidebar-avatar-brightness))]'
+      )}
+      style={
+        {
+          '--sidebar-avatar-brightness': String(tone.brightness),
+          '--sidebar-avatar-contrast': String(tone.contrast),
+        } as CSSProperties
+      }
+    />
+  );
+}
+
+function UpdatedItemProjectLine({ item, active }: { item: SidebarUpdatedItem; active: boolean }) {
   const label = resolveUpdatedItemProjectLabel(item);
   if (!label) return null;
   const repoFullName = item.repoFullName ?? (item.kind === 'github' ? label : null);
   const isGithub = item.kind === 'github';
   const mark = isGithub ? (
-    <GitHubOwnerIcon repoFullName={repoFullName} className="h-3.5 w-3.5" />
+    <UpdatedGitHubOwnerMark repoFullName={repoFullName} active={active} />
   ) : item.kind === 'local' ? (
     <Folder className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
   ) : (
@@ -677,7 +794,7 @@ function UpdatedItemProjectLine({ item }: { item: SidebarUpdatedItem }) {
       <span
         className={cn(
           'flex shrink-0 items-center justify-center',
-          isGithub ? 'h-3.5 w-3.5 overflow-hidden rounded-sm' : 'h-3 w-3 opacity-80'
+          isGithub ? 'h-4 w-4 overflow-hidden rounded-[3px]' : 'h-3 w-3 opacity-80'
         )}
       >
         {mark}
@@ -969,7 +1086,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           >
             {titleNode}
           </div>
-          {showProjectLine ? <UpdatedItemProjectLine item={item} /> : null}
+          {showProjectLine ? <UpdatedItemProjectLine item={item} active={selected} /> : null}
         </div>
         {/* Keep PR at the right edge. Line totals stay in the hover card. */}
         <div className="flex h-5 shrink-0 items-center">
