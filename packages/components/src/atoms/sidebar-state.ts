@@ -237,17 +237,6 @@ export const sidebarOrganizeModeAtom = atomWithStorage<SidebarOrganizeMode>(
 );
 
 /**
- * Updated mode mixes every project into one recency list. When true, top-level
- * rows show folder / GitHub owner mark + project name under the title. Nested
- * opened Sessions stay one line either way. Only consulted while organize mode
- * is `updated`; Workspace grouping already has project headers.
- */
-export const sidebarUpdatedShowProjectAtom = atomWithStorage<boolean>(
-  'lody-sidebar-updated-show-project',
-  true
-);
-
-/**
  * Per-bucket collapse state for the Updated organize mode.
  * Keyed by the single 'all' bucket; value is whether collapsed. (Persisted
  * entries from the retired today/week/older buckets are simply ignored.)

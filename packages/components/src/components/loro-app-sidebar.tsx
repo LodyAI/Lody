@@ -74,7 +74,6 @@ import {
   sidebarCollapsedAtom,
   sidebarLastWidthAtom,
   sidebarOrganizeModeAtom,
-  sidebarUpdatedShowProjectAtom,
   sidebarUpdatedBucketCollapseStateAtom,
   sidebarUpdatedBucketShowFullStateAtom,
   type SidebarOrganizeMode,
@@ -1601,7 +1600,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     [scope, isMultiMemberWorkspace, membersByUserId]
   );
   const [organizeMode, setOrganizeMode] = useAtom(sidebarOrganizeModeAtom);
-  const [showUpdatedProject, setShowUpdatedProject] = useAtom(sidebarUpdatedShowProjectAtom);
   const setSidebarCollapsed = useSetAtom(sidebarCollapsedAtom);
   const [sidebarLastWidth, setSidebarLastWidth] = useAtom(sidebarLastWidthAtom);
   const handleChatScopeChanged = useCallback(
@@ -2403,7 +2401,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       showHeading: t('sidebar.filter.showHeading', 'Show'),
       organizeProject: t('sidebar.filter.organizeProject', 'Project'),
       organizeUpdated: t('sidebar.filter.organizeUpdated', 'Updated'),
-      showUpdatedProject: t('sidebar.filter.showUpdatedProject', 'Show project'),
       showMyTasks: t('sessions.sidebar.my', 'My Tasks'),
       showAllTasks: t('sessions.sidebar.team', 'All Tasks'),
     }),
@@ -3214,8 +3211,6 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         updatedShowFullBuckets={updatedBucketShowFullState}
         updatedIsLoading={organizeMode === 'updated' && sessionsListLoading}
         onOrganizeModeChange={handleOrganizeModeChange}
-        showUpdatedProject={showUpdatedProject}
-        onShowUpdatedProjectChange={setShowUpdatedProject}
         onChatScopeChange={handleChatScopeChanged}
         onSelectUpdatedItem={handleSelectUpdatedItem}
         onTogglePinnedSection={handleTogglePinnedSection}

@@ -257,23 +257,6 @@ describe('LoroSidebar pinned section', () => {
     expect(pinnedRow?.querySelector('[data-sidebar-updated-project]')).toBeNull();
   });
 
-  it('hides project context in Updated mode when the filter sub-option is off', () => {
-    renderSidebar({
-      organizeMode: 'updated',
-      showUpdatedProject: false,
-      updatedItems: [
-        {
-          id: 'updated-session',
-          kind: 'chat',
-          title: 'Recently updated conversation',
-          sectionLabel: 'Chats',
-          latestMessageAt: new Date('2026-07-14T09:00:00.000Z'),
-        },
-      ],
-    });
-    expect(container?.querySelector('[data-sidebar-updated-project]')).toBeNull();
-  });
-
   it('collapses pinned conversations and keeps the folded chevron visible', () => {
     const onTogglePinnedSection = vi.fn();
     renderSidebar({

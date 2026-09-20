@@ -23,7 +23,6 @@ export type SidebarFilterLabels = {
   showHeading: string;
   organizeProject: string;
   organizeUpdated: string;
-  showUpdatedProject: string;
   showMyTasks: string;
   showAllTasks: string;
 };
@@ -34,7 +33,6 @@ const defaultLabels: SidebarFilterLabels = {
   showHeading: 'Show',
   organizeProject: 'Project',
   organizeUpdated: 'Updated',
-  showUpdatedProject: 'Show project',
   showMyTasks: 'My Tasks',
   showAllTasks: 'All Tasks',
 };
@@ -44,9 +42,6 @@ export type SidebarFilterPopoverProps = {
   scope: SidebarChatScope;
   onOrganizeChange?: (next: SidebarOrganizeMode) => void;
   onScopeChange?: (next: SidebarChatScope) => void;
-  /** Whether Updated-mode rows show project identity. Ignored unless organize is `updated`. */
-  showUpdatedProject?: boolean;
-  onShowUpdatedProjectChange?: (next: boolean) => void;
   labels?: Partial<SidebarFilterLabels>;
   className?: string;
   triggerClassName?: string;
@@ -107,8 +102,6 @@ export function SidebarFilterPopover({
   scope,
   onOrganizeChange,
   onScopeChange,
-  showUpdatedProject = true,
-  onShowUpdatedProjectChange,
   labels,
   className,
   triggerClassName,
@@ -121,9 +114,7 @@ export function SidebarFilterPopover({
 
   const handleOrganizeSelect = (next: SidebarOrganizeMode) => {
     onOrganizeChange?.(next);
-    // Keep the menu open on Updated so the nested "Show project" row is
-    // reachable in the same gesture. Project has no nested control.
-    if (next !== 'updated') setOpen(false);
+    setOpen(false);
   };
   const handleScopeSelect = (next: SidebarChatScope) => {
     onScopeChange?.(next);
@@ -171,49 +162,12 @@ export function SidebarFilterPopover({
           selected={organize === 'workspace'}
           onSelect={() => handleOrganizeSelect('workspace')}
         />
-        <div className="relative">
-          <FilterRow
-            label={merged.organizeUpdated}
-            icon={Clock}
-            selected={organize === 'updated'}
-            onSelect={() => handleOrganizeSelect('updated')}
-          />
-          {organize === 'updated' ? (
-            <button
-              type="button"
-              role="menuitemcheckbox"
-              aria-checked={showUpdatedProject}
-              data-sidebar-filter-show-project=""
-              className={cn(
-                'flex w-full min-h-7 select-none items-center gap-2 rounded-md px-2 py-1 text-left text-[0.9em] leading-tight',
-                'text-popover-foreground',
-                'hover:bg-foreground/[0.05] hover:text-foreground',
-                'focus-visible:bg-foreground/[0.05] focus-visible:text-foreground focus-visible:outline-hidden',
-                'dark:hover:bg-white/[0.10] dark:focus-visible:bg-white/[0.10]'
-              )}
-              onClick={() => onShowUpdatedProjectChange?.(!showUpdatedProject)}
-            >
-              {/* Same 14px icon column as FilterRow. Trunk reaches the Updated
-                  clock centre; elbow turns into the nested label. */}
-              <span className="relative flex h-3.5 w-3.5 shrink-0" aria-hidden="true">
-                <span
-                  data-sidebar-filter-tree="trunk"
-                  className="absolute left-1/2 -top-[21px] bottom-1/2 w-px -translate-x-1/2 bg-muted-foreground/35"
-                />
-                <span
-                  data-sidebar-filter-tree="elbow"
-                  className="absolute left-1/2 top-1/2 h-px w-2.5 bg-muted-foreground/35"
-                />
-              </span>
-              <span className="min-w-0 flex-1 truncate">{merged.showUpdatedProject}</span>
-              {showUpdatedProject ? (
-                <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-              ) : (
-                <span className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-              )}
-            </button>
-          ) : null}
-        </div>
+        <FilterRow
+          label={merged.organizeUpdated}
+          icon={Clock}
+          selected={organize === 'updated'}
+          onSelect={() => handleOrganizeSelect('updated')}
+        />
         <div className={menuSeparatorClassName} aria-hidden="true" />
         <SectionHeading>{merged.showHeading}</SectionHeading>
         <FilterRow

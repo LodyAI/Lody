@@ -40,10 +40,11 @@ const TREE_LINE_CLASS = 'bg-sidebar-foreground/20';
  */
 const TREE_TRUNK_FROM_PREV_CLASS = '-top-2';
 /**
- * Extra reach for a first child under a two-line opener (title + ~16px project
- * subtitle). 8px (the one-line contract) + 16px subtitle = 24px = `-top-6`.
+ * Extra reach for a first child under a two-line opener (title + project
+ * subtitle with 4px gap and slightly taller padding). 8px (the one-line
+ * contract) + ~20px subtitle block = 28px = `-top-7`.
  */
-const TREE_TRUNK_FROM_TALL_OPENER_CLASS = '-top-6';
+const TREE_TRUNK_FROM_TALL_OPENER_CLASS = '-top-7';
 const TREE_TRUNK_INTO_NEXT_CLASS = '-bottom-[9px]';
 
 /**

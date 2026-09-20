@@ -671,7 +671,7 @@ function UpdatedItemProjectLine({ item }: { item: SidebarUpdatedItem }) {
   return (
     <div
       data-sidebar-updated-project={item.kind}
-      className="mt-px flex min-w-0 items-center gap-1 text-[11px] leading-tight text-sidebar-foreground-muted"
+      className="flex min-w-0 items-center gap-1 text-[11px] leading-tight text-sidebar-foreground-muted"
     >
       <span className="flex h-3 w-3 shrink-0 items-center justify-center opacity-80">{mark}</span>
       <span className="min-w-0 truncate">{label}</span>
@@ -874,7 +874,8 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         // only. The bucket wrapper above also uses an (unnamed) `group` for its
         // header chevron — without naming, hovering any row would match the bucket's
         // group-hover and reveal every row's archive button at once.
-        'group/row relative flex w-full items-start rounded-md px-2 py-1 text-left',
+        'group/row relative flex w-full items-start rounded-md px-2 text-left',
+        showProjectLine ? 'py-1.5' : 'py-1',
         'border border-transparent bg-transparent',
         !showSelectedState &&
           onSelect &&
@@ -945,7 +946,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             />
           </span>
         ) : null}
-        <div className="min-w-0 flex-1">
+        <div className={cn('min-w-0 flex-1', showProjectLine && 'flex flex-col gap-1')}>
           <div
             className={cn('flex h-5 min-w-0 items-center truncate text-sm')}
             // Double-click to rename is scoped to the title only, so double-clicking

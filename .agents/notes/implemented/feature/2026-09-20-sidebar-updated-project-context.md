@@ -9,13 +9,12 @@ PR: https://github.com/LodyAI/Lody/pull/838
 ## Abstract
 
 Updated organize mode is a recency firehose across every project, so a one-line
-title no longer says where a Session lives. When Updated is selected, the
-filter menu nests a "Show project" checkbox (on by default) that adds a second
-line with the same identity mark Project headers already use (folder, GitHub
-owner avatar, or chat glyph) plus the project or section name. Nested opened
-Sessions stay a single title line so the opened-by tree trunk still meets the
-30px row contract. Workspace-mode Pinned omits the line because those rows
-still sit next to their project groups.
+title no longer says where a Session lives. Top-level rows now add a second
+line with the same identity mark the Project headers already use (folder,
+GitHub owner avatar, or chat glyph) plus the project or section name. Nested
+opened Sessions stay a single title line so the opened-by tree trunk still
+meets the 30px row contract. Workspace-mode Pinned omits the line because those
+rows still sit next to their project groups.
 
 ## Problem and decision
 
@@ -27,18 +26,21 @@ one in the current project.
 
 `SidebarUpdatedSessionList` accepts `showProjectContext`.
 `LoroSidebar` turns it on for the Pinned section and the Updated bucket when
-`organizeMode === 'updated'` and the nested "Show project" checkbox is on
-(`sidebarUpdatedShowProjectAtom`, default true). Selecting Updated keeps the
-filter menu open so the checkbox is reachable in the same gesture. The second
-line uses `subtitle` when present (local folder name, GitHub `owner/repo`) and
-falls back to `sectionLabel` for chats. Nested children
-(`openedByTree.kind === 'child'`) skip the line: they inherit the opener's
-project visually through nesting.
+`organizeMode === 'updated'`. The second line uses `subtitle` when present
+(local folder name, GitHub `owner/repo`) and falls back to `sectionLabel` for
+chats. Nested children (`openedByTree.kind === 'child'`) skip the line: they
+inherit the opener's project visually through nesting.
 
 The title line keeps the existing 20px content height so disclosure, connector,
-and end-slot geometry stay on that line. A first child under a two-line opener
-stretches its upward trunk (`-top-6` instead of `-top-2`) to close the extra
-subtitle gap. Later siblings keep the one-line trunk.
+and end-slot geometry stay on that line. Title and project sit 4px apart, and
+two-line rows use `py-1.5` so the pair is not flush against the highlight.
+A first child under a two-line opener stretches its upward trunk (`-top-7`
+instead of `-top-2`) to close the extra subtitle gap. Later siblings keep the
+one-line trunk.
+
+A nested "Show project" checkbox under Updated was tried and dropped: the extra
+control made the filter noisier without changing the default, which is to show
+the project line whenever Updated is selected.
 
 ## Alternatives and trade-offs
 
