@@ -2119,6 +2119,10 @@ export const SessionChatStreamView = forwardRef<
                           conversationFontSize={conversationFontSize}
                           shimmerGroupHeader={row.key === liveGroupHeaderRowKey}
                           liveStatus={row.key === liveFooterRowKey ? liveFooterStatus : null}
+                          liveStatusFollowsSurface={
+                            row.key === liveFooterRowKey &&
+                            assistantRowPaintsSurface(virtualRows[rowIndex - 1])
+                          }
                         />
                       </MessageSelectionRow>
                     );
@@ -4025,6 +4029,22 @@ const isAssistantToolCallActivityEntry = (
   entry: AssistantActivityRenderItem
 ): entry is AssistantToolCallRenderItem => entry.content.type === 'tool_call';
 
+/** Whether a live status below this row needs the same gap used between cards. */
+const assistantRowPaintsSurface = (row: ChatVirtualRow | undefined): boolean => {
+  if (row?.type !== 'assistant') return false;
+  switch (row.content.kind) {
+    case 'plan':
+    case 'subagent_tasks':
+      return true;
+    case 'content':
+      return isCardContentBlock(row.content.block);
+    case 'activity_detail':
+      return isAssistantToolCallActivityEntry(row.content.entry);
+    default:
+      return false;
+  }
+};
+
 // All props are primitives, so plain memo() keeps finished thoughts inside a
 // still-streaming turn from re-rendering on every delta.
 const AssistantThoughtVirtualRow = memo(function AssistantThoughtVirtualRow({
@@ -4521,6 +4541,8 @@ interface AssistantChatItemProps {
   shimmerGroupHeader?: boolean;
   /** This row is the live turn's footer: the status sits above its actions. */
   liveStatus?: AgentActivityStatusProps | null;
+  /** A bordered/card row above the status needs the wider object gap. */
+  liveStatusFollowsSurface?: boolean;
 }
 
 // Rows for unchanged turns are reference-stable via `assistantTurnRowsCache`,
@@ -4609,6 +4631,7 @@ const areAssistantChatItemPropsEqual = (
   prev.onTurnHoverChange === next.onTurnHoverChange &&
   prev.conversationFontSize === next.conversationFontSize &&
   prev.shimmerGroupHeader === next.shimmerGroupHeader &&
+  prev.liveStatusFollowsSurface === next.liveStatusFollowsSurface &&
   prev.liveStatus?.label === next.liveStatus?.label &&
   prev.liveStatus?.tone === next.liveStatus?.tone &&
   prev.liveStatus?.shimmer === next.liveStatus?.shimmer;
@@ -4630,6 +4653,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
   conversationFontSize,
   shimmerGroupHeader = false,
   liveStatus = null,
+  liveStatusFollowsSurface = false,
 }: AssistantChatItemProps) {
   const message = row.item.message;
   const { content } = row;
@@ -4721,9 +4745,11 @@ const AssistantChatItem = memo(function AssistantChatItem({
         return (
           <>
             {/* Inside the turn, above its copy/fork actions: the status reads as
-                the turn's next step rather than something after it. */}
+                the turn's next step rather than something after it. The footer
+                row itself suppresses top padding, so restore the normal prose
+                gap or the wider surface gap used after a bordered card. */}
             {liveStatus ? (
-              <div className="pb-1.5">
+              <div className={cn('pb-1.5', liveStatusFollowsSurface ? 'pt-3' : 'pt-1')}>
                 <AgentActivityStatus {...liveStatus} message={message} />
               </div>
             ) : null}

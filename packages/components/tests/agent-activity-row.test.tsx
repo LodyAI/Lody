@@ -151,6 +151,28 @@ describe('live agent status', () => {
     expect(
       status!.compareDocumentPosition(copyContext!) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
+    expect(status?.parentElement?.classList.contains('pt-1')).toBe(true);
+  });
+
+  it('keeps the wider surface gap below a live subagent task card', async () => {
+    await render(
+      liveTurn([
+        toolCall('a'),
+        {
+          type: 'subagent_task',
+          taskId: 'task-a',
+          status: 'in_progress',
+          actor: 'Researcher',
+          description: 'Inspect the failing check',
+        },
+      ]),
+      { label: 'Working' },
+      { withTurnFooter: true }
+    );
+
+    const status = container.querySelector('[data-agent-activity-status]');
+    expect(container.textContent).toContain('Waiting on 1 task');
+    expect(status?.parentElement?.classList.contains('pt-3')).toBe(true);
   });
 
   it('exposes the turn configuration while the reply is still streaming', async () => {
