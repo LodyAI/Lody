@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: https://github.com/LodyAI/Lody/pull/837
+
 [中文](2026-09-20-ask-question-answer-notes.zh.md)
 
 ## Abstract
