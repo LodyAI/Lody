@@ -74,6 +74,8 @@ describe('SidebarFilterPopover Updated project sub-option', () => {
     expect(row).not.toBeNull();
     expect(row?.getAttribute('aria-checked')).toBe('true');
     expect(row?.textContent).toContain('Show project');
+    expect(row?.querySelector('[data-sidebar-filter-tree="trunk"]')).not.toBeNull();
+    expect(row?.querySelector('[data-sidebar-filter-tree="elbow"]')).not.toBeNull();
     flushSync(() => {
       row?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     });
