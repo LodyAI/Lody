@@ -1,10 +1,10 @@
-import * as baseline from './fixtures/mention-file-search-baseline';
+import * as baseline from '../../tests/fixtures/file-search/baseline';
 import {
   buildMentionFileIndex,
   getSuggestions,
-} from '../src/components/mentions/mention-file-search';
-import { createFileSearchClient } from '../src/components/mentions/mention-file-search-client';
-import { makeFilePaths, fileSearchQueries } from './mention-file-search-fixture';
+} from '../../src/components/mentions/file-search/engine';
+import { createFileSearchClient } from '../../src/components/mentions/file-search/client';
+import { makeFilePaths, fileSearchQueries } from '../../tests/fixtures/file-search/paths';
 
 const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 async function measure<T>(operation: () => T | Promise<T>) {
@@ -46,7 +46,10 @@ export async function runBenchmark(repeats = 3) {
           reject = fail;
           client = createFileSearchClient(
             new Worker(
-              new URL('../src/components/mentions/mention-file-search.worker.ts', import.meta.url),
+              new URL(
+                '../../src/components/mentions/file-search/search.worker.ts',
+                import.meta.url
+              ),
               { type: 'module' }
             ),
             entry,
@@ -111,7 +114,7 @@ export async function runBenchmark(repeats = 3) {
 /** Real worker protocol check, driven by messages rather than sleeps or timings. */
 export async function verifyWorkerCancellation() {
   const worker = new Worker(
-    new URL('../src/components/mentions/mention-file-search.worker.ts', import.meta.url),
+    new URL('../../src/components/mentions/file-search/search.worker.ts', import.meta.url),
     { type: 'module' }
   );
   const entry = { paths: makeFilePaths(2000) };

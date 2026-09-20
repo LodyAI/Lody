@@ -1,4 +1,4 @@
-import { useMentionFileSearch } from './use-mention-file-search';
+import { useMentionFileSearch } from './file-search/use-file-search';
 import { useShortcutMentionSource } from './use-shortcut-mention-source';
 import { shortcutComposerScope } from './shortcut-composer-state';
 import * as React from 'react';

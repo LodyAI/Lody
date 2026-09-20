@@ -1,4 +1,4 @@
-import { useMentionFileSearch } from './use-mention-file-search';
+import { useMentionFileSearch } from './file-search/use-file-search';
 import * as React from 'react';
 import { forEachAtTokenSpan, type HydratedMentions } from '@/components/mentions/mention-hydration';
 import { useAtomValue } from 'jotai';
@@ -12,8 +12,8 @@ import {
   getRepoMentionAnalyticsId,
   normalizeGithubFetchErrorCode,
 } from '@/components/mentions/mention-analytics';
-import { buildPathSuggestions } from './mention-file-search';
-export * from './mention-file-search';
+import { buildPathSuggestions } from './file-search/engine';
+export * from './file-search/engine';
 import { withGitHubTokenRetry } from '@/lib/github-token';
 import { cn } from '@/lib/utils';
 import { FileIcon, FolderIcon } from '@/components/icons/file-icons';

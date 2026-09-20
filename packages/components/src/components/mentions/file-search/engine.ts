@@ -1,4 +1,4 @@
-import { createFuzzyScoreOnly } from './vscode-fuzzy-score';
+import { createFuzzyScoreOnly } from '../vscode-fuzzy-score';
 
 const scoreFileMatch = createFuzzyScoreOnly();
 

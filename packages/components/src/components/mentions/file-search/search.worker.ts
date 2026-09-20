@@ -1,5 +1,5 @@
-import { buildMentionFileIndex, searchSuggestions } from './mention-file-search';
-import type { FileSearchRequest, FileSearchResponse } from './mention-file-search-client';
+import { buildMentionFileIndex, searchSuggestions } from './engine';
+import type { FileSearchRequest, FileSearchResponse } from './client';
 
 let index: ReturnType<typeof buildMentionFileIndex> = null;
 let generation = 0;

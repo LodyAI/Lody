@@ -1,4 +1,4 @@
-// From packages/components: node benchmarks/mention-file-search.mjs [repeats]
+// From packages/components: node benchmarks/file-search/run.mjs [repeats]
 import { build, version as viteVersion } from 'vite';
 import { createRequire } from 'node:module';
 import { chromium } from '@playwright/test';
@@ -9,7 +9,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join, resolve as resolvePath } from 'node:path';
 
 const require = createRequire(import.meta.url);
-const root = fileURLToPath(new URL('..', import.meta.url));
+const root = fileURLToPath(new URL('../..', import.meta.url));
 const output = await mkdtemp(join(tmpdir(), 'lody-file-search-bench-'));
 let browser;
 let server;
@@ -23,13 +23,13 @@ try {
       emptyOutDir: true,
       minify: true,
       lib: {
-        entry: join(root, 'benchmarks/mention-file-search-browser.ts'),
+        entry: join(root, 'benchmarks/file-search/browser.ts'),
         formats: ['es'],
         fileName: () => 'benchmark.js',
       },
     },
   });
-  server = createServer(async (request, response) => {
+  server = createServer((request, response) => {
     if (request.url === '/') {
       response.setHeader('Content-Type', 'text/html');
       response.end('<!doctype html><title>File search benchmark</title>');
@@ -40,12 +40,13 @@ try {
       response.writeHead(404).end();
       return;
     }
-    try {
-      response.setHeader('Content-Type', 'text/javascript');
-      response.end(await readFile(path));
-    } catch {
-      response.writeHead(404).end();
-    }
+    void readFile(path).then(
+      (content) => {
+        response.setHeader('Content-Type', 'text/javascript');
+        response.end(content);
+      },
+      () => response.writeHead(404).end()
+    );
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   browser = await chromium.launch({

@@ -17,10 +17,8 @@ rules live in [AGENTS.md](AGENTS.md); the pipeline and its reasoning live in
   `category_enter` is reported from the resolved view, not a row callback: a
   navigation item never fires `onMentionSelect`, and the keyboard route counts.
 - `file-at-mention.tsx` and `mention-project-file-source.ts` load file paths and
-  provide draft hydration. `use-mention-file-search.ts` binds menus to the worker
-  client; `mention-file-search.worker.ts` owns indexing and cancellable queries.
-  `mention-file-search.ts` owns path ranking and bounded selection. See the
-  [reproducible benchmark](../../../benchmarks/README.md).
+  provide draft hydration. [`file-search/`](file-search/README.md) owns the
+  cancellable Worker, React lifecycle, and bounded path ranking.
 - `mention-session-source.ts` owns session slugs, candidates, the slug → id cache,
   hydration, the drop-time insertion, and the before-send expansion. Transfer
   format and the self-drop check live in `lib/session-mention-drag.ts`.

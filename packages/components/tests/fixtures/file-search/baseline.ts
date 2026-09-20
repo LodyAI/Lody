@@ -1,5 +1,5 @@
 // Frozen search implementation from ea225601e92138ad37521fc6d873f1973d4d2268.
-import { scoreMentionMatch } from '../../src/components/mentions/mention-rank';
+import { scoreMentionMatch } from '../../../src/components/mentions/mention-rank';
 
 export const MAX_SUGGESTIONS = 120;
 export const MAX_DEFAULT_SUGGESTIONS = 60;

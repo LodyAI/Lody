@@ -44,11 +44,16 @@ implements responsiveness and freshness behavior; it does not claim human Spec
 approval. The existing [pipeline](../../../docs/ui-mentions.md) remains the owner
 of the wider mention architecture.
 
+The search implementation is grouped under `mentions/file-search/`. The browser
+benchmark owns its runner and recorded samples under `benchmarks/file-search/`;
+behavior tests and the benchmark share the frozen reference and synthetic paths
+from `tests/fixtures/file-search/`, so tests do not import benchmark entrypoints.
+
 ## Reproducible evidence
 
 Run instructions, fixture definitions, and methodology are in the
-[benchmark README](../../../../packages/components/benchmarks/README.md); the
-[raw samples](../../../../packages/components/benchmarks/results/mention-file-search-2026-09-20.json)
+[benchmark README](../../../../packages/components/benchmarks/file-search/README.md); the
+[raw samples](../../../../packages/components/benchmarks/file-search/results-2026-09-20.json)
 include all three repetitions, no discarded warm-up. This run used Apple M4 Max,
 macOS arm64, Node 26.8.2, Vite 8.2.2, Playwright 1.58.2, and headless Chrome 153. The production build runs the real
 Worker and checks every result against the frozen pre-change implementation.
@@ -65,15 +70,28 @@ For 80,000 synthetic files, median completion time and maximum frame callback ga
 Cold baseline indexing took 215.9ms on the renderer. Worker startup, transfer,
 indexing and an empty query took 210.6ms end to end with a 17.2ms maximum frame gap.
 
+## Installation consistency
+
+CI initially failed before tests: main had advanced the Claude adapter to
+`56b94c6c` without updating the root lockfile. The lockfile now matches that
+manifest. Its exact pins for Anthropic SDK 0.126.0, Prettier 3.9.7, and Vitest
+5.0.1 (including Mocker and Spy 5.0.1) require five release-age exceptions;
+registry publication dates are September 15–16, 2026. These exceptions complete
+the already-selected adapter update and do not exempt future versions. The
+[seven-day policy](../process/2026-09-13-dependency-release-age.md) remains active
+for all other resolution. Verification uses an independent clone with all pinned
+submodules initialized, including a frozen-lockfile installation.
+
 ## Verification and limits
 
 The 17 affected/neighboring mention suites passed all 192 tests on Node 22.23.2
 with Vitest 3.2.4. Strict standalone typechecking of the six search/worker modules,
 scoped Oxfmt/Oxlint checks, and the Vite 8.2.2 production Worker build passed.
-Full component typechecking is blocked by unavailable workspace dependencies
-(including Electron) and unrelated diagnostics in this checkout. The final docs
-check has 11 pre-existing broken links to uninitialized Codex/Grok submodules;
-none concern the changed documentation. No full Electron build or UI profile was
+Validation in a standalone clone with every pinned submodule initialized passed
+`pnpm install --frozen-lockfile`, full `pnpm check` (types, lint, tests, and boundaries),
+`pnpm format`, `pnpm format:check`, `pnpm run docs check`, and the complete
+Electron `pnpm build`. The reorganized browser harness also passed result parity
+and real Worker cancellation after a clean install. No Electron UI profile was
 performed.
 
 Tests compare ordering and limits with the baseline, compare score-only output

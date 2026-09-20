@@ -4,11 +4,11 @@ import React, { act } from 'react';
 import {
   buildMentionFileIndex,
   getSuggestions,
-} from '../src/components/mentions/mention-file-search';
+} from '../src/components/mentions/file-search/engine';
 import type {
   FileSearchRequest,
   FileSearchResponse,
-} from '../src/components/mentions/mention-file-search-client';
+} from '../src/components/mentions/file-search/client';
 
 let fileEntry: { paths: string[]; fetchedAt: number; truncated: boolean } | null = null;
 import { createRoot, type Root } from 'react-dom/client';

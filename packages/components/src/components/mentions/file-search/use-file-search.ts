@@ -1,6 +1,6 @@
 import * as React from 'react';
-import type { MentionFileSearchEntry, PathSuggestion } from './mention-file-search';
-import { createFileSearchClient } from './mention-file-search-client';
+import type { MentionFileSearchEntry, PathSuggestion } from './engine';
+import { createFileSearchClient } from './client';
 
 const EMPTY_ITEMS: PathSuggestion[] = [];
 
@@ -16,12 +16,12 @@ export function useMentionFileSearch(entry: MentionFileSearchEntry | null, term:
   const [failure, setFailure] = React.useState<MentionFileSearchEntry | null>(null);
 
   React.useEffect(() => {
-    if (!enabled || !entry) return;
+    if (!enabled || !entry) return undefined;
     let alive = true;
     setResult(null);
     setFailure(null);
     try {
-      const worker = new Worker(new URL('./mention-file-search.worker.ts', import.meta.url), {
+      const worker = new Worker(new URL('./search.worker.ts', import.meta.url), {
         type: 'module',
       });
       client.current = createFileSearchClient(

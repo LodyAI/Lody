@@ -2,22 +2,22 @@ import { createFuzzyScoreOnly, scoreFuzzy } from '../src/components/mentions/vsc
 import * as React from 'react';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
-import { useMentionFileSearch } from '../src/components/mentions/use-mention-file-search';
+import { useMentionFileSearch } from '../src/components/mentions/file-search/use-file-search';
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
 import {
   buildMentionFileIndex,
   buildPathSuggestions,
   getSuggestions,
-} from '../src/components/mentions/mention-file-search';
-import * as baseline from '../benchmarks/fixtures/mention-file-search-baseline';
-import { makeFilePaths, fileSearchQueries } from '../benchmarks/mention-file-search-fixture';
+} from '../src/components/mentions/file-search/engine';
+import * as baseline from './fixtures/file-search/baseline';
+import { makeFilePaths, fileSearchQueries } from './fixtures/file-search/paths';
 import {
   createFileSearchClient,
   type FileSearchRequest,
   type FileSearchResponse,
   type FileSearchWorker,
-} from '../src/components/mentions/mention-file-search-client';
+} from '../src/components/mentions/file-search/client';
 
 class ControlledWorker {
   onmessage: FileSearchWorker['onmessage'] = null;

@@ -1,4 +1,4 @@
-import type { MentionFileSearchEntry, PathSuggestion } from './mention-file-search';
+import type { MentionFileSearchEntry, PathSuggestion } from './engine';
 
 export type FileSearchRequest =
   | { type: 'cancel' }

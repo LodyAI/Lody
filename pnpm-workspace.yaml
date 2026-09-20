@@ -79,6 +79,12 @@ minimumReleaseAge: 10080
 
 # Grandfather versions already locked on main; later releases remain quarantined.
 minimumReleaseAgeExclude:
+  # Exact dependency pins from the ACP adapters already selected on main.
+  - '@anthropic-ai/sdk@0.126.0'
+  - prettier@3.9.7
+  - vitest@5.0.1
+  - '@vitest/mocker@5.0.1'
+  - '@vitest/spy@5.0.1'
   - '@anthropic-ai/claude-agent-sdk@0.3.274'
   - '@anthropic-ai/claude-agent-sdk-darwin-arm64@0.3.274'
   - '@anthropic-ai/claude-agent-sdk-darwin-x64@0.3.274'

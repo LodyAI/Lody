@@ -7,9 +7,9 @@ import {
   getSuggestions,
   type PathSuggestion,
   type FileSuggestionIndex,
-} from './mention-file-search';
-export { buildMentionFileIndex } from './mention-file-search';
-export type { FileSuggestionIndex } from './mention-file-search';
+} from './file-search/engine';
+export { buildMentionFileIndex } from './file-search/engine';
+export type { FileSuggestionIndex } from './file-search/engine';
 import {
   getIssuePrSuggestions,
   type ItemSuggestion as IssuePrSuggestion,
