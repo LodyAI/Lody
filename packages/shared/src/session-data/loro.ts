@@ -38,6 +38,7 @@ import type {
   SessionImportResult,
   SessionHistoryCommands,
   SessionHistoryReader,
+  SessionModelSummaryReader,
   SessionObservation,
 } from './types';
 import type { SessionDirectoryRow, SessionTurn, SessionTurnRead } from './domain';
@@ -100,6 +101,23 @@ const readSlot = (list: LoroList, position: number): SessionTurnRead => {
   if (position < 0 || position >= list.length) return { state: 'missing' };
   const turn = asStoredTurn(list.get(position));
   return turn ? { state: 'ready', turn } : { state: 'invalid' };
+};
+
+const readField = (value: unknown, key: string): unknown => {
+  if (isContainer(value)) return value.kind() === 'Map' ? (value as LoroMap).get(key) : undefined;
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)[key]
+    : undefined;
+};
+
+const readString = (value: unknown): string | undefined => {
+  if (typeof value === 'string') return value;
+  return isContainer(value) && value.kind() === 'Text' ? value.toString() : undefined;
+};
+
+const readLength = (value: unknown): number => {
+  if (Array.isArray(value)) return value.length;
+  return isContainer(value) && value.kind() === 'List' ? (value as LoroList).length : 0;
 };
 
 export function createLoroSessionData(options: LoroSessionDataOptions) {
@@ -335,6 +353,20 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
     count() {
       return list.length;
     },
+    readModelSummaryAt(position: number) {
+      if (position < 0 || position >= list.length) return undefined;
+      const value = list.get(position);
+      const model = readField(value, 'modelInfo');
+      return {
+        role: readString(readField(value, 'role')),
+        modelInfo: {
+          modelId: readString(readField(model, 'modelId')),
+          name: readString(readField(model, 'name')),
+        },
+        itemCount: readLength(readField(value, 'items')),
+        planCount: readLength(readField(value, 'plan')),
+      };
+    },
     readAt(position: number) {
       return readSlot(list, position);
     },
@@ -388,7 +420,7 @@ export function createLoroSessionData(options: LoroSessionDataOptions) {
         },
       } satisfies SessionObservation;
     },
-  } satisfies SessionHistoryReader;
+  } satisfies SessionHistoryReader & SessionModelSummaryReader;
 
   const commands: SessionHistoryCommands = {
     async applyHistoryAction(action) {

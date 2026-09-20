@@ -1021,7 +1021,6 @@ export class SessionForkService {
         await this.deps.workspaceDocument.persistPendingChanges('session-fork-commit');
         await this.deps.forkOperationStore.clear(targetSessionId).catch(() => {});
       });
-      await targetDoc.syncModelSummary();
     } catch (error) {
       await this.deps.sessionManager.terminateSession(targetSessionId, true).catch(() => {});
       await this.deps.sessionManager.cleanupForkWorktree(config).catch((cleanupError: unknown) => {
@@ -1059,8 +1058,15 @@ export class SessionForkService {
             : String(publicError.detail ?? error)
         }`
       );
+      return;
     } finally {
       this.activeOperations.delete(operation.id);
+    }
+    // The fork is durable; a display projection cannot authorize compensation.
+    try {
+      await targetDoc.syncModelSummary();
+    } catch {
+      this.deps.logger.warn(`[${targetSessionId}] Failed to publish fork model summary`);
     }
   }
 }

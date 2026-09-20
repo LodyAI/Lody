@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { LoroDoc } from 'loro-crdt';
+import { describe, expect, it, vi } from 'vitest';
+import { LoroDoc, LoroMap, LoroList, LoroText } from 'loro-crdt';
 import type { LoroRepo } from 'loro-repo';
 import { SessionDocument } from './doc';
 import type { Logger } from '@/utils/logger';
@@ -9,8 +9,12 @@ import {
   type SessionId,
   type SessionMeta,
 } from '@lody/shared';
-import type { SessionTurn } from '@lody/shared/session-data';
-import { attachSessionModelSummary, latestSessionModel } from './session-model-summary';
+import { createLoroSessionData, type SessionTurn } from '@lody/shared/session-data';
+import {
+  attachSessionModelSummary,
+  latestSessionModel,
+  latestSessionModelFromReader,
+} from './session-model-summary';
 
 const assistant = (
   id: string,
@@ -60,6 +64,97 @@ describe('session model summary', () => {
         });
     }
   });
+  it.each(['history', 'destroy'] as const)(
+    'repairs external metadata overwrite on %s',
+    async (trigger) => {
+      let stored = { meta: { id: 'repair', lastModel: { modelId: 'stale' } } };
+      const writes: unknown[] = [];
+      const raw = new LoroDoc();
+      const repo = {
+        openPersistedDoc: async () => ({ doc: raw }),
+        getDocMeta: async () => stored,
+        upsertDocMeta: async (_id: string, patch: object) => {
+          writes.push(patch);
+          stored = { meta: { ...stored.meta, ...patch } };
+        },
+      } as unknown as LoroRepo;
+      const logger = { debug() {}, info() {}, warn() {}, error() {} } as unknown as Logger;
+      const doc = new SessionDocument(repo, 'repair' as SessionId, async () => {}, logger);
+      await doc.initOffline();
+      await doc.sessionData.commands.appendTurn(
+        assistant('a', { modelId: 'actual', name: '' }) as SessionTurn
+      );
+      await doc.syncModelSummary();
+      expect(stored.meta.lastModel).toEqual({ modelId: 'actual' });
+      await doc.syncModelSummary();
+      expect(writes).toHaveLength(1);
+      stored = { meta: { ...stored.meta, lastModel: { modelId: 'stale' } } };
+      if (trigger === 'history') {
+        const repaired = Promise.withResolvers<void>();
+        const upsert = repo.upsertDocMeta.bind(repo);
+        repo.upsertDocMeta = async (...args) => {
+          await upsert(...args);
+          repaired.resolve();
+        };
+        doc.sessionData.writer.setField('a', 'finished', true);
+        raw.commit();
+        await repaired.promise;
+        expect(stored.meta.lastModel).toEqual({ modelId: 'actual' });
+      }
+      await doc.destroy({ preserveStatus: true });
+      expect(stored.meta.lastModel).toEqual({ modelId: 'actual' });
+      expect(writes).toHaveLength(2);
+    }
+  );
+
+  it('reads container and legacy summaries without serializing bodies or provider metadata', () => {
+    const raw = new LoroDoc();
+    const list = raw.getList('history');
+    list.insert(0, assistant('legacy', { modelId: 'legacy', name: 'Legacy' }));
+    const turn = list.insertContainer(1, new LoroMap());
+    turn.set('role', 'assistant');
+    const model = turn.setContainer('modelInfo', new LoroMap());
+    model.setContainer('modelId', new LoroText()).insert(0, ' actual ');
+    model.set('name', ' Actual ');
+    model.setContainer('_meta', new LoroMap()).set('opaque', 'x'.repeat(100_000));
+    const items = turn.setContainer('items', new LoroList());
+    const data = createLoroSessionData({ doc: raw, sessionId: 'shallow' as SessionId });
+    const mapJSON = vi.spyOn(LoroMap.prototype, 'toJSON').mockImplementation(() => {
+      throw new Error('body materialized');
+    });
+    const listJSON = vi.spyOn(LoroList.prototype, 'toJSON').mockImplementation(() => {
+      throw new Error('list materialized');
+    });
+    try {
+      expect(latestSessionModelFromReader(data.history)).toEqual({
+        modelId: 'legacy',
+        name: 'Legacy',
+      });
+      items.insert(0, { type: 'future_tool', payload: 'x'.repeat(100_000) });
+      raw.commit();
+      expect(latestSessionModelFromReader(data.history)).toEqual({
+        modelId: 'actual',
+        name: 'Actual',
+      });
+      items.delete(0, 1);
+      turn.setContainer('plan', new LoroList()).insert(0, { content: 'step' });
+      expect(latestSessionModelFromReader(data.history)).toEqual({
+        modelId: 'actual',
+        name: 'Actual',
+      });
+      model.delete('modelId');
+      model.delete('name');
+      expect(latestSessionModelFromReader(data.history)).toEqual({});
+      list.delete(0, 2);
+      list.insert(0, 'invalid');
+      expect(latestSessionModelFromReader(data.history)).toBeNull();
+    } finally {
+      mapJSON.mockRestore();
+      listJSON.mockRestore();
+      data.dispose();
+    }
+  });
+
   it('uses actual latest assistant data, never requested config or an older known model', () => {
     const first = assistant('a1', { modelId: 'actual', name: 'Actual', _meta: { secret: 'omit' } });
     expect(latestSessionModel([first])).toEqual({ modelId: 'actual', name: 'Actual' });
@@ -123,7 +218,7 @@ describe('session model summary', () => {
     const handle = attachSessionModelSummary(
       sourceFromMirror(mirror),
       async (model) => {
-        writes.push(model);
+        if (JSON.stringify(writes.at(-1)) !== JSON.stringify(model)) writes.push(model);
         return true;
       },
       (error) => errors.push(error)
@@ -173,7 +268,7 @@ describe('session model summary', () => {
           fail = false;
           throw new Error('unavailable');
         }
-        writes.push(model);
+        if (JSON.stringify(writes.at(-1)) !== JSON.stringify(model)) writes.push(model);
         return true;
       },
       (error) => errors.push(error)

@@ -1,7 +1,9 @@
 # Actual model in session summaries
 
 Status: draft
-Translation: pending
+Translation: current
+
+[中文](session-model-summary.zh.md)
 
 ## Scenario
 
@@ -26,11 +28,15 @@ that the session has never run.
 
 Projection follows documents already open for normal work; it must not enumerate
 and open historical rooms. Streaming unchanged model data does not rewrite the
-catalog. Publication is serialized and does not block the prompt path; a failure
+catalog. Projection reads only role, model identity, and item/plan counts; it must
+not materialize turn bodies or opaque model extension payloads. Publication is serialized and does not block the prompt path; a failure
 is retried on the next document change or flush. Existing persistence and Streams
 transport own delivery. Hidden fork targets and deleted sessions are not published;
 once a fork commit makes the target visible, its summary is published without
-waiting for another history change.
+waiting for another history change. A projection failure after a durable fork commit
+must not terminate the target, remove its worktree, or create a failed receipt.
+Deduplication compares the current catalog value, so the next history change or
+flush repairs a summary overwritten by stale metadata.
 
 ## Limits and evidence
 

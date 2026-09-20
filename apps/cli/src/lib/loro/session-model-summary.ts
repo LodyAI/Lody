@@ -1,4 +1,5 @@
 import type { SessionMeta } from '@lody/shared';
+import type { SessionModelSummaryReader } from '@lody/shared/session-data';
 
 export type SessionModelHistorySource = {
   subscribe: (listener: () => void) => () => void;
@@ -8,8 +9,8 @@ export type SessionModelHistorySource = {
 type AssistantLike = {
   role?: string;
   modelInfo?: unknown;
-  items?: readonly unknown[];
-  plan?: readonly unknown[];
+  items?: { readonly length: number };
+  plan?: { readonly length: number };
 };
 
 // The renderer hides assistant entries with no items and no plan (interrupted or
@@ -36,20 +37,24 @@ export function latestSessionModel(history: readonly AssistantLike[]): SessionMe
   return null;
 }
 
-export function latestSessionModelFromReader(history: {
-  count(): number;
-  readAt(position: number): { state: string; turn?: AssistantLike };
-}): SessionMeta['lastModel'] {
+export function latestSessionModelFromReader(
+  history: SessionModelSummaryReader
+): SessionMeta['lastModel'] {
   for (let index = history.count() - 1; index >= 0; index--) {
-    const read = history.readAt(index);
-    if (read.state !== 'ready') continue;
-    const model = projectAssistantModel(read.turn);
+    const summary = history.readModelSummaryAt(index);
+    if (summary?.role !== 'assistant') continue;
+    const model = projectAssistantModel({
+      role: 'assistant',
+      modelInfo: summary.modelInfo,
+      items: { length: summary.itemCount },
+      plan: { length: summary.planCount },
+    });
     if (model !== undefined) return model;
   }
   return null;
 }
 
-/** One coalesced writer; streaming text cannot enqueue a metadata write per token. */
+/** Serialize reconciliation; the publisher deduplicates against current metadata. */
 export function attachSessionModelSummary(
   source: SessionModelHistorySource,
   publish: (model: SessionMeta['lastModel'], active: () => boolean) => Promise<boolean>,
@@ -58,7 +63,6 @@ export function attachSessionModelSummary(
   let disposed = false;
   let running: Promise<void> | undefined;
   let dirty = false;
-  let published: string | undefined;
   const sync = (): Promise<void> => {
     dirty = true;
     if (running || disposed) return running ?? Promise.resolve();
@@ -68,9 +72,7 @@ export function attachSessionModelSummary(
           if (disposed) break;
           dirty = false;
           const model = source.latestModel();
-          const key = JSON.stringify(model);
-          if (key === published) continue;
-          if (await publish(model, () => !disposed)) published = key;
+          await publish(model, () => !disposed);
         }
       })
       .catch(onError)

@@ -64,7 +64,9 @@ subdirectory; this file is the navigation index. Cross-module explanations live 
   ([AGENTS.md](file-preview/AGENTS.md)).
 - `loro/` — Loro repo/runtime layer, presence, machine flock rooms, and connection
   recovery ([AGENTS.md](loro/AGENTS.md)). `session-model-summary.ts` projects actual
-  assistant models from already-open session documents into catalog metadata.
+  assistant models through shallow scalar/count reads of already-open documents.
+  It compares current catalog metadata on each reconciliation so stale overwrites
+  are repaired on the next history change or flush.
 - `pr-poller/` — PR discovery, lifecycle, CI rollup, and merge-state reconciliation
   ([AGENTS.md](pr-poller/AGENTS.md)).
 - `review-automation/` — "Auto review and merge"

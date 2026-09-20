@@ -214,7 +214,7 @@ function createForkHarness(
     resolveLocalProjectRootPath: vi.fn(async () => '/source/project-root'),
     cleanupForkWorktree: vi.fn(async () => undefined),
   };
-  const logger = { error: vi.fn() };
+  const logger = { error: vi.fn(), warn: vi.fn() };
   const service = new SessionForkService({
     workspaceDocument: workspaceDocument as never,
     sessionManager: sessionManager as never,
@@ -237,6 +237,7 @@ function createForkHarness(
 
   return {
     service,
+    logger,
     persistPendingChanges,
     repo,
     sessionManager,
@@ -776,6 +777,39 @@ describe('SessionForkService durability boundary', () => {
     );
     await vi.waitFor(() => expect(harness.markers).toEqual([]));
   });
+
+  it.each(['throw', 'reject'] as const)(
+    'keeps a committed worktree fork when model summary publication %s fails',
+    async (failure) => {
+      const harness = createForkHarness(undefined, {
+        worktree: { dirty: false, headSha: 'a'.repeat(40) },
+      });
+      const finished = Promise.withResolvers<void>();
+      harness.logger.warn.mockImplementation(() => finished.resolve());
+      harness.targetDoc.syncModelSummary.mockImplementation(() => {
+        if (failure === 'throw') throw new Error('projection unavailable');
+        return Promise.reject(new Error('projection unavailable'));
+      });
+      const result = await harness.service.fork({
+        ...forkSpec,
+        targetContext: { kind: 'new-worktree' },
+      });
+      expect(result.success).toBe(true);
+      await finished.promise;
+      expect(harness.targetDoc.getForkOperation()).toBeUndefined();
+      expect(harness.markers).toEqual([]);
+      expect(harness.repo.upsertDocMeta).toHaveBeenCalledWith(
+        getSessionRoomId(targetSessionId),
+        expect.objectContaining({ acpSessionId: 'acp-target' })
+      );
+      expect(harness.persistPendingChanges.mock.calls.map(([reason]) => reason)).toEqual([
+        'session-fork-prepare',
+        'session-fork-commit',
+      ]);
+      expect(harness.sessionManager.terminateSession).not.toHaveBeenCalled();
+      expect(harness.sessionManager.cleanupForkWorktree).not.toHaveBeenCalled();
+    }
+  );
 
   it('fails closed when the fork operation store cannot record the operation', async () => {
     const harness = createForkHarness(undefined, {
