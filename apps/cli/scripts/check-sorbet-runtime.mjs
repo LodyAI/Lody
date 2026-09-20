@@ -376,11 +376,17 @@ async function checkScriptedSessionLifecycle() {
     assert(lodyCapabilities?.subagents?.version === 1, 'missing Lody subagent capability');
 
     const source = await firstWorker.connection.newSession({ cwd: home, mcpServers: [] });
+    const modelOption = source.configOptions?.find((option) => option.id === 'model');
     assert(
-      source.configOptions?.some(
-        (option) => option.id === 'model' && option.currentValue.endsWith('/scripted-model')
-      ),
+      modelOption?.currentValue.endsWith('/scripted-model'),
       'scripted Session did not use the selected Provider model'
+    );
+    const modelSelector = modelOption.currentValue;
+    assert(
+      source['_meta']?.lody?.modelConfigOptions?.[modelSelector]?.some(
+        (option) => option.id === 'thought_level' && option.currentValue === 'off'
+      ),
+      'scripted Session did not publish its model-specific thinking configuration'
     );
     const thought = await firstWorker.connection.setSessionConfigOption({
       sessionId: source.sessionId,
@@ -392,6 +398,22 @@ async function checkScriptedSessionLifecycle() {
         (option) => option.id === 'thought_level' && option.currentValue === 'high'
       ),
       'scripted Session did not apply its thinking level'
+    );
+    assert(
+      thought['_meta']?.lody?.modelConfigOptions?.[modelSelector]?.some(
+        (option) => option.id === 'thought_level' && option.currentValue === 'high'
+      ),
+      'scripted config response did not update its model-specific thinking configuration'
+    );
+    assert(
+      firstWorker.updates.some(
+        ({ update }) =>
+          update.sessionUpdate === 'config_option_update' &&
+          update['_meta']?.lody?.modelConfigOptions?.[modelSelector]?.some(
+            (option) => option.id === 'thought_level' && option.currentValue === 'high'
+          )
+      ),
+      'scripted config notification did not update its model-specific thinking configuration'
     );
     const permission = await firstWorker.connection.setSessionConfigOption({
       sessionId: source.sessionId,
