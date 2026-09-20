@@ -14,6 +14,12 @@ explains why exact opener navigation and root-row indentation use separate ids.
 A child Tab may open an independent Session: the row sits under the root, but its
 navigation must still return to the precise creating Tab.
 
+Updated organize mode is a mixed recency list, so a top-level row shows a second
+line with folder / GitHub owner mark + project name. Nested opened Sessions stay
+one title line so the 30px tree trunk still meets. Workspace-mode Pinned omits
+the line. Decision:
+[updated project context](../../../../.agents/notes/implemented/feature/2026-09-20-sidebar-updated-project-context.md).
+
 ## Entry points and layout
 
 - Sidebar Search, immediately below New Chat, opens the shared command palette
