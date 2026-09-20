@@ -88,6 +88,19 @@ describe('SidebarFilterPopover Updated project-name preference', () => {
     expect(onShowUpdatedProjectNamesChange).not.toHaveBeenCalled();
   });
 
+  it('opens the unavailable hint from a touch interaction', () => {
+    render('workspace');
+    const row = document.body.querySelector<HTMLElement>('[data-sidebar-filter-section="display"]');
+    const touchStart = new Event('pointerdown', { bubbles: true, cancelable: true });
+    Object.defineProperty(touchStart, 'pointerType', { value: 'touch' });
+
+    flushSync(() => {
+      row?.dispatchEvent(touchStart);
+    });
+
+    expect(document.body.textContent).toContain('Available in Updated view');
+  });
+
   it('closes the menu after changing the view', () => {
     container = document.createElement('div');
     document.body.appendChild(container);

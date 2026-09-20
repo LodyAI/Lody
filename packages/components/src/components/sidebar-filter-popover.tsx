@@ -117,8 +117,14 @@ export function SidebarFilterPopover({
 }: SidebarFilterPopoverProps) {
   const merged = { ...defaultLabels, ...labels };
   const [open, setOpen] = useState(false);
+  const [originsHintOpen, setOriginsHintOpen] = useState(false);
   const sourceLabelsSwitchId = useId();
   const originsAvailable = organize === 'updated';
+
+  const handleOpenChange = (next: boolean) => {
+    setOpen(next);
+    if (!next) setOriginsHintOpen(false);
+  };
 
   const handleOrganizeSelect = (next: SidebarOrganizeMode) => {
     onOrganizeChange?.(next);
@@ -129,7 +135,7 @@ export function SidebarFilterPopover({
     setOpen(false);
   };
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={handleOpenChange}>
       <PopoverTrigger asChild>
         {trigger ?? (
           <Button
@@ -196,11 +202,21 @@ export function SidebarFilterPopover({
         </div>
         <div className={menuSeparatorClassName} aria-hidden="true" />
         <TooltipProvider delayDuration={300}>
-          <Tooltip open={originsAvailable ? false : undefined}>
+          <Tooltip
+            open={originsAvailable ? false : originsHintOpen}
+            onOpenChange={setOriginsHintOpen}
+          >
             <TooltipTrigger asChild>
               <div
                 data-sidebar-filter-section="display"
                 data-disabled={originsAvailable ? undefined : ''}
+                aria-disabled={originsAvailable ? undefined : true}
+                tabIndex={originsAvailable ? undefined : 0}
+                onPointerDownCapture={(event) => {
+                  if (originsAvailable || event.pointerType !== 'touch') return;
+                  event.preventDefault();
+                  setOriginsHintOpen((current) => !current);
+                }}
                 className={cn(
                   'group flex min-h-7 items-center gap-2 rounded-md px-2 py-[3px]',
                   originsAvailable ? 'text-popover-foreground' : 'text-muted-foreground/55'

@@ -24,8 +24,10 @@ Updated organize mode is a mixed recency list. The sidebar view popover exposes
 second line with folder / muted GitHub owner mark + project name. The complete
 row acts as the Switch hover target, changing only the track color. It remains
 visible but disabled in Project mode, with a right-side tooltip explaining that
-it is available in Updated view. GitHub marks sample their source luminance, leave pale avatars at their
-original luminance, and lift only dark avatars. The active row restores the
+it is available in Updated view. Touch users open the same hint by tapping the
+disabled row, while keyboard focus also exposes it. GitHub marks sample their
+source luminance, leave pale avatars at their original luminance, and lift only
+dark avatars. The active row restores the
 original color with a short transition. Nested opened Sessions stay one title
 line so the 30px tree trunk still meets. Workspace-mode Pinned omits the line.
 Decisions:

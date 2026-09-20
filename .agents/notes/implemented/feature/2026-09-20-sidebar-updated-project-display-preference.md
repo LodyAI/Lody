@@ -24,7 +24,8 @@ keeps it open. The switch remains visible in Project mode so its existence and
 saved state do not appear and disappear as the view changes. Project mode
 disables the row and exposes an `Available in Updated view` tooltip to its
 right. Hovering anywhere on the row changes only the Switch track color; the
-row surface, icon, and label remain unchanged.
+row surface, icon, and label remain unchanged. Touching the disabled row opens
+the same hint, and the focusable row preserves keyboard access.
 
 `sidebarUpdatedShowProjectNamesAtom` persists the global display preference in
 local storage and defaults to `true`, preserving the behavior introduced by the
