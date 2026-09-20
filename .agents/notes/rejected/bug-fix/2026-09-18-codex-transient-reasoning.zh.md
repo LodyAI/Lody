@@ -5,6 +5,16 @@ Translation: current
 
 [English](2026-09-18-codex-transient-reasoning.md)
 
+## 摘要
+
+下述方案曾经合入，并于次日被 revert；此处作为被驳回的备选方案保留，紧随其后的小节记录
+驳回原因。内置 Codex 先前会把 `agent_thought_chunk` 送入普通 ACP 历史回调，因此本应临时的 reasoning
+会在轮次结束后仍被看见，也会出现在导出和重新打开的会话中。现在客户端只在进入
+`HistoryWriter` 前截获这些 Codex chunk，提取有长度上限的当前摘要，并借助会话既有的临时
+presence owner 作为 `running.detail` 发布。活动行只在 presence 新鲜时展示它；普通的
+assistant/tool 更新会清空它，轮次清理也会移除它。已有的持久化 thought 条目不会被改写，
+因为打开历史不等于迁移或获得删除用户数据的授权。
+
 ## 2026-09-20 撤销
 
 该改动随 PR #807 于 2026-09-19 未经 review 合并，次日被 revert。两个原因，均由 Lody
@@ -21,15 +31,6 @@ Translation: current
   为什么移除这个生产者。
 
 以下为原始决策内容，保留以避免在未解决上述两点的情况下再次提出同样方案。
-
-## 摘要
-
-内置 Codex 先前会把 `agent_thought_chunk` 送入普通 ACP 历史回调，因此本应临时的 reasoning
-会在轮次结束后仍被看见，也会出现在导出和重新打开的会话中。现在客户端只在进入
-`HistoryWriter` 前截获这些 Codex chunk，提取有长度上限的当前摘要，并借助会话既有的临时
-presence owner 作为 `running.detail` 发布。活动行只在 presence 新鲜时展示它；普通的
-assistant/tool 更新会清空它，轮次清理也会移除它。已有的持久化 thought 条目不会被改写，
-因为打开历史不等于迁移或获得删除用户数据的授权。
 
 ## 决策
 

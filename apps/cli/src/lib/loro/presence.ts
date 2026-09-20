@@ -120,6 +120,13 @@ export class CliPresenceRuntime {
    * Single write path for locally-authored presence: keeps the workspace
    * replica and the local-origin view from ever diverging, and is the only
    * place that announces a local-plane push.
+   *
+   * Every call queues one serial POST on the workspace's SHARED presence
+   * transport, ahead of the machine heartbeat, with no coalescing and no queue
+   * bound. Callers must therefore be driven by a timer, a lifecycle transition,
+   * or a user navigation — never by a stream/progress/chunk callback. A burst
+   * here makes this machine read offline even though the room stays `joined`.
+   * Bounds: `specs/loro-ephemeral-presence-channel.md`.
    */
   private writeLocalOrigin(key: string, state: LodyPresenceState): void {
     this.store.set(key, state as unknown as Value);

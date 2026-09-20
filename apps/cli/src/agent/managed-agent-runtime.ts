@@ -45,6 +45,14 @@ import { getLodyDataDir } from '@lody/shared/node/installation-profile';
 
 const COMPLETE_MARKER = '.lody-complete';
 
+/**
+ * Floor between managed-runtime progress emissions. A listener republishes these as
+ * session presence, and the presence channel is a shared serial queue that the machine
+ * heartbeat also uses, so the emit rate must be bounded by the publisher rather than by
+ * the download's chunk rate. See specs/loro-ephemeral-presence-channel.md.
+ */
+const MANAGED_RUNTIME_PROGRESS_MIN_INTERVAL_MS = 500;
+
 function managedRuntimeAbortError(signal: AbortSignal): Error {
   return signal.reason instanceof Error
     ? signal.reason
@@ -1453,15 +1461,20 @@ export class ManagedAgentRuntimeManager {
     }
 
     let downloadedBytes = offset;
-    let lastPercent = -1;
     let lastEmitAtMs = 0;
     const emitDownloadProgress = (force = false) => {
       const percent = getDownloadPercent(downloadedBytes, archive.size);
       const nowMs = Date.now();
-      if (!force && percent === lastPercent && nowMs - lastEmitAtMs < 500) {
+      // This runs per stream chunk, and a listener publishes it as session presence.
+      // The ceiling must therefore be TIME-based, not "changed percent": a changing
+      // value is exactly what defeats the `(phase, detail)` dedupe downstream, and a
+      // presence write per changed percent puts ~100 serial POSTs ahead of the
+      // machine heartbeat on the workspace's shared queue. Terminal state is never
+      // lost, because the caller forces an emit after the pipeline settles.
+      // Bounds: specs/loro-ephemeral-presence-channel.md.
+      if (!force && nowMs - lastEmitAtMs < MANAGED_RUNTIME_PROGRESS_MIN_INTERVAL_MS) {
         return;
       }
-      lastPercent = percent ?? -1;
       lastEmitAtMs = nowMs;
       this.emitProgress(progressKey, {
         runtimeName: name,

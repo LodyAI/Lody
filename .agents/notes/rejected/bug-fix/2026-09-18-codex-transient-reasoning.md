@@ -5,6 +5,19 @@ Translation: current
 
 [中文](2026-09-18-codex-transient-reasoning.zh.md)
 
+## Abstract
+
+The approach below shipped and was reverted the next day; it is preserved as the
+rejected alternative, and the section after it records why. Builtin Codex emitted `agent_thought_chunk` through the ordinary ACP history
+callback, so its transient reasoning remained visible after the turn ended and
+in exported or reopened sessions. The client now intercepts only those Codex
+chunks before `HistoryWriter`, extracts a bounded current summary, and publishes
+it as `running.detail` through the session's existing ephemeral presence owner.
+The activity row displays that detail only while the presence is fresh; ordinary
+assistant/tool updates clear it and turn cleanup removes it. Existing persisted
+thought entries are deliberately not rewritten, because opening history is not a
+migration or authorization to delete user data.
+
 ## Rejected on 2026-09-20
 
 This change shipped in PR #807 (merged 2026-09-19 without review) and was
@@ -26,18 +39,6 @@ reverted the next day. Two reasons, both owned by the Lody team:
 
 The rest of this note is the original rationale, kept so the same approach is
 not proposed again without addressing both points.
-
-## Abstract
-
-Builtin Codex emitted `agent_thought_chunk` through the ordinary ACP history
-callback, so its transient reasoning remained visible after the turn ended and
-in exported or reopened sessions. The client now intercepts only those Codex
-chunks before `HistoryWriter`, extracts a bounded current summary, and publishes
-it as `running.detail` through the session's existing ephemeral presence owner.
-The activity row displays that detail only while the presence is fresh; ordinary
-assistant/tool updates clear it and turn cleanup removes it. Existing persisted
-thought entries are deliberately not rewritten, because opening history is not a
-migration or authorization to delete user data.
 
 ## Decision
 
