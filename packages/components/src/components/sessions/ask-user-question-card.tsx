@@ -663,11 +663,15 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
 
         {question.note ? (
           <label className="mt-2 flex flex-col gap-1 text-xs text-muted-foreground">
-            <span>
-              {question.note.title ||
-                t('sessions.askQuestion.noteLabel', 'Additional context (optional)')}
+            <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+              <span className="text-foreground/85">
+                {question.note.title ||
+                  t('sessions.askQuestion.noteLabel', 'Additional context (optional)')}
+              </span>
+              {question.note.description ? (
+                <span className="text-muted-foreground/70">{question.note.description}</span>
+              ) : null}
             </span>
-            {question.note.description ? <span>{question.note.description}</span> : null}
             {question.note.isSecret ? (
               <Input type="password" {...noteInputProps} />
             ) : (
