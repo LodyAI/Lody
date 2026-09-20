@@ -89,8 +89,8 @@ Read each heading’s linked context before changing its files.
   `lastRunningSeen`, or the CLI dispatch pointers.
 - The only frontend-derived activity state is the dispatched-but-not-started
   window; anchor on the turn's durable timestamp and stop at 30s.
-- Submission routing has one conservative exception: queue behind an unfinished
-  transcript when presence is absent. That barrier never relights Working UI.
+- Without presence, queue behind unfinished turns; never relight Working UI.
+- Busy composer: no authoritative steer support means regular Queue.
 
 ## [Composer info bar](../../../../../.agents/docs/sessions-info-bar.md)
 

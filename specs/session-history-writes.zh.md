@@ -45,6 +45,11 @@ Translation: current
   单独解析。新增字段非法时，整条命令在写入前拒绝。
 - 新历史接受原有内置 CLI selector 的归一化，不重写旧历史。steer 配置编辑只校验变化的字段。
 - 队列提升必须在历史接受后才删除队列行；写入失败保留队列行。
+- 输入框 steering 必须同时具备权威 ACP acknowledged steering 能力、活跃 prompt 和已知未结束
+  assistant turn。忙碌期间，Guide 偏好或反转 Queue 的发送若不具备该能力，直接追加到正规 Queue；
+  能力信息不可用或仅为 provisional 时也如此。消息保留队列顺序及正常提升前的编辑/删除能力，
+  不创建 pending-apply 历史，也不发出 steer 请求。这是投递前的路由决策；已经提交的原生 steer
+  仍遵循下文的投递结果规则。
 - 手动 Codex 压缩持有 native turn 直到完成。Stop 中断该 turn，并保留 ACP prompt，
   直到 `turn/completed` 确认结果或 provider 连接关闭。对已 in-flight 且 ACP session 就绪的
   prompt，Lody 记录取消并发送 provider cancel，不中断 owner fiber。ACP 返回前保留 owner

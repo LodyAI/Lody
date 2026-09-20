@@ -63,6 +63,13 @@ That tolerance must not authorize creating new malformed items locally.
 - New history accepts existing legacy built-in CLI selector normalization without rewriting
   stored history. Steer config edits parse only changed fields.
 - Queue promotion removes its queued row only after history acceptance; failed writes retain it.
+- Composer steering requires authoritative ACP support for acknowledged steering,
+  a live prompt, and a known unfinished assistant turn. During activity, a guide
+  preference or inverted queue submission without that support appends to the
+  regular Queue, including when capability information is unavailable or provisional.
+  It retains queue order and editing/removal until normal promotion; it creates no
+  pending-apply history entry and sends no steer request. This routing decision
+  precedes delivery; submitted native steers retain the outcome rules below.
 - Manual Codex compaction owns its native turn through completion. Stop interrupts
   that turn and retains the ACP prompt until `turn/completed` confirms its outcome
   or the provider connection closes. For an in-flight prompt with a ready ACP session,
