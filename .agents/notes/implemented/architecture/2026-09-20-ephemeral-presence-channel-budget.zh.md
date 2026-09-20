@@ -76,14 +76,35 @@ Translation: current
 `local-loro-data-plane-server.ts` 已经把突发合并为单帧并在写入时刻取快照，它是修复上述三处
 的模板。
 
+### 「未知」不等于「离线」
+
+写入侧只覆盖了契约的一半。`getOnlineMachineIds()` 在 presence room 无法加入时返回 null，
+作用域规则把它定义为状态**未知**，而 MCP 服务端用 `?.has(id) === true` 把它坍缩成了离线。
+一个辅助函数扇出到五处 agent 可见的后果：单命令派发与两条批量路径都抛出 `MACHINE_OFFLINE`，
+会话列表报告 `temporarily_blocked`，选项路径则**静默**地把所有远端机器从候选列表中删除。
+null 分支此前完全没有测试，而 `commands/agent-config.ts` 早已正确处理并在注释里写明了原因。
+
+现在 liveness 是三态查询，守卫只在明确的 `offline` 时阻塞。状态未知的机器继续执行，并在
+自己的截止期限上失败 —— 这是诚实的慢失败，而不是迅速的错误失败，与 agent-config 的立场一致。
+守护进程冷启动或重连退避就足以让 presence room 不可用，因此这条路径无需任何突发即可触发。
+
+`lody machine list` 有对应的报告缺陷：未知状态只存在于一条 stderr 警告里，而 stdout 输出
+`online: false`，于是任何解析 `--json` 的消费者都会记录下一个确定的"离线"。`online` 保持原义，
+新增的 `onlineStatus` 字段承载全部三种状态。`--online-only` 仍按"已证明在线"过滤，对该标志
+而言是正确的，警告也仍会输出。
+
+反向映射刻意未动：`session_status_many` 的 `machineOnline` 来自实时 RPC 而非 presence，
+属于不同来源，不在本契约范围内。
+
 ## 验证
 
 `managed-agent-runtime.test.ts` 用冻结时钟和 64 个已投递 chunk 锁定该上限：只有三次生命周期
 发射存活，且终态字节数仍被报告。把修复消融回按百分比判断后，这 3 次变成 47 次，说明该测试
 确实能发现回归，而不是静默通过。只有 `Date` 被伪造，下载 pipeline 保留真实 I/O 调度。
 
-`pnpm --filter lody test`（2823 项通过）与 `pnpm --filter @lody/shared test` 覆盖 presence
-schema 上限与未改动的写入方。本 note 记录的是基于源码检查的审计和确定性的单元级约束，
+两处 liveness 修复都由测试锁定，它们区分「已加入房间但缺少条目」与「无法检查」；消融任一处
+坍缩都恰好让其中一个测试失败。`pnpm --filter lody test` 与 `pnpm --filter @lody/shared test`
+覆盖 presence schema 上限与未改动的写入方。本 note 记录的是基于源码检查的审计和确定性的单元级约束，
 不构成"关注清单上的写入方已在生产负载下被测量过"的证据；触发本次工作的线上故障也从未在完整
 观测条件下端到端复现。
 

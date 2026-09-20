@@ -51,12 +51,19 @@ ephemeral 通道面向最新状态。它不随文档流持久化，不重放历�
 未知。读取端不得在传输未同步时报告"离线"，也不得把连接健康当作送达及时的证据 —— 本 Spec 所
 要防止的故障，正是这两者同时成立。
 
+三种状态必须一直保留到消费方，不得在中途被压平。只有明确的"离线"才可以阻塞工作或拒绝派发；
+"未知"应当继续执行，并在自己的截止期限上失败，因为一个诚实的慢失败胜过一个迅速的错误失败。
+对外报告在线状态的接口要携带状态本身而不是布尔值，使调用方能区分"已检查且确实不可用"与
+"无法检查"。
+
 ## 证据
 
 通道常量、负载 schema 与时效判定位于 `packages/shared/src/presence.ts`。工作区传输、它的两个
 store 以及机器心跳定时器位于 `apps/cli/src/lib/loro/presence.ts`；会话活跃状态的唯一所有者是
 `apps/cli/src/lib/loro/session-active-presence.ts`。读取端的解释逻辑位于
-`packages/components/src/atoms/presence.ts`，CLI 侧位于 `apps/cli/src/commands/machine.ts`。
+`packages/components/src/atoms/presence.ts`，CLI 侧位于 `apps/cli/src/commands/machine.ts`，
+其 `onlineStatus` 字段让三种状态穿过 `--json` 到达调用方。`apps/cli/src/mcp/lody-mcp-server.ts`
+中的派发守卫只在明确离线时阻塞；`apps/cli/src/commands/agent-config.ts` 采取同样立场。
 
 串行队列、不做合并以及无上限重试预算，是 `@loro-dev/streams-crdt`（`EphemeralStreamCrdt`）的
 实现细节，检查版本为 0.15.1。本仓库无法控制它们，因此该约束被表述为发布方的义务。

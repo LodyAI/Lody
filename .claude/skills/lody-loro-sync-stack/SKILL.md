@@ -102,12 +102,13 @@ write time. Copy that shape when a producer is genuinely bursty.
 - `apps/cli/src/lib/loro/session-active-presence.ts` — the single owner of session active presence. Never publish or clear it from `setStatus`, RPC dispatch, permission/image callbacks or watcher recovery.
 - `packages/components/src/providers/workspace-presence-transport.ts` — the renderer's session-viewing writer.
 - `packages/components/src/atoms/presence.ts` — reader side. Liveness is three-state: `online` from a fresh heartbeat, `offline` only on a synced transport, `unknown` otherwise. Never report offline from an unsynced transport.
+- `apps/cli/src/mcp/lody-mcp-server.ts` — dispatch guards. Keep the three states: block on a definite `offline` only, and let `unknown` proceed and fail against its own deadline. Collapsing `unknown` to offline refuses healthy Machines with a false reason whenever presence is merely still joining.
 
 ## Diagnosing "machine shows offline"
 
 Work in this order and keep the claims separate.
 
-1. **Is it the browser only?** Read it independently: `lody machine list --workspace <selector> --json`. This joins the presence room and recomputes fresh machine IDs. A `presence room unavailable` warning on stderr means *unknown*, not offline — do not equate them.
+1. **Is it the browser only?** Read it independently: `lody machine list --workspace <selector> --json`. This joins the presence room and recomputes fresh machine IDs. Read the `onlineStatus` field, not the legacy `online` boolean: `unknown` means the presence room could not be joined and nothing was checked, which is not evidence of an offline machine.
 2. **Is it workspace-scoped?** Run the same read against another workspace on the same machine. Each workspace has its own transport and its own queue, so a burst in one workspace cannot affect another. Same machine online in workspace B and offline in workspace A points straight at a per-workspace publisher, not at the host.
 3. **Is presence still being produced locally, and is it getting out?** `CliPresenceRuntime` logs each heartbeat with `queued=`, `room=`, `sinceLastAppendMs=` and, when uploads are stuck, `writeError=`. The write itself still proves only a LOCAL store write, so never read the line's existence as delivery — read its counters. A separate `heartbeat delivered` line reports `ageAtSendMs`, and warns when that age reached the freshness window. A heartbeat that is never acknowledged shows up as `unackedForMs=` on later lines.
 4. **Is a producer flooding?** Count presence writes per second per session in `~/.lody/logs/`. A single session emitting hundreds or thousands of writes in a few seconds is the signature; correlate its onset with the offline interval.

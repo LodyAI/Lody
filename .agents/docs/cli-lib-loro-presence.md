@@ -83,8 +83,15 @@ APIs are a different reachability domain and are NOT gated by it.
 Machine liveness is three-state, and the states are not interchangeable. A fresh
 heartbeat means online. The absence of one on a SYNCED transport means offline. An
 unsynced transport means unknown. `getOnlineMachineIds()` returning null means the
-presence room is not joined — status unknown, not offline — and `lody machine list`
-prints an explicit warning in that case rather than silently reporting offline.
+presence room is not joined — status unknown, not offline.
+
+Carry that distinction all the way to the consumer instead of flattening it. Only a
+definite offline may block work: the MCP dispatch guards refuse on `'offline'` alone,
+so a Machine whose presence room merely has not joined stays usable and fails later
+against its own deadline if it really is down. `lody machine list` reports
+`onlineStatus` (`online` / `offline` / `unknown`) beside the legacy `online` boolean, so
+a `--json` consumer parsing stdout is no longer told a confident offline when the truth
+is that nothing could be checked.
 
 Durable `MachineMeta.lastSeen` is retired and is not written even at registration;
 machine online checks read presence only. Never reintroduce periodic doc-meta writes

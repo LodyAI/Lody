@@ -64,6 +64,12 @@ on a synced transport means offline; an unsynced transport means unknown. A read
 report "offline" from an unsynced transport, and must not treat a healthy connection as evidence
 that delivery is current — the failure this spec prevents produced exactly that combination.
 
+The three states must survive to the consumer, not be flattened on the way. Only a definite
+offline may block work or refuse a dispatch; unknown proceeds and fails later against its own
+deadline, because a truthful slow failure beats a fast wrong one. A surface that reports liveness
+carries the state itself rather than a boolean, so a caller can tell "we checked and it is down"
+from "we could not check".
+
 ## Evidence
 
 Channel constants, payload schemas and the freshness predicate are in
@@ -71,7 +77,9 @@ Channel constants, payload schemas and the freshness predicate are in
 heartbeat timer are in `apps/cli/src/lib/loro/presence.ts`; session active presence has a single
 owner in `apps/cli/src/lib/loro/session-active-presence.ts`. Reader-side interpretation is in
 `packages/components/src/atoms/presence.ts` and, for the CLI, in
-`apps/cli/src/commands/machine.ts`.
+`apps/cli/src/commands/machine.ts`, whose `onlineStatus` carries the three states through
+`--json`. The MCP dispatch guards in `apps/cli/src/mcp/lody-mcp-server.ts` block on a definite
+offline only; `apps/cli/src/commands/agent-config.ts` takes the same position.
 
 The serial queue, its lack of coalescing and the unbounded retry budget are implementation
 details of `@loro-dev/streams-crdt` (`EphemeralStreamCrdt`), inspected at version 0.15.1. This

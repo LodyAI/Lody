@@ -93,6 +93,33 @@ needs its own measurement and a separate scope:
 `local-loro-data-plane-server.ts` already collapses a presence burst into one frame and
 snapshots at write time. It is the template for fixing the three above.
 
+### Unknown liveness is not offline
+
+The write side was only half the contract. `getOnlineMachineIds()` returns null when
+the presence room could not be joined, which the scoped rules define as status UNKNOWN,
+and the MCP server collapsed that null to offline with `?.has(id) === true`. One helper
+fanned out to five agent-visible consequences: single-command dispatch and both batch
+paths threw `MACHINE_OFFLINE`, the session list reported `temporarily_blocked`, and the
+options path silently dropped every remote Machine from the candidate list. The null
+branch had no test at all, while `commands/agent-config.ts` already guarded it
+correctly and explained why in a comment.
+
+Liveness is now a three-state lookup, and the guards block on a definite `offline`
+alone. An unknown Machine proceeds and fails later against its own deadline, which is a
+truthful slow failure rather than a fast wrong one — the same position the agent-config
+path took. A cold daemon start or a reconnect backoff is enough to make the presence
+room unavailable, so this was reachable without any burst.
+
+`lody machine list` had the matching reporting bug: the unknown case existed only in a
+stderr warning while stdout said `online: false`, so anything parsing `--json` recorded
+a confident offline. `online` keeps its meaning and an additive `onlineStatus` now
+carries all three states. `--online-only` still filters on proven-online, which is
+correct for that flag, and the warning still fires.
+
+The reverse mapping was deliberately left alone: `session_status_many` derives
+`machineOnline` from the live RPC rather than from presence, so it is a different
+source and not part of this contract.
+
 ## Verification
 
 `managed-agent-runtime.test.ts` pins the ceiling with a frozen clock and 64 delivered
@@ -101,8 +128,10 @@ reported. Ablating the fix back to the percent-based guard turns those 3 into 47
 test detects the regression rather than passing silently. Only `Date` is faked; the
 download pipeline keeps real I/O scheduling.
 
-`pnpm --filter lody test` (2823 passing) and `pnpm --filter @lody/shared test` cover the
-presence schema bound and the unchanged writers. This note records an inspected-source
+Both liveness fixes are pinned by tests that distinguish a Machine absent from a joined
+room from one that could not be checked; ablating either collapse fails exactly one of
+them. `pnpm --filter lody test` and `pnpm --filter @lody/shared test` cover the presence
+schema bound and the unchanged writers. This note records an inspected-source
 audit and a deterministic unit-level bound. It is not evidence that the remaining
 watch-list writers have been measured under production load, and the live incident that
 motivated it was never reproduced end to end under instrumentation.
