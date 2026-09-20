@@ -54,6 +54,25 @@ describe('local session control node validators', () => {
     expect(isLocalSessionControlRequestCjs(request)).toBe(true);
   });
 
+  it('accepts builtin Sorbet sessions in TS and CJS validators', () => {
+    const request = {
+      type: 'session/create',
+      sessionId: 'session-sorbet',
+      machineId: 'machine-1',
+      workspaceId: 'workspace-1',
+      acpSessionConfig: {
+        cliType: 'builtin',
+        agentType: 'sorbet',
+        prompt: 'hello',
+      },
+      userId: 'user-1',
+      userName: 'Test User',
+      userEmail: 'test@example.com',
+    };
+    expect(isLocalSessionControlRequest(request)).toBe(true);
+    expect(isLocalSessionControlRequestCjs(request)).toBe(true);
+  });
+
   it('accepts builtin Bub sessions in TS and CJS validators', () => {
     const request = {
       type: 'session/create',
