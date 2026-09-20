@@ -35,7 +35,9 @@ this page is the full text of the rules summarised there.
     A lone parent Session tab is not draggable; enable tab drag only once a
     second visible tab exists. On desktop, Cmd/Ctrl+W is the native Close
     accelerator. Session-detail registers a tab closer: focused side panel or
-    conversation tab closes, including the parent. Close writes shared `isTabClosed`,
+    conversation tab closes, including the parent when siblings remain. With only
+    one conversation tab, the conversation region yields to window close without
+    changing shared tab state. Explicit tab × still closes the tab. Tab close writes shared `isTabClosed`,
     selects the next open neighbour (right then left), or enters a local draft.
     `?tab=empty` remains an entry sentinel: after hydration, reuse a local draft or
     create one and replace the URL. Mobile viewers remain active. With

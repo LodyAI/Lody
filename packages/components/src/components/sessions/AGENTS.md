@@ -1,9 +1,8 @@
 # components/sessions
 
-`CLAUDE.md` is a symlink to this file. Edit `AGENTS.md` only.
+`CLAUDE.md` symlinks here. Edit `AGENTS.md` only.
 
-Parent AGENTS apply. Files: [README.md](README.md); data: `context/message-flow.md`.
-Read each heading’s linked context before changing its files.
+Parent rules apply. Read each heading’s linked context before edits.
 
 ## [Tabs and `?tab` routing](../../../../../.agents/docs/sessions-tabs-routing.md)
 
@@ -17,6 +16,7 @@ Read each heading’s linked context before changing its files.
   may replace the current choice with a neighbour or local draft. Close writes
   `isTabClosed`, never archive — a never-messaged tab is exact-deleted.
   Reopening archives restores lifecycle first.
+- Cmd/Ctrl+W: lone conversation closes window; focused side-panel tab closes first.
 - `Change owner` writes the OWNER `SessionMeta.userId`, never sharing/visibility;
   they stay separate actions.
 

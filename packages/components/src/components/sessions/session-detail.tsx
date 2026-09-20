@@ -4442,7 +4442,7 @@ const SessionDetail = ({
     () => {
       const target = resolveFocusedTabCloseTarget();
       if (!target) return 'handled';
-      if (target.kind === 'landing') {
+      if (target.kind === 'window') {
         return 'unhandled';
       }
       if (target.kind === 'side-panel') {

@@ -20,7 +20,7 @@ describes the shared parsing and persistence boundary.
 | `session-tab-bar.tsx`                        | Desktop merged top row: session tab pills, status slot, drag sources        |
 | `adaptive-tab-strip.tsx`                     | Width sharing for the tab pills                                             |
 | `session-side-panel-tab-bar.tsx`             | Right-panel tab strip (fixed panels, side chats, viewers)                   |
-| `session-tab-close-target.ts`                | Registration for the Cmd/Ctrl+W close target                                |
+| `session-tab-close-target.ts`                | Resolve the focused tab or last-tab window close target                                |
 | `session-list-rows.ts`                       | Sidebar/tab row derivation, including child grouping by parent              |
 | `child-tab-empty-state.tsx`                  | Suggestions shown in an empty child tab                                     |
 | `session-not-found.tsx`                      | Missing-session surface                                                     |
