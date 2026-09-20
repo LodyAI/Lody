@@ -52,8 +52,12 @@ Translation: current
   配置也纳入同一收尾流程。Stop 后五秒仍有请求未结束时，Lody 终止旧 session，让连接关闭
   结束请求。计时不等待 cancel ACK，
   也不因重复 Stop 重置。终止失败则继续持有 owner，直到 ACP 结束。start/interrupt ACK
-  和压缩 item 的完成均不能释放执行 ownership。CLI 在取消确认后、接受下一轮前，
-  将尚未结束的压缩标记为 failed。打开 Session 不触发历史修复 RPC，也不改写旧结果。
+  和压缩 item 的完成均不能释放执行 ownership。助手 turn 收尾时会结算其遗留的上下文
+  压缩标记，适用于所有路径而不只是取消确认之后：provider 从未推进到终态的标记，在接受
+  下一轮之前持久化为 failed。若同一 turn 中还有更晚的压缩标记，被取代的标记属于同一次
+  压缩的重复身份（adapter 重复声明了已在进行中的压缩），予以移除，使一次压缩只呈现一
+  行。之后若 provider 仍为同一 `toolCallId` 发来更新，以该更新为准。
+  打开 Session 不触发历史修复 RPC，也不改写旧结果。
 - steer adapter 只报告三种最终投递结果：`applied`、`not-applied` 或 `unknown`。只有
   `not-applied` 可以把同一个用户轮次交回普通 dispatch；`applied` 表示已经消费，
   `unknown` 则在历史中变为 `delivery_unknown` 并返回 `delivery-unknown`，绝不自动调度。
