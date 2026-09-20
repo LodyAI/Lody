@@ -4,16 +4,16 @@
 
 ## Ownership
 
-| Area                | Source of truth                                                | Contract                                                                             |
-| ------------------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| Contributor prompts | `PULL_REQUEST_TEMPLATE.md`, Issue Forms                        | Ask only for public, actionable contribution context.                                |
-| PR validation       | `scripts/check-pr-body.mjs`                                    | Validate the rendered template contract without GitHub mutations.                    |
-| PR reconciliation   | `scripts/pr-policy.mjs`                                        | Own disposition, findings, labels, comments, grace period, cleanup, and expiry.      |
-| Issue linking       | `scripts/pr-issue-link.mjs`                                    | Parse and normalize only `## Related issue`.                                         |
-| Event orchestration | `workflows/pr-policy.yml`, `workflows/pr-policy-reconcile.yml` | Route every PR event and audit through one concurrency group and one reconciler.     |
-| Scope labels        | `labeler.yml`, `workflows/pr-scope.yml`                        | Derive configured `scope:*` labels from changed paths.                               |
-| Code checks         | `workflows/ci.yml`, `scripts/select-ci-scope.mjs`              | Keep `Static checks`/`Tests`. Selector skip/affected fail open; no workflow `paths`. |
-| Codex review        | root `AGENTS.md` `## Code Review Rules`, `codex-review.md`     | Report only P0/P1, security first; 👍 when the linked Issue is solved.               |
+| Area | Source of truth | Contract |
+| --- | --- | --- |
+| Contributor prompts | `PULL_REQUEST_TEMPLATE.md`, Issue Forms | Ask only for public, actionable contribution context. |
+| PR validation | `scripts/check-pr-body.mjs` | Validate the rendered template contract without GitHub mutations. |
+| PR reconciliation | `scripts/pr-policy.mjs` | Own disposition, findings, labels, comments, grace period, cleanup, and expiry. |
+| Issue linking | `scripts/pr-issue-link.mjs` | Parse and normalize only `## Related issue`. |
+| Event orchestration | `workflows/pr-policy.yml`, `workflows/pr-policy-reconcile.yml` | Route every PR event and audit through one concurrency group and one reconciler. |
+| Scope labels | `labeler.yml`, `workflows/pr-scope.yml` | Derive configured `scope:*` labels from changed paths. |
+| Code checks | `workflows/ci.yml`, `scripts/select-ci-scope.mjs` | Keep `Static checks`/`Tests`. Selector skip/affected fail open; no workflow `paths`. |
+| Codex review | root `AGENTS.md` `## Code Review Rules`, `codex-review.md` | Report only P0/P1, security first; 👍 when the linked Issue is solved. |
 
 Do not duplicate a rule across these layers. Changes to required PR template
 headings must update the checker in the same commit and validate representative
@@ -45,13 +45,16 @@ Workflow-file security constraints live in
   handoff block and its markers. Use `Closes #123` when merging the PR should
   close the Issue and `Refs #123` only when it must stay open. A bare `#123` or
   full Lody Issue URL in `## Related issue` defaults to `Closes #123`.
-- Before opening a fork-based pull request, an Agent asks its user to publish
-  the authoring conversation and places the public link in the optional
-  `### Shared conversation` section, deleting it when no shareable
-  conversation exists. The Agent may request publication through its tools,
-  but only the user confirms it; never invent a share URL.
-- Context handoff answers are concise public evidence; `N/A` and redacted
-  values are rejected; they give maintainers too little provenance.
+- Before opening a fork-based PR, an Agent asks its user to publish the authoring
+  conversation and fills the required `### Shared conversation` status and link
+  or reason using the template. Accept public links from any authoring tool.
+  Only the user confirms publication; never invent a URL, refusal, or limitation.
+  Wait for an answer: silence is not refusal. If the user declines, preserve their
+  exact reply in a separate fenced block under `#### Sharing refusal (verbatim)`
+  within `### Original user prompt`, retaining the triggering prompt unchanged.
+- Context handoff answers are public evidence, not placeholders. Redact only
+  private spans in quoted prompts/replies with explicit markers; entirely
+  redacted evidence and `N/A` do not satisfy the contract.
 - An Agent preparing a fork-based contribution explains that the Context handoff
   is public and an invalid PR closes after the seven-day correction period.
 - Same-repository branches do not create or require an Issue solely for intake,
@@ -61,12 +64,12 @@ Workflow-file security constraints live in
 
 `pullRequestDisposition` classifies each current PR before any mutation:
 
-| Disposition | Condition                                     | Behavior                                                                                |
-| ----------- | --------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `bot`       | Author login ends in `[bot]`                  | Do not normalize or enforce; clear prior managed state when present.                    |
-| `bypass`    | `status:pr-policy-bypass` is present          | Do not normalize or enforce; clear prior managed state when present.                    |
-| `internal`  | Numeric `head.repo.id` equals `base.repo.id`  | Normalize an explicit Issue reference; do not enforce the external template.            |
-| `external`  | Repository ids differ or either id is missing | Normalize an explicit Issue reference, then enforce the complete contribution contract. |
+| Disposition | Condition | Behavior |
+| --- | --- | --- |
+| `bot` | Author login ends in `[bot]` | Do not normalize or enforce; clear prior managed state when present. |
+| `bypass` | `status:pr-policy-bypass` is present | Do not normalize or enforce; clear prior managed state when present. |
+| `internal` | Numeric `head.repo.id` equals `base.repo.id` | Normalize an explicit Issue reference; do not enforce the external template. |
+| `external` | Repository ids differ or either id is missing | Normalize an explicit Issue reference, then enforce the complete contribution contract. |
 
 `author_association` never classifies a PR. A fork remains external when its
 author is an owner or member. The bypass label is an explicit maintainer action
