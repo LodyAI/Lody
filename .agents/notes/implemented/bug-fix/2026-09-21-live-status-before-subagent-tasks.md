@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/867
 
 [中文](2026-09-21-live-status-before-subagent-tasks.zh.md)
 
