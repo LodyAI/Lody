@@ -2404,6 +2404,8 @@
   "settings.about.devbarStop": "Stop Devbar",
   "settings.about.devbarAgentAccess": "Agent and terminal access",
   "settings.about.devbarAgentAccessHelper": "Exposes local MCP and restricted subprocess tools until Devbar stops.",
+  "settings.about.devbarWarmup": "Auxiliary window warmup",
+  "settings.about.devbarWarmupHelper": "Developer-only experiment: keep one hidden renderer ready for auxiliary windows.",
   "settings.about.devbarAgentConnect": "Agent connection",
   "settings.about.devbarAgentConnectHelper": "Run `devframe connect` to proxy this Hub to coding agents over stdio MCP, or use the endpoints below directly.",
   "settings.about.devbarError": "Devbar could not be started.",
