@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+Implementation: [PR #860](https://github.com/LodyAI/Lody/pull/860)
+
 [English](2026-09-21-devbar-conversation-capture.md)
 
 ## 摘要
