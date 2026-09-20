@@ -2266,9 +2266,8 @@ function DesktopSessionPreview({
     </div>
   );
 
-  /* Single-row desktop top bar: [session tabs …] [toolbar]. The old repo-title
-     header row is gone in production; `mt-0.5 h-11` keeps the h-8 pills on the
-     same y=8 line as the sidebar and side-panel cards. */
+  /* Single-row desktop top bar: [session tabs …] [toolbar]. Flush with the
+     sidebar header at y=0. */
   const topBar = (
     <SessionTabBar
       variant="session"
@@ -2286,7 +2285,7 @@ function DesktopSessionPreview({
           {headerToolbar}
         </>
       }
-      className="mt-0.5 h-11"
+      className="h-11"
     />
   );
 
@@ -2405,9 +2404,9 @@ function DesktopSessionPreview({
       changesList('types')
     );
 
-  /* Floating card, 1:1 with session-detail.tsx's `desktopSecondaryPanel`. */
+  /* Full-bleed panel, 1:1 with session-detail.tsx's `desktopSecondaryPanel`. */
   const secondaryPanel = (
-    <div className="mx-2 mb-2 mt-2 flex h-[calc(100%_-_1rem)] min-w-0 flex-col overflow-hidden rounded-xl border border-sidebar-border/80 bg-sidebar shadow-[0_1px_4px_-1px_rgba(0,0,0,0.18)]">
+    <div className="flex h-full min-w-0 flex-col overflow-hidden border-l border-border/70 bg-background">
       <SessionSidePanelTabBar
         tabs={sidePanelTabs}
         activeTabId={activePanelTab}
@@ -3727,7 +3726,7 @@ export function LandingAppPreview({
      from production — worktree is a checkbox pill now. */
   const branchWorktreePill =
     contextType === 'chat' ? null : (
-      <div className="flex h-6 min-w-0 max-w-full items-center overflow-hidden rounded-md bg-input/60 dark:bg-foreground/[0.08]">
+      <div className="flex h-6 min-w-0 max-w-full items-center overflow-hidden rounded-md bg-[hsl(var(--composer))] dark:bg-foreground/[0.08]">
         <span className="inline-flex min-w-0 items-center" data-demo="branch">
           <BranchSelector
             value={selectedBranch}

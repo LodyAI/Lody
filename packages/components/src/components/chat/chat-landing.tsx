@@ -80,7 +80,6 @@ import {
   setMobileDrawerOpenAtom,
   navigationSidebarHiddenAtom,
   showNavigationSidebarAtom,
-  tasksFeatureEnabledAtom,
   userAtom,
   workspaceReposCacheAtomFamily,
 } from '@/atoms';
@@ -203,6 +202,7 @@ import { ErrorBoundary } from '@/components/error-boundary';
 import { ChatLandingView, type ChatLandingHintType } from './chat-landing-view';
 import { getSessionCreationNavigation } from './submission/use-composer-navigation-focus';
 import { BranchSelector, getSelectorTagClassName } from './chat-landing-selectors';
+import { CONTEXT_PILL_SURFACE_CLASS } from './context-pill-class';
 import {
   extractIssuePRMentionsFromText,
   useKnownIssuePrItems,
@@ -249,7 +249,7 @@ import {
   shouldSubmitOnEnterForMobileKeyboardAction,
 } from '@/lib/mobile-keyboard-action';
 import { getChatComposerPromptPlaceholderKey } from '@/lib/chat-composer-placeholder';
-import { splitImageAndFileAttachments } from '@/lib/file-drop';
+import { selectPastedClipboardFiles, splitImageAndFileAttachments } from '@/lib/file-drop';
 import { canShowSubscriptionRateLimits } from '@/lib/session-usage';
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
 import { createMachinePairing } from '@/lib/cli-api-key';
@@ -580,7 +580,6 @@ function WorkspaceChatLanding({
   const multiWorkspaceAvailable = useAppCapability('multiWorkspace');
   const currentUser = useAtomValue(userAtom);
   const userId = currentUser?.id;
-  const tasksFeatureEnabled = useAtomValue(tasksFeatureEnabledAtom);
   const { activeOrganization, organizations, switchOrganization } = useOrganization({
     targetSlug: workspaceSlug,
   });
@@ -2766,6 +2765,18 @@ function WorkspaceChatLanding({
     void handleSubmit();
   };
 
+  const attachPastedFiles = useCallback(
+    (files: File[]) => {
+      const { images, attachments } = splitImageAndFileAttachments(files);
+      if (images.length > 0) {
+        addFiles(images);
+      }
+      if (attachments.length > 0) {
+        addFileAttachments(attachments);
+      }
+    },
+    [addFileAttachments, addFiles]
+  );
   const handlePromptPaste = useCallback(
     (event: ClipboardEvent<HTMLTextAreaElement>) => {
       const text = event.clipboardData.getData('text/plain');
@@ -2791,31 +2802,41 @@ function WorkspaceChatLanding({
 
       if (text && shouldCapturePastedTextDraft(text)) {
         event.preventDefault();
-        if (insertLargePastedTextAtSelection(text)) {
-          return;
-        }
+        insertLargePastedTextAtSelection(text);
       }
 
-      const pastedFiles = Array.from(event.clipboardData.items)
+      const clipboardFiles = Array.from(event.clipboardData.items)
         .filter((item) => item.kind === 'file')
         .map((item) => item.getAsFile())
         .filter((file): file is File => file !== null);
+      // A Word or PowerPoint copy carries a picture of the selection beside the
+      // text, so attaching every clipboard file turned those pastes into a
+      // screenshot of themselves.
+      const { files: pastedFiles, renderedImages } = selectPastedClipboardFiles({
+        text,
+        files: clipboardFiles,
+      });
+
+      if (renderedImages.length > 0) {
+        toast(t('composer.pastedRichTextAsText', 'Pasted as text'), {
+          // One id, so pasting repeatedly replaces the hint instead of stacking it.
+          id: 'composer-pasted-rich-text-as-text',
+          action: {
+            label: t('composer.pastedRichTextAttachImage', 'Attach image'),
+            onClick: () => attachPastedFiles(renderedImages),
+          },
+        });
+      }
 
       if (pastedFiles.length > 0) {
         event.preventDefault();
-        const { images, attachments } = splitImageAndFileAttachments(pastedFiles);
-        if (images.length > 0) {
-          addFiles(images);
-        }
-        if (attachments.length > 0) {
-          addFileAttachments(attachments);
-        }
+        attachPastedFiles(pastedFiles);
         return;
       }
 
       handleImagePromptPaste(event);
     },
-    [addFileAttachments, addFiles, handleImagePromptPaste, insertLargePastedTextAtSelection, t]
+    [attachPastedFiles, handleImagePromptPaste, insertLargePastedTextAtSelection, t]
   );
   const handleImageDrop = useCallback(
     (files: File[]) => {
@@ -3062,7 +3083,6 @@ function WorkspaceChatLanding({
         configOptionValues: dispatchConfigOptionValues,
         issuePRMentions,
         mcpServerIds: mcpSelection.selectedIds,
-        taskToolsEnabled: tasksFeatureEnabled,
         agentRoleId: activeAgentRole?.id ?? null,
         agentRoleRevision: activeAgentRole?.revision,
       });
@@ -3388,7 +3408,7 @@ function WorkspaceChatLanding({
         emptyText={t('chat.branchEmpty', { defaultValue: 'No branches found' })}
         loading={contextType === 'local' ? loadingLocalGitState || runtimeInitializing : undefined}
         loadingText={t('chat.branchLoading', { defaultValue: 'Loading branches...' })}
-        className="h-6 min-w-0 max-w-full gap-1.5 rounded-none border-none bg-transparent px-2 text-xs font-normal text-foreground/80 hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-100 [&_span]:text-xs [&_span]:leading-tight [&_svg]:text-current [&_svg]:opacity-100"
+        className="h-6 min-w-0 max-w-full gap-1.5 rounded-none border-none bg-transparent px-2 text-[0.9em] font-normal text-foreground/80 hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-100 [&_span]:text-[0.9em] [&_span]:leading-tight [&_svg]:text-current [&_svg]:opacity-100"
         disabled={isBranchDisabled}
       />
     </span>
@@ -3446,7 +3466,12 @@ function WorkspaceChatLanding({
 
   const branchWorktreePill =
     branchSelectorNode || topWorktreeNode ? (
-      <div className="flex h-6 min-w-0 max-w-full items-center overflow-hidden rounded-md bg-input/60 dark:bg-foreground/[0.08]">
+      <div
+        className={cn(
+          'flex h-6 min-w-0 max-w-full items-center overflow-hidden rounded-md',
+          CONTEXT_PILL_SURFACE_CLASS
+        )}
+      >
         {branchSelectorNode}
         {branchSelectorNode && topWorktreeNode ? (
           <span aria-hidden="true" className="h-4 w-px shrink-0 bg-border" />
@@ -3723,7 +3748,7 @@ function WorkspaceChatLanding({
           type="button"
           variant="ghost"
           size="sm"
-          className={cn(selectorTagClassName, 'text-xs leading-tight')}
+          className={cn(selectorTagClassName, 'text-[0.9em] leading-tight')}
           onClick={resetErrorBoundary}
           aria-label={t('chat.retryTargetSelector', 'Retry target selector')}
         >
@@ -4246,7 +4271,6 @@ function WorkspaceChatLanding({
         modelId: modelOptions.length > 0 ? selectedModelId : null,
         configOptionValues: dispatchConfigOptionValues,
         mcpServerIds: mcpSelection.selectedIds,
-        taskToolsEnabled: tasksFeatureEnabled,
       }),
     [
       dispatchConfigOptionValues,
@@ -4255,7 +4279,6 @@ function WorkspaceChatLanding({
       modelOptions.length,
       selectedModeId,
       selectedModelId,
-      tasksFeatureEnabled,
     ]
   );
   const { handoffToSession: handoffSessionPreparation } = useSessionPreparation({
@@ -4301,7 +4324,7 @@ function WorkspaceChatLanding({
     selectedRepo,
     workspaceId,
   ]);
-  const expandSkillMentionsForPrompt = useMentionPromptExpansion({
+  const { expand: expandSkillMentionsForPrompt } = useMentionPromptExpansion({
     source: mentionSource,
     skillAgent,
     promptValue: prompt,
@@ -5146,10 +5169,7 @@ function WorkspaceChatLanding({
   const inboxFeatureEnabled = useAtomValue(inboxFeatureEnabledAtom);
   const showMobileInbox = showProjectSharing && inboxFeatureEnabled;
   const effectiveMobileHomeTab: MobileHomeTab =
-    (selectedMobileHomeTab === 'tasks' && !tasksFeatureEnabled) ||
-    (selectedMobileHomeTab === 'inbox' && !showMobileInbox)
-      ? 'chat'
-      : selectedMobileHomeTab;
+    selectedMobileHomeTab === 'inbox' && !showMobileInbox ? 'chat' : selectedMobileHomeTab;
   useEffect(() => {
     if (!showMobileInbox && selectedMobileHomeTab === 'inbox') {
       setSelectedMobileHomeTab('chat');
@@ -5312,16 +5332,12 @@ function WorkspaceChatLanding({
            since the feature isn't shipping yet and the user's actual
            "data context" is still whichever Chat / Projects state
            they were on.
-         - 'tasks': same as Inbox — the Tasks surface reads its own
-           atoms and has no session-context meaning, so the composer
-           context + URL stay on whatever Chat / Projects state the
-           user had before tapping across.
          - 'chat': mirror to `contextType` + URL so the composer's
            selectors line up with the visible list.
          - 'projects': delegate to whichever sub-tab is remembered
            (`persistedProjectsSubTab`), since 项目 isn't itself a
            contextType. */
-      if (nextTab === 'inbox' || nextTab === 'tasks') return;
+      if (nextTab === 'inbox') return;
       const nextContext: SessionContextType = nextTab === 'chat' ? 'chat' : persistedProjectsSubTab;
       setContextType(nextContext);
       void navigate({
@@ -6029,7 +6045,7 @@ function WorkspaceChatLanding({
       </div>
       <button
         type="button"
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-hover hover:text-foreground"
         onClick={() => void dismissInboxItem({ itemId: sharingReviewRow._id })}
         aria-label={t('common.dismiss', 'Dismiss')}
       >
@@ -6042,18 +6058,19 @@ function WorkspaceChatLanding({
   );
   const [piMigrationBusy, setPiMigrationBusy] = useState(false);
   const [piMigrationError, setPiMigrationError] = useState(false);
-  const canMigratePi = legacyPiProviders.every((config) =>
+  const migratablePiProviders = legacyPiProviders.filter((config) =>
     machineSupportsProtocolCapability(
       machines.get(config.machineId),
       MACHINE_PROTOCOL_CAPABILITIES.builtinPi
     )
   );
+  const canMigratePi = migratablePiProviders.length > 0;
   const confirmPiMigration = async () => {
     if (!runtime || piMigrationBusy || !canMigratePi) return;
     setPiMigrationBusy(true);
     setPiMigrationError(false);
     try {
-      for (const config of legacyPiProviders) {
+      for (const config of migratablePiProviders) {
         await runtime.writer.flockRowUpdate(
           getMachineFlockDocId(runtime.workspaceId, config.machineId),
           machineFlockKeys.agentConfig(config.id),
@@ -6072,10 +6089,10 @@ function WorkspaceChatLanding({
     }
   };
   const composerNoticeNode =
-    sharingReviewNoticeNode || sessionLimitNoticeNode || legacyPiProviders.length ? (
+    sharingReviewNoticeNode || sessionLimitNoticeNode || canMigratePi ? (
       <>
         <PiProviderMigrationCard
-          count={legacyPiProviders.length}
+          count={migratablePiProviders.length}
           busy={piMigrationBusy}
           error={piMigrationError}
           canMigrate={canMigratePi}
@@ -6131,6 +6148,7 @@ function WorkspaceChatLanding({
             onImageDrop={submitting ? undefined : handleImageDrop}
             imageDropDisabled={submitting}
             promptPlaceholder={promptPlaceholder}
+            compactPlaceholderName={activeAgentRole?.name ?? selectedConfig?.name ?? null}
             promptDisabled={submitting}
             promptRows={4}
             promptEnterKeyHint={promptEnterKeyHint}
@@ -6318,7 +6336,6 @@ function WorkspaceChatLanding({
           onPullToRefresh={handleMobileHomePullToRefresh}
           selectedTab={effectiveMobileHomeTab}
           showInboxTab={showMobileInbox}
-          showTasksTab={tasksFeatureEnabled}
           selectedProjectsSubTab={selectedProjectsSubTab}
           onProjectsSubTabSelect={handleMobileHomeProjectsSubTabSelect}
           onAddLocalProject={() => openAddProjectDialog()}
@@ -6376,7 +6393,6 @@ function WorkspaceChatLanding({
               'Connect a GitHub repository'
             ),
             chatTab: t('chat.contextSwitch.chat', 'Chat'),
-            tasksTab: t('tasks.title', 'Tasks'),
             recentProjectsHeading: t('chat.mobileHome.recentProjectsHeading', '最近常用'),
             settingsTab: t('settings.title', 'Settings'),
             projectRemoving: t('sidebar.localProjects.remove.removing', 'Removing…'),
@@ -6570,6 +6586,7 @@ function WorkspaceChatLanding({
         onPromptPaste={handlePromptPaste}
         onImageDrop={handleImageDrop}
         promptPlaceholder={promptPlaceholder}
+        compactPlaceholderName={activeAgentRole?.name ?? selectedConfig?.name ?? null}
         promptEnterKeyHint={promptEnterKeyHint}
         promptRef={promptTextareaRef}
         pastedTextDrafts={pastedTextDrafts}

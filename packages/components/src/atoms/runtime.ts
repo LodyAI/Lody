@@ -24,9 +24,8 @@ import type {
   SessionDocMeta,
   SessionTurnInputConfig,
   SessionId,
-  TaskId,
-  TaskDocInput,
-  TaskDocState,
+  SessionMeta,
+  SessionOperation,
   MachineId,
   MachinePingResponse,
   MachineRestartResponse,
@@ -145,25 +144,6 @@ export type PreviewVisualCommentDocStore = {
   waitUntilSynced: () => Promise<void>;
 };
 
-export type TaskDocUpdater =
-  | Partial<TaskDocInput>
-  | ((state: Readonly<TaskDocInput>) => TaskDocInput)
-  | ((state: TaskDocInput) => void);
-
-export type TaskDocStore = {
-  readonly taskId: TaskId;
-  readonly roomId: string;
-  readonly doc: LoroDoc;
-  readonly firstSynced: Promise<void>;
-  getSyncState: () => RoomSyncState;
-  subscribeSyncState: (listener: (state: RoomSyncState) => void) => () => void;
-  getState: () => TaskDocState;
-  setState: (updater: TaskDocUpdater) => void;
-  subscribe: (listener: (state: TaskDocState) => void) => () => void;
-  dispose: () => void;
-  waitUntilSynced: () => Promise<void>;
-};
-
 export type WorkspaceRuntime = {
   /**
    * The workspace slug used for caching the (slug, id) mapping.
@@ -174,6 +154,11 @@ export type WorkspaceRuntime = {
    */
   readonly workspaceId: WorkspaceId;
   readonly repo: LoroRepo;
+  /** Read targets from the ready metadata source, independently of UI projection. */
+  readSessionOperationTargets: (
+    sessionId: SessionId,
+    operation: SessionOperation
+  ) => Promise<[SessionMeta, ...SessionMeta[]]>;
   /** Workspace-owned, scoped LRU for owner-session file-index Flock resources. */
   readonly codeCollabFileIndexCache: CodeCollabFileIndexCache;
   /**
@@ -226,10 +211,6 @@ export type WorkspaceRuntime = {
   releasePreviewVisualCommentStore: (sessionId: SessionId) => Promise<void>;
   acquirePreviewVisualCommentStore: (sessionId: SessionId) => Promise<PreviewVisualCommentDocStore>;
   releasePreviewVisualCommentStoreRef: (sessionId: SessionId) => void;
-  withTaskStore: <T>(taskId: TaskId, fn: (store: TaskDocStore) => Promise<T> | T) => Promise<T>;
-  releaseTaskStore: (taskId: TaskId) => Promise<void>;
-  acquireTaskStore: (taskId: TaskId) => Promise<TaskDocStore>;
-  releaseTaskStoreRef: (taskId: TaskId) => void;
   sendControl: (message: ClientToServer) => void;
   waitForSessionCreateResponse: (
     sessionId: SessionId,

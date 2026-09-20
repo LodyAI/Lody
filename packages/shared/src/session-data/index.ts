@@ -7,11 +7,8 @@ export {
   applyRespondPermission,
   applyResumeAssistant,
   createAssistantTurn,
-  hasTaskProposal,
   markTurnSeenBlocked,
-  parseTaskProposalResolution,
   resolveEditableTail,
-  resolveTaskProposalOnEntry,
   type EditableTail,
   type EditableTailTurn,
 } from './planner';
@@ -38,5 +35,3 @@ export {
 export { readLatestTurn, readSessionHistory } from './read';
 
 export { markAssistantTurnFinished } from './assistant-finalize';
-
-export { HistoryActionRefused } from './task-proposal';

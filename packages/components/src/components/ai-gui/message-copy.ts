@@ -101,7 +101,7 @@ export const getTextContentFromMessageItems = (items: MessageContent[]): string 
  *
  * The other kinds stay expanded on purpose: a pasted-text span IS the content
  * the user wants when they copy, and a skill or session mention expands to a
- * path or an id that remains meaningful pasted elsewhere.
+ * path or a `session://` link that remains meaningful pasted elsewhere.
  */
 const COPY_AS_LABEL_SPAN_KINDS: ReadonlySet<MessageTextSpanKind> = new Set(['agent_role']);
 

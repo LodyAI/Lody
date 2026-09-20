@@ -94,13 +94,10 @@ for (const leading of ['empty', 'visible']) {
   });
 }
 
-for (const { story, label, colorVariable } of [
-  { story: 'starting-activity', label: 'Starting…', colorVariable: '--primary' },
-  {
-    story: 'permission-activity',
-    label: 'Waiting for permission',
-    colorVariable: '--status-warning',
-  },
+for (const { story, label, working } of [
+  // Live work shimmers; waiting on the user keeps a still, warning-toned label.
+  { story: 'starting-activity', label: 'Starting…', working: true },
+  { story: 'permission-activity', label: 'Waiting for permission', working: false },
 ]) {
   test(`agent activity stays visible across empty history hydration: ${story}`, async ({
     page,
@@ -114,13 +111,13 @@ for (const { story, label, colorVariable } of [
     await expect(activity).toBeVisible();
     await expect(activity).toBeInViewport();
     await expect(page.locator('[data-message-selection-scroll]')).toHaveCount(0);
-    const activityColor = () =>
-      page
-        .locator('.agent-activity-dot')
-        .evaluate((element) =>
-          (element as HTMLElement).style.getPropertyValue('--agent-activity-color')
-        );
-    expect(await activityColor()).toBe(`hsl(var(${colorVariable}, 199 89% 72%))`);
+    const activityPresentation = () =>
+      activity.evaluate((element) => ({
+        shimmer:
+          window.getComputedStyle(element, '::after').animationName === 'agent-shimmer-sweep',
+        warning: element.classList.contains('text-status-warning'),
+      }));
+    expect(await activityPresentation()).toEqual({ shimmer: working, warning: !working });
 
     const toggleActivity = page.getByRole('button', { name: 'Toggle activity', exact: true });
     await toggleActivity.click();
@@ -134,7 +131,7 @@ for (const { story, label, colorVariable } of [
     ).toBeInViewport();
     await expect(activity).toHaveCount(1);
     await expect(activity).toBeInViewport();
-    expect(await activityColor()).toBe(`hsl(var(${colorVariable}, 199 89% 72%))`);
+    expect(await activityPresentation()).toEqual({ shimmer: working, warning: !working });
     await toggleActivity.click();
     await expect(activity).toHaveCount(0);
   });

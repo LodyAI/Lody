@@ -28,25 +28,33 @@ const statusLabels = {
 const selectSessionTitle = (session: SessionMeta | null | undefined): string | null =>
   session?.title?.trim() || null;
 
-/** The status belongs to the creating Operation's target Turn, not later Session activity. */
-export function CreatedSessionOperationCard({
-  sessionId,
-  fallbackTitle,
-  status,
-  onNavigateSession,
-}: {
-  sessionId: SessionId;
-  fallbackTitle?: string;
-  status: CreatedSessionStatus;
-  onNavigateSession?: (target: SessionNavigationTarget) => void;
-}) {
+/** A target Session's live title, falling back to the Operation's label. */
+export function useOperationTargetTitle(sessionId: SessionId, fallbackTitle?: string): string {
   const { t } = useTranslation();
   const titleAtom = useMemo(
     () => selectAtom(sessionMetaAtomFamily(getSessionRoomId(sessionId)), selectSessionTitle),
     [sessionId]
   );
   const liveTitle = useAtomValue(titleAtom);
-  const title = liveTitle || fallbackTitle?.trim() || t('sessions.untitled', 'Untitled session');
+  return liveTitle || fallbackTitle?.trim() || t('sessions.untitled', 'Untitled session');
+}
+
+/** The status belongs to the creating Operation's target Turn, not later Session activity. */
+export function CreatedSessionOperationCard({
+  sessionId,
+  fallbackTitle,
+  status,
+  detail,
+  onNavigateSession,
+}: {
+  sessionId: SessionId;
+  fallbackTitle?: string;
+  status: CreatedSessionStatus;
+  detail?: string;
+  onNavigateSession?: (target: SessionNavigationTarget) => void;
+}) {
+  const { t } = useTranslation();
+  const title = useOperationTargetTitle(sessionId, fallbackTitle);
   const StatusIcon =
     status === 'running'
       ? LoaderCircle
@@ -61,6 +69,7 @@ export function CreatedSessionOperationCard({
       relation="opened"
       label={t('sessions.openedBy.createdSession', 'Session created')}
       sessionTitle={title}
+      detail={detail}
       actionLabel={t('sessions.openedBy.viewSession', 'View session')}
       onAction={onNavigateSession ? () => onNavigateSession({ sessionId }) : undefined}
       status={

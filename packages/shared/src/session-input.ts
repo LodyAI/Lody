@@ -61,7 +61,6 @@ export type SessionConversationConfig = {
   modelId?: string;
   configOptionValues?: Record<string, AcpConfigOptionValue>;
   mcpServerIds?: McpServerId[];
-  taskToolsEnabled?: boolean;
   /** Null is an explicit None; undefined means the selected Turn predates this field. */
   agentRoleId?: AgentRoleId | null;
   agentRoleRevision?: number;
@@ -170,9 +169,6 @@ export const resolveSessionConversationConfig = (
         ? { configOptionValues: inputConfig.configOptionValues }
         : {}),
       ...(inputConfig.mcpServerIds ? { mcpServerIds: inputConfig.mcpServerIds } : {}),
-      ...(typeof inputConfig.taskToolsEnabled === 'boolean'
-        ? { taskToolsEnabled: inputConfig.taskToolsEnabled }
-        : {}),
       ...(inputConfig.agentRoleId !== undefined ? { agentRoleId: inputConfig.agentRoleId } : {}),
       ...(typeof inputConfig.agentRoleId === 'string' && inputConfig.agentRoleRevision !== undefined
         ? { agentRoleRevision: inputConfig.agentRoleRevision }
@@ -267,12 +263,6 @@ export const resolveSessionMcpSelection = (
   history: readonly { id: string; role: unknown; inputConfig?: unknown }[],
   messageQueue: readonly { $cid?: unknown; acpSessionConfig?: unknown }[] = []
 ): McpServerId[] => resolveSessionConversationConfig(history, messageQueue).mcpServerIds ?? [];
-
-/** The Task MCP gate frozen by the latest driving Turn. Missing legacy values are disabled. */
-export const resolveSessionTaskToolsEnabled = (
-  history: readonly { id: string; role: unknown; inputConfig?: unknown }[],
-  messageQueue: readonly { $cid?: unknown; acpSessionConfig?: unknown }[] = []
-): boolean => resolveSessionConversationConfig(history, messageQueue).taskToolsEnabled === true;
 
 const normalizeTextInputBlock = (
   block: Extract<SessionInputBlock, { type: 'text' }>
@@ -634,7 +624,6 @@ export const buildSessionTurnInputConfig = (args: {
   modelId?: string | null;
   configOptionValues?: Record<string, AcpConfigOptionValue> | null;
   mcpServerIds?: readonly McpServerId[] | null;
-  taskToolsEnabled?: boolean;
   agentRoleId?: AgentRoleId | null;
   agentRoleRevision?: number;
   issuePRMentions?: IssuePRMention[];
@@ -655,9 +644,6 @@ export const buildSessionTurnInputConfig = (args: {
         ? args.configOptionValues
         : undefined,
     mcpServerIds: args.mcpServerIds ? [...args.mcpServerIds] : undefined,
-    ...(args.taskToolsEnabled !== undefined
-      ? { taskToolsEnabled: args.taskToolsEnabled === true }
-      : {}),
     ...(args.agentRoleId !== undefined ? { agentRoleId: args.agentRoleId } : {}),
     ...(typeof args.agentRoleId === 'string' && args.agentRoleRevision !== undefined
       ? { agentRoleRevision: args.agentRoleRevision }

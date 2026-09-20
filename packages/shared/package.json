@@ -60,6 +60,10 @@
       "types": "./src/electron-ipc.ts",
       "import": "./src/electron-ipc.ts"
     },
+    "./devbar": {
+      "types": "./src/devbar.ts",
+      "import": "./src/devbar.ts"
+    },
     "./proxy-env": {
       "types": "./src/proxy-env.ts",
       "import": "./src/proxy-env.ts"

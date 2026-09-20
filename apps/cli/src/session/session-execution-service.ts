@@ -290,6 +290,8 @@ type TurnRuntimeState = {
   /** One drain deadline shared by Stop and the cancellation finalizer. */
   cancellationDrain?: Promise<void>;
   steerWaitController?: AbortController;
+  /** Submitted handoff steer whose verdict may trail the yielded prompt's answer. */
+  pendingHandoffSteerOutcome?: Promise<SteerOutcomeResult>;
   pendingSteerConfig?: Set<Promise<void>>;
   interruptRequested: boolean;
   terminateSessionOnCancel: boolean;
@@ -817,7 +819,15 @@ export class SessionExecutionService {
         run.promptOutcome.then((outcome) => ({ type: 'prompt' as const, outcome })),
         run.successorReady.then(() => ({ type: 'successor' as const })),
       ]);
-      if (settled.type === 'prompt' && !run.successor) runtime.steerWaitController?.abort();
+      // A handoff adapter answers the yielded prompt BEFORE it confirms the
+      // steer. Keep that steer's wait alive: the decision below queues behind
+      // the steer, so `applied` hands off to its successor and a refusal falls
+      // through to completion. Draining here would wait on the next turn.
+      const handoffVerdictPending =
+        !!runtime.pendingHandoffSteerOutcome && !runtime.cancelRequested;
+      if (settled.type === 'prompt' && !run.successor && !handoffVerdictPending) {
+        runtime.steerWaitController?.abort();
+      }
       const decision = await this.steerMutationQueue.enqueue(runtime.sessionId, async () => {
         if (
           this.turnRuntimeBySession.get(runtime.sessionId) !== runtime ||
@@ -1580,6 +1590,16 @@ export class SessionExecutionService {
       const previousUserTurnId = runtime.userTurnId;
       const steerRun = agentClient.steerPrompt(acpSessionId, promptBlocks);
       providerSubmissionStarted = true;
+      if (steerCapability.upstreamTurn === 'handoff') {
+        const pendingOutcome = steerRun.outcome;
+        runtime.pendingHandoffSteerOutcome = pendingOutcome;
+        const clear = () => {
+          if (runtime.pendingHandoffSteerOutcome === pendingOutcome) {
+            runtime.pendingHandoffSteerOutcome = undefined;
+          }
+        };
+        void pendingOutcome.then(clear, clear);
+      }
       let steerOutcome: SteerOutcomeResult;
       try {
         steerOutcome = await wait(steerRun.outcome);
@@ -4225,7 +4245,6 @@ export class SessionExecutionService {
           agentType: acpSessionConfig.agentType,
           configOptionValues: acpSessionConfig.configOptionValues,
           mcpServerIds: acpSessionConfig.mcpServerIds ?? [],
-          taskToolsEnabled: acpSessionConfig.taskToolsEnabled === true,
           customAcp: resumeCustomAcp,
           runtimeOverrides: resumeRuntimeOverrides,
           requesterUserId: userId,
@@ -5047,7 +5066,6 @@ export class SessionExecutionService {
       agentType: acpSessionConfig.agentType,
       configOptionValues: acpSessionConfig.configOptionValues,
       mcpServerIds: acpSessionConfig.mcpServerIds ?? [],
-      taskToolsEnabled: acpSessionConfig.taskToolsEnabled === true,
       agentConfigId: existingMeta?.agentConfigId,
       customAcp: acpSessionConfig.customAcp,
       runtimeOverrides: acpSessionConfig.runtimeOverrides,

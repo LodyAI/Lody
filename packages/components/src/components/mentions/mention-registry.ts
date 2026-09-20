@@ -4,10 +4,12 @@ import { useTranslation } from 'react-i18next';
 import { getAgentRoleEmoji, type AcpCommandSummary } from '@lody/shared';
 import { filterAndRankSlashCommands } from '@/lib/command-slash-search';
 import {
-  buildPathSuggestions,
   getSuggestions,
   type PathSuggestion,
-} from '@/components/mentions/file-at-mention';
+  type FileSuggestionIndex,
+} from './file-search/engine';
+export { buildMentionFileIndex } from './file-search/engine';
+export type { FileSuggestionIndex } from './file-search/engine';
 import {
   getIssuePrSuggestions,
   type ItemSuggestion as IssuePrSuggestion,
@@ -280,7 +282,9 @@ export function selectMentionMenuView(
     // `limit` is passed down so a source can stop early, and enforced here so
     // the cap holds whether or not it did.
     const candidates = category.getCandidates(search, limit).slice(0, limit);
-    if (candidates.length > 0) groups.push({ category, candidates });
+    if (candidates.length > 0 || category.status === 'loading' || category.status === 'error') {
+      groups.push({ category, candidates });
+    }
   }
 
   return {
@@ -336,43 +340,6 @@ function applyLimit<T>(ranked: T[], limit: number | undefined): T[] {
   return limit === undefined || ranked.length <= limit ? ranked : ranked.slice(0, limit);
 }
 
-export type FileSuggestionIndex = {
-  dirs: PathSuggestion[];
-  files: PathSuggestion[];
-  allSuggestions: PathSuggestion[];
-};
-
-/**
- * Rankable file index for the mention menu. The GitHub/worktree tree only
- * yields files, so directories are synthesised by `buildPathSuggestions`;
- * lazily-listed directories are folded in on top so `@` completion can offer a
- * directory it has not expanded yet.
- */
-export function buildMentionFileIndex(
-  entry: { paths: string[]; lazyDirectories?: ReadonlyArray<{ path: string }> } | null,
-  buildLazyDirectoryToken: (path: string) => string | null
-): FileSuggestionIndex | null {
-  if (!entry) return null;
-  const base = buildPathSuggestions(entry.paths);
-  const tokens = new Set(base.allTokens);
-  const lazyDirs: PathSuggestion[] = [];
-  for (const lazy of entry.lazyDirectories ?? []) {
-    const token = buildLazyDirectoryToken(lazy.path);
-    if (!token || tokens.has(token)) continue;
-    tokens.add(token);
-    lazyDirs.push({
-      kind: 'dir',
-      path: token.replace(/\/+$/u, ''),
-      token,
-    });
-  }
-  if (lazyDirs.length === 0) return base;
-  const dirs = [...base.dirs, ...lazyDirs].sort((left, right) =>
-    left.token.localeCompare(right.token)
-  );
-  return { dirs, files: base.files, allSuggestions: [...dirs, ...base.files] };
-}
-
 export function toFileCandidate(item: PathSuggestion): MentionCandidate {
   const isDirectory = item.kind === 'dir';
   return {
@@ -396,7 +363,7 @@ export function buildFileCandidates(
   limit?: number
 ): MentionCandidate[] {
   if (!index) return [];
-  return applyLimit(getSuggestions(index, term), limit).map(toFileCandidate);
+  return getSuggestions(index, term, limit).map(toFileCandidate);
 }
 
 export function toIssuePrCandidate(item: IssuePrSuggestion): MentionCandidate {
@@ -625,7 +592,7 @@ function sourceCategoryFields(sourceKey: MentionSourceKey, source: SourceState) 
 
 export type MentionCategorySources = {
   file?: SourceState & {
-    index: FileSuggestionIndex | null;
+    getCandidates: MentionCategory['getCandidates'];
     notice?: string;
   };
   issuePr?: SourceState & {
@@ -688,7 +655,7 @@ export function useMentionCategories(sources: MentionCategorySources): MentionCa
         icon: 'file',
         ...sourceCategoryFields('file', file),
         notice: file.notice,
-        getCandidates: (term, limit) => buildFileCandidates(file.index, term, limit),
+        getCandidates: file.getCandidates,
       });
     }
 

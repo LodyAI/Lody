@@ -27,6 +27,7 @@ import {
 import type { MachineVisibilityAccess } from '@/lib/visible-machine-index';
 import type { VisibleLocalProjectIndex } from '@/lib/visible-local-project-index';
 import { cn } from '@/lib/utils';
+import { CONTEXT_PILL_HOVER_CLASS, CONTEXT_PILL_SURFACE_CLASS } from './context-pill-class';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -105,11 +106,7 @@ export function compareUnifiedProjectOptions(
 
 function selectUnifiedProjectOptionsForRender<
   TOption extends Pick<UnifiedProjectOption, 'label' | 'description' | 'selection'>,
->(
-  options: readonly TOption[],
-  query: string,
-  limit?: number
-): TOption[] {
+>(options: readonly TOption[], query: string, limit?: number): TOption[] {
   if (limit !== undefined && limit <= 0) return [];
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const visible: TOption[] = [];
@@ -231,11 +228,10 @@ export function buildUnifiedLocalProjectOptions({
   return visible;
 }
 
-export interface UnifiedProjectSelectorViewProps
-  extends Omit<
-    UnifiedProjectSelectorProps,
-    'selectedMachineId' | 'latestMessageAtByLocalProject' | 'projectSharing'
-  > {
+export interface UnifiedProjectSelectorViewProps extends Omit<
+  UnifiedProjectSelectorProps,
+  'selectedMachineId' | 'latestMessageAtByLocalProject' | 'projectSharing'
+> {
   localProjects: ReadonlyArray<UnifiedLocalProjectOption>;
   onShareLocalProjectWithTeam?: (selection: LocalProjectSelection) => Promise<void>;
   getShareErrorMessage?: (error: unknown, fallback: string) => string;
@@ -282,12 +278,15 @@ function ProjectAccessStatus({
   const isAction = variant === 'trigger' && Boolean(onShare);
   const sharedClassName = cn(
     'inline-flex shrink-0 select-none items-center gap-1 text-muted-foreground',
-    variant === 'trigger' &&
-      'h-6 rounded-r-md border-l border-border/60 bg-input/60 px-2 text-[0.66rem] font-medium transition-colors dark:bg-foreground/[0.08]',
-    variant === 'option' && 'text-[0.68rem] font-medium',
+    variant === 'trigger' && [
+      'h-6 rounded-r-md px-2 text-[0.8em] font-medium transition-colors',
+      CONTEXT_PILL_SURFACE_CLASS,
+      // The pill's own left border doubles as the divider from the trigger.
+      'dark:border-l-border/60',
+    ],
+    variant === 'option' && 'text-[0.8em] font-medium',
     'text-foreground/75',
-    isAction &&
-      'cursor-pointer hover:bg-input hover:text-foreground dark:hover:bg-foreground/[0.12]',
+    isAction && ['cursor-pointer', CONTEXT_PILL_HOVER_CLASS],
     variant === 'trigger' &&
       'outline-hidden focus-visible:relative focus-visible:z-20 focus-visible:ring-2 focus-visible:ring-ring/50'
   );
@@ -319,7 +318,7 @@ function ProjectAccessStatus({
         className="max-w-72 px-2.5 py-2"
       >
         <div className="font-medium">{title}</div>
-        <div className="mt-0.5 text-xs text-muted-foreground">{description}</div>
+        <div className="mt-0.5 text-[0.8em] text-muted-foreground">{description}</div>
       </TooltipContent>
     </Tooltip>
   );
@@ -465,19 +464,16 @@ export function UnifiedProjectSelectorView({
     : undefined;
   const canShareSelectedProject = Boolean(
     selectedOption &&
-      selectedPrivateSharing?.canManage &&
-      selectedPrivateSharing.privateReason !== 'machine-not-registered' &&
-      onShareLocalProjectWithTeam
+    selectedPrivateSharing?.canManage &&
+    selectedPrivateSharing.privateReason !== 'machine-not-registered' &&
+    onShareLocalProjectWithTeam
   );
 
   const isPropertyRow = triggerVariant === 'property-row';
 
   return (
     <div
-      className={cn(
-        'group/project relative flex min-w-0 items-center',
-        isPropertyRow && 'w-full'
-      )}
+      className={cn('group/project relative flex min-w-0 items-center', isPropertyRow && 'w-full')}
     >
       {value.kind !== 'none' && !isPropertyRow ? (
         <button
@@ -514,17 +510,18 @@ export function UnifiedProjectSelectorView({
               isPropertyRow
                 ? [
                     'flex h-8 w-full min-w-0 max-w-none items-center gap-2 rounded-md px-2',
-                    'text-[13px] font-normal transition-colors',
+                    'text-[1em] font-normal transition-colors',
                     'bg-transparent text-foreground hover:bg-hover',
                     'data-[state=open]:bg-hover',
                     '[&_svg]:text-current [&_svg]:opacity-70',
                     value.kind === 'none' && 'text-muted-foreground',
                   ]
                 : [
-                    'flex h-6 min-w-0 max-w-[18rem] items-center gap-1.5 rounded-md bg-input/60 px-2 dark:bg-foreground/[0.08]',
-                    'text-xs font-normal text-foreground/80 transition-colors hover:bg-input hover:text-foreground dark:hover:bg-foreground/[0.12] [&_svg]:text-current [&_svg]:opacity-100',
-                    'data-[state=open]:bg-input data-[state=open]:text-foreground dark:data-[state=open]:bg-foreground/[0.12]',
-                    selectedPrivateSharing && 'rounded-r-none',
+                    'flex h-6 min-w-0 max-w-[18rem] items-center gap-1.5 rounded-md px-2',
+                    CONTEXT_PILL_SURFACE_CLASS,
+                    'text-[0.9em] font-normal text-foreground/80 transition-colors [&_svg]:text-current [&_svg]:opacity-100',
+                    CONTEXT_PILL_HOVER_CLASS,
+                    selectedPrivateSharing && 'rounded-r-none border-r-0',
                   ],
               className
             )}
@@ -559,7 +556,7 @@ export function UnifiedProjectSelectorView({
                 if (event.key !== 'Escape') event.stopPropagation();
               }}
               placeholder={t('chat.projectPicker.searchPlaceholder', 'Search projects')}
-              className="h-8 border-border/50 bg-background/45 pl-8 text-xs shadow-none"
+              className="h-8 border-border/50 bg-background/45 pl-8 text-[0.9em] shadow-none"
             />
           </div>
           <div className="scrollbar-pro max-h-[min(50vh,13rem)] overflow-y-auto">
@@ -600,7 +597,7 @@ export function UnifiedProjectSelectorView({
                         labelNode
                       )}
                       {inlineDescription ? (
-                        <span className="line-clamp-2 text-xs leading-snug text-muted-foreground">
+                        <span className="line-clamp-2 text-[0.8em] leading-snug text-muted-foreground">
                           {inlineDescription}
                         </span>
                       ) : null}
@@ -618,7 +615,7 @@ export function UnifiedProjectSelectorView({
                 );
               })
             ) : (
-              <div className="px-2.5 py-5 text-center text-xs text-muted-foreground">
+              <div className="px-2.5 py-5 text-center text-[0.9em] text-muted-foreground">
                 {t('chat.projectPicker.emptyText', 'No projects found')}
               </div>
             )}

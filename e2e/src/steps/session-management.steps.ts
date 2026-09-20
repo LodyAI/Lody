@@ -51,11 +51,18 @@ When('用户归档并永久删除 opener Session', async function (this: LodyWor
   );
 });
 
-Then('child Tab 被删除而 opened Sessions 和 worktree 保留', async function (this: LodyWorld) {
-  await this.sessionRelationLifecyclePage!.expectDanglingProvenanceAndCleanup(
-    this.sessionRelationLifecycleResources!
-  );
-});
+// Step suspended in session-management.feature per wibus-wee's call
+// (2026-09-18): archived Session routes resolve to an empty/draft tab since
+// #746, so the opened-by card never renders. Kept registered so re-enabling
+// the Gherkin step needs no code change.
+Then(
+  'child Tab 被删除而 opened Sessions 保留 dangling 溯源并可独立清理',
+  async function (this: LodyWorld) {
+    await this.sessionRelationLifecyclePage!.expectDanglingProvenanceAndCleanup(
+      this.sessionRelationLifecycleResources!
+    );
+  }
+);
 
 Then(
   'metadata 未完成 hydration 时精确删除 empty child Tab 仍成功',

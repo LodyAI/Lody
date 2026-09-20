@@ -35,6 +35,13 @@ confirmation; unrelated machines and other builtin providers remain unaffected.
 
 ## Verification limits
 
+The landing filters legacy providers by their own machine's `builtinPi` capability.
+The card count, visibility and confirmed write loop use that supported subset, so
+one outdated machine does not block others. Unsupported providers remain unchanged
+and become eligible for a later confirmation when their machine updates. With no
+supported providers, both the card and its otherwise empty notice wrapper are hidden.
+Migration progress and retry feedback remain available for supported providers.
+
 Focused launch, migration, authentication and protocol tests cover local behavior.
 Packaging smoke uses the official CLI with a local synthetic model. It does not prove
 commercial-provider quality or Windows runtime behavior on this macOS host.

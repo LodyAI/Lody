@@ -52,3 +52,6 @@ than shell launcher parsing.
 ## Integration
 
 - [Lody PR #747](https://github.com/LodyAI/Lody/pull/747)
+- Followed by [letting macOS helpers load runtime-installed native addons](2026-09-17-dsh-helper-library-validation.md):
+  moving DSH into Lody Helper exposed it to macOS library validation, which the
+  packaged entitlements did not allow for.

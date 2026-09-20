@@ -5,6 +5,23 @@ import {
   hexColorToHslChannel,
 } from '../src/lib/vscode-theme/vscode-theme-color';
 import type { LodyResolvedVSCodeTheme } from '../src/lib/vscode-theme/vscode-theme-schemas';
+import { getBundledVSCodeThemeByIdSync } from '../src/lib/vscode-theme/bundled/bundled-vscode-themes';
+
+const hslChannelLuminance = (channel: string): number => {
+  const [h, s, l] = channel.split(' ').map((part) => Number.parseFloat(part));
+  const sat = s / 100;
+  const light = l / 100;
+  const k = (n: number) => (n + h / 30) % 12;
+  const a = sat * Math.min(light, 1 - light);
+  const [r, g, b] = [0, 8, 4].map((n) => light - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1)));
+  const linear = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
+};
+
+const contrastRatio = (a: string, b: string): number => {
+  const [dark, light] = [hslChannelLuminance(a), hslChannelLuminance(b)].sort((x, y) => x - y);
+  return (light + 0.05) / (dark + 0.05);
+};
 
 const themeFixture: LodyResolvedVSCodeTheme = {
   schemaVersion: 1,
@@ -61,7 +78,7 @@ describe('createLodyThemeCssVariables', () => {
     const sidebarForeground = hexColorToHslChannel('#A0A0A0');
 
     expect(variables['--background']).toBe('0 0% 6.3%');
-    expect(variables['--hover']).toBe('0 0% 15.7%');
+    expect(variables['--hover']).toBe('0 0% 10.2%');
     expect(variables['--hover-foreground']).toBe('0 0% 100%');
     expect(variables['--highlight']).toBe(warmAccent);
     expect(variables['--highlight-foreground']).toBe(buttonForeground);
@@ -181,5 +198,49 @@ describe('createLodyThemeCssVariables', () => {
     expect(variables['--status-success']).toBe(hexColorToHslChannel('#22CC66'));
     expect(variables['--code-added']).toBe(hexColorToHslChannel('#22CC66'));
     expect(variables['--code-removed']).toBe(hexColorToHslChannel('#FF0000'));
+  });
+
+  it('resolves syntax colors with TextMate selector matching, not raw string prefixes', () => {
+    const variables = createLodyThemeCssVariables({
+      ...themeFixture,
+      tokenColors: [
+        { scope: ['comment', 'string.comment'], settings: { foreground: '#888888' } },
+        { scope: 'keyword.operator', settings: { foreground: '#999999' } },
+        { scope: 'string', settings: { foreground: '#AA3300' } },
+        { scope: 'keyword', settings: { foreground: '#5500AA' } },
+        { scope: 'constant.numeric.decimal', settings: { foreground: '#0066CC' } },
+      ],
+    });
+
+    expect(variables['--syntax-comment']).toBe(hexColorToHslChannel('#888888'));
+    expect(variables['--syntax-string']).toBe(hexColorToHslChannel('#AA3300'));
+    expect(variables['--syntax-keyword']).toBe(hexColorToHslChannel('#5500AA'));
+    // No rule for `constant.numeric` itself: fall back to a sub-scope's color.
+    expect(variables['--syntax-number']).toBe(hexColorToHslChannel('#0066CC'));
+  });
+
+  it('keeps Lody Light code syntax at AA contrast on its code block background', () => {
+    const theme = getBundledVSCodeThemeByIdSync('lody-light');
+    expect(theme).toBeDefined();
+    const variables = createLodyThemeCssVariables(theme!);
+    const background = variables['--code-background'];
+    expect(background).toBeDefined();
+
+    for (const name of [
+      '--syntax-string',
+      '--syntax-keyword',
+      '--syntax-number',
+      '--syntax-function',
+      '--syntax-variable',
+      '--syntax-title',
+      '--syntax-attr',
+      '--syntax-builtin',
+    ]) {
+      expect({ name, ratio: contrastRatio(variables[name]!, background!) >= 4.5 }).toEqual({
+        name,
+        ratio: true,
+      });
+    }
+    expect(contrastRatio(variables['--syntax-comment']!, background!)).toBeGreaterThanOrEqual(3.5);
   });
 });

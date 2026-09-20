@@ -1,4 +1,4 @@
-import type { LodyWorktreeProject } from 'acp-extension-core';
+import type { LodyClientExtensionCapabilities, LodyWorktreeProject } from 'acp-extension-core';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
@@ -40,6 +40,9 @@ import {
   getServerNow,
   ACP_INIT_TIMEOUT_MS as DEFAULT_ACP_INIT_TIMEOUT_MS,
   ACP_NEW_SESSION_TIMEOUT_MS as DEFAULT_ACP_NEW_SESSION_TIMEOUT_MS,
+  getDevinSubagentContextId,
+  hasOtherDevinSubagentMeta,
+  parseDevinSubagentTaskMeta,
 } from '@lody/shared';
 import { getLocalControlSocketPath } from '@lody/shared/node/local-ipc';
 import { getLodyMcpHttpEndpoint } from '@/mcp/lody-mcp-http-server';
@@ -460,6 +463,22 @@ export type ImageGenerationEndEvent = {
 };
 
 const IMAGE_GENERATION_REVISED_PROMPT_PREFIX = 'Revised prompt: ';
+const MAX_LIVE_REASONING_LABEL_LENGTH = 280;
+
+const latestCodexReasoningSummaryLine = (text: string): string | null => {
+  for (const rawLine of text.split(/\r?\n/u).reverse()) {
+    let line = rawLine.trim();
+    if (!line || line.startsWith('<!--')) continue;
+    line = line.replace(/^#+\s*/u, '').trim();
+    if (line.startsWith('**')) {
+      const closing = line.indexOf('**', 2);
+      if (closing < 0) continue;
+      line = `${line.slice(2, closing)}${line.slice(closing + 2)}`.trim();
+    }
+    if (line) return line.slice(0, MAX_LIVE_REASONING_LABEL_LENGTH);
+  }
+  return null;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -573,8 +592,6 @@ export interface AgentClientOptions {
   };
   /** Config selected before ACP session establishment. */
   configOptionValues?: SessionTurnInputConfig['configOptionValues'];
-  /** Whether this Agent session mounts the built-in Lody Task MCP tools. */
-  taskToolsEnabled?: boolean;
   /** Launcher family (npx/uvx/local) for ACP startup analytics; non-PII. */
   launcher?: AcpLauncher;
   /**
@@ -584,6 +601,8 @@ export interface AgentClientOptions {
   terminalEnabled?: boolean;
   onStartupStage?: (event: AcpStartupStageEvent) => void;
   onUpdateMessage(message: AcpSessionNotification): void;
+  /** Ephemeral Codex reasoning label; never a transcript or history callback. */
+  onLiveReasoningStatus?(label: string | null): void;
   onRequestPermission(
     requestId: string,
     request: acp.RequestPermissionRequest
@@ -626,6 +645,7 @@ export class AgentClient implements acp.Client {
   private supportsFork = false;
   private supportsForkAtTurn = false;
   private lodyExtensionCapabilities: LodyExtensionCapabilities = {};
+  private readonly devinSubagentTaskIds = new Set<string>();
   private worktreeProject?: LodyWorktreeProject;
   private authMethods: acp.AuthMethod[] = [];
   private authenticationRequired = false;
@@ -639,6 +659,8 @@ export class AgentClient implements acp.Client {
   /** Session config options returned by the agent; the source of model/mode choices and names. */
   private configOptions: acp.SessionConfigOption[] = [];
   private readonly configOptionsListeners = new Set<() => void>();
+  private codexReasoningMessageId: string | null = null;
+  private codexReasoningText = '';
   /** Desired config retained across same-client replacement sessions. */
   private readonly configOptionValues: NonNullable<SessionTurnInputConfig['configOptionValues']>;
   /** Legacy top-level `models` state proves that `session/set_model` is supported. */
@@ -693,7 +715,6 @@ export class AgentClient implements acp.Client {
               workspaceId: this.options.workspaceId,
               machineId: this.options.machineId,
               workdir,
-              taskToolsEnabled: this.options.taskToolsEnabled === true,
             }),
           },
         ];
@@ -710,10 +731,6 @@ export class AgentClient implements acp.Client {
       { name: 'LODY_MCP_MACHINE_ID', value: this.options.machineId },
       { name: 'LODY_MCP_SOCKET_PATH', value: getLocalControlSocketPath() },
       { name: 'LODY_MCP_WORKDIR', value: workdir },
-      {
-        name: 'LODY_MCP_TASK_TOOLS_ENABLED',
-        value: this.options.taskToolsEnabled === true ? '1' : '0',
-      },
     ];
 
     // ACP MCP config is an explicit environment allowlist. The MCP subprocess
@@ -903,6 +920,35 @@ export class AgentClient implements acp.Client {
       return;
     }
     this.lastSessionUpdateAtMs = Date.now();
+
+    // Devin publishes subagent internals under `cognition.ai/subagent_context`.
+    // Non-tool internals are dropped here, before usage/config/title side
+    // consumers and the transcript see them; tool updates continue so their
+    // edit evidence and permission-requested rows still resolve in history.
+    // Register only a lifecycle row that can itself materialize as a task —
+    // a malformed marker on a non-tool update must not make the applier's
+    // fail-open (no task row → keep internals visible) unreachable.
+    const isToolUpdate =
+      params.update.sessionUpdate === 'tool_call' ||
+      params.update.sessionUpdate === 'tool_call_update';
+    const devinLifecycle = parseDevinSubagentTaskMeta(params.update._meta);
+    if (
+      devinLifecycle !== null &&
+      isToolUpdate &&
+      'toolCallId' in params.update &&
+      params.update.toolCallId.length > 0
+    ) {
+      this.devinSubagentTaskIds.add(devinLifecycle.taskId);
+    }
+    const devinSubagentOwnerId = getDevinSubagentContextId(params.update._meta);
+    const isDevinSubagentInternal =
+      devinSubagentOwnerId !== null &&
+      this.devinSubagentTaskIds.has(devinSubagentOwnerId) &&
+      !hasOtherDevinSubagentMeta(params.update._meta);
+    if (isDevinSubagentInternal && !isToolUpdate) {
+      return;
+    }
+
     if (this.handleUsageUpdate(params.update)) {
       // Usage telemetry is handled outside persisted chat history and remains
       // soft-validated so malformed telemetry cannot break the session stream.
@@ -934,8 +980,49 @@ export class AgentClient implements acp.Client {
       return;
     }
 
+    if (this.handleCodexLiveReasoning(notification)) {
+      return;
+    }
+
     this.options.onUpdateMessage(notification);
     return;
+  }
+
+  /**
+   * Codex thought chunks are transient status information, not conversation
+   * history. Other ACP providers retain the standard thought-history path.
+   */
+  private handleCodexLiveReasoning(notification: AcpSessionNotification): boolean {
+    if (!this.isCodexAgent()) return false;
+
+    const { update } = notification;
+    if (update.sessionUpdate === 'agent_thought_chunk') {
+      if (update.content.type !== 'text') return true;
+      const messageId = update.messageId ?? '__current__';
+      if (this.codexReasoningMessageId !== messageId) {
+        this.codexReasoningMessageId = messageId;
+        this.codexReasoningText = '';
+      }
+      this.codexReasoningText += update.content.text;
+      this.options.onLiveReasoningStatus?.(
+        latestCodexReasoningSummaryLine(this.codexReasoningText)
+      );
+      return true;
+    }
+
+    switch (update.sessionUpdate) {
+      case 'agent_message_chunk':
+      case 'tool_call':
+      case 'tool_call_update':
+      case 'plan':
+        if (this.codexReasoningMessageId !== null) {
+          this.codexReasoningMessageId = null;
+          this.codexReasoningText = '';
+          this.options.onLiveReasoningStatus?.(null);
+        }
+        break;
+    }
+    return false;
   }
 
   private handleGoalSessionInfoUpdate(notification: AcpSessionNotification): void {
@@ -1628,6 +1715,18 @@ export class AgentClient implements acp.Client {
       : undefined;
   }
 
+  /**
+   * Devin CLI keeps its subagent lifecycle/attribution notifications behind a
+   * private `cognition.ai/*` capability bit; without it, subagents surface only
+   * as instantly-completed `run_subagent`/`read_subagent` tool calls. See
+   * `devin-subagent-task.ts` for the matching `_meta` readers.
+   */
+  private getDevinClientCapabilitiesMeta(): Record<string, unknown> | undefined {
+    return this.options.agentConfig?.agentType === 'devin'
+      ? { 'cognition.ai/subagentSupport': true }
+      : undefined;
+  }
+
   private getSessionStartMeta(forkSessionTurnId?: string) {
     const clientIdentifier = this.getGrokClientIdentifier();
     const lody = {
@@ -1733,6 +1832,7 @@ export class AgentClient implements acp.Client {
     const connection = new acp.ClientSideConnection(() => this, stream);
     this.connection = connection;
     const grokClientIdentifier = this.getGrokClientIdentifier();
+    const devinClientCapabilitiesMeta = this.getDevinClientCapabilitiesMeta();
     this.worktreeProject = undefined;
     this.logger.debug(
       `[${this.options.sessionId}] Starting ACP client (workdir=${workdir} resumeSessionId=${
@@ -1808,6 +1908,12 @@ export class AgentClient implements acp.Client {
               // existing AskUserQuestion permission UI.
               elicitation: {
                 form: {},
+              },
+              _meta: {
+                ...devinClientCapabilitiesMeta,
+                lody: {
+                  elicitation: { version: 1, answerNotes: true },
+                } satisfies LodyClientExtensionCapabilities,
               },
             },
           }),
@@ -2196,6 +2302,7 @@ export class AgentClient implements acp.Client {
     });
 
     this.acpSessionId = sessionResponse.sessionId;
+    this.devinSubagentTaskIds.clear();
     this.logger.debug(
       `[${this.options.sessionId}] ACP session id set: ${sessionResponse.sessionId}`
     );
@@ -2266,6 +2373,7 @@ export class AgentClient implements acp.Client {
   adoptPreparedSession(sessionResponse: acp.NewSessionResponse): void {
     this.applySessionResponseState(sessionResponse);
     this.acpSessionId = sessionResponse.sessionId;
+    this.devinSubagentTaskIds.clear();
     this.authenticationRequired = false;
     this.logger.debug(
       `[${this.options.sessionId}] Adopted replacement ACP session: ${sessionResponse.sessionId}`

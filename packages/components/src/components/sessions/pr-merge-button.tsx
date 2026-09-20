@@ -15,29 +15,21 @@ const MERGE_METHODS: Array<{
   value: GitHubMergeMethod;
   labelKey: string;
   labelFallback: string;
-  descKey: string;
-  descFallback: string;
 }> = [
   {
     value: 'merge',
     labelKey: 'sessions.prTab.mergeMerge',
     labelFallback: 'Create a merge commit',
-    descKey: 'sessions.prTab.mergeMergeDesc',
-    descFallback: 'All commits from this branch will be added to the base branch.',
   },
   {
     value: 'squash',
     labelKey: 'sessions.prTab.mergeSquash',
     labelFallback: 'Squash and merge',
-    descKey: 'sessions.prTab.mergeSquashDesc',
-    descFallback: 'The commits from this branch will be combined into a single commit.',
   },
   {
     value: 'rebase',
     labelKey: 'sessions.prTab.mergeRebase',
     labelFallback: 'Rebase and merge',
-    descKey: 'sessions.prTab.mergeRebaseDesc',
-    descFallback: 'The commits will be rebased and added to the base branch.',
   },
 ];
 
@@ -114,7 +106,11 @@ export function PrMergeButton({
           variant={buttonVariant}
           disabled={isDisabled}
           onClick={() => void onMerge?.(method)}
-          className={cn('h-8 gap-1 rounded-r-none border-transparent', readyGreen && greenClasses)}
+          className={cn(
+            'h-8 gap-1 rounded-r-none',
+            buttonVariant === 'outline' ? 'border-r-0' : 'border-transparent',
+            readyGreen && greenClasses
+          )}
         >
           {mainContent}
         </Button>
@@ -146,33 +142,18 @@ export function PrMergeButton({
             </Button>
           )}
         </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="end"
-          side={compact ? 'top' : 'bottom'}
-          className="min-w-[280px]"
-        >
+        <DropdownMenuContent align="end" side={compact ? 'top' : 'bottom'}>
           {MERGE_METHODS.map((candidate) => {
             const isActive = candidate.value === method;
             return (
               <DropdownMenuItem
                 key={candidate.value}
                 onClick={() => onSelectMethod?.(candidate.value)}
-                className="items-start"
               >
                 <Check
-                  className={cn(
-                    'mt-0.5 h-3.5 w-3.5 shrink-0',
-                    isActive ? 'text-foreground' : 'text-transparent'
-                  )}
+                  className={cn('shrink-0', isActive ? 'text-foreground' : 'text-transparent')}
                 />
-                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span className="text-sm font-medium">
-                    {t(candidate.labelKey, candidate.labelFallback)}
-                  </span>
-                  <span className="text-[11px] text-muted-foreground">
-                    {t(candidate.descKey, candidate.descFallback)}
-                  </span>
-                </div>
+                {t(candidate.labelKey, candidate.labelFallback)}
               </DropdownMenuItem>
             );
           })}

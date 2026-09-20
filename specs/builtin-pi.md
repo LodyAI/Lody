@@ -21,6 +21,11 @@ prompt and other fields. Deleted or already changed rows are not recreated or ov
 Partial failures can be retried without remigrating completed rows.
 The daemon advertises `builtinPi` only when its Node version and platform satisfy
 the pinned runtime manifest; an incompatible host must not offer migration.
+The landing card appears when at least one eligible provider's machine advertises
+that capability. Confirmation migrates only providers on supported machines;
+unsupported machines do not block them and their providers remain unchanged until
+a later confirmation after those machines become supported. Hide the card when no
+providers can migrate. Once migration starts, the card may show disabled progress feedback.
 
 This is provider migration, not native session conversion. The new adapter accepts
 native Pi JSONL paths and cannot resume legacy `pi-acp` IDs. The confirmation card

@@ -1,11 +1,16 @@
 import { createAuthClient } from 'better-auth/client'
 import { electronClient } from '@better-auth/electron/client'
-import { storage } from '@better-auth/electron/storage'
 import { organizationClient } from 'better-auth/client/plugins'
 import { convexClient, crossDomainClient } from '@convex-dev/better-auth/client/plugins'
 import { app, safeStorage } from 'electron'
+import Conf from 'conf'
 import { Buffer } from 'node:buffer'
-import { resolve } from 'node:path'
+import { join, resolve } from 'node:path'
+import {
+  backupAuthStorageFile,
+  createRecoveringAuthStorage,
+  openAuthStorageBackend
+} from './auth-storage'
 import { isLocalPlatform } from './platform'
 
 const DEV_PLAINTEXT_AUTH_STORAGE_ENV = 'LODY_ELECTRON_PLAINTEXT_AUTH_STORAGE'
@@ -110,16 +115,55 @@ if (!authBaseURL) {
     'VITE_CONVEX_SITE_URL (or VITE_CONVEX_DEPLOY_URL) is required for Electron auth client'
   )
 }
-const rawAuthStorage = storage()
-const authStorage = {
-  getItem: (key: string): string | null => {
-    const value = rawAuthStorage.getItem(key)
-    return typeof value === 'string' ? value : null
-  },
-  setItem: (key: string, value: unknown): void => {
-    rawAuthStorage.setItem(key, value)
-  }
+const normalizedConfModule = Conf as typeof Conf | { default?: typeof Conf }
+const ConfConstructor =
+  typeof normalizedConfModule === 'function' ? normalizedConfModule : normalizedConfModule.default
+if (typeof ConfConstructor !== 'function') {
+  throw new TypeError('Unable to initialize auth storage: invalid Conf module export shape.')
 }
+
+// Same file as @better-auth/electron's storage(): `userData/config.json`.
+const authStoragePath = join(app.getPath('userData'), 'config.json')
+const opened = openAuthStorageBackend(
+  () =>
+    new ConfConstructor<Record<string, unknown>>({
+      cwd: app.getPath('userData'),
+      projectName: app.getName(),
+      projectVersion: app.getVersion()
+    }),
+  { path: authStoragePath, backup: backupAuthStorageFile }
+)
+if (opened.error) {
+  console.warn(
+    `[Auth] ${authStoragePath} was unreadable and was moved to ${opened.backupPath ?? '(backup failed)'}; sign in again.`,
+    opened.error
+  )
+}
+const confStore = opened.store
+
+const authStorage = createRecoveringAuthStorage(
+  {
+    path: authStoragePath,
+    get: (key) => confStore.get(key, null),
+    set: (key, value) => confStore.set(key, value),
+    delete: (key) => confStore.delete(key)
+  },
+  {
+    encryptedKeys: ['better-auth.cookie', 'better-auth.local_cache'],
+    cipher: {
+      isReady: () => app.isReady(),
+      isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
+      decryptString: (encrypted) => safeStorage.decryptString(encrypted)
+    },
+    backup: (path) => backupAuthStorageFile(path),
+    onRecovered: ({ key, backupPath, error }) => {
+      console.warn(
+        `[Auth] Dropped undecryptable ${key} from ${authStoragePath} (backup: ${backupPath ?? 'failed'}); sign in again.`,
+        error
+      )
+    }
+  }
+)
 
 export const authClient = createAuthClient({
   baseURL: authBaseURL,

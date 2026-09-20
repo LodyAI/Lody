@@ -182,7 +182,7 @@ function ReviewerMachineRow({
       <div role="cell" className="flex min-w-0 items-center gap-2.5">
         <Monitor className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         <div className="min-w-0">
-          <p className="truncate font-medium leading-tight text-foreground">{machine.name}</p>
+          <p className="truncate font-normal leading-tight text-foreground">{machine.name}</p>
           <p className="truncate text-[11px] leading-tight text-muted-foreground">
             {online
               ? t('settings.review.machineOnline', 'Online')
@@ -345,7 +345,7 @@ export function ReviewerMachineConfigTable({
     >
       <div
         role="row"
-        className="hidden grid-cols-[minmax(150px,0.75fr)_minmax(0,1.75fr)] gap-4 bg-muted/25 px-3 py-1.5 text-[11px] font-medium text-muted-foreground sm:grid"
+        className="hidden grid-cols-[minmax(150px,0.75fr)_minmax(0,1.75fr)] gap-4 bg-muted/25 px-3 py-1.5 text-[11px] font-normal text-muted-foreground sm:grid"
       >
         <div role="columnheader">{t('settings.review.machineColumn', 'Machine')}</div>
         <div role="columnheader" className="pl-4">

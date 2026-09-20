@@ -318,7 +318,7 @@ export function PromptShortcutForm({
               the two no longer agree — and it names which reference. */}
           {scopeIssues.length > 0 && (
             <FormMessage tone="error">
-              <span className="block font-medium">
+              <span className="block font-normal">
                 {t(
                   'settings.promptShortcuts.repairScope',
                   'Restore the matching scope or remove these mentions before saving.'

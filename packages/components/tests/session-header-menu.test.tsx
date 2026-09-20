@@ -11,6 +11,7 @@ import {
   reviewAgentExperimentEnabledAtom,
 } from '../src/atoms/settings';
 import { SessionHeaderMenu } from '../src/components/sessions/session-chat-interface';
+import { TooltipProvider } from '../src/ui/tooltip';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -33,7 +34,14 @@ const session = {
   title: 'Menu test',
 } as SessionMeta;
 
-const translate = (_key: string, fallback: string) => fallback;
+const translate = (_key: string, fallback: string, options?: Record<string, unknown>) =>
+  Object.entries(options ?? {}).reduce(
+    (message, [name, value]) => message.replaceAll(`{{${name}}}`, String(value)),
+    fallback
+  );
+
+const vscodeLauncher = { kind: 'builtin' as const, id: 'vscode' as const, label: 'VS Code' };
+const cursorLauncher = { kind: 'builtin' as const, id: 'cursor' as const, label: 'Cursor' };
 
 describe('SessionHeaderMenu', () => {
   let root: Root | undefined;
@@ -113,11 +121,11 @@ describe('SessionHeaderMenu', () => {
     expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe('none');
   }
 
-  it('opens the submenu and forks into the current workspace', async () => {
+  it('opens the submenu and forks to a new tab', async () => {
     await act(async () => root?.render(<ForkMenuHarness />));
     await openForkMenu();
     expect(menuItem('Copy context as Markdown')).toBeDefined();
-    await act(async () => menuItem('Current workspace').click());
+    await act(async () => menuItem('Fork to new tab').click());
     expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe('shared');
     expect(document.querySelector('[role="menu"]')).toBeNull();
   });
@@ -125,7 +133,7 @@ describe('SessionHeaderMenu', () => {
   it('forks into a new worktree when that destination is available', async () => {
     await act(async () => root?.render(<ForkMenuHarness forkWorktreeAvailability="available" />));
     await openForkMenu();
-    await act(async () => menuItem('New worktree').click());
+    await act(async () => menuItem('Fork to new worktree').click());
     expect(container?.querySelector('[data-testid="fork-result"]')?.textContent).toBe(
       'new-worktree'
     );
@@ -137,7 +145,7 @@ describe('SessionHeaderMenu', () => {
       root?.render(<ForkMenuHarness isForking forkWorktreeAvailability="available" />)
     );
     await openForkMenu();
-    for (const label of ['Current workspace', 'New worktree']) {
+    for (const label of ['Fork to new tab', 'Fork to new worktree']) {
       const item = menuItem(label);
       expect(item.getAttribute('data-disabled')).not.toBeNull();
       await act(async () => item.click());
@@ -153,7 +161,7 @@ describe('SessionHeaderMenu', () => {
   it('keeps copying available without native fork support', async () => {
     await act(async () => root?.render(<ForkMenuHarness nativeForkAvailable={false} />));
     await openForkMenu();
-    expect(document.body.textContent).not.toContain('Current workspace');
+    expect(document.body.textContent).not.toContain('Fork to new tab');
     await act(async () => menuItem('Copy context as Markdown').click());
     expect(container?.querySelector('[data-testid="copy-result"]')?.textContent).toBe('copied');
   });
@@ -180,9 +188,9 @@ describe('SessionHeaderMenu', () => {
     });
     await openMenu();
 
-    const openedByItem = Array.from(document.querySelectorAll<HTMLElement>('[role="menuitem"]')).find(
-      (item) => item.textContent?.includes('Opened by: Deleted session')
-    );
+    const openedByItem = Array.from(
+      document.querySelectorAll<HTMLElement>('[role="menuitem"]')
+    ).find((item) => item.textContent?.includes('Opened by: Deleted session'));
     expect(openedByItem?.getAttribute('data-disabled')).not.toBeNull();
 
     await act(async () => openedByItem?.click());
@@ -224,5 +232,106 @@ describe('SessionHeaderMenu', () => {
     ).find((button) => button.textContent?.includes('Open review settings'));
     await act(async () => openSettings?.click());
     expect(onOpenReviewSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('omits the Session group heading and keeps Team as a normal-weight row', async () => {
+    await act(async () => {
+      root?.render(
+        <TooltipProvider>
+          <SessionHeaderMenu
+            session={
+              {
+                ...session,
+                project: { kind: 'github', repoFullName: 'loro-dev/lody', branch: 'main' },
+                repoFullName: 'loro-dev/lody',
+                branchName: 'fix/ui',
+                baseBranch: 'main',
+              } as SessionMeta
+            }
+            machineName="MacBook"
+            sharing={{
+              visibility: 'team',
+              canManage: true,
+              machineId: null,
+              localProjectId: null,
+              machineName: 'MacBook',
+              projectName: 'lody',
+            }}
+            onCopyUrl={vi.fn()}
+            t={translate}
+          />
+        </TooltipProvider>
+      );
+    });
+    await openMenu();
+
+    expect(
+      Array.from(document.querySelectorAll('*')).some(
+        (el) => el.childNodes.length === 1 && el.textContent === 'Session'
+      )
+    ).toBe(false);
+
+    const teamLabel = Array.from(document.querySelectorAll('span')).find(
+      (el) => el.textContent === 'Team' && el.childElementCount === 0
+    );
+    expect(teamLabel?.className).toContain('font-normal');
+    expect(teamLabel?.className).not.toContain('font-medium');
+    expect(teamLabel?.closest('div')?.className).toContain('cursor-default');
+    expect(teamLabel?.closest('div')?.className).toContain('select-none');
+  });
+
+  it('omits Open in IDE when no launchers are provided', async () => {
+    await act(async () => {
+      root?.render(<SessionHeaderMenu session={session} onCopyUrl={vi.fn()} t={translate} />);
+    });
+    await openMenu();
+    expect(document.body.textContent).not.toContain('Open in VS Code');
+  });
+
+  it('opens the selected IDE from the actions menu', async () => {
+    const onOpen = vi.fn();
+    await act(async () => {
+      root?.render(
+        <SessionHeaderMenu
+          session={session}
+          onCopyUrl={vi.fn()}
+          openInIde={{
+            options: [vscodeLauncher],
+            selected: vscodeLauncher,
+            onOpen,
+            onSelect: vi.fn(),
+          }}
+          t={translate}
+        />
+      );
+    });
+    await openMenu();
+    await act(async () => menuItem('Open in VS Code').click());
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it('lists multiple IDE launchers in a submenu and launches the chosen one', async () => {
+    const onSelect = vi.fn();
+    await act(async () => {
+      root?.render(
+        <SessionHeaderMenu
+          session={session}
+          onCopyUrl={vi.fn()}
+          openInIde={{
+            options: [vscodeLauncher, cursorLauncher],
+            selected: vscodeLauncher,
+            onOpen: vi.fn(),
+            onSelect,
+          }}
+          t={translate}
+        />
+      );
+    });
+    await openMenu();
+    const trigger = menuItem('Open in VS Code');
+    expect(trigger.getAttribute('aria-haspopup')).toBe('menu');
+    await act(async () => trigger.click());
+    await act(async () => menuItem('Cursor').click());
+    expect(onSelect).toHaveBeenCalledWith(cursorLauncher);
   });
 });

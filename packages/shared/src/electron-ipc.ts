@@ -30,6 +30,15 @@ export type RendererFatalErrorReport = {
 
 export type WindowBadgeInput = { unread: number; waiting: number };
 
+/**
+ * Route a product window should show. Sent to a pre-warmed auxiliary window
+ * when it is reused, so the renderer can bind the target without a reload.
+ */
+export type ElectronWindowTarget = {
+  workspace: string;
+  sessionId?: string;
+};
+
 export type SessionControlSendInput = {
   requestId: string;
   message: LocalSessionControlRequest;
@@ -401,6 +410,24 @@ export const ElectronAuthCallbackSessionSchema = z
   .strict();
 
 export type ElectronAuthCallbackSession = z.infer<typeof ElectronAuthCallbackSessionSchema>;
+
+export type ElectronLoginState = {
+  revision: number;
+  attemptId: string | null;
+  phase: 'idle' | 'waiting' | 'exchanging' | 'authenticated' | 'error';
+  session: ElectronAuthCallbackSession | null;
+  error:
+    | 'browser_open_failed'
+    | 'authorization_expired'
+    | 'exchange_failed'
+    | 'exchange_rejected'
+    | 'exchange_timeout'
+    | 'secure_storage_unavailable'
+    | 'restart_required'
+    | null;
+  /** Credential-free failure summary (HTTP status/server code or local error) for support. */
+  errorDetail: string | null;
+};
 
 export type ElectronUpdaterPhase =
   | 'idle'

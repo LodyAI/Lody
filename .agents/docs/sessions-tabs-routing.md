@@ -55,7 +55,32 @@ this page is the full text of the rules summarised there.
     is the only place its own unread state can surface — sub-sessions get no
     sidebar row — so do not drop the marker from any tab renderer.
     Desktop tabs share width equally whenever all can reach `ACTIVE_TAB_MIN_WIDTH`;
-    below that threshold the active tab keeps that width and the others share the remainder.
+    below that threshold the active tab keeps that width and the others share the remainder,
+    provided the strip viewport is at least 366px wide. Narrower strips divide evenly.
+    Browser flex owns resting widths, including initial/restored tabs: these do not
+    run an opening width animation. Item margins alone own the 6px inter-tab gap.
+    A pointer-triggered close freezes every surviving tab at its current width
+    (Chromium's `in_tab_close_` rapid-close mode) so the next tab's close
+    button lands under the cursor; the freeze only arms on a pointerdown inside
+    the strip, so keyboard/programmatic closes relayout normally. The freeze
+    decision runs DURING RENDER (React's derived-state adjustment), so a
+    removal commit's first painted frame already carries the frozen widths —
+    deciding it in an effect let the unfrozen allocation commit first and
+    flashed survivors at the fresh width for a frame. The freeze
+    releases when the pointer leaves an EXPANDED region — 40px below the strip
+    and 60px toward the new-tab button, like Chromium's MouseWatcher — or on a
+    tab add, a viewport shrink below the captured width (a wider viewport keeps
+    it), or a single remaining tab. Widths freeze by role, not by tab: a
+    survivor that becomes active mid-freeze takes the captured active width
+    while the deselected tab drops back to the inactive width. Closing only the
+    LAST tab never enters the mode — the new last tab already ends at the right
+    edge — and closing the last tab while frozen re-spreads the survivors over
+    the occupied width instead of shrinking the budget, keeping that edge
+    under the cursor. Frozen removals slide closed (the survivor starts with the
+    freed width as an inline-start margin) over a 200ms transition that reduced-motion
+    users skip. Adding or restoring tabs and releasing the freeze return directly
+    to flex. See the [browser-width decision](../notes/implemented/architecture/2026-09-21-browser-owned-tab-widths.md)
+    for DOM capture and ResizeObserver update ordering.
     **The tab pills' top border shares one line with the sidebar and side-panel
     cards at y=8**, since every floating card is `mt-2` (sidebar in
     `loro-app-sidebar.tsx`, side panel + terminal dock in `session-detail.tsx` /
@@ -129,6 +154,13 @@ this page is the full text of the rules summarised there.
   shared close replaces only the still-current URL choice with an open neighbour
   or `empty` (materialized into a local draft); this narrow invalidation never reopens the parent or mirrors selection
   into React state. The old broad `shouldClearSessionUrlTab` normalizer remains dead.
+  In-conversation created-Session cards can carry only the child Session id. When that id is
+  already a known tab in the mounted workspace, navigation stays local; a closed target goes
+  through the lifecycle-aware reopen action and waits for its open metadata projection before
+  selection instead of routing through the child root URL or letting stale close metadata
+  redirect the explicit request to an open sibling.
+  The pending request is keyed by its source Session as well as its URL tab value, so
+  switching between two tabless Session routes cancels the old request.
   Promotion keeps its `pendingDraftChildSessionIds` entry
   as a draft→child resolution alias through the send window. The ABSENT value
   means "no explicit choice" and is reserved for external entries: the session

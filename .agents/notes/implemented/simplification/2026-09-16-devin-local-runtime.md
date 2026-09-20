@@ -7,6 +7,8 @@ Translation: current
 
 PR: https://github.com/LodyAI/Lody/pull/763
 
+Partially superseded by [Restore Devin's managed registry binary](../bug-fix/2026-09-18-devin-managed-binary-restoration.md).
+
 ## Abstract
 
 Devin previously shipped as a `binary`-distribution registry agent: Lody

@@ -260,8 +260,7 @@ function createDeferred<T>(): Deferred<T> {
 function buildSessionPreparationCompatibility(
   launchSource: Partial<SessionLaunchConfig> | null | undefined,
   mcpServerIds: readonly McpServerId[] | undefined,
-  configOptionValues: SessionConfig['configOptionValues'],
-  taskToolsEnabled: boolean
+  configOptionValues: SessionConfig['configOptionValues']
 ) {
   return {
     launch: buildSessionLaunchConfig({
@@ -272,7 +271,6 @@ function buildSessionPreparationCompatibility(
     runConfig: normalizeSessionPreparationRunConfigForDedup({
       mcpServerIds: mcpServerIds ? [...mcpServerIds] : undefined,
       configOptionValues,
-      taskToolsEnabled,
     }),
   };
 }
@@ -385,6 +383,7 @@ export interface CreateAgentConfig {
   abortSignal?: AbortSignal;
   onStartupStage?: (event: AcpStartupStageEvent) => void;
   onUpdateMessage: (message: AcpSessionNotification) => void;
+  onLiveReasoningStatus?: (label: string | null) => void;
   onRequestPermission: (
     requestId: string,
     request: RequestPermissionRequest
@@ -429,6 +428,7 @@ interface SessionManagerEvents {
   exit: (exit: SessionExitEvent) => void;
   terminated: (exit: SessionTerminatedEvent) => void;
   onACPUpdateMessage: (sessionId: SessionId, message: AcpSessionNotification) => void;
+  onCodexLiveReasoningStatus: (sessionId: SessionId, label: string | null) => void;
   onUsageUpdate: (event: {
     sessionId: SessionId;
     acpSessionId: ACPSessionId;
@@ -611,8 +611,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         buildSessionPreparationCompatibility(
           current.config,
           resource.config.mcpServerIds,
-          resource.config.configOptionValues,
-          resource.config.taskToolsEnabled
+          resource.config.configOptionValues
         )
       )
     ) {
@@ -678,8 +677,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     const compatibility = buildSessionPreparationCompatibility(
       config,
       config.mcpServerIds,
-      config.configOptionValues,
-      config.taskToolsEnabled
+      config.configOptionValues
     );
     const claim = this.preparationService.claim({
       sessionId,
@@ -706,8 +704,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
             buildSessionPreparationCompatibility(
               current.config,
               config.mcpServerIds,
-              config.configOptionValues,
-              config.taskToolsEnabled
+              config.configOptionValues
             )
           )
         );
@@ -926,7 +923,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       agentType: spec.agentType,
       configOptionValues: spec.runConfig?.configOptionValues,
       mcpServerIds: spec.runConfig?.mcpServerIds ?? [],
-      taskToolsEnabled: spec.runConfig?.taskToolsEnabled === true,
       customAcp: agentConfig.customAcp,
       runtimeOverrides: agentConfig.runtimeOverrides,
       project: spec.project as ProjectRef | undefined,
@@ -944,8 +940,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     const compatibility = buildSessionPreparationCompatibility(
       config,
       config.mcpServerIds,
-      config.configOptionValues,
-      config.taskToolsEnabled
+      config.configOptionValues
     );
     const ghTokenInjected = await this.prepareGitHubRepoSessionConfig(config);
     signal.throwIfAborted();
@@ -1264,6 +1259,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       onStartupStage: options?.onStartupStage,
       onUpdateMessage: (update) => {
         dispatchEvent(() => this.emit('onACPUpdateMessage', sessionId, update));
+      },
+      onLiveReasoningStatus: (label) => {
+        dispatchEvent(() => this.emit('onCodexLiveReasoningStatus', sessionId, label));
       },
       onRequestPermission: (requestId, request) => {
         if (options?.allowInteractiveRequest && !options.allowInteractiveRequest()) {

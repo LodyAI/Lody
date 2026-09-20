@@ -1,7 +1,9 @@
+import { useSelectionStableValue } from '@/hooks/use-conversation-text-selection';
 import {
   type ComponentPropsWithoutRef,
   type CSSProperties,
   type ReactNode,
+  createContext,
   useState,
   useContext,
   useCallback,
@@ -30,10 +32,8 @@ import {
 } from 'streamdown';
 import type { BundledLanguage } from 'shiki';
 import { Check, Copy } from 'lucide-react';
-import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import { parseTaskImageMarkdownUrl } from '@lody/shared';
-import { DEFAULT_CONVERSATION_FONT_SIZE, tasksFeatureEnabledAtom } from '@/atoms/settings';
+import { DEFAULT_CONVERSATION_FONT_SIZE } from '@/atoms/settings';
 import { MonochromeFileIcon } from '@/components/icons/file-icons';
 import {
   isMarkdownAgentFileHref,
@@ -52,14 +52,33 @@ import {
 import { findSessionSearchOccurrences } from '@/lib/session-chat-search';
 import { useResolvedTheme } from '../../theme-provider';
 import type { ConversationFontSize } from '@/atoms/settings';
-import { useTaskImageUrl } from '@/hooks/use-task-image';
+import { MarkdownFencedCodeBlock } from './markdown-code-block';
 import { MarkdownDiffBlock } from './markdown-diff-block';
 import { createMarkdownMermaidConfig, createMarkdownMermaidPlugin } from './markdown-mermaid';
 import { MermaidDiagramViewer } from './mermaid-diagram-viewer';
 import { MermaidFullscreenButton, useMermaidDiagramCanvas } from './use-mermaid-diagram-canvas';
 import { SessionReadonlyContext } from './session-readonly-context';
+import type { MarkdownAgentFileLinkMenuItem } from '@/hooks/use-session-file-actions';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from '@/ui/context-menu';
 
 export { createMarkdownMermaidConfig } from './markdown-mermaid';
+
+/**
+ * Conversation surfaces provide this capability at their boundary. Rendering
+ * Markdown elsewhere (shared pages, file previews) deliberately has no native
+ * file-actions menu.
+ */
+export const AgentFileLinkContextMenuItemsContext = createContext<
+  ((href: string) => readonly MarkdownAgentFileLinkMenuItem[]) | undefined
+>(undefined);
 
 type MarkdownCodeProps = ComponentPropsWithoutRef<'code'> & {
   inline?: boolean;
@@ -173,7 +192,8 @@ const MARKDOWN_BASE_CLASSNAME =
   '[&_h5]:!mt-3 [&_h5]:!mb-1.5 [&_h5]:font-semibold [&_h5]:uppercase [&_h5]:tracking-wide ' +
   '[&_h6]:!mt-3 [&_h6]:!mb-1.5 [&_h6]:font-semibold [&_h6]:uppercase [&_h6]:tracking-wide [&_h6]:text-muted-foreground ' +
   '[&_:is(h1,h2,h3,h4,h5,h6):first-child]:!mt-0 ' +
-  '[&_a]:underline [&_a]:underline-offset-2 [&_a]:decoration-muted-foreground/40 [&_a:hover]:decoration-muted-foreground ' +
+  '[&_a]:text-markdown-link ' +
+  '[&_a]:underline [&_a]:underline-offset-2 [&_a]:decoration-current/35 [&_a:hover]:decoration-current/70 ' +
   '[&_.katex-display]:!my-5 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden [&_.katex-display]:py-1 ' +
   '[&_[data-streamdown="mermaid-block"]]:!my-5 ' +
   // Streamdown wraps every diagram in a pan/zoom canvas that claims the gesture
@@ -190,12 +210,12 @@ const MARKDOWN_BASE_CLASSNAME =
   '[&_[data-streamdown="mermaid"]]:overflow-hidden ' +
   '[&_[data-streamdown="code-block"]]:!my-4 ' +
   '[&_table]:!my-0 [&_table]:w-full [&_table]:border-collapse [&_table]:text-[0.92em] [&_table]:leading-[1.5] ' +
-  '[&_th]:border-b [&_th]:border-border/70 [&_th]:bg-muted/45 [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-semibold [&_th]:text-foreground/80 ' +
+  '[&_th]:border-b [&_th]:border-border/70 [&_th]:bg-muted/20 [&_th]:px-2.5 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-semibold [&_th]:text-foreground/80 dark:[&_th]:bg-muted/40 ' +
   '[&_td]:border-b [&_td]:border-border/45 [&_td]:px-2.5 [&_td]:py-1.5 [&_td]:align-top ' +
   '[&_tbody_tr:nth-child(even)]:bg-muted/15 [&_tbody_tr:last-child_td]:border-b-0 ' +
   '[&_:is(th,td):first-child]:w-px [&_:is(th,td):first-child]:whitespace-nowrap ' +
   '[&_tbody_td:first-child]:font-medium [&_tbody_td:first-child]:text-foreground/75 ' +
-  '[&_table_code]:!bg-muted/55 [&_table_code]:!ring-0';
+  '[&_table_code]:!bg-foreground/[0.08] [&_table_code]:!ring-0 dark:[&_table_code]:!bg-foreground/[0.14]';
 
 const MARKDOWN_SIZE_CLASSNAME =
   '[&_h1]:text-[length:var(--markdown-h1-font-size)] ' +
@@ -640,13 +660,6 @@ const remarkLinkifyFilePaths = () => {
   };
 };
 
-const MARKDOWN_REMARK_PLUGINS = [
-  remarkGfm,
-  remarkRepairMalformedGfmAutolinks,
-  remarkLinkifyPlainUrls,
-  remarkLinkifyFilePaths,
-];
-
 const MARKDOWN_MATH_PLUGIN = createMathPlugin();
 
 type ShikiHighlighter = Awaited<ReturnType<(typeof import('shiki/core'))['createHighlighterCore']>>;
@@ -690,6 +703,45 @@ const MARKDOWN_CODE_LANGUAGE_SET = new Set<string>([
   ...MARKDOWN_CODE_LANGUAGES,
   ...Object.keys(MARKDOWN_CODE_LANGUAGE_ALIASES),
 ]);
+
+const FENCED_CODE_RENDERER_LANGUAGE_SET = new Set<string>([
+  ...MARKDOWN_CODE_LANGUAGE_SET,
+  'diff',
+  'text',
+  'plaintext',
+  'txt',
+]);
+
+// Fences rendered by other Streamdown plugins keep their language.
+const FENCED_CODE_PASSTHROUGH_LANGUAGE_SET = new Set<string>(['mermaid']);
+
+const remarkDefaultFencedCodeLanguage = () => (tree: unknown) => {
+  const walk = (node: MdastNode) => {
+    if (node.type === 'code') {
+      const codeNode = node as { lang?: string; meta?: string | null };
+      const lang = String(codeNode.lang ?? '').trim();
+      if (!lang) {
+        codeNode.lang = 'text';
+      } else if (
+        !FENCED_CODE_RENDERER_LANGUAGE_SET.has(lang.toLowerCase()) &&
+        !FENCED_CODE_PASSTHROUGH_LANGUAGE_SET.has(lang.toLowerCase())
+      ) {
+        codeNode.meta = [`highlight=${lang}`, codeNode.meta].filter(Boolean).join(' ');
+        codeNode.lang = 'text';
+      }
+    }
+    node.children?.forEach(walk);
+  };
+  if (typeof tree === 'object' && tree !== null) walk(tree as MdastNode);
+};
+
+const MARKDOWN_REMARK_PLUGINS = [
+  remarkGfm,
+  remarkRepairMalformedGfmAutolinks,
+  remarkLinkifyPlainUrls,
+  remarkLinkifyFilePaths,
+  remarkDefaultFencedCodeLanguage,
+];
 
 const normalizeCodeLanguage = (language: BundledLanguage): BundledLanguage | null => {
   const normalized = String(language).trim().toLowerCase();
@@ -860,6 +912,15 @@ const MARKDOWN_CODE_PLUGIN = createLazyShikiCodePlugin();
 
 const MARKDOWN_MERMAID_PLUGIN = createMarkdownMermaidPlugin();
 
+const FENCED_CODE_RENDERER_LANGUAGES = [
+  ...MARKDOWN_CODE_LANGUAGES,
+  ...Object.keys(MARKDOWN_CODE_LANGUAGE_ALIASES),
+  'diff',
+  'text',
+  'plaintext',
+  'txt',
+] as const;
+
 const STREAMDOWN_PLUGINS = {
   code: MARKDOWN_CODE_PLUGIN,
   math: MARKDOWN_MATH_PLUGIN,
@@ -868,6 +929,10 @@ const STREAMDOWN_PLUGINS = {
     {
       language: 'diff',
       component: MarkdownDiffBlock,
+    },
+    {
+      language: [...FENCED_CODE_RENDERER_LANGUAGES],
+      component: MarkdownFencedCodeBlock,
     },
   ],
 } satisfies PluginConfig;
@@ -922,9 +987,7 @@ const writeTextToClipboard = async (text: string): Promise<boolean> => {
 };
 
 const markdownUrlTransform: UrlTransform = (value, key, node) =>
-  isMarkdownAgentFileHref(value) || (key === 'src' && parseTaskImageMarkdownUrl(value))
-    ? value
-    : defaultUrlTransform(value, key, node);
+  isMarkdownAgentFileHref(value) ? value : defaultUrlTransform(value, key, node);
 
 type MarkdownTableProps = ComponentPropsWithoutRef<'table'> & {
   node?: unknown;
@@ -936,16 +999,19 @@ const AgentFileLink = ({
   onFilePathClick,
   copyAgentFileLabel,
   openAgentFileLabel,
+  getContextMenuItems,
 }: {
   href: string;
   children: ReactNode;
   onFilePathClick?: (href: string) => void;
   copyAgentFileLabel: string;
   openAgentFileLabel: string;
+  getContextMenuItems?: (href: string) => readonly MarkdownAgentFileLinkMenuItem[];
 }) => {
   const [didCopy, setDidCopy] = useState(false);
   const hasOpenAction = Boolean(onFilePathClick);
   const iconPath = parseMarkdownAgentFileHref(href)?.filePath ?? href;
+  const contextMenuItems = getContextMenuItems?.(href) ?? [];
 
   const handleClick = useCallback(async () => {
     if (onFilePathClick) {
@@ -960,7 +1026,7 @@ const AgentFileLink = ({
     window.setTimeout(() => setDidCopy(false), 1200);
   }, [href, onFilePathClick]);
 
-  return (
+  const link = (
     <button
       type="button"
       onClick={() => {
@@ -969,20 +1035,68 @@ const AgentFileLink = ({
       title={href}
       aria-label={`${hasOpenAction ? openAgentFileLabel : copyAgentFileLabel}: ${href}`}
       className={cn(
-        'inline-flex max-w-full items-center gap-1 rounded-sm align-[-0.15em] text-sky-700 dark:text-sky-400 no-underline shadow-none transition-colors',
+        'm-0 inline-flex max-w-full items-baseline gap-1 rounded-sm border-0 bg-transparent p-0 align-baseline font-[inherit] leading-[inherit] text-markdown-link no-underline shadow-none transition-colors',
         'hover:underline underline-offset-2 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
       )}
     >
-      <MonochromeFileIcon filePath={iconPath} className="h-3.5 w-3.5 shrink-0" />
+      <MonochromeFileIcon
+        filePath={iconPath}
+        className="h-[1.38em] w-[1.38em] shrink-0 self-center"
+      />
       <span className="min-w-0 truncate">{children}</span>
       {!hasOpenAction ? (
         didCopy ? (
-          <Check className="h-3 w-3 shrink-0" />
+          <Check className="h-[0.85em] w-[0.85em] shrink-0 self-center" />
         ) : (
-          <Copy className="h-3 w-3 shrink-0" />
+          <Copy className="h-[0.85em] w-[0.85em] shrink-0 self-center" />
         )
       ) : null}
     </button>
+  );
+
+  if (contextMenuItems.length === 0) return link;
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{link}</ContextMenuTrigger>
+      <ContextMenuContent className="min-w-[190px]">
+        {contextMenuItems.map((item) => {
+          const ItemIcon = item.icon;
+          if (item.kind === 'submenu') {
+            return (
+              <ContextMenuSub key={item.id}>
+                <ContextMenuSubTrigger icon={<ItemIcon className="h-3.5 w-3.5" />}>
+                  {item.label}
+                </ContextMenuSubTrigger>
+                <ContextMenuSubContent className="min-w-[190px]">
+                  {item.items.map((child) => {
+                    const ChildIcon = child.icon;
+                    return (
+                      <ContextMenuItem
+                        key={child.id}
+                        icon={<ChildIcon className="h-3.5 w-3.5" />}
+                        onSelect={child.run}
+                      >
+                        {child.label}
+                      </ContextMenuItem>
+                    );
+                  })}
+                </ContextMenuSubContent>
+              </ContextMenuSub>
+            );
+          }
+          return (
+            <ContextMenuItem
+              key={item.id}
+              icon={<ItemIcon className="h-3.5 w-3.5" />}
+              onSelect={item.run}
+            >
+              {item.label}
+            </ContextMenuItem>
+          );
+        })}
+      </ContextMenuContent>
+    </ContextMenu>
   );
 };
 
@@ -1001,11 +1115,13 @@ const createMarkdownComponents = ({
   copyAgentFileLabel,
   openAgentFileLabel,
   onAgentFileLinkClick,
+  getAgentFileLinkContextMenuItems,
   readonly,
 }: {
   copyAgentFileLabel: string;
   openAgentFileLabel: string;
   onAgentFileLinkClick?: (href: string) => void;
+  getAgentFileLinkContextMenuItems?: (href: string) => readonly MarkdownAgentFileLinkMenuItem[];
   readonly: boolean;
 }): Components => ({
   inlineCode: (props: MarkdownCodeProps) => {
@@ -1013,8 +1129,8 @@ const createMarkdownComponents = ({
     return (
       <code
         className={cn(
-          'rounded-sm bg-code px-1 py-px font-mono text-[0.85em] text-code-foreground ring-1 ring-inset ring-border/50',
-          className
+          className,
+          'rounded-sm bg-foreground/[0.08] px-1 py-px font-mono text-[0.85em] text-foreground ring-0 dark:bg-foreground/[0.14]'
         )}
         {...rest}
       >
@@ -1048,6 +1164,7 @@ const createMarkdownComponents = ({
           onFilePathClick={onAgentFileLinkClick}
           copyAgentFileLabel={copyAgentFileLabel}
           openAgentFileLabel={openAgentFileLabel}
+          getContextMenuItems={getAgentFileLinkContextMenuItems}
         >
           {children}
         </AgentFileLink>
@@ -1060,16 +1177,16 @@ const createMarkdownComponents = ({
       </MarkdownExternalLink>
     );
   },
-  img: TaskMarkdownImage,
+  img: ConversationMarkdownImage,
   // <picture> just passes through its children (the <img> fallback);
   // <source> is suppressed since it's only meaningful inside a real browser <picture>.
   source: () => null,
   picture: (props: MarkdownPictureProps) => <>{props.children}</>,
 });
 
-function TaskMarkdownImage(props: MarkdownImageProps) {
+function ConversationMarkdownImage(props: MarkdownImageProps) {
   const readonly = useContext(SessionReadonlyContext);
-  // No workspace task hook or URI fetch is mounted for an anonymous publication.
+  // No workspace URI fetch is mounted for an anonymous publication.
   // Typed share images are handled separately through the manifest attachment reader.
   if (readonly) {
     const inline =
@@ -1091,31 +1208,11 @@ function TaskMarkdownImage(props: MarkdownImageProps) {
       </span>
     );
   }
-  return <WorkspaceMarkdownImage {...props} />;
-}
-
-function WorkspaceMarkdownImage(props: MarkdownImageProps) {
   const { node: _node, src, alt, ...rest } = props;
-  const taskImageId = src ? parseTaskImageMarkdownUrl(src) : null;
-  const tasksEnabled = useAtomValue(tasksFeatureEnabledAtom);
-  const resolvedUrl = useTaskImageUrl(taskImageId && tasksEnabled ? src : undefined);
-
-  if (taskImageId && !tasksEnabled) return null;
-
-  if (taskImageId && !resolvedUrl) {
-    return (
-      <span
-        role="img"
-        aria-label={alt || 'Task image'}
-        className="my-2 block h-24 w-full max-w-sm animate-pulse rounded-md bg-muted"
-      />
-    );
-  }
-
   return (
     <img
       {...rest}
-      src={taskImageId ? resolvedUrl : src}
+      src={src}
       alt={alt ?? ''}
       className={cn('my-2 max-h-[32rem] max-w-full rounded-md object-contain', rest.className)}
     />
@@ -1156,15 +1253,23 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   onAgentFileLinkClick?: (href: string) => void;
   searchBlockId?: string;
 }) {
+  ({ text, size, allowHtml, isStreaming, searchBlockId } = useSelectionStableValue({
+    text,
+    size,
+    allowHtml,
+    isStreaming,
+    searchBlockId,
+  }));
   const { t } = useTranslation();
-  const resolvedTheme = useResolvedTheme();
+  const resolvedTheme = useSelectionStableValue(useResolvedTheme());
   const readonly = useContext(SessionReadonlyContext);
+  const getAgentFileLinkContextMenuItems = useContext(AgentFileLinkContextMenuItemsContext);
   const containerRef = useRef<HTMLDivElement>(null);
   /** Whether this block currently holds search marks that need unwrapping. */
   const markedRef = useRef(false);
-  const search = useSessionSearch();
-  const searchMatch = useSessionSearchBlock(searchBlockId ?? '');
-  const copyCodeLabel = t('common.copyCode', 'Copy code');
+  const search = useSelectionStableValue(useSessionSearch());
+  const searchMatch = useSelectionStableValue(useSessionSearchBlock(searchBlockId ?? ''));
+  const copyCodeLabel = useSelectionStableValue(t('common.copyCode', 'Copy code'));
   const copyAgentFileLabel = t('sessions.copyAgentFilePath', 'Copy agent file path');
   const openAgentFileLabel = t('sessions.openAgentFile', 'Open agent file');
   const canvasLabel = t('sessions.diagram.canvas', 'Zoom and pan diagram');
@@ -1190,17 +1295,25 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     canvasLabel,
   });
 
-  const components = useMemo(
+  const currentComponents = useMemo(
     () =>
       createMarkdownComponents({
         copyAgentFileLabel,
         openAgentFileLabel,
         onAgentFileLinkClick,
+        getAgentFileLinkContextMenuItems,
         readonly: readonly !== null,
       }),
-    [copyAgentFileLabel, onAgentFileLinkClick, openAgentFileLabel, readonly]
+    [
+      copyAgentFileLabel,
+      getAgentFileLinkContextMenuItems,
+      onAgentFileLinkClick,
+      openAgentFileLabel,
+      readonly,
+    ]
   );
 
+  const components = useSelectionStableValue(currentComponents);
   const rehypePlugins = useMemo(() => (allowHtml ? [rehypeRaw, rehypeSanitize] : []), [allowHtml]);
   const streamdownTranslations = useMemo(
     () =>

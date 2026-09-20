@@ -29,13 +29,20 @@ The current behavioral contract remains a [draft Spec](../../../../specs/session
 
 | State                                         | Owner and release boundary                                                                                            |
 | --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Local preparation / application wait          | Target-turn abort signal; Stop and prompt completion release the steer lane and rewrite lease.                        |
+| Local preparation / application wait          | Target-turn abort signal; Stop and prompt completion release the steer lane and rewrite lease (see handoff below).    |
 | Submitted ACP/configuration work              | Existing execution owner; completion or confirmed termination, using one five-second drain.                           |
 | Refused input                                 | Exact-id pending activation in daemon-owned `steerTurnStatuses`; ordinary claim or missing-history failure clears it. |
 | Applied/unknown result before history arrives | Exact-id projection in the same map; terminal projection clears it, applied processing remains until finalization.    |
 | Renderer RPC acknowledgement                  | Presentation only; never writes processing over a terminal history row.                                               |
 
 An already-applied handoff finishes its serialized ownership transfer before completion.
+A handoff adapter (built-in Claude, `upstreamTurn: 'handoff'`) answers the yielded prompt
+BEFORE it reports `applied`: the old turn settles first, and the adapter confirms the steer
+only when the SDK replays it. Once that steer was submitted, prompt completion therefore does
+not end its verdict wait; the completion decision queues behind it. `applied` then hands off
+to the successor, while a refusal or unknown result takes the ordinary completion path. Ending
+that wait instead made the owner drain the steered prompt, which is the next turn, and
+terminate the agent after five seconds. Stop and same-turn (Codex) steers are unchanged.
 Steer configuration uses the target signal between mutations, while its outstanding call
 remains tracked. A repeated Stop cannot interrupt an owner still draining a steer after its
 main prompt returned. Outcome-write failure releases the application lease in `finally`.
@@ -69,6 +76,7 @@ history wait. No live-provider frequency or universal exactly-once guarantee is 
 
 Deterministic executor tests cover Stop and natural completion during document, prompt-block,
 and configuration waits, a second queued steer, raw request drain after main prompt completion,
+a handoff verdict (applied or refused) that trails the yielded prompt's answer,
 late applied/refused/unknown results before history, newer activation preservation, and later
 ordinary execution. Shared tests exercise terminal guards and unknown status through real
 HistoryWriter/Loro peer import. Renderer tests cover delayed terminal ACKs and explicit unknown

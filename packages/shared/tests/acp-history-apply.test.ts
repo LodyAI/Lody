@@ -945,4 +945,168 @@ describe('acp history apply', () => {
       }
     }
   );
+
+  describe('devin subagent internals', () => {
+    const started = (agentId: string) =>
+      makeNotification({
+        sessionUpdate: 'tool_call_update',
+        toolCallId: agentId,
+        status: 'in_progress',
+        _meta: {
+          'cognition.ai/subagent_started': { agentId, title: `Task ${agentId}` },
+        },
+      });
+    const context = (parentAgentId: string) => ({
+      'cognition.ai/subagent_context': { parentAgentId },
+    });
+
+    it('suppresses subagent output once its task row exists, on live and replayed batches', () => {
+      const notifications = [
+        started('agent-1'),
+        makeNotification({
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'internal' },
+          _meta: context('agent-1'),
+        }),
+        makeNotification({
+          sessionUpdate: 'agent_message_chunk',
+          content: { type: 'text', text: 'visible' },
+        }),
+      ];
+      for (const history of [
+        applyNotificationOnHistory([], notifications),
+        replayInChunks(notifications, [1]),
+      ]) {
+        const items = (history[0] as { items?: MessageContent[] }).items ?? [];
+        expect(items).toEqual([
+          expect.objectContaining({ type: 'subagent_task', taskId: 'agent-1' }),
+          { type: 'text', text: 'visible' },
+        ]);
+      }
+    });
+
+    it('keeps context-tagged output when no task row names the owner', () => {
+      const history = applyNotificationOnHistory(
+        [],
+        [
+          makeNotification({
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: 'unknown-owner' },
+            _meta: context('never-started'),
+          }),
+        ]
+      );
+      const items = (history[0] as { items?: MessageContent[] }).items ?? [];
+      expect(items).toEqual([{ type: 'text', text: 'unknown-owner' }]);
+    });
+
+    it('suppresses a subagent tool call but merges updates into a permission-written row', () => {
+      const seeded = applyNotificationOnHistory(
+        [],
+        [
+          makeNotification({
+            sessionUpdate: 'tool_call',
+            toolCallId: 'approved-tool',
+            title: 'Approved tool',
+            status: 'pending',
+          }),
+          started('agent-1'),
+        ]
+      );
+      const history = applyNotificationOnHistory(seeded, [
+        makeNotification({
+          sessionUpdate: 'tool_call',
+          toolCallId: 'silent-tool',
+          title: 'Silent tool',
+          status: 'in_progress',
+          _meta: context('agent-1'),
+        }),
+        makeNotification({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'approved-tool',
+          status: 'completed',
+          _meta: context('agent-1'),
+        }),
+      ]);
+      const items = (history[0] as { items?: MessageContent[] }).items ?? [];
+      expect(items).toEqual([
+        expect.objectContaining({
+          type: 'tool_call',
+          toolCallId: 'approved-tool',
+          status: 'completed',
+        }),
+        expect.objectContaining({ type: 'subagent_task', taskId: 'agent-1' }),
+      ]);
+    });
+
+    it('materializes a tagged nested lifecycle row with parentTaskId', () => {
+      const history = applyNotificationOnHistory(
+        [],
+        [
+          started('parent'),
+          makeNotification({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'child',
+            status: 'in_progress',
+            _meta: {
+              ...context('parent'),
+              'cognition.ai/subagent_started': { agentId: 'child', title: 'Nested' },
+            },
+          }),
+        ]
+      );
+      const items = (history[0] as { items?: MessageContent[] }).items ?? [];
+      expect(items).toEqual([
+        expect.objectContaining({ type: 'subagent_task', taskId: 'parent' }),
+        expect.objectContaining({
+          type: 'subagent_task',
+          taskId: 'child',
+          parentTaskId: 'parent',
+        }),
+      ]);
+    });
+
+    it('passes tagged updates carrying an unrecognized subagent payload through', () => {
+      const history = applyNotificationOnHistory(
+        [],
+        [
+          started('agent-1'),
+          makeNotification({
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: 'new-protocol' },
+            _meta: { ...context('agent-1'), 'cognition.ai/subagent_future': { x: 1 } },
+          }),
+        ]
+      );
+      const items = (history[0] as { items?: MessageContent[] }).items ?? [];
+      expect(items).toContainEqual({ type: 'text', text: 'new-protocol' });
+    });
+
+    it('keeps a completed task terminal when a started row replays late', () => {
+      const history = applyNotificationOnHistory(
+        [],
+        [
+          started('agent-1'),
+          makeNotification({
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'agent-1',
+            status: 'completed',
+            _meta: {
+              'cognition.ai/subagent_completed': { agentId: 'agent-1', summary: 'done' },
+            },
+          }),
+          started('agent-1'),
+        ]
+      );
+      const items = (history[0] as { items?: MessageContent[] }).items ?? [];
+      expect(items).toEqual([
+        expect.objectContaining({
+          type: 'subagent_task',
+          taskId: 'agent-1',
+          status: 'completed',
+          summary: 'done',
+        }),
+      ]);
+    });
+  });
 });

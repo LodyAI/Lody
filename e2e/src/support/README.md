@@ -12,6 +12,7 @@
 | `pages/desktop-window-cache-page.ts`                 | Auxiliary renderer readiness and IndexedDB cache-namespace evidence        |
 | `pages/review-page.ts`                               | Review-panel project setup and observable diff interactions                |
 | `pages/session-page.ts`                              | Deterministic ACP conversation and Stop lifecycle                          |
+| `pages/load-session-page.ts`                         | Synthetic persisted-session load seeding and warm-reopen usability         |
 | `pages/work-session-page.ts`                         | Worktree Session, terminal, deletion, and cleanup contract                 |
 | `pages/agent-role-page.ts`                           | Agent Role settings, accepted invocation evidence, and cleanup             |
 | `pages/agent-provider-lifecycle-page.ts`             | Invalid draft, rollback, two-Provider dispatch, revisit, and deletion      |
@@ -22,7 +23,7 @@
 | `pages/project-reopen-page.ts`                       | Two-project switching and duplicate catalog identity checks                |
 | `pages/session-queue-page.ts`                        | Queued follow-up removal and ordered ACP dispatch evidence                 |
 | `pages/session-management-page.ts`                   | Session metadata, Archive restore, history, and deletion                   |
-| `pages/session-relation-lifecycle-page.ts`           | Containment deletion, provenance, worktree, and hydration isolation        |
+| `pages/session-relation-lifecycle-page.ts`           | Archive cascade, containment deletion, provenance, and hydration isolation |
 | `pages/session-read-state-page.ts`                   | Unread state, sidebar navigation, and two-Session cleanup                  |
 | `pages/session-fork-page.ts`                         | Native ACP fork, origin, worktree, and source isolation                    |
 | `pages/session-goal-page.ts`                         | Goal state machine, Session isolation, revisit, Archive, and wire evidence |
@@ -40,6 +41,8 @@
 | `fixtures/mcp-catalog-fixture.ts`                    | ACP and stdio MCP process evidence                                         |
 | `fixtures/project-reopen-fixture.ts`                 | Two isolated Git repositories for duplicate and switching checks           |
 | `fixtures/session-management-fixture.ts`             | UI-created Session identity and deterministic ACP command                  |
+| `fixtures/load-session-fixture.ts`                   | Bounded large-message load profile and persisted-session seed              |
+| `fixtures/load-scripted-acp.mjs`                     | Deterministic ACP responses sized from the load prompt                     |
 | `fixtures/session-relation-lifecycle-fixture.ts`     | Synthetic containment, provenance, and cold-cache metadata                 |
 | `fixtures/session-read-state-fixture.ts`             | Two UI-created Session identities and deterministic ACP command            |
 | `fixtures/session-queue-fixture.ts`                  | File-signaled queue ACP event and release evidence                         |

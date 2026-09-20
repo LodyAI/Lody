@@ -88,6 +88,98 @@ export const InCreateOperation: Story = {
   ),
 };
 
+const operationStoryArgs = {
+  relation: 'opened',
+  label: '',
+  sessionTitle: '',
+  actionLabel: '',
+  onAction: () => {},
+} as const;
+
+const renderOperation = (message: SessionHistoryParsed) => (
+  <div className="w-[720px] max-w-[calc(100vw-2rem)]">
+    <MessageRowView
+      message={message}
+      sessionId={'storybook-opener' as SessionId}
+      onNavigateSession={() => {}}
+    />
+  </div>
+);
+
+/** A message Operation names the Session it reached and previews the reply. */
+export const MessageOperationCompleted: Story = {
+  args: operationStoryArgs,
+  render: () =>
+    renderOperation({
+      ...operationCompletion,
+      id: 'storybook-chat-completion',
+      items: [
+        {
+          type: 'operation_completion',
+          deliveryId: 'operation:pr789:completion',
+          operationId: 'pr789-fix-regression-test-portal-selection-20260917',
+          operationKind: 'session_chat',
+          completion: {
+            type: 'result',
+            value: {
+              items: [
+                {
+                  status: 'succeeded',
+                  label: 'Fix the portal selection regression test',
+                  target: { sessionId: operationSessionId, userTurnId: 'storybook-user-turn' },
+                  assistantTurnId: 'storybook-assistant-turn',
+                  output: {
+                    text: [
+                      '我会先读取本次失败的完整 Tests 日志并复核测试的 portal 选择逻辑，确认它只是残留根菜单被选中后再做精确修复；不会放宽断言。',
+                      '',
+                      '## 排查',
+                      '',
+                      '- 失败来自 `review-page` 的 portal 定位：测试在菜单挂载前就读取了 `[role=menu]`，拿到的是上一轮残留的根菜单。',
+                      '- 本地用同样的 fixture 复现了两次，都是在第一次打开 Fork 菜单时发生。',
+                      '',
+                      '## 修复',
+                      '',
+                      '- 断言前等待目标 portal 带上 `data-state="open"`，并按 `aria-label` 精确匹配，而不是取第一个菜单。',
+                      '- 没有放宽任何断言，也没有增加 sleep。',
+                      '',
+                      '结论：已修复并推送到 PR #789，Static checks、Tests、Desktop E2E 全部通过。',
+                    ].join('\n'),
+                  },
+                },
+              ],
+            },
+          },
+        },
+      ],
+    }),
+};
+
+/** A whole-Operation failure has no Session to show; it reads as one rounded status. */
+export const OperationFailed: Story = {
+  args: operationStoryArgs,
+  render: () =>
+    renderOperation({
+      ...operationCompletion,
+      id: 'storybook-failed-completion',
+      items: [
+        {
+          type: 'operation_completion',
+          deliveryId: 'operation:failed:completion',
+          operationId: 'storybook-failed-operation',
+          operationKind: 'session_chat',
+          completion: {
+            type: 'error',
+            error: {
+              code: 'TARGET_UNAVAILABLE',
+              message: 'The target machine is offline.',
+              retryable: true,
+            },
+          },
+        },
+      ],
+    }),
+};
+
 const openedSessionId = 'storybook-opened-session' as SessionId;
 const openedConversationItems: ChatStreamItem[] = [
   {

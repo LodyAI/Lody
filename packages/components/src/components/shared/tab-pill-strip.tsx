@@ -6,10 +6,9 @@ import { cn } from '@/lib/utils';
  * `session-tab-bar.tsx` (canvas → inactive → active) before touching these;
  * re-derive and measure against the actual theme tokens, don't guess.
  */
-export const TAB_PILL_ACTIVE_CLASS =
-  'border-sidebar-border/80 bg-sidebar text-tab-active-foreground shadow-[0_1px_4px_-1px_rgba(0,0,0,0.18)] dark:border-muted-foreground/[0.24] dark:bg-muted-foreground/[0.18]';
+export const TAB_PILL_ACTIVE_CLASS = 'bg-foreground/[0.08] text-tab-active-foreground';
 export const TAB_PILL_INACTIVE_CLASS =
-  'bg-muted-foreground/[0.07] text-tab-inactive-foreground hover:bg-muted-foreground/[0.12] hover:text-tab-hover-foreground';
+  'bg-foreground/[0.035] text-tab-inactive-foreground hover:bg-foreground/[0.06] hover:text-tab-hover-foreground';
 
 export interface TabPillItem<Key extends string = string> {
   key: Key;
@@ -54,7 +53,7 @@ export function TabPillStrip<Key extends string>({
             aria-selected={active}
             onClick={() => onSelect(key)}
             className={cn(
-              'flex h-8 min-w-0 items-center gap-1.5 rounded-md border border-transparent px-3 text-[13px] font-medium transition-colors',
+              'flex h-8 min-w-0 items-center gap-1.5 rounded-md border border-transparent px-3 text-[0.9em] font-medium transition-colors',
               active ? TAB_PILL_ACTIVE_CLASS : TAB_PILL_INACTIVE_CLASS,
               itemClassName
             )}

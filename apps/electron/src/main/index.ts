@@ -2,17 +2,31 @@ import {
   registerLocalFileResourceScheme,
   installLocalFileResourceProtocol
 } from './services/local-file-resource-protocol'
-import { app, BrowserWindow, safeStorage } from 'electron'
+import { app, BrowserWindow, ipcMain, safeStorage } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import dns from 'node:dns'
 import { writeHeapSnapshot } from 'node:v8'
 import icon from '../../resources/icon.png?asset'
 import macIcon from '../../build/icon-mac.padded.png?asset'
-import { acquireSingleInstanceLock, registerOpenUrlHandler } from './deep-link'
+import {
+  acquireSingleInstanceLock,
+  initializeAuthDeepLinks,
+  registerOpenUrlHandler
+} from './deep-link'
 import { registerLodyProtocolClient } from './protocol-client'
 import { registerIpcServices } from './ipc/register-services'
-import { openMainWindow, openOrFocusMainWindow, setMainWindowProductReloadTarget } from './window'
-import { getMainWindow, setAppQuitting, setWindowsTrayAvailable } from './window-state'
+import {
+  openMainWindow,
+  openOrFocusMainWindow,
+  reloadMainWindowForDevbar,
+  setMainWindowProductReloadTarget
+} from './window'
+import {
+  getMainWindow,
+  productWindows,
+  setAppQuitting,
+  setWindowsTrayAvailable
+} from './window-state'
 import { CliService } from './services/cli-service'
 import { applyPendingDesktopLocalReset } from './services/local-reset-service'
 import { TerminalRelay } from './services/terminal-relay'
@@ -22,7 +36,11 @@ import { AuthService } from './services/auth-service'
 import { authClient } from './auth'
 import { AppUpdaterService } from './services/app-updater-service'
 import { shouldConstructUpdaterEnabled } from './services/app-updater-sparkle-policy'
-import { configureDevbarDiagnostics } from './services/devbar-service'
+import {
+  configureDevbarDiagnostics,
+  startDevbarDevframeService,
+  stopDevbarDevframeService
+} from './services/devbar/service'
 import { GlobalShortcutsService } from './services/global-shortcuts-service'
 import { WindowsTrayService } from './services/windows-tray-service'
 import {
@@ -35,13 +53,14 @@ import {
   flushElectronMainErrorReporting,
   installElectronMainErrorReporting
 } from './posthog-error-reporting'
-import { IPC_PUSH_CHANNELS } from '@lody/shared/electron-ipc'
+import { IPC_PUSH_CHANNELS, IPC_SEND_CHANNELS } from '@lody/shared/electron-ipc'
 import { PublicBrowserService } from './services/public-browser-service'
 import { desktopInstallationProfile, isLocalPlatform } from './platform'
 import { mainPlatformKind } from './platform'
 import { getLocalLoroDataPlaneSocketPath } from '@lody/shared/node/local-ipc'
 import { getLocalTerminalSocketPath } from '@lody/shared/node/local-terminal'
 import { getInitialDesktopPath, markOnboardingCompleted } from './onboarding-state'
+import { handleWindowWarmReady } from './window-warm-service'
 import { extractDeepLinkFromArgv } from './deep-link-url'
 import { shouldHideMainWindowOnAutoLaunch } from './auto-launch-policy'
 import {
@@ -192,6 +211,7 @@ if (hasSingleInstanceLock) {
     // `lody app reset-cache` is the way back for a user whose renderer is wedged,
     // so it has to run while nothing holds that storage open.
     await applyPendingDesktopLocalReset()
+    await startDevbarDevframeService()
     recordE2EBootDiagnostic('initializing-services')
     if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(macIcon)
 
@@ -199,12 +219,39 @@ if (hasSingleInstanceLock) {
       isDefaultProtocolClient: app.isDefaultProtocolClient(LODY_PROTOCOL),
       protocol: LODY_PROTOCOL
     })
-    const authService = new AuthService()
+    const authService = new AuthService(
+      (state) => {
+        // Only redacted lifecycle data goes to diagnostics, never the session.
+        console.info('[Auth] login transition', {
+          attemptId: state.attemptId,
+          phase: state.phase,
+          error: state.error
+        })
+        for (const window of productWindows) {
+          if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+            try {
+              window.webContents.send('auth.loginState', state)
+            } catch {
+              // A closing renderer cannot roll back the authoritative result.
+              console.warn('[Auth] Login state delivery failed; snapshot remains available')
+            }
+          }
+        }
+      },
+      () => {
+        void cliService.restartAutoStart().catch(() => console.warn('[Auth] CLI restart failed'))
+      }
+    )
     const cliService = new CliService({
       resolveBootstrapSession: async () => {
         return await authService.getBootstrapSession()
       }
     })
+    if (!isLocalPlatform()) {
+      initializeAuthDeepLinks(async (token) => {
+        await authService.login.complete(token)
+      })
+    }
     const terminalRelay = new TerminalRelay(getLocalTerminalSocketPath(mainPlatformKind))
     const loroDataPlaneRelay = new LoroDataPlaneRelay(
       getLocalLoroDataPlaneSocketPath(mainPlatformKind)
@@ -273,7 +320,8 @@ if (hasSingleInstanceLock) {
       windowBadgeService,
       globalShortcutsService,
       getMainWindow,
-      completeOnboarding
+      completeOnboarding,
+      reloadMainWindowForDevbar
     })
 
     setupApplicationMenu({
@@ -292,6 +340,10 @@ if (hasSingleInstanceLock) {
     recordE2EBootDiagnostic('opening-main-window')
     openMainWindow({ icon, initialPath, hideWindowOnAutoLaunch })
     recordE2EBootDiagnostic('main-window-opened')
+    // Warmup is off by default and only enabled from Developer mode. When it is
+    // enabled, session-windows primes the spare after an auxiliary request so
+    // ordinary single-window sessions never pay an idle renderer cost.
+    ipcMain.on(IPC_SEND_CHANNELS.appWindowReady, (event) => handleWindowWarmReady(event.sender.id))
     console.info('[Electron] Initial desktop surface selected', {
       initialPath,
       hideWindowOnAutoLaunch
@@ -333,7 +385,8 @@ if (hasSingleInstanceLock) {
       event.preventDefault()
       void Promise.allSettled([
         cliService.shutdownForQuit(),
-        flushElectronMainErrorReporting()
+        flushElectronMainErrorReporting(),
+        stopDevbarDevframeService()
       ]).finally(() => {
         cliShutdownComplete = true
         app.quit()

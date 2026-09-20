@@ -6,6 +6,7 @@ import type { SessionHistoryParsed, SessionId } from '@lody/shared';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  AgentActivityRow,
   AssistantTurnFooter,
   MOBILE_TURN_ACTION_LEADING_INSET_PX,
   SessionChatActionContext,
@@ -245,6 +246,104 @@ describe('mobile assistant-turn duration slot', () => {
     expect(leadingSlotText(container)).toBe('');
     const slot = container.querySelector<HTMLElement>('[data-assistant-turn-actions] > span');
     expect(slot?.style.minWidth).toBe(`${MOBILE_TURN_ACTION_LEADING_INSET_PX}px`);
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+});
+
+describe('desktop live-turn duration', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('adds and updates duration in the live activity status rather than a footer', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-10T03:00:00.000Z'));
+    await initI18n('en');
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    const message = {
+      id: 'assistant-turn-desktop-live',
+      role: 'assistant',
+      timestamp: '2026-09-10T02:59:55.000Z',
+      finished: false,
+      items: [{ type: 'text', text: 'Still working.' }],
+    } as unknown as SessionHistoryParsed;
+
+    await act(async () => {
+      root.render(
+        createElement(
+          ForceDesktopLayoutProvider,
+          null,
+          createElement(
+            'div',
+            null,
+            createElement(AgentActivityRow, {
+              label: 'Exploring',
+              tone: 'warning',
+              shimmer: false,
+              message,
+            }),
+            createElement(AssistantTurnFooter, {
+              message,
+              sessionId: 'session-desktop-live' as SessionId,
+              showDuration: false,
+              isLive: true,
+              isTurnHovered: false,
+            })
+          )
+        )
+      );
+    });
+
+    const activityLabel = () =>
+      container.querySelector('[data-agent-activity-status]')?.textContent;
+    expect(activityLabel()).toBe('Exploring (Worked for 5s)');
+    expect(container.querySelector('[data-assistant-turn-duration]')).toBeNull();
+    expect(container.querySelector('[data-assistant-turn-actions]')).toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_100);
+    });
+    expect(activityLabel()).toBe('Exploring (Worked for 7s)');
+
+    await act(async () => root.unmount());
+    container.remove();
+  });
+
+  it('does not render a live duration for an unfinished turn that is no longer current', async () => {
+    await initI18n('en');
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    const root: Root = createRoot(container);
+    const message = {
+      id: 'assistant-turn-desktop-stale',
+      role: 'assistant',
+      timestamp: '2026-09-10T02:00:00.000Z',
+      finished: false,
+      items: [{ type: 'text', text: 'Interrupted.' }],
+    } as unknown as SessionHistoryParsed;
+
+    await act(async () => {
+      root.render(
+        createElement(
+          ForceDesktopLayoutProvider,
+          null,
+          createElement(AssistantTurnFooter, {
+            message,
+            sessionId: 'session-desktop-stale' as SessionId,
+            showDuration: false,
+            isLive: false,
+            isTurnHovered: false,
+          })
+        )
+      );
+    });
+
+    expect(container.querySelector('[data-assistant-turn-duration]')).toBeNull();
+    expect(container.querySelector('[data-assistant-turn-actions]')).toBeNull();
 
     await act(async () => root.unmount());
     container.remove();

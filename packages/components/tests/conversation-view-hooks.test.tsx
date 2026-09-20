@@ -241,7 +241,6 @@ it.each([false, true])(
       agentRoleId: null,
       mcpServerIds: [],
       configOptionValues: { effort: 'high' },
-      taskToolsEnabled: true,
     };
     const doc = buildSessionDoc(history);
     const idle = createManualIdle();

@@ -259,7 +259,7 @@ describe('LodyOperationStore', () => {
     }
   });
 
-  it('round-trips a frozen create dispatch config including the task tools gate', async () => {
+  it('round-trips a frozen create dispatch config', async () => {
     const store = await makeStore();
     try {
       const accepted = store.accept({
@@ -273,7 +273,6 @@ describe('LodyOperationStore', () => {
               modeId: 'default',
               modelId: 'gpt-5',
               configOptionValues: { fast: true },
-              taskToolsEnabled: false,
               inheritSessionDefaults: false as const,
             },
           ],
@@ -286,7 +285,6 @@ describe('LodyOperationStore', () => {
           modeId: 'default',
           modelId: 'gpt-5',
           configOptionValues: { fast: true },
-          taskToolsEnabled: false,
           inheritSessionDefaults: false,
         },
       ]);

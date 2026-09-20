@@ -43,7 +43,11 @@ this page is the full text of the rules summarised there.
   must queue in that state (even when the preference is guide; steering requires
   positive live prompt activity), because queue promotion is safe for both a live
   turn and a stale transcript while direct dispatch can create a second accepted
-  turn. This barrier affects routing only; it must not relight Working UI or enable
+  turn. Cmd+Shift+Enter in the composer inverts the configured busy-send
+  behavior for that one submission (`invertBehavior` in the route resolver): a
+  queue default steers, a guide default queues — with every guard unchanged, so
+  an inverted steer still requires positive live prompt activity. This barrier
+  affects routing only; it must not relight Working UI or enable
   Stop. That pre-start label is additionally suppressed whenever the
   status chip has an active connection/machine problem (`statusStripState !=
 null`: browser offline, machine removed or offline) — the chip owns that story,

@@ -1,4 +1,12 @@
-import { useCallback, useMemo, useRef, useState, type ComponentType, type SVGProps } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+  type SVGProps,
+} from 'react';
 import { useAtomValue } from 'jotai';
 import { Copy, Download, ExternalLink, FolderOpen, Share2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -29,15 +37,21 @@ import {
   type SessionFileErrorActions,
 } from '@/lib/session-file-actions';
 import { resolveLocalWorkspaceFilePath } from '@/lib/session-local-file-path';
+import { resolveSessionFileOpenTarget } from '@/lib/session-file-open-target';
 import {
   resolveSessionLocalProjectRootPath,
   resolveSessionRepoFullName,
 } from '@/lib/session-local-file-source';
 import {
   buildPathLauncherLaunchInput,
+  buildPathLauncherProbes,
   getAvailablePathLauncherOptions,
+  getPathLauncherId,
+  PATH_LAUNCHER_PREFERENCE_CHANGED_EVENT,
+  PATH_LAUNCHER_PREFERENCE_STORAGE_KEY,
   readStoredPathLauncherPreference,
   resolveSelectedPathLauncher,
+  type PathLauncherOption,
 } from '@/lib/session-path-launchers';
 import {
   resolveMachineDotlodyPath,
@@ -62,6 +76,28 @@ export type SessionFileMenuItem = {
   readonly run: (filePath: string) => void;
 };
 
+/** A context-menu row owned by an agent-written Markdown file link. */
+export type MarkdownAgentFileLinkMenuAction = {
+  readonly kind: 'action';
+  readonly id: string;
+  readonly label: string;
+  readonly icon: ComponentType<{ className?: string }>;
+  readonly run: () => void;
+};
+
+/** A nested group of alternate path launchers. */
+export type MarkdownAgentFileLinkMenuSubmenu = {
+  readonly kind: 'submenu';
+  readonly id: string;
+  readonly label: string;
+  readonly icon: ComponentType<{ className?: string }>;
+  readonly items: readonly MarkdownAgentFileLinkMenuAction[];
+};
+
+export type MarkdownAgentFileLinkMenuItem =
+  | MarkdownAgentFileLinkMenuAction
+  | MarkdownAgentFileLinkMenuSubmenu;
+
 export type SessionFileActions = {
   /** Absolute path on the machine that owns the file, when it resolves. */
   readonly resolveHostPath: (filePath: string) => string | null;
@@ -75,6 +111,12 @@ export type SessionFileActions = {
     filePath: string,
     snapshot?: FileWorkspaceBinarySnapshot
   ) => SessionFileErrorActions | undefined;
+  /**
+   * Context-menu actions for a path an agent wrote in Markdown. Unlike the
+   * file-tree menu, this deliberately never offers download/share remotely:
+   * outside the owning local Electron machine it is Copy Path only.
+   */
+  readonly buildMarkdownLinkMenuItems: (href: string) => readonly MarkdownAgentFileLinkMenuItem[];
   /**
    * The same actions as a menu, for the file tree's context menu and the side
    * panel's ⋯ menu. Stable across renders so a memoized tree row can take it.
@@ -106,6 +148,9 @@ export function useSessionFileActions({
   const nativeShell = isNativeAppShell();
   const exportingRef = useRef(false);
   const [sharing, setSharing] = useState(false);
+  const [pathLauncherPreference, setPathLauncherPreference] = useState(
+    readStoredPathLauncherPreference
+  );
   const localMachineId = useAtomValue(localMachineIdAtom);
   const localHomeDir = useAtomValue(localHomeDirAtom);
   const sessionMachine = useAtomValue(
@@ -156,6 +201,23 @@ export function useSessionFileActions({
     (filePath: string) => resolveLocalWorkspaceFilePath(workspacePath, filePath, isLocalMachine),
     [isLocalMachine, workspacePath]
   );
+
+  // Keep the Markdown menu's "Open in" target aligned with the session-header
+  // launcher preference, including changes made in Settings while a chat stays
+  // mounted behind another tab.
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const refresh = () => setPathLauncherPreference(readStoredPathLauncherPreference());
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === PATH_LAUNCHER_PREFERENCE_STORAGE_KEY) refresh();
+    };
+    window.addEventListener(PATH_LAUNCHER_PREFERENCE_CHANGED_EVENT, refresh);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener(PATH_LAUNCHER_PREFERENCE_CHANGED_EVENT, refresh);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, []);
 
   const reportLocalActionFailure = useCallback(
     (
@@ -256,18 +318,98 @@ export function useSessionFileActions({
     [resolveHostPath, t]
   );
 
-  // Read once per render rather than subscribed: the menus mount on demand, so
-  // they already pick up a preference changed in settings since the last open.
-  const editorLauncher = useMemo(() => {
+  const runEditorAction = useCallback(
+    (launcher: PathLauncherOption, filePath: string) => {
+      const path = resolveHostPath(filePath);
+      if (!path) {
+        reportLocalActionFailure('editor', filePath, null, 'path_unresolved');
+        return;
+      }
+      void (async () => {
+        try {
+          const services = getIpcServices();
+          if (!services) {
+            reportLocalActionFailure('editor', filePath, path, 'ipc_unavailable');
+            return;
+          }
+          const result = await services.app.launchLocalPath(
+            buildPathLauncherLaunchInput(launcher, path, platform, 'file')
+          );
+          if (!result.launched) reportLocalActionFailure('editor', filePath, path, result);
+        } catch (error) {
+          reportLocalActionFailure('editor', filePath, path, error);
+        }
+      })();
+    },
+    [platform, reportLocalActionFailure, resolveHostPath]
+  );
+
+  const launcherCandidates = useMemo(() => {
     if (!isElectronRenderer) return null;
-    const preference = readStoredPathLauncherPreference();
-    const options = getAvailablePathLauncherOptions({
-      customLaunchers: preference.customLaunchers,
+    return getAvailablePathLauncherOptions({
+      customLaunchers: pathLauncherPreference.customLaunchers,
       isElectron: true,
       platform,
     });
-    return resolveSelectedPathLauncher(preference.selectedLauncherId, options);
-  }, [isElectronRenderer, platform]);
+  }, [isElectronRenderer, pathLauncherPreference.customLaunchers, platform]);
+
+  // The Files tree and preview continue to offer the configured selection as
+  // soon as a local host path exists. Markdown needs the stricter probed list
+  // below because it promises equivalence with the visible header control.
+  const selectedEditorLauncher = useMemo(
+    () =>
+      launcherCandidates
+        ? resolveSelectedPathLauncher(pathLauncherPreference.selectedLauncherId, launcherCandidates)
+        : null,
+    [launcherCandidates, pathLauncherPreference.selectedLauncherId]
+  );
+
+  // The header deliberately advertises only launchers that the desktop bridge
+  // has found. Use the identical probe here so "Open in" cannot name a stale
+  // preference that is absent from the top control.
+  const [availableLauncherIds, setAvailableLauncherIds] = useState(new Set<string>());
+  useEffect(() => {
+    if (!isElectronRenderer || !workspacePath || !launcherCandidates) {
+      setAvailableLauncherIds(new Set());
+      return undefined;
+    }
+    const services = getIpcServices();
+    if (!services) return undefined;
+    let cancelled = false;
+    void services.app
+      .probePathLaunchers({
+        launchers: buildPathLauncherProbes(launcherCandidates, workspacePath, platform),
+      })
+      .then(
+        (result) => {
+          if (!cancelled) setAvailableLauncherIds(new Set(result.availableIds));
+        },
+        () => {
+          if (!cancelled) setAvailableLauncherIds(new Set());
+        }
+      );
+    return () => {
+      cancelled = true;
+    };
+  }, [isElectronRenderer, launcherCandidates, platform, workspacePath]);
+
+  const availableEditorLaunchers = useMemo(() => {
+    if (!launcherCandidates) return null;
+    const options = launcherCandidates.filter((launcher) =>
+      availableLauncherIds.has(getPathLauncherId(launcher))
+    );
+    if (options.length === 0) return null;
+    const selected = resolveSelectedPathLauncher(
+      pathLauncherPreference.selectedLauncherId,
+      options
+    );
+    return {
+      selected,
+      alternatives: options.filter(
+        (option) => getPathLauncherId(option) !== getPathLauncherId(selected)
+      ),
+    };
+  }, [availableLauncherIds, launcherCandidates, pathLauncherPreference.selectedLauncherId]);
 
   // ONE decision for both halves, and `hasHostPath` is the real thing: an
   // Electron renderer on the owning machine still cannot reach a shell until
@@ -329,27 +471,22 @@ export function useSessionFileActions({
           const result = await services.app.openLocalPath(path);
           return result.opened ? null : result;
         }),
-      editor: editorLauncher
+      editor: selectedEditorLauncher
         ? {
             label: t('sessions.fileActions.openInEditor', 'Open in {{editor}}', {
-              editor: editorLauncher.label,
+              editor: selectedEditorLauncher.label,
             }),
-            open: (filePath) =>
-              runLocalAction('editor', filePath, async (services, path) => {
-                const result = await services.app.launchLocalPath(
-                  buildPathLauncherLaunchInput(editorLauncher, path, platform, 'file')
-                );
-                return result.launched ? null : result;
-              }),
+            open: (filePath) => runEditorAction(selectedEditorLauncher, filePath),
           }
         : null,
     };
   }, [
     availability.localHost,
-    editorLauncher,
+    runEditorAction,
     platform,
     reportLocalActionFailure,
     resolveHostPath,
+    selectedEditorLauncher,
     session,
     t,
   ]);
@@ -456,6 +593,95 @@ export function useSessionFileActions({
     [copyPath, download, localHost, nativeShell, resolveHostPath, session, sharing]
   );
 
+  const resolveMarkdownLinkFilePath = useCallback(
+    (href: string): string | null => {
+      const trimmed = href.trim();
+      if (!trimmed) return null;
+      return resolveSessionFileOpenTarget({
+        rawPath: trimmed,
+        pathKind: 'markdown-href',
+        workspacePath,
+      }).filePath;
+    },
+    [workspacePath]
+  );
+
+  const buildMarkdownLinkMenuItems = useCallback(
+    (href: string): readonly MarkdownAgentFileLinkMenuItem[] => {
+      const filePath = resolveMarkdownLinkFilePath(href);
+      if (!filePath) return [];
+
+      const items: MarkdownAgentFileLinkMenuItem[] = [
+        {
+          kind: 'action',
+          id: 'copy-path',
+          label: t('sessions.fileActions.copyPath', 'Copy Path'),
+          icon: Copy,
+          run: () => copyPath(filePath),
+        },
+      ];
+
+      // The exact same local-host gate protects every path handed to Electron.
+      // A remote agent's href can still be copied, but must never reach this
+      // viewer's shell or advertise actions that will fail.
+      if (!localHost || !resolveHostPath(filePath)) return items;
+
+      items.push({
+        kind: 'action',
+        id: 'open-file',
+        label: t('sessions.fileActions.openFile', 'Open File'),
+        icon: ExternalLink,
+        run: () => localHost.openInDefaultApp(filePath),
+      });
+      if (availableEditorLaunchers) {
+        items.push({
+          kind: 'action',
+          id: 'open-in-editor',
+          label: t('sessions.fileActions.openInEditor', 'Open in {{editor}}', {
+            editor: availableEditorLaunchers.selected.label,
+          }),
+          icon: ExternalLink,
+          run: () => runEditorAction(availableEditorLaunchers.selected, filePath),
+        });
+      }
+
+      const alternatives = availableEditorLaunchers?.alternatives ?? [];
+      if (alternatives.length > 0) {
+        items.push({
+          kind: 'submenu',
+          id: 'open-with',
+          label: t('sessions.fileActions.openWith', 'Open with'),
+          icon: ExternalLink,
+          items: alternatives.map((launcher) => ({
+            kind: 'action' as const,
+            id: `open-with:${getPathLauncherId(launcher)}`,
+            label: launcher.label,
+            icon: ExternalLink,
+            run: () => runEditorAction(launcher, filePath),
+          })),
+        });
+      }
+
+      items.push({
+        kind: 'action',
+        id: 'reveal',
+        label: localHost.revealLabel,
+        icon: FolderOpen,
+        run: () => localHost.reveal(filePath),
+      });
+      return items;
+    },
+    [
+      copyPath,
+      availableEditorLaunchers,
+      localHost,
+      resolveHostPath,
+      resolveMarkdownLinkFilePath,
+      runEditorAction,
+      t,
+    ]
+  );
+
   const menuItems = useMemo<readonly SessionFileMenuItem[]>(() => {
     if (!session) return [];
     const items: SessionFileMenuItem[] = [
@@ -496,5 +722,13 @@ export function useSessionFileActions({
     return items;
   }, [copyPath, download, localHost, nativeShell, session, t]);
 
-  return { resolveHostPath, copyPath, localHost, download, buildErrorActions, menuItems };
+  return {
+    resolveHostPath,
+    copyPath,
+    localHost,
+    download,
+    buildErrorActions,
+    buildMarkdownLinkMenuItems,
+    menuItems,
+  };
 }

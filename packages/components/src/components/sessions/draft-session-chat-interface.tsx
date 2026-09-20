@@ -31,7 +31,6 @@ import {
 
 import { getAllAgentConfigAtom } from '@/atoms';
 import { docMetaCacheReadyAtom } from '@/atoms/doc-meta';
-import { tasksFeatureEnabledAtom } from '@/atoms/settings';
 import {
   extractIssuePRMentionsFromText,
   useKnownIssuePrItems,
@@ -126,7 +125,10 @@ export interface DraftSessionChatInterfaceProps {
 export type DraftSessionChatInterfaceHandle = {
   focusInput: () => void;
   addCommentReference: (reference: CommentReferencePayload) => boolean;
-  insertSessionMention: (sessionId: string) => boolean;
+  insertSessionMention: (
+    sessionId: string,
+    options?: { at?: number; replaceEnd?: number }
+  ) => boolean;
 };
 
 export const DraftSessionChatInterface = memo(
@@ -175,7 +177,6 @@ export const DraftSessionChatInterface = memo(
         return item.role.agentConfigId === draft.agentConfigId ? item.role : null;
       }, [composerAgentRoleItems, draft.agentConfigId, draft.agentRoleId]);
       const docMetaCacheReady = useAtomValue(docMetaCacheReadyAtom);
-      const tasksFeatureEnabled = useAtomValue(tasksFeatureEnabledAtom);
       // The draft composer has no MCP picker yet, so the first turn carries the
       // workspace default selection — the same set the promoted child composer
       // resolves for an empty session doc.
@@ -562,7 +563,6 @@ export const DraftSessionChatInterface = memo(
                   )
                 : undefined,
               mcpServerIds: mcpSelection.selectedIds,
-              taskToolsEnabled: tasksFeatureEnabled,
               agentRoleId: activeAgentRole?.id ?? null,
               agentRoleRevision: activeAgentRole?.revision,
             }),
@@ -584,7 +584,6 @@ export const DraftSessionChatInterface = memo(
           parentRepoFullName,
           selectedModeId,
           selectedModelId,
-          tasksFeatureEnabled,
         ]
       );
 
@@ -624,8 +623,8 @@ export const DraftSessionChatInterface = memo(
           addCommentReference: (reference: CommentReferencePayload) => {
             return inputAreaRef.current?.addCommentReference(reference) ?? false;
           },
-          insertSessionMention: (sessionId: string) => {
-            return inputAreaRef.current?.insertSessionMention(sessionId) ?? false;
+          insertSessionMention: (sessionId, options) => {
+            return inputAreaRef.current?.insertSessionMention(sessionId, options) ?? false;
           },
         }),
         []

@@ -410,7 +410,7 @@ describe('SessionList opened-by rendering', () => {
         ?.querySelector(`[data-sidebar-session-id="${sessionId}"]`)
         ?.querySelector('[data-session-row-end-slot]');
 
-    expect(endOf('idle')?.textContent).toContain('+12');
+    expect(endOf('idle')?.textContent).not.toContain('+12');
     expect(endOf('busy')?.textContent).not.toContain('+12');
     expect(endOf('busy')?.querySelector('[data-session-working-spinner]')).not.toBeNull();
   });
@@ -436,7 +436,7 @@ describe('SessionList opened-by rendering', () => {
     });
 
     const row = container?.querySelector('[data-sidebar-session-id="opened-2"]');
-    expect(row?.className).toContain('bg-sidebar-foreground/10');
+    expect(row?.className).toContain('bg-sidebar-selection');
     expect(row?.querySelector('[data-session-working-spinner]')).not.toBeNull();
   });
 });

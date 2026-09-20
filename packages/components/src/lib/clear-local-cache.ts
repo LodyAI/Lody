@@ -30,6 +30,7 @@ import { EAGER_SYNC_CACHE_DB } from '../providers/eager-sync-snapshot-cache';
 import { replaceAppWindowLocation } from './app-location';
 import { getRegisteredAuthClient } from './auth-client-singleton';
 import { getIpcServices } from './electron-ipc-client';
+import { isWarmWindow } from './desktop-window';
 import { PROMPT_SHORTCUT_DATA_PREFIX } from './prompt-shortcut-storage';
 
 /**
@@ -464,6 +465,9 @@ async function runPendingClearOnBoot(): Promise<PendingLocalClearMode | null> {
  *   cached yet.
  */
 export async function maybeClearLodyCacheOnBoot(extraNames: string[] = []): Promise<void> {
+  // The hidden warm spare boots the same providers; it must never consume a
+  // clear armed for the window the user will actually see.
+  if (isWarmWindow()) return;
   bootClearPromise ??= runPendingClearOnBoot();
   const mode = await bootClearPromise;
   // Nothing was pending, or this caller has no extra databases to contribute.

@@ -83,7 +83,7 @@ export function WorkspaceOwnershipTransfer({
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 px-3 py-3">
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium">{t('workspace.transfer.title')}</p>
+        <p className="text-sm font-normal">{t('workspace.transfer.title')}</p>
         <p className="mt-1 text-xs text-muted-foreground">
           {t(candidates.length ? 'workspace.transfer.description' : 'workspace.transfer.noMembers')}
         </p>

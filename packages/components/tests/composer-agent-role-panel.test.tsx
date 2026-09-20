@@ -89,6 +89,7 @@ describe('ComposerAgentRolePanel', () => {
               items: [reviewer],
               selectedRoleId: null,
               onSelect: () => undefined,
+              compact: false,
               ...props,
             })
           )
@@ -170,9 +171,9 @@ describe('ComposerAgentRolePanel', () => {
   it('offers making another Role from the list', async () => {
     const onCreate = vi.fn();
     const view = await render({ onCreate });
-    const create = [...view.querySelectorAll('[role="menuitem"]')].find((node) =>
-      node.textContent?.includes('New role')
-    );
+    const create = view.querySelector(
+      '[aria-label="Create role from current settings"]'
+    ) as HTMLElement | null;
     await act(async () => {
       (create as HTMLElement).click();
     });
@@ -222,5 +223,46 @@ describe('ComposerAgentRolePanel', () => {
     });
     expect(view.textContent).toContain('Checking availability');
     expect(view.textContent).not.toContain('Unavailable');
+  });
+
+  it('puts agent and model on the Role row when the detail pane cannot fit', async () => {
+    const view = await render({ compact: true, onEdit: () => undefined });
+    const row = [...view.querySelectorAll('[role="menuitemradio"]')].find((node) =>
+      node.textContent?.includes('Code Reviewer')
+    );
+    expect(row?.textContent).toContain('Code Reviewer');
+    expect(row?.textContent).toContain('Codex');
+    expect(row?.textContent).toContain('5.6-Sol');
+    expect(view.textContent).not.toContain('Edit role');
+    expect(view.textContent).not.toContain('Review the diff for correctness before style.');
+  });
+
+  it('detects a too-narrow popper and drops the detail pane without a compact prop', async () => {
+    const innerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 400 });
+    try {
+      const view = await render({ compact: undefined, onEdit: () => undefined });
+      const row = [...view.querySelectorAll('[role="menuitemradio"]')].find((node) =>
+        node.textContent?.includes('Code Reviewer')
+      );
+      expect(row?.textContent).toContain('Codex');
+      expect(row?.textContent).toContain('5.6-Sol');
+      expect(view.textContent).not.toContain('Edit role');
+    } finally {
+      if (innerWidth) Object.defineProperty(window, 'innerWidth', innerWidth);
+      else delete (window as { innerWidth?: number }).innerWidth;
+    }
+  });
+
+  it('still picks a Role from the compact two-line list', async () => {
+    const onSelect = vi.fn();
+    const view = await render({ compact: true, onSelect });
+    const row = [...view.querySelectorAll('[role="menuitemradio"]')].find((node) =>
+      node.textContent?.includes('Code Reviewer')
+    );
+    await act(async () => {
+      (row as HTMLElement).click();
+    });
+    expect(onSelect).toHaveBeenCalledWith('r-1');
   });
 });

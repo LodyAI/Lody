@@ -15,6 +15,8 @@ import {
   parseHistoryWrite,
   HistoryWriteError,
   parseLodyTaskMeta,
+  parseDevinSubagentTaskMeta,
+  getDevinSubagentContextId,
 } from '@lody/shared';
 import type { ModelInfo } from '@lody/shared';
 import type { RequestPermissionRequest, RequestPermissionResponse } from '@agentclientprotocol/sdk';
@@ -182,13 +184,17 @@ export const handleACPUpdateMessage = async (
       } else {
         // Tool/subagent updates can belong to older turns. Only text/thought
         // chunks have a target-local ownership contract; retain full routing otherwise.
+        // Devin subagent-tagged chunks need the whole-history view too — the
+        // applier can only drop them when it can see the owner task row, which
+        // may live in an older entry.
         const targetOnly = Boolean(
           targetTurnId &&
           persistableBatch.every(
             ({ update }) =>
               (update.sessionUpdate === 'agent_message_chunk' ||
                 update.sessionUpdate === 'agent_thought_chunk') &&
-              update.content.type === 'text'
+              update.content.type === 'text' &&
+              getDevinSubagentContextId(update._meta) === null
           )
         );
         const createId = targetTurnId ? () => targetTurnId : uuidV4;
@@ -866,7 +872,7 @@ const filterNotificationsForHistory = (
     if (update.sessionUpdate !== 'tool_call_update') return true;
     // Task snapshots are small lifecycle facts, not replaceable tool output.
     // The history applier merges them by taskId for both live and resumed views.
-    if (parseLodyTaskMeta(update._meta)) return true;
+    if (parseLodyTaskMeta(update._meta) ?? parseDevinSubagentTaskMeta(update._meta)) return true;
     // Tool call updates are often "full snapshots" (especially terminal output). Persisting all
     // intermediate snapshots causes the CRDT history to blow up. We keep only terminal state
     // transitions that represent a finished tool call.
@@ -1116,6 +1122,7 @@ const triggerStandardDiffCallbacksFromNotifications = async (
 const extractLatestPlanSnapshot = (batch: AcpSessionNotification[]): SessionPlanEntry[] | null => {
   for (let i = batch.length - 1; i >= 0; i -= 1) {
     const update = batch[i]?.update;
+    if (getDevinSubagentContextId(update?._meta) !== null) continue;
     const entries =
       update?.sessionUpdate === 'plan'
         ? update.entries

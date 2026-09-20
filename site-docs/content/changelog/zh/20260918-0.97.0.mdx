@@ -1,0 +1,20 @@
+---
+title: '20260918-0.97.0'
+version: 0.97.0
+date: 2026-09-18
+description: 加入 session mention、桌面项目目录和队列 Steer，并修复 macOS 桌面端 Agent 启动失败。
+---
+
+版本 0.97.0
+
+### ✨ 新功能
+
+- 把会话链接粘贴进输入框会变成 session mention；需要普通链接时用 Cmd/Ctrl+Shift+V。
+- 桌面端「设置 > 项目」改为双栏目录：左侧 GitHub / 机器，右侧该来源下的文件夹，点击文件夹打开编辑。
+- 队列里的消息支持直接 Steer（Agent 支持 acknowledged steering 时不限第一条）；发送时用 Cmd/Ctrl+Shift+Enter 可临时切换「排队 / 引导」行为。
+
+### 🐛 修复与改进
+
+- 修复已签名的 macOS 桌面端无法启动 DeepSeek Harness 及其他需要加载未签名原生扩展的 Agent 的问题。
+- 手机会话菜单支持将对话分享为图片。
+- 会话栏较窄时，IDE 和分享入口收进「⋯」菜单。

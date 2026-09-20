@@ -19,7 +19,7 @@ lives in its `README.md`.
    expensive one, which is why `getCandidates` must stay lazy and a bare `@` calls
    none of them.
 3. **Commit.** The candidate's `insertText` is what the user sees in the prompt;
-   the committed *range* is what carries structured identity (a session id, a Role
+   the committed _range_ is what carries structured identity (a session id, a Role
    id) that no text form could.
 4. **Draft persistence and hydration.** Ranges are stored beside the draft, and
    rebuilding them from text is only a fallback.
@@ -28,14 +28,28 @@ lives in its `README.md`.
 
 ## Ranking
 
-Issues and PRs share one cache, and the shared ranking caps its result set.
-Ranking the merged list first therefore lets a long issue list starve every PR out
-of the PR category, so the slices are partitioned once by `useMentionCategories`
-rather than re-derived per keystroke.
+File menus use `useMentionFileSearch`: a Worker owns the file/directory index,
+path metadata, and matching. The registry reads only the bounded current result.
+Opening a file query creates the Worker; leaving file search, closing the menu,
+changing the entry, or unmounting terminates it. One query runs at a time and the
+client retains only the latest pending query. The Worker yields between batches
+so cancellation can interrupt scoring. Entry identity and query revisions prevent
+old results from reaching a new menu; failures remain visible and reopening retries.
 
-The vendored VS Code `scoreFuzzy` is used with non-contiguous matching enabled: a
-query may skip words, spaces, and punctuation, while consecutive, separator, path,
-case, and camel-case matches receive the same bonuses as VS Code.
+The file scorer reuses matrix rows without reconstructing unused match positions.
+A subsequence check rejects impossible matches, and a worst-first heap retains
+only the best 120 candidates. Path ordering, default 60-result limit, lazy directory
+navigation, and VS Code score semantics remain unchanged. Aggregate loading/error
+groups stay visible even before they have candidates. Draft token hydration remains
+a separate synchronous path; this worker does not perform file discovery or I/O.
+
+Issues and PRs rank their own cached slices so one kind cannot starve the other.
+Files, sessions, roles, issues and PRs retain VS Code non-contiguous matching, with
+consecutive, separator, path, case, and camel-case bonuses. Skills and commands
+keep their own ranking. The [file search Spec](../../specs/composer-file-search.md)
+owns responsiveness and freshness intent; the
+[benchmark note](../notes/implemented/bug-fix/2026-09-20-composer-file-search-worker.md)
+records measurements and remaining limits.
 
 ## Activation is not revalidation
 
@@ -52,7 +66,7 @@ every return looking like plain text — and never came back at all if the sourc
 never loaded. Hence persistence of the narrow `PersistedMentionRange`: the live
 range carries callbacks, which `JSON.stringify` writes as `{}`.
 
-`mergeHydratedMentions` rejects an *overlapping* range, not just an exact
+`mergeHydratedMentions` rejects an _overlapping_ range, not just an exact
 duplicate, because a session and a path are now the same shape: two sources can
 each claim `@fix-ci` at different ends, and only rejecting overlaps keeps the
 restored range authoritative.

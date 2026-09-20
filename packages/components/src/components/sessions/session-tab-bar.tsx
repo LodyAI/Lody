@@ -37,6 +37,7 @@ import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import { isSessionTabClosed } from '@/lib/session-tab-url';
 import { TAB_PILL_ACTIVE_CLASS, TAB_PILL_INACTIVE_CLASS } from '@/components/shared/tab-pill-strip';
 import { AdaptiveTabStrip, AdaptiveTabStripItem } from './adaptive-tab-strip';
+import { SESSION_PAGE_CONTAINER_CLASS } from './session-conversation-page';
 import {
   armSessionMentionDrag,
   clearSessionMentionDrag,
@@ -97,27 +98,11 @@ interface SessionTabBarProps {
 }
 
 /* One canvas: `bg-background` runs unbroken from this bar down through the
-   message list, and the tabs sit ON it without breaking it. The ACTIVE tab is
-   the heaviest thing in the row — it wears the app's floating-panel material
-   (`bg-sidebar` + `border-sidebar-border` + the same drop shadow as the side
-   panel and terminal dock), so "the one in a box" reads as the current page.
-   Inactive tabs get a flat borderless wash and dimmed text; they must stay
-   lighter-weight than the active tab, since chrome is what the eye scores as
-   selected among siblings.
-
-   Keep the surface ladder ordered — canvas → inactive → active — measured, not
-   assumed. `bg-sidebar` gives light that ladder for free (canvas 241 → active
-   229), but DARK needs the override: Vesper's sideBar is #161616, a mere 6
-   above the #101010 canvas and BELOW the inactive wash (26), so the active pill
-   rendered as a dent and only its border kept it legible. Hence the `dark:`
-   pair, which lands canvas 16 → inactive 26 → active 42, border 70.
-   `--tab-active`/`--tab-inactive` are useless here: both collapse onto
-   `--background` in dark, which is what forced the original `/[0.22]` vs
-   `/[0.12]` tints — a 10% gap that rendered as one gray.
-   `border-transparent` on the base keeps every state on the same box model, so
-   switching tabs never shifts a label by a pixel. */
+   message list. Active/inactive fills come from `TAB_PILL_*_CLASS` — the same
+   tokens as the right side-panel tab strip. `border-transparent` on the base
+   keeps every state on the same box model. */
 const TAB_ITEM_CLASS =
-  'group relative flex h-8 w-full min-w-0 items-center gap-1.5 overflow-hidden rounded-md border border-transparent px-3 text-[13px] transition-colors cursor-pointer';
+  'group relative flex h-8 w-full min-w-0 items-center gap-1.5 overflow-hidden rounded-md border border-transparent px-3 text-[0.9em] transition-colors cursor-default';
 const TAB_ITEM_ACTIVE_CLASS = TAB_PILL_ACTIVE_CLASS;
 const TAB_ITEM_INACTIVE_CLASS = TAB_PILL_INACTIVE_CLASS;
 const TAB_INLINE_ACTION_CLASS =
@@ -217,7 +202,9 @@ function TabContent({
      would be a flash between the click and the read receipt landing. */
   const isUnread = !isActive && sessionHasUnreadMessages(session);
   const label = getTabLabel(session, isParent, defaultTitle, t);
-  const showClose = onTabClose && !isEditing;
+  // A lone tab has no close button: there is nothing to switch to, and closing
+  // it would only swap the conversation for an empty draft.
+  const showClose = onTabClose && !isEditing && !solo;
   const tabId = `session-tab-${session.id}`;
   const agentConfig = useAtomValue(getAgentMetaByIdAtomFamily(session.agentConfigId));
   const iconEnv = agentConfig?.env ?? getSessionLaunchConfigLegacyFields(session)?.env;
@@ -305,7 +292,7 @@ function TabContent({
             if (e.key === 'Enter') commitRename();
             if (e.key === 'Escape') cancelRename();
           }}
-          className="w-full min-w-0 bg-transparent outline-hidden text-[13px]"
+          className="w-full min-w-0 bg-transparent outline-hidden text-[0.9em]"
         />
       ) : (
         <span className="truncate">{label}</span>
@@ -354,7 +341,7 @@ function DraftTabContent({
   onClose?: (tabId: string) => MaybePromiseVoid;
   t: (key: string, fallback: string) => string;
 }) {
-  const showClose = onClose;
+  const showClose = onClose && !solo;
   const closeIconVisibility = isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100';
   const label = getDraftTabLabel(draft, t('sessions.tabs.newTab', 'New Tab'));
   const tabId = `draft-tab-${draft.id}`;
@@ -433,7 +420,7 @@ function ViewerTabContent({
   onClose?: (tabId: string) => MaybePromiseVoid;
   t: (key: string, fallback: string, opts?: Record<string, unknown>) => string;
 }) {
-  const showClose = onClose;
+  const showClose = onClose && !solo;
   const closeIconVisibility = isActive ? 'opacity-100' : 'opacity-0 group-hover:opacity-100';
   const tabId = `viewer-tab-${tab.id}`;
   const saveStateLabel = tab.saving
@@ -759,7 +746,14 @@ export const SessionTabBar = memo(function SessionTabBar({
   ) : null;
 
   return (
-    <div className={cn('flex min-w-0 items-center bg-background', windowDragClass, className)}>
+    <div
+      className={cn(
+        SESSION_PAGE_CONTAINER_CLASS,
+        'flex min-w-0 items-center bg-background',
+        windowDragClass,
+        className
+      )}
+    >
       {leftSlot ? (
         <div
           className={cn(
@@ -776,8 +770,11 @@ export const SessionTabBar = memo(function SessionTabBar({
         activeItemId={activeTabId}
         role="tablist"
         aria-label={t('sessions.tabs.label', 'Session tabs')}
-        className="h-11"
-        paddingLeft={variant === 'session' ? 4 : 8}
+        // max-h-full keeps the strip inside a padded h-11 bar (macOS row pad).
+        className="h-11 max-h-full"
+        // A little more than the 6px tab gap, so the first tab reads as part of
+        // the strip rather than attached to the sidebar edge.
+        paddingLeft={8}
         paddingRight={8}
       >
         {showParentTab && (
@@ -885,11 +882,11 @@ export function ClosedTabsPopover({
       </Tooltip>
       <PopoverContent align="end" className="w-72 p-0" sideOffset={4}>
         <div className="border-b border-border px-3 py-2">
-          <p className="text-xs font-medium text-popover-foreground/70">
+          <p className="text-[0.8em] font-medium text-popover-foreground/70">
             {t('sessions.tabs.closedTabs', 'Closed conversations')}
           </p>
         </div>
-        <ScrollArea className="max-h-60">
+        <ScrollArea viewportClassName="max-h-60">
           <div className="py-1">
             {sorted.map((session) => {
               const label = session.title?.trim() || t('sessions.tabs.newTab', 'New Tab');
@@ -898,7 +895,7 @@ export function ClosedTabsPopover({
                 <button
                   key={session.id}
                   type="button"
-                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-hover/60"
+                  className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-[0.9em] transition-colors hover:bg-hover/60"
                   onClick={() => {
                     void onRestore(session.id);
                   }}

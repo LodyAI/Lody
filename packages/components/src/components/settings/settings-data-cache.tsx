@@ -1,8 +1,12 @@
-import { createContext, useContext, useMemo, type ReactNode } from 'react';
-import { useAtomValue } from 'jotai';
+import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import type { WorktreeCleanupScriptConfig, WorktreeSetupScriptConfig } from '@lody/shared';
 import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
+import {
+  setWorkspaceReposCacheAtom,
+  workspaceReposCacheAtomFamily,
+} from '@/atoms/local-storage-cache';
 import { useOrganization } from '@/hooks/useOrganization';
 import { useAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
 import { useCloudQuery } from '@lody/platform/react';
@@ -125,6 +129,8 @@ export function SettingsDataCacheProvider({ children }: { children: ReactNode })
   const canManageGithub = Boolean(workspaceId) && hasAdminPermission;
 
   const canQuery = canRunAuthedWorkspaceQuery(workspaceId, isConvexAuthenticated);
+  const cachedRepositories = useAtomValue(workspaceReposCacheAtomFamily(workspaceId));
+  const setWorkspaceReposCache = useSetAtom(setWorkspaceReposCacheAtom);
 
   // Preload all stats ranges once at settings-root level to avoid re-fetch when switching tabs.
   const dayUsage = useCloudQuery(
@@ -173,6 +179,44 @@ export function SettingsDataCacheProvider({ children }: { children: ReactNode })
     queryResult: workspaceReposWithStatus,
   });
 
+  useEffect(() => {
+    if (!workspaceId) return;
+    if (workspaceReposWithStatus) {
+      setWorkspaceReposCache({
+        workspaceId,
+        repositories: workspaceReposWithStatus.map((repo) => ({
+          fullName: repo.repoFullName,
+          description: null,
+        })),
+      });
+      return;
+    }
+    if (repositories) {
+      setWorkspaceReposCache({
+        workspaceId,
+        repositories: repositories.map((repo) => ({
+          fullName: repo.fullName,
+          description: null,
+        })),
+      });
+    }
+  }, [repositories, setWorkspaceReposCache, workspaceId, workspaceReposWithStatus]);
+
+  const workspaceReposWithStatusOrCache = useMemo(() => {
+    if (workspaceReposWithStatus) return workspaceReposWithStatus;
+    if (!cachedRepositories || cachedRepositories.length === 0) return undefined;
+    return cachedRepositories.map((repo) => {
+      const name = repo.fullName.split('/').pop() || repo.fullName;
+      return {
+        repoFullName: repo.fullName,
+        name,
+        repositoryId: 0,
+        private: false,
+        enabled: true,
+      };
+    });
+  }, [cachedRepositories, workspaceReposWithStatus]);
+
   const usageTimelineByRange = useMemo(
     () => ({
       day: dayUsage,
@@ -190,8 +234,9 @@ export function SettingsDataCacheProvider({ children }: { children: ReactNode })
       usageTimelineByRange,
       usageCalendar,
       repositories,
-      workspaceReposWithStatus: workspaceReposWithStatus ?? undefined,
-      workspaceReposLoading,
+      workspaceReposWithStatus: workspaceReposWithStatusOrCache,
+      workspaceReposLoading:
+        workspaceReposLoading && (workspaceReposWithStatusOrCache?.length ?? 0) === 0,
     }),
     [
       canManageGithub,
@@ -200,7 +245,7 @@ export function SettingsDataCacheProvider({ children }: { children: ReactNode })
       usageCalendar,
       workspaceId,
       workspaceReposLoading,
-      workspaceReposWithStatus,
+      workspaceReposWithStatusOrCache,
     ]
   );
 

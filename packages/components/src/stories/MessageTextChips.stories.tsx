@@ -58,7 +58,8 @@ const SENT = applyTextRewrites(COMPOSER_TEXT, [
   },
   {
     ...at('@session:crdt-metadata-cleanup'),
-    replacement: 'use lody mcp to query session[id: 9f2c-4a11] history',
+    replacement:
+      '[@CRDT metadata cleanup](session://9f2c-4a11)',
     span: { kind: 'session', label: 'CRDT metadata cleanup', target: '9f2c-4a11' },
   },
   {
@@ -94,7 +95,7 @@ function Bubble({
   return (
     <div className={cn('flex flex-col items-end gap-1.5', className)}>
       <div className="font-medium text-muted-foreground text-xs">{title}</div>
-      <div className="min-w-0 max-w-full rounded-2xl border border-foreground/[0.08] bg-foreground/[0.05] px-4 py-2.5">
+      <div className="min-w-0 max-w-full rounded-2xl bg-foreground/[0.05] px-4 py-2.5">
         <div
           className={cn(
             'min-w-0 max-w-full whitespace-pre-wrap text-sm [overflow-wrap:anywhere]',

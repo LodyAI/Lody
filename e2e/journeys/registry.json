@@ -490,11 +490,11 @@
       "state": "active",
       "priority": "P1",
       "runtime": "simulator",
-      "title": "Preserve opened worktree Sessions through opener archive and delete",
+      "title": "Opened Sessions survive opener archive and delete",
       "owner": "session-lifecycle",
       "feature": "src/features/session-management.feature",
       "fixture": "session-fork-and-seeded-relations",
-      "fingerprint": "bf5df94ba0e024a2ac8e9c34b0bd8879e821e67337be85bc01732979e8e05b87",
+      "fingerprint": "4f2e14b9458ebd4f064cc8aca5a02bfd1209989a8c450207cec5409c7eac23d9",
       "ownerPaths": [
         "packages/components/src/hooks/use-session-actions.ts",
         "packages/components/src/lib/session-navigation.ts",
@@ -506,26 +506,25 @@
         { "id": "session.seedRelations" },
         { "id": "session.archiveOpener" },
         { "id": "archive.deletePermanently" },
-        { "id": "session.openSurvivors" },
         { "id": "session.reloadWithMetadataScanBlocked" },
         { "id": "session.closeEmptyChildTab" }
       ],
       "checkpoints": [
-        "archive affects only the root and direct child Tab",
-        "permanent delete removes only the root and direct child Tab",
-        "opened Sessions retain documents, provenance, running ACP processes, and worktrees",
-        "dangling opener provenance is visible and non-navigable",
+        "archive cascades through containment and opened-by links to the child Tab and both opened Sessions",
+        "each archived opened Session releases its ACP process and worktree directory",
+        "permanent delete removes only the archived root and its direct child Tab",
+        "opened Sessions stay archived, listed, and undeleted after the root delete",
         "exact child deletion succeeds before metadata hydration completes"
       ],
       "cleanup": [
-        "opened worktree Sessions and ACP processes are permanently deleted",
+        "surviving archived Sessions live only inside the disposable run directory",
         "isolated app and Git fixture directories are removed"
       ],
       "coverage": {
-        "renderer": "Session archive, Archive delete, child Tabs, and opened-by provenance",
+        "renderer": "Session archive, Archive delete, and child Tabs",
         "electronIpc": "Real window, local repo, terminal, and Session RPC",
         "bundledCli": "Real archive and worktree cleanup command processing",
-        "durableState": "Containment deletion, provenance retention, and worktree survival",
+        "durableState": "Archive cascade teardown and containment-scoped deletion",
         "externalWire": "Scripted fork-capable ACP"
       },
       "signals": {

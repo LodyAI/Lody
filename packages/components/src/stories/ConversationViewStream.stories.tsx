@@ -7,12 +7,13 @@
  * "Worked for …" group to check that expansion still lands rows under the
  * same rail.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import type { SessionHistory, SessionId } from '@lody/shared';
 import { LoroDoc } from 'loro-crdt';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
 import type { SessionChatStreamViewProps } from '@/components/ai-gui/view';
+import type { SessionChatStreamHandle } from '@/components/ai-gui/view';
 import { useConversationStreamItems } from '@/hooks/use-conversation-stream-items';
 import { createConversationSession, type ConversationView } from '@/lib/conversation-view';
 
@@ -114,7 +115,7 @@ function buildHistory(rounds: number): SessionHistory[] {
 }
 
 /** One doc per story load; the writer is the production write path. */
-function openWindowedView(rounds: number, id: SessionId = sessionId): ConversationView {
+function openWindowedView(entries: SessionHistory[], id: SessionId = sessionId): ConversationView {
   const doc = new LoroDoc();
   doc.getMap('session').set('id', id);
   const session = createConversationSession(doc, { sessionId: id });
@@ -126,7 +127,7 @@ function openWindowedView(rounds: number, id: SessionId = sessionId): Conversati
     doc.free();
   };
   const writer = session.historyWriter;
-  for (const entry of buildHistory(rounds)) writer.append(entry);
+  for (const entry of entries) writer.append(entry);
   return view;
 }
 
@@ -135,13 +136,21 @@ const renderMessageRow: SessionChatStreamViewProps['renderMessageRow'] = ({
   sessionId: rowSessionId,
 }) => <MessageRowView message={message} sessionId={rowSessionId} />;
 
-function WindowedStream({ rounds }: { rounds: number }) {
+function WindowedStream({
+  rounds,
+  streamSessionId = sessionId,
+  history,
+}: {
+  rounds?: number;
+  streamSessionId?: SessionId;
+  history?: SessionHistory[];
+}) {
   const [view, setView] = useState<ConversationView | null>(null);
   useEffect(() => {
-    const next = openWindowedView(rounds);
+    const next = openWindowedView(history ?? buildHistory(rounds ?? ROUNDS), streamSessionId);
     setView(next);
     return () => next.dispose();
-  }, [rounds]);
+  }, [rounds, history, streamSessionId]);
   const {
     initialWindowReady,
     items,
@@ -149,13 +158,14 @@ function WindowedStream({ rounds }: { rounds: number }) {
     lastCompletedAssistantMessageId,
     onVisibleTurnRangeChange,
     onOutlinePreviewRound,
-  } = useConversationStreamItems(view, sessionId);
+  } = useConversationStreamItems(view, streamSessionId);
   return (
     <div className="h-[720px] w-full bg-background">
       <SessionChatStreamView
+        conversationView={view}
         initialWindowReady={initialWindowReady}
         items={items}
-        sessionId={sessionId}
+        sessionId={streamSessionId}
         className="h-full"
         renderMessageRow={renderMessageRow}
         showScrollToLatest={false}
@@ -189,7 +199,7 @@ function OpenFlickerStory({ rounds }: { rounds: number }) {
   const [view, setView] = useState<ConversationView | null>(null);
   const [openId, setOpenId] = useState(0);
   useEffect(() => {
-    const next = openWindowedView(rounds);
+    const next = openWindowedView(buildHistory(rounds));
     setView(next);
     return () => next.dispose();
   }, [rounds]);
@@ -245,6 +255,7 @@ function OpenedStream({
   } = useConversationStreamItems(view, streamSessionId);
   return (
     <SessionChatStreamView
+      conversationView={view}
       initialWindowReady={initialWindowReady}
       items={items}
       sessionId={streamSessionId}
@@ -288,7 +299,7 @@ function SwitchFlickerStory({ rounds }: { rounds: number }) {
   // empty-state render every real session switch goes through.
   const [documentPending, setDocumentPending] = useState(false);
   useEffect(() => {
-    const built = SWITCH_SESSION_IDS.map((id) => openWindowedView(rounds, id));
+    const built = SWITCH_SESSION_IDS.map((id) => openWindowedView(buildHistory(rounds), id));
     setViews(built);
     return () => built.forEach((view) => view.dispose());
   }, [rounds]);
@@ -332,3 +343,187 @@ function SwitchFlickerStory({ rounds }: { rounds: number }) {
 export const SwitchBetweenLongConversations: Story = {
   render: () => <SwitchFlickerStory rounds={ROUNDS} />,
 };
+
+const JUMP_SESSION_ID = 'session-worked-group-expand-jump' as SessionId;
+
+/**
+ * Short turns whose last "Worked for …" header rests within a viewport of
+ * the bottom — the shape in which expanding it cannot put the header at the
+ * viewport top because there is not enough content left below.
+ */
+function buildWorkedGroupJumpHistory(): SessionHistory[] {
+  const history: SessionHistory[] = [];
+  for (let round = 0; round < 10; round += 1) {
+    history.push({
+      id: `j-user-${round}`,
+      role: 'user',
+      timestamp: at(round * 2),
+      read: true,
+      finished: true,
+      status: 'handled',
+      fileDiff: [],
+      items: [{ type: 'text', text: `Round ${round + 1}: apply the fix and re-run the suite` }],
+      inputConfig: {
+        prompt: `Round ${round + 1}`,
+        cliType: 'builtin',
+        agentType: 'claude',
+        modeId: 'default',
+        modelId: 'sonnet',
+      },
+    } as unknown as SessionHistory);
+    history.push({
+      id: `j-assistant-${round}`,
+      role: 'assistant',
+      timestamp: at(round * 2 + 1),
+      userTurnId: `j-user-${round}`,
+      endedAt: Date.UTC(2026, 7, 19, 9, 0, 0) + (round * 2 + 1) * 60_000 + 28_000,
+      finished: true,
+      fileDiff: [],
+      items: [
+        { type: 'thought', text: `Thinking about round ${round + 1}.` },
+        {
+          type: 'tool_call',
+          toolCallId: `j-tool-${round}-1`,
+          status: 'completed',
+          title: `Read src/module-${round}.ts`,
+          kind: 'read',
+          rawInput: { path: `src/module-${round}.ts` },
+        },
+        {
+          type: 'tool_call',
+          toolCallId: `j-tool-${round}-2`,
+          status: 'completed',
+          title: `Edit src/module-${round}.ts`,
+          kind: 'edit',
+          rawInput: { path: `src/module-${round}.ts` },
+        },
+        { type: 'text', text: `Answer for round ${round + 1}.\n\n${paragraphs(2, round)}` },
+      ],
+    } as unknown as SessionHistory);
+  }
+  return history;
+}
+
+/**
+ * Regression check for the worked-group expand scroll jump. With
+ * follow-output released (wheel-scroll up a few hundred pixels), clicking the
+ * last turn's "Worked for …" header must toggle in place: the header keeps
+ * its viewport position, the revealed rows open beneath it, and the scroll
+ * offset does not move — expanding used to `scrollToIndex` the header to the
+ * top, which clamped at max scroll and yanked the reader to the session end.
+ */
+export const WorkedGroupExpandJump: Story = {
+  render: () => (
+    <WindowedStream history={buildWorkedGroupJumpHistory()} streamSessionId={JUMP_SESSION_ID} />
+  ),
+};
+
+const SELECTION_SESSION_ID = 'native-text-selection-story' as SessionId;
+const selectionHistory = Array.from({ length: 120 }, (_, index) => ({
+  id: `selection-${index}`,
+  role: 'assistant',
+  finished: index !== 0,
+  read: true,
+  timestamp: at(index),
+  items: [
+    {
+      type: 'text',
+      text: `SELECT-${index}-START\n\n这是用于验证跨屏复制的固定文本。 This paragraph must survive virtual row recycling.\n\nSELECT-${index}-END`,
+    },
+    ...(index === 0
+      ? [
+          {
+            type: 'tool_call',
+            toolCallId: 'selection-tool',
+            title: 'Selection tool running',
+            kind: 'other',
+            status: 'in_progress',
+          },
+          { type: 'text', text: 'UNSELECTED-FINAL-ANSWER' },
+        ]
+      : []),
+  ],
+})) as SessionHistory[];
+
+function NativeTextSelectionStory() {
+  const [session, setSession] = useState<ReturnType<typeof createConversationSession> | null>(null);
+  const streamRef = useRef<SessionChatStreamHandle>(null);
+  useEffect(() => {
+    const doc = new LoroDoc();
+    doc.getMap('session').set('id', SELECTION_SESSION_ID);
+    const next = createConversationSession(doc, {
+      sessionId: SELECTION_SESSION_ID,
+      maxHydrated: 8,
+      tailKeep: 2,
+    });
+    for (const entry of selectionHistory) next.historyWriter.append(entry);
+    setSession(next);
+    return () => {
+      next.dispose();
+      doc.free();
+    };
+  }, []);
+  const stream = useConversationStreamItems(session?.history ?? null, SELECTION_SESSION_ID);
+  return (
+    <div className="flex h-screen flex-col bg-background">
+      <div className="flex gap-3 p-2">
+        <button
+          data-testid="selection-start"
+          onClick={() => streamRef.current?.scrollToIndex(0, false)}
+        >
+          Start
+        </button>
+        <button
+          data-testid="selection-clear"
+          onClick={() => window.getSelection()?.removeAllRanges()}
+        >
+          Clear selection
+        </button>
+        <button
+          data-testid="selection-finish"
+          data-finished={
+            session?.history.turn(session.history.indexOf('selection-0'))?.finished ?? false
+          }
+          onClick={() =>
+            session?.historyWriter.replace('selection-0', {
+              ...selectionHistory[0]!,
+              finished: true,
+              items: [
+                { type: 'text', text: 'UPDATED-PROSE' },
+                {
+                  type: 'tool_call',
+                  toolCallId: 'selection-tool',
+                  title: 'Selection tool completed',
+                  kind: 'other',
+                  status: 'completed',
+                },
+                { type: 'text', text: 'UNSELECTED-FINAL-ANSWER' },
+              ],
+            } as SessionHistory)
+          }
+        >
+          Finish first turn
+        </button>
+        <textarea data-testid="selection-paste" aria-label="Paste copied text" className="border" />
+      </div>
+      <div className="min-h-0 flex-1" data-testid="native-selection-story">
+        <SessionChatStreamView
+          ref={streamRef}
+          conversationView={session?.history}
+          sessionId={SELECTION_SESSION_ID}
+          initialWindowReady={stream.initialWindowReady}
+          items={stream.items}
+          lastAssistantMessageId={stream.lastAssistantMessageId}
+          lastCompletedAssistantMessageId={stream.lastCompletedAssistantMessageId}
+          onVisibleTurnRangeChange={stream.onVisibleTurnRangeChange}
+          onOutlinePreviewRound={stream.onOutlinePreviewRound}
+          leadingContent={<div>Selection regression fixture</div>}
+          renderMessageRow={renderMessageRow}
+          className="h-full"
+        />
+      </div>
+    </div>
+  );
+}
+
+export const NativeTextSelection: Story = { render: () => <NativeTextSelectionStory /> };

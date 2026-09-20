@@ -70,7 +70,6 @@ import {
 import { useSessionMcpSelection } from '@/hooks/use-session-mcp-selection';
 import { MessageQueueDisplay, shouldRequestNativeQueueSteer } from './message-queue';
 import { useTranslation } from 'react-i18next';
-import { useRouter } from '@tanstack/react-router';
 import { toast } from 'sonner';
 import type {
   LocalProjectId,
@@ -137,9 +136,6 @@ import {
   queuedMessageBehaviorAtom,
   userAtom,
 } from '@/atoms';
-import { currentWorkspaceSlugAtom } from '@/atoms';
-import { taskIndexRowsAtom } from '@/atoms/tasks';
-import { tasksFeatureEnabledAtom } from '@/atoms/settings';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { browserOnlineAtom } from '@/atoms/control-connection';
 import {
@@ -240,12 +236,14 @@ import { AutoReviewMenuItem } from './auto-review-menu-item';
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
 import {
   getSessionForkDestinationOptions,
+  SessionForkOptionTooltip,
   type SessionForkDestination,
   type SessionForkWorktreeAvailability,
 } from './session-fork-destination-menu';
 import { ReviewAgentSetupDialog } from './auto-review-info';
 import { AutoReviewStatus } from './auto-review-status';
 import { useAutoReview } from '@/hooks/use-auto-review';
+import { SessionAgentFileLinkMenuProvider } from './session-agent-file-link-menu';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { SessionRelationCard } from '@/components/shared/session-relation-card';
 import {
@@ -256,7 +254,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -288,6 +285,7 @@ import { SessionPinContext, type SessionPinContextValue } from './session-pin-co
 import { SessionSyncingIndicator } from './session-syncing-indicator';
 import { ChildTabEmptyState } from './child-tab-empty-state';
 import {
+  SESSION_PAGE_HEADER_PILLS_CLASS,
   SessionConversationPage,
   SessionConversationPageHeader,
 } from './session-conversation-page';
@@ -778,7 +776,7 @@ export function SessionHistoryButton({
                 <button
                   key={session.id}
                   className={cn(
-                    'w-full rounded-lg border px-3 py-2 text-left transition-colors hover:bg-muted',
+                    'w-full rounded-lg border px-3 py-2 text-left transition-colors hover:bg-hover',
                     isActive && 'border-border/70 bg-selection text-selection-foreground'
                   )}
                   onClick={() => handleSelect(session.id as SessionId)}
@@ -930,6 +928,11 @@ export type SessionOpenedByMenuState = {
   onOpenSession: (target: SessionNavigationTarget) => void;
 };
 
+const SESSION_HEADER_MENU_CONTENT_CLASS =
+  'min-w-[200px] max-w-[290px] [&_[role=menuitem]]:min-h-8 [&_[role=menuitem]]:py-1.5';
+const SESSION_HEADER_MENU_STATIC_ROW_CLASS =
+  'flex min-h-8 w-full min-w-0 cursor-default select-none items-center gap-2 overflow-hidden rounded-md px-2 py-1.5 text-[13px] leading-4';
+
 /** Session header "···" menu — context, visibility, sharing, and session actions. */
 export function SessionHeaderMenu({
   session,
@@ -955,6 +958,7 @@ export function SessionHeaderMenu({
   onRestore,
   onDelete,
   compact = false,
+  openInIde,
   t,
 }: {
   session: SessionMeta;
@@ -986,6 +990,13 @@ export function SessionHeaderMenu({
   onRestore?: () => void | Promise<void>;
   onDelete?: () => void | Promise<void>;
   compact?: boolean;
+  /** Electron path launchers; always listed in `⋯` so CSS-hidden pills stay reachable. */
+  openInIde?: {
+    options: PathLauncherOption[];
+    selected: PathLauncherOption;
+    onOpen: () => void;
+    onSelect: (launcher: PathLauncherOption) => void;
+  };
   t: SessionSharingTranslator;
 }) {
   const isArchived = !!session.isArchived;
@@ -1065,6 +1076,45 @@ export function SessionHeaderMenu({
       </>
     ) : null;
 
+  const openInIdeMenu = (() => {
+    if (!openInIde || openInIde.options.length === 0) return null;
+    const SelectedIcon = getPathLauncherIcon(openInIde.selected);
+    const openLabel = t('sessions.openInIde', 'Open in {{name}}', {
+      name: openInIde.selected.label,
+    });
+    if (openInIde.options.length === 1) {
+      return (
+        <DropdownMenuItem onClick={openInIde.onOpen}>
+          <SelectedIcon className="h-3.5 w-3.5 shrink-0" />
+          {openLabel}
+        </DropdownMenuItem>
+      );
+    }
+    return (
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger>
+          <SelectedIcon className="h-3.5 w-3.5 shrink-0" />
+          <span className="min-w-0 flex-1 truncate">{openLabel}</span>
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent>
+          {openInIde.options.map((launcher) => {
+            const launcherId = getPathLauncherId(launcher);
+            const LauncherIcon = getPathLauncherIcon(launcher);
+            return (
+              <DropdownMenuItem key={launcherId} onClick={() => openInIde.onSelect(launcher)}>
+                <LauncherIcon className="h-3.5 w-3.5 shrink-0" />
+                {launcher.label}
+                {launcherId === getPathLauncherId(openInIde.selected) ? (
+                  <Check className="ml-auto h-3.5 w-3.5 shrink-0" />
+                ) : null}
+              </DropdownMenuItem>
+            );
+          })}
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+    );
+  })();
+
   const copyToClipboard = useCallback(
     // successMessage names what was copied in a full sentence (e.g. "Base
     // branch name copied to clipboard") — no raw value echo, which reads
@@ -1095,19 +1145,14 @@ export function SessionHeaderMenu({
             <Ellipsis className="h-4 w-4" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="min-w-[200px] max-w-[320px]">
+        <DropdownMenuContent align="end" className={SESSION_HEADER_MENU_CONTENT_CLASS}>
           <SessionWindowMenuItem sessionId={session.id} dropdown />
-          {/* One compact context group keeps useful identity visible. Separate labels make
-              every value pay for two rows, while a submenu hides context behind another step. */}
+          {/* Identity stays inline: a group label wastes a row, and a submenu hides
+              repo/branch/machine behind another step. */}
           {!compact && showSessionContext ? (
             <>
-              <DropdownMenuLabel className="pb-0.5 pt-1.5 text-[0.7rem] font-medium text-muted-foreground">
-                {t('sessions.sessionContextLabel', 'Session')}
-              </DropdownMenuLabel>
-
               {isGitHub && repoFullName ? (
                 <DropdownMenuItem
-                  className="py-1.5"
                   onClick={() =>
                     copyToClipboard(
                       repoFullName,
@@ -1119,13 +1164,13 @@ export function SessionHeaderMenu({
                 >
                   <Github className="h-3.5 w-3.5 text-muted-foreground" />
                   <span className="min-w-0 flex-1 truncate">{repoFullName}</span>
-                  <Copy className="ml-auto h-3 w-3 shrink-0 opacity-50" />
+                  <Copy className="ml-auto h-3 w-3 shrink-0 text-muted-foreground" />
                 </DropdownMenuItem>
               ) : null}
 
               {showBranchInfo ? (
                 <DropdownMenuItem
-                  className="items-start py-1.5"
+                  className="items-start"
                   onClick={() =>
                     copyToClipboard(
                       branchDisplayValue,
@@ -1160,11 +1205,10 @@ export function SessionHeaderMenu({
                       </span>
                     ) : null}
                   </span>
-                  <Copy className="ml-auto mt-0.5 h-3 w-3 shrink-0 opacity-50" />
+                  <Copy className="ml-auto mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
                 </DropdownMenuItem>
               ) : showProjectPath ? (
                 <DropdownMenuItem
-                  className="py-1.5"
                   onClick={() =>
                     copyToClipboard(
                       localPath,
@@ -1176,12 +1220,12 @@ export function SessionHeaderMenu({
                 >
                   <Folder className="h-3.5 w-3.5 text-muted-foreground" />
                   <span className="min-w-0 flex-1 truncate">{localPath}</span>
-                  <Copy className="ml-auto h-3 w-3 shrink-0 opacity-50" />
+                  <Copy className="ml-auto h-3 w-3 shrink-0 text-muted-foreground" />
                 </DropdownMenuItem>
               ) : null}
 
               {machineName ? (
-                <div className="flex min-w-0 items-center gap-2 px-2.5 py-1.5 text-[0.8rem]">
+                <div className={SESSION_HEADER_MENU_STATIC_ROW_CLASS}>
                   <Monitor className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <span className="sr-only">{t('sessions.machineLabel', 'Machine')}: </span>
                   <span className="min-w-0 flex-1 truncate">{machineName}</span>
@@ -1198,7 +1242,7 @@ export function SessionHeaderMenu({
               {sharing ? (
                 <Tooltip delayDuration={300}>
                   <TooltipTrigger asChild>
-                    <div className="flex min-w-0 items-center gap-2 px-2.5 py-1.5 text-[0.8rem]">
+                    <div className={SESSION_HEADER_MENU_STATIC_ROW_CLASS}>
                       {sharing.visibility === 'team' ? (
                         <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                       ) : sharing.visibility === 'private' ? (
@@ -1206,7 +1250,7 @@ export function SessionHeaderMenu({
                       ) : (
                         <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                       )}
-                      <span className="min-w-0 flex-1 truncate font-medium">
+                      <span className="min-w-0 flex-1 truncate font-normal">
                         {getSessionSharingLabel(t, sharing)}
                       </span>
                     </div>
@@ -1222,6 +1266,8 @@ export function SessionHeaderMenu({
           ) : null}
 
           {openedByRelationRows}
+
+          {openInIdeMenu}
 
           {onOpenPublicShare && (
             <DropdownMenuItem onClick={onOpenPublicShare}>
@@ -1253,31 +1299,46 @@ export function SessionHeaderMenu({
                   {t('sessions.forkSession', 'Fork session')}
                 </span>
               </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="min-w-[16rem]">
+              <DropdownMenuSubContent className="min-w-[13rem]">
                 {onFork &&
                   !isArchived &&
-                  getSessionForkDestinationOptions(t, forkWorktreeAvailability).map((option) => (
-                    <DropdownMenuItem
-                      key={option.id}
-                      disabled={option.disabled || isForking}
-                      className="items-start py-1.5"
-                      onSelect={() => {
-                        void onFork(option.id);
-                      }}
-                    >
-                      {option.id === 'new-worktree' ? (
-                        <WorktreeIcon className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                      ) : (
-                        <Folder className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                      )}
-                      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                        <span className="leading-tight">{option.label}</span>
-                        <span className="text-xs font-normal leading-snug text-muted-foreground">
-                          {option.hint}
-                        </span>
-                      </span>
-                    </DropdownMenuItem>
-                  ))}
+                  getSessionForkDestinationOptions(t, forkWorktreeAvailability).map((option) => {
+                    const disabled = option.disabled || isForking;
+                    const item = (
+                      <DropdownMenuItem
+                        key={option.id}
+                        disabled={disabled}
+                        onSelect={() => {
+                          void onFork(option.id);
+                        }}
+                      >
+                        {option.id === 'new-worktree' ? (
+                          <WorktreeIcon className="h-3.5 w-3.5 shrink-0" />
+                        ) : (
+                          <Folder className="h-3.5 w-3.5 shrink-0" />
+                        )}
+                        <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                        {option.status ? (
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            {option.status}
+                          </span>
+                        ) : null}
+                      </DropdownMenuItem>
+                    );
+                    // The submenu usually opens toward the conversation, so the
+                    // explanation sits on that side instead of over the parent menu.
+                    return disabled ? (
+                      item
+                    ) : (
+                      <SessionForkOptionTooltip
+                        key={option.id}
+                        description={option.description}
+                        side="left"
+                      >
+                        {item}
+                      </SessionForkOptionTooltip>
+                    );
+                  })}
                 {onCopyConversationHistory && (
                   <DropdownMenuItem
                     onSelect={() => {
@@ -1558,12 +1619,12 @@ export function SessionSearchBar({
         type="button"
         variant="ghost"
         size="icon"
-        className="h-7 w-7 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground disabled:pointer-events-none disabled:text-muted-foreground/40"
+        className="h-6 w-6 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:pointer-events-none disabled:text-muted-foreground/40"
         disabled={!hasResults}
         onClick={onClick}
         aria-label={label}
       >
-        <Icon className="h-3.5 w-3.5" strokeWidth={2.25} />
+        <Icon className="h-3.5 w-3.5" strokeWidth={2} />
       </Button>
     );
     if (!hasResults) return button;
@@ -1581,23 +1642,22 @@ export function SessionSearchBar({
   };
 
   return (
-    <div className="pointer-events-auto absolute right-3 top-3 z-20 w-[min(440px,calc(100%-1.5rem))] sm:right-4 sm:top-4 sm:w-[min(440px,calc(100%-2rem))]">
+    <div className="pointer-events-auto absolute right-3 top-3 z-20 w-[min(360px,calc(100%-1.5rem))] sm:right-4 sm:top-4 sm:w-[min(360px,calc(100%-2rem))]">
       <div
         role="search"
         className={cn(
-          'group/search flex h-11 items-center gap-1 rounded-full border bg-background/95 pl-3.5 pr-1.5 shadow-[0_14px_40px_-18px_rgba(15,23,42,0.45),0_2px_10px_-4px_rgba(15,23,42,0.16)] backdrop-blur-md transition-colors supports-[backdrop-filter]:bg-background/85',
-          'border-border focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/20',
-          noResults &&
-            'border-destructive/30 focus-within:border-destructive/60 focus-within:ring-destructive/15'
+          'group/search flex h-9 items-center gap-0.5 rounded-lg border-[0.5px] bg-background/95 pl-2.5 pr-1 shadow-[0_4px_12px_-4px_rgba(15,23,42,0.16),0_1px_2px_rgba(15,23,42,0.06)] backdrop-blur-md transition-colors supports-[backdrop-filter]:bg-background/85',
+          'border-border focus-within:border-ring/60',
+          noResults && 'border-destructive/30 focus-within:border-destructive/60'
         )}
       >
         <Search
           className={cn(
-            'h-4 w-4 shrink-0 transition-colors',
+            'h-3.5 w-3.5 shrink-0 transition-colors',
             hasQuery ? 'text-foreground' : 'text-muted-foreground/80',
             noResults && 'text-destructive/80'
           )}
-          strokeWidth={2.25}
+          strokeWidth={2}
         />
         <Input
           ref={inputRef}
@@ -1606,7 +1666,7 @@ export function SessionSearchBar({
           onChange={(event) => onQueryChange(event.target.value)}
           placeholder={t('sessions.findInConversation', 'Find in session')}
           aria-label={t('sessions.findInConversation', 'Find in session')}
-          className="h-9 min-w-0 flex-1 border-0 bg-transparent px-2 py-0 text-[13.5px] tracking-tight shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0 [&::-webkit-search-cancel-button]:hidden"
+          className="h-7 min-w-0 flex-1 border-0 bg-transparent px-1.5 py-0 text-[13px] tracking-tight shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0 [&::-webkit-search-cancel-button]:hidden"
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
               event.preventDefault();
@@ -1640,7 +1700,7 @@ export function SessionSearchBar({
           </span>
         )}
 
-        <Separator orientation="vertical" className="mx-0.5 h-5 bg-border/60" />
+        <Separator orientation="vertical" className="mx-0.5 h-4 bg-border/60" />
 
         <div className="flex items-center gap-px">
           {renderNavButton(
@@ -1656,11 +1716,11 @@ export function SessionSearchBar({
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+                className="h-6 w-6 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
                 onClick={onClose}
                 aria-label={t('common.close', 'Close')}
               >
-                <X className="h-3.5 w-3.5" strokeWidth={2.25} />
+                <X className="h-3.5 w-3.5" strokeWidth={2} />
               </Button>
             </TooltipTrigger>
             <TooltipContent
@@ -1813,12 +1873,17 @@ export type SessionChatInterfaceHandle = {
   cancelShareImageSelection: () => void;
   openSearch: () => void;
   getLastAssistantTurnId: () => string | null;
-  insertSessionMention: (sessionId: string) => boolean;
+  insertSessionMention: (
+    sessionId: string,
+    options?: { at?: number; replaceEnd?: number }
+  ) => boolean;
 };
 
 export type DispatchInputBlocksOptions = {
   forceQueue?: boolean;
   forceDirect?: boolean;
+  /** Swaps the configured busy-send behavior (queue <-> steer) for this send. */
+  invertSubmitBehavior?: boolean;
   modeIdOverride?: string | null;
   modelIdOverride?: string | null;
   configOptionValuesOverride?: Record<string, AcpConfigOptionValue>;
@@ -1953,7 +2018,6 @@ export const SessionChatInterface = memo(
     const [publicShareSessionId, setPublicShareSessionId] = useState<string | null>(null);
     const publicShareStatus = useSessionShareStatus(publicShareWorkspaceId ?? null, session.id);
     const currentUser = useAtomValue(userAtom);
-    const tasksEnabled = useAtomValue(tasksFeatureEnabledAtom);
     const { openSettings } = useOpenSettings();
     const billingEntitlement = useCloudQuery(
       cloudOperations.billing.getWorkspaceBillingEntitlement,
@@ -2777,6 +2841,10 @@ export const SessionChatInterface = memo(
       }
       return resolveActivityFromHistory(sessionHistory);
     }, [liveSessionStatus, sessionHistory]);
+    const runningReasoningLabel =
+      session.agentType === 'codex' && liveSessionStatus?.type === 'running'
+        ? (liveSessionStatus.detail ?? null)
+        : null;
 
     const activeAssistantTurnId = useMemo(() => {
       return resolveActiveAssistantTurnId(sessionHistory);
@@ -3570,7 +3638,15 @@ export const SessionChatInterface = memo(
         : isSessionActive
           ? liveSessionStatus?.type === 'requestPermission'
             ? t('sessions.statusIndicator.requestPermission')
-            : t(`sessions.statusIndicator.${runningActivity ?? 'thinking'}`)
+            : // Codex's transient reasoning summary, when it reports one.
+              (runningReasoningLabel ??
+              (runningActivity === 'imageGenerating'
+                ? t('sessions.statusIndicator.imageGenerating')
+                : // Reading, running and editing all read as "Working"; the
+                  // collapsed tool groups above already say which.
+                  runningActivity === 'exploring' || runningActivity === 'writing'
+                  ? t('sessions.working', 'Working')
+                  : t('sessions.statusIndicator.thinking')))
           : hasPendingDispatch && statusStripState == null
             ? // Pre-start only while the turn can actually start: any
               // connection/machine problem (browser offline, machine removed or
@@ -3579,6 +3655,8 @@ export const SessionChatInterface = memo(
             : null;
     const agentActivityTone =
       isSessionActive && liveSessionStatus?.type === 'requestPermission' ? 'warning' : 'primary';
+    // Waiting on the user is not work in progress: that status does not shimmer.
+    const agentActivityShimmer = agentActivityTone !== 'warning';
 
     const scrollChatToBottom = useCallback(() => {
       requestAnimationFrame(() => chatStreamRef.current?.scrollToBottom());
@@ -3627,7 +3705,6 @@ export const SessionChatInterface = memo(
             configOptionValues: turnConfigOptionValues,
             issuePRMentions,
             mcpServerIds: mcpSelection.selectedIds,
-            taskToolsEnabled: tasksEnabled,
             agentRoleId:
               options?.agentRole?.agentRoleId ?? (options?.agentRole === null ? null : undefined),
             agentRoleRevision: options?.agentRole?.agentRoleRevision,
@@ -3737,7 +3814,6 @@ export const SessionChatInterface = memo(
         touchSessionActivity,
         updateHistoryEntry,
         t,
-        tasksEnabled,
       ]
     );
 
@@ -3769,7 +3845,6 @@ export const SessionChatInterface = memo(
             configOptionValues: turnConfigOptionValues,
             issuePRMentions,
             mcpServerIds: mcpSelection.selectedIds,
-            taskToolsEnabled: tasksEnabled,
             agentRoleId:
               options?.agentRole?.agentRoleId ?? (options?.agentRole === null ? null : undefined),
             agentRoleRevision: options?.agentRole?.agentRoleRevision,
@@ -3785,7 +3860,6 @@ export const SessionChatInterface = memo(
             configOptionValues: inputConfig.configOptionValues ?? undefined,
             issuePRMentions: inputConfig.issuePRMentions ?? undefined,
             mcpServerIds: [...mcpSelection.selectedIds],
-            taskToolsEnabled: inputConfig.taskToolsEnabled,
             agentRoleId: inputConfig.agentRoleId,
             agentRoleRevision: inputConfig.agentRoleRevision,
             resume: inputConfig.resume ?? undefined,
@@ -3834,7 +3908,6 @@ export const SessionChatInterface = memo(
         session.userId,
         sessionProject,
         t,
-        tasksEnabled,
       ]
     );
 
@@ -3881,6 +3954,7 @@ export const SessionChatInterface = memo(
         const submitRoute = resolveSessionMessageSubmitRoute({
           forceDirect,
           forceQueue: options?.forceQueue === true,
+          invertBehavior: options?.invertSubmitBehavior === true,
           isPromptBusy: isAgentBusy,
           hasUnfinishedAssistantTurn: activeAssistantTurnId != null,
           queuedMessageBehavior,
@@ -3907,6 +3981,7 @@ export const SessionChatInterface = memo(
           ...inputSummary,
           force_queue: Boolean(options?.forceQueue),
           force_direct: forceDirect,
+          invert_behavior: Boolean(options?.invertSubmitBehavior),
           submit_route: submitRoute.type,
           is_agent_busy: isAgentBusy,
           mode_id: turnModeId ?? null,
@@ -4030,9 +4105,10 @@ export const SessionChatInterface = memo(
     const handleSendMessage = useCallback(
       async (
         inputBlocks: SessionInputBlock[],
-        agentRole?: SessionTurnAgentRoleSelection
+        agentRole?: SessionTurnAgentRoleSelection,
+        options?: Omit<DispatchInputBlocksOptions, 'agentRole'>
       ): Promise<boolean> => {
-        return await dispatchInputBlocks(inputBlocks, { agentRole });
+        return await dispatchInputBlocks(inputBlocks, { ...options, agentRole });
       },
       [dispatchInputBlocks]
     );
@@ -4536,33 +4612,6 @@ export const SessionChatInterface = memo(
       if (run.url) window.open(run.url, '_blank', 'noopener,noreferrer');
     }, []);
 
-    // The task this session belongs to. Titles come from the workspace task
-    // index, which is already loaded for the sidebar count, so the chip costs no
-    // extra read.
-    const router = useRouter();
-    const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
-    const sessionTaskId = session.taskId;
-    const taskIndexRows = useAtomValue(taskIndexRowsAtom);
-    // A session keeps its `taskId` even for a user who never enabled the Tasks
-    // beta (an agent or another device can set it), so the chip is gated too —
-    // otherwise it would be a visible door to a feature that is supposed to be
-    // absent, and the index it reads from is not even synced.
-    const sessionTaskChip = useMemo(() => {
-      if (!tasksEnabled || !sessionTaskId) return null;
-      const row = taskIndexRows[sessionTaskId];
-      return { taskId: sessionTaskId as string, title: row?.title ?? '' };
-    }, [tasksEnabled, sessionTaskId, taskIndexRows]);
-    const handleOpenSessionTask = useCallback(
-      (taskId: string) => {
-        if (!workspaceSlug) return;
-        void router.navigate({
-          to: '/$workspaceName/tasks/$taskId',
-          params: { workspaceName: workspaceSlug, taskId },
-        });
-      },
-      [router, workspaceSlug]
-    );
-
     // Presentation-only "opened by" provenance (MCP `lody_session_create`).
     // Read from the already-loaded session meta cache, so it costs no extra
     // document. `parentSessionId` children are excluded by the atom — they are
@@ -4873,8 +4922,8 @@ export const SessionChatInterface = memo(
         cancelShareImageSelection: shareSelection.cancel,
         openSearch,
         getLastAssistantTurnId: () => lastCompletedAssistantMessageId,
-        insertSessionMention: (sessionId: string) => {
-          return inputAreaRef.current?.insertSessionMention(sessionId) ?? false;
+        insertSessionMention: (sessionId, options) => {
+          return inputAreaRef.current?.insertSessionMention(sessionId, options) ?? false;
         },
       }),
       [
@@ -5201,13 +5250,24 @@ export const SessionChatInterface = memo(
     );
     const handleSteerQueuedMessage = useCallback(
       async (item: MessageQueueItem) => {
+        // Interrupt-and-send always runs the queue head next, so it is only a
+        // valid steer substitute for the first item. Later items are steerable
+        // exclusively through native acknowledged steering.
+        if (messageQueue[0]?.$cid !== item.$cid && !shouldUseNativeQueueSteer) {
+          return;
+        }
         if (shouldUseNativeQueueSteer) {
           await handleNativeSteerQueuedMessage(item);
           return;
         }
         await handleInterruptAndSend(item);
       },
-      [handleInterruptAndSend, handleNativeSteerQueuedMessage, shouldUseNativeQueueSteer]
+      [
+        handleInterruptAndSend,
+        handleNativeSteerQueuedMessage,
+        messageQueue,
+        shouldUseNativeQueueSteer,
+      ]
     );
 
     const handleReorderQueueItem = useCallback(
@@ -5711,7 +5771,7 @@ export const SessionChatInterface = memo(
     const headerLauncherActions = (
       <>
         {shouldShowOpenInIdeButton && isElectronRendererForPathLaunch && (
-          <div className="flex items-center">
+          <div className={cn(SESSION_PAGE_HEADER_PILLS_CLASS, 'items-center')}>
             <Button
               className="h-6 px-2 py-1 rounded-r-none border-r-0 gap-1"
               variant="outline"
@@ -5823,6 +5883,18 @@ export const SessionChatInterface = memo(
         onArchive={onArchiveSession}
         onRestore={onRestoreSession}
         onDelete={onDeleteSession}
+        openInIde={
+          shouldShowOpenInIdeButton && isElectronRendererForPathLaunch
+            ? {
+                options: pathLauncherOptions,
+                selected: selectedPathLauncher,
+                onOpen: handleOpenInIde,
+                onSelect: (launcher) => {
+                  void handleSelectPathLauncher(launcher);
+                },
+              }
+            : undefined
+        }
         t={t}
       />
     );
@@ -5834,11 +5906,13 @@ export const SessionChatInterface = memo(
       : undefined;
     const headerAccessNode =
       !isMobile && (sharing || headerPublicShare) ? (
-        <SessionAccessControl
-          state={sharing}
-          onShareWithTeam={onShareWithTeam}
-          publicShare={headerPublicShare}
-        />
+        <div className={cn(SESSION_PAGE_HEADER_PILLS_CLASS, 'items-center')}>
+          <SessionAccessControl
+            state={sharing}
+            onShareWithTeam={onShareWithTeam}
+            publicShare={headerPublicShare}
+          />
+        </div>
       ) : null;
     const headerArchivedNode = session.isArchived === true ? <SessionArchivedBadge /> : null;
 
@@ -5940,49 +6014,52 @@ export const SessionChatInterface = memo(
                       {/* Key forces remount on session change, preventing scroll state bleed between sessions */}
                       <MessageSendStatusContext.Provider value={sendingMessageIds}>
                         <MessageSelectionContext.Provider value={shareSelection.context}>
-                          <SessionChatStream
-                            key={session.id}
-                            ref={chatStreamRef}
-                            sessionId={session?.id}
-                            workspaceId={workspaceId}
-                            showSenderIdentity={isMultiMember}
-                            view={conversationView}
-                            sessionCreatedAt={session?.createdAt}
-                            dividerLabel={sessionDividerLabel}
-                            className="h-full"
-                            leadingContent={openedByConversationStart}
-                            emptyState={chatStreamEmptyState}
-                            agentActivityLabel={agentActivityLabel}
-                            agentActivityTone={agentActivityTone}
-                            onFileDiffClick={onFileDiffClick}
-                            onFilePathClick={onFilePathClick ? handleFilePathClick : undefined}
-                            onOpenHtmlFile={handleOpenHtmlAttachment}
-                            messageFileDiffEntriesByTurn={messageFileDiffEntriesByTurn}
-                            assistantActions={assistantQuickActions}
-                            assistantActionsMessageId={latestCompletedProposedPlan?.entryId}
-                            onCopyContext={(messageId) => {
-                              void handleCopyConversationHistory(messageId);
-                            }}
-                            onForkLastAssistant={onForkLastAssistant}
-                            forkWorktreeAvailability={forkWorktreeAvailability}
-                            onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
-                            onEditLastUser={
-                              editableLastUserMessageId ? handleEditLastUser : undefined
-                            }
-                            onResendUndelivered={handleResendUndelivered}
-                            capacityRetry={capacityRetry ?? undefined}
-                            forkingAssistantMessageId={forkingAssistantMessageId}
-                            onNavigateSession={onNavigateSession}
-                            onLastCompletedAssistantMessageIdChange={
-                              handleLastCompletedAssistantMessageIdChange
-                            }
-                            conversationFontSize={conversationFontSize}
-                            skipNextViewportResizeAutoScrollRef={
-                              skipNextViewportResizeAutoScrollRef
-                            }
-                            suppressStickyAutoScrollRef={suppressStickyAutoScrollRef}
-                            outlineOverlayRoot={outlineOverlayRoot}
-                          />
+                          <SessionAgentFileLinkMenuProvider session={session}>
+                            <SessionChatStream
+                              key={session.id}
+                              ref={chatStreamRef}
+                              sessionId={session?.id}
+                              workspaceId={workspaceId}
+                              showSenderIdentity={isMultiMember}
+                              view={conversationView}
+                              sessionCreatedAt={session?.createdAt}
+                              dividerLabel={sessionDividerLabel}
+                              className="h-full"
+                              leadingContent={openedByConversationStart}
+                              emptyState={chatStreamEmptyState}
+                              agentActivityLabel={agentActivityLabel}
+                              agentActivityTone={agentActivityTone}
+                              agentActivityShimmer={agentActivityShimmer}
+                              onFileDiffClick={onFileDiffClick}
+                              onFilePathClick={onFilePathClick ? handleFilePathClick : undefined}
+                              onOpenHtmlFile={handleOpenHtmlAttachment}
+                              messageFileDiffEntriesByTurn={messageFileDiffEntriesByTurn}
+                              assistantActions={assistantQuickActions}
+                              assistantActionsMessageId={latestCompletedProposedPlan?.entryId}
+                              onCopyContext={(messageId) => {
+                                void handleCopyConversationHistory(messageId);
+                              }}
+                              onForkLastAssistant={onForkLastAssistant}
+                              forkWorktreeAvailability={forkWorktreeAvailability}
+                              onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
+                              onEditLastUser={
+                                editableLastUserMessageId ? handleEditLastUser : undefined
+                              }
+                              onResendUndelivered={handleResendUndelivered}
+                              capacityRetry={capacityRetry ?? undefined}
+                              forkingAssistantMessageId={forkingAssistantMessageId}
+                              onNavigateSession={onNavigateSession}
+                              onLastCompletedAssistantMessageIdChange={
+                                handleLastCompletedAssistantMessageIdChange
+                              }
+                              conversationFontSize={conversationFontSize}
+                              skipNextViewportResizeAutoScrollRef={
+                                skipNextViewportResizeAutoScrollRef
+                              }
+                              suppressStickyAutoScrollRef={suppressStickyAutoScrollRef}
+                              outlineOverlayRoot={outlineOverlayRoot}
+                            />
+                          </SessionAgentFileLinkMenuProvider>
                         </MessageSelectionContext.Provider>
                       </MessageSendStatusContext.Provider>
                     </ErrorBoundary>
@@ -6066,11 +6143,10 @@ export const SessionChatInterface = memo(
                     }
                     onGoalCommand={handleGoalCardCommand}
                     onGoalDismiss={handleDismissGoalBanner}
-                    task={sessionTaskChip}
-                    onOpenTask={handleOpenSessionTask}
                     scheduledTasks={pendingScheduledTasks}
                     prCiRuns={infoBarPrCiRuns}
                     onOpenPrCiRun={handleOpenPrCiRun}
+                    prCiState={latestPrState?.s}
                     projectName={repoFullName || resolvedLocalProjectMeta?.name || null}
                     branch={isMobile ? null : session.branchName?.trim() || null}
                     workspaceLocation={
@@ -6110,6 +6186,31 @@ export const SessionChatInterface = memo(
                     // Mobile keeps the bar above the session drawer's z-30
                     // edge-back strip so its leading chip stays tappable.
                     protectFromEdgeBackZone={isMobile}
+                    // Queued turns stack on the bar (or on the composer when the
+                    // bar is empty). Hidden with the composer: a pending
+                    // permission bypasses the queue, as does share selection.
+                    queue={
+                      messageQueue.length > 0 &&
+                      !shouldReplaceComposerWithPermission &&
+                      !shareSelection.active ? (
+                        <MessageQueueDisplay
+                          sessionId={session.id}
+                          items={messageQueue}
+                          onRemove={handleRemoveQueueItem}
+                          onReorder={handleReorderQueueItem}
+                          onEditStart={handleStartQueueItemEdit}
+                          onEditCancel={handleCancelQueueItemEdit}
+                          onEditSave={handleSaveQueueItemEdit}
+                          onSteer={handleSteerQueuedMessage}
+                          showSteerAction={
+                            isSessionActive &&
+                            !!activeAssistantTurnId &&
+                            !isExternalHistoryRefreshing
+                          }
+                          nativeSteerAvailable={shouldUseNativeQueueSteer}
+                        />
+                      ) : undefined
+                    }
                   />
 
                   {/* Input area - isolated component to prevent full re-renders on typing.
@@ -6151,26 +6252,9 @@ export const SessionChatInterface = memo(
                         availableCommands={availableCommands}
                         commandsEnabled={isVisible}
                         freeTurnLimitNotice={freeSessionTurnNotice}
-                        queueDisplay={
-                          messageQueue.length > 0 ? (
-                            <MessageQueueDisplay
-                              sessionId={session.id}
-                              items={messageQueue}
-                              onRemove={handleRemoveQueueItem}
-                              onReorder={handleReorderQueueItem}
-                              onEditStart={handleStartQueueItemEdit}
-                              onEditCancel={handleCancelQueueItemEdit}
-                              onEditSave={handleSaveQueueItemEdit}
-                              onSteer={handleSteerQueuedMessage}
-                              showSteerAction={
-                                isSessionActive &&
-                                !!activeAssistantTurnId &&
-                                !isExternalHistoryRefreshing
-                              }
-                            />
-                          ) : null
-                        }
                         mcp={mcpSelection.menu}
+                        // The info bar above owns this gap (and seats the queue).
+                        hideTopSpacer
                         skipNextViewportResizeAutoScrollRef={skipNextViewportResizeAutoScrollRef}
                         onModeChange={handleModeChange}
                         onModelChange={handleModelChange}

@@ -50,6 +50,13 @@ opener is ranked by its freshest opened Session. Without that, nesting would bur
 just-updated row under a stale opener and silently break the ordering contract of
 Updated mode.
 
+Workspace-mode GitHub groups and local projects share the same five-root preview.
+Their Show all state is part of the flattened keyboard-navigation projection, and
+folding either group clears that state so reopening starts compact again. Local
+project keys are namespaced by machine and project because the same state map also
+contains repository full names. See the
+[decision note](../notes/implemented/feature/2026-09-17-local-project-session-preview.md).
+
 ## The leading slot, and why status left it
 
 The opener and unrelated top-level rows keep the exact flat-list alignment; only a child

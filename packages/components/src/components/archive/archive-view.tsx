@@ -130,6 +130,10 @@ const PR_STATUS_META: Record<PrStatus, PrStatusMeta> = {
   },
 };
 
+// `--input-border` is intentionally subtle, but on dark archive rows it can
+// blend into the page. Keep the selection affordance visible before hover.
+const ARCHIVE_MULTI_SELECT_CHECKBOX_CLASS = 'dark:border-muted-foreground/50';
+
 function formatRelativeTime(dateValue: number | string | undefined, now: Date): string {
   if (!dateValue) return '--';
 
@@ -444,6 +448,7 @@ function DesktopArchivedSessionItem({
             onCheckedChange={() => onToggleSelect(session.id)}
             onClick={(e) => e.stopPropagation()}
             aria-label={`Select ${title}`}
+            className={ARCHIVE_MULTI_SELECT_CHECKBOX_CLASS}
           />
         </div>
       ) : (
@@ -453,6 +458,7 @@ function DesktopArchivedSessionItem({
             onCheckedChange={() => onEnterMultiSelect(session.id)}
             onClick={(e) => e.stopPropagation()}
             aria-label={`Select ${title}`}
+            className={ARCHIVE_MULTI_SELECT_CHECKBOX_CLASS}
           />
         </div>
       )}
@@ -700,6 +706,7 @@ function MobileArchivedSessionItem({
             onCheckedChange={() => onToggleSelect(session.id)}
             onClick={(e) => e.stopPropagation()}
             aria-label={`Select ${title}`}
+            className={ARCHIVE_MULTI_SELECT_CHECKBOX_CLASS}
           />
         </div>
       )}
@@ -931,6 +938,7 @@ export function ArchivedSessionGroupSection({
                 checked={groupCheckboxState}
                 onCheckedChange={() => onToggleGroupSelect(groupKey, groupSessionIds)}
                 aria-label={`Select all in ${label}`}
+                className={ARCHIVE_MULTI_SELECT_CHECKBOX_CLASS}
               />
             </div>
           )}

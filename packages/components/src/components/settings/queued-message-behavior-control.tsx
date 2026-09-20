@@ -47,7 +47,7 @@ export function QueuedMessageBehaviorControl({
             aria-checked={selected}
             onClick={() => onChange(option.value)}
             className={cn(
-              'min-w-16 rounded-full px-3 text-xs font-medium transition-colors',
+              'min-w-16 rounded-full px-3 text-xs font-normal transition-colors',
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60',
               selected
                 ? 'bg-background text-foreground shadow-sm'

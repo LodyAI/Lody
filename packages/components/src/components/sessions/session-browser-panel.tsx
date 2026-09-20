@@ -78,6 +78,8 @@ type EffectivePreviewState = {
 
 type ManagedNavigationPhase = 'resolving-machine' | 'opening-local' | 'creating-tunnel';
 
+type PublicBrowserNavigationRequest = { id: number; url: string };
+
 const approvalFor = (
   address: BrowserAddress & { engine: 'managed-preview'; target: PreviewTarget },
   userId: string,
@@ -140,7 +142,11 @@ function SessionBrowserPanelController({
     index: -1,
   });
   const [publicState, setPublicState] = useState<ElectronPublicBrowserState | null>(null);
-  const [publicNavigationRequestId, setPublicNavigationRequestId] = useState<number | null>(null);
+  // Native state may change the current address after a redirect or history
+  // movement. Keep the explicit renderer intent separate so that observation
+  // cannot be fed back into WebContentsView.loadURL.
+  const [publicNavigationRequest, setPublicNavigationRequest] =
+    useState<PublicBrowserNavigationRequest | null>(null);
   const [annotationEnabled, setAnnotationEnabled] = useState(false);
   const [annotationAvailable, setAnnotationAvailable] = useState(false);
   const [managedLoading, setManagedLoading] = useState(false);
@@ -164,6 +170,7 @@ function SessionBrowserPanelController({
   const [machinePlane, setMachinePlane] = useState<'local' | 'cloud' | null>(null);
   const [resumeAddress, setResumeAddress] = useState<BrowserAddress | null>(null);
   const navigationSequenceRef = useRef(0);
+  const publicNavigationSequenceRef = useRef(0);
   const restoreAttemptKeyRef = useRef<string | null>(null);
   const handledCandidateNavigationRequestRef = useRef(0);
 
@@ -236,7 +243,7 @@ function SessionBrowserPanelController({
     setLocalEndpoint(null);
     setHistory(resumeState?.history ?? { entries: [], index: -1 });
     setPublicState(null);
-    setPublicNavigationRequestId(null);
+    setPublicNavigationRequest(null);
     setManagedState(null);
     setManagedCommand(undefined);
     setAnnotationEnabled(false);
@@ -422,7 +429,11 @@ function SessionBrowserPanelController({
         await releaseLocalEndpoint();
         if (sequence !== navigationSequenceRef.current) return;
         commitOpenedAddress(next, null, options?.historyIndex);
-        setPublicNavigationRequestId((current) => (options?.restore ? null : (current ?? 0) + 1));
+        setPublicNavigationRequest(
+          options?.restore
+            ? null
+            : { id: ++publicNavigationSequenceRef.current, url: next.logicalUrl }
+        );
         return;
       }
       if (!next.target) {
@@ -931,6 +942,15 @@ function SessionBrowserPanelController({
     [commitHistory]
   );
 
+  const handlePublicNavigationRequestConsumed = useCallback(
+    (request: PublicBrowserNavigationRequest) => {
+      setPublicNavigationRequest((current) =>
+        current?.id === request.id && current.url === request.url ? null : current
+      );
+    },
+    []
+  );
+
   const handleManagedState = useCallback(
     (state: ManagedBrowserStateMessage['payload']) => {
       setManagedState(state);
@@ -1040,10 +1060,10 @@ function SessionBrowserPanelController({
       ) : currentAddress?.engine === 'public-web' ? (
         <PublicBrowserSurface
           browserId={`session-browser-${session.id}`}
-          url={currentAddress.logicalUrl}
-          navigationRequestId={publicNavigationRequestId}
+          navigationRequest={publicNavigationRequest}
           active={active && !error && pendingAction === null}
           onStateChange={handlePublicState}
+          onNavigationRequestConsumed={handlePublicNavigationRequestConsumed}
         />
       ) : currentAddress?.engine === 'managed-preview' && viewerUrl ? (
         <ManagedPreviewSurface

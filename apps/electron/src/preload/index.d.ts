@@ -1,4 +1,5 @@
 import { ElectronAPI } from '@electron-toolkit/preload'
+import type { BootProfilerBridge } from './boot-profiler'
 
 type LodyPlatformInfo = {
   os: string
@@ -53,6 +54,7 @@ declare global {
     __LODY_ELECTRON__?: true
     __LODY_PLATFORM__?: LodyPlatformInfo
     __LODY_APP_INFO__?: LodyNativeAppInfo
+    __LODY_E2E_BOOT__?: BootProfilerBridge
     electron: ElectronAPI
     ipc: LodyIpcBridge
   }

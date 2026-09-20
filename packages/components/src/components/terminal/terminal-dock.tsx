@@ -36,27 +36,20 @@ type RememberedTerminalSessionState = {
   activeTerminalId: string | null;
 };
 
-// The terminal tab strip's own canvas is already `bg-sidebar` (the floating
-// card's fill), unlike `SessionTabBar`/`TAB_PILL_*`, whose pill sits on the
-// app's plain `--background` canvas — reusing that treatment here stacked a
-// border + shadow on a fill that matched its parent 1:1, so the pill read as
-// heavy chrome instead of a lightweight selected state. Flat fill only, no
-// border/shadow, and a step down from the card's own tone in dark mode where
-// `--background`/`--sidebar` collapse together.
+// The terminal tab strip's own canvas is already `bg-sidebar`, unlike
+// `SessionTabBar`/`TAB_PILL_*`, whose pill sits on the app's plain
+// `--background` canvas. Flat fill only, no border/shadow.
 const TERMINAL_TAB_ACTIVE_CLASS =
   'bg-background text-tab-active-foreground dark:bg-muted-foreground/[0.16]';
 const TERMINAL_TAB_INACTIVE_CLASS =
   'text-tab-inactive-foreground hover:bg-muted-foreground/[0.08] hover:text-tab-hover-foreground';
 
 // Chrome above the resizable body: the drag zone (h-1.5 = 6px) + the top tab
-// strip (h-8 = 32px). Added to `bodyHeight` for the floating card's height.
+// strip (h-8 = 32px). Added to `bodyHeight` for the dock's height.
 const RESIZE_HANDLE_HEIGHT = 6;
 const HEADER_HEIGHT = 32;
 const DOCK_CHROME_HEIGHT = RESIZE_HANDLE_HEIGHT + HEADER_HEIGHT;
-// The card floats with mt-1 (4px) + mb-2 (8px) around it, so the animated outer
-// wrapper is taller than the card by that much.
-const CARD_VERTICAL_MARGIN = 12;
-const DOCK_TOTAL_CHROME_HEIGHT = DOCK_CHROME_HEIGHT + CARD_VERTICAL_MARGIN;
+const DOCK_TOTAL_CHROME_HEIGHT = DOCK_CHROME_HEIGHT;
 
 const MIN_BODY_HEIGHT = 140;
 const MAX_BODY_HEIGHT = 680;
@@ -486,9 +479,8 @@ export function TerminalDock({
       aria-hidden={!isOpen}
     >
       {isOpen ? (
-        // Floating rounded card, mirroring the desktop side panel (sidebar) look.
         <div
-          className="mx-2 mb-2 mt-1 flex min-w-0 flex-col overflow-hidden rounded-xl border border-sidebar-border/80 bg-sidebar shadow-[0_1px_4px_-1px_rgba(0,0,0,0.18)]"
+          className="flex min-w-0 flex-col overflow-hidden border-t border-sidebar-border/80 bg-sidebar"
           style={{ height: bodyHeight + DOCK_CHROME_HEIGHT }}
         >
           {/* Drag-to-resize zone at the very top edge (no visible handle bar). */}

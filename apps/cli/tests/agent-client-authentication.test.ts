@@ -129,6 +129,31 @@ describe('AgentClient Kimi authentication and resume', () => {
     expect(connectionMocks.resumeSession).not.toHaveBeenCalled();
   });
 
+  it('advertises the Devin subagent capability only to the devin agent', async () => {
+    await createClient('devin').startSession({} as never, '/tmp');
+
+    expect(connectionMocks.initialize).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clientCapabilities: expect.objectContaining({
+          _meta: {
+            'cognition.ai/subagentSupport': true,
+            lody: { elicitation: { version: 1, answerNotes: true } },
+          },
+        }),
+      })
+    );
+
+    connectionMocks.initialize.mockClear();
+    await createClient('claude').startSession({} as never, '/tmp');
+
+    const capabilities = connectionMocks.initialize.mock.calls[0]?.[0]?.clientCapabilities;
+    expect(capabilities._meta).not.toHaveProperty('cognition.ai/subagentSupport');
+    expect(capabilities).toMatchObject({
+      elicitation: { form: {} },
+      _meta: { lody: { elicitation: { version: 1, answerNotes: true } } },
+    });
+  });
+
   it('lets builtin Grok use its local terminal runner', async () => {
     const client = createClient('grok');
 

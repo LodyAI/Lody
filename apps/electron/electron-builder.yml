@@ -78,7 +78,10 @@ mac:
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
-  entitlementsInherit: build/entitlements.mac.plist
+  # Nested binaries need one more exception than the top-level app: the embedded
+  # CLI and ACP agents run as Lody Helper and load runtime-installed native
+  # addons, which library validation rejects. See the inherit plist's comment.
+  entitlementsInherit: build/entitlements.mac.inherit.plist
   extraFiles:
     - from: node_modules/electron-sparkle-updater/native/vendor/Sparkle.framework
       to: Frameworks/Sparkle.framework

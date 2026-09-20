@@ -81,7 +81,6 @@ export type CreateAcpClientOptions = {
     agentType: string;
   };
   configOptionValues?: AgentClientOptions['configOptionValues'];
-  taskToolsEnabled?: boolean;
   /** Launcher family (npx/uvx/local) for ACP startup analytics; non-PII. */
   launcher?: AcpLauncher;
   resumeSessionId?: ACPSessionId;
@@ -97,6 +96,7 @@ export type CreateAcpClientOptions = {
   machineId?: MachineId;
   onStartupStage?: (event: AcpStartupStageEvent) => void;
   onUpdateMessage(message: AcpSessionNotification): void;
+  onLiveReasoningStatus?(label: string | null): void;
   onRequestPermission(
     requestId: string,
     request: RequestPermissionRequest
@@ -130,11 +130,11 @@ export const createAcpClient = async (options: CreateAcpClientOptions) => {
     agentConfig: options.agentConfig,
     configOptionValues: options.configOptionValues,
     resolveWorktreeProject: options.resolveWorktreeProject,
-    taskToolsEnabled: options.taskToolsEnabled,
     launcher: options.launcher,
     terminalEnabled: options.terminalEnabled,
     onStartupStage: options.onStartupStage,
     onUpdateMessage: options.onUpdateMessage,
+    onLiveReasoningStatus: options.onLiveReasoningStatus,
     onRequestPermission: options.onRequestPermission,
     onUsageUpdate: options.onUsageUpdate,
     onContextWindowUsageUpdate: options.onContextWindowUsageUpdate,

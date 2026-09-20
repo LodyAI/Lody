@@ -415,7 +415,7 @@ const VirtualFileTreeRow = memo(function VirtualFileTreeRow({
       aria-selected={selected}
       disabled={disabled}
       className={cn(
-        'group flex w-full items-center pr-2 text-left text-sm outline-none hover:bg-hover hover:text-hover-foreground focus-visible:bg-hover focus-visible:ring-1 focus-visible:ring-ring',
+        'group flex w-full items-center pr-2 text-left text-[0.9em] outline-none hover:bg-hover hover:text-hover-foreground focus-visible:bg-hover focus-visible:ring-1 focus-visible:ring-ring',
         // `w-full` resolves against the positioned ancestor once absolute, so
         // the hover/selection background still spans the full row.
         virtualStart !== undefined && 'absolute left-0 top-0',
@@ -910,7 +910,7 @@ const AutoFileTreeView = ({
         />
 
         {shouldUseLocalFileList && localListTruncated ? (
-          <div className="pt-2 text-xs text-muted-foreground">{localTruncatedLabel}</div>
+          <div className="pt-2 text-[0.8em] text-muted-foreground">{localTruncatedLabel}</div>
         ) : null}
       </div>
     </ScrollArea>

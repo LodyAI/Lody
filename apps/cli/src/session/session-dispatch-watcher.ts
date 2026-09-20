@@ -2002,7 +2002,6 @@ export class SessionDispatchWatcher {
         modelId: entry.inputConfig?.modelId,
         configOptionValues: entry.inputConfig?.configOptionValues,
         mcpServerIds: entry.inputConfig?.mcpServerIds ?? [],
-        taskToolsEnabled: entry.inputConfig?.taskToolsEnabled === true,
         agentRoleId: entry.inputConfig?.agentRoleId,
         agentRoleRevision: entry.inputConfig?.agentRoleRevision,
         issuePRMentions: entry.inputConfig?.issuePRMentions,
@@ -2046,7 +2045,6 @@ export class SessionDispatchWatcher {
         modelId: entry.inputConfig?.modelId,
         configOptionValues: entry.inputConfig?.configOptionValues,
         mcpServerIds: entry.inputConfig?.mcpServerIds ?? [],
-        taskToolsEnabled: entry.inputConfig?.taskToolsEnabled === true,
         agentRoleId: entry.inputConfig?.agentRoleId,
         agentRoleRevision: entry.inputConfig?.agentRoleRevision,
         issuePRMentions: entry.inputConfig?.issuePRMentions,
@@ -2178,7 +2176,6 @@ export class SessionDispatchWatcher {
           : undefined,
         mcpServerIds:
           normalizeMcpServerIdSelection(queuedItem.acpSessionConfig?.mcpServerIds) ?? [],
-        taskToolsEnabled: queuedItem.acpSessionConfig?.taskToolsEnabled === true,
         agentRoleId: queuedItem.acpSessionConfig?.agentRoleId,
         agentRoleRevision: queuedItem.acpSessionConfig?.agentRoleRevision,
         issuePRMentions: queuedItem.acpSessionConfig?.issuePRMentions,

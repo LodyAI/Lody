@@ -927,7 +927,6 @@ describe('normalizeSessionTurnInputConfig', () => {
       },
       resume: 'acp-1',
       inputBlocks: [{ type: 'text', text: 'hello' }],
-      taskToolsEnabled: false,
       issuePRMentions: 'invalid',
     });
 
@@ -941,7 +940,6 @@ describe('normalizeSessionTurnInputConfig', () => {
       },
       resume: 'acp-1',
       inputBlocks: [{ type: 'text', text: 'hello' }],
-      taskToolsEnabled: false,
     });
   });
 });

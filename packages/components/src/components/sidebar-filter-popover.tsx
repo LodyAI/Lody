@@ -6,6 +6,12 @@ import { CarbonSettingsAdjust } from '@/components/icons/carbon-settings-adjust'
 import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
 import { Button } from '@/ui/button';
+import {
+  menuGroupLabelClassName,
+  menuSeparatorClassName,
+  menuSurfaceClassName,
+  menuSurfaceStyle,
+} from '@/ui/menu-styles';
 import type { SidebarOrganizeMode } from '@/atoms/sidebar-state';
 import type { SidebarChatScope } from '@/atoms/sidebar-state';
 
@@ -15,7 +21,7 @@ export type SidebarFilterLabels = {
   triggerAriaLabel: string;
   organizeHeading: string;
   showHeading: string;
-  organizeWorkspace: string;
+  organizeProject: string;
   organizeUpdated: string;
   showMyTasks: string;
   showAllTasks: string;
@@ -25,7 +31,7 @@ const defaultLabels: SidebarFilterLabels = {
   triggerAriaLabel: 'Filter sidebar',
   organizeHeading: 'Organize',
   showHeading: 'Show',
-  organizeWorkspace: 'Workspace',
+  organizeProject: 'Project',
   organizeUpdated: 'Updated',
   showMyTasks: 'My Tasks',
   showAllTasks: 'All Tasks',
@@ -64,22 +70,22 @@ const FilterRow = forwardRef<HTMLButtonElement, RowProps>(function FilterRow(
       role="menuitemradio"
       aria-checked={selected}
       className={cn(
-        'flex w-full select-none items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm',
-        'text-popover-foreground transition-colors',
-        'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
-        'focus-visible:bg-sidebar-hover focus-visible:text-sidebar-hover-foreground',
-        'focus-visible:outline-hidden',
+        'flex w-full min-h-7 select-none items-center gap-2 rounded-md px-2 py-1 text-left text-[0.9em] leading-tight',
+        'text-popover-foreground',
+        'hover:bg-foreground/[0.05] hover:text-foreground',
+        'focus-visible:bg-foreground/[0.05] focus-visible:text-foreground focus-visible:outline-hidden',
+        'dark:hover:bg-white/[0.10] dark:focus-visible:bg-white/[0.10]',
         className
       )}
       onClick={onSelect}
       {...rest}
     >
-      <Icon className="h-4 w-4 shrink-0 text-sidebar-foreground-muted" aria-hidden="true" />
+      <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {selected ? (
-        <Check className="h-4 w-4 shrink-0 text-foreground" aria-hidden="true" />
+        <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
       ) : (
-        <span className="h-4 w-4 shrink-0" aria-hidden="true" />
+        <span className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
       )}
     </button>
   );
@@ -87,9 +93,7 @@ const FilterRow = forwardRef<HTMLButtonElement, RowProps>(function FilterRow(
 
 function SectionHeading({ children }: { children: ReactNode }) {
   return (
-    <div className="px-2 pb-1 pt-1 text-[11px] font-medium tracking-wide text-sidebar-foreground-muted/70">
-      {children}
-    </div>
+    <div className={cn(menuGroupLabelClassName, 'normal-case tracking-normal')}>{children}</div>
   );
 }
 
@@ -143,13 +147,17 @@ export function SidebarFilterPopover({
       <PopoverContent
         side={side}
         align={align}
-        sideOffset={8}
-        style={{ animation: 'none' }}
-        className={cn('w-56 rounded-xl p-1.5 shadow-2xl', className)}
+        sideOffset={6}
+        style={{ ...menuSurfaceStyle, animation: 'none' }}
+        className={cn(
+          'w-max min-w-44 border-0 bg-transparent p-0.5 shadow-none',
+          menuSurfaceClassName,
+          className
+        )}
       >
         <SectionHeading>{merged.organizeHeading}</SectionHeading>
         <FilterRow
-          label={merged.organizeWorkspace}
+          label={merged.organizeProject}
           icon={Folder}
           selected={organize === 'workspace'}
           onSelect={() => handleOrganizeSelect('workspace')}
@@ -160,7 +168,7 @@ export function SidebarFilterPopover({
           selected={organize === 'updated'}
           onSelect={() => handleOrganizeSelect('updated')}
         />
-        <div className="my-1 h-px bg-sidebar-border/60" aria-hidden="true" />
+        <div className={menuSeparatorClassName} aria-hidden="true" />
         <SectionHeading>{merged.showHeading}</SectionHeading>
         <FilterRow
           label={merged.showMyTasks}

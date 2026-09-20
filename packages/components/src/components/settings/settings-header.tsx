@@ -48,7 +48,7 @@ export function SettingsHeader({ title, onBack, actions, className }: SettingsHe
         </Button>
 
         {/* 标题 */}
-        <h2 className="text-lg font-semibold truncate flex-1">{title}</h2>
+        <h2 className="text-lg font-normal truncate flex-1">{title}</h2>
 
         {/* 操作按钮区域 */}
         {actions && <div className="ml-auto flex items-center gap-2">{actions}</div>}

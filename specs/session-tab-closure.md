@@ -29,6 +29,12 @@ restore is visible and retryable. No bulk migration guesses the reason for an ar
 Metadata uses the existing writer and CRDT synchronization. Disconnected writes
 reconcile through that same field conflict policy. Background work never reopens tabs.
 Reopening adds the tab everywhere but only selects it for the initiating viewer.
+An in-conversation card that opens a child conversation restores that tab first
+when it is closed, waits until the restored state is projected locally, then selects
+that exact child in the current Session workspace. Open siblings are not fallbacks for
+an explicit restore request.
+Changing the current Session invalidates the pending restore even when both routes omit
+`?tab`; a restore started in one Session cannot select a child in another.
 The URL remains the selected-view authority; `tab=empty` is a compatible entry into
 the default draft. After metadata hydration, reuse an existing local draft or create
 one, then replace the sentinel with its explicit draft URL. A confirmed close may replace the still-current URL choice;

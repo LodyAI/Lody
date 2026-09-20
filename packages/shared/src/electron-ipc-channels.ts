@@ -6,9 +6,11 @@ import type { TerminalDataEvent, TerminalExitEvent, TerminalTitleEvent } from '.
 import type {
   CliOutputEvent,
   ElectronCliState,
+  ElectronLoginState,
   ElectronLocalSessionControlResponseEvent,
   ElectronPublicBrowserState,
   ElectronUpdaterState,
+  ElectronWindowTarget,
   GlobalShortcutTriggeredPayload,
   SessionCompletionNotificationClickPayload,
 } from './electron-ipc';
@@ -27,11 +29,13 @@ export type IpcPushMap = {
   'publicBrowser.state': ElectronPublicBrowserState;
   'sessionControl.response': ElectronLocalSessionControlResponseEvent;
   'app.deepLink': string;
+  'auth.loginState': ElectronLoginState;
   'app.menuAction': string;
   'app.fullscreen': boolean;
   'app.nativeTheme': 'light' | 'dark';
   'app.globalShortcut': GlobalShortcutTriggeredPayload;
   'app.sessionCompletionClick': SessionCompletionNotificationClickPayload;
+  'app.windowTarget': ElectronWindowTarget;
 };
 
 export type IpcSendMap = {
@@ -43,6 +47,7 @@ export type IpcSendMap = {
   'loro.send': LocalLoroDataPlaneClientMessage;
   'loro.subscribe': null;
   'cli.subscribe': null;
+  'app.windowReady': null;
 };
 
 export const IPC_PUSH_CHANNELS = {
@@ -55,11 +60,13 @@ export const IPC_PUSH_CHANNELS = {
   publicBrowserState: 'publicBrowser.state',
   sessionControlResponse: 'sessionControl.response',
   appDeepLink: 'app.deepLink',
+  authLoginState: 'auth.loginState',
   appMenuAction: 'app.menuAction',
   appFullscreen: 'app.fullscreen',
   appNativeTheme: 'app.nativeTheme',
   appGlobalShortcut: 'app.globalShortcut',
   appSessionCompletionClick: 'app.sessionCompletionClick',
+  appWindowTarget: 'app.windowTarget',
 } as const satisfies { [K: string]: keyof IpcPushMap };
 
 export const IPC_SEND_CHANNELS = {
@@ -71,6 +78,7 @@ export const IPC_SEND_CHANNELS = {
   loroSend: 'loro.send',
   loroSubscribe: 'loro.subscribe',
   cliSubscribe: 'cli.subscribe',
+  appWindowReady: 'app.windowReady',
 } as const satisfies { [K: string]: keyof IpcSendMap };
 
 const PUSH_CHANNEL_VALUES: readonly string[] = Object.values(IPC_PUSH_CHANNELS);

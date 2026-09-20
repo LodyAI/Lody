@@ -7,16 +7,16 @@ Read each heading’s linked context before changing its files.
 
 ## [Tabs and `?tab` routing](../../../../../.agents/docs/sessions-tabs-routing.md)
 
-- Desktop chrome is ONE `SessionTabBar` row: traffic-light insets gated on
-  `!useElectronFullscreen()`. Measure pill/card geometry (y=8, `mt-0.5`, button centering).
-- Keep the surface ladder canvas → inactive → active in both themes and MEASURE
-  it; never give inactive tabs more chrome than the active one, and never use
+- ONE `SessionTabBar` row; traffic-light insets gated on `!useElectronFullscreen()`.
+  Hide IDE/share pills below `SESSION_PAGE_HEADER_PILLS_MIN_WIDTH_PX`; keep them on `⋯`.
+- Conversation and side-panel tabs share `TAB_PILL_*_CLASS`. Never
   `--tab-active`/`--tab-inactive` (both collapse onto `--background` in dark).
 - One leading status slot per tab, `waiting > working > unread > agent icon`;
   test `isWaiting` first, and never drop unread from a tab renderer.
 - `?tab` owns selection; never mirror it in state (#193). Confirmed shared closure
   may replace the current choice with a neighbour or local draft. Close writes
-  `isTabClosed`, never archive/delete; reopening archives restores lifecycle first.
+  `isTabClosed`, never archive — a never-messaged tab is exact-deleted.
+  Reopening archives restores lifecycle first.
 - `Change owner` writes the OWNER `SessionMeta.userId`, never sharing/visibility;
   they stay separate actions.
 
@@ -80,7 +80,8 @@ Read each heading’s linked context before changing its files.
   to unedited composer fields, never infer runtime config from a permission
   click, and freeze a non-Plan mode for explicit execution actions.
 - `AgentRoleDetailPane` is the ONE pane that reads a Role and shows only what it
-  pins; `AgentRoleEditorDialog` is the one editor.
+  pins; `AgentRoleEditorDialog` is the one editor. When the pane cannot fit,
+  `ComposerAgentRolePanel` puts agent · model on a second line instead.
 
 ## [Live status and dispatch](../../../../../.agents/docs/sessions-live-status.md)
 

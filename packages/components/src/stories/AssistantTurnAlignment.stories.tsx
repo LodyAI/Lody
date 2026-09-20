@@ -156,6 +156,8 @@ export const DesktopStreamingTurn: Story = {
         items={items}
         sessionId={sessionId}
         renderMessageRow={renderMessageRow}
+        lastAssistantMessageId={streamingTurn.id}
+        onCopyContext={() => undefined}
         agentActivityLabel="Exploring"
         agentActivityTone="warning"
       />

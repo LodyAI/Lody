@@ -14,12 +14,13 @@ the reasoning behind those rules.
 | User rows | `view.tsx`                                       | Multi-member sender metadata and desktop profile.                                 |
 | Turns     | `assistant-turn-render-blocks.ts`                | Activity groups and foldable segments.                                            |
 | Outline   | `conversation-outline-*`                         | Round ticks and navigation.                                                       |
-| Selection | [`message-selection.tsx`](message-selection.tsx) | Temporary message selection, drag rectangle, range modifiers, and edge scrolling. |
+| Image sharing selection | [`message-selection.tsx`](message-selection.tsx) | Temporary message selection, drag rectangle, range modifiers, and edge scrolling. |
 
 - `conversation-outline-rail.tsx` renders one tick per round (a user turn plus its
   work) and a hover preview; `conversation-outline-arrival-intent.ts` decides when
   a pointer heading for a tick counts as arrival.
-- `markdown-renderer.tsx` wraps Streamdown; `markdown-diff-block.tsx` is the
+- `markdown-renderer.tsx` wraps Streamdown; `markdown-code-block.tsx` owns fenced
+  blocks, wrap, and Markdown-fence preview; `markdown-diff-block.tsx` is the
   inline diff. Diagrams are split three ways: `use-mermaid-diagram-canvas.tsx`
   owns activation and the gestures that follow it, `mermaid-inline-canvas.ts` the
   pure zoom/pan geometry, and `mermaid-diagram-viewer.tsx` the full-screen
@@ -40,9 +41,12 @@ the reasoning behind those rules.
 `AssistantTurnAlignment.stories`, and the multiple-sender states in
 `SessionConversationPage.stories.tsx`.
 
-The mobile footer's leading duration slot — live and finished — is pinned by
-`tests/assistant-turn-action-inset.test.ts` and `tests/session-history-duration.test.ts`,
-and shown by `MobileTurnDurationSlot.stories.tsx`.
+The assistant footer's duration — live and finished on desktop, and the leading
+slot on mobile — is pinned by `tests/assistant-turn-action-inset.test.ts`,
+`tests/chat-virtual-rows-identity.test.ts`, and
+`tests/session-history-duration.test.ts`. The desktop live state is shown by
+`AssistantTurnAlignment.stories.tsx`; `MobileTurnDurationSlot.stories.tsx` shows
+the mobile live and finished states.
 
 ## Why the rules read the way they do
 
@@ -91,3 +95,15 @@ Coverage: `SessionRelationCard.stories.tsx`, `tests/session-relation-card.test.t
 and CLI `tests/operation-progress-history.test.ts`. The latter uses real Loro Mirror
 validation and snapshot reloads, because schema-free document fakes cannot detect
 a missing persisted-history message variant.
+
+## Native text selection
+
+[`use-conversation-text-selection.ts`](../../hooks/use-conversation-text-selection.ts)
+owns native range retention, history leases, and incomplete-copy protection.
+`view.tsx` supplies stable row identities, `keepMounted`, folding snapshots, and
+follow suppression; `markdown-renderer.tsx` holds selected prose presentation.
+Session data and action controls continue updating. This is independent of
+`message-selection.tsx`, which selects messages for image sharing.
+
+The [decision note](../../../../../.agents/notes/implemented/bug-fix/2026-09-20-conversation-text-selection.md)
+records lifecycle, alternatives, and platform verification limits.

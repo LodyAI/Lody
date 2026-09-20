@@ -17,6 +17,7 @@ import {
   useWorkspaceMcpCatalogActions,
 } from '@/hooks/use-workspace-mcp-catalog';
 import { cn } from '@/lib/utils';
+import { SETTINGS_ROW_CARD_CLASS } from './compact-layout';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { MCP_TRANSPORT_LABELS, McpTransportIcon } from '@/components/shared/mcp-transport';
 import {
@@ -133,7 +134,7 @@ export function McpSetting() {
       <section className="flex flex-col">
         <div className="flex items-center justify-between gap-2 pb-1 pt-0.5">
           <div className="flex min-w-0 items-center gap-2">
-            <h3 className="text-xs font-semibold text-muted-foreground">
+            <h3 className="text-xs font-normal text-muted-foreground">
               {t('settings.mcp.catalogTitle')}
             </h3>
             {servers.length > 0 ? (
@@ -208,7 +209,7 @@ export function McpSetting() {
           )}
         >
           <header className="shrink-0 border-b border-border/60 px-5 py-3 pr-12">
-            <DialogTitle className="text-sm font-semibold">
+            <DialogTitle className="text-sm font-normal">
               {editor?.mode === 'edit' ? t('settings.mcp.editTitle') : t('settings.mcp.addTitle')}
             </DialogTitle>
             <DialogDescription className="mt-0.5 text-xs leading-snug text-muted-foreground">
@@ -281,7 +282,7 @@ export function McpServerRow({
   const { t } = useTranslation();
   const defaultLabel = t('settings.mcp.defaultToggle', { name: server.name });
   return (
-    <div className="overflow-hidden rounded-lg bg-foreground/[0.04]">
+    <div className={cn('overflow-hidden', SETTINGS_ROW_CARD_CLASS)}>
       <div className="flex w-full min-w-0 items-center transition-colors hover:bg-hover/40">
         <button
           type="button"
@@ -294,7 +295,7 @@ export function McpServerRow({
           </span>
           <span className="min-w-0 flex-1">
             <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-              <span className="min-w-0 truncate text-sm font-medium leading-tight">
+              <span className="min-w-0 truncate text-sm font-normal leading-tight">
                 {server.name}
               </span>
               <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px]">

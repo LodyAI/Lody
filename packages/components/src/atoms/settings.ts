@@ -9,11 +9,12 @@ export const languageAtom = atomWithStorage<SupportedLanguage>('lody-language', 
 
 export const DEFAULT_CONVERSATION_FONT_SIZE = 14;
 /**
- * The sizes settings offers, ascending. Free-form entry is deliberately gone: a number
- * field silently rewrote whatever the user typed (clamped into a range, rounded), which
- * reads as the app fighting the keystrokes. A short scale has one value per visible step.
+ * The sizes settings offers, ascending — five named tiers (smaller, small, default,
+ * large, larger). Free-form entry is deliberately gone: a number field silently rewrote
+ * whatever the user typed (clamped into a range, rounded), which reads as the app
+ * fighting the keystrokes. A short scale has one value per visible step.
  */
-export const CONVERSATION_FONT_SIZES = [8, 12, 14, 16, 20, 24, 28, 32] as const;
+export const CONVERSATION_FONT_SIZES = [12, 13, 14, 15, 16] as const;
 export type ConversationFontSize = number;
 
 const LEGACY_CONVERSATION_FONT_SIZES: Record<string, ConversationFontSize> = {
@@ -186,33 +187,10 @@ export const autoArchiveOnPrClosedAtom = atomWithStorage<boolean>(
 
 /** localStorage keys for developer-only beta gates — keep in sync with the atoms below. */
 export const DEVELOPER_MODE_STORAGE_KEY = 'lody-developer-mode-enabled';
-export const TASKS_BETA_STORAGE_KEY = 'lody-tasks-beta-enabled';
 export const INBOX_BETA_STORAGE_KEY = 'lody-inbox-beta-enabled';
 
-/**
- * Synchronous read of the Tasks feature gate from localStorage.
- *
- * `atomWithStorage` without a settled store can still report its default on the
- * first paint (and `getOnInit` only samples storage once at module load, so a
- * test or late write is invisible). Route guards that redirect on `false` must
- * use this on that first frame so a bookmarked `/tasks/$taskId` is not bounced
- * to chat before hydration finishes.
- */
-export function readTasksFeatureEnabledFromStorage(): boolean {
-  if (typeof window === 'undefined') {
-    return false;
-  }
-  try {
-    const developerMode = JSON.parse(localStorage.getItem(DEVELOPER_MODE_STORAGE_KEY) ?? 'false');
-    const tasksBeta = JSON.parse(localStorage.getItem(TASKS_BETA_STORAGE_KEY) ?? 'false');
-    return developerMode === true && tasksBeta === true;
-  } catch {
-    return false;
-  }
-}
-
 // getOnInit samples storage when the atom module loads so a cold SPA boot
-// (the deep-link case) already has the right init value.
+// already has the right init value.
 export const developerModeEnabledAtom = atomWithStorage<boolean>(
   DEVELOPER_MODE_STORAGE_KEY,
   false,
@@ -220,31 +198,8 @@ export const developerModeEnabledAtom = atomWithStorage<boolean>(
   { getOnInit: true }
 );
 
-// Opt-in for the Tasks beta. Reachable only from the beta section of Settings,
-// which itself only renders while Developer mode is on.
-export const tasksBetaEnabledAtom = atomWithStorage<boolean>(
-  TASKS_BETA_STORAGE_KEY,
-  false,
-  undefined,
-  { getOnInit: true }
-);
-
-/**
- * The single gate every Tasks surface reads — sidebar entry, routes, commands,
- * quick-add, index sync, status watcher, session task chip, and the agent's task
- * proposal card. When it is false the feature must be indistinguishable from one
- * that was never built.
- *
- * Developer mode is part of the condition, not merely the way to reach the
- * switch: turning Developer mode off has to hide Tasks again, and it does so
- * without discarding the opt-in, so turning it back on restores the choice.
- */
-export const tasksFeatureEnabledAtom = atom(
-  (get) => get(developerModeEnabledAtom) && get(tasksBetaEnabledAtom)
-);
-
-// Opt-in for the unfinished mobile Inbox. Like Tasks, this is reachable only
-// from the beta section while Developer mode is on.
+// Opt-in for the unfinished mobile Inbox. Reachable only from the beta section
+// while Developer mode is on.
 export const inboxBetaEnabledAtom = atomWithStorage<boolean>(
   INBOX_BETA_STORAGE_KEY,
   false,

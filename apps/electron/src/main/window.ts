@@ -7,7 +7,9 @@ import {
   consumePendingDeepLink,
   getMainWindow,
   isAppQuitting,
+  isWarmWindow,
   isWindowsTrayAvailable,
+  markWarmWindow,
   setMainWindow,
   productWindows
 } from './window-state'
@@ -26,7 +28,10 @@ import { describeDeepLinkForAuthDebug } from './auth-debug'
 import { captureElectronMainException } from './posthog-error-reporting'
 import { createRendererProcessGoneHandling } from './renderer-process-gone'
 import { resolveMainWindowRuntimePolicy } from './window-runtime-policy'
+import { IPC_PUSH_CHANNELS, type ElectronWindowTarget } from '@lody/shared/electron-ipc'
 import { serializePreferredSystemLanguagesArgument } from '../system-language-argument'
+import { isDevbarRendererEnabled } from './services/devbar/service'
+import { devbarRendererEntry } from './services/devbar/control'
 import {
   clearMountWatchdog,
   clearUnresponsiveWatchdog,
@@ -50,7 +55,18 @@ type CreateMainWindowOptions = {
   auxiliary?: boolean
   hideWindowOnAutoLaunch?: boolean
   onDidFinishLoad?: () => void
+  /**
+   * Keeps a hidden spare auxiliary window alive for the next open instead of
+   * showing it. The renderer binds a concrete target later, so the window boots
+   * on a neutral route and must never present itself to the user.
+   */
+  warm?: boolean
 }
+
+// Neutral route a warm spare boots on. `window=workspace` marks it auxiliary
+// (its own session storage); `warm=1` tells the renderer to keep the neutral
+// shell until a target is bound instead of redirecting into a workspace.
+export const WARM_WINDOW_INITIAL_PATH = '/?window=workspace&warm=1'
 
 const DEEP_LINK_DEBUG_PREFIX = '[electron-auth-debug]'
 
@@ -138,16 +154,29 @@ function formatLoadFailure(details: LoadFailureDetails): string {
   ].join('\n')
 }
 
-function resolveMainRendererTarget(initialPath = '/'): ReloadTarget {
+function resolveMainRendererTarget(
+  initialPath = '/',
+  devbarEnabled = isDevbarRendererEnabled(),
+  auxiliary = false
+): ReloadTarget {
+  const rendererEntry = devbarRendererEntry(devbarEnabled, auxiliary)
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    // The dev server keeps index.html on plain history paths; only the Devbar
+    // entry loads as <entry>.html#/<route> since it runs hash history on http.
+    const path =
+      rendererEntry === 'index.html'
+        ? initialPath
+        : initialPath === '/'
+          ? rendererEntry
+          : `${rendererEntry}#${initialPath}`
     return {
       type: 'url',
-      url: new URL(initialPath, process.env['ELECTRON_RENDERER_URL']).toString()
+      url: new URL(path, process.env['ELECTRON_RENDERER_URL']).toString()
     }
   }
   return {
     type: 'file',
-    filePath: join(__dirname, '../renderer/index.html'),
+    filePath: join(__dirname, `../renderer/${rendererEntry}`),
     ...(initialPath === '/' ? {} : { hash: initialPath })
   }
 }
@@ -167,6 +196,28 @@ function loadRendererTarget(window: BrowserWindow, target: ReloadTarget): Promis
     return window.loadURL(target.url)
   }
   return window.loadFile(target.filePath, target.hash ? { hash: target.hash } : undefined)
+}
+
+function readCurrentRendererPath(window: BrowserWindow): string {
+  try {
+    const current = new URL(window.webContents.getURL())
+    if (current.hash.startsWith('#/')) return current.hash.slice(1)
+    if (!current.pathname.endsWith('.html') && current.pathname.startsWith('/')) {
+      return `${current.pathname}${current.search}`
+    }
+  } catch {
+    // A window still navigating has no route worth preserving.
+  }
+  return '/'
+}
+
+export async function reloadMainWindowForDevbar(
+  window: BrowserWindow,
+  enabled: boolean
+): Promise<void> {
+  const target = resolveMainRendererTarget(readCurrentRendererPath(window), enabled)
+  setReloadTarget(window, target)
+  await loadRendererTarget(window, target)
 }
 
 function isTrustedNavigation(url: string, targets: readonly ReloadTarget[]): boolean {
@@ -389,16 +440,43 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
     pendingInitialMaximize.add(window)
   }
   productWindows.add(window)
+  if (options.warm) markWarmWindow(window)
   window.once('closed', () => {
     productWindows.delete(window)
     if (getMainWindow() === window) {
-      setMainWindow([...productWindows].find((candidate) => !candidate.isDestroyed()) ?? null)
+      setMainWindow(
+        [...productWindows].find(
+          (candidate) => !candidate.isDestroyed() && !isWarmWindow(candidate)
+        ) ?? null
+      )
+    }
+    // A hidden spare must not keep the process alive once the last real window
+    // closes, and holding it while the app idles would only waste memory. A
+    // later auxiliary request can prime a replacement when the option remains on.
+    if (!isAppQuitting()) {
+      const hasRealWindow = [...productWindows].some(
+        (candidate) => !candidate.isDestroyed() && !isWarmWindow(candidate)
+      )
+      if (!hasRealWindow) {
+        for (const candidate of [...productWindows]) {
+          if (!candidate.isDestroyed() && isWarmWindow(candidate)) {
+            candidate.destroy()
+          }
+        }
+      }
     }
   })
   if (!options.auxiliary) trackMainWindowState(window)
-  const mainTarget = resolveMainRendererTarget(options.initialPath)
+  const initialDevbarEnabled = isDevbarRendererEnabled()
+  const mainTarget = resolveMainRendererTarget(
+    options.initialPath,
+    initialDevbarEnabled,
+    options.auxiliary
+  )
+  const standardTarget = resolveMainRendererTarget(options.initialPath, false)
+  const devbarTarget = resolveMainRendererTarget(options.initialPath, true)
   const recoveryTarget = resolveRecoveryTarget()
-  installNavigationGuard(window, [mainTarget, recoveryTarget])
+  installNavigationGuard(window, [standardTarget, devbarTarget, recoveryTarget])
   installContextMenu(window)
   setReloadTarget(window, mainTarget)
   attachMainWindowDiagnostics(window, recoveryTarget)
@@ -415,6 +493,10 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
   window.on('leave-full-screen', sendFullscreenState)
 
   window.on('ready-to-show', () => {
+    // A warm spare stays hidden until it is claimed for a concrete target.
+    if (options.warm) {
+      return
+    }
     if (options.hideWindowOnAutoLaunch) {
       return
     }
@@ -449,7 +531,7 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
           MOUNT_WATCHDOG_TIMEOUT_MS,
           'ms — the boot may be stuck.'
         )
-        if (is.dev && !window.isDestroyed()) {
+        if (is.dev && !options.warm && !window.isDestroyed()) {
           try {
             window.webContents.openDevTools({ mode: 'detach' })
           } catch (error) {
@@ -565,4 +647,36 @@ export function openOrFocusMainWindow(options: OpenMainWindowOptions): BrowserWi
   }
 
   return openMainWindow(options)
+}
+
+/**
+ * Creates the hidden spare auxiliary window. It boots the renderer on a neutral
+ * route so the next `openSessionWindow` can bind a real target without paying
+ * the full cold-boot cost.
+ */
+export function createWarmWindow(options: { icon?: string } = {}): BrowserWindow {
+  return createMainWindow({
+    icon: options.icon,
+    auxiliary: true,
+    warm: true,
+    initialPath: WARM_WINDOW_INITIAL_PATH
+  })
+}
+
+/**
+ * Hands a claimed warm window its concrete route and presents it. The renderer
+ * navigates client-side; the themed shell is already painted, so the window is
+ * shown immediately without a blank frame.
+ */
+export function bindMainWindowTarget(window: BrowserWindow, target: ElectronWindowTarget): void {
+  if (window.isDestroyed()) return
+  window.webContents.send(IPC_PUSH_CHANNELS.appWindowTarget, target)
+  if (window.isMinimized()) {
+    window.restore()
+  }
+  if (!window.isVisible()) {
+    window.show()
+  }
+  app.focus({ steal: true })
+  window.focus()
 }

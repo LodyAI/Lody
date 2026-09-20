@@ -204,7 +204,9 @@ export class SessionForkPage {
     await expect(forkButton.last()).toBeVisible({ timeout: 30_000 });
     await forkButton.last().focus();
     await forkButton.last().press('Enter');
-    const newWorktree = this.page.getByRole('menuitem', { name: /^(New worktree|新 worktree)/u });
+    const newWorktree = this.page.getByRole('menuitem', {
+      name: /^(Fork to new worktree|分叉到新 Worktree)/u,
+    });
     await expect(newWorktree).toBeEnabled({ timeout: 30_000 });
     await newWorktree.click();
 

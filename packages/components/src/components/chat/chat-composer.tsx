@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -23,7 +24,7 @@ import {
   type VisualAnnotationReferenceChipItem,
 } from './visual-annotation-reference-chip';
 import { cn } from '@/lib/utils';
-import { COMPOSER_SESSION_SURFACE_CLASS } from './composer-surface';
+import { COMPOSER_ELEVATION_CLASS, COMPOSER_SESSION_SURFACE_CLASS } from './composer-surface';
 import {
   CombinedMentionTextarea,
   type CombinedMentionTextareaHandle,
@@ -37,11 +38,12 @@ import type { SkillMentionAgent } from '@/components/mentions/mention-skill-sour
 import {
   arePastedTextDraftsEqual,
   getPastedTextCharacterCount,
-  getPastedTextClipboardTextForSelection,
   getPastedTextLineCount,
   updatePastedTextDraftContent,
   type PastedTextDraft,
 } from '@/lib/pasted-text-draft';
+import { getExpandedClipboardTextForSelection } from '@/lib/composer-clipboard';
+import { useMentionPromptExpansion } from '@/components/mentions/mention-expansion';
 import type { Mention as MentionRange } from '@/ui/mention/index';
 import type { PersistedMentionRange } from '@/components/mentions/mention-persistence';
 import { toIntlLocale } from '@/lib/intl-locale';
@@ -59,6 +61,8 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/ui/sheet';
 import { Textarea, type TextareaProps } from '@/ui/textarea';
 import { hasFileTransfer, readDroppedTransfer } from '@/lib/file-drop';
 import {
+  COMPOSER_COMPACT_PLACEHOLDER_MAX_PX,
+  getChatComposerCompactPlaceholder,
   getChatComposerPromptPlaceholderKey,
   getChatComposerMobilePromptPlaceholderKey,
 } from '@/lib/chat-composer-placeholder';
@@ -117,6 +121,8 @@ export interface ChatComposerProps {
   onPromptKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   onPromptPaste?: (event: ClipboardEvent<HTMLTextAreaElement>) => void;
   promptPlaceholder?: string;
+  /** Agent or role name for the compact-width placeholder ("Work with {{name}}"). */
+  compactPlaceholderName?: string | null;
   promptDisabled?: boolean;
   promptRows?: number;
   promptEnterKeyHint?: TextareaProps['enterKeyHint'];
@@ -214,7 +220,7 @@ export function getChatComposerTextareaClassName({
           isMobile ? 'min-h-[24px]' : 'min-h-[48px]'
         ),
     'focus-visible:outline-hidden focus-visible:ring-0 focus-visible:ring-offset-0',
-    'text-input-foreground placeholder:text-input-placeholder'
+    'text-input-foreground placeholder:text-input-placeholder/40'
   );
 }
 
@@ -247,6 +253,7 @@ export function ChatComposer({
   onPromptKeyDown,
   onPromptPaste,
   promptPlaceholder,
+  compactPlaceholderName,
   promptDisabled = false,
   promptRows = 3,
   promptEnterKeyHint,
@@ -325,17 +332,39 @@ export function ChatComposer({
   const imagePreviewLabel = t('sessions.imagePreview', 'Image preview');
   const pastedTextDialogTitle = t('composer.pastedTextTitle', 'Pasted text');
   const pastedTextEditorLabel = t('composer.pastedTextEditorLabel', 'Edit pasted text');
-  const resolvedPromptPlaceholder =
-    promptPlaceholder ??
-    (isMobile
-      ? t(getChatComposerMobilePromptPlaceholderKey({ mentionSource, skillAgent }))
-      : t(
-          getChatComposerPromptPlaceholderKey({
-            mentionSource,
-            availableCommands,
-            skillAgent,
-          })
-        ));
+  const composerBoxRef = useRef<HTMLDivElement>(null);
+  const [useCompactPlaceholder, setUseCompactPlaceholder] = useState(false);
+  useLayoutEffect(() => {
+    const box = composerBoxRef.current;
+    if (!box) return undefined;
+    const update = (width: number) => {
+      setUseCompactPlaceholder(width <= COMPOSER_COMPACT_PLACEHOLDER_MAX_PX);
+    };
+    update(box.getBoundingClientRect().width);
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? 0;
+      update(width);
+    });
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, []);
+  const compactPromptPlaceholder = (() => {
+    const compact = getChatComposerCompactPlaceholder({ name: compactPlaceholderName });
+    return compact.name ? t(compact.key, { name: compact.name }) : t(compact.key);
+  })();
+  const resolvedPromptPlaceholder = useCompactPlaceholder
+    ? compactPromptPlaceholder
+    : (promptPlaceholder ??
+      (isMobile
+        ? t(getChatComposerMobilePromptPlaceholderKey({ mentionSource, skillAgent }))
+        : t(
+            getChatComposerPromptPlaceholderKey({
+              mentionSource,
+              availableCommands,
+              skillAgent,
+            })
+          )));
   const numberFormatter = useMemo(() => new Intl.NumberFormat(intlLocale), [intlLocale]);
   const previewPastedTextDraft =
     pastedTextDrafts.find((item) => item.id === previewPastedTextDraftId) ?? null;
@@ -358,6 +387,26 @@ export function ChatComposer({
       })),
     [pastedTextDrafts]
   );
+  // Live ranges for copy expansion. Send still owns its copy via the parent
+  // callback; we mirror here so Cmd/Ctrl+C can expand without waiting on send.
+  const [mentionRanges, setMentionRanges] = useState<MentionRange[]>([]);
+  const handleMentionRangesChange = useCallback(
+    (ranges: MentionRange[]) => {
+      setMentionRanges(ranges);
+      onMentionRangesChange?.(ranges);
+    },
+    [onMentionRangesChange]
+  );
+  const { getRewrites: getMentionPromptRewrites } = useMentionPromptExpansion({
+    source: mentionSource,
+    skillAgent,
+    promptValue,
+    currentSessionId,
+  });
+  // Drop stale ranges when the draft identity changes (session swap / remount).
+  useEffect(() => {
+    setMentionRanges([]);
+  }, [draftKey]);
   const handlePastedTextMentionsChange = useCallback(
     (nextMentions: MentionRange[]) => {
       if (promptDisabled) return;
@@ -429,11 +478,17 @@ export function ChatComposer({
   const handlePromptCopy = useCallback(
     (event: ClipboardEvent<HTMLTextAreaElement>) => {
       const input = event.currentTarget;
-      const clipboardText = getPastedTextClipboardTextForSelection({
+      // Expand session/skill/role/pasted mentions to the agent-facing plain
+      // text — same rewrites as send. Native copy stays when nothing expands.
+      const clipboardText = getExpandedClipboardTextForSelection({
         value: promptValue,
-        drafts: pastedTextDrafts,
         selectionStart: input.selectionStart,
         selectionEnd: input.selectionEnd,
+        rewrites: getMentionPromptRewrites({
+          text: promptValue,
+          mentions: mentionRanges,
+          pastedTextDrafts,
+        }),
       });
 
       if (clipboardText === null) {
@@ -443,7 +498,7 @@ export function ChatComposer({
       event.preventDefault();
       event.clipboardData.setData('text/plain', clipboardText);
     },
-    [pastedTextDrafts, promptValue]
+    [getMentionPromptRewrites, mentionRanges, pastedTextDrafts, promptValue]
   );
 
   const canHandleImageDrop = Boolean(onImageDrop) && !imageDropDisabled && !promptDisabled;
@@ -567,22 +622,20 @@ export function ChatComposer({
    * before redrawing them in the mention colour. It has to equal whatever this
    * composer paints behind the textarea, or the "invisible" cover shows up as a
    * rectangle — which is exactly what `--input` did here, since this surface is
-   * deliberately `bg-background` rather than the muddy `bg-input`.
+   * deliberately `--composer` rather than the muddy `bg-input`.
    *
    * KEEP IN SYNC with the `bg-*` classes below. CSS cannot read an ancestor's
    * background, so this is a copy, and a copy can drift.
    */
   const mentionSurfaceClassName =
-    '[--mention-chip-surface:hsl(var(--background))] dark:[--mention-chip-surface:color-mix(in_srgb,hsl(var(--input))_90%,hsl(var(--background)))]';
+    '[--mention-chip-surface:hsl(var(--composer))] dark:[--mention-chip-surface:color-mix(in_srgb,hsl(var(--input))_90%,hsl(var(--background)))]';
 
-  // Linear-like light surface: white canvas + hairline border + soft lift.
+  // Light surface: near-white composer on the gray canvas + 1px border.
   // Avoid heavy bg-input fills that read as muddy gray on cool-white themes.
   const mentionContainerClassName = !isLanding
     ? cn(
-        'w-full',
-        'focus-within:ring-1 focus-within:ring-offset-0',
-        'focus-within:outline-hidden',
-        'rounded-2xl border border-foreground/[0.10] bg-background focus-within:ring-ring/30 dark:border-input-border/70 dark:bg-input/90',
+        'w-full focus-within:outline-hidden',
+        'rounded-2xl border border-foreground/[0.10] bg-[hsl(var(--composer))] dark:border-input-border/70 dark:bg-input/90',
         mentionSurfaceClassName
       )
     : undefined;
@@ -590,7 +643,7 @@ export function ChatComposer({
   const dialogTextareaClassName = cn(
     'input-scrollbar min-h-[120px] resize-none px-4 py-3 text-sm leading-6 transition-shadow sm:min-h-[120px]',
     'w-full rounded-2xl border-transparent bg-transparent focus-visible:ring-0 focus-visible:ring-offset-0',
-    'text-input-foreground placeholder:text-input-placeholder'
+    'text-input-foreground placeholder:text-input-placeholder/40'
   );
 
   const actionBaseClassName = cn(
@@ -604,18 +657,17 @@ export function ChatComposer({
 
   const actionWidthClassName = isLanding ? 'w-auto shrink-0' : 'w-auto';
 
+  // Focus stays quiet: the caret and placeholder already show where typing
+  // goes, so the composer keeps its resting border instead of an accent ring.
   const landingContainerClassName = cn(
-    'flex flex-col gap-4 rounded-xl border px-4 pt-4 pb-3 transition-shadow focus-within:ring-1',
-    'border-foreground/[0.10] bg-background shadow-[0_1px_2px_hsl(0_0%_0%/0.04),0_8px_24px_-12px_hsl(0_0%_0%/0.08)] focus-within:ring-ring/30',
-    'dark:border-input-border/60 dark:bg-input/90 dark:shadow-[0_22px_70px_-48px_rgba(15,23,42,0.25)] dark:focus-within:ring-ring/40',
+    '@container/composer-box flex flex-col gap-4 rounded-xl border px-4 pt-4 pb-3',
+    'border-foreground/[0.10] bg-[hsl(var(--composer))]',
+    COMPOSER_ELEVATION_CLASS,
+    'dark:border-input-border/60 dark:bg-input/90',
     mentionSurfaceClassName
   );
 
-  const sessionContainerClassName = cn(
-    COMPOSER_SESSION_SURFACE_CLASS,
-    'focus-within:border-ring/40',
-    mentionSurfaceClassName
-  );
+  const sessionContainerClassName = cn(COMPOSER_SESSION_SURFACE_CLASS, mentionSurfaceClassName);
 
   const boxContainerClassName = isLanding ? landingContainerClassName : sessionContainerClassName;
   const composerHasAttachments =
@@ -632,7 +684,7 @@ export function ChatComposer({
     ? 'border-primary/50 bg-primary/[0.04] ring-2 ring-primary/25'
     : undefined;
   const boxFooterClassName = cn(
-    'flex select-none items-center gap-x-2',
+    'flex select-none items-center gap-x-1.5',
     isLanding ? 'pt-2' : 'pt-0.5'
   );
   const statusClassName = cn(
@@ -674,6 +726,7 @@ export function ChatComposer({
               </div>
             ) : null}
             <div
+              ref={composerBoxRef}
               className={cn(boxContainerClassName, imageDropClassName, 'group relative')}
               onDragEnter={canHandleImageDrop ? handleImageDragEnter : undefined}
               onDragOver={canHandleImageDrop ? handleImageDragOver : undefined}
@@ -898,7 +951,7 @@ export function ChatComposer({
                 onExternalMentionsChange={handlePastedTextMentionsChange}
                 onMentionClick={handleMentionClick}
                 getMentionChip={getComposerMentionChip}
-                onMentionRangesChange={onMentionRangesChange}
+                onMentionRangesChange={handleMentionRangesChange}
                 persistedMentions={persistedMentions}
                 draftKey={draftKey}
                 mentionActionsRef={mentionActionsRef}
@@ -956,7 +1009,7 @@ export function ChatComposer({
                 {/* Single row only: long model names must shrink/truncate inside
                     the run-config face rather than wrapping config chips onto a
                     second line (especially on mobile). */}
-                <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-x-2 overflow-hidden">
+                <div className="@container/composer-face flex min-w-0 flex-1 flex-nowrap items-center gap-x-1.5 overflow-hidden">
                   {footerSelector ?? selector}
                 </div>
 
@@ -1001,7 +1054,7 @@ export function ChatComposer({
               onExternalMentionsChange={handlePastedTextMentionsChange}
               onMentionClick={handleMentionClick}
               getMentionChip={getComposerMentionChip}
-              onMentionRangesChange={onMentionRangesChange}
+              onMentionRangesChange={handleMentionRangesChange}
               persistedMentions={persistedMentions}
               draftKey={draftKey}
               mentionActionsRef={mentionActionsRef}

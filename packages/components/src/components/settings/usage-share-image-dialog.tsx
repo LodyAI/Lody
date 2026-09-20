@@ -323,7 +323,7 @@ export function UsageShareImageDialog({
                   type="button"
                   aria-pressed={backdrop === 'none'}
                   className={cn(
-                    'col-span-full flex h-9 items-center justify-center rounded-md border text-sm font-medium transition-colors',
+                    'col-span-full flex h-9 items-center justify-center rounded-md border text-sm font-normal transition-colors',
                     backdrop === 'none'
                       ? 'border-primary bg-primary/10 text-primary ring-2 ring-primary/25'
                       : 'border-border bg-muted/30 hover:bg-muted/60'

@@ -169,10 +169,7 @@ function prepareChart(buckets: StackedAreaBucket[], maxSeries: number): Prepared
 function DefaultSeriesMarker({ color, size = 'sm' }: { color: string; size?: 'sm' | 'md' }) {
   return (
     <span
-      className={cn(
-        'inline-block shrink-0 rounded-xs',
-        size === 'sm' ? 'h-2 w-2' : 'h-2.5 w-2.5'
-      )}
+      className={cn('inline-block shrink-0 rounded-xs', size === 'sm' ? 'h-2 w-2' : 'h-2.5 w-2.5')}
       style={{ backgroundColor: color }}
     />
   );
@@ -218,7 +215,7 @@ function UsageTooltip({
 
   return (
     <div className="min-w-[180px] max-w-[260px] rounded-md border border-border/80 bg-background/95 px-3 py-2 text-xs shadow-md backdrop-blur-sm">
-      <div className="font-medium text-foreground">{label}</div>
+      <div className="font-normal text-foreground">{label}</div>
       <div className="mt-1 font-mono text-muted-foreground">{tooltipValueFormatter(total)}</div>
       <div className="mt-1.5 space-y-1">
         {rows.slice(0, 6).map((row) => (
@@ -271,8 +268,8 @@ export function UsageStackedAreaChart({
   if (!prepared) {
     return (
       <div className={cn('rounded-lg border border-border/70 bg-card/60 text-sm', className)}>
-        <header className="flex min-h-10 items-center gap-2 border-b border-border/70 bg-muted/40 px-3 py-1.5">
-          <p className="text-xs font-semibold text-muted-foreground">{title}</p>
+        <header className="flex min-h-10 items-center gap-2 border-b border-border/70 dark:bg-muted/40 px-3 py-1.5">
+          <p className="text-xs font-normal text-muted-foreground">{title}</p>
         </header>
         <div className="p-4">
           <p className="text-sm text-muted-foreground">{emptyText}</p>
@@ -287,8 +284,8 @@ export function UsageStackedAreaChart({
 
   return (
     <div className={cn('overflow-hidden rounded-lg border border-border/70 bg-card/60', className)}>
-      <header className="flex min-h-10 items-center gap-2 border-b border-border/70 bg-muted/40 px-3 py-1.5">
-        <p className="text-xs font-semibold text-muted-foreground">{title}</p>
+      <header className="flex min-h-10 items-center gap-2 border-b border-border/70 dark:bg-muted/40 px-3 py-1.5">
+        <p className="text-xs font-normal text-muted-foreground">{title}</p>
       </header>
       <div className="p-4">
         {/* ResponsiveContainer measures the parent and never overflows, so the
@@ -370,7 +367,7 @@ export function UsageStackedAreaChart({
               <span
                 className={
                   tintSeriesLabel
-                    ? 'max-w-[200px] truncate whitespace-nowrap font-medium'
+                    ? 'max-w-[200px] truncate whitespace-nowrap font-normal'
                     : 'max-w-[200px] truncate whitespace-nowrap text-muted-foreground'
                 }
                 style={tintSeriesLabel ? { color: s.color } : undefined}
@@ -434,8 +431,8 @@ export function UsagePerspectiveChart({
   if (!chart) {
     return (
       <div className={cn('rounded-lg border border-border/70 bg-card/60 text-sm', className)}>
-        <header className="flex min-h-10 items-center border-b border-border/70 bg-muted/40 px-3 py-1.5">
-          <p className="text-xs font-semibold text-muted-foreground">{title}</p>
+        <header className="flex min-h-10 items-center border-b border-border/70 dark:bg-muted/40 px-3 py-1.5">
+          <p className="text-xs font-normal text-muted-foreground">{title}</p>
         </header>
         <div className="p-4 text-muted-foreground">{emptyText}</div>
       </div>
@@ -444,8 +441,8 @@ export function UsagePerspectiveChart({
 
   return (
     <div className={cn('overflow-hidden rounded-lg border border-border/70 bg-card/60', className)}>
-      <header className="flex min-h-10 items-center border-b border-border/70 bg-muted/40 px-3 py-1.5">
-        <p className="text-xs font-semibold text-muted-foreground">{title}</p>
+      <header className="flex min-h-10 items-center border-b border-border/70 dark:bg-muted/40 px-3 py-1.5">
+        <p className="text-xs font-normal text-muted-foreground">{title}</p>
       </header>
       <div className="relative h-[238px] overflow-hidden bg-muted/20 sm:h-[272px]">
         <div
@@ -501,11 +498,32 @@ export function UsagePerspectiveChart({
                 </text>
               </g>
             ))}
-            <line x1="98" x2="932" y1={chart.baseline} y2={chart.baseline} stroke="currentColor" strokeOpacity="0.35" />
-            <line x1="98" x2="98" y1="34" y2={chart.baseline} stroke="currentColor" strokeOpacity="0.35" />
+            <line
+              x1="98"
+              x2="932"
+              y1={chart.baseline}
+              y2={chart.baseline}
+              stroke="currentColor"
+              strokeOpacity="0.35"
+            />
+            <line
+              x1="98"
+              x2="98"
+              y1="34"
+              y2={chart.baseline}
+              stroke="currentColor"
+              strokeOpacity="0.35"
+            />
             {chart.xTicks.map((tick) => (
               <g key={tick.x}>
-                <line x1={tick.x} x2={tick.x} y1={chart.baseline} y2={chart.baseline + 6} stroke="currentColor" strokeOpacity="0.35" />
+                <line
+                  x1={tick.x}
+                  x2={tick.x}
+                  y1={chart.baseline}
+                  y2={chart.baseline + 6}
+                  stroke="currentColor"
+                  strokeOpacity="0.35"
+                />
                 <text
                   x={tick.x}
                   y={chart.baseline + 23}

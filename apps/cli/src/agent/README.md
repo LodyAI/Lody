@@ -22,7 +22,9 @@ context/message-flow.md "Upstream".
   capabilities (fs, elicitation), permission/fs request handling, update callbacks. Lody
   ACP extensions are consumed through `acp-extension-core`, so capability discovery lives
   at `agentCapabilities._meta.lody`, session metadata at `_meta.lody`, and custom methods
-  use the Core `_lody/...` names.
+  use the Core `_lody/...` names. Session initialization advertises Core answer notes
+  alongside standard form elicitation; the shared Ask Question bridge retains the
+  selection and separately keyed note through durable permission history.
 - `acp-runner.ts` — process spawn/restart around the client. Spawn + initialize +
   `newSession`/`loadSession` share `acp-session-start-gate.ts`.
 - `acp-session-start-gate.ts` — process-wide start semaphore used by

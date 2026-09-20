@@ -54,6 +54,7 @@ function makeRow(state: ProjectHistoryImportState): ProjectSettingsRow {
       createdAtMs: 1,
     },
     sharedWithTeam: false,
+    conversationCount: 0,
     isUpdating: false,
     canUpdateSharing: true,
     worktreeSetup: { scripts: {} },
@@ -108,14 +109,14 @@ describe('ProjectHistoryImportPanel empty states', () => {
   it('guides the first sync without showing list actions', async () => {
     await renderState(makeState(null));
 
-    expect(container.textContent).toContain('Sync Codex conversations');
+    expect(container.textContent).toContain("Find this project's conversations in Codex");
     expect(buttonLabels()).toEqual(['Sync']);
   });
 
   it('guides another sync when the synced catalog is empty', async () => {
     await renderState(makeState({ listed: 0, lastListedAt: 1, sessions: [] }));
 
-    expect(container.textContent).toContain('No Codex conversations found');
+    expect(container.textContent).toContain('Start a conversation for this project in Codex');
     expect(buttonLabels()).toEqual(['Sync again']);
   });
 

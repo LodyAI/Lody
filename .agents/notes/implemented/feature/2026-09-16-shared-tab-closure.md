@@ -41,3 +41,8 @@ selection, without clearing mobile viewers or creating shared Sessions. The empt
 sentinel remains compatible; Strict Mode must not duplicate draft insertion.
 Tests cover partial-to-complete fallback, existing draft preservation and single
 insertion. Native visual acceptance remains separate from these tests.
+
+Owner follow-up (2026-09-19): a successful close shows no toast, whether this or
+another client closed the tab; the tab leaving the strip is the feedback. The
+"This conversation tab was closed" info toast added in #746 is removed. Close
+failures still surface an error toast.

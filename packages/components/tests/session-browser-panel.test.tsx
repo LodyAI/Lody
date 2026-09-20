@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   MachineMeta,
   MachineId,
+  ElectronPublicBrowserState,
   PreviewConnection,
   PreviewTarget,
   SessionId,
@@ -32,12 +33,16 @@ vi.mock('react-i18next', () => ({
 }));
 
 vi.mock('../src/components/sessions/public-browser-surface', () => ({
-  PublicBrowserSurface: (props: { url: string; navigationRequestId: number | null }) => {
+  PublicBrowserSurface: (props: {
+    navigationRequest: { id: number; url: string } | null;
+    onStateChange: (state: ElectronPublicBrowserState) => void;
+    onNavigationRequestConsumed: (request: { id: number; url: string }) => void;
+  }) => {
     publicBrowserSurfaceRender(props);
     return createElement('div', {
       'data-testid': 'public-browser',
-      'data-url': props.url,
-      'data-navigation-request-id': props.navigationRequestId ?? 'restore',
+      'data-url': props.navigationRequest?.url ?? '',
+      'data-navigation-request-id': props.navigationRequest?.id ?? 'restore',
     });
   },
 }));
@@ -343,6 +348,99 @@ describe('SessionBrowserPanel controller', () => {
       'button[aria-label="Annotation is available only for local and private-network pages"]'
     ) as HTMLButtonElement | null;
     expect(annotationButton?.disabled).toBe(true);
+  });
+
+  it('does not turn an observed public URL into a new navigation request', async () => {
+    const testRuntime = createRuntime();
+    const rendered = await renderPanel(testRuntime.runtime);
+
+    await enterAddress(rendered, 'example.com/docs');
+
+    const firstProps = publicBrowserSurfaceRender.mock.calls.at(-1)?.[0] as {
+      navigationRequest: { id: number; url: string } | null;
+      onStateChange: (state: ElectronPublicBrowserState) => void;
+    };
+    expect(firstProps.navigationRequest).toEqual({ id: 1, url: 'https://example.com/docs' });
+
+    await act(async () => {
+      firstProps.onStateChange({
+        browserId: 'session-browser-session-browser-controller',
+        phase: 'ready',
+        url: 'https://example.com/redirected',
+        canGoBack: true,
+        canGoForward: false,
+      });
+      await flushMicrotasks();
+    });
+
+    const latestProps = publicBrowserSurfaceRender.mock.calls.at(-1)?.[0] as typeof firstProps;
+    expect(latestProps.navigationRequest).toBe(firstProps.navigationRequest);
+    expect(latestProps.navigationRequest).toEqual({ id: 1, url: 'https://example.com/docs' });
+    expect((rendered.querySelector('input[aria-label="Address"]') as HTMLInputElement).value).toBe(
+      'https://example.com/redirected'
+    );
+  });
+
+  it('clears only a public navigation request that the surface has dispatched', async () => {
+    const testRuntime = createRuntime();
+    const rendered = await renderPanel(testRuntime.runtime);
+
+    await enterAddress(rendered, 'example.com/docs');
+
+    const firstProps = publicBrowserSurfaceRender.mock.calls.at(-1)?.[0] as {
+      navigationRequest: { id: number; url: string } | null;
+      onNavigationRequestConsumed: (request: { id: number; url: string }) => void;
+    };
+    expect(firstProps.navigationRequest).toEqual({ id: 1, url: 'https://example.com/docs' });
+
+    await act(async () => {
+      firstProps.onNavigationRequestConsumed({ id: 999, url: 'https://example.com/other' });
+      await flushMicrotasks();
+    });
+    expect(publicBrowserSurfaceRender.mock.calls.at(-1)?.[0].navigationRequest).toBe(
+      firstProps.navigationRequest
+    );
+
+    await act(async () => {
+      firstProps.onNavigationRequestConsumed(firstProps.navigationRequest!);
+      await flushMicrotasks();
+    });
+    expect(publicBrowserSurfaceRender.mock.calls.at(-1)?.[0].navigationRequest).toBeNull();
+  });
+
+  it('assigns a new request id when retrying a consumed public navigation', async () => {
+    const testRuntime = createRuntime();
+    const rendered = await renderPanel(testRuntime.runtime);
+
+    await enterAddress(rendered, 'example.com/docs');
+
+    const firstProps = publicBrowserSurfaceRender.mock.calls.at(-1)?.[0] as {
+      navigationRequest: { id: number; url: string } | null;
+      onStateChange: (state: ElectronPublicBrowserState) => void;
+      onNavigationRequestConsumed: (request: { id: number; url: string }) => void;
+    };
+    const firstRequest = firstProps.navigationRequest!;
+    expect(firstRequest).toEqual({ id: 1, url: 'https://example.com/docs' });
+
+    await act(async () => {
+      firstProps.onNavigationRequestConsumed(firstRequest);
+      firstProps.onStateChange({
+        browserId: 'session-browser-session-browser-controller',
+        phase: 'error',
+        url: firstRequest.url,
+        canGoBack: false,
+        canGoForward: false,
+        error: 'load failed',
+      });
+      await flushMicrotasks();
+    });
+
+    await enterAddress(rendered, 'example.com/docs');
+
+    expect(publicBrowserSurfaceRender.mock.calls.at(-1)?.[0].navigationRequest).toEqual({
+      id: 2,
+      url: 'https://example.com/docs',
+    });
   });
 
   it('reattaches a public browser without navigating again after remount', async () => {

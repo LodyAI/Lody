@@ -116,10 +116,8 @@ function getTerminalTabButton(container: HTMLElement, title: string): HTMLButton
 }
 
 function expectActiveTerminal(container: HTMLElement, title: string): void {
-  // Active tab = a flat fill against the strip's own `bg-sidebar` canvas (no
-  // border/shadow — this strip already lives inside the floating card's own
-  // border+shadow, so stacking another pair on a 24px tab read as heavy
-  // chrome). See the comment on `TERMINAL_TAB_ACTIVE_CLASS`.
+  // Active tab = a flat fill against the strip's own `bg-sidebar` canvas.
+  // See the comment on `TERMINAL_TAB_ACTIVE_CLASS`.
   const tab = getTerminalTab(container, title);
   expect(tab.getAttribute('aria-selected')).toBe('true');
   const classes = tab.className.split(/\s+/);

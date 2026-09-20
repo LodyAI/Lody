@@ -44,3 +44,6 @@ macOS 真实探针使用已安装的 Lody Helper（Node 22.22.0）、缓存的�
 ## 集成
 
 - [Lody PR #747](https://github.com/LodyAI/Lody/pull/747)
+- 后续：[允许 macOS 子进程加载运行时安装的原生模块](2026-09-17-dsh-helper-library-validation.zh.md)——
+  把 DSH 挪进 Lody Helper 之后，它开始受 macOS library validation 约束，而打包时的
+  entitlements 并未为此留出例外。

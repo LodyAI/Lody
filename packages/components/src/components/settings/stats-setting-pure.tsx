@@ -135,9 +135,9 @@ function StatTile({
         className
       )}
     >
-      <p className="text-[0.8rem] font-medium text-muted-foreground">{label}</p>
+      <p className="text-[0.8rem] font-normal text-muted-foreground">{label}</p>
       <div className="mt-auto">
-        <div className="min-w-0 whitespace-nowrap text-3xl font-bold leading-none tracking-tight tabular-nums text-foreground text-[clamp(1.5rem,16cqw,2.75rem)]">
+        <div className="min-w-0 whitespace-nowrap text-3xl font-normal leading-none tracking-tight tabular-nums text-foreground text-[clamp(1.5rem,16cqw,2.75rem)]">
           {children}
         </div>
         {footer ? <div className="mt-2">{footer}</div> : null}
@@ -170,7 +170,7 @@ function RangeSelector({
             aria-selected={active}
             onClick={() => onRangeChange(value)}
             className={cn(
-              'rounded-md px-3 py-1 text-xs font-medium transition-colors',
+              'rounded-md px-3 py-1 text-xs font-normal transition-colors',
               active
                 ? 'bg-background text-foreground shadow-xs'
                 : 'text-muted-foreground hover:text-foreground'
@@ -221,7 +221,7 @@ export function StatsSettingsView({
          says Usage). Workspace name + the time-window selector. */}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="truncate text-lg font-semibold leading-tight text-foreground">
+          <h2 className="truncate text-lg font-normal leading-tight text-foreground">
             {workspaceName || t('workspace.usage.title')}
           </h2>
           <p className="mt-0.5 text-xs text-muted-foreground">{windowCaption}</p>

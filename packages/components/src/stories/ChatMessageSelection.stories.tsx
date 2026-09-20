@@ -19,6 +19,7 @@ import {
   MessageSelectionToolbar,
   useMessageSelection,
 } from '@/components/ai-gui/message-selection';
+import { ForceMobileLayoutProvider } from '@/hooks/use-mobile';
 import {
   SessionConversationPage,
   SessionConversationPageBody,
@@ -174,3 +175,18 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 export const Default: Story = {};
 export const LongConversation: Story = { args: { long: true } };
+
+/**
+ * Handset selection mode: the left edge belongs to the session drawer's
+ * back-swipe strip, so the checkbox drops to an inset state badge and the row
+ * stays the tap target; the toolbar keeps default-size buttons. Tapping
+ * "Preview image" opens the bottom drawer.
+ */
+export const MobileSelection: Story = {
+  parameters: { viewport: { defaultViewport: 'mobile1' } },
+  render: (args) => (
+    <ForceMobileLayoutProvider force>
+      <SelectionHarness {...args} />
+    </ForceMobileLayoutProvider>
+  ),
+};

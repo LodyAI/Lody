@@ -50,14 +50,12 @@ export const mobileWorkspaceBaseContextAtom = atom<MobileWorkspaceBaseContext>({
  */
 export interface DataLoadingState {
   projects: boolean;
-  tasks: boolean;
   machines: boolean;
   agents: boolean;
 }
 
 export const dataLoadedAtom = atom<DataLoadingState>({
   projects: false,
-  tasks: false,
   machines: false,
   agents: false,
 });

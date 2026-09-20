@@ -46,7 +46,6 @@ export function pickDirectoryInputConfig(source: unknown): unknown {
   const normalized = normalizeSessionTurnInputConfig({
     mcpServerIds: picked.mcpServerIds,
     configOptionValues: picked.configOptionValues,
-    taskToolsEnabled: picked.taskToolsEnabled,
     cliType: picked.cliType,
     agentType: picked.agentType,
   });

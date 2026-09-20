@@ -402,7 +402,7 @@ function RecordingButton({ preview, onCancel }: { preview: string | null; onCanc
       // Inner kbd chips get a primary tint so they read as "live capture" rather than
       // the resting muted style.
       className={cn(
-        'inline-flex h-7 items-center gap-2 rounded-md border border-primary/40 bg-primary/5 px-2.5 text-xs font-medium text-primary',
+        'inline-flex h-7 items-center gap-2 rounded-md border border-primary/40 bg-primary/5 px-2.5 text-xs font-normal text-primary',
         'transition-colors hover:bg-primary/10',
         '[&_[data-slot=kbd]]:bg-primary/15 [&_[data-slot=kbd]]:text-primary'
       )}

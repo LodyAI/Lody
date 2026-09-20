@@ -1,0 +1,1143 @@
+{
+  "environment": {
+    "node": "v26.8.2",
+    "vite": "8.2.2",
+    "playwright": "1.58.2",
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpu": "Apple M4 Max"
+  },
+  "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/153.0.0.0 Safari/537.36",
+  "hardwareConcurrency": 14,
+  "repeats": 3,
+  "rows": [
+    {
+      "count": 1000,
+      "phase": "index",
+      "mode": "baseline",
+      "durationMs": 1.9000000953674316,
+      "maxFrameGapMs": 16.799999952316284,
+      "frames": 1
+    },
+    {
+      "count": 1000,
+      "phase": "index+empty-query",
+      "mode": "worker",
+      "durationMs": 5.799999952316284,
+      "maxFrameGapMs": 16.200000047683716,
+      "frames": 1
+    },
+    {
+      "count": 1000,
+      "query": "a",
+      "iteration": 0,
+      "mode": "baseline",
+      "durationMs": 9.200000047683716,
+      "maxFrameGapMs": 16.40000009536743,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 1000,
+      "query": "a",
+      "iteration": 0,
+      "mode": "optimized-sync",
+      "durationMs": 4.599999904632568,
+      "maxFrameGapMs": 17.399999856948853,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 1000,
+      "query": "a",
+      "iteration": 0,
+      "mode": "worker",
+      "durationMs": 4.8999998569488525,
+      "maxFrameGapMs": 17.399999856948853,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 1000,
+      "query": "a",
+      "iteration": 1,
+      "mode": "baseline",
+      "durationMs": 9.5,
+      "maxFrameGapMs": 17.299999952316284,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 1000,
+      "query": "a",
+      "iteration": 1,
+      "mode": "optimized-sync",
+      "durationMs": 1.2999999523162842,
+      "maxFrameGapMs": 16.700000047683716,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 1000,
+      "query": "a",
+      "iteration": 1,
+      "mode": "worker",
+      "durationMs": 2.3999998569488525,
+      "maxFrameGapMs": 16.700000047683716,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 1000,
+      "query": "a",
+      "iteration": 2,
+      "mode": "baseline",
+      "durationMs": 8.799999952316284,
+      "maxFrameGapMs": 17.200000047683716,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 1000,
+      "query": "a",
+      "iteration": 2,
+      "mode": "optimized-sync",
+      "durationMs": 1.2000000476837158,
+      "maxFrameGapMs": 16.799999952316284,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 1000,
+      "query": "a",
+      "iteration": 2,
+      "mode": "worker",
+      "durationMs": 2,
+      "maxFrameGapMs": 16.700000047683716,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 1000,
+      "query": "comp",
+      "iteration": 0,
+      "mode": "baseline",
+      "durationMs": 11.599999904632568,
+      "maxFrameGapMs": 16.799999952316284,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 1000,
+      "query": "comp",
+      "iteration": 0,
+      "mode": "optimized-sync",
+      "durationMs": 6.5,
+      "maxFrameGapMs": 17.600000143051147,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 1000,
+      "query": "comp",
+      "iteration": 0,
+      "mode": "worker",
+      "durationMs": 7.099999904632568,
+      "maxFrameGapMs": 17.399999856948853,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 1000,
+      "query": "comp",
+      "iteration": 1,
+      "mode": "baseline",
+      "durationMs": 11.399999856948853,
+      "maxFrameGapMs": 16.799999952316284,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 1000,
+      "query": "comp",
+      "iteration": 1,
+      "mode": "optimized-sync",
+      "durationMs": 4.700000047683716,
+      "maxFrameGapMs": 16.700000047683716,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 1000,
+      "query": "comp",
+      "iteration": 1,
+      "mode": "worker",
+      "durationMs": 4.800000190734863,
+      "maxFrameGapMs": 16.700000047683716,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 1000,
+      "query": "comp",
+      "iteration": 2,
+      "mode": "baseline",
+      "durationMs": 11.5,
+      "maxFrameGapMs": 17.399999856948853,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 1000,
+      "query": "comp",
+      "iteration": 2,
+      "mode": "optimized-sync",
+      "durationMs": 4.700000047683716,
+      "maxFrameGapMs": 16.700000047683716,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 1000,
+      "query": "comp",
+      "iteration": 2,
+      "mode": "worker",
+      "durationMs": 4.799999952316284,
+      "maxFrameGapMs": 17,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 1000,
+      "query": "src/components",
+      "iteration": 0,
+      "mode": "baseline",
+      "durationMs": 25.799999952316284,
+      "maxFrameGapMs": 25.90000009536743,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 1000,
+      "query": "src/components",
+      "iteration": 0,
+      "mode": "optimized-sync",
+      "durationMs": 16.299999952316284,
+      "maxFrameGapMs": 16.40000009536743,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 1000,
+      "query": "src/components",
+      "iteration": 0,
+      "mode": "worker",
+      "durationMs": 16.59999990463257,
+      "maxFrameGapMs": 16.59999990463257,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 1000,
+      "query": "src/components",
+      "iteration": 1,
+      "mode": "baseline",
+      "durationMs": 23.799999952316284,
+      "maxFrameGapMs": 23.899999856948853,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 1000,
+      "query": "src/components",
+      "iteration": 1,
+      "mode": "optimized-sync",
+      "durationMs": 13.700000047683716,
+      "maxFrameGapMs": 17.100000143051147,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 1000,
+      "query": "src/components",
+      "iteration": 1,
+      "mode": "worker",
+      "durationMs": 13.700000047683716,
+      "maxFrameGapMs": 17.200000047683716,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 1000,
+      "query": "src/components",
+      "iteration": 2,
+      "mode": "baseline",
+      "durationMs": 24.700000047683716,
+      "maxFrameGapMs": 24.700000047683716,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 1000,
+      "query": "src/components",
+      "iteration": 2,
+      "mode": "optimized-sync",
+      "durationMs": 12.700000047683716,
+      "maxFrameGapMs": 16.5,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 1000,
+      "query": "src/components",
+      "iteration": 2,
+      "mode": "worker",
+      "durationMs": 13.600000143051147,
+      "maxFrameGapMs": 16.200000047683716,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 1000,
+      "query": "zz-no-match",
+      "iteration": 0,
+      "mode": "baseline",
+      "durationMs": 10.799999952316284,
+      "maxFrameGapMs": 16.5,
+      "frames": 1,
+      "results": 0
+    },
+    {
+      "count": 1000,
+      "query": "zz-no-match",
+      "iteration": 0,
+      "mode": "optimized-sync",
+      "durationMs": 0.40000009536743164,
+      "maxFrameGapMs": 16.90000009536743,
+      "frames": 1,
+      "results": 0
+    },
+    {
+      "count": 1000,
+      "query": "zz-no-match",
+      "iteration": 0,
+      "mode": "worker",
+      "durationMs": 0.5999999046325684,
+      "maxFrameGapMs": 16.09999990463257,
+      "frames": 1,
+      "results": 0
+    },
+    {
+      "count": 1000,
+      "query": "zz-no-match",
+      "iteration": 1,
+      "mode": "baseline",
+      "durationMs": 11.099999904632568,
+      "maxFrameGapMs": 17.199999809265137,
+      "frames": 1,
+      "results": 0
+    },
+    {
+      "count": 1000,
+      "query": "zz-no-match",
+      "iteration": 1,
+      "mode": "optimized-sync",
+      "durationMs": 0.5,
+      "maxFrameGapMs": 16.600000143051147,
+      "frames": 1,
+      "results": 0
+    },
+    {
+      "count": 1000,
+      "query": "zz-no-match",
+      "iteration": 1,
+      "mode": "worker",
+      "durationMs": 0.6000001430511475,
+      "maxFrameGapMs": 16.5,
+      "frames": 1,
+      "results": 0
+    },
+    {
+      "count": 1000,
+      "query": "zz-no-match",
+      "iteration": 2,
+      "mode": "baseline",
+      "durationMs": 10.799999952316284,
+      "maxFrameGapMs": 15.699999809265137,
+      "frames": 1,
+      "results": 0
+    },
+    {
+      "count": 1000,
+      "query": "zz-no-match",
+      "iteration": 2,
+      "mode": "optimized-sync",
+      "durationMs": 0.5,
+      "maxFrameGapMs": 17.5,
+      "frames": 1,
+      "results": 0
+    },
+    {
+      "count": 1000,
+      "query": "zz-no-match",
+      "iteration": 2,
+      "mode": "worker",
+      "durationMs": 0.5999999046325684,
+      "maxFrameGapMs": 17.200000047683716,
+      "frames": 1,
+      "results": 0
+    },
+    {
+      "count": 10000,
+      "phase": "index",
+      "mode": "baseline",
+      "durationMs": 19,
+      "maxFrameGapMs": 19,
+      "frames": 1
+    },
+    {
+      "count": 10000,
+      "phase": "index+empty-query",
+      "mode": "worker",
+      "durationMs": 26.100000143051147,
+      "maxFrameGapMs": 16.90000009536743,
+      "frames": 2
+    },
+    {
+      "count": 10000,
+      "query": "a",
+      "iteration": 0,
+      "mode": "baseline",
+      "durationMs": 65.5,
+      "maxFrameGapMs": 65.80000019073486,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 10000,
+      "query": "a",
+      "iteration": 0,
+      "mode": "optimized-sync",
+      "durationMs": 26.299999952316284,
+      "maxFrameGapMs": 26.5,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 10000,
+      "query": "a",
+      "iteration": 0,
+      "mode": "worker",
+      "durationMs": 38.5,
+      "maxFrameGapMs": 17.5,
+      "frames": 3,
+      "results": 120
+    },
+    {
+      "count": 10000,
+      "query": "a",
+      "iteration": 1,
+      "mode": "baseline",
+      "durationMs": 84.89999985694885,
+      "maxFrameGapMs": 85,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 10000,
+      "query": "a",
+      "iteration": 1,
+      "mode": "optimized-sync",
+      "durationMs": 12.799999952316284,
+      "maxFrameGapMs": 15.899999856948853,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 10000,
+      "query": "a",
+      "iteration": 1,
+      "mode": "worker",
+      "durationMs": 10.799999952316284,
+      "maxFrameGapMs": 17.600000143051147,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 10000,
+      "query": "a",
+      "iteration": 2,
+      "mode": "baseline",
+      "durationMs": 60.40000009536743,
+      "maxFrameGapMs": 60.5,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 10000,
+      "query": "a",
+      "iteration": 2,
+      "mode": "optimized-sync",
+      "durationMs": 12.799999952316284,
+      "maxFrameGapMs": 16.700000047683716,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 10000,
+      "query": "a",
+      "iteration": 2,
+      "mode": "worker",
+      "durationMs": 9.900000095367432,
+      "maxFrameGapMs": 15.700000047683716,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 10000,
+      "query": "comp",
+      "iteration": 0,
+      "mode": "baseline",
+      "durationMs": 100.40000009536743,
+      "maxFrameGapMs": 100.59999990463257,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 10000,
+      "query": "comp",
+      "iteration": 0,
+      "mode": "optimized-sync",
+      "durationMs": 42.5,
+      "maxFrameGapMs": 42.799999952316284,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 10000,
+      "query": "comp",
+      "iteration": 0,
+      "mode": "worker",
+      "durationMs": 44.700000047683716,
+      "maxFrameGapMs": 16.800000190734863,
+      "frames": 3,
+      "results": 120
+    },
+    {
+      "count": 10000,
+      "query": "comp",
+      "iteration": 1,
+      "mode": "baseline",
+      "durationMs": 98.10000014305115,
+      "maxFrameGapMs": 98.29999995231628,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 10000,
+      "query": "comp",
+      "iteration": 1,
+      "mode": "optimized-sync",
+      "durationMs": 44.200000047683716,
+      "maxFrameGapMs": 44.299999952316284,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 10000,
+      "query": "comp",
+      "iteration": 1,
+      "mode": "worker",
+      "durationMs": 44,
+      "maxFrameGapMs": 17.200000047683716,
+      "frames": 3,
+      "results": 120
+    },
+    {
+      "count": 10000,
+      "query": "comp",
+      "iteration": 2,
+      "mode": "baseline",
+      "durationMs": 100.29999995231628,
+      "maxFrameGapMs": 100.5,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 10000,
+      "query": "comp",
+      "iteration": 2,
+      "mode": "optimized-sync",
+      "durationMs": 44.200000047683716,
+      "maxFrameGapMs": 44.40000009536743,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 10000,
+      "query": "comp",
+      "iteration": 2,
+      "mode": "worker",
+      "durationMs": 44.60000014305115,
+      "maxFrameGapMs": 17.700000047683716,
+      "frames": 3,
+      "results": 120
+    },
+    {
+      "count": 10000,
+      "query": "src/components",
+      "iteration": 0,
+      "mode": "baseline",
+      "durationMs": 206.79999995231628,
+      "maxFrameGapMs": 206.89999985694885,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 10000,
+      "query": "src/components",
+      "iteration": 0,
+      "mode": "optimized-sync",
+      "durationMs": 132.09999990463257,
+      "maxFrameGapMs": 132.19999980926514,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 10000,
+      "query": "src/components",
+      "iteration": 0,
+      "mode": "worker",
+      "durationMs": 134.60000014305115,
+      "maxFrameGapMs": 17.5,
+      "frames": 9,
+      "results": 120
+    },
+    {
+      "count": 10000,
+      "query": "src/components",
+      "iteration": 1,
+      "mode": "baseline",
+      "durationMs": 204.19999980926514,
+      "maxFrameGapMs": 204.29999995231628,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 10000,
+      "query": "src/components",
+      "iteration": 1,
+      "mode": "optimized-sync",
+      "durationMs": 131.09999990463257,
+      "maxFrameGapMs": 131.20000004768372,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 10000,
+      "query": "src/components",
+      "iteration": 1,
+      "mode": "worker",
+      "durationMs": 131,
+      "maxFrameGapMs": 17.09999990463257,
+      "frames": 8,
+      "results": 120
+    },
+    {
+      "count": 10000,
+      "query": "src/components",
+      "iteration": 2,
+      "mode": "baseline",
+      "durationMs": 207.59999990463257,
+      "maxFrameGapMs": 207.59999990463257,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 10000,
+      "query": "src/components",
+      "iteration": 2,
+      "mode": "optimized-sync",
+      "durationMs": 131.79999995231628,
+      "maxFrameGapMs": 131.90000009536743,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 10000,
+      "query": "src/components",
+      "iteration": 2,
+      "mode": "worker",
+      "durationMs": 132.29999995231628,
+      "maxFrameGapMs": 17.799999952316284,
+      "frames": 8,
+      "results": 120
+    },
+    {
+      "count": 10000,
+      "query": "zz-no-match",
+      "iteration": 0,
+      "mode": "baseline",
+      "durationMs": 101.5,
+      "maxFrameGapMs": 101.60000014305115,
+      "frames": 1,
+      "results": 0
+    },
+    {
+      "count": 10000,
+      "query": "zz-no-match",
+      "iteration": 0,
+      "mode": "optimized-sync",
+      "durationMs": 3.5,
+      "maxFrameGapMs": 16.700000047683716,
+      "frames": 1,
+      "results": 0
+    },
+    {
+      "count": 10000,
+      "query": "zz-no-match",
+      "iteration": 0,
+      "mode": "worker",
+      "durationMs": 4.099999904632568,
+      "maxFrameGapMs": 17.09999990463257,
+      "frames": 1,
+      "results": 0
+    },
+    {
+      "count": 10000,
+      "query": "zz-no-match",
+      "iteration": 1,
+      "mode": "baseline",
+      "durationMs": 98.5,
+      "maxFrameGapMs": 98.59999990463257,
+      "frames": 1,
+      "results": 0
+    },
+    {
+      "count": 10000,
+      "query": "zz-no-match",
+      "iteration": 1,
+      "mode": "optimized-sync",
+      "durationMs": 3.3000001907348633,
+      "maxFrameGapMs": 17.100000143051147,
+      "frames": 1,
+      "results": 0
+    },
+    {
+      "count": 10000,
+      "query": "zz-no-match",
+      "iteration": 1,
+      "mode": "worker",
+      "durationMs": 3.700000047683716,
+      "maxFrameGapMs": 16.40000009536743,
+      "frames": 1,
+      "results": 0
+    },
+    {
+      "count": 10000,
+      "query": "zz-no-match",
+      "iteration": 2,
+      "mode": "baseline",
+      "durationMs": 99.40000009536743,
+      "maxFrameGapMs": 99.5,
+      "frames": 1,
+      "results": 0
+    },
+    {
+      "count": 10000,
+      "query": "zz-no-match",
+      "iteration": 2,
+      "mode": "optimized-sync",
+      "durationMs": 3.5,
+      "maxFrameGapMs": 16.40000009536743,
+      "frames": 1,
+      "results": 0
+    },
+    {
+      "count": 10000,
+      "query": "zz-no-match",
+      "iteration": 2,
+      "mode": "worker",
+      "durationMs": 3.5999999046325684,
+      "maxFrameGapMs": 16.59999990463257,
+      "frames": 1,
+      "results": 0
+    },
+    {
+      "count": 80000,
+      "phase": "index",
+      "mode": "baseline",
+      "durationMs": 215.89999985694885,
+      "maxFrameGapMs": 216.20000004768372,
+      "frames": 1
+    },
+    {
+      "count": 80000,
+      "phase": "index+empty-query",
+      "mode": "worker",
+      "durationMs": 210.59999990463257,
+      "maxFrameGapMs": 17.200000047683716,
+      "frames": 14
+    },
+    {
+      "count": 80000,
+      "query": "a",
+      "iteration": 0,
+      "mode": "baseline",
+      "durationMs": 451.39999985694885,
+      "maxFrameGapMs": 451.5,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 80000,
+      "query": "a",
+      "iteration": 0,
+      "mode": "optimized-sync",
+      "durationMs": 176.70000004768372,
+      "maxFrameGapMs": 176.80000019073486,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 80000,
+      "query": "a",
+      "iteration": 0,
+      "mode": "worker",
+      "durationMs": 164.89999985694885,
+      "maxFrameGapMs": 17.700000047683716,
+      "frames": 10,
+      "results": 120
+    },
+    {
+      "count": 80000,
+      "query": "a",
+      "iteration": 1,
+      "mode": "baseline",
+      "durationMs": 442.09999990463257,
+      "maxFrameGapMs": 442.09999990463257,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 80000,
+      "query": "a",
+      "iteration": 1,
+      "mode": "optimized-sync",
+      "durationMs": 84,
+      "maxFrameGapMs": 84.20000004768372,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 80000,
+      "query": "a",
+      "iteration": 1,
+      "mode": "worker",
+      "durationMs": 72.30000019073486,
+      "maxFrameGapMs": 17.59999990463257,
+      "frames": 5,
+      "results": 120
+    },
+    {
+      "count": 80000,
+      "query": "a",
+      "iteration": 2,
+      "mode": "baseline",
+      "durationMs": 442,
+      "maxFrameGapMs": 442.10000014305115,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 80000,
+      "query": "a",
+      "iteration": 2,
+      "mode": "optimized-sync",
+      "durationMs": 90.40000009536743,
+      "maxFrameGapMs": 90.5,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 80000,
+      "query": "a",
+      "iteration": 2,
+      "mode": "worker",
+      "durationMs": 68.29999995231628,
+      "maxFrameGapMs": 17.5,
+      "frames": 5,
+      "results": 120
+    },
+    {
+      "count": 80000,
+      "query": "comp",
+      "iteration": 0,
+      "mode": "baseline",
+      "durationMs": 740.7999999523163,
+      "maxFrameGapMs": 740.8999998569489,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 80000,
+      "query": "comp",
+      "iteration": 0,
+      "mode": "optimized-sync",
+      "durationMs": 325,
+      "maxFrameGapMs": 325.2000000476837,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 80000,
+      "query": "comp",
+      "iteration": 0,
+      "mode": "worker",
+      "durationMs": 328.90000009536743,
+      "maxFrameGapMs": 17.600000143051147,
+      "frames": 20,
+      "results": 120
+    },
+    {
+      "count": 80000,
+      "query": "comp",
+      "iteration": 1,
+      "mode": "baseline",
+      "durationMs": 739.7000000476837,
+      "maxFrameGapMs": 739.7999999523163,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 80000,
+      "query": "comp",
+      "iteration": 1,
+      "mode": "optimized-sync",
+      "durationMs": 323.7000000476837,
+      "maxFrameGapMs": 323.90000009536743,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 80000,
+      "query": "comp",
+      "iteration": 1,
+      "mode": "worker",
+      "durationMs": 316.39999985694885,
+      "maxFrameGapMs": 17.600000143051147,
+      "frames": 19,
+      "results": 120
+    },
+    {
+      "count": 80000,
+      "query": "comp",
+      "iteration": 2,
+      "mode": "baseline",
+      "durationMs": 739.3000001907349,
+      "maxFrameGapMs": 739.4000000953674,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 80000,
+      "query": "comp",
+      "iteration": 2,
+      "mode": "optimized-sync",
+      "durationMs": 321.60000014305115,
+      "maxFrameGapMs": 321.7000000476837,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 80000,
+      "query": "comp",
+      "iteration": 2,
+      "mode": "worker",
+      "durationMs": 315.5,
+      "maxFrameGapMs": 17.5,
+      "frames": 19,
+      "results": 120
+    },
+    {
+      "count": 80000,
+      "query": "src/components",
+      "iteration": 0,
+      "mode": "baseline",
+      "durationMs": 1519.5999999046326,
+      "maxFrameGapMs": 1519.7000000476837,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 80000,
+      "query": "src/components",
+      "iteration": 0,
+      "mode": "optimized-sync",
+      "durationMs": 982.5,
+      "maxFrameGapMs": 982.7000000476837,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 80000,
+      "query": "src/components",
+      "iteration": 0,
+      "mode": "worker",
+      "durationMs": 969.5,
+      "maxFrameGapMs": 17.5,
+      "frames": 59,
+      "results": 120
+    },
+    {
+      "count": 80000,
+      "query": "src/components",
+      "iteration": 1,
+      "mode": "baseline",
+      "durationMs": 1530.8000001907349,
+      "maxFrameGapMs": 1530.9000000953674,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 80000,
+      "query": "src/components",
+      "iteration": 1,
+      "mode": "optimized-sync",
+      "durationMs": 971.2000000476837,
+      "maxFrameGapMs": 971.2999999523163,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 80000,
+      "query": "src/components",
+      "iteration": 1,
+      "mode": "worker",
+      "durationMs": 954.4000000953674,
+      "maxFrameGapMs": 17.600000143051147,
+      "frames": 58,
+      "results": 120
+    },
+    {
+      "count": 80000,
+      "query": "src/components",
+      "iteration": 2,
+      "mode": "baseline",
+      "durationMs": 1534.1999998092651,
+      "maxFrameGapMs": 1534.2999999523163,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 80000,
+      "query": "src/components",
+      "iteration": 2,
+      "mode": "optimized-sync",
+      "durationMs": 978.2000000476837,
+      "maxFrameGapMs": 978.2000000476837,
+      "frames": 1,
+      "results": 120
+    },
+    {
+      "count": 80000,
+      "query": "src/components",
+      "iteration": 2,
+      "mode": "worker",
+      "durationMs": 959.7000000476837,
+      "maxFrameGapMs": 17.5,
+      "frames": 58,
+      "results": 120
+    },
+    {
+      "count": 80000,
+      "query": "zz-no-match",
+      "iteration": 0,
+      "mode": "baseline",
+      "durationMs": 746,
+      "maxFrameGapMs": 746.1000001430511,
+      "frames": 1,
+      "results": 0
+    },
+    {
+      "count": 80000,
+      "query": "zz-no-match",
+      "iteration": 0,
+      "mode": "optimized-sync",
+      "durationMs": 30.09999990463257,
+      "maxFrameGapMs": 30.09999990463257,
+      "frames": 1,
+      "results": 0
+    },
+    {
+      "count": 80000,
+      "query": "zz-no-match",
+      "iteration": 0,
+      "mode": "worker",
+      "durationMs": 27.40000009536743,
+      "maxFrameGapMs": 16.799999952316284,
+      "frames": 2,
+      "results": 0
+    },
+    {
+      "count": 80000,
+      "query": "zz-no-match",
+      "iteration": 1,
+      "mode": "baseline",
+      "durationMs": 732.4000000953674,
+      "maxFrameGapMs": 732.6000001430511,
+      "frames": 1,
+      "results": 0
+    },
+    {
+      "count": 80000,
+      "query": "zz-no-match",
+      "iteration": 1,
+      "mode": "optimized-sync",
+      "durationMs": 36.59999990463257,
+      "maxFrameGapMs": 36.700000047683716,
+      "frames": 1,
+      "results": 0
+    },
+    {
+      "count": 80000,
+      "query": "zz-no-match",
+      "iteration": 1,
+      "mode": "worker",
+      "durationMs": 30.699999809265137,
+      "maxFrameGapMs": 17.300000190734863,
+      "frames": 2,
+      "results": 0
+    },
+    {
+      "count": 80000,
+      "query": "zz-no-match",
+      "iteration": 2,
+      "mode": "baseline",
+      "durationMs": 741.5,
+      "maxFrameGapMs": 741.5999999046326,
+      "frames": 1,
+      "results": 0
+    },
+    {
+      "count": 80000,
+      "query": "zz-no-match",
+      "iteration": 2,
+      "mode": "optimized-sync",
+      "durationMs": 32.5,
+      "maxFrameGapMs": 32.59999990463257,
+      "frames": 1,
+      "results": 0
+    },
+    {
+      "count": 80000,
+      "query": "zz-no-match",
+      "iteration": 2,
+      "mode": "worker",
+      "durationMs": 26.699999809265137,
+      "maxFrameGapMs": 17.40000009536743,
+      "frames": 2,
+      "results": 0
+    }
+  ]
+}

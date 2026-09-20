@@ -9,6 +9,19 @@ let windowsTrayAvailable = false
 // Only product windows enter this set; embedded browsers and recovery probes do not.
 export const productWindows = new Set<BrowserWindow>()
 
+// Warm spare windows are product windows (they need product IPC to boot) but
+// must never be treated as a user-facing window: they never become the main
+// window fallback and never count as a visible product surface.
+const warmWindows = new WeakSet<BrowserWindow>()
+
+export function markWarmWindow(window: BrowserWindow): void {
+  warmWindows.add(window)
+}
+
+export function isWarmWindow(window: BrowserWindow): boolean {
+  return warmWindows.has(window)
+}
+
 export function getMainWindow(): BrowserWindow | null {
   return mainWindow
 }

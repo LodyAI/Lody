@@ -95,6 +95,19 @@ export function ProjectSkillsView({
 
   if (groups.length === 0) {
     if (status === 'error') {
+      const unreachable =
+        Boolean(error?.includes('machine_rpc_unavailable')) ||
+        Boolean(error?.includes('CLI is not accepting RPC'));
+      if (unreachable) {
+        return (
+          <p className="text-xs text-muted-foreground">
+            {t(
+              'workspace.projects.machineUnreachable',
+              'This machine isn’t connected. Worktree setup and skills will load when it comes online.'
+            )}
+          </p>
+        );
+      }
       return (
         <SkillsEmptyShell
           icon={<AlertCircle className="h-4 w-4 text-destructive" />}
@@ -251,7 +264,7 @@ function SkillRow({ skill, scope }: { skill: ProjectSkill; scope: ProjectSkillSc
     <div className="px-3 py-2.5">
       <div className="flex items-center gap-2">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
-          <span className="truncate text-sm font-medium text-foreground">{skill.name}</span>
+          <span className="truncate text-sm font-normal text-foreground">{skill.name}</span>
           {skill.version ? <SkillVersionBadge version={skill.version} size="sm" /> : null}
           {skill.isSymlink ? (
             <SkillSymlinkBadge symlinkTarget={skill.symlinkTarget} size="sm" />
@@ -305,7 +318,7 @@ function SkillsEmptyShell({
       <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted/60">
         {icon}
       </div>
-      <p className="text-sm font-medium text-foreground">{title}</p>
+      <p className="text-sm font-normal text-foreground">{title}</p>
       {body ? <p className="max-w-sm text-xs text-muted-foreground">{body}</p> : null}
       {action}
     </div>

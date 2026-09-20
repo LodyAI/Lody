@@ -6,11 +6,7 @@ import type { ElectronUpdaterPhase } from '@lody/shared';
 import { useAtom } from 'jotai';
 import { Button } from '@/ui/button';
 import { Switch } from '@/ui/switch';
-import {
-  developerModeEnabledAtom,
-  inboxBetaEnabledAtom,
-  tasksBetaEnabledAtom,
-} from '@/atoms/settings';
+import { developerModeEnabledAtom, inboxBetaEnabledAtom } from '@/atoms/settings';
 import { useElectronUpdaterState } from '@/hooks/use-electron-updater-state';
 import { OpenSourceAttributionsDialog } from '@/components/settings/open-source-attributions-dialog';
 import { JoinCommunityButton } from '@/components/settings/join-community-dialog';
@@ -110,7 +106,6 @@ const DEVELOPER_MODE_REVEAL_TAPS = 7;
 export function MobileAboutSettings() {
   const { t, i18n } = useTranslation();
   const [developerModeEnabled, setDeveloperModeEnabled] = useAtom(developerModeEnabledAtom);
-  const [tasksBetaEnabled, setTasksBetaEnabled] = useAtom(tasksBetaEnabledAtom);
   const [inboxBetaEnabled, setInboxBetaEnabled] = useAtom(inboxBetaEnabledAtom);
   const [revealTaps, setRevealTaps] = useState(0);
   const updaterState = useElectronUpdaterState();
@@ -291,19 +286,6 @@ export function MobileAboutSettings() {
       {developerModeEnabled ? (
         <MobileSettingsSection title={t('settings.beta.title', 'Beta features')}>
           <MobileSettingsRowGroup>
-            <MobileSettingsRow
-              label={t('settings.beta.tasks', 'Tasks')}
-              helper={t(
-                'settings.beta.tasksHelper',
-                'Track work you are not starting yet, separately from chats. In development — expect rough edges.'
-              )}
-            >
-              <Switch
-                checked={tasksBetaEnabled}
-                onCheckedChange={setTasksBetaEnabled}
-                aria-label={t('settings.beta.tasks', 'Tasks')}
-              />
-            </MobileSettingsRow>
             <MobileSettingsRow
               label={t('settings.beta.inbox', 'Inbox')}
               helper={t(

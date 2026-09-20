@@ -67,6 +67,7 @@ function ProjectRow({ state }: { state?: LocalProjectRemovalState }) {
       canRemoveProject
       removalState={state ?? null}
       collapsed={false}
+      whetherShowFullList={false}
       isSelected={false}
       sessionsForProject={activeProjectSessions}
       childSessionsByParent={new Map()}
@@ -86,6 +87,7 @@ function ProjectRow({ state }: { state?: LocalProjectRemovalState }) {
       collapsedOpenedBySessionIds={{}}
       onToggleOpenedBySessions={() => {}}
       onToggleCollapsed={() => {}}
+      onToggleFullList={() => {}}
       onRequestRemoval={() => {}}
     />
   );
@@ -141,6 +143,7 @@ function DesktopSidebar({
             }}
             canRemoveProject
             collapsed
+            whetherShowFullList={false}
             isSelected={!state}
             sessionsForProject={[]}
             childSessionsByParent={new Map()}
@@ -160,6 +163,7 @@ function DesktopSidebar({
             collapsedOpenedBySessionIds={{}}
             onToggleOpenedBySessions={() => {}}
             onToggleCollapsed={() => {}}
+            onToggleFullList={() => {}}
             onRequestRemoval={() => {}}
           />
         </div>

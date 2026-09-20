@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { extractDeepLinkFromArgv, parseDeepLinkArg } from './deep-link-url'
-import { getMainWindow, setPendingDeepLink } from './window-state'
+import { consumePendingDeepLink, getMainWindow, setPendingDeepLink } from './window-state'
+import { readDesktopLoginCallback } from './services/desktop-login'
 import { focusMainWindow } from './window'
 import { publishDeepLinkToPrimary, startDeepLinkIpcListener } from './deep-link-ipc'
 import { describeDeepLinkForAuthDebug, describeUrlForAuthDebug, logAuthDebug } from './auth-debug'
@@ -9,6 +10,16 @@ let stopIpcListener: (() => void) | null = null
 let lastHandledDeepLink: string | null = null
 let lastHandledAt = 0
 const USE_DEEP_LINK_IPC_FALLBACK = process.platform === 'win32'
+let authCallbackHandler: ((token: string) => Promise<void>) | null = null
+
+export function initializeAuthDeepLinks(handler: (token: string) => Promise<void>): void {
+  authCallbackHandler = handler
+  const pending = consumePendingDeepLink()
+  if (!pending) return
+  const token = readDesktopLoginCallback(pending)
+  if (token !== null) void handler(token)
+  else setPendingDeepLink(pending)
+}
 
 function shouldSkipDuplicateDeepLink(url: string): boolean {
   const now = Date.now()
@@ -29,6 +40,14 @@ export function handleDeepLink(url: string): void {
     logAuthDebug('handleDeepLink ignored URL because parseDeepLinkArg returned null', {
       deepLink: describeDeepLinkForAuthDebug(url)
     })
+    return
+  }
+  const authToken = readDesktopLoginCallback(parsedDeepLink)
+  if (authToken !== null && authCallbackHandler) {
+    // Authentication belongs to main even if there is no mounted product page.
+    void authCallbackHandler(authToken)
+    const window = getMainWindow()
+    if (window && !window.isDestroyed()) focusMainWindow(window)
     return
   }
   if (shouldSkipDuplicateDeepLink(parsedDeepLink)) {

@@ -125,18 +125,12 @@ test('captures render work while streaming and while only the working indicator 
     );
   }
   await expect(page.getByText('Thinking', { exact: true })).toBeVisible();
-  const cssAnimationNames = await story.evaluate((element) => {
-    const dot = element.querySelector('.agent-activity-dot-pulse');
-    const label = element.querySelector('.agent-activity-label');
-    return {
-      dot: dot ? window.getComputedStyle(dot).animationName : null,
-      label: label ? window.getComputedStyle(label, '::after').animationName : null,
-    };
+  // The live status is a compositor-driven CSS shimmer on the status label.
+  const statusAnimationName = await story.evaluate((element) => {
+    const label = element.querySelector('.agent-shimmer');
+    return label ? window.getComputedStyle(label, '::after').animationName : null;
   });
-  expect(cssAnimationNames).toEqual({
-    dot: 'agent-activity-dot-pulse',
-    label: 'agent-activity-label-highlight',
-  });
+  expect(statusAnimationName).toBe('agent-shimmer-sweep');
 
   const streamingEvents = await captureTrace(page, 4_000);
   const streaming = summarizeTrace(streamingEvents);

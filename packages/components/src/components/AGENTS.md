@@ -28,14 +28,15 @@ Ownership and explanations: [README.md](README.md).
   an opener shows disclosure and a child shows ├/└; hover swaps either for ⋯ at the same
   7px centre. Draw nesting regardless of working/unread/waiting status. Only children
   widen the slot from 14px to 26px for a 12px title indent without shifting the background.
-  Keep geometry in the pure `session-row-leading-slot.tsx` (re-exported by
-  `sidebar-row-shared.tsx` and reused by anonymous shares); context-menu expand/collapse uses the same
-  toggle callback.
+  Keep geometry in `session-row-leading-slot.tsx` (re-exported by
+  `sidebar-row-shared.tsx`); context-menu expand/collapse uses the same toggle.
+- Conversation titles stay `font-normal`; pin with the glyph, never weight.
 - Desktop working/waiting/unread status belongs only in `SessionRowStatusIndicator`
   inside `SidebarRowEndSlot`. Pass those three flags to the end slot, never the leading
-  slot. Status replaces resting line diff, `Mergeable`, worktree glyph, PR icon, or mobile
-  time with one 14px mark; retain metrics in the desktop hover info card. Mobile chat
-  leading-node rules remain in [mobile/AGENTS.md](mobile/AGENTS.md).
+  slot. Status replaces resting `Mergeable`, worktree glyph, PR icon, or mobile
+  time with one 14px mark. No +/- totals on the row (hover card only). Mobile
+  leading-node rules remain in
+  [mobile/AGENTS.md](mobile/AGENTS.md).
 - Never hide a Session through nesting: missing, cross-section, cross-group, cycling,
   or deeper-than-one-level openers render top-level. `MAX_VISIBLE_SESSIONS` /
   `SHOW_FULL_BUCKET_THRESHOLD` count top-level rows. Every list passes `rootRank` for
@@ -73,7 +74,7 @@ Ownership and explanations: [README.md](README.md).
 - Desktop changelogs open in-app as sanitized Markdown with raw HTML off. Only
   missing notes fall back to the website, via `getChangelogUrl` and
   `openExternalUrl`, never a hardcoded link.
-- `AgentActivityIndicator`, `ZoomableImageViewer`, and Electron image preview
+- The live agent status shimmer, `ZoomableImageViewer`, and Electron image preview
   copy/save keep their own rules in [shared/AGENTS.md](shared/AGENTS.md);
   `ZoomableImageViewer` is the ONE image viewer, so never add a second one.
 - `web-workspace-layout.tsx` owns top/side safe-area insets for desktop surfaces,

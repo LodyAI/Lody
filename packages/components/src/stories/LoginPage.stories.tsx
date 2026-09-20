@@ -6,6 +6,8 @@ import { LoginPage, type LoginPageProps } from '@/components/login-page';
 import { AuthProvider } from '@/providers/convex-provider';
 import { StableSessionContext } from '@/hooks/useStableSession';
 import type { LodyAuthClient } from '@/lib/auth';
+import { Provider, createStore } from 'jotai';
+import { electronLoginErrorAtom, electronLoginPhaseAtom } from '@/atoms';
 
 type StableSessionValue = NonNullable<
   ComponentProps<typeof StableSessionContext.Provider>['value']
@@ -279,6 +281,33 @@ export const ElectronBrowserHandoff: Story = {
         // code, so no story can navigate a reader to `lody://`.
         transferUser={() => new Promise(() => {})}
       />
+    </WithSearchParam>
+  ),
+};
+
+function DesktopLoginFailure(args: LoginPageProps) {
+  const [store] = useState(() => {
+    const value = createStore();
+    value.set(electronLoginPhaseAtom, 'error');
+    value.set(electronLoginErrorAtom, 'exchange_timeout');
+    return value;
+  });
+  return (
+    <Provider store={store}>
+      <LoginPageStoryHarness
+        {...args}
+        isElectronRenderer
+        sessionValue={createStableSessionValue()}
+      />
+    </Provider>
+  );
+}
+
+export const ElectronCallbackFailure: Story = {
+  name: 'Electron sign-in request timed out',
+  render: (args) => (
+    <WithSearchParam search="">
+      <DesktopLoginFailure {...args} />
     </WithSearchParam>
   ),
 };

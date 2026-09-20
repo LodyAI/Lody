@@ -58,6 +58,11 @@ contracts, and window/renderer integration rules live in
 - Every embedded-CLI descendant launched through `process.execPath` must inherit
   `ELECTRON_RUN_AS_NODE` when it exists. On packaged macOS, omitting it launches a
   second GUI app instead of Node.
+- Those descendants load runtime-installed native addons that carry no Team ID, so
+  macOS nested binaries keep `disable-library-validation` in
+  `build/entitlements.mac.inherit.plist`. Removing it makes every such `dlopen` fail
+  and the host reports only `ACP connection closed`. Top-level app entitlements stay
+  strict.
 - Electron Builder ignores nested staged `node_modules`. `eb-after-pack.mjs` must copy
   them into `app.asar.unpacked`, assert the DeepSeek adapter plus all four pinned
   presets, then probe CLI `--help`, node-pty loading, and a real in-memory SQLite
@@ -107,6 +112,11 @@ contracts, and window/renderer integration rules live in
 - `snap` stays in the target list for local builds and needs snapcraft on the machine.
 
 ## Verification
+
+- Cloud browser login is owned by main: PKCE attempts, callback exchange and replay
+  handling must not depend on a renderer. Organization failures never roll back
+  authentication. Windows subscribe then read revisioned snapshots. Contract:
+  [desktop browser login](../../specs/desktop-browser-login.md).
 
 - Run the repository checks after source changes. Packaging/native-dependency changes
   also require the Electron packaging probes for every affected target architecture.

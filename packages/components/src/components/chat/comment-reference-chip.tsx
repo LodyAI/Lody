@@ -55,7 +55,7 @@ export function CommentReferenceChip({
       className={cn(
         'group/chip relative flex max-w-64 flex-col gap-0.5 rounded-lg border',
         'bg-muted/50 px-2.5 py-1.5 text-xs',
-        isInteractive && 'cursor-pointer hover:bg-muted/80 transition-colors',
+        isInteractive && 'cursor-pointer hover:bg-hover transition-colors',
         className
       )}
       onClick={isInteractive ? handleChipClick : undefined}

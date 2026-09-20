@@ -7,6 +7,57 @@ export type SessionNavigationTarget = {
   tabSessionId?: SessionId;
 };
 
+/**
+ * Resolve a navigation target that already belongs to the mounted Session
+ * workspace. Operation cards only persist the created Session id, so a child
+ * target arrives as `{ sessionId: childId }` rather than the root + tab pair.
+ * Recognizing it locally lets the caller restore a closed tab before selecting
+ * it instead of routing through the child's root URL and immediately falling
+ * back when the parent sees the shared close flag.
+ */
+export const resolveCurrentWorkspaceTabNavigation = (
+  target: SessionNavigationTarget,
+  currentSessionId: SessionId,
+  currentTabSessionIds: ReadonlySet<string>,
+  closedTabSessionIds: ReadonlySet<string>
+): { tabSessionId: SessionId; shouldReopen: boolean } | null => {
+  let tabSessionId: SessionId | null = null;
+  if (target.sessionId === currentSessionId) {
+    tabSessionId = target.tabSessionId ?? currentSessionId;
+  } else if (target.tabSessionId === undefined && currentTabSessionIds.has(target.sessionId)) {
+    tabSessionId = target.sessionId;
+  }
+  return tabSessionId
+    ? { tabSessionId, shouldReopen: closedTabSessionIds.has(tabSessionId) }
+    : null;
+};
+
+export type SessionTabRestoreNavigationResolution =
+  | { kind: 'wait' }
+  | { kind: 'cancel' }
+  | { kind: 'navigate'; tabSessionId: SessionId };
+
+/**
+ * A reopen write can resolve before its projected Session metadata reaches the
+ * mounted workspace. Wait for that projection before selecting the target;
+ * otherwise the shared-close reconciliation sees the stale close flag and
+ * replaces the requested URL with an open neighbour.
+ */
+export const resolveSessionTabRestoreNavigation = (
+  tabSessionId: SessionId,
+  sourceSessionId: SessionId,
+  currentSessionId: SessionId,
+  sourceUrlTab: string | undefined,
+  currentUrlTab: string | undefined,
+  writeCompleted: boolean,
+  closedTabSessionIds: ReadonlySet<string>
+): SessionTabRestoreNavigationResolution => {
+  if (currentSessionId !== sourceSessionId) return { kind: 'cancel' };
+  if (currentUrlTab !== sourceUrlTab) return { kind: 'cancel' };
+  if (!writeCompleted || closedTabSessionIds.has(tabSessionId)) return { kind: 'wait' };
+  return { kind: 'navigate', tabSessionId };
+};
+
 /** The route params/search needed to restore a Session navigation target. */
 export const getSessionNavigationLocation = (
   target: SessionNavigationTarget

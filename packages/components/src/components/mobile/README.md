@@ -8,11 +8,9 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
 ## Screens and chrome
 
 - `mobile-home-screen.tsx` — workspace home. `workspaceTabSpecs` builds the
-  Inbox / Chat / Tasks / Projects dock tabs; the Tasks body is the shared
-  `TasksListBody mobile embedded`, lazy-imported from
-  `../tasks/tasks-workspace.tsx` (`embedded` skips the safe-area BaseHeader under
-  the home chrome). The header's connection/pull pill is absolutely centred on the
-  h-9 chrome row, and the pill bar expands above the scroll region.
+  Inbox / Chat / Projects dock tabs. The header's connection/pull pill is
+  absolutely centred on the h-9 chrome row, and the pill bar expands above the
+  scroll region.
 - `mobile-project-screen.tsx`, `mobile-chat-landing-screen.tsx`,
   `mobile-archive-screen.tsx` — the other top-level screens.
 - `mobile-workspace-layout.tsx`, `mobile-workspace-tabbar.tsx`,

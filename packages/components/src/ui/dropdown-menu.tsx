@@ -269,11 +269,11 @@ DropdownMenuSubTrigger.displayName = DropdownMenuPrimitive.SubTrigger.displayNam
 /**
  * A submenu is offset from its TRIGGER ROW, not from the parent menu's edge, so
  * the offset has to clear everything between the two: the parent surface's `p-1`
- * (4px) and the 1px hairline ring each surface paints OUTSIDE its border box
- * (`menuSurfaceStyle`). At the old `6` those ate all but 0px of it and the two
- * surfaces rendered as one welded slab; `10` leaves a 4px gap between the rings.
+ * (4px) and the 0.5px hairline ring each surface paints OUTSIDE its border box
+ * (`menuSurfaceStyle`). Visual gap between rings = sideOffset - 4 - 0.5 - 0.5.
+ * `5` welds the two surfaces into one slab; `7` leaves a 2px gap.
  */
-const SUB_CONTENT_SIDE_OFFSET = 10;
+const SUB_CONTENT_SIDE_OFFSET = 7;
 
 const DropdownMenuSubContent = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.SubContent>,
@@ -405,8 +405,11 @@ DropdownMenuCheckboxItem.displayName = DropdownMenuPrimitive.CheckboxItem.displa
 
 const DropdownMenuRadioItem = React.forwardRef<
   React.ElementRef<typeof DropdownMenuPrimitive.RadioItem>,
-  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.RadioItem>
->(({ className, children, onSelect, ...props }, ref) => {
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.RadioItem> & {
+    /** Selected-row mark: a dot (default) or a check for list-style pickers. */
+    indicator?: 'dot' | 'check';
+  }
+>(({ className, children, onSelect, indicator = 'dot', ...props }, ref) => {
   const selectionContext = React.useContext(DropdownMenuSelectionContext);
   return (
     <DropdownMenuPrimitive.RadioItem
@@ -420,7 +423,11 @@ const DropdownMenuRadioItem = React.forwardRef<
     >
       <span className="absolute start-3 flex h-3.5 w-3.5 items-center justify-center">
         <DropdownMenuPrimitive.ItemIndicator>
-          <Circle className="h-2 w-2 fill-current" />
+          {indicator === 'check' ? (
+            <Check className="size-3.5!" />
+          ) : (
+            <Circle className="size-2! fill-current" />
+          )}
         </DropdownMenuPrimitive.ItemIndicator>
       </span>
       {children}
@@ -590,7 +597,7 @@ const DropdownMenuSearchInput = React.forwardRef<HTMLInputElement, DropdownMenuS
           }}
           placeholder={placeholder}
           aria-label={ariaLabel ?? placeholder}
-          className="min-w-0 flex-1 border-none bg-transparent text-[0.8rem] leading-tight outline-none placeholder:text-muted-foreground focus:outline-none focus:ring-0"
+          className="min-w-0 flex-1 border-none bg-transparent text-[0.9em] leading-tight outline-none placeholder:text-muted-foreground focus:outline-none focus:ring-0"
         />
       </div>
     );

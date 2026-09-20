@@ -8,11 +8,6 @@ import { SessionReadonlyContext } from '../src/components/ai-gui/session-readonl
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (_key: string, fallback: string) => fallback }),
 }));
-vi.mock('../src/hooks/use-task-image', () => ({
-  useTaskImageUrl: () => {
-    throw new Error('Workspace image hook must not mount');
-  },
-}));
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;

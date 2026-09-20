@@ -78,7 +78,7 @@ function MentionItem({
     <MentionPrimitive.Item
       data-slot="mention-item"
       className={cn(
-        'relative flex w-full cursor-default select-none items-center gap-2 rounded-xs px-2 py-1.5 text-sm outline-hidden data-[disabled]:pointer-events-none data-[highlighted]:bg-hover data-[highlighted]:text-hover-foreground data-[disabled]:opacity-50',
+        'relative flex w-full cursor-default select-none items-center gap-2 rounded-xs px-2 py-1.5 text-sm outline-hidden data-[disabled]:pointer-events-none data-[highlighted]:bg-foreground/[0.05] data-[highlighted]:text-foreground data-[disabled]:opacity-50 dark:data-[highlighted]:bg-white/[0.10] dark:data-[highlighted]:text-foreground',
         className
       )}
       {...props}

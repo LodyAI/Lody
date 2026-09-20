@@ -42,11 +42,6 @@ Command entrypoints, the daemon runner, and session dispatch from the CLI/MCP bo
   before reading by default; sync failure is a command failure with an `--offline` hint.
   `--offline` is the explicit local-cache path, never an automatic fallback. `lody sync` is the
   explicit workspace sync command and excludes Code Collab file-index Flock docs.
-- Persisting a non-empty Task document makes loro-repo register `e/task-<id>` in workspace meta;
-  Task fields are not copied into `m/task-<id>/*`. `listWorkspaceTaskIds` combines that physical
-  source (`listAliveRoomIds` over `e/*`) with visible Task Index rows, repairs a missing row from
-  its document, and honors an explicit tombstone. `sync`, `export`, and account deletion must
-  retain BOTH discovery paths so an interrupted or legacy write cannot escape coverage.
 
 ## `lody app`
 

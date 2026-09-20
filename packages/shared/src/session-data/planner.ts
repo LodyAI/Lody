@@ -1,12 +1,9 @@
-import { z } from 'zod';
 import { isSessionGoalActive, resolveLatestSessionGoalFromHistory } from '../goal';
-import { parseHistoryWrite } from '../history-write-schema';
 import type { PermissionOutcome } from '../message';
 import type {
   OpenAssistantTurnInput,
   ReplaceEditableTailInput,
   SessionEditableTailRejectionCode,
-  TaskProposalResolution,
 } from './types';
 import type { SessionTurn } from './domain';
 
@@ -108,53 +105,6 @@ export function applyRespondPermission(
     return true;
   }
   return false;
-}
-
-/**
- * Shared, side-effect-free planner for a task-proposal decision. Only the first
- * matching notice is resolved, matching the previous single-item behaviour.
- */
-export function resolveTaskProposalOnEntry(
-  entry: { items?: unknown },
-  proposalId: string,
-  resolution: TaskProposalResolution
-): boolean {
-  const items = Array.isArray(entry.items) ? entry.items : [];
-  for (const item of items) {
-    const notice = asRecord(item);
-    if (
-      notice?.type === 'system_notice' &&
-      notice.name === 'task_proposal' &&
-      asRecord(notice.meta)?.proposalId === proposalId
-    ) {
-      const meta = asRecord(notice.meta)!;
-      meta.outcome = resolution.outcome;
-      if (resolution.taskId !== undefined) meta.taskId = resolution.taskId;
-      return true;
-    }
-  }
-  return false;
-}
-
-export function hasTaskProposal(entry: { items?: unknown }, proposalId: string): boolean {
-  const items = Array.isArray(entry.items) ? entry.items : [];
-  return items.some((item) => {
-    const notice = asRecord(item);
-    return (
-      notice?.type === 'system_notice' &&
-      notice.name === 'task_proposal' &&
-      asRecord(notice.meta)?.proposalId === proposalId
-    );
-  });
-}
-
-const TaskProposalResolutionSchema = z
-  .object({ outcome: z.enum(['created', 'dismissed']), taskId: z.string().optional() })
-  .strict();
-
-/** Validate a caller-supplied decision before any write is attempted. */
-export function parseTaskProposalResolution(value: unknown): TaskProposalResolution {
-  return parseHistoryWrite(TaskProposalResolutionSchema, value) as TaskProposalResolution;
 }
 
 // # Editable tail rules

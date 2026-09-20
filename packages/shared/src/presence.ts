@@ -70,6 +70,9 @@ const ActiveSessionStatusSchema = z.preprocess(
     z.object({
       type: z.literal('running'),
       activity: z.enum(['image_generation']).optional(),
+      // Presence is an ephemeral UI surface. Bound provider-supplied detail so
+      // an untrusted ACP stream cannot inflate the presence document.
+      detail: z.string().min(1).max(280).optional(),
     }),
     z.object({
       type: z.literal('requestPermission'),
