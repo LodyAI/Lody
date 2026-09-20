@@ -1,3 +1,4 @@
+import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import {
   useCallback,
   useEffect,
@@ -4484,8 +4485,7 @@ function WorkspaceChatLanding({
       if (typeof session.lastMessageAt === 'number' && Number.isFinite(session.lastMessageAt)) {
         const prev = latest.get(key) ?? 0;
         if (session.lastMessageAt > prev) latest.set(key, session.lastMessageAt);
-        const isUnread =
-          typeof session.lastReadAt !== 'number' || session.lastMessageAt > session.lastReadAt;
+        const isUnread = sessionHasUnreadMessages(session);
         if (isUnread) unread.set(key, (unread.get(key) ?? 0) + 1);
       }
     }
@@ -4561,19 +4561,13 @@ function WorkspaceChatLanding({
     return counts;
   }, [visibleSessions]);
   const githubRepositoryLatestMessageAt = mobileSheetRecency.byRepo;
-  /* Unread-session count per repository — drives the row's trailing
-     badge. Mirrors `localProjectActivity.unread` semantics: a session
-     is unread when `lastMessageAt` is newer than `lastReadAt` (or
-     `lastReadAt` is missing entirely). */
+  /* Unread-session count per repository drives the row's trailing badge. */
   const githubRepositoryUnreadCount = useMemo(() => {
     const unread = new Map<string, number>();
     for (const session of visibleSessions) {
       const repoFullName = getSessionGitHubRepoFullName(session);
       if (!repoFullName) continue;
-      if (typeof session.lastMessageAt !== 'number') continue;
-      const isUnread =
-        typeof session.lastReadAt !== 'number' || session.lastMessageAt > session.lastReadAt;
-      if (!isUnread) continue;
+      if (!sessionHasUnreadMessages(session)) continue;
       unread.set(repoFullName, (unread.get(repoFullName) ?? 0) + 1);
     }
     return unread;

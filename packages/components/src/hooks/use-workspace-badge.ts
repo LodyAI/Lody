@@ -1,3 +1,4 @@
+import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import { useEffect, useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { sessionListAtom } from '@/atoms/doc-meta';
@@ -47,10 +48,7 @@ export function useWorkspaceBadge(): void {
         waiting += 1;
         continue;
       }
-      const lastMessageAt =
-        typeof session.lastMessageAt === 'number' ? session.lastMessageAt : null;
-      const lastReadAt = typeof session.lastReadAt === 'number' ? session.lastReadAt : null;
-      if (lastMessageAt !== null && (lastReadAt === null || lastMessageAt > lastReadAt)) {
+      if (sessionHasUnreadMessages(session)) {
         unread += 1;
       }
     }

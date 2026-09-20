@@ -98,7 +98,11 @@ describe('SessionTabBar drag sources', () => {
 
   it('closes the last main tab to one local draft and retains the closed-list reopen action', async () => {
     function Harness() {
-      const [parent, setParent] = useState(parentSession);
+      const [parent, setParent] = useState({
+        ...parentSession,
+        lastMessageAt: 200,
+        lastReadAt: 100,
+      });
       const [drafts, setDrafts] = useState<DraftSessionTab[]>([]);
       const [selected, setSelected] = useState<string>(parent.id);
       const closed = parent.isTabClosed === true;
@@ -165,6 +169,7 @@ describe('SessionTabBar drag sources', () => {
     await act(async () =>
       container.querySelector<HTMLButtonElement>('[aria-label="Closed conversations"]')!.click()
     );
+    expect(document.querySelector('[aria-label="Unread messages"]')).toBeNull();
     await act(async () =>
       document
         .querySelector<HTMLButtonElement>('[aria-label="Reopen conversation: Main session"]')!

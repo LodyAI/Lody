@@ -1672,11 +1672,7 @@ const SessionDetail = ({
   // Priority: waiting > working > unread > idle.
   const tabStatus = useMemo<TabStatus>(() => {
     if (!activeSession) return null;
-    const lastMessageAt =
-      typeof activeSession.lastMessageAt === 'number' ? activeSession.lastMessageAt : null;
-    const lastReadAt =
-      typeof activeSession.lastReadAt === 'number' ? activeSession.lastReadAt : null;
-    const hasUnread = lastMessageAt !== null && (lastReadAt === null || lastMessageAt > lastReadAt);
+    const hasUnread = sessionHasUnreadMessages(activeSession);
     const isWaiting = activeSessionLiveStatus?.type === 'requestPermission';
     // CLI-reported presence is the fact source for "working"; persistent goal
     // state and meta dispatch pointers do not imply a prompt is running.
@@ -4521,7 +4517,6 @@ const SessionDetail = ({
           : (visibleChildSessions.find((s) => s.id === tabId) ?? null);
       const draft = meta ? null : (draftTabs.find((d) => d.id === tabId) ?? null);
       const lastMessageAt = typeof meta?.lastMessageAt === 'number' ? meta.lastMessageAt : null;
-      const lastReadAt = typeof meta?.lastReadAt === 'number' ? meta.lastReadAt : null;
       const liveStatus = meta != null ? (conversationLiveStatusMap[tabId] ?? null) : null;
       return {
         id: tabId,
@@ -4533,10 +4528,7 @@ const SessionDetail = ({
         main: tabId === sessionId,
         running: liveStatus != null,
         waitingPermission: liveStatus?.type === 'requestPermission',
-        unread:
-          meta != null &&
-          lastMessageAt !== null &&
-          (lastReadAt === null || lastMessageAt > lastReadAt),
+        unread: meta != null && sessionHasUnreadMessages(meta),
         lastActivityAt: lastMessageAt,
       };
     });

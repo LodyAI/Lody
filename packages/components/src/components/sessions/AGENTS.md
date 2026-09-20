@@ -12,10 +12,10 @@ Read each heading’s linked context before changing its files.
 - Conversation and side-panel tabs share `TAB_PILL_*_CLASS`. Never
   `--tab-active`/`--tab-inactive` (both collapse onto `--background` in dark).
 - One leading status slot per tab, `waiting > working > unread > agent icon`;
-  test `isWaiting` first, and never drop unread from a tab renderer.
+  Test `isWaiting` first; use `sessionHasUnreadMessages` to exclude closed/archived output.
 - `?tab` owns selection; never mirror it in state (#193). Confirmed shared closure
   may replace the current choice with a neighbour or local draft. Close writes
-  `isTabClosed`, never archive — a never-messaged tab is exact-deleted.
+  `isTabClosed`, never archive or delete.
   Reopening archives restores lifecycle first.
 - `Change owner` writes the OWNER `SessionMeta.userId`, never sharing/visibility;
   they stay separate actions.
