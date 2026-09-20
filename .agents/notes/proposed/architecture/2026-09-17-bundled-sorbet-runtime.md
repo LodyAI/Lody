@@ -47,7 +47,7 @@ Investigation baselines:
 - Sorbet ACP compatibility and conformance were tested after building the required workspace
   packages: 5 files and 36 tests passed. The generated compatibility matrix test also passed.
 
-Prototype integration pin: Sorbet `369b1d0bf9e5f17d64725b4c9f62be4502144781`. This revision also
+Prototype integration pin: Sorbet `e47f47cea7b4fca388c5d6745cb5e34c3a6d6786`. This revision also
 contains the cross-process Journal writer lease and credential mutation lease described below, and
 passes the packaged Windows SRT helper path explicitly into sandbox readiness checks.
 
@@ -370,11 +370,11 @@ durability model with a smaller boundary.
 - [Lody Session process lifecycle](../../../../apps/cli/src/session/session.ts)
 - [Lody installation data root](../../../../packages/shared/src/node/installation-profile.ts)
 - [Electron CLI runtime staging](../../../../apps/electron/scripts/cli-native-deps.mjs)
-- [Sorbet ACP entry](https://github.com/LodyAI/Sorbet/blob/369b1d0bf9e5f17d64725b4c9f62be4502144781/packages/acp/src/stdio-cli.ts)
-- [Sorbet Lody extension advertisement](https://github.com/LodyAI/Sorbet/blob/369b1d0bf9e5f17d64725b4c9f62be4502144781/packages/acp/src/agent.ts)
-- [Sorbet compatibility matrix](https://github.com/LodyAI/Sorbet/blob/369b1d0bf9e5f17d64725b4c9f62be4502144781/packages/acp/COMPATIBILITY.md)
-- [Sorbet NodeAgent composition](https://github.com/LodyAI/Sorbet/blob/369b1d0bf9e5f17d64725b4c9f62be4502144781/packages/node-agent/src/agent.ts)
-- [Sorbet session registry](https://github.com/LodyAI/Sorbet/blob/369b1d0bf9e5f17d64725b4c9f62be4502144781/packages/node-agent/src/sessions/registry.ts)
-- [Sorbet JSONL Journal](https://github.com/LodyAI/Sorbet/blob/369b1d0bf9e5f17d64725b4c9f62be4502144781/packages/runtime/src/journal/jsonl-store.ts)
+- [Sorbet ACP entry](https://github.com/LodyAI/Sorbet/blob/e47f47cea7b4fca388c5d6745cb5e34c3a6d6786/packages/acp/src/stdio-cli.ts)
+- [Sorbet Lody extension advertisement](https://github.com/LodyAI/Sorbet/blob/e47f47cea7b4fca388c5d6745cb5e34c3a6d6786/packages/acp/src/agent.ts)
+- [Sorbet compatibility matrix](https://github.com/LodyAI/Sorbet/blob/e47f47cea7b4fca388c5d6745cb5e34c3a6d6786/packages/acp/COMPATIBILITY.md)
+- [Sorbet NodeAgent composition](https://github.com/LodyAI/Sorbet/blob/e47f47cea7b4fca388c5d6745cb5e34c3a6d6786/packages/node-agent/src/agent.ts)
+- [Sorbet session registry](https://github.com/LodyAI/Sorbet/blob/e47f47cea7b4fca388c5d6745cb5e34c3a6d6786/packages/node-agent/src/sessions/registry.ts)
+- [Sorbet JSONL Journal](https://github.com/LodyAI/Sorbet/blob/e47f47cea7b4fca388c5d6745cb5e34c3a6d6786/packages/runtime/src/journal/jsonl-store.ts)
 - [Current Pi adapter lifecycle](../../../../packages/acp-extension-pi/README.md)
 - [Current Pi native-file resume](../../../../packages/acp-extension-pi/src/connection.ts)

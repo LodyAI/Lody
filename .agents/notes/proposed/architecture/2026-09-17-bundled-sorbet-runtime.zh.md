@@ -41,7 +41,7 @@ Lody 版本锁定 Sorbet 源码，构建内置的 `sorbet-acp` 入口，并为�
 - 构建所需 workspace 包后，Sorbet ACP 兼容与一致性测试全部通过：5 个文件、36 个测试；
   单独生成的兼容矩阵测试也通过。
 
-当前原型锁定 Sorbet `369b1d0bf9e5f17d64725b4c9f62be4502144781`。该版本也包含下文所述
+当前原型锁定 Sorbet `e47f47cea7b4fca388c5d6745cb5e34c3a6d6786`。该版本也包含下文所述
 的跨进程 Journal writer lease 与 credential mutation lease，并把打包的 Windows SRT helper
 路径显式传给 sandbox readiness 检查。
 
@@ -323,11 +323,11 @@ Lody 已经具备每 Session 的进程监管，因此只要明确处理共享文
 - [Lody Session 进程生命周期](../../../../apps/cli/src/session/session.ts)
 - [Lody 安装数据根目录](../../../../packages/shared/src/node/installation-profile.ts)
 - [Electron CLI runtime staging](../../../../apps/electron/scripts/cli-native-deps.mjs)
-- [Sorbet ACP 入口](https://github.com/LodyAI/Sorbet/blob/369b1d0bf9e5f17d64725b4c9f62be4502144781/packages/acp/src/stdio-cli.ts)
-- [Sorbet Lody 扩展声明](https://github.com/LodyAI/Sorbet/blob/369b1d0bf9e5f17d64725b4c9f62be4502144781/packages/acp/src/agent.ts)
-- [Sorbet 兼容矩阵](https://github.com/LodyAI/Sorbet/blob/369b1d0bf9e5f17d64725b4c9f62be4502144781/packages/acp/COMPATIBILITY.md)
-- [Sorbet NodeAgent 组合](https://github.com/LodyAI/Sorbet/blob/369b1d0bf9e5f17d64725b4c9f62be4502144781/packages/node-agent/src/agent.ts)
-- [Sorbet Session registry](https://github.com/LodyAI/Sorbet/blob/369b1d0bf9e5f17d64725b4c9f62be4502144781/packages/node-agent/src/sessions/registry.ts)
-- [Sorbet JSONL Journal](https://github.com/LodyAI/Sorbet/blob/369b1d0bf9e5f17d64725b4c9f62be4502144781/packages/runtime/src/journal/jsonl-store.ts)
+- [Sorbet ACP 入口](https://github.com/LodyAI/Sorbet/blob/e47f47cea7b4fca388c5d6745cb5e34c3a6d6786/packages/acp/src/stdio-cli.ts)
+- [Sorbet Lody 扩展声明](https://github.com/LodyAI/Sorbet/blob/e47f47cea7b4fca388c5d6745cb5e34c3a6d6786/packages/acp/src/agent.ts)
+- [Sorbet 兼容矩阵](https://github.com/LodyAI/Sorbet/blob/e47f47cea7b4fca388c5d6745cb5e34c3a6d6786/packages/acp/COMPATIBILITY.md)
+- [Sorbet NodeAgent 组合](https://github.com/LodyAI/Sorbet/blob/e47f47cea7b4fca388c5d6745cb5e34c3a6d6786/packages/node-agent/src/agent.ts)
+- [Sorbet Session registry](https://github.com/LodyAI/Sorbet/blob/e47f47cea7b4fca388c5d6745cb5e34c3a6d6786/packages/node-agent/src/sessions/registry.ts)
+- [Sorbet JSONL Journal](https://github.com/LodyAI/Sorbet/blob/e47f47cea7b4fca388c5d6745cb5e34c3a6d6786/packages/runtime/src/journal/jsonl-store.ts)
 - [当前 Pi adapter 生命周期](../../../../packages/acp-extension-pi/README.md)
 - [当前 Pi 原生文件恢复](../../../../packages/acp-extension-pi/src/connection.ts)
