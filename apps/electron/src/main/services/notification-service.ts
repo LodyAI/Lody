@@ -51,6 +51,8 @@ function focusWindow(window: BrowserWindow): void {
 }
 
 export class NotificationService {
+  private readonly activeNotifications = new Set<Notification>()
+
   constructor(private readonly getMainWindow: () => BrowserWindow | null) {}
 
   getPermissionStatus(): GetNotificationPermissionStatusResult {
@@ -160,6 +162,6 @@ export class NotificationService {
       })
     })
 
-    return await showNativeNotification(notification)
+    return await showNativeNotification(notification, this.activeNotifications)
   }
 }
