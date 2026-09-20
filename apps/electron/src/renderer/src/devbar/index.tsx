@@ -5,6 +5,7 @@ import { createClsTracker } from './cls'
 import { isDevbarDeepLink } from './deep-link'
 import { devbarSampleRoute } from './route'
 import { createLongTaskBuffer, type LongTaskEntryLike } from './long-tasks'
+import { ConversationCaptureControl } from './conversation-capture-control'
 import './index.css'
 
 type AppServices = NonNullable<ReturnType<typeof getIpcServices>>['app']
@@ -245,6 +246,7 @@ export function DesktopDevbar(): JSX.Element {
         <span className="desktop-devbar-status" data-status={devframeStatus} aria-hidden="true" />
         Devbar
       </button>
+      <ConversationCaptureControl />
       <span className="desktop-devbar-metrics">
         <DevbarMetric
           label="FPS"

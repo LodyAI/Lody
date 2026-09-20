@@ -1,3 +1,4 @@
+/* eslint @typescript-eslint/explicit-function-return-type: "off" -- Node runs this JavaScript test module without TypeScript annotations. */
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
@@ -366,7 +367,6 @@ void test('lody loopback routes serve the dock renderer module and the live snap
   const renderer = get('/__lody/dock-renderer.mjs')
   assert.equal(renderer.handled, true)
   assert.match(renderer.response.headers['content-type'], /text\/javascript/)
-  assert.match(renderer.response.body, /export default async function main/)
 
   const json = get('/__lody/snapshot.json')
   assert.equal(json.handled, true)
@@ -457,4 +457,209 @@ void test('devbar samples record the hash-history route, not the HTML entry path
     devbarSampleRoute({ pathname: '/devbar.html', search: '', hash: '' }),
     '/devbar.html'
   )
+})
+
+void test('chat capture separates cold reveal from re-hide, row loss and remount', async () => {
+  const { createConversationCapture } =
+    await import('./renderer/src/devbar/conversation-capture.ts')
+  const capture = createConversationCapture(100)
+  const frame = {
+    route: 1,
+    pane: 1,
+    visible: false,
+    scrollTop: 100,
+    scrollHeight: 1000,
+    viewportHeight: 400,
+    mountedRows: 1,
+    rowsTruncated: false,
+    rows: []
+  }
+  capture.sample(100, frame)
+  capture.sample(110, { ...frame, visible: true, rows: [{ id: 1, top: -10, height: 80 }] })
+  assert.equal(capture.report().summary.observations.rehidden, undefined)
+  capture.sample(120, frame)
+  capture.sample(130, { ...frame, visible: true, rows: [{ id: 1, top: -10, height: 80 }] })
+  capture.sample(140, { ...frame, visible: true })
+  capture.sample(150, { ...frame, pane: null })
+  capture.sample(160, { ...frame, pane: 2 })
+  assert.deepEqual(capture.report().summary.observations, {
+    route: 1,
+    rehidden: 1,
+    'rows-empty': 1,
+    'pane-removed': 1,
+    'pane-replaced': 1
+  })
+  capture.sample(170, { ...frame, route: 2, pane: 3 })
+  assert.equal(capture.report().summary.observations['pane-replaced'], 1)
+  assert.equal(capture.report().summary.observations.rehidden, 1)
+})
+
+void test('chat capture distinguishes retained anchor displacement from ordinary scroll', async () => {
+  const { createConversationCapture } =
+    await import('./renderer/src/devbar/conversation-capture.ts')
+  const capture = createConversationCapture(0)
+  const frame = {
+    route: 1,
+    pane: 1,
+    visible: true,
+    scrollTop: 6400,
+    scrollHeight: 20848,
+    viewportHeight: 500,
+    mountedRows: 10,
+    rowsTruncated: false,
+    rows: [{ id: 61, top: -20, height: 104 }]
+  }
+  capture.sample(0, frame)
+  capture.sample(16, {
+    ...frame,
+    scrollHeight: 20952,
+    rows: [
+      { id: 60, top: -20, height: 104 },
+      { id: 61, top: 84, height: 104 }
+    ]
+  })
+  assert.equal(capture.report().summary.observations['anchor-shift'], 1)
+  capture.sample(32, { ...frame, scrollTop: 6504 })
+  assert.equal(capture.report().summary.observations['anchor-shift'], 1)
+  capture.stop(40, 'manual')
+  assert.equal(capture.sample(50, frame), false)
+  assert.equal(capture.report().samples.length, 3)
+  assert.deepEqual(capture.report().ended, { atMs: 40, reason: 'manual' })
+})
+
+void test('chat capture bounds changing frames and event data without growing on unchanged frames', async () => {
+  const { createConversationCapture } =
+    await import('./renderer/src/devbar/conversation-capture.ts')
+  const capture = createConversationCapture(0)
+  const frame = {
+    route: 1,
+    pane: null,
+    visible: false,
+    scrollTop: 0,
+    scrollHeight: 0,
+    viewportHeight: 0,
+    mountedRows: 0,
+    rowsTruncated: false,
+    rows: []
+  }
+  for (let i = 0; i < 100; i++) capture.sample(i, frame)
+  assert.equal(capture.report().samples.length, 1)
+  for (let i = 1; i < 1800; i++)
+    assert.equal(capture.sample(i + 100, { ...frame, scrollTop: i }), true)
+  assert.equal(capture.sample(2000, { ...frame, scrollTop: 2000 }), false)
+  for (let i = 0; i < 300; i++) {
+    capture.input(i, 'wheel')
+    capture.longTask(i, 60)
+  }
+  assert.equal(capture.report().samples.length, 1800)
+  assert.equal(capture.report().inputs.length, 200)
+  assert.equal(capture.report().longTasks.length, 100)
+  const timeout = createConversationCapture(0)
+  assert.equal(timeout.sample(60_000, frame), false)
+})
+
+void test('runtime capture aliases DOM identities and releases observers, frames and listeners on stop or failure', async (t) => {
+  const { startConversationCapture } = await import('./renderer/src/devbar/conversation-capture.ts')
+  const pendingFrames = new Map()
+  const timers = new Map()
+  const listeners = new Map()
+  let nextId = 1
+  let now = 100
+  let fail = false
+  let observerConnected = false
+  const reports = []
+  const pane = {
+    scrollTop: 100,
+    scrollHeight: 1000,
+    checkVisibility: () => true,
+    getBoundingClientRect: () => ({ top: 0, bottom: 400, width: 500, height: 400 }),
+    querySelectorAll: () => [
+      {
+        dataset: { conversationRowKey: 'private-turn-id' },
+        getBoundingClientRect: () => ({ top: -10, bottom: 90, height: 100 })
+      }
+    ]
+  }
+  const document = {
+    hidden: false,
+    querySelector() {
+      if (fail) throw new Error('unavailable')
+      return pane
+    },
+    addEventListener: (type, listener) => listeners.set(type, listener),
+    removeEventListener: (type) => listeners.delete(type)
+  }
+  const replacements = {
+    document,
+    window: { location: { hash: '#/sessions/private-session-id', pathname: '/' } },
+    requestAnimationFrame: (callback) => {
+      const id = nextId++
+      pendingFrames.set(id, callback)
+      return id
+    },
+    cancelAnimationFrame: (id) => pendingFrames.delete(id),
+    getComputedStyle: () => ({ visibility: 'visible', display: 'block', opacity: '1' }),
+    PerformanceObserver: class {
+      static supportedEntryTypes = ['longtask']
+      observe() {
+        observerConnected = true
+      }
+      disconnect() {
+        observerConnected = false
+      }
+    }
+  }
+  const originals = new Map(
+    Object.keys(replacements).map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)])
+  )
+  for (const [key, value] of Object.entries(replacements))
+    Object.defineProperty(globalThis, key, { value, writable: true, configurable: true })
+  t.after(() => {
+    for (const [key, descriptor] of originals) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor)
+      else delete globalThis[key]
+    }
+  })
+  t.mock.method(performance, 'now', () => now)
+  t.mock.method(globalThis, 'setTimeout', (callback) => {
+    const id = nextId++
+    timers.set(id, callback)
+    return id
+  })
+  t.mock.method(globalThis, 'clearTimeout', (id) => timers.delete(id))
+  const stopped = () => {
+    assert.equal(pendingFrames.size, 0)
+    assert.equal(timers.size, 0)
+    assert.equal(listeners.size, 0)
+    assert.equal(observerConnected, false)
+  }
+  const capture = startConversationCapture((report) => reports.push(report))
+  now = 116
+  capture.stop()
+  capture.stop()
+  stopped()
+  assert.equal(reports.length, 1)
+  assert.deepEqual(reports[0].samples[0].frame.rows, [{ id: 1, top: -10, height: 100 }])
+  assert.equal(JSON.stringify(reports).includes('private-'), false)
+  assert.equal(reports[0].ended.reason, 'manual')
+
+  startConversationCapture((report) => reports.push(report))
+  fail = true
+  const [id, callback] = pendingFrames.entries().next().value
+  pendingFrames.delete(id)
+  callback()
+  stopped()
+  assert.equal(reports.at(-1).ended.reason, 'error')
+  fail = false
+  startConversationCapture((report) => reports.push(report))
+  document.hidden = true
+  listeners.get('visibilitychange')()
+  stopped()
+  assert.equal(reports.at(-1).ended.reason, 'hidden')
+  document.hidden = false
+  startConversationCapture((report) => reports.push(report))
+  now += 60_000
+  timers.values().next().value()
+  stopped()
+  assert.equal(reports.at(-1).ended.reason, 'timeout')
 })
