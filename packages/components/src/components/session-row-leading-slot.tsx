@@ -13,6 +13,17 @@ export type SessionRowOpenedByTreeSlot =
   | {
       kind: 'child';
       isLastChild: boolean;
+      /**
+       * First nested row under an opener. Optional: Workspace-mode rows omit it
+       * because every row is one title line. Updated-mode two-line openers pass
+       * this with {@link tallOpener} so the upward trunk still meets the chevron.
+       */
+      isFirstChild?: boolean;
+      /**
+       * Opener is taller than the 30px title-line contract (Updated-mode project
+       * subtitle). Stretch the first child's upward trunk to close the gap.
+       */
+      tallOpener?: boolean;
     };
 
 const TREE_CHILD_SLOT_CLASS = 'w-[26px] justify-start';
@@ -28,6 +39,12 @@ const TREE_LINE_CLASS = 'bg-sidebar-foreground/20';
  * dash per row. Rationale: `.agents/docs/components-sidebar-session-tree.md`.
  */
 const TREE_TRUNK_FROM_PREV_CLASS = '-top-2';
+/**
+ * Extra reach for a first child under a two-line opener (title + project
+ * subtitle with 4px gap and slightly taller padding). 8px (the one-line
+ * contract) + ~20px subtitle block = 28px = `-top-7`.
+ */
+const TREE_TRUNK_FROM_TALL_OPENER_CLASS = '-top-7';
 const TREE_TRUNK_INTO_NEXT_CLASS = '-bottom-[9px]';
 
 /**
@@ -128,7 +145,9 @@ export function SessionRowLeadingSlot({
               'absolute w-px',
               TREE_LINE_CLASS,
               TREE_CONTROL_LEFT_CLASS,
-              TREE_TRUNK_FROM_PREV_CLASS,
+              childTree.isFirstChild && childTree.tallOpener
+                ? TREE_TRUNK_FROM_TALL_OPENER_CLASS
+                : TREE_TRUNK_FROM_PREV_CLASS,
               childTree.isLastChild ? 'bottom-1/2' : TREE_TRUNK_INTO_NEXT_CLASS
             )}
           />

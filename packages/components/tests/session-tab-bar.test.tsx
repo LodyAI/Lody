@@ -7,6 +7,7 @@ import type { MachineId, SessionId, SessionMeta } from '@lody/shared';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { SessionTabBar } from '../src/components/sessions/session-tab-bar';
+import { allocateAdaptiveTabStripLayout } from '../src/components/sessions/adaptive-tab-strip';
 import { useEmptySessionDraft } from '../src/hooks/use-empty-session-draft';
 import { createDraftSessionTab, type DraftSessionTab } from '../src/lib/session-draft-tabs';
 import { TooltipProvider } from '../src/ui/tooltip';
@@ -313,10 +314,11 @@ describe('SessionTabBar rapid-close tab widths', () => {
   const childD: SessionMeta = { ...childSession, id: 'session-child-d' as SessionId };
   const childE: SessionMeta = { ...childSession, id: 'session-child-e' as SessionId };
 
-  let resizeObserverCallback: ResizeObserverCallback | null = null;
   let mockViewportWidth = 800;
   let commits = 0;
   let nextFrameId = 0;
+  let itemIds = ['session-parent'] as string[];
+  let resizeCallback: ResizeObserverCallback | null = null;
   const pendingFrames = new Map<number, FrameRequestCallback>();
 
   beforeEach(() => {
@@ -327,6 +329,8 @@ describe('SessionTabBar rapid-close tab widths', () => {
     mockViewportWidth = 800;
     commits = 0;
     nextFrameId = 0;
+    itemIds = ['session-parent'];
+    resizeCallback = null;
     pendingFrames.clear();
     vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
       const id = ++nextFrameId;
@@ -334,25 +338,63 @@ describe('SessionTabBar rapid-close tab widths', () => {
       return id;
     });
     vi.stubGlobal('cancelAnimationFrame', (id: number) => pendingFrames.delete(id));
-    // The strip measures its viewport through clientWidth; jsdom reports 0.
     Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
       configurable: true,
       get() {
         return mockViewportWidth;
       },
     });
-    resizeObserverCallback = null;
     vi.stubGlobal(
       'ResizeObserver',
       class FakeResizeObserver {
         constructor(callback: ResizeObserverCallback) {
-          resizeObserverCallback = callback;
+          resizeCallback = callback;
         }
         observe() {}
         unobserve() {}
         disconnect() {}
       }
     );
+    // The resting layout belongs to the browser (flex), which jsdom does not
+    // implement. Stand in for it with the integer allocation the strip used to
+    // compute itself, so close-mode geometry has real numbers to freeze.
+    Object.defineProperty(HTMLElement.prototype, 'getBoundingClientRect', {
+      configurable: true,
+      value(this: HTMLElement) {
+        const id = this.getAttribute?.('data-adaptive-tab-strip-item');
+        if (!id) return { width: 0, height: 0, top: 0, left: 0, right: 0, bottom: 0 } as DOMRect;
+        // A frozen item carries an explicit width; everything else is flex.
+        const pinned = parseInt(this.style?.width ?? '', 10);
+        if (Number.isFinite(pinned)) {
+          return {
+            width: pinned,
+            height: 32,
+            top: 0,
+            left: 0,
+            right: pinned,
+            bottom: 32,
+          } as DOMRect;
+        }
+        const layout = allocateAdaptiveTabStripLayout({
+          viewportWidth: mockViewportWidth,
+          itemIds,
+          activeItemId: standInActiveItemId(),
+          gap: 6,
+          paddingLeft: 8,
+          paddingRight: 8,
+          activeMinWidth: 180,
+        });
+        const width = layout.items.find((item) => item.id === id)?.width ?? 0;
+        return {
+          width,
+          height: 32,
+          top: 0,
+          left: 0,
+          right: width,
+          bottom: 32,
+        } as DOMRect;
+      },
+    });
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -365,10 +407,42 @@ describe('SessionTabBar rapid-close tab widths', () => {
     vi.unstubAllGlobals();
   });
 
+  /**
+   * The active item, read from the pinned-min property the renderer sets on
+   * it. The strip marks the active tab by setting
+   * `--tab-active-min-width`, which is also what the stand-in layout needs in
+   * order to mirror the browser's minimum.
+   */
+  function standInActiveItemId(): string | null {
+    for (const item of container.querySelectorAll<HTMLElement>('[data-adaptive-tab-strip-item]')) {
+      if (item.style.getPropertyValue('--tab-active-min-width')) {
+        return item.getAttribute('data-adaptive-tab-strip-item');
+      }
+    }
+    return null;
+  }
+
+  /** Refresh the ids and the stand-in flex layout after a commit. */
+  async function syncLayout() {
+    itemIds = Array.from(
+      container.querySelectorAll<HTMLElement>('[data-adaptive-tab-strip-item]')
+    ).map((item) => item.getAttribute('data-adaptive-tab-strip-item')!);
+    await act(async () => {});
+  }
+
+  /**
+   * Effective item width: the browser's flex result, or — while frozen — the
+   * explicit width the strip pins. jsdom gives every element the same
+   * `mockViewportWidth`, so the stand-in layout is the integer allocation
+   * shared with `captureStripGeometry`.
+   */
   function tabWidths(): number[] {
     return Array.from(
       container.querySelectorAll<HTMLElement>('[data-adaptive-tab-strip-item]')
-    ).map((item) => parseInt(item.style.width, 10));
+    ).map((item) => {
+      const frozen = parseInt(item.style.width, 10);
+      return Number.isFinite(frozen) ? frozen : Math.round(item.getBoundingClientRect().width);
+    });
   }
 
   function itemMargins(): string[] {
@@ -409,8 +483,8 @@ describe('SessionTabBar rapid-close tab widths', () => {
 
   async function resizeTo(width: number) {
     mockViewportWidth = width;
-    await act(async () => resizeObserverCallback?.([], {} as ResizeObserver));
-    await flushFrame();
+    await act(async () => resizeCallback?.([], {} as ResizeObserver));
+    await syncLayout();
   }
 
   async function renderHarness(
@@ -488,21 +562,25 @@ describe('SessionTabBar rapid-close tab widths', () => {
         </Provider>
       )
     );
+    await syncLayout();
   }
 
   async function clickClose(sessionId: string) {
     const button = container.querySelector<HTMLButtonElement>(`#session-tab-${sessionId} button`)!;
     await act(async () => {
-      // Rapid-close mode only arms on a real pointer gesture inside the strip.
+      // Rapid-close mode only arms on a real pointer gesture inside the strip,
+      // which is also when the strip snapshots its painted geometry.
       button.dispatchEvent(new TestPointerEvent('pointerdown', { bubbles: true }));
       button.click();
     });
+    await syncLayout();
   }
 
   async function programmaticClose(sessionId: string) {
     await act(async () =>
       container.querySelector<HTMLButtonElement>(`#session-tab-${sessionId} button`)!.click()
     );
+    await syncLayout();
   }
 
   // Arms the rapid-close gesture without closing anything — the pointerdown on
@@ -511,6 +589,7 @@ describe('SessionTabBar rapid-close tab widths', () => {
     await act(async () => {
       viewport().dispatchEvent(new TestPointerEvent('pointerdown', { bubbles: true }));
     });
+    await syncLayout();
   }
 
   it('keeps surviving tab widths after closing a middle tab while hovered', async () => {
@@ -586,12 +665,15 @@ describe('SessionTabBar rapid-close tab widths', () => {
     expect(tabWidths()).toEqual([145, 180, 145, 145, 145]);
 
     await clickClose(childB.id);
+
     expect(tabWidths()).toEqual([145, 180, 145, 145]);
 
     // Closing the last tab while frozen does not shrink the budget: survivors
     // re-spread over the occupied 648px so the new last tab's right edge —
     // and its close button — stays under the cursor.
+
     await clickClose(childD.id);
+
     expect(tabWidths()).toEqual([207, 207, 207]);
 
     await leaveStrip();
@@ -619,6 +701,25 @@ describe('SessionTabBar rapid-close tab widths', () => {
     await resizeTo(700);
     // 700 - 16px padding - 6px gap = 678, split evenly.
     expect(tabWidths()).toEqual([339, 339]);
+  });
+
+  it('leaves the resting row to flex, with the active minimum pinned', async () => {
+    // The strip paints no widths at rest: `flex: 1 1 0` lets the browser size
+    // the tabs in the same style recalculation as the panel around them, so a
+    // sidebar toggle needs no measurement loop. Only the frozen state pins an
+    // explicit width.
+    await renderHarness([childA, childB, childC], childB.id);
+
+    const items = Array.from(
+      container.querySelectorAll<HTMLElement>('[data-adaptive-tab-strip-item]')
+    );
+    expect(items.every((item) => !item.style.width)).toBe(true);
+    expect(items.every((item) => item.style.flex === '1 1 0px')).toBe(true);
+    // The active tab carries the pinned minimum; the container query on the
+    // viewport decides whether it applies.
+    expect(items[2].style.getPropertyValue('--tab-active-min-width')).toBe('180px');
+    expect(items[0].style.getPropertyValue('--tab-active-min-width')).toBe('');
+    expect(viewport().className).toContain('@container');
   });
 
   it('does not freeze for a programmatic close without a pointer gesture', async () => {
@@ -649,67 +750,22 @@ describe('SessionTabBar rapid-close tab widths', () => {
     expect(tabWidths()).toEqual([192, 192, 191, 191]);
   });
 
-  it('never writes an unfrozen width to the active tab on the removal commit', async () => {
-    // The reported flash: with the SECOND tab active, closing a later tab
-    // briefly painted the active tab at the freshly allocated width before the
-    // frozen layout landed a render later. The freeze is decided during render
-    // now, so the first DOM commit already carries frozen widths — the active
-    // item's inline style must not be written at all.
-    await renderHarness([childA, childB, childC, childD], childA.id);
-    expect(tabWidths()).toEqual([145, 180, 145, 145, 145]);
-
-    const mutations: MutationRecord[] = [];
-    const observer = new MutationObserver((records) => mutations.push(...records));
-    const activeItem = () =>
-      container.querySelector<HTMLElement>('[data-adaptive-tab-strip-item="session-child-a"]')!;
-    observer.observe(activeItem(), {
-      attributes: true,
-      attributeFilter: ['style'],
-      attributeOldValue: true,
-    });
-
-    await clickClose(childC.id);
-    observer.disconnect();
-
-    // Every style state the element held — each record's pre-mutation value
-    // plus the final value — must carry the frozen 180px width. The old
-    // effect-driven freeze let the unfrozen allocation commit first, so the
-    // sequence contained the fresh, unfrozen width before snapping back.
-    const widthOf = (cssText: string | null) => /width:\s*(\d+)px/.exec(cssText ?? '')?.[1];
-    const heldStates = [...mutations.map((record) => record.oldValue), activeItem().style.cssText];
-    expect(heldStates.map(widthOf).every((width) => width === '180')).toBe(true);
-    expect(tabWidths()).toEqual([145, 180, 145, 145]);
-  });
-
-  it('releases the freeze when a tab is added and grows the new tab into place', async () => {
+  it('releases the freeze when a tab is added and lets flex take the row', async () => {
     await renderHarness([childA, childB]);
     await clickClose(childA.id);
     expect(tabWidths()).toEqual([258, 257]);
 
     await act(async () => container.querySelector<HTMLButtonElement>('#add-child')!.click());
-    // The inserted tab animates from zero width like Chromium's insert
-    // animation, then settles into the even relayout.
-    expect(tabWidths()).toEqual([258, 257, 0]);
-    await flushFrame();
+    await syncLayout();
+
+    // An add is not a close gesture: the frozen widths are released and the
+    // row goes back to flex, with no item pinned.
     expect(tabWidths()).toEqual([258, 257, 257]);
-  });
-
-  it('morphs a same-commit substitution from the removed width instead of zero', async () => {
-    await renderHarness([childA, childB, childC, childD], childB.id);
-    // [parent 146, A 146, B 180, C 146, D 146].
-    expect(tabWidths()).toEqual([145, 145, 180, 145, 145]);
-
-    // childE replaces childB at the same index while the selection moves to
-    // childC — the shape of a draft promoting into a session.
-    await act(async () => container.querySelector<HTMLButtonElement>('#replace-child')!.click());
-
-    const itemE = () =>
-      container.querySelector<HTMLElement>('[data-adaptive-tab-strip-item="session-child-e"]')!;
-    // The replacement starts from the removed tab's width, not from zero.
-    expect(itemE().style.width).toBe('180px');
-    await flushFrame();
-    expect(itemE().style.width).toBe('145px');
-    expect(tabWidths()).toEqual([145, 145, 145, 180, 145]);
+    expect(
+      Array.from(container.querySelectorAll<HTMLElement>('[data-adaptive-tab-strip-item]')).every(
+        (item) => item.style.width === ''
+      )
+    ).toBe(true);
   });
 
   it('holds survivor geometry while the active selection moves in a later commit', async () => {
@@ -737,12 +793,15 @@ describe('SessionTabBar rapid-close tab widths', () => {
     expect(container.querySelectorAll('[data-adaptive-tab-strip-item]')).toHaveLength(0);
 
     await act(async () => container.querySelector<HTMLButtonElement>('#open-parent')!.click());
+    await syncLayout();
 
     // A lone tab materializing in an empty strip renders at its final width
-    // directly — there is nothing for a grow-in to read against.
+    // directly — there is nothing for a grow-in to read against — and flex
+    // owns that width.
     const item = container.querySelector<HTMLElement>(
       '[data-adaptive-tab-strip-item="session-parent"]'
     )!;
-    expect(item.style.width).toBe('784px');
+    expect(item.style.width).toBe('');
+    expect(tabWidths()).toEqual([784]);
   });
 });
