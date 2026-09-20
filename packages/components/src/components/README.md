@@ -9,6 +9,11 @@ The sidebar spans `loro-sidebar.tsx`, `loro-app-sidebar.tsx`, `session-list.tsx`
 `sidebar-*.tsx`. `sessions/session-list-rows.ts` resolves row relationships, while
 `lib/session-opened-by-tree.ts` builds the presentation tree.
 
+GitHub repository groups and local project folders both expose a desktop drag handle.
+Their orders are persisted per workspace; local project keys also include the owning
+machine so projects from different devices cannot collide. See the
+[sidebar project ordering Spec](../../../../specs/sidebar-project-ordering.md).
+
 [Sidebar relationship rationale](../../../../.agents/docs/components-sidebar-session-tree.md)
 explains why exact opener navigation and root-row indentation use separate ids.
 A child Tab may open an independent Session: the row sits under the root, but its

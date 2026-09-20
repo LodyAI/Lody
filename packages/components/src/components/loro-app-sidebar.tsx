@@ -1,7 +1,23 @@
 import { openSessionOnModifiedClick } from '@/lib/desktop-window';
 import { SessionWindowMenuItem } from './session-window-menu-item';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { startSessionMentionDrag } from '@/lib/session-mention-drag';
+import {
+  closestCenter,
+  DndContext,
+  type DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { useSidebarKeyboardNav } from '@/hooks/use-sidebar-keyboard-nav';
 import { useLocation, useRouter } from '@tanstack/react-router';
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
@@ -67,6 +83,8 @@ import {
   chatsCollapsedAtom,
   githubWorktreesSectionCollapsedAtom,
   localProjectCollapseStateAtom,
+  localProjectOrderAtom,
+  moveLocalProjectOrder,
   localProjectsSectionCollapseStateAtom,
   pinnedSectionCollapsedAtom,
   repoCollapseStateAtom,
@@ -152,6 +170,7 @@ import {
   LockKeyhole,
   Mail,
   FolderOpen,
+  GripVertical,
   Monitor,
   MoreHorizontal,
   Settings2,
@@ -992,6 +1011,7 @@ export type LocalProjectItemProps = {
   onToggleCollapsed: (machineId: MachineId, localProjectId: LocalProjectId) => void;
   onToggleFullList: (groupKey: string) => void;
   onRequestRemoval: (info: LocalProjectRemovalRequest) => void;
+  dragHandle?: ReactNode;
 };
 
 const hoverActionClassName = cn(
@@ -1067,6 +1087,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
   onToggleCollapsed,
   onToggleFullList,
   onRequestRemoval,
+  dragHandle,
 }: LocalProjectItemProps) {
   const { t } = useTranslation();
   const groupKey = getLocalProjectSessionGroupKey(machineId, project.id);
@@ -1240,7 +1261,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                       </TooltipTrigger>
                       <TooltipContent side="right">{removalStateLabel}</TooltipContent>
                     </Tooltip>
-                  ) : showProjectMenu || showNewChatButton ? (
+                  ) : showProjectMenu || showNewChatButton || dragHandle ? (
                     <div className="flex shrink-0 items-center gap-0.5">
                       {showProjectMenu ? (
                         <button
@@ -1279,6 +1300,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                           <SquarePen className="h-3.5 w-3.5" />
                         </button>
                       ) : null}
+                      {dragHandle}
                     </div>
                   ) : null}
                 </div>
@@ -1430,6 +1452,60 @@ export const LocalProjectItem = memo(function LocalProjectItem({
     </div>
   );
 }, localProjectItemPropsEqual);
+
+const SortableLocalProjectItem = memo(
+  function SortableLocalProjectItem({
+    sortableId,
+    canReorder,
+    ...props
+  }: LocalProjectItemProps & { sortableId: string; canReorder: boolean }) {
+    const { t } = useTranslation();
+    const {
+      attributes,
+      listeners,
+      setNodeRef,
+      setActivatorNodeRef,
+      transform,
+      transition,
+      isDragging,
+    } = useSortable({ id: sortableId, disabled: !canReorder });
+    const constrainedTransform = transform ? { ...transform, x: 0, scaleX: 1, scaleY: 1 } : null;
+    const dragHandle = canReorder ? (
+      <button
+        type="button"
+        ref={setActivatorNodeRef}
+        className={cn(hoverActionClassName, 'cursor-grab touch-none active:cursor-grabbing')}
+        aria-label={t('sidebar.localProjects.reorder', 'Reorder project')}
+        {...attributes}
+        {...listeners}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+      >
+        <GripVertical className="h-3.5 w-3.5" />
+      </button>
+    ) : undefined;
+
+    return (
+      <div
+        ref={setNodeRef}
+        style={{
+          transform: CSS.Transform.toString(constrainedTransform),
+          transition,
+        }}
+        className={cn('w-full', isDragging && 'z-10 opacity-60')}
+        data-local-project-sortable-id={sortableId}
+      >
+        <LocalProjectItem {...props} dragHandle={dragHandle} />
+      </div>
+    );
+  },
+  (prev, next) =>
+    prev.sortableId === next.sortableId &&
+    prev.canReorder === next.canReorder &&
+    localProjectItemPropsEqual(prev, next)
+);
 
 export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   const { t, i18n } = useTranslation();
@@ -1861,6 +1937,13 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   const [localProjectCollapseState, setLocalProjectCollapseState] = useAtom(
     localProjectCollapseStateAtom
   );
+  const [localProjectOrder, setLocalProjectOrder] = useAtom(localProjectOrderAtom);
+  const localProjectOrderRef = useRef(localProjectOrder);
+  localProjectOrderRef.current = localProjectOrder;
+  const localProjectSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
   const [showFullSessionGroups, setShowFullSessionGroups] = useAtom(sidebarShowFullListAtom);
   // Shared with SessionList (same atom) so an opener collapsed in one sidebar
   // surface stays collapsed in the other, and with the keyboard nav model so
@@ -2201,9 +2284,18 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     // should not appear in the sidebar.
     const showLocalSection = localSection && localSection.projects.length > 0;
 
+    const savedRank = new Map(localProjectOrder.map((key, index) => [key, index]));
     return [...(showLocalSection ? [localSection] : []), ...remoteSections].map((section) => ({
       ...section,
       projects: [...section.projects].sort((a, b) => {
+        const machineId = section.machineId;
+        const aRank = machineId ? savedRank.get(`${machineId}:${a.id}`) : undefined;
+        const bRank = machineId ? savedRank.get(`${machineId}:${b.id}`) : undefined;
+        if (aRank !== undefined || bRank !== undefined) {
+          if (aRank === undefined) return 1;
+          if (bRank === undefined) return -1;
+          if (aRank !== bRank) return aRank - bRank;
+        }
         const aTime = typeof a.createdAtMs === 'number' ? a.createdAtMs : 0;
         const bTime = typeof b.createdAtMs === 'number' ? b.createdAtMs : 0;
         if (aTime !== bTime) return aTime - bTime;
@@ -2212,6 +2304,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     }));
   }, [
     localMachineId,
+    localProjectOrder,
     machineMetaMap,
     pendingLocalProjectRemovals,
     sessionsListLoading,
@@ -2219,6 +2312,43 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     userId,
     visibleLocalProjectMap,
   ]);
+
+  // Register newly visible projects without deleting saved entries. A project
+  // may disappear briefly while its machine reconnects; retaining the key
+  // keeps its chosen position when the catalog returns.
+  useEffect(() => {
+    if (sessionsListLoading) return;
+    const prevOrder = localProjectOrderRef.current;
+    const known = new Set(prevOrder);
+    const discovered: string[] = [];
+    for (const section of localProjectSections) {
+      if (!section.machineId) continue;
+      for (const project of section.projects) {
+        const key = `${section.machineId}:${project.id}`;
+        if (known.has(key)) continue;
+        known.add(key);
+        discovered.push(key);
+      }
+    }
+    if (discovered.length > 0) setLocalProjectOrder([...prevOrder, ...discovered]);
+  }, [localProjectSections, sessionsListLoading, setLocalProjectOrder]);
+
+  const handleMoveLocalProject = useCallback(
+    (sectionProjectKeys: readonly string[], event: DragEndEvent) => {
+      const overId = event.over?.id;
+      if (!overId) return;
+      const activeKey = String(event.active.id);
+      const overKey = String(overId);
+      const nextOrder = moveLocalProjectOrder(
+        localProjectOrderRef.current,
+        sectionProjectKeys,
+        activeKey,
+        overKey
+      );
+      if (nextOrder) setLocalProjectOrder(nextOrder);
+    },
+    [setLocalProjectOrder]
+  );
 
   // Build one complete, mode-independent row model first. Pinned sessions are
   // split from this model below so Workspace and Updated cannot accidentally
@@ -2417,6 +2547,10 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       <div>
         {localProjectSections.map((section, sectionIndex) => {
           const sectionCollapsed = localProjectsSectionCollapseState[section.sectionKey] ?? false;
+          const sectionProjectKeys = section.machineId
+            ? section.projects.map((project) => `${section.machineId}:${project.id}`)
+            : [];
+          const canReorderProjects = !isMobile && sectionProjectKeys.length > 1;
           const headerFilter = sectionIndex === 0 ? sidebarFilterPlaceholder : null;
           const dividerRight =
             section.canImport && isElectron ? (
@@ -2464,80 +2598,96 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
               />
 
               {sectionCollapsed ? null : (
-                <div className="space-y-0.5">
-                  {section.projects.map((project) => {
-                    const machineId = section.machineId;
-                    if (!machineId) return null;
-                    const projectKey = `${machineId}:${project.id}`;
-                    const collapsed = localProjectCollapseState[projectKey] ?? false;
-                    const sessionGroupKey = getLocalProjectSessionGroupKey(machineId, project.id);
-                    const sessionsForProject =
-                      workspaceLocalProjectSessionsByKey.get(projectKey) ?? [];
-                    const isSelected = projectKey === selectedLocalProjectKey;
-                    const rootPath =
-                      typeof project.rootPath === 'string' ? project.rootPath.trim() : '';
-                    const formattedPath = rootPath ? rootPath : null;
+                <DndContext
+                  sensors={localProjectSensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={(event) => handleMoveLocalProject(sectionProjectKeys, event)}
+                >
+                  <SortableContext
+                    items={sectionProjectKeys}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    <div className="space-y-0.5">
+                      {section.projects.map((project) => {
+                        const machineId = section.machineId;
+                        if (!machineId) return null;
+                        const projectKey = `${machineId}:${project.id}`;
+                        const collapsed = localProjectCollapseState[projectKey] ?? false;
+                        const sessionGroupKey = getLocalProjectSessionGroupKey(
+                          machineId,
+                          project.id
+                        );
+                        const sessionsForProject =
+                          workspaceLocalProjectSessionsByKey.get(projectKey) ?? [];
+                        const isSelected = projectKey === selectedLocalProjectKey;
+                        const rootPath =
+                          typeof project.rootPath === 'string' ? project.rootPath.trim() : '';
+                        const formattedPath = rootPath ? rootPath : null;
 
-                    return (
-                      <LocalProjectItem
-                        key={project.id}
-                        machineId={machineId}
-                        machineName={section.machineDisplayName}
-                        project={project}
-                        canRemoveProject={section.canRemoveProject}
-                        removalState={
-                          pendingLocalProjectRemovals.has(projectKey)
-                            ? onlineMachineIds.has(machineId)
-                              ? 'removing'
-                              : 'waiting_for_device'
-                            : null
-                        }
-                        collapsed={collapsed}
-                        whetherShowFullList={showFullSessionGroups[sessionGroupKey] ?? false}
-                        isSelected={isSelected}
-                        sessionsForProject={sessionsForProject}
-                        childSessionsByParent={childSessionsByParent}
-                        liveSessionStatuses={liveSessionStatuses}
-                        resolveSessionAuthor={resolveSessionAuthor}
-                        formattedPath={formattedPath}
-                        defaultSessionTitle={defaultSessionTitle}
-                        selectedSessionId={selectedSessionId}
-                        removeProjectLabel={removeProjectLabel}
-                        newChatLabel={newChatLabel}
-                        archiveTooltipLabel={archiveTooltipLabel}
-                        archiveActionLabel={archiveActionLabel}
-                        archiveConfirmLabel={archiveConfirmLabel}
-                        isMobile={isMobile}
-                        toggleLabel={toggleLabel}
-                        onNavigateProject={handleNavigateToProject}
-                        // New Chat selects a target; it must not fork or clear
-                        // the workspace-owned Chat Landing draft.
-                        onNewChatInProject={handleNavigateToProject}
-                        onOpenProjectSettings={handleOpenProjectSettings}
-                        onRevealProject={
-                          isElectron && machineId === localMachineId
-                            ? handleRevealProject
-                            : undefined
-                        }
-                        onArchiveProjectChats={handleArchiveProjectChats}
-                        onNavigateSession={handleNavigateToSession}
-                        onArchive={handleArchiveSession}
-                        onMarkSessionUnread={handleMarkSessionUnread}
-                        onRenameSession={handleRenameSession}
-                        onToggleSessionPinned={handleTogglePinSession}
-                        onCopySessionUrl={handleCopySessionUrl}
-                        onShareSessionWithTeam={handleRequestShareSession}
-                        sessionSharingById={sessionSharingById}
-                        collapsedOpenedBySessionIds={collapsedOpenedBySessionIds}
-                        onToggleOpenedBySessions={handleToggleOpenedBySessions}
-                        resolveOpenerRowId={resolveOpenerRowId}
-                        onToggleCollapsed={toggleLocalProjectCollapsed}
-                        onToggleFullList={handleToggleLocalProjectFullList}
-                        onRequestRemoval={handleRequestRemoval}
-                      />
-                    );
-                  })}
-                </div>
+                        return (
+                          <SortableLocalProjectItem
+                            key={project.id}
+                            sortableId={projectKey}
+                            canReorder={canReorderProjects}
+                            machineId={machineId}
+                            machineName={section.machineDisplayName}
+                            project={project}
+                            canRemoveProject={section.canRemoveProject}
+                            removalState={
+                              pendingLocalProjectRemovals.has(projectKey)
+                                ? onlineMachineIds.has(machineId)
+                                  ? 'removing'
+                                  : 'waiting_for_device'
+                                : null
+                            }
+                            collapsed={collapsed}
+                            whetherShowFullList={showFullSessionGroups[sessionGroupKey] ?? false}
+                            isSelected={isSelected}
+                            sessionsForProject={sessionsForProject}
+                            childSessionsByParent={childSessionsByParent}
+                            liveSessionStatuses={liveSessionStatuses}
+                            resolveSessionAuthor={resolveSessionAuthor}
+                            formattedPath={formattedPath}
+                            defaultSessionTitle={defaultSessionTitle}
+                            selectedSessionId={selectedSessionId}
+                            removeProjectLabel={removeProjectLabel}
+                            newChatLabel={newChatLabel}
+                            archiveTooltipLabel={archiveTooltipLabel}
+                            archiveActionLabel={archiveActionLabel}
+                            archiveConfirmLabel={archiveConfirmLabel}
+                            isMobile={isMobile}
+                            toggleLabel={toggleLabel}
+                            onNavigateProject={handleNavigateToProject}
+                            // New Chat selects a target; it must not fork or clear
+                            // the workspace-owned Chat Landing draft.
+                            onNewChatInProject={handleNavigateToProject}
+                            onOpenProjectSettings={handleOpenProjectSettings}
+                            onRevealProject={
+                              isElectron && machineId === localMachineId
+                                ? handleRevealProject
+                                : undefined
+                            }
+                            onArchiveProjectChats={handleArchiveProjectChats}
+                            onNavigateSession={handleNavigateToSession}
+                            onArchive={handleArchiveSession}
+                            onMarkSessionUnread={handleMarkSessionUnread}
+                            onRenameSession={handleRenameSession}
+                            onToggleSessionPinned={handleTogglePinSession}
+                            onCopySessionUrl={handleCopySessionUrl}
+                            onShareSessionWithTeam={handleRequestShareSession}
+                            sessionSharingById={sessionSharingById}
+                            collapsedOpenedBySessionIds={collapsedOpenedBySessionIds}
+                            onToggleOpenedBySessions={handleToggleOpenedBySessions}
+                            resolveOpenerRowId={resolveOpenerRowId}
+                            onToggleCollapsed={toggleLocalProjectCollapsed}
+                            onToggleFullList={handleToggleLocalProjectFullList}
+                            onRequestRemoval={handleRequestRemoval}
+                          />
+                        );
+                      })}
+                    </div>
+                  </SortableContext>
+                </DndContext>
               )}
             </div>
           );
