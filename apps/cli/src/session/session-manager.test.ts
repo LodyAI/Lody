@@ -912,6 +912,122 @@ describe('SessionManager durable create ownership', () => {
     await expect(result).resolves.toBe(session);
     expect(manager.getPendingSession(sessionId)).toBeNull();
   });
+
+  const buildOwnershipManager = () =>
+    new SessionManager(
+      createLogger(),
+      'token',
+      'machine-1' as MachineId,
+      'workspace-1' as WorkspaceId,
+      createWorkspaceDocument(new Map()),
+      {
+        sessionSandboxFactory: async () => createNoopSessionSandbox(),
+        cloudPort: createTestCloudPort(),
+      }
+    );
+
+  it('hands a retry a fresh create after a wedged one is abandoned', async () => {
+    const manager = buildOwnershipManager();
+    const sessionId = 'wedged-create-session' as SessionId;
+    const attempts: Array<ReturnType<typeof deferred<ISession>>> = [];
+    // A create wedged inside a managed-runtime install or ACP startup: the
+    // first attempt's promise is never resolved by this test.
+    const createFromPreparationOrCold = vi.fn(async () => {
+      const pending = deferred<ISession>();
+      attempts.push(pending);
+      return await pending.promise;
+    });
+    (
+      manager as unknown as {
+        createSessionFromPreparationOrCold: typeof createFromPreparationOrCold;
+      }
+    ).createSessionFromPreparationOrCold = createFromPreparationOrCold;
+    const config = createSessionConfig({ sessionId });
+
+    void manager.createSession(config).catch(() => undefined);
+    await Promise.resolve();
+    const wedged = manager.getPendingSession(sessionId);
+    expect(wedged).not.toBeNull();
+
+    // Deduplication hands a naive retry the very same wedged promise, so it
+    // would stall exactly like the first attempt.
+    void manager.createSession(config).catch(() => undefined);
+    await Promise.resolve();
+    expect(manager.getPendingSession(sessionId)).toBe(wedged);
+
+    expect(manager.abandonPendingSessionCreate(sessionId, 'initialization-stalled')).toBe(true);
+    expect(manager.getPendingSession(sessionId)).toBeNull();
+
+    // The retry now reaches a genuinely new create and completes, which is the
+    // self-healing the stall watchdog promises.
+    const retry = manager.createSession(config);
+    await Promise.resolve();
+    expect(manager.getPendingSession(sessionId)).not.toBe(wedged);
+    const retrySession = {
+      sessionId,
+      terminate: vi.fn(async () => undefined),
+    } as unknown as ISession;
+    attempts[1]?.resolve(retrySession);
+    await expect(retry).resolves.toBe(retrySession);
+  });
+
+  it('terminates a session that materializes from an abandoned create', async () => {
+    const manager = buildOwnershipManager();
+    const sessionId = 'late-create-session' as SessionId;
+    const created = deferred<ISession>();
+    const createFromPreparationOrCold = vi.fn(async () => await created.promise);
+    (
+      manager as unknown as {
+        createSessionFromPreparationOrCold: typeof createFromPreparationOrCold;
+      }
+    ).createSessionFromPreparationOrCold = createFromPreparationOrCold;
+
+    void manager.createSession(createSessionConfig({ sessionId })).catch(() => undefined);
+    await Promise.resolve();
+    expect(manager.abandonPendingSessionCreate(sessionId, 'initialization-stalled')).toBe(true);
+
+    // The abandoned create wins the race after nobody is waiting for it. Its
+    // Session was never handed to a caller, so it must not survive as an orphan.
+    const terminate = vi.fn(async () => undefined);
+    created.resolve({ sessionId, terminate } as unknown as ISession);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(terminate).toHaveBeenCalledWith(true);
+  });
+
+  it('reports no entry to abandon when the create already settled', async () => {
+    const manager = buildOwnershipManager();
+    const sessionId = 'settled-create-session' as SessionId;
+    expect(manager.abandonPendingSessionCreate(sessionId, 'initialization-stalled')).toBe(false);
+  });
+
+  it('stops waiting on a wedged create instead of hanging teardown', async () => {
+    vi.useFakeTimers();
+    try {
+      const manager = buildOwnershipManager();
+      const sessionId = 'wedged-terminate-session' as SessionId;
+      (
+        manager as unknown as {
+          pendingSessionCreates: Map<SessionId, Promise<ISession>>;
+        }
+      ).pendingSessionCreates.set(sessionId, new Promise<ISession>(() => {}));
+
+      const result = manager.requestSessionTerminate(sessionId);
+      let settled = false;
+      void result.then(() => {
+        settled = true;
+      });
+      await Promise.resolve();
+      expect(settled).toBe(false);
+
+      // Teardown gives the create its deadline and then detaches, rather than
+      // waiting on a promise that will never settle.
+      await vi.advanceTimersByTimeAsync(300_000);
+      await expect(result).resolves.toBe('terminated');
+      expect(manager.getPendingSession(sessionId)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('SessionManager preparation compatibility', () => {

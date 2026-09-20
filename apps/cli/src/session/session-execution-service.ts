@@ -101,7 +101,10 @@ import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 import { startTraceSpan, traceAsync } from '@/utils/trace-span';
 import { captureCli } from '@/lib/analytics/posthog';
-import type { SessionActivePresencePhase } from '@/lib/loro/session-active-presence';
+import type {
+  SessionActivePresencePhase,
+  SessionInitializationStall,
+} from '@/lib/loro/session-active-presence';
 import type { SessionConfig } from './types';
 import type { ISession, SessionManager } from './session-manager';
 import type { LoroDocumentManager, SessionDocument } from '@/lib/loro/doc';
@@ -305,6 +308,14 @@ type TurnRuntimeState = {
   /** Serialized ancillary finalization for yielded logical turns. */
   yieldedFinalization: Promise<void>;
   pendingSession?: Promise<ISession>;
+  /**
+   * Latched when the initialization stall watchdog halted this turn. The halt is
+   * a FAILURE, not a cancellation, so the scope finalizer takes
+   * `finalizeStalledInitializationEffect` instead of
+   * `finalizeCancelledTurnEffect` — the race interrupts the losing body fiber,
+   * which would otherwise read as a user cancellation.
+   */
+  initializationStalled: boolean;
   fiber?: Fiber.RuntimeFiber<unknown, unknown>;
 };
 
@@ -451,6 +462,20 @@ class SessionTurnCancelled extends Data.TaggedError('SessionTurnCancelled')<{
   sessionId: SessionId;
   turnId: string;
 }> {}
+
+/**
+ * User-visible copy for a turn stopped by the initialization stall watchdog.
+ * Names the stage that went silent and how long it was given, so the message is
+ * actionable rather than a bare "initialization failed".
+ */
+const formatInitializationStallMessage = (stall: SessionInitializationStall): string => {
+  const seconds = (ms: number) => Math.round(ms / 1000);
+  return (
+    `Session initialization stopped making progress while ${stall.description}: ` +
+    `no change for ${seconds(stall.stalledMs)}s (limit ${seconds(stall.budgetMs)}s). ` +
+    'The turn was stopped instead of waiting indefinitely; send it again to retry.'
+  );
+};
 
 class SessionTurnHalted extends Data.TaggedError('SessionTurnHalted')<{
   sessionId: SessionId;
@@ -753,6 +778,15 @@ export class SessionExecutionService {
   private readonly canceledTurnBySession = new Map<SessionId, string>();
   private readonly currentTurnBySession = new Map<SessionId, string>();
   private readonly turnRuntimeBySession = new Map<SessionId, TurnRuntimeState>();
+  /**
+   * One waiter per session while a visible turn is initializing; see
+   * {@link awaitInitializationStall}. Registered for the whole turn because the
+   * watchdog only ever fires while the published status is `initializing`.
+   */
+  private readonly initializationStallWaiters = new Map<
+    SessionId,
+    (stall: SessionInitializationStall) => void
+  >();
   private readonly rewriteBarrierSessions = new Set<SessionId>();
   private readonly rewriteConflictLeaseSessions = new Set<SessionId>();
   private readonly turnReleaseWaiters = new Map<SessionId, Map<string, Set<() => void>>>();
@@ -2063,6 +2097,7 @@ export class SessionExecutionService {
       cancelFinalized: false,
       interruptRequested: false,
       terminateSessionOnCancel: false,
+      initializationStalled: false,
       ...(options.onTurnSettled
         ? { settlement: { callback: options.onTurnSettled, completed: false } }
         : {}),
@@ -2244,6 +2279,58 @@ export class SessionExecutionService {
       });
   }
 
+  /**
+   * Release what a stalled initialization was holding.
+   *
+   * The stall is a failure, not a cancellation, so it must not go through
+   * `finalizeCancelledTurnEffect` — that would mark the user's turn cancelled.
+   * But that finalizer also owned the pending-create cleanup, and the stall is
+   * the first halt that can land WHILE `SessionManager.createSession` is still
+   * in flight, so the release has to happen here instead.
+   *
+   * Detaching matters more than terminating: the create is cached in
+   * `pendingSessionCreates` keyed by session id, so leaving it there hands the
+   * user's retry the very same wedged promise and stalls it again — the
+   * documented retry path would not actually recover. Nothing here awaits the
+   * wedged promise; if it ever settles, the manager's reaper terminates the
+   * Session it produced.
+   */
+  private finalizeStalledInitializationEffect(
+    runtime: TurnRuntimeState
+  ): Effect.Effect<void, never, never> {
+    const self = this;
+    return Effect.gen(function* () {
+      self.deps.clearActiveTurnId(runtime.sessionId, runtime.turnId);
+
+      // A Session that already materialized is owned by this turn and nobody
+      // else will stop it.
+      const session = runtime.session;
+      if (session) {
+        yield* self.ignoreWithWarning(
+          runtime.sessionId,
+          'Failed to terminate session after initialization stalled',
+          self.tryPromise(() => session.terminate(true))
+        );
+        return;
+      }
+
+      const detached = self.deps.sessionManager.abandonPendingSessionCreate(
+        runtime.sessionId,
+        'initialization-stalled'
+      );
+      if (detached || !runtime.pendingSession) {
+        return;
+      }
+      // The pending promise did not come from the dedupe map (nothing to
+      // detach), so reap it directly rather than leaving a possible orphan.
+      self.terminatePendingSessionWhenReady({
+        sessionId: runtime.sessionId,
+        turnId: runtime.turnId,
+        pendingSession: runtime.pendingSession,
+      });
+    });
+  }
+
   private drainCancelledPrompt(session: ISession, runtime?: TurnRuntimeState): Promise<void> {
     if (runtime?.cancellationDrain) return runtime.cancellationDrain;
     const requests = () =>
@@ -2309,6 +2396,67 @@ export class SessionExecutionService {
       ).pipe(Effect.asVoid),
       release,
     };
+  }
+
+  /**
+   * Fail a visible turn whose initialization stopped making progress.
+   *
+   * Called by `SessionActivePresenceController`'s stall watchdog. Resolving the
+   * waiter makes {@link awaitInitializationStall} win its race against the turn
+   * body, which records a user-visible `session_init_failed` and closes the turn
+   * scope — releasing presence, the ACP replay suppression, and the runtime
+   * registration that would otherwise keep the session un-collectable forever.
+   */
+  notifyInitializationStalled(sessionId: SessionId, stall: SessionInitializationStall): void {
+    const runtime = this.turnRuntimeBySession.get(sessionId);
+    if (runtime) {
+      runtime.initializationStalled = true;
+    }
+    const waiter = this.initializationStallWaiters.get(sessionId);
+    if (!waiter) {
+      // Presence is only ever started inside a visible turn, so this means the
+      // turn settled between the watchdog tick and this call. Nothing to fail.
+      this.deps.logger.debug(
+        `[${sessionId}] Initialization stall reported with no owning turn; ignoring`
+      );
+      return;
+    }
+    waiter(stall);
+  }
+
+  /**
+   * Never completes unless the initialization stall watchdog fires, at which
+   * point it records the user-visible failure and halts the turn. Raced against
+   * the turn body so a dependency that never returns — the observed case was a
+   * cloud identity lookup that hung for 1h51m — cannot pin the turn open.
+   */
+  private awaitInitializationStall(
+    sessionId: SessionId,
+    sessionDoc: SessionDocument,
+    runtime: TurnRuntimeState
+  ): Effect.Effect<never, unknown, never> {
+    return Effect.async<SessionInitializationStall, never>((resume) => {
+      const waiter = (stall: SessionInitializationStall): void => {
+        resume(Effect.succeed(stall));
+      };
+      this.initializationStallWaiters.set(sessionId, waiter);
+      return Effect.sync(() => {
+        // A newer turn may already own the slot; only retract our own waiter.
+        if (this.initializationStallWaiters.get(sessionId) === waiter) {
+          this.initializationStallWaiters.delete(sessionId);
+        }
+      });
+    }).pipe(
+      Effect.flatMap((stall) =>
+        this.recordKnownChatFailureAndHaltEffect({
+          sessionId,
+          sessionDoc,
+          userTurnId: runtime.userTurnId,
+          reason: 'session_init_failed',
+          message: formatInitializationStallMessage(stall),
+        })
+      )
+    );
   }
 
   private acquireSessionActivePresence(
@@ -3215,7 +3363,9 @@ export class SessionExecutionService {
             turnRuntime.cancelRequested ||
             self.isTurnCancelled(sessionId, turnRuntime.turnId) ||
             wasInterrupted;
-          if (wasCancelled) {
+          if (turnRuntime.initializationStalled) {
+            yield* self.finalizeStalledInitializationEffect(turnRuntime);
+          } else if (wasCancelled) {
             yield* self.finalizeCancelledTurnEffect({
               sessionId,
               sessionDoc,
@@ -3458,16 +3608,23 @@ export class SessionExecutionService {
                 return undefined;
               });
 
-            yield* body({
-              turnId: runtime.turnId,
-              runtime,
-              setUnhandledErrorContext,
-              bindSession,
-              trackPendingSession,
-              abortIfCancelled,
-              openAssistantEntry,
-              prompt,
-            });
+            // Bound the whole turn against the initialization stall watchdog.
+            // The watchdog only ever fires while the published presence status
+            // is `initializing`, so a turn that reaches `running` races against
+            // an effect that never completes and pays nothing.
+            yield* Effect.raceFirst(
+              body({
+                turnId: runtime.turnId,
+                runtime,
+                setUnhandledErrorContext,
+                bindSession,
+                trackPendingSession,
+                abortIfCancelled,
+                openAssistantEntry,
+                prompt,
+              }),
+              self.awaitInitializationStall(sessionId, sessionDoc, runtime)
+            );
           })
         )
       )

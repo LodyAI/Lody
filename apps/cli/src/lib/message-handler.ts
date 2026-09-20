@@ -2846,7 +2846,13 @@ export class MessageHandler {
     this.sessionActivePresence = new SessionActivePresenceController(
       this.workspaceDocument,
       this.machineId,
-      this.logger
+      this.logger,
+      {
+        // Late-bound: the execution service is constructed further down this
+        // constructor, and the watchdog can only fire once a turn is running.
+        onInitializationStalled: (sessionId, stall) =>
+          this.executionService.notifyInitializationStalled(sessionId, stall),
+      }
     );
     this.supportRegistryAgentTypes = config.supportRegistryAgentTypes ?? [];
     this.closeSessionTerminals = config.closeSessionTerminals;
