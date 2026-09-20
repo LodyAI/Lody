@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-09-20-dsh-user-questions.md)
 
+PR: [Lody #840](https://github.com/LodyAI/Lody/pull/840)
+
 ## 摘要
 
 Harness preset 已提供 `ask_user_question`，但 ACP adapter 没有 answerer，调用会以
