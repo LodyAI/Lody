@@ -25,6 +25,8 @@
     "./kbd": "./src/kbd/kbd.tsx",
     "./menu": "./src/menu/menu.tsx",
     "./menubar": "./src/menu/menubar.tsx",
+    "./number-field": "./src/field/number-field.tsx",
+    "./password-input": "./src/field/password-input.tsx",
     "./popover": "./src/popover/popover.tsx",
     "./popup-container": "./src/popup/portal-container.tsx",
     "./progress": "./src/feedback/progress.tsx",

@@ -10,7 +10,7 @@ behavior.
 | `src/tokens`        | Semantic color, type, spacing, motion, radius, and elevation tokens                                           |
 | `src/theme`         | Applies light or dark StyleX themes to a subtree                                                              |
 | `src/button`        | Base UI Button behavior and Lody variants, sizes, tones, and shapes                                           |
-| `src/field`         | Base UI Field composition: label, Input, Textarea, Checkbox, Radio, Switch, Select, Combobox, help, and error |
+| `src/field`         | Base UI Field composition: label, Input, Textarea, NumberField, PasswordInput, Checkbox, Radio, Switch, Select, Combobox, help, and error |
 | `src/popup`         | The floating surface a list, a menu or a popover opens on, and its tokens                                     |
 | `src/menu`          | Menu, ContextMenu and Menubar: commands on that surface                                                       |
 | `src/popover`       | The same surface holding content rather than rows                                                             |
@@ -91,6 +91,60 @@ const themes = [
 the whole control; inside a `Combobox.InputGroup` the group is the well and the
 input is bare, so a chevron beside it lands inside one control rather than beside
 a second one.
+
+`NumberField` is a range rather than a text control that happens to hold digits.
+The root owns `min`, `max` and `step`, clamps what the steppers and the arrow
+keys do, and reports a `number | null` — so a surface never parses
+`event.target.value`, never writes its own clamp, and never sees the `1` a person
+typed on the way to `14`. `null` is the box empty mid-edit, which a caller either
+ignores or reads as its own zero.
+
+```tsx
+<Field.Root>
+  <Field.Label>Conversation font size</Field.Label>
+  <NumberField.Root value={size} min={9} max={24} step={1} onValueChange={onSize}>
+    <NumberField.Group>
+      <NumberField.Input />
+      <NumberField.Decrement aria-label={t('settings.fontSize.decrease')} />
+      <NumberField.Increment aria-label={t('settings.fontSize.increase')} />
+    </NumberField.Group>
+  </NumberField.Root>
+</Field.Root>
+```
+
+The group is the well and the input inside it is bare, the way a
+`Combobox.InputGroup` holds its chevron. A value somebody nudges up and down
+takes the steppers; a value typed once — a budget, a threshold — takes
+`NumberField.Input` on its own, and the input is then the whole control. Base UI
+names the steppers "Increase" and "Decrease" in English and keeps them out of
+the tab order, so a localised surface passes its own `aria-label` and a keyboard
+uses the arrow keys instead. It also marks an invalid number field `data-invalid`
+without ever saying `aria-invalid`; `NumberField.Input` states that itself, since
+this package's rule is that the ring and what a screen reader announces are one
+fact.
+
+`PasswordInput` is a secret and the control that reveals it, sharing one well:
+a reveal beside the control would be a second control, and the ring would then
+say which of the two has focus rather than that the field does. It is the one
+control here with no Base UI primitive under it, so the input builds its own
+shell out of its own `render` — which is how the input stays the field's one
+control, so a `Field.Label` still points at it, and how a `Field.Root disabled`
+reaches the eye and not only the value.
+
+```tsx
+<Field.Root>
+  <Field.Label>Password</Field.Label>
+  <PasswordInput
+    autoComplete="new-password"
+    labels={{ show: t('login.showPassword'), hide: t('login.hidePassword') }}
+  />
+</Field.Root>
+```
+
+Whether the password is showing is the control's own state and never a prop: it
+is a glance, not a setting, and a surface that could set it could persist "show
+me the password". `className` lands on the shell, which is the control, and
+`inputClassName` on the value inside it.
 
 A `Menu` is that same floating surface with commands on it. It is also the
 dropdown menu: Base UI has no separate part for one, so a second name would be a
@@ -714,7 +768,10 @@ that carries an inversion across a surface are recorded in the
 [UI avatar and kbd note](../../.agents/notes/implemented/feature/2026-09-13-ui-avatar-kbd.md);
 the well a pressed control sinks into, the set that is not a strip, and the bar
 that draws nothing are recorded in the
-[UI toggle and toolbar note](../../.agents/notes/implemented/feature/2026-09-15-ui-toggle-toolbar.md).
+[UI toggle and toolbar note](../../.agents/notes/implemented/feature/2026-09-15-ui-toggle-toolbar.md);
+the range that clamps itself, the shell an input builds out of its own `render`,
+and the two Base UI gaps they close are recorded in the
+[UI number and password fields note](../../.agents/notes/implemented/feature/2026-09-20-ui-number-password-fields.md).
 
 Open the gallery with `pnpm storybook` and pick _Design System / UI Gallery_.
 It renders each sample once per palette and reads its values back off the

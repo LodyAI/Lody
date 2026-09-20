@@ -39,6 +39,27 @@ they can see which one it is, and the row they are on is marked separately,
 because those are two different facts. A list that is open reports what it is to
 a screen reader, and a control tells one which list it opens.
 
+The composition also provides a control for a number and a control for a
+password. A number is a range rather than a text control that happens to hold
+digits: the control owns the smallest and largest values it will take and the
+step it moves in, keeps what a person enters inside that range, and reports the
+number itself rather than the text of it, so a surface neither parses what was
+typed nor writes its own limit. A person moves the value with the keyboard, and
+where it is worth nudging, with a control at each end of the field; those two
+controls are outside the keyboard's path, because the arrow keys already do
+what they do, and each is named in the language the surface is running in. A
+number that is outside its range says so to a screen reader and not only
+through its appearance.
+
+A password is masked until the person asks to see it, and the control that
+reveals it shares one field with the value rather than standing beside it as a
+second control: focus belongs to the field, not to one half of it. Whether the
+password is showing belongs to the control and lasts as long as the person is
+looking at it; no surface can set it, store it, or restore it. The reveal is
+named in both of its states — what it will do next, not what the field is doing
+— and a field that is disabled disables the reveal with the value, so nothing
+in it looks usable when it is not.
+
 A surface that owns a modal states where the popups inside it belong. A modal
 holds the keyboard and the scroll inside its panel, so a list that opens outside
 that panel is unreachable in it; the surface names the panel once and the lists
@@ -404,3 +425,7 @@ The sunken place a pressed control goes into rather than filling with ink, the
 set of them that is not the strip of choices, and the row that draws nothing and
 exists for the keyboard are recorded in the
 [UI toggle and toolbar note](../.agents/notes/implemented/feature/2026-09-15-ui-toggle-toolbar.md).
+The range that keeps its own limits, the field a password builds around its own
+value, and the two things the library underneath leaves unsaid are recorded in
+the
+[UI number and password fields note](../.agents/notes/implemented/feature/2026-09-20-ui-number-password-fields.md).

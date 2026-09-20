@@ -141,3 +141,54 @@ export function WarningGlyph() {
     </svg>
   );
 }
+
+/** One step down on a number field's stepper. */
+export function MinusGlyph() {
+  return <Glyph d="M4 8h8" />;
+}
+
+/** One step up. */
+export function PlusGlyph() {
+  return <Glyph d="M8 4v8M4 8h8" />;
+}
+
+/**
+ * The reveal control on a password field, in its two states. A password is
+ * masked until someone asks, so the eye is what the control does next rather
+ * than what the field is doing now: the open eye offers to show the secret and
+ * the struck-through one offers to hide it again.
+ */
+export function EyeGlyph() {
+  return (
+    <svg {...stylex.props(styles.glyph)} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M1.5 8C3.2 5.1 5.4 3.6 8 3.6S12.8 5.1 14.5 8c-1.7 2.9-3.9 4.4-6.5 4.4S3.2 10.9 1.5 8Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <circle cx="8" cy="8" r="1.9" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  );
+}
+
+export function EyeOffGlyph() {
+  return (
+    <svg {...stylex.props(styles.glyph)} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M6.6 3.8A6.6 6.6 0 0 1 8 3.6c2.6 0 4.8 1.5 6.5 4.4a12.4 12.4 0 0 1-2.2 2.8M4 4.8A12.1 12.1 0 0 0 1.5 8c1.7 2.9 3.9 4.4 6.5 4.4 1 0 2-.2 2.9-.7"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M6.6 6.6a1.9 1.9 0 0 0 2.7 2.7"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+      <path d="m2.6 2.6 10.8 10.8" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}

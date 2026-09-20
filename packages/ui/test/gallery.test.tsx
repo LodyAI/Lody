@@ -117,6 +117,33 @@ describe('UiGallery', () => {
     }
   });
 
+  test('shows the number and the secret, each with what sits beside the value', () => {
+    // Both are real controls on the board, not stand-ins: neither is portalled.
+    expect(board).toContain('aria-roledescription="Number field"');
+    expect(board).toContain('type="password"');
+    // The steppers and the reveal are the states they are in, read off the
+    // rendered node: a stepper out of the tab order, a reveal that says it
+    // will show rather than that it is showing.
+    expect(board).toContain('aria-label="Increase"');
+    expect(board).toContain('aria-label="Decrease"');
+    expect(board).toContain('aria-label="Show password"');
+    expect(board).toContain('aria-pressed="false"');
+    // The gap Base UI leaves on a number field, closed here: an invalid one
+    // says so to a screen reader and not only through the ring.
+    expect(board).toMatch(/<input[^>]*inputMode="numeric"[^>]*aria-invalid="true"/);
+    // The size legends are the password ladder's, which name themselves: the
+    // field family's own "small · 28" is already on the board further up, so
+    // asserting that would pass with this section deleted.
+    for (const legend of [
+      'bare',
+      'stepped',
+      'password \u00b7 small \u00b7 28',
+      'password \u00b7 large \u00b7 36',
+    ]) {
+      expect(board, `the ${legend} row is missing from the board`).toContain(legend);
+    }
+  });
+
   test('shows the trigger every state and names the popup tokens', () => {
     // A trigger is a button that announces a listbox; a Combobox is an input
     // that announces one. Their presence is the board holding the real
