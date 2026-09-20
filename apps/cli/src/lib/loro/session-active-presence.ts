@@ -50,7 +50,7 @@ const phaseToStatus = (
 ): SessionStatus => {
   switch (phase ?? 'thinking') {
     case 'thinking':
-      return SessionStatusFactory.running(undefined, detail);
+      return SessionStatusFactory.running();
     case 'initializing':
       return SessionStatusFactory.initializing(undefined, detail);
     case 'git-clone':

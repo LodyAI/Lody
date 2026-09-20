@@ -43,12 +43,8 @@ export const SessionStatusFactory = {
   idle(): SessionStatus {
     return { type: 'idle' };
   },
-  running(activity?: SessionRunningActivity, detail?: string): SessionStatus {
-    return {
-      type: 'running',
-      ...(activity !== undefined ? { activity } : {}),
-      ...(detail !== undefined ? { detail } : {}),
-    };
+  running(activity?: SessionRunningActivity): SessionStatus {
+    return activity ? { type: 'running', activity } : { type: 'running' };
   },
   requestPermission(): SessionStatus {
     return { type: 'requestPermission' };

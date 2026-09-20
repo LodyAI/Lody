@@ -35,11 +35,6 @@ Translation: current
   变成 seen/read，且其他字段完全不变；它不是崩溃恢复或分布式事务。
   外部 provider 导入仍是新输入，不能借用已存历史复制权限。
 - 这里的接受表示本地 CRDT 写入。持久化、权限和远端同步仍由原有 repo 和传输层负责。
-- 在历史边界之前被归类为临时态的 provider 更新，绝不能进入 `HistoryWriter`。内置 Codex 的
-  `agent_thought_chunk` 就属于这一类：它可以经由临时 presence 发布有长度上限的 live 状态，
-  但不得创建 assistant `thought` item，导出和重新打开会话时也不得出现，并且必须在该轮的
-  presence 被清除时消失。这只约束今后的写入；打开会话不得清理旧客户端已持久化的 thought item。
-  其他 ACP provider 的标准 thought chunk 仍走普通历史路径。
 - 除 type/toolCallId 外，工具字段只解析本次变化的值，不重验未修改的工具内容；
   只修改 outcome 时保留已有请求信息。修改工具身份需完整 item 解析；变化的 content block
   单独解析。新增字段非法时，整条命令在写入前拒绝。

@@ -1,9 +1,26 @@
 # Codex reasoning 是实时状态，不是会话历史
 
-Status: implemented
+Status: rejected
 Translation: current
 
 [English](2026-09-18-codex-transient-reasoning.md)
+
+## 2026-09-20 撤销
+
+该改动随 PR #807 于 2026-09-19 未经 review 合并，次日被 revert。两个原因，均由 Lody
+团队判定：
+
+- **reasoning 按产品意图属于会话历史。** Codex 的 thought chunk 应当和其他 ACP provider
+  的 thought 一样留在 transcript 中。把它藏起来是对所报症状的错误修法，因此直接移除
+  `HistoryWriter` 旁路和 `running.detail` presence 字段，而不是给它限速。
+- **它把 presence 传输打满了。** 每个 thought chunk 都改变 `running.detail`，而 `setPhase()`
+  对任何 detail 变化都立即发布。单个 Codex 会话在三秒内写入了 4,000 条会话 presence。
+  会话 presence 与机器心跳共用同一个工作区 `EphemeralStreamCrdt`，其 `pendingLocal`
+  队列是不做合并的严格 FIFO，排在突发之后的心跳送达时 `updatedAt` 已超出 90 秒时效窗口，
+  于是该机器仅在这个工作区显示离线。presence 队列本身的弱点另行跟踪；本 note 只记录
+  为什么移除这个生产者。
+
+以下为原始决策内容，保留以避免在未解决上述两点的情况下再次提出同样方案。
 
 ## 摘要
 

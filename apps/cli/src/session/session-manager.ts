@@ -383,7 +383,6 @@ export interface CreateAgentConfig {
   abortSignal?: AbortSignal;
   onStartupStage?: (event: AcpStartupStageEvent) => void;
   onUpdateMessage: (message: AcpSessionNotification) => void;
-  onLiveReasoningStatus?: (label: string | null) => void;
   onRequestPermission: (
     requestId: string,
     request: RequestPermissionRequest
@@ -428,7 +427,6 @@ interface SessionManagerEvents {
   exit: (exit: SessionExitEvent) => void;
   terminated: (exit: SessionTerminatedEvent) => void;
   onACPUpdateMessage: (sessionId: SessionId, message: AcpSessionNotification) => void;
-  onCodexLiveReasoningStatus: (sessionId: SessionId, label: string | null) => void;
   onUsageUpdate: (event: {
     sessionId: SessionId;
     acpSessionId: ACPSessionId;
@@ -1259,9 +1257,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       onStartupStage: options?.onStartupStage,
       onUpdateMessage: (update) => {
         dispatchEvent(() => this.emit('onACPUpdateMessage', sessionId, update));
-      },
-      onLiveReasoningStatus: (label) => {
-        dispatchEvent(() => this.emit('onCodexLiveReasoningStatus', sessionId, label));
       },
       onRequestPermission: (requestId, request) => {
         if (options?.allowInteractiveRequest && !options.allowInteractiveRequest()) {
