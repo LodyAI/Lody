@@ -52,7 +52,9 @@ slot on mobile — is pinned by `tests/assistant-turn-action-inset.test.ts`,
 `tests/chat-virtual-rows-identity.test.ts`, and
 `tests/session-history-duration.test.ts`. The desktop live state is shown by
 `AssistantTurnAlignment.stories.tsx`; `MobileTurnDurationSlot.stories.tsx` shows
-the mobile live and finished states.
+the mobile live and finished states. `tests/agent-activity-row.test.tsx` covers
+live status placement above the subagent task summary, both with and without
+footer actions, and task-summary expansion.
 
 ## Why the rules read the way they do
 

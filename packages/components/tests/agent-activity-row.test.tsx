@@ -154,26 +154,55 @@ describe('live agent status', () => {
     expect(status?.parentElement?.classList.contains('pt-1')).toBe(true);
   });
 
-  it('keeps the wider surface gap below a live subagent task card', async () => {
-    await render(
-      liveTurn([
-        toolCall('a'),
-        {
-          type: 'subagent_task',
-          taskId: 'task-a',
-          status: 'in_progress',
-          actor: 'Researcher',
-          description: 'Inspect the failing check',
-        },
-      ]),
-      { label: 'Working' },
-      { withTurnFooter: true }
-    );
+  it.each([
+    { withTurnFooter: false, taskStatus: 'completed' },
+    { withTurnFooter: true, taskStatus: 'completed' },
+    { withTurnFooter: false, taskStatus: 'in_progress' },
+    { withTurnFooter: true, taskStatus: 'in_progress' },
+  ])(
+    'places status above $taskStatus tasks with footer=$withTurnFooter',
+    async ({ withTurnFooter, taskStatus }) => {
+      await render(
+        liveTurn([
+          toolCall('a'),
+          { type: 'text', text: 'Partial answer.' },
+          ...['a', 'b', 'c'].map((id) => ({
+            type: 'subagent_task',
+            taskId: `task-${id}`,
+            status: taskStatus,
+            actor: `Researcher ${id}`,
+            description: `Inspect check ${id}`,
+          })),
+        ]),
+        { label: 'Working' },
+        { withTurnFooter }
+      );
 
-    const status = container.querySelector('[data-agent-activity-status]');
-    expect(container.textContent).toContain('Waiting on 1 task');
-    expect(status?.parentElement?.classList.contains('pt-3')).toBe(true);
-  });
+      const status = container.querySelector('[data-agent-activity-status]');
+      const summary = Array.from(container.querySelectorAll('button')).find(
+        (button) =>
+          button.textContent === (taskStatus === 'completed' ? '3 tasks' : 'Waiting on 3 tasks')
+      );
+      expect(status?.textContent).toBe('Working (Worked for 30s)');
+      expect(container.querySelectorAll('[data-agent-activity-status]')).toHaveLength(1);
+      expect(statusRow()).toBeNull();
+      expect(summary).toBeDefined();
+      expect(
+        status!.compareDocumentPosition(summary!) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy();
+      if (taskStatus === 'in_progress') {
+        expect(container.textContent).toContain('Inspect check a');
+        return;
+      }
+      expect(summary!.getAttribute('aria-expanded')).toBe('false');
+      await act(async () => summary!.click());
+      expect(summary!.getAttribute('aria-expanded')).toBe('true');
+      expect(container.textContent).toContain('Inspect check a');
+      await act(async () => summary!.click());
+      expect(summary!.getAttribute('aria-expanded')).toBe('false');
+      expect(container.textContent).not.toContain('Inspect check a');
+    }
+  );
 
   it('exposes the turn configuration while the reply is still streaming', async () => {
     await render(

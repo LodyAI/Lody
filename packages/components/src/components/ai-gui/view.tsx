@@ -1509,19 +1509,21 @@ export const SessionChatStreamView = forwardRef<
       }
       return null;
     }, [agentActivityLabel, agentActivityShimmer, virtualRows]);
-    // Otherwise, when the live turn ends in its footer, the status sits inside the
-    // turn above that footer's actions; only a turn without one (or no turn yet)
-    // gets the separate status row after the conversation.
-    const liveFooterRowKey = useMemo(() => {
+    // Keep status above the task summary, with or without footer actions.
+    // Other live turns put it in the footer or in a separate trailing row.
+    const liveStatusRowKey = useMemo(() => {
       if (!agentActivityLabel || liveGroupHeaderRowKey !== null) return null;
       const last = virtualRows[virtualRows.length - 1];
-      return last?.type === 'assistant' &&
-        last.content.kind === 'footer' &&
-        last.item.message.finished !== true
-        ? last.key
-        : null;
+      if (last?.type !== 'assistant' || last.item.message.finished === true) return null;
+      const footerKey = last.content.kind === 'footer' ? last.key : null;
+      const contentRow = footerKey ? virtualRows[virtualRows.length - 2] : last;
+      return contentRow?.type === 'assistant' &&
+        contentRow.item === last.item &&
+        contentRow.content.kind === 'subagent_tasks'
+        ? contentRow.key
+        : footerKey;
     }, [agentActivityLabel, liveGroupHeaderRowKey, virtualRows]);
-    const liveFooterStatus = useMemo<AgentActivityStatusProps | null>(
+    const liveTurnStatus = useMemo<AgentActivityStatusProps | null>(
       () =>
         agentActivityLabel
           ? { label: agentActivityLabel, tone: agentActivityTone, shimmer: agentActivityShimmer }
@@ -1529,7 +1531,7 @@ export const SessionChatStreamView = forwardRef<
       [agentActivityLabel, agentActivityShimmer, agentActivityTone]
     );
     const shouldShowAgentActivityRow =
-      shouldShowAgentActivity && liveGroupHeaderRowKey === null && liveFooterRowKey === null;
+      shouldShowAgentActivity && liveGroupHeaderRowKey === null && liveStatusRowKey === null;
     const leadingRowCount = leadingContent == null ? 0 : 1;
 
     /**
@@ -2118,9 +2120,9 @@ export const SessionChatStreamView = forwardRef<
                           onTurnHoverChange={handleAssistantTurnHoverChange}
                           conversationFontSize={conversationFontSize}
                           shimmerGroupHeader={row.key === liveGroupHeaderRowKey}
-                          liveStatus={row.key === liveFooterRowKey ? liveFooterStatus : null}
+                          liveStatus={row.key === liveStatusRowKey ? liveTurnStatus : null}
                           liveStatusFollowsSurface={
-                            row.key === liveFooterRowKey &&
+                            row.key === liveStatusRowKey &&
                             assistantRowPaintsSurface(virtualRows[rowIndex - 1])
                           }
                         />
@@ -4804,7 +4806,16 @@ const AssistantChatItem = memo(function AssistantChatItem({
         );
       }
       case 'subagent_tasks':
-        return <AssistantSubagentTasksRow message={message} sessionId={row.item.sessionId} />;
+        return (
+          <>
+            {liveStatus ? (
+              <div className="pb-2">
+                <AgentActivityStatus {...liveStatus} message={message} />
+              </div>
+            ) : null}
+            <AssistantSubagentTasksRow message={message} sessionId={row.item.sessionId} />
+          </>
+        );
       case 'footer':
         return (
           <>
