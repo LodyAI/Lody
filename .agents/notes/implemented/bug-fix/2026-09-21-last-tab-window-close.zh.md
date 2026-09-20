@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#866](https://github.com/LodyAI/Lody/pull/866)
 
 [English](2026-09-21-last-tab-window-close.md) | 中文
 
