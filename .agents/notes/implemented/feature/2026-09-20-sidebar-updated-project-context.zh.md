@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/838
 
 [English](2026-09-20-sidebar-updated-project-context.md)
 
