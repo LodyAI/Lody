@@ -4,6 +4,7 @@ import type { CodeCollabDebugGlobal } from './lib/code-collab-global-debug';
 import type { WorkspacePresenceDebugGlobal } from './providers/workspace-presence-transport';
 import type { LodyLiveActivityBridge } from './hooks/use-lody-live-activity';
 import type { LodyAppStoreReviewBridge } from './hooks/use-app-store-review-prompt';
+import type { AppIconBridge } from './components/mobile/mobile-app-icon-settings';
 
 /**
  * Boot guard installed by the inline script in a shell's index.html (currently
@@ -37,6 +38,7 @@ declare global {
     __LODY_BOOT__?: LodyBootController;
     __LODY_LIVE_ACTIVITY__?: LodyLiveActivityBridge;
     __LODY_APP_STORE_REVIEW__?: LodyAppStoreReviewBridge;
+    __LODY_APP_ICON__?: AppIconBridge;
     __LODY_APP_INFO__?: {
       version?: string;
       build?: string;
