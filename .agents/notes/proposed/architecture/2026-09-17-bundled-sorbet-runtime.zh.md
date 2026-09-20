@@ -67,8 +67,9 @@ Lody 版本锁定 Sorbet 源码，构建内置的 `sorbet-acp` 入口，并为�
   capability 进行门控。
 - Provider 设置推荐 Codex OAuth；启用 Claude OAuth 前要求用户明确操作；显示 Sorbet 声明的
   每个订阅 OAuth Provider；支持自定义 Provider 的新增、编辑、删除和按 Provider 退出；默认值
-  变更只影响新 Session。API key 使用一次性加密 Machine RPC，通过 Sorbet credential 边界写入，
-  不进入 Loro 或 Agent config。
+  变更只影响新 Session。Provider 设置当前只使用桌面应用的进程本地 Machine bridge；API key
+  通过 Sorbet credential 边界写入，不进入 Loro 或 Agent config。Workspace Streams 在具备
+  payload-bound 请求者授权前拒绝 Provider 设置。
 - Lody 专用认证 client 会声明一项版本化的 credential-form 扩展，表单响应同样走一次性加密的
   Machine RPC。对其他 client，Sorbet 仍遵守 ACP 默认禁止 credential form 的规则；只有看到这项
   扩展时，才把 Pi 的 `secret` 与 `manual_code` prompt 标记为 secret。浏览器 URL 授权会先于备用
@@ -158,7 +159,7 @@ Provider 配置属于实际执行任务的 Machine，并在 Lody 中通过独立
 - 在 Claude OAuth 登录或选择前要求用户明确启用；
 - 通过 Sorbet Provider metadata 显示 GitHub Copilot、Kimi Code、xAI 以及未来新增的订阅 OAuth
   连接，不在 Lody 中维护重复 allowlist；
-- 可信 API key 录入：secret 直接发送到目标 Machine，绝不进入 ACP elicitation、Loro state、
+- 可信的本地 API key 录入：secret 直接发送到目标 Machine，绝不进入 ACP elicitation、Loro state、
   prompt、Journal、保留的进度或日志；
 - 自定义 Provider 定义、endpoint、模型目录、非敏感连接状态，以及按 Provider 单独退出；
 - 本 Machine 的 Sorbet 默认连接。
@@ -173,8 +174,9 @@ Session 进入 blocked 状态并要求用户选择替代连接，Lody 不会在 
 明确替换后，必须先把它持久化为一次 Session 配置变更，后续工作才能使用新连接。
 
 OAuth 继续走 Sorbet ACP authentication method 与 Lody 现有 URL/elicitation client。通用 ACP form
-elicitation 明确不能携带凭据，所以 API key 必须使用可信的 Machine RPC：它接收加密 secret，
-通过 Sorbet credential 边界写入，只返回 metadata。标准 ACP `agent.logout` 当前会清空 Sorbet
+elicitation 明确不能携带凭据，所以 Provider 设置使用桌面应用的进程本地 Machine bridge，通过
+Sorbet credential 边界写入，只返回 metadata。Workspace Streams 在 Lody 能签发同时绑定请求者、
+Machine、精确 payload 和防重放 id 的 token 前拒绝这类操作。标准 ACP `agent.logout` 当前会清空 Sorbet
 全部凭据，因此按 Provider 单独退出也属于这条 Machine control plane，而不能复用全局 logout。
 
 ## 已有协议适配情况
@@ -248,7 +250,7 @@ Sorbet OAuth 可以使用 Lody 专用的 ACP authentication client 和 URL 流�
    生命周期验证 ACP initialize 以及 new/load/resume/close。
 3. 在开发环境外开放前，验证 turn history、权限、模型/config 切换、steering、goal、compaction、
    子 Agent、usage、fork-at-turn 和 crash recovery。
-4. Machine 级 Sorbet Provider Center、可信 API key RPC、按 Provider logout、自定义 Provider
+4. Machine 级 Sorbet Provider Center、可信的本地 API key 录入、按 Provider logout、自定义 Provider
    control queue、新 worker 选择 replay 和上述连接选择规则已经实现，可以进行手动测试。
 5. 完成跨平台打包、沙箱、故障注入、升级和回滚门槛后，才能把 Sorbet 标记为 production-ready。
 
@@ -300,7 +302,8 @@ Lody 已经具备每 Session 的进程监管，因此只要明确处理共享文
   方式提示、`providers/list`、空 credential store 的 `auth_required`、自定义 Provider control、
   模型驱动的并行 Read 与 Bash 执行、动态 Session 配置、worker crash 后的 load/replay 与 resume，
   以及 fork-at-turn/list/delete 检查。Provider 设置组件测试覆盖 Machine capability 门控、订阅
-  OAuth 渲染、Claude 直接启用、自定义模型去重，以及 API key 只进入专用 secret RPC。仓库级
+  OAuth 渲染、Claude 直接启用、自定义模型去重、本地 Provider 路由、远程拒绝，以及 API key
+  不进入保留状态。仓库级
   `pnpm check` 也已通过，
   包括 shared、components、CLI、Electron、i18n 和源码边界的完整检查。
 - Electron 官方发布信息显示 39.5.1 使用 Node 22.22.0。Darwin arm64 installer 已连同内置

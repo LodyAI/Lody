@@ -3214,27 +3214,6 @@ export class MessageHandler {
             onProgress: args.onProgress,
           });
         },
-        manageSorbetProviderCenter: async (operation) => {
-          try {
-            const result = await runSorbetProviderCenterOperation(operation);
-            return {
-              type: 'machine/sorbet-provider-center_response' as const,
-              machineId: this.machineId,
-              success: true,
-              snapshot: result.snapshot,
-              ...(result.affectedProviderId === undefined
-                ? {}
-                : { affectedProviderId: result.affectedProviderId }),
-            };
-          } catch (error) {
-            return {
-              type: 'machine/sorbet-provider-center_response' as const,
-              machineId: this.machineId,
-              success: false,
-              error: formatErrorMessage(error),
-            };
-          }
-        },
         getMachineAcpBinaryStatus: async ({ agentType }) =>
           await this.executionService.getMachineAcpBinaryStatus({
             type: 'machine/acp-binary-status',

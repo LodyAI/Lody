@@ -74,11 +74,12 @@ testing but does not by itself satisfy the production gates below:
   versioned `sorbetProviderCenter` protocol capability.
 - The Provider settings recommend Codex OAuth, require an explicit action before enabling Claude
   OAuth, render every subscription OAuth Provider advertised by Sorbet, support custom Provider
-  create/edit/delete and per-Provider logout, and change the default only for new Sessions. API keys
-  use a one-time encrypted Machine RPC and are written through Sorbet's credential boundary without
-  entering Loro or Agent configuration.
+  create/edit/delete and per-Provider logout, and change the default only for new Sessions. Provider
+  settings currently use the desktop app's process-local Machine bridge; API keys are written through
+  Sorbet's credential boundary without entering Loro or Agent configuration. Workspace Streams
+  rejects Provider settings until it has payload-bound requester authorization.
 - Lody's dedicated authentication client advertises a versioned credential-form extension backed by
-  the same one-time encrypted Machine RPC. Sorbet preserves ACP's default ban on credential forms
+  a one-time encrypted Machine RPC. Sorbet preserves ACP's default ban on credential forms
   for other clients, marks Pi `secret` and `manual_code` prompts as secret only for this extension,
   and serializes browser URL consent before the fallback form so the two interactions cannot race.
 - A release-build smoke check launches the exact bundled entry from an empty data root, negotiates
@@ -175,7 +176,7 @@ form. It owns:
 - an explicit enable action before Claude OAuth login or selection;
 - GitHub Copilot, Kimi Code, xAI, and future subscription OAuth connections advertised through
   Sorbet Provider metadata rather than a duplicate Lody allowlist;
-- trusted API-key entry that sends the secret directly to the target Machine and never places it in
+- trusted local API-key entry that sends the secret directly to the target Machine and never places it in
   ACP elicitation, Loro state, prompts, Journals, retained progress, or logs;
 - custom Provider definitions, endpoints, model catalogs, non-secret connection status, and
   per-Provider logout;
@@ -195,8 +196,9 @@ Session configuration change before later work uses it.
 
 OAuth continues through Sorbet's ACP authentication methods and Lody's existing URL/elicitation
 client. API keys cannot use generic ACP form elicitation because that channel excludes credentials.
-The Provider Center therefore requires a trusted Machine RPC that accepts encrypted secret input,
-writes through Sorbet's credential boundary, and returns metadata only. Standard ACP
+The Provider Center therefore uses the desktop app's process-local Machine bridge, writes through
+Sorbet's credential boundary, and returns metadata only. Workspace Streams rejects the operation
+until Lody has a source-minted token bound to the requester, Machine, exact payload, and replay id. Standard ACP
 `agent.logout` currently clears every credential in Sorbet, so per-Provider logout also belongs to
 this Machine control plane rather than that global method.
 
@@ -282,7 +284,7 @@ machine-scoped credential store without placing secrets in session journals, pro
    initialize plus new/load/resume/close through the existing one-worker-per-Session lifecycle.
 3. Validate turn history, permissions, model/config changes, steering, goals, compaction, subagents,
    usage, fork-at-turn, and crash recovery before exposing the builtin outside development.
-4. The Machine-scoped Sorbet Provider Center, trusted API-key RPC, per-Provider logout, custom
+4. The Machine-scoped Sorbet Provider Center, trusted local API-key entry, per-Provider logout, custom
    Provider control queue, new-worker selection replay, and the selection rules above are now
    implemented for manual testing.
 5. Complete the cross-platform package, sandbox, fault-injection, upgrade, and rollback gates before
@@ -345,7 +347,8 @@ durability model with a smaller boundary.
   Provider control, model-driven parallel Read and Bash execution, dynamic Session configuration,
   worker-crash load/replay and resume, and fork-at-turn/list/delete checks. Provider settings component
   tests cover Machine capability gating, subscription OAuth rendering, direct Claude enablement,
-  custom-model deduplication, and keeping API keys on the dedicated secret RPC. The repository-wide
+  custom-model deduplication, local-only Provider routing, remote rejection, and keeping API keys out
+  of retained state. The repository-wide
   `pnpm check` also passed,
   including the full shared, components, CLI, Electron, i18n, and source-boundary suites.
 - Electron's published 39.5.1 runtime reports Node 22.22.0. A Darwin arm64 installer was built with

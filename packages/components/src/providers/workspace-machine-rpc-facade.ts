@@ -1188,12 +1188,12 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           timeoutMs: options?.timeoutMs ?? 30_000,
         })) as SorbetProviderCenterResponse | null;
       }
-      return await (
-        await getMachineRpcClient(machineId)
-      ).requestSorbetProviderCenter({
-        operation,
-        timeoutMs: options?.timeoutMs ?? 30_000,
-      });
+      return {
+        type: 'machine/sorbet-provider-center_response',
+        machineId,
+        success: false,
+        error: 'Sorbet Provider settings are only available on the local Machine.',
+      };
     } catch (error) {
       return {
         type: 'machine/sorbet-provider-center_response',
@@ -1220,13 +1220,12 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
           timeoutMs: options?.timeoutMs ?? 30_000,
         })) as SorbetProviderCenterResponse | null;
       }
-      return await (
-        await getMachineRpcClient(machineId)
-      ).setSorbetProviderApiKey({
-        providerId,
-        apiKey,
-        timeoutMs: options?.timeoutMs ?? 30_000,
-      });
+      return {
+        type: 'machine/sorbet-provider-center_response',
+        machineId,
+        success: false,
+        error: 'Sorbet Provider settings are only available on the local Machine.',
+      };
     } catch (error) {
       return {
         type: 'machine/sorbet-provider-center_response',

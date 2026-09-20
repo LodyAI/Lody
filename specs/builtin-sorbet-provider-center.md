@@ -25,12 +25,12 @@ Lody owns the bundled Sorbet revision, the Agent creation flow, Machine routing,
 process supervision, and the choice applied to a new Session. Sorbet owns Provider definitions,
 credentials, models, Session execution, Journals, and the Provider/model recorded in a Session.
 
-Provider Center state belongs to the execution Machine under Lody's Sorbet data directory. Non-secret
-connection metadata can cross the Machine RPC boundary. OAuth continues through Sorbet's ACP
-authentication methods. API keys use a one-time Machine public key and an encrypted envelope; they
-must not enter Agent configuration, Machine Flock rows, Loro documents, prompts, Journals, retained
-progress, command arguments, or logs. The target CLI writes the decrypted key through Sorbet's
-credential store and returns metadata only.
+Provider Center state belongs to the execution Machine under Lody's Sorbet data directory. OAuth
+continues through Sorbet's ACP authentication methods. Provider settings are currently available
+only from the desktop app to its process-local Machine bridge; the unauthenticated Workspace Streams
+RPC rejects every Provider settings request. API keys must not enter Agent configuration, Machine
+Flock rows, Loro documents, prompts, Journals, retained progress, command arguments, or logs. The
+local target CLI writes the key through Sorbet's credential store and returns metadata only.
 
 The Machine advertises `sorbetProviderCenter` protocol version 1. Clients must check this capability
 instead of inferring support from a CLI release or the presence of Sorbet in their own UI. An older
@@ -72,8 +72,8 @@ snapshot.
 
 The bundled control entry and ACP entry use `<lody-data>/agents/sorbet` and honor `LODY_DATA_DIR`.
 Provider selection is written atomically with owner-only permissions. Credential mutation uses
-Sorbet's cross-process lease. The API-key encryption recipient is one-use, bounded, and expires when
-the client does not finish submission.
+Sorbet's cross-process lease. Remote Provider configuration remains disabled until Lody can mint and
+verify an authorization token bound to the requester, Machine, exact operation payload, and replay id.
 
 The target Machine resolves its environment or system HTTP(S) proxy into standard proxy variables
 before it starts Sorbet. Sorbet installs a proxy-aware global Node dispatcher at its executable
@@ -107,8 +107,8 @@ manual code, and Lody keeps the authorization link visible beside that form.
 - `packages/sorbet/packages/node-agent/src/network/http-proxy.ts`
 - `packages/sorbet/packages/node-agent/tests/http-proxy.test.ts`
 
-Executed validation: shared, Streams RPC, CLI, and component type checks; Streams RPC and Provider
-Center component tests; the bundled Sorbet lifecycle and Provider Center smoke checks, including
+Executed validation: shared, Streams RPC, CLI, and component type checks; local Provider routing,
+remote rejection, and Provider settings component tests; the bundled Sorbet lifecycle and Provider Center smoke checks, including
 execution through the first Codex OAuth login prompt; and the interactive authentication queue
 regression test. On Darwin, the final CLI bundle also completes model-driven parallel Read and Bash
 Tools against a synthetic local Provider, applies thinking and permission configuration, recovers a

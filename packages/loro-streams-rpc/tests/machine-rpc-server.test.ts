@@ -26,7 +26,7 @@ import {
   encryptCodeCollabV2RpcPayload,
   encryptRpcSecret,
   getMachineAcpAuthorizationCodeSecretContext,
-  getSorbetProviderApiKeySecretContext,
+  LORO_STREAMS_RPC_ERROR_CODES,
   LoroStreamsGatewayError,
   LoroStreamsMachineRpcServer,
   type LoroJsonLiveBatchHandler,
@@ -420,21 +420,10 @@ describe('LoroStreamsMachineRpcServer', () => {
     server.stop();
   });
 
-  it('decrypts Sorbet API keys once and rejects replayed envelopes', async () => {
+  it('rejects Sorbet Provider settings over unauthenticated workspace streams', async () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
     const machineId = 'machine-1' as MachineId;
     const fake = createFakeStreamClient();
-    const manageSorbetProviderCenter = vi.fn(async (operation) => ({
-      type: 'machine/sorbet-provider-center_response' as const,
-      machineId,
-      success: true as const,
-      snapshot: {
-        version: 1 as const,
-        claudeOAuthEnabled: false,
-        providers: [],
-      },
-      affectedProviderId: operation.action === 'set-api-key' ? operation.providerId : undefined,
-    }));
     const server = new LoroStreamsMachineRpcServer({
       logger: createSilentLogger(),
       workspaceId,
@@ -442,25 +431,21 @@ describe('LoroStreamsMachineRpcServer', () => {
       streamClient: fake.streamClient,
       getMachineStatus: vi.fn(),
       refreshMachineAcpCapabilities: vi.fn(),
-      manageSorbetProviderCenter,
     });
-    const base = {
-      jsonrpc: '2.0' as const,
-      rpcVersion: '1',
-      machineId,
-      workspaceId,
-      replyTo: 'workspace-1:rpc:res:client-1',
-      sentAt: Date.now(),
-      expiresAt: Date.now() + 5_000,
-    };
 
     fake.pushBatch({
       messages: [
         {
-          ...base,
-          id: 'sorbet-key-prepare',
+          jsonrpc: '2.0',
+          rpcVersion: '1',
+          machineId,
+          workspaceId,
+          replyTo: 'workspace-1:rpc:res:client-1',
+          sentAt: Date.now(),
+          expiresAt: Date.now() + 5_000,
+          id: 'sorbet-provider-snapshot',
           method: 'machine/sorbet-provider-center',
-          params: { action: 'prepare-api-key' },
+          params: { action: 'snapshot' },
         },
       ],
       nextOffset: '1',
@@ -470,71 +455,11 @@ describe('LoroStreamsMachineRpcServer', () => {
 
     await server.start();
     await fake.waitForAppendedCount(1);
-    const secretInput = (
-      fake.appended[0]!.value as {
-        result: {
-          secretInput: { operationId: string; publicKey: RpcSecretPublicKey };
-        };
-      }
-    ).result.secretInput;
-    const apiKeyEnvelope = await encryptRpcSecret(
-      secretInput.publicKey,
-      'secret-provider-key',
-      getSorbetProviderApiKeySecretContext({
-        workspaceId,
-        machineId,
-        operationId: secretInput.operationId,
-        providerId: 'custom-provider',
-      })
-    );
-    const setKeyParams = {
-      action: 'set-api-key' as const,
-      operationId: secretInput.operationId,
-      providerId: 'custom-provider',
-      apiKeyEnvelope,
-    };
-    fake.pushBatch({
-      messages: [
-        {
-          ...base,
-          id: 'sorbet-key-set',
-          method: 'machine/sorbet-provider-center',
-          params: setKeyParams,
-        },
-      ],
-      nextOffset: '2',
-      cursor: 'cursor-2',
-      upToDate: true,
-    });
-
-    await fake.waitForAppendedCount(2);
-    expect(manageSorbetProviderCenter).toHaveBeenCalledOnce();
-    expect(manageSorbetProviderCenter).toHaveBeenCalledWith({
-      action: 'set-api-key',
-      providerId: 'custom-provider',
-      apiKey: 'secret-provider-key',
-    });
-
-    fake.pushBatch({
-      messages: [
-        {
-          ...base,
-          id: 'sorbet-key-replay',
-          method: 'machine/sorbet-provider-center',
-          params: setKeyParams,
-        },
-      ],
-      nextOffset: '3',
-      cursor: 'cursor-3',
-      upToDate: true,
-    });
-
-    await fake.waitForAppendedCount(3);
-    expect(manageSorbetProviderCenter).toHaveBeenCalledOnce();
-    expect(fake.appended[2]?.value).toMatchObject({
-      id: 'sorbet-key-replay',
+    expect(fake.appended[0]?.value).toMatchObject({
+      id: 'sorbet-provider-snapshot',
       error: {
-        message: expect.stringContaining('recipient is no longer active'),
+        code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
+        message: expect.stringContaining('only available on the local Machine'),
       },
     });
     server.stop();

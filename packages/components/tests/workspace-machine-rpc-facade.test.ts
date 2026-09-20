@@ -17,6 +17,33 @@ afterEach(() => {
 });
 
 describe('createWorkspaceMachineRpcFacade', () => {
+  it('keeps Sorbet Provider settings off unauthenticated workspace streams', async () => {
+    const getMachineRpcClient = vi.fn();
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      getMachineProtocolCapabilities: async () => CURRENT_MACHINE_PROTOCOL_CAPABILITIES,
+      targetRouter: {
+        getPlaneForMachine: () => 'cloud',
+        resolvePlaneForMachine: async () => 'cloud',
+      },
+      getMachineRpcClient,
+    });
+
+    await expect(
+      facade.requestSorbetProviderCenter(remoteMachineId, { action: 'snapshot' })
+    ).resolves.toMatchObject({
+      success: false,
+      error: expect.stringContaining('only available on the local Machine'),
+    });
+    await expect(
+      facade.setSorbetProviderApiKey(remoteMachineId, 'custom-provider', 'secret-key')
+    ).resolves.toMatchObject({
+      success: false,
+      error: expect.stringContaining('only available on the local Machine'),
+    });
+    expect(getMachineRpcClient).not.toHaveBeenCalled();
+  });
+
   it('never sends a scoped cancel to a daemon without the scoped-cancel protocol', async () => {
     const facade = createWorkspaceMachineRpcFacade({
       workspaceId,

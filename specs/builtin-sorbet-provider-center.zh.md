@@ -23,11 +23,11 @@ Lody 负责锁定内置 Sorbet revision、Agent 创建流程、Machine 路由、
 为新 Session 解析连接。Sorbet 负责 Provider 定义、凭据、模型、Session 执行、Journal，以及
 Session 内记录的实际 Provider 与模型。
 
-Provider Center 状态归执行任务的 Machine 所有，存放在 Lody 的 Sorbet 数据目录下。非敏感连接
-metadata 可以跨越 Machine RPC。OAuth 继续走 Sorbet 的 ACP authentication method。API key 使用
-目标 Machine 提供的一次性公钥和加密信封；它不得进入 Agent config、Machine Flock row、Loro
-文档、prompt、Journal、保留的 progress、命令行参数或日志。目标 CLI 解密后通过 Sorbet
-credential store 写入，只返回 metadata。
+Provider Center 状态归执行任务的 Machine 所有，存放在 Lody 的 Sorbet 数据目录下。OAuth 继续走
+Sorbet 的 ACP authentication method。Provider 设置目前只允许桌面应用通过进程本地 Machine
+bridge 配置本机；未经认证的 Workspace Streams RPC 会拒绝所有 Provider 设置请求。API key 不得
+进入 Agent config、Machine Flock row、Loro 文档、prompt、Journal、保留的 progress、命令行参数
+或日志。本地目标 CLI 通过 Sorbet credential store 写入 key，只返回 metadata。
 
 Machine 发布 `sorbetProviderCenter` protocol version 1。客户端必须检查这个 capability，不能根据
 CLI 版本或自身 UI 中是否有 Sorbet 来推断支持。旧 Machine 显示升级或重启要求，不能展示一个
@@ -62,8 +62,9 @@ Provider 与 credential 边界。Session worker 在进程启动时读取 Provide
 Session 保持已经固定的 Provider snapshot。
 
 内置 control entry 与 ACP entry 都使用 `<lody-data>/agents/sorbet`，并遵守 `LODY_DATA_DIR`。
-Provider 选择以 owner-only 权限原子写入；credential mutation 使用 Sorbet 的跨进程 lease。
-API key 加密接收方只使用一次、数量有上限，客户端未完成提交时会过期。
+Provider 选择以 owner-only 权限原子写入；credential mutation 使用 Sorbet 的跨进程 lease。远程
+Provider 配置保持关闭，直到 Lody 能签发并验证同时绑定请求者、Machine、精确操作 payload 和
+防重放 id 的授权 token。
 
 目标 Machine 在启动 Sorbet 前，把环境或系统 HTTP(S) 代理解析为标准代理变量。Sorbet 在自身
 可执行入口安装支持代理的 Node 全局 dispatcher，因此 OAuth code exchange、token refresh 和
@@ -94,8 +95,8 @@ capability，Sorbet 才会用表单传递 `secret` 与 `manual_code` prompt。So
 - `packages/sorbet/packages/node-agent/src/network/http-proxy.ts`
 - `packages/sorbet/packages/node-agent/tests/http-proxy.test.ts`
 
-已执行验证：shared、Streams RPC、CLI 与 components type check；Streams RPC 与 Provider
-Center 组件测试；打包后的 Sorbet lifecycle 与 Provider Center smoke check（包括实际执行到
+已执行验证：shared、Streams RPC、CLI 与 components type check；本地 Provider 路由、远程拒绝与
+Provider 设置组件测试；打包后的 Sorbet lifecycle 与 Provider Center smoke check（包括实际执行到
 Codex OAuth 第一个登录提示）；以及交互式认证队列回归测试。在 Darwin 上，最终 CLI bundle
 还会连接本地虚拟 Provider，完成模型驱动的并行 Read 与 Bash Tool，应用 thinking 与 permission
 配置，在 worker `SIGKILL` 后恢复 durable Session，并从已提交 turn 创建独立 fork。虚拟 Provider
