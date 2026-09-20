@@ -28,6 +28,8 @@ rules own the pre-PR interaction, and the body checker reports findings through 
 existing reconciler. Public conversation links are no longer limited to Lody.
 Existing external PRs acquire the same findings on their next reconciliation.
 
+Implementation PR: [#855](https://github.com/LodyAI/Lody/pull/855).
+
 ## Validation and limits
 
 Behavioral tests cover complete and omitted disclosure, all status branches,
