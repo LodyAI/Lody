@@ -39,3 +39,4 @@ Kimi 是单独构建的托管运行包。只更新源码和 gitlink 不会升级
 不发布生产制品。全仓验证的限制在 PR 中记录。
 
 Lody PR：[#846](https://github.com/LodyAI/Lody/pull/846)。
+Kimi PR：[#12](https://github.com/LodyAI/acp-extension-kimi/pull/12)。
