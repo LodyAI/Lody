@@ -1,3 +1,4 @@
+import { useMentionFileSearch } from './file-search/use-file-search';
 import { useShortcutMentionSource } from './use-shortcut-mention-source';
 import { shortcutComposerScope } from './shortcut-composer-state';
 import * as React from 'react';
@@ -40,7 +41,7 @@ import {
 } from '@/components/mentions/mention-persistence';
 import { MentionTwoLevelMenu } from '@/components/mentions/mention-two-level-menu';
 import {
-  buildMentionFileIndex,
+  toFileCandidate,
   MENTION_TRIGGER,
   useMentionCategories,
   type MentionCategorySources,
@@ -166,11 +167,6 @@ function TwoLevelMentionMenu({
     enableSessionMentions && active && commandsEnabled
   );
 
-  const fileIndex = React.useMemo(
-    () =>
-      enableFileMentions ? buildMentionFileIndex(fileData.entry, buildLazyDirectoryToken) : null,
-    [enableFileMentions, fileData.entry]
-  );
   const issuePrSuggestions = React.useMemo(
     () =>
       enableIssueMentions && issuePrData.entry ? buildItemSuggestions(issuePrData.entry.items) : [],
@@ -200,9 +196,10 @@ function TwoLevelMentionMenu({
               'Project is very large; local file list was truncated.'
             )
         : undefined,
-      index: fileIndex,
+      // Attach worker results after resolving the registered namespaces.
+      getCandidates: () => [],
     }),
-    [enableFileMentions, fileData, fileIndex, fileSourceKind, t]
+    [enableFileMentions, fileData, fileSourceKind, t]
   );
 
   // `refresh` is async, but `onActivate` is fire-and-forget (`() => void`).
@@ -354,11 +351,45 @@ function TwoLevelMentionMenu({
       ]
     )
   );
+  const namespacedSearch = parseMentionNamespaceSearch(context.filterStore.search);
+  const scopedCategory = namespacedSearch
+    ? baseCategories.find((category) => category.namespace === namespacedSearch.namespace)
+    : undefined;
+  const fileTerm =
+    active && context.trigger === '@' && enableFileMentions
+      ? scopedCategory
+        ? scopedCategory.id === 'file'
+          ? namespacedSearch!.term
+          : null
+        : context.filterStore.search || null
+      : null;
+  const fileSearch = useMentionFileSearch(fileData.entry, fileTerm);
+  const searchedCategories = React.useMemo(
+    () =>
+      baseCategories.map((category) => {
+        if (category.id !== 'file') return category;
+        return {
+          ...category,
+          status:
+            category.status === 'error' || category.status === 'loading'
+              ? category.status
+              : fileSearch.status,
+          message:
+            category.message ??
+            (fileSearch.status === 'error'
+              ? t('mention.file.loadError', 'Failed to load files.')
+              : undefined),
+          getCandidates: (term: string, limit?: number) =>
+            term === fileTerm ? fileSearch.items.slice(0, limit).map(toFileCandidate) : [],
+        };
+      }),
+    [baseCategories, fileSearch.items, fileSearch.status, fileTerm, t]
+  );
   const categories = React.useMemo(
     () =>
       templateScope
         ? shortcutTemplateCategories({
-            categories: baseCategories,
+            categories: searchedCategories,
             scope: templateScope,
             skills: skillItems,
             allowedDirs: allowedSkillDirs,
@@ -381,8 +412,8 @@ function TwoLevelMentionMenu({
                       .join(' + '),
                   }),
           })
-        : baseCategories,
-    [templateScope, baseCategories, skillItems, allowedSkillDirs, t]
+        : searchedCategories,
+    [templateScope, searchedCategories, skillItems, allowedSkillDirs, t]
   );
 
   // Ask the provider to list a directory the user has drilled into but that was

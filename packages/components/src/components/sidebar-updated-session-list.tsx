@@ -13,11 +13,13 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { startSessionMentionDrag } from '@/lib/session-mention-drag';
 import {
   Archive,
+  Folder,
   GitBranch,
   GitPullRequest,
   Link2,
   LockKeyhole,
   Mail,
+  MessageCircle,
   Pencil,
   Pin,
   PinOff,
@@ -38,6 +40,7 @@ import {
 } from '@/ui/context-menu';
 import { SwipeActionRow } from '@/components/shared/swipe-action-row';
 import {
+  GitHubOwnerIcon,
   SessionOpenedByTreeRow,
   SessionPrIcon,
   SessionMergeablePill,
@@ -226,6 +229,18 @@ export function sortUpdatedItems(items: SidebarUpdatedItem[]): SidebarUpdatedIte
 }
 
 /**
+ * Project line in Updated mode. Local rows use the folder name (`subtitle`);
+ * GitHub rows use the repo full name; chat rows fall back to the section label
+ * ("Chats") so a mixed list still says where the row lives.
+ */
+export function resolveUpdatedItemProjectLabel(item: SidebarUpdatedItem): string | null {
+  const subtitle = item.subtitle?.trim();
+  if (subtitle) return subtitle;
+  const section = item.sectionLabel.trim();
+  return section || null;
+}
+
+/**
  * When a bucket has more than this many rows, the row list collapses to the
  * latest N and reveals a "Show all (count)" toggle. Mirrors the per-group
  * preview pattern in SessionList, but with a higher threshold because Updated
@@ -358,6 +373,14 @@ export type SidebarUpdatedSessionListProps = {
    * instead — it must stay reachable in every state.
    */
   headerAction?: ReactNode;
+  /**
+   * Updated organize mode mixes sessions from every project into one recency
+   * list, so top-level rows show a second line: folder / GitHub owner mark +
+   * project name. Nested opened Sessions skip it — they already sit under a
+   * parent that carries the project. Workspace-mode Pinned omits this because
+   * those rows still live next to their project groups.
+   */
+  showProjectContext?: boolean;
 };
 
 const defaultLabels: SidebarUpdatedSessionListLabels = {
@@ -390,6 +413,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
   showFullBuckets,
   onToggleFullBucket,
   headerAction,
+  showProjectContext = false,
 }: SidebarUpdatedSessionListProps) {
   const { t } = useTranslation();
   const merged: SidebarUpdatedSessionListLabels = useMemo(
@@ -551,10 +575,19 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
               />
               {!collapsed ? (
                 <div className="flex flex-col gap-px">
-                  {visibleNodes.map((node) => {
+                  {visibleNodes.map((node, nodeIndex) => {
                     const openedByTree = buildSessionRowOpenedByTreeSlot(node, t, () =>
                       handleToggleOpenedBySessions(node.item.id)
                     );
+                    const prevNode = visibleNodes[nodeIndex - 1];
+                    const treeSlot: SessionRowOpenedByTreeSlot | undefined =
+                      openedByTree?.kind === 'child' && showProjectContext
+                        ? {
+                            ...openedByTree,
+                            isFirstChild: prevNode?.depth === 0,
+                            tallOpener: true,
+                          }
+                        : openedByTree;
                     return (
                       <SessionOpenedByTreeRow
                         key={node.item.id}
@@ -567,6 +600,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                           selected={node.item.id === selectedItemId}
                           isMobile={isMobile}
                           showPinnedIcon={showPinnedIcon}
+                          showProjectContext={showProjectContext}
                           href={getItemHref?.(node.item.id)}
                           onSelect={onSelectItem}
                           onArchive={onArchiveItem}
@@ -577,7 +611,7 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
                           onShareWithTeam={onShareItemWithTeam}
                           onOpenPullRequest={onOpenPullRequest}
                           onBeginRename={beginRename}
-                          openedByTree={openedByTree}
+                          openedByTree={treeSlot}
                           contextMenuLabels={contextMenuLabels}
                           archiveTooltipLabel={archiveLabels.tooltip}
                           archiveActionLabel={archiveLabels.action}
@@ -623,12 +657,43 @@ export const SidebarUpdatedSessionList = memo(function SidebarUpdatedSessionList
 
 SidebarUpdatedSessionList.displayName = 'SidebarUpdatedSessionList';
 
+function UpdatedItemProjectLine({ item }: { item: SidebarUpdatedItem }) {
+  const label = resolveUpdatedItemProjectLabel(item);
+  if (!label) return null;
+  const repoFullName = item.repoFullName ?? (item.kind === 'github' ? label : null);
+  const isGithub = item.kind === 'github';
+  const mark = isGithub ? (
+    <GitHubOwnerIcon repoFullName={repoFullName} className="h-3.5 w-3.5" />
+  ) : item.kind === 'local' ? (
+    <Folder className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
+  ) : (
+    <MessageCircle className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
+  );
+  return (
+    <div
+      data-sidebar-updated-project={item.kind}
+      className="flex min-w-0 items-center gap-1 text-[11px] leading-tight text-sidebar-foreground-muted"
+    >
+      <span
+        className={cn(
+          'flex shrink-0 items-center justify-center',
+          isGithub ? 'h-3.5 w-3.5 overflow-hidden rounded-sm' : 'h-3 w-3 opacity-80'
+        )}
+      >
+        {mark}
+      </span>
+      <span className="min-w-0 truncate">{label}</span>
+    </div>
+  );
+}
+
 type UpdatedItemRowProps = {
   item: SidebarUpdatedItem;
   now: Date;
   selected: boolean;
   isMobile: boolean;
   showPinnedIcon: boolean;
+  showProjectContext?: boolean;
   href?: string;
   onSelect?: (id: string, tabSessionId?: string) => void;
   onArchive?: (id: string) => void;
@@ -652,6 +717,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   selected,
   isMobile,
   showPinnedIcon,
+  showProjectContext = false,
   href,
   onSelect,
   onArchive,
@@ -775,6 +841,9 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           })
       : undefined;
 
+  const isNestedChild = openedByTree?.kind === 'child';
+  const showProjectLine = showProjectContext && !isNestedChild;
+  const projectLabel = showProjectLine ? resolveUpdatedItemProjectLabel(item) : null;
   const titleNode = (
     <span
       className={cn(
@@ -787,6 +856,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       {item.title}
     </span>
   );
+  const rowAriaLabel = projectLabel ? `${item.title}, ${projectLabel}` : item.title;
 
   const [rowMenuOpen, setRowMenuOpen] = useState(false);
 
@@ -794,6 +864,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
     <div
       role={!useAnchor && onSelect ? 'button' : undefined}
       tabIndex={!useAnchor && onSelect ? 0 : undefined}
+      aria-label={!useAnchor && onSelect ? rowAriaLabel : undefined}
       aria-current={selected ? 'page' : undefined}
       data-id={`updated:${item.id}`}
       data-scope-item="row"
@@ -811,7 +882,8 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         // only. The bucket wrapper above also uses an (unnamed) `group` for its
         // header chevron — without naming, hovering any row would match the bucket's
         // group-hover and reveal every row's archive button at once.
-        'group/row relative flex w-full items-center rounded-md px-2 py-1 text-left',
+        'group/row relative flex w-full items-start rounded-md px-2 text-left',
+        showProjectLine ? 'py-1.5' : 'py-1',
         'border border-transparent bg-transparent',
         !showSelectedState &&
           onSelect &&
@@ -849,7 +921,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       {useAnchor && href ? (
         <a
           href={href}
-          aria-label={item.title}
+          aria-label={rowAriaLabel}
           className="absolute inset-0 z-10 rounded-md focus:outline-hidden focus-visible:shadow-none"
           // The overlay anchor covers the row, so it is what a drag starts on;
           // left draggable it would drag its link instead.
@@ -858,73 +930,86 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         />
       ) : null}
 
-      <div className="flex w-full min-w-0 items-center gap-1.5 text-sm">
-        <SessionRowLeadingSlot
-          showMenuButton={hasMenuActions}
-          menuLabel={contextMenuLabels.moreActions}
-          openedByTree={openedByTree}
-          fadeClassName="group-hover/row:opacity-0"
-          restPointerClassName="group-hover/row:pointer-events-none"
-          revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
-        />
-        <SessionRowAuthorAvatar author={item.owner} />
-        {showPinnedIcon && item.isPinned ? (
-          <Pin
-            aria-hidden="true"
-            className="relative -top-px h-3 w-3 shrink-0 text-sidebar-foreground-muted/80"
+      <div className="flex w-full min-w-0 items-start gap-1.5 text-sm">
+        <div className="flex h-5 shrink-0 items-center">
+          <SessionRowLeadingSlot
+            showMenuButton={hasMenuActions}
+            menuLabel={contextMenuLabels.moreActions}
+            openedByTree={openedByTree}
+            fadeClassName="group-hover/row:opacity-0"
+            restPointerClassName="group-hover/row:pointer-events-none"
+            revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
           />
+        </div>
+        {item.owner ? (
+          <span className="flex h-5 shrink-0 items-center">
+            <SessionRowAuthorAvatar author={item.owner} />
+          </span>
         ) : null}
-        <div
-          className={cn('min-w-0 flex-1 flex items-center truncate text-sm')}
-          // Double-click to rename is scoped to the title only, so double-clicking
-          // elsewhere on the row (e.g. the two-step Archive confirm button) cannot
-          // accidentally trigger a rename.
-          onDoubleClick={(e) => {
-            if (!canRename) return;
-            e.preventDefault();
-            e.stopPropagation();
-            onBeginRename(item.id, item.title);
-          }}
-        >
-          {titleNode}
+        {showPinnedIcon && item.isPinned ? (
+          <span className="flex h-5 shrink-0 items-center">
+            <Pin
+              aria-hidden="true"
+              className="relative -top-px h-3 w-3 shrink-0 text-sidebar-foreground-muted/80"
+            />
+          </span>
+        ) : null}
+        <div className={cn('min-w-0 flex-1', showProjectLine && 'flex flex-col gap-1')}>
+          <div
+            className={cn('flex h-5 min-w-0 items-center truncate text-sm')}
+            // Double-click to rename is scoped to the title only, so double-clicking
+            // elsewhere on the row (e.g. the two-step Archive confirm button) cannot
+            // accidentally trigger a rename.
+            onDoubleClick={(e) => {
+              if (!canRename) return;
+              e.preventDefault();
+              e.stopPropagation();
+              onBeginRename(item.id, item.title);
+            }}
+          >
+            {titleNode}
+          </div>
+          {showProjectLine ? <UpdatedItemProjectLine item={item} /> : null}
         </div>
         {/* Keep PR at the right edge. Line totals stay in the hover card. */}
-        <SidebarRowEndSlot
-          isWaitingPermission={item.isWaitingPermission}
-          isWorking={item.isWorking}
-          hasUnreadMessages={item.hasUnreadMessages}
-          fadeClassName="group-hover/row:opacity-0"
-          restIcon={
-            showPr ||
-            showMergeablePill ||
-            isMobile ||
-            (item.kind === 'local' && item.isWorktree) ? (
-              <span
-                className={cn(
-                  'flex select-none items-center gap-1.5 text-[11px] tabular-nums text-sidebar-foreground-muted/80',
-                  useAnchor && 'z-20'
-                )}
-              >
-                {isMobile ? <span>{relativeTime}</span> : null}
-                {showMergeablePill ? <SessionMergeablePill /> : null}
-                <SessionRowWorktreeIndicator
-                  isWorktree={item.kind === 'local' && item.isWorktree}
+        <div className="flex h-5 shrink-0 items-center">
+          <SidebarRowEndSlot
+            isWaitingPermission={item.isWaitingPermission}
+            isWorking={item.isWorking}
+            hasUnreadMessages={item.hasUnreadMessages}
+            fadeClassName="group-hover/row:opacity-0"
+            restIcon={
+              showPr ||
+              showMergeablePill ||
+              isMobile ||
+              (item.kind === 'local' && item.isWorktree) ? (
+                <span
+                  className={cn(
+                    'flex select-none items-center gap-1.5 text-[11px] tabular-nums text-sidebar-foreground-muted/80',
+                    useAnchor && 'z-20'
+                  )}
+                >
+                  {isMobile ? <span>{relativeTime}</span> : null}
+                  {showMergeablePill ? <SessionMergeablePill /> : null}
+                  <SessionRowWorktreeIndicator
+                    isWorktree={item.kind === 'local' && item.isWorktree}
+                  />
+                  {showPr ? <SessionPrIcon prStatus={prStatus} prCiState={item.prCiState} /> : null}
+                </span>
+              ) : undefined
+            }
+            archive={
+              showInlineArchive ? (
+                <SidebarRowArchiveButton
+                  label={archiveTooltipLabel}
+                  confirmLabel={archiveConfirmLabel}
+                  onConfirm={() => onArchive?.(item.id)}
+                  revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
                 />
-                {showPr ? <SessionPrIcon prStatus={prStatus} prCiState={item.prCiState} /> : null}
-              </span>
-            ) : undefined
-          }
-          archive={
-            showInlineArchive ? (
-              <SidebarRowArchiveButton
-                label={archiveTooltipLabel}
-                confirmLabel={archiveConfirmLabel}
-                onConfirm={() => onArchive?.(item.id)}
-                revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
-              />
-            ) : undefined
-          }
-        />
+              ) : undefined
+            }
+          />
+        </div>
       </div>
     </div>
   );

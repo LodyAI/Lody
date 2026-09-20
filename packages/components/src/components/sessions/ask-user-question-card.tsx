@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent,
   type KeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
@@ -22,6 +23,8 @@ import {
 } from '@lody/shared';
 
 import { Button } from '@/ui/button';
+import { Input } from '@/ui/input';
+import { Textarea } from '@/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui/dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { cn } from '@/lib/utils';
@@ -29,6 +32,7 @@ import { cn } from '@/lib/utils';
 type DraftAnswer = {
   selectedLabels: string[];
   customAnswer: string;
+  note?: string;
 };
 
 type SwipeState = {
@@ -80,13 +84,12 @@ const buildDraftsFromAnswers = (
   answers: AskUserQuestionAnswers | undefined
 ): DraftAnswer[] =>
   meta.questions.map((question, index) => {
-    if (!answers) {
-      return { selectedLabels: [], customAnswer: '' };
-    }
+    const noteValue = question.note ? answers?.[question.note.fieldId] : undefined;
+    const note = typeof noteValue === 'string' ? noteValue : '';
     const key = getAskUserQuestionAnswerKey(meta.questions, index);
-    const value = answers[key];
+    const value = answers?.[key];
     if (value === undefined) {
-      return { selectedLabels: [], customAnswer: '' };
+      return { selectedLabels: [], customAnswer: '', note };
     }
     const values = Array.isArray(value) ? value : [value];
     const optionLabels = new Set(question.options.map((option) => option.label));
@@ -102,6 +105,7 @@ const buildDraftsFromAnswers = (
     return {
       selectedLabels,
       customAnswer: customParts.join('\n'),
+      note,
     };
   });
 
@@ -123,13 +127,14 @@ const buildAnswers = (
   meta: AskUserQuestionPermissionMeta,
   drafts: DraftAnswer[]
 ): AskUserQuestionAnswers | null => {
-  const answers: AskUserQuestionAnswers = {};
+  const answers: AskUserQuestionAnswers = Object.create(null);
   for (const [index, question] of meta.questions.entries()) {
     const draft = drafts[index];
     if (!draft) return null;
     const value = getDraftAnswerValue(question, draft);
     if (value === null) return null;
     answers[getAskUserQuestionAnswerKey(meta.questions, index)] = value;
+    if (question.note && draft.note?.trim()) answers[question.note.fieldId] = draft.note;
   }
   return answers;
 };
@@ -358,12 +363,12 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
         const next = current.map((entry, i) => {
           if (i !== currentIndex) return entry;
           if (!question.multiSelect) {
-            return { selectedLabels: [label], customAnswer: '' };
+            return { ...entry, selectedLabels: [label], customAnswer: '' };
           }
           const selectedLabels = entry.selectedLabels.includes(label)
             ? entry.selectedLabels.filter((value) => value !== label)
             : [...entry.selectedLabels, label];
-          return { selectedLabels, customAnswer: '' };
+          return { ...entry, selectedLabels, customAnswer: '' };
         });
 
         // Single-select: auto-advance to the next unanswered question for
@@ -372,7 +377,12 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
         // after they have reviewed the full set of answers — rejected:
         // auto-submitting on the last click writes the full answer set
         // through to the CRDT before the user can revisit earlier answers.
-        if (!question.multiSelect && mode.kind === 'interactive' && currentIndex < total - 1) {
+        if (
+          !question.multiSelect &&
+          !question.note &&
+          mode.kind === 'interactive' &&
+          currentIndex < total - 1
+        ) {
           queueMicrotask(() => setPageIndex(currentIndex + 1));
         }
         return next;
@@ -388,6 +398,7 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
         current.map((entry, i) =>
           i === currentIndex
             ? {
+                ...entry,
                 selectedLabels: value.trim() ? [] : entry.selectedLabels,
                 customAnswer: value,
               }
@@ -414,6 +425,19 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
   };
 
   if (!question) return null;
+
+  const noteInputProps = {
+    value: isReadonly && question.note?.isSecret && draft.note ? '••••••••' : (draft.note ?? ''),
+    disabled,
+    className:
+      'min-w-0 rounded-md border border-border bg-input-field px-2 py-1.5 text-foreground disabled:bg-muted',
+    onChange: (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      const note = event.target.value;
+      setDrafts((current) =>
+        current.map((entry, index) => (index === currentIndex ? { ...entry, note } : entry))
+      );
+    },
+  };
 
   const PaginationDots =
     total > 1 ? (
@@ -618,7 +642,11 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
                 </span>
                 <input
                   type={question.isSecret ? 'password' : 'text'}
-                  value={draft.customAnswer}
+                  value={
+                    isReadonly && question.isSecret && draft.customAnswer
+                      ? '••••••••'
+                      : draft.customAnswer
+                  }
                   disabled={disabled}
                   placeholder={t('sessions.customAnswerPlaceholder', 'Type a custom answer...')}
                   className="min-w-0 flex-1 border-0 bg-transparent p-0 text-xs leading-5 text-foreground shadow-none placeholder:text-muted-foreground/60 focus:outline-none focus-visible:outline-none focus-visible:ring-0 disabled:cursor-not-allowed"
@@ -628,6 +656,25 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
               </div>
             ) : null}
           </div>
+        ) : null}
+
+        {question.note ? (
+          <label className="mt-2 flex flex-col gap-1 text-xs text-muted-foreground">
+            <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+              <span className="text-foreground/85">
+                {question.note.title ||
+                  t('sessions.askQuestion.noteLabel', 'Additional context (optional)')}
+              </span>
+              {question.note.description ? (
+                <span className="text-muted-foreground/70">{question.note.description}</span>
+              ) : null}
+            </span>
+            {question.note.isSecret ? (
+              <Input type="password" {...noteInputProps} />
+            ) : (
+              <Textarea rows={2} {...noteInputProps} />
+            )}
+          </label>
         ) : null}
 
         {/* Custom answer is an inline option row in the list above; Submit is a

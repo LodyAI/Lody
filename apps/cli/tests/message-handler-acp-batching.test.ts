@@ -364,7 +364,7 @@ describe('MessageHandler ACP batching', () => {
     }
   });
 
-  it('settles only a failed compaction across finalization, reload, and later activity', async () => {
+  it('settles an open compaction across finalization, reload, and later activity', async () => {
     vi.useRealTimers();
     const sessionId = 'compaction-lifecycle' as SessionId;
     const { repo, docs, handler } = await createHandlerHarness([sessionId]);
@@ -374,11 +374,7 @@ describe('MessageHandler ACP batching', () => {
       beginConversationTurn(sessionId: SessionId): string;
       enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
       flushACPUpdatesNow(sessionId: SessionId): Promise<void>;
-      finalizeACPState(
-        sessionId: SessionId,
-        turnId?: string,
-        options?: { settleContextCompactionAsFailed?: boolean }
-      ): Promise<void>;
+      finalizeACPState(sessionId: SessionId, turnId?: string): Promise<void>;
     };
     const findCompaction = (history: SessionHistoryInput[], toolCallId: string) =>
       history
@@ -405,6 +401,9 @@ describe('MessageHandler ACP batching', () => {
       await host.flushACPUpdatesNow(sessionId);
       expect(isSessionContextCompacting(await doc.sessionData.history.readAll())).toBe(true);
 
+      // Nothing after the turn boundary can carry `compact-1` to a terminal
+      // status, so finalization owns it: the durable record must not reload as
+      // a compaction that is still running. Repeating the call is a no-op.
       await host.finalizeACPState(sessionId, turnId);
       await host.finalizeACPState(sessionId, turnId);
 
@@ -412,20 +411,9 @@ describe('MessageHandler ACP batching', () => {
       await reopened.initOffline({ history: [] });
       const reloadedHistory = await reopened.sessionData.history.readAll();
       const reloadedTurn = reloadedHistory.find((entry) => entry.id === turnId);
-      const staleCompaction = findCompaction(reloadedHistory, 'compact-1');
       expect(reloadedTurn?.finished).toBe(true);
-      expect(staleCompaction).toMatchObject({ status: 'in_progress' });
-      expect(isSessionContextCompacting(reloadedHistory)).toBe(true);
-
-      await host.finalizeACPState(sessionId, turnId, {
-        settleContextCompactionAsFailed: true,
-      });
-      await host.finalizeACPState(sessionId, turnId, {
-        settleContextCompactionAsFailed: true,
-      });
-      const failedHistory = await reopened.sessionData.history.readAll();
-      expect(findCompaction(failedHistory, 'compact-1')).toMatchObject({ status: 'failed' });
-      expect(isSessionContextCompacting(failedHistory)).toBe(false);
+      expect(findCompaction(reloadedHistory, 'compact-1')).toMatchObject({ status: 'failed' });
+      expect(isSessionContextCompacting(reloadedHistory)).toBe(false);
 
       host.enqueueACPUpdate(sessionId, {
         sessionId,

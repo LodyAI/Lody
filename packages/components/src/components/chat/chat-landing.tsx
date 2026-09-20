@@ -224,6 +224,7 @@ import { withGitHubTokenRetry } from '@/lib/github-token';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useVisibleLocalProjectsFromMachineIndex } from '@/hooks/use-visible-local-projects';
 import {
+  isLocalProjectRemovalCompletionSuppressed,
   useLocalProjectRemovalResultNotifications,
   usePendingLocalProjectRemovals,
 } from '@/hooks/use-remove-local-project';
@@ -378,6 +379,7 @@ import {
   getSharingReviewTeamHasNoVisibleLocalResources,
   getSharingReviewTeamLooksEmpty,
   shouldRetrySharingReviewConflict,
+  shouldReportLocalProjectUnavailable,
   getChatLandingSubmitDisabled,
   getChatLandingVisibleComposerStatus,
   isChatLandingMachineReachable,
@@ -1156,6 +1158,7 @@ function WorkspaceChatLanding({
   const fireProjectSelectedOnChange = useFireOnKeyChange();
   const fireAgentConfigOnChange = useFireOnKeyChange();
   const preSelectionAppliedRef = useRef<string | null>(null);
+  const previousPreSelectionKeyRef = useRef<string | null>(null);
   // False while a just-applied URL intent has not rendered yet; the selection
   // mirror must not compare against that pre-application state.
   const selectionSyncArmedRef = useRef(false);
@@ -1401,6 +1404,8 @@ function WorkspaceChatLanding({
     repo: preSelectedRepo,
   });
   useEffect(() => {
+    const previousPreSelectionKey = previousPreSelectionKeyRef.current;
+    previousPreSelectionKeyRef.current = preSelectionKey;
     if (preSelectionAppliedRef.current === preSelectionKey) return;
     preSelectionAppliedRef.current = preSelectionKey;
     // The applied selection reaches state next render; disarm the mirror so it
@@ -1425,6 +1430,11 @@ function WorkspaceChatLanding({
     } else if (preSelectedRepo) {
       setContextType('github');
       setSelectedRepo(preSelectedRepo);
+    } else if (previousPreSelectionKey?.startsWith('local|')) {
+      // A sidebar removal navigates from a URL-named local project to plain
+      // `/chat` while this landing stays mounted. Clear the stale local
+      // selection before the optimistic Flock overlay can report it missing.
+      handleSelectedLocalProjectChange(null);
     }
   }, [
     preSelectionKey,
@@ -1510,7 +1520,24 @@ function WorkspaceChatLanding({
       isDocMetaCacheReady: docMetaCacheReady,
       isMetaRoomFirstSyncPending,
     });
-    if (localProjectAvailability !== 'unavailable') return;
+    const localProjectKey = buildLocalProjectKey(
+      selectedLocalProject.machineId,
+      selectedLocalProject.localProjectId
+    );
+    const removalInProgress =
+      pendingLocalProjectRemovals.has(localProjectKey) ||
+      isLocalProjectRemovalCompletionSuppressed(
+        selectedLocalProject.machineId,
+        selectedLocalProject.localProjectId
+      );
+    if (
+      !shouldReportLocalProjectUnavailable({
+        availability: localProjectAvailability,
+        removalInProgress,
+      })
+    ) {
+      return;
+    }
     toast.error(t('sidebar.localProjects.forbidden', 'Local project is not available'));
     handleSelectedLocalProjectChange(null);
     setContextType(hasGitHubRepos ? 'github' : 'chat');
@@ -1526,6 +1553,7 @@ function WorkspaceChatLanding({
     visibleLocalProjectAccess,
     visibleLocalProjectsLoading,
     isMetaRoomFirstSyncPending,
+    pendingLocalProjectRemovals,
     hasGitHubRepos,
     t,
     handleSelectedLocalProjectChange,

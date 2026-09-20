@@ -11,6 +11,7 @@ import {
   getChatLandingHintType,
   getChatLandingInitialDataLoading,
   getChatLandingLocalProjectAvailability,
+  shouldReportLocalProjectUnavailable,
   getChatLandingProjectRecency,
   getChatLandingSelectedMachineProjectStatus,
   getChatLandingSubmitDisabled,
@@ -702,6 +703,41 @@ describe('getChatLandingLocalProjectAvailability', () => {
         isDocMetaCacheReady: true,
       })
     ).toBe('available');
+  });
+});
+
+describe('shouldReportLocalProjectUnavailable', () => {
+  it('suppresses the transient unavailable state while a project removal is active', () => {
+    expect(
+      shouldReportLocalProjectUnavailable({
+        availability: 'unavailable',
+        removalInProgress: true,
+      })
+    ).toBe(false);
+  });
+
+  it('still reports a genuinely unavailable project', () => {
+    expect(
+      shouldReportLocalProjectUnavailable({
+        availability: 'unavailable',
+        removalInProgress: false,
+      })
+    ).toBe(true);
+  });
+
+  it('does not report pending or available projects', () => {
+    expect(
+      shouldReportLocalProjectUnavailable({
+        availability: 'pending',
+        removalInProgress: false,
+      })
+    ).toBe(false);
+    expect(
+      shouldReportLocalProjectUnavailable({
+        availability: 'available',
+        removalInProgress: false,
+      })
+    ).toBe(false);
   });
 });
 

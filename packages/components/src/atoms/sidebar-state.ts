@@ -177,6 +177,62 @@ export const localProjectCollapseStateAtom = atomWithStorage<LocalProjectCollaps
   {}
 );
 
+/**
+ * Per-workspace local-project ordering. Entries use the machine-qualified
+ * `${machineId}:${localProjectId}` key because project ids are only unique
+ * within their owning machine.
+ */
+const localProjectOrderByWorkspaceAtom = atomWithStorage<Record<string, string[]>>(
+  'lody-sidebar-local-project-order-by-workspace',
+  {}
+);
+
+const EMPTY_LOCAL_PROJECT_ORDER: readonly string[] = Object.freeze([]);
+
+/**
+ * Local-project order scoped to the current workspace. Reading outside a
+ * workspace returns an empty array; writing outside a workspace is a no-op.
+ */
+export const localProjectOrderAtom = atom<readonly string[], [readonly string[]], void>(
+  (get) => {
+    const workspaceId = get(currentWorkspaceIdAtom);
+    if (!workspaceId) return EMPTY_LOCAL_PROJECT_ORDER;
+    return get(localProjectOrderByWorkspaceAtom)[workspaceId] ?? EMPTY_LOCAL_PROJECT_ORDER;
+  },
+  (get, set, value) => {
+    const workspaceId = get(currentWorkspaceIdAtom);
+    if (!workspaceId) return;
+    const map = get(localProjectOrderByWorkspaceAtom);
+    set(localProjectOrderByWorkspaceAtom, {
+      ...map,
+      [workspaceId]: [...value],
+    });
+  }
+);
+
+/**
+ * Reorder the visible projects in one machine section while retaining saved
+ * entries that are currently absent or belong to another machine.
+ */
+export function moveLocalProjectOrder(
+  persistedOrder: readonly string[],
+  visibleKeys: readonly string[],
+  activeKey: string,
+  overKey: string
+): readonly string[] | null {
+  const fromIndex = visibleKeys.indexOf(activeKey);
+  const toIndex = visibleKeys.indexOf(overKey);
+  if (fromIndex < 0 || toIndex < 0 || fromIndex === toIndex) return null;
+
+  const nextVisibleOrder = [...visibleKeys];
+  const [moved] = nextVisibleOrder.splice(fromIndex, 1);
+  if (!moved) return null;
+  nextVisibleOrder.splice(toIndex, 0, moved);
+
+  const visibleSet = new Set(visibleKeys);
+  return [...nextVisibleOrder, ...persistedOrder.filter((key) => !visibleSet.has(key))];
+}
+
 // ============================================================================
 // Section Collapsed (Local Projects + GitHub Worktrees headers)
 // ============================================================================

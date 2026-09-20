@@ -231,3 +231,17 @@ describe('buildFileCandidates', () => {
     );
   });
 });
+
+it('keeps pending and failed sources visible in aggregate search without stale candidates', () => {
+  const file = makeCategory('file', 'file', 'Files', []);
+  for (const status of ['loading', 'error'] as const) {
+    file.status = status;
+    const view = selectMentionMenuView([file], 'composer');
+    expect(view.level).toBe('aggregate');
+    if (view.level !== 'aggregate') throw new Error('Expected aggregate search');
+    expect(view.groups).toEqual([{ category: file, candidates: [] }]);
+  }
+  file.status = 'ready';
+  const view = selectMentionMenuView([file], 'composer');
+  expect(view.level === 'aggregate' && view.groups).toEqual([]);
+});

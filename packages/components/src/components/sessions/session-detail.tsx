@@ -100,6 +100,7 @@ import {
   navigationSidebarHiddenAtom,
   showNavigationSidebarAtom,
   zenLayoutModeAtom,
+  zenRightPanelAtom,
 } from '@/atoms/layout-state';
 import {
   memo,
@@ -4171,6 +4172,16 @@ const SessionDetail = ({
   });
 
   const jotaiStore = useStore();
+  useLayoutEffect(() => {
+    if (isMobile) return undefined;
+    const panel = { open: isSidebarOpen, reveal: revealRightSidebar };
+    jotaiStore.set(zenRightPanelAtom, panel);
+    return () => {
+      if (jotaiStore.get(zenRightPanelAtom) === panel) {
+        jotaiStore.set(zenRightPanelAtom, null);
+      }
+    };
+  }, [isMobile, isSidebarOpen, jotaiStore, revealRightSidebar, sessionId]);
   useCommand({
     id: 'session.newTabOrTerminal',
     title: t('commands.session.newTabOrTerminal', 'New Tab or Terminal'),

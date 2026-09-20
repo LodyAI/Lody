@@ -55,7 +55,10 @@ this page is the full text of the rules summarised there.
     is the only place its own unread state can surface — sub-sessions get no
     sidebar row — so do not drop the marker from any tab renderer.
     Desktop tabs share width equally whenever all can reach `ACTIVE_TAB_MIN_WIDTH`;
-    below that threshold the active tab keeps that width and the others share the remainder.
+    below that threshold the active tab keeps that width and the others share the remainder,
+    provided the strip viewport is at least 366px wide. Narrower strips divide evenly.
+    Browser flex owns resting widths, including initial/restored tabs: these do not
+    run an opening width animation. Item margins alone own the 6px inter-tab gap.
     A pointer-triggered close freezes every surviving tab at its current width
     (Chromium's `in_tab_close_` rapid-close mode) so the next tab's close
     button lands under the cursor; the freeze only arms on a pointerdown inside
@@ -73,13 +76,11 @@ this page is the full text of the rules summarised there.
     LAST tab never enters the mode — the new last tab already ends at the right
     edge — and closing the last tab while frozen re-spreads the survivors over
     the occupied width instead of shrinking the budget, keeping that edge
-    under the cursor. Removals slide closed (the survivor starts with the
-    freed width as an inline-start margin) and pure inserts grow from zero
-    width, both over a 200ms transition that reduced-motion users skip. A
-    same-commit remove+add is a substitution, not an insert — a draft
-    promoting to a session morphs from the removed tab's width rather than
-    appearing from zero — and a lone tab added to an empty strip renders at
-    its final width directly.
+    under the cursor. Frozen removals slide closed (the survivor starts with the
+    freed width as an inline-start margin) over a 200ms transition that reduced-motion
+    users skip. Adding or restoring tabs and releasing the freeze return directly
+    to flex. See the [browser-width decision](../notes/implemented/architecture/2026-09-21-browser-owned-tab-widths.md)
+    for DOM capture and ResizeObserver update ordering.
     **The tab pills' top border shares one line with the sidebar and side-panel
     cards at y=8**, since every floating card is `mt-2` (sidebar in
     `loro-app-sidebar.tsx`, side panel + terminal dock in `session-detail.tsx` /

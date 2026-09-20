@@ -47,7 +47,6 @@ export type HistoryAction =
       turnId?: string;
       endedAt: number;
       permissionWaitMs?: number;
-      settleContextCompactionAsFailed?: boolean;
       force?: boolean;
     }
   | { kind: 'upsert-turn'; turn: SessionEntry; beforeTurnId?: string; beforeLastUser?: boolean }
