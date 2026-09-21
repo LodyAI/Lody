@@ -1,3 +1,4 @@
+import { enableRendererHangStacks } from './renderer-hang-diagnostics'
 import {
   registerLocalFileResourceScheme,
   installLocalFileResourceProtocol
@@ -97,6 +98,7 @@ if (
   }
 }
 
+enableRendererHangStacks()
 configureDevbarDiagnostics()
 registerLocalFileResourceScheme()
 
