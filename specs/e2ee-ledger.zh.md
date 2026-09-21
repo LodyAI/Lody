@@ -3,6 +3,104 @@
 Status: draft
 Translation: pending
 
+本稿是协议与验证意图：记录如何编码、什么操作在什么状态下合法、宿主不能替核心做什么。
+不是实现排期、测试计划或 freeze 清单。协作者是否接受一条记录，只取决于自己已验证的
+前置状态能否通过与核心相同的检查（`Ledger.verify` / `extend`）。
+
+## 术语
+
+没有密码学背景也可以从这里读起。后文用到这些词时，含义以本节为准；公式和操作表在后面章节。
+「工作区」与 Org 同义。创世哈希、`genesis`、Org 身份、信任锚（`anchor`）在已确认设计里是同一条创世记录的哈希。
+
+### 人、设备与组织
+
+| 说法               | 英文                           | 含义                                                                                                                                                           |
+| ------------------ | ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 加密组织           | Org                            | 一套独立的成员、权限、账本和文档加密密钥。口语也叫工作区。首版不再套一层 Team（旧产品里 Team 是 Org 之上的分组，本稿没有）。                                   |
+| 用户               | user                           | 成员和角色的主体，是人，不是某台电脑。                                                                                                                         |
+| 成员实例           | membership                     | 某用户在本 Org 的这一次资格。移除后再加入是新实例，旧资格不复活。                                                                                              |
+| 设备               | device                         | 一台电脑、手机、远程机器或恢复设备。每台自己生成密钥，不复制旧设备私钥。                                                                                       |
+| 个人 / 机器 / 恢复 | personal / machine / recovery  | 设备种类。机器不能管理 Org；恢复设备平时不运行，只用来收密钥和批准本人的新个人设备。                                                                           |
+| 角色               | Owner / Admin / Member / Guest | 用户在本 Org 的权限档。Guest 只读。设备不另存一套角色。                                                                                                        |
+| 管理能力           | `canManage`                    | 这台个人设备能不能做邀请、发布新一代密钥等管理操作。必须和用户角色取交集：Admin 的普通手机若未授予管理能力，仍不能发布新一代密钥。机器和恢复设备必须为 false。 |
+| 恢复设备           | recovery device，文中常写 R    | 已登记、平时不上线的虚拟设备。私钥用 Passkey 或恢复文件包起来，需要时才解锁。                                                                                  |
+| Passkey            | Passkey / PRF                  | 系统级通行密钥；这里只用它派生一段密钥来包装 R 的私钥。Passkey 不是 R，也不能代替账本授权。真机 PRF 仍待验收。                                                 |
+| 用户根私钥         | user root key                  | 旧设想：每人一把凌驾于所有设备之上的私钥。本稿没有这种钥匙；恢复走登记过的 R。                                                                                 |
+
+### 账本长什么样
+
+| 说法        | 英文                 | 含义                                                                                                                   |
+| ----------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| 权限账本    | authorization ledger | 一条公开可验证的权限历史：谁是成员、哪台设备有效、现在第几代。服务端能保存和读取，但不能靠改自己的用户表来授解密权。   |
+| 授权事实    | authorization facts  | 账本上可公开验证的状态：成员、角色、设备、公钥、当前代次和密钥指纹等。不是密钥材料。                                   |
+| 创世记录    | genesis              | 账本的第一条记录。它的哈希就是本 Org 的身份。必须从二维码等账本之外的可信渠道确认，不能因为记录「自称」可信就信。      |
+| 哈希 / 摘要 | hash / digest        | 把任意字节压成固定 32 字节指纹。相同输入得到相同结果，几乎无法从指纹反推原文，改一个字节指纹就变。                     |
+| 哈希链      | hash chain           | 每条新记录都写上一条的哈希（`previousHash`）。改中间任何一条，后面全部对不上。账本是一条线，不自动合并分叉。           |
+| 前驱        | predecessor          | `previousHash` 指向的那条上一记录。                                                                                    |
+| 链头        | head                 | 本机已验证的最后一条记录的哈希。提交下一条时要对着这个值。                                                             |
+| 增量        | suffix / increment   | 创世或权限快照之后新追加的记录。快照**之前**的历史叫前缀（prefix），新人首次加入不必下载前缀。                         |
+| 签名        | signature            | 用设备私钥在特定字节上盖章；别人用对应公钥能验证「就是这台设备签的」，但签过不等于这台设备有权做这件事。               |
+| 单签        | single-signer        | 一条账本记录只有一个提交者签名。操作内部仍可附带别人的持钥证明。                                                       |
+| 多签        | multi-signature      | 旧原型里一条记录要多人签。本稿不用。                                                                                   |
+| 持钥证明    | possession proof     | 新设备用自己的私钥签一段绑定 Org 和新公钥的数据，证明它真的拿着对应私钥，而不是别人替它登记一把公钥。                  |
+| 在线格式    | wire                 | 真正发送和落盘的原始字节，不是调试用的 JSON/hex 文本。                                                                 |
+| DAG-CBOR    | DAG-CBOR             | 记录的二进制编码：固定顺序的数组，哈希和密钥都是原始字节。只借用这种编码，不引入 IPFS、CID 或可合并的协作图。          |
+| 线性账本    | linear ledger        | 成功提交的顺序就是权限顺序。不用 MLS（一种群组密钥协议），也不用授权 DAG（一种可分叉合并的授权图）或「谁先撤权谁赢」。 |
+
+### 密钥、承诺与信封
+
+| 说法                | 英文                                       | 含义                                                                                                                                                                                                                       |
+| ------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 公私钥              | public / private key                       | 公钥可公开；私钥不出设备。签名和加密各用一对，不能混用。                                                                                                                                                                   |
+| 对称密钥            | symmetric key                              | 加密和解密用同一把。内容密钥 `K` 就是对称密钥。                                                                                                                                                                            |
+| 内容密钥 / 代次密钥 | epoch key，文中常写 `K`（第 n 代写 `K_n`） | 随机抽出的 32 字节对称密钥。文档密钥由它按 Org、代次、文档再派生，不能写进账本明文。                                                                                                                                       |
+| 代次 / 换代         | epoch / rotation                           | 内容密钥的世代，从 0 起每次加一。换代 = 作废当前 `K`、发布新的 `K`。旧密钥解不了新内容；已经拿到的旧密钥和旧明文收不回。操作名 `publishEpoch`。                                                                            |
+| 承诺                | commitment                                 | 钥匙的公开指纹，不是钥匙本身。别人看见承诺推不出 `K`；你以后也只能出示原来那把 `K`。公式见 §2。代码里同一字段还叫 `keyCommitment`、`epochCommitment`、`epoch0Commitment`。                                                 |
+| 域分隔摘要          | domain-separated digest                    | 哈希前先拼一个用途标签（如 `"lody-e2ee/epoch-key/v1\0"`），避免「当记录哈希用的 SHA-256」被拿去冒充「当密钥承诺用的 SHA-256」。                                                                                            |
+| 信封                | envelope                                   | 把当前代 `K` 用接收设备的加密公钥封好的一份密文。只发给那台设备，不写在账本明文里。解开后必须再算承诺，和账本对上才算拿到正确的钥匙。旧文「每设备密钥包」指这个，不是历史包。                                              |
+| 独立投递通道        | key-delivery channel                       | 发信封用的传输，和账本记录不是同一条流。账本负责授权事实；投递通道负责把 `K` 送到设备。                                                                                                                                    |
+| 历史包 / 历史密钥包 | history packet                             | 换代记录里的一小段密文：用新 `K` 加密上一把 `K`。图里的 `H_n` 就是第 n 代这条密文。新成员拿到当前 `K` 后可以沿历史包解开全部旧钥。验证账本的人把它当不透明字节，不解密。字段名 `previousEpochKey` / `previousEpochKey72`。 |
+| nonce / 认证标签    | nonce / tag                                | 加密时附带的随机数和校验尾，解密必须原样使用。历史包 72 字节 = 24 字节 nonce + 32 字节密文 + 16 字节标签。                                                                                                                 |
+| HPKE                | HPKE                                       | 封信封用的标准公钥加密（RFC 9180）。记住「给指定设备封一份只有它能解的密文」即可。                                                                                                                                         |
+| 发布 vs 送到        | published vs delivered                     | 账本上出现承诺 = 这一代已发布。每台设备真正解开信封 = 已送到。前者不蕴含后者。                                                                                                                                             |
+
+§8.1 的「记录外层」是账本记录怎么编码，和这里封给设备的信封不是同一件事。
+
+### 提交、对账与信任
+
+| 说法              | 英文                               | 含义                                                                                                                                                          |
+| ----------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 宿主              | host                               | 账本外层：落盘、CAS、发信封、查时钟。纯验证核心不算宿主。                                                                                                     |
+| 条件追加          | CAS，Compare-And-Swap / append-cas | 服务器只在「当前链头还是我看到的那个哈希」时收下我这条记录。否则冲突。冲突后必须重新准备，不能改已签名的字节再发。                                            |
+| 待提交 / 未知结果 | pending / unknown outcome          | 本地必须先原样存好将要发送的字节，再去 CAS。没收到回执时，用同一份字节去对账，禁止换一把新签名重发（那会变成另一条记录）。                                    |
+| 对账              | reconcile / compare                | 两台设备核对自己验证过的历史：同一创世、同一长度、同一链头（快照路径还要核完整权限状态）。远端口头说「hash 一样」不算数。                                     |
+| 权限快照          | authorization snapshot             | 已有设备对「当前完整权限状态」的签名摘要。新人可先验证快照再追后续增量，不必从创世验完全部历史。                                                              |
+| 内容快照          | content snapshot                   | 某篇文档在某一读位置上的加密快照，走文档流，不是权限账本快照。协作文档本身用 CRDT（可合并的副本数据类型）同步；权限账本不是 CRDT。                            |
+| 背书者            | endorser                           | 签署权限快照的那台设备。必须是当时有效的 Owner/Admin 个人管理设备。快照不能仅凭内部自称 Owner 来证明签署者资格。                                              |
+| 信任锚            | trust anchor / `anchor`            | 验证开始前，从账本之外带入的创世哈希。程序不能自己发明「创世可信」。                                                                                          |
+| 公钥目录          | key directory                      | 服务端上的公钥通讯录。签名只能证明「持有这把私钥」，不能独自证明「这是某个人」。                                                                              |
+| 配对              | pairing                            | 用二维码等账本之外的信道核对公钥和创世哈希。                                                                                                                  |
+| 纯验证核心        | pure verifier                      | `Ledger.verify` / `extend`：只解析、哈希、验签、重放权限，不联网、不读盘、不读系统时间。写库、发信封、做 CAS 的是宿主。                                       |
+| 防重放            | replay protection                  | 用过的申请 ID、设备公钥等不能再用来做另一次授权。重新签名并换前驱，不是同一次原文重试。                                                                       |
+| 新鲜度            | freshness                          | 当前状态合法，不等于「现在仍然该执行」。已知撤权应立即失效；上传是否被后端接受，仍可能依赖宿主的时钟和最多 15 分钟的网关/JWT 截止。本稿不宣称已验证生产网关。 |
+| 跨流              | cross-stream                       | 权限账本和文档内容不在同一条服务器流上，没有「两条流一起成功或一起失败」的事务。                                                                              |
+| 续读位置          | continuation offset                | 文档流上已接纳内容的位置。内容快照卡在这个位置，不能靠自报时间或账本 head 冒充。                                                                              |
+| `verified=true`   | —                                  | 禁止出现的捷径：调用方声称「已经验过」从而跳过验签。磁盘对象必须再走 `Ledger.verify` 或 §6.1 的快照入口。                                                     |
+
+不要求先读 MLS、Merkle 树（一种树状哈希证明）或 IPFS。本稿明确不用它们。
+
+### 外层名字与文中编号
+
+| 说法                     | 含义                                                                               |
+| ------------------------ | ---------------------------------------------------------------------------------- |
+| Convex                   | 产品云端表，只适合存加入申请的待处理/取消。表状态不是密码学授权。                  |
+| Streams / `streams-crdt` | 本地或托管的字节流和文档同步。账本 CAS 走它的 `append-cas`；文档加密复用它的接口。 |
+| JWT / 网关               | 生产上云端访问控制的设想。实验室用薄 HTTP 网关代替；本包不宣称已接线。             |
+| D1 A                     | Owner 单方转让：当前 Owner 的管理个人设备单独签名，接任者须已是成员。              |
+| D2                       | 创世代承诺暂不编 genesis；持钥模块解开后按 §2 公式核对。                           |
+| D3                       | 账本没有 cancel 操作；用过的申请 ID 永久消费。                                     |
+| D4–D5                    | §8 的操作字段和权限交集（角色 ∩ `canManage` ∩ 设备种类）。                         |
+
 ## 1. 目标与确认范围
 
 首次加入采用经过认证的已有设备签署的权限快照，不要求从创世重放全部账本；此后
@@ -12,7 +110,7 @@ DAG 或自动合并分叉。本稿取代[旧原型](e2ee-control-log.zh.md)的�
 不是对现有代码已迁移的声明。
 
 已确认方向：纯验证核心、不可变验证视图、DAG-CBOR 固定数组、普通记录单签、完整记录
-hash、独立的每设备密钥分发通道、随换代记录保存的历史密钥包；普通记录不重复 OrgID、序号或通用操作 ID。下列 TypeScript
+hash、独立的每设备密钥分发通道、随换代记录保存的历史密钥包；普通记录不重复 OrgID（旧字段，现用 genesis hash 标识 Org）、序号或通用操作 ID。下列 TypeScript
 表达逻辑类型，不冻结 API 拼写和字节编码。恢复采用已登记的恢复设备，不再单设用户根私钥；
 具体操作证据、创世格式与版本策略仍待审。
 
@@ -22,10 +120,26 @@ hash、独立的每设备密钥分发通道、随换代记录保存的历史密�
 权限与变更历史是可见元数据，不宣称这些没有隐私价值。邮箱、设备名称和 IP 不默认
 进入永久账本。私钥、内容密钥、业务内容不得进入明文记录。
 
-每设备的当前代密钥包由独立通道传输；每次换代唯一的历史密钥包则直接放在换代
-记录中，属于密文，不暴露明文密钥。账本同时保留必要的授权事实与密钥承诺。承诺是随机内容密钥的
-域分隔摘要，绑定账本和代次；收件人解密后可核对密钥是否匹配。它不证明已送达，
-也不是加密密钥。承诺属于 Epoch 操作，不是通用记录字段。
+当前代内容密钥（epoch key）是随机抽出的 32 字节，用来加密这一代的文档；它不能写进账本明文。
+每台合格设备各自收到一份用自己加密公钥封好的信封（envelope），走独立投递通道。
+换代记录里另有一份固定大小的历史包（history packet）：用新密钥加密上一把密钥。
+这是密文，外人看不到明文。
+
+账本只保存授权事实，以及一个密钥承诺（commitment）。承诺不是钥匙，而是钥匙的公开指纹：
+
+```text
+epoch ≥ 1:  commitment = SHA-256("lody-e2ee/epoch-key/v1\0" || genesis || epoch || K)
+epoch = 0:  commitment = SHA-256("lody-e2ee/epoch-key/v1\0" || K)
+```
+
+`K` 是 32 字节内容密钥；`genesis` 是本 Org 创世记录 hash；`epoch` 是 4 字节大端无符号代次编号。
+带标签的哈希（domain-separated digest）把 Org 身份和代次编进输入，同一把 `K` 不能拿去冒充另一个工作区或另一代。
+创世代（epoch 0）要等创世记录自己算出 hash 才有 genesis，因此这一代的承诺不编 genesis。
+承诺可以公开，但不能加密文档，也反推不出原密钥。
+
+设备解开信封后，必须再算一遍承诺，和账本上这一代的值对上，才接受这把密钥。
+账本出现承诺只表示这一代已发布（published），不表示每台设备都已送到（delivered）。
+承诺只出现在创世和换代操作 `publishEpoch`（见 §4、§8.2）里，不是每条记录都有的字段。
 
 ## 3. 最小记录类型
 
@@ -70,9 +184,13 @@ Base64 或 JSON 字符串。调试展示时才转可读文本，不改变签名�
 ```ts
 const bodyBytes = encode([previousHash, signerPublicKey, operation]);
 const signingBytes = concat(signatureDomain, bodyBytes);
+const signature = sign(signingBytes); // 设备私钥在核心外盖章；signingBytes 只在这里用
 const recordBytes = encode([[previousHash, signerPublicKey, operation], signature]);
 const recordHash = hash(concat(recordDomain, recordBytes));
 ```
+
+最终要保存和 CAS 的是 `recordBytes`（整条记录的原始字节）。`recordHash` 是它的身份：下一条的 `previousHash`、CAS 期望的链头，都对着它。
+`signingBytes` 不会编进记录里。它只是「拿去签名的那一串字节」：标签 + 已经编码好的 body。验签时用同一公式重算，再拿公钥检查 `signature`。
 
 编码器不能代替 schema 和规范字节验证。固定数组避免 map 键排序歧义；数字限定
 有界整数，并拒绝用浮点 CBOR token 表达整数等非规范形式，不能只在解码后检查
@@ -114,7 +232,9 @@ type EpochState = {
 };
 ```
 
-签名公钥用于验证作者，加密公钥用于接收密钥包，两者用途不同；以上均为公开信息。
+`keyCommitment` 即 §2 的 commitment。`rotationRequired` 在移除成员或撤销设备后为 true，表示应当尽快换代；`publishEpoch` 成功后回到 false。纯验证器不因为这个标志就拒绝其它操作。
+
+签名公钥用于验证作者，加密公钥用于接收信封，两者用途不同；以上均为公开信息。
 不再用含糊的 `identityKeys` 或 `encryptionKey` 字段名。恢复设备使用相同的独立
 签名/加密公钥与成员绑定，不在 Member 上另设恢复公钥或要求所有设备保管用户私钥。
 `machine` 与 `recovery` 的 `canManage` 必须为 false；恢复授权是单独允许的本人
@@ -126,16 +246,16 @@ type EpochState = {
 旧设备请求重放。公开视图可仅列有效条目，内部仍需保存防重放所需事实。
 `ReadonlyMap` 是类型示意；实现不得把内部可修改的 Map 直接暴露给调用方。
 
-| 操作       | 记录提交者 / 操作内证据                                              | 效果                                                                      |
-| ---------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| 创建 Org   | 创始设备签名                                                         | 一个创世操作登记用户、唯一 Owner、首设备和首代承诺；信任锚另行核验        |
-| 接纳成员   | Owner/Admin 管理设备；附绑定用户与首设备的持钥申请证据               | 新成员以 Member 加入，不提前发当前密钥；Guest 加入/角色调整的精确入口待审 |
-| 移除成员   | Owner 管理设备                                                       | 撤该成员实例全部资格，不连带其他成员                                      |
-| 调整角色   | Owner 管理设备                                                       | Admin/Member/Guest 变更，不借此转让 Owner                                 |
-| 接纳设备   | 本人有效个人设备；恢复设备仅可授权本人的新个人设备；附新设备持钥证明 | 直接绑定当前成员实例，记录明确设备能力；恢复能力授予字段待审              |
-| 撤销设备   | 本人有效个人设备                                                     | 仅撤本 Org 的目标设备，不沿批准关系传播                                   |
-| 转让 Owner | 当前 Owner 管理个人设备单签（D1 A）                                  | 唯一 Owner 转移，前任变 Admin；接任者须已是成员且非当前 Owner             |
-| 发布 Epoch | Owner/Admin 管理设备                                                 | 记录新代、承诺及历史密钥包；每设备密钥包独立交付，发布不等于所有端激活    |
+| 操作       | 记录提交者 / 操作内证据                                              | 效果                                                                                     |
+| ---------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| 创建 Org   | 创始设备签名                                                         | 一个创世操作登记用户、唯一 Owner、首设备和首代承诺（epoch-0 commitment）；信任锚另行核验 |
+| 接纳成员   | Owner/Admin 管理设备；附绑定用户与首设备的持钥申请证据               | 新成员以 Member 加入，不提前发当前密钥；Guest 加入/角色调整的精确入口待审                |
+| 移除成员   | Owner 管理设备                                                       | 撤该成员实例全部资格，不连带其他成员                                                     |
+| 调整角色   | Owner 管理设备                                                       | Admin/Member/Guest 变更，不借此转让 Owner                                                |
+| 接纳设备   | 本人有效个人设备；恢复设备仅可授权本人的新个人设备；附新设备持钥证明 | 直接绑定当前成员实例，记录明确设备能力；恢复能力授予字段待审                             |
+| 撤销设备   | 本人有效个人设备                                                     | 仅撤本 Org 的目标设备，不沿批准关系传播                                                  |
+| 转让 Owner | 当前 Owner 管理个人设备单签（D1 A）                                  | 唯一 Owner 转移，前任变 Admin；接任者须已是成员且非当前 Owner                            |
+| 发布 Epoch | Owner/Admin 管理设备                                                 | 记录新代、commitment 及 history packet；每设备 envelope 独立投递，发布不等于所有端已送到 |
 
 不提供 `patchState` 等任意状态修改。权限来自用户角色与设备能力的交集，机器不能
 管理。申请者不是通用 signer 类型；其公钥只能验证加入意愿和持钥，不能自授权。
@@ -169,10 +289,10 @@ R 的私钥以加密备份保存，Passkey PRF 或恢复文件是包装入口，
 备份绑定预期 R、用户及必要的 Org 信任锚；其精确格式单独审定，服务端位置/账号
 表不能自行决定可信创世或替换 R。包装材料变化不要求逐次改写历史内容密钥。
 
-恢复流程：解锁 R → 验证账本及 R/成员当前资格 → 打开已投递给 R 的当前代密钥包
-并核对承诺 → 从账本历史包恢复旧钥 → 生成新设备 C 的独立密钥，R 签署本人设备
+恢复流程：解锁 R → 验证账本及 R/成员当前资格 → 打开已投递给 R 的当前代信封
+并核对其 commitment → 从账本 history packet 恢复旧钥 → 生成新设备 C 的独立密钥，R 签署本人设备
 授权且 C 提供持钥证明 → CAS 入账后使用 C，清理 R 的临时秘密。恢复和解密都是
-有前提的：R 未登记、已撤销、成员失效或密钥包缺失时不能宣称成功；不要求其他
+有前提的：R 未登记、已撤销、成员失效或信封缺失时不能宣称成功；不要求其他
 设备此刻在线，仅限所需密文已经持久保存的情况。密钥投递失败显示“同步失败：
 端到端加密密钥分发失败”，保留已入账事实并重试投递，不重复登记。
 
@@ -195,7 +315,7 @@ Passkey 与恢复文件分别包装相同 R 的私钥；不引入每入口独立
 ### 历史密钥随换代入账（2026-09-13 已确认）
 
 每一代生成独立随机的 Org 对称密钥 `K_n`，不是轮换设备公私钥。除创世代外，
-换代操作必须携带一个历史密钥包：用 `K_n` 认证加密上一代密钥 `K_(n-1)`。
+换代操作必须携带一个历史包：用 `K_n` 认证加密上一代密钥 `K_(n-1)`。
 加密上下文绑定可信 genesis、前后代次和独立的历史密钥用途；具体编码随密码学
 模块定稿。操作字段的逻辑名称为 `previousEpochKey: Uint8Array`，实际仍编码为
 DAG-CBOR 固定数组中的 byte string，包含解密所需的 nonce、密文与认证标签。
@@ -204,6 +324,8 @@ DAG-CBOR 固定数组中的 byte string，包含解密所需的 nonce、密文�
 K₂ → 解开换代记录中的 H₂ → K₁ → 解开 H₁ → K₀
 ```
 
+`H_n` 是第 n 代 `publishEpoch` 记录里的那份 history packet（72 字节），不是另一把密钥。
+
 新成员获授全部历史：收到当前代密钥后，从已验证账本取得历史包并逐级恢复旧钥。
 旧密钥不能反向推导新密钥；已撤权者已取得的历史明文和旧钥不能收回。
 只包上一代，每轮增加一份固定规模密文，不随设备数或历史代数复制全部旧钥。
@@ -211,14 +333,14 @@ K₂ → 解开换代记录中的 H₂ → K₁ → 解开 H₁ → K₀
 历史包受换代记录的签名和 hash chain 覆盖，不再另设历史流、历史包发布器或
 跨流提交协议。验证核心只检查字段格式、大小、签名与发布者权限，将密文视为
 不透明字节；无须持有内容密钥、解密或联网，纯账本及对账边界不变。
-记录签名不证明包内密钥正确：持钥模块解密后仍须核对对应旧代的密钥承诺，
+记录签名不证明包内密钥正确：持钥模块解密后仍须核对该旧代的 commitment，
 失败必须明确报错，不能跳过缺失/损坏的代次。历史包是否正确不影响对账本签名
 事实的验证；恶意管理员造成历史解锁失败的修复不属于首版坏链修复能力。
 
 换代流程：先安全保存新密钥及包含历史包的精确待提交记录，再 CAS 提交；未知结果
 按账本原文对账，不重新生成候选。确认入账后，按已验证的当前权限向各有效设备
 独立分发当前代密钥，失败可重试。账本提交只保证历史包随记录一并保存，不保证
-每设备包已经送达、持久安装或所有写者同时切代；继续沿用已确认的上传可用性与
+每设备信封已经送达、持久安装或所有写者同时切代；继续沿用已确认的上传可用性与
 总撤权窗口，不引入跨文档流的瞬时切代保证。
 
 新成员加入也是先确认接纳入账，再交付当前代密钥；解锁历史不恢复已失效的权限。
@@ -266,11 +388,12 @@ const record = await ledger.finalize(proposal, signature);
 
 ## 6. 对账与外层职责
 
-### 6.1 签名快照引导（已确认方向，尚未实现）
+### 6.1 签名快照引导
 
-2026-09-13 决策修订：首次加入不要求全历史验签/权限重放，取消 10k/100ms 接入门槛。
-标题仍写「尚未实现」以保持链接；`verifySnapshot` / `openFromSnapshot` 已按 2026-09-14 确认的 API 落地于 `70ffef7`。S1–S5 快照阶段已整理，可供后续审查和接手；不是 V4、不是 merge/push、不是产品上线。R2/C3（真机/Passkey）为后续验收，仍未验。
-采用已有设备对当前权限状态的签名背书，允许加入后通过额外信道与其他成员核对。
+核心入口已落地：`prepareSnapshot` / `finalizeSnapshot` / `verifySnapshot` / `openFromSnapshot` /
+`comparisonNote` / `compareNotes`。这不是产品上线：独立核对 UI、真机 Passkey、生产网关截止仍待宿主验收。
+
+首次加入不要求全历史验签/权限重放。采用已有设备对当前权限状态的签名背书，允许加入后通过额外信道与其他成员核对。
 这不是继承 MLS 协议或证明，也不是把旧 `Ledger.verify` 改成跳过签名。
 
 - **信任起点。** 接收端固定预期 Org 与背书设备身份。配对或额外信道确认可认证
@@ -308,8 +431,10 @@ const record = await ledger.finalize(proposal, signature);
 的 `trust` 含 genesis、endorser、head、headSignature。快照为链外 DAG-CBOR，不是
 普通 op。当前 `Ledger.verify/extend` 测试只证明全量/增量路径；快照路径以
 `test/ledger-snapshot.test.ts`、`test/ledger-snapshot-client.test.ts` 和公开
-`bench/readme-consumer.ts` 为准。S1–S5 快照阶段已整理于 `70ffef7`，不是 V4。
+`bench/readme-consumer.ts` 为准。
 不得把反序列化对象当成账本视图。普通记录 wire 不变。
+
+快照路径必须拒绝：坏签名、错 Org/背书者、`head` 正确但状态不受该签名覆盖、缺少防重放所需字段、越权后缀、回滚。通过快照+后缀得到的状态，须与从创世完整重放同一后缀后的状态一致。有效背书者可以签署结构合法的虚假状态；验签通过不证明历史合法，须靠独立核对或全量审计发现。
 
 ### 6.2 已建立起点后的增量对账
 
@@ -331,36 +456,41 @@ pending。磁盘数据的恢复验证/可信边界须明确，不能仅反序列
 服务端隐藏更新或分发不同有效历史，不由 hash chain 独自解决；最新性和跨端核对
 是独立保证。上述适配器可以独立测试，不依赖 Lody UI 或 Convex 私有类型。
 
-## 7. 性能与退出条件
+## 7. 性能
 
-10,000 条从零全签重放 ≤100ms 的 B 门槛已由用户明确撤销，不是测量达标。
-暂停为该目标安排 SIMD/Wasm/多线程加速任务；不删除审计入口、既有基准或安全反例。
-日常路径测签名快照引导、增量追赶、跨端摘要核对和资源用量，不以历史长度要求
-每次从零验证；本次不指定新的毫秒阈值。按需全量审计仍验证全部签名和权限。
+「一万条从零全签重放 ≤100ms」已撤销，不是测量达标。日常路径按签名快照引导和增量追赶，
+不以历史长度要求每次从零验证；按需全量审计仍验证全部签名和权限。不指定新的毫秒阈值。
 
-P1 公开面见第 8–11 节。D1–D5 已书面确认（D1=A；D2–D5=同意实现表）。
-旧冻结面不覆盖 §6.1 的快照入口；新增设计、独立测试和审查未通过前不能交接为已实现。
-原型 241 项测试不证明本稿已实现。
+## 8. 操作编码与检查
 
-## 8. P1 操作与字段（D1–D5 已书面确认）
+整数均为无符号、最短 CBOR；公钥/签名/hash 为原始字节；账本不含 CBOR 文本。
+Org 身份与信任锚是 **genesis 记录 hash**。创世代承诺无法把尚未算出的 genesis hash
+放进摘要；持钥模块解开后按 §2 核对（D2）。
 
-除非注明待确认，字段来自已确认规则，不另加通用 patch。整数均为无符号、最短 CBOR；
-公钥/签名/hash 为原始字节；账本不含 CBOR 文本。Org 身份与信任锚是 **genesis 记录 hash**。
-创世代承诺无法把尚未算出的 genesis hash 放进摘要：承诺字节对纯验证器不透明；
-持钥模块的绑定方式见 D2。
+前置条件指该记录入账**之前**的 `OrgState`。协作者接受一条操作，当且仅当自己已验证的
+前置状态通过与 `decodeRecord` + 验签 + `applyGenesis` / `applyOperation` 相同的检查。
+代码：`packages/e2ee-core/src/ledger/{ledger,policy,schema}.ts`。有限模型对照见
+`test/ledger-model.ts`，不是协议证明。
 
-### 8.1 记录信封
+### 8.1 记录外层
+
+记录外层是账本记录的编码，不是封给设备的密钥信封。
 
 ```text
 genesisBody   = [protocolVersion=1, signer, userId, membershipId, encPub, epoch0Commitment]
 ordinaryBody  = [previousHash, signer, operation]
-record        = [body, signature64]
 signingBytes  = "lody-e2ee/sig/v1\0" || encode(body)
+signature     = Sign(signingBytes)          // 私钥在核心外；不把 signingBytes 编进记录
+record        = [body, signature64]
 recordHash    = SHA-256("lody-e2ee/rec/v1\0" || encode(record))
+epoch ≥ 1:    commitment = SHA-256("lody-e2ee/epoch-key/v1\0" || genesis || epoch || K)
+epoch = 0:    commitment = SHA-256("lody-e2ee/epoch-key/v1\0" || K)
 ```
 
+`K` 为 32 字节；`epoch` 为 4 字节大端 uint32。
+
 创世与普通记录靠 `body[0]` 的 CBOR 类型区分（uint 版本 vs 32 字节 hash），不能用空前驱冒充创世。
-未知 `protocolVersion`、非规范整数、浮点、尾随字节、超限、过深嵌套、map/文本/tag 一律拒绝。
+未知 `protocolVersion`、非规范整数、浮点、尾随字节、超限、过深嵌套、map/文本/CBOR tag（这里的 tag 是编码类型，不是 §8.2 的操作码）一律拒绝。
 
 | 限制                       | 值                                     |
 | -------------------------- | -------------------------------------- |
@@ -374,32 +504,102 @@ recordHash    = SHA-256("lody-e2ee/rec/v1\0" || encode(record))
 | userId                     | 32 字节不透明账号绑定                  |
 | 历史包                     | 72 字节（24 nonce + 32 密文 + 16 tag） |
 
-签名公钥必须是规范、非零、素阶子群点；验证 `zip215: false`，A 与 R 均检查子群。不使用 JSON/hex 降级。
+签名公钥必须是规范、非零、素阶子群点（实现细节：验证库 `zip215: false`，签名里的点 A 与 R 都做子群检查）。不使用 JSON/hex 降级。
 
-### 8.2 操作
+### 8.2 操作编码
 
-| tag  | 操作          | 数组                                                              | 提交者                                | 效果 / 拒绝                                                                        |
-| ---- | ------------- | ----------------------------------------------------------------- | ------------------------------------- | ---------------------------------------------------------------------------------- |
-| 创世 | createOrg     | 见上，隐式 personal+canManage+Owner+epoch0                        | 创始设备                              | 信任锚外带核验                                                                     |
-| 1    | admitMember   | `[1, membershipId, joinRequest]`                                  | Owner/Admin 管理个人设备              | 恒为 Member；Guest/Admin 不经此授予                                                |
-| 2    | removeMember  | `[2, membershipId]`                                               | Owner 管理个人设备                    | 该实例全部设备失效；不能移除当前 Owner                                             |
-| 3    | setRole       | `[3, membershipId, role]` role=1 admin / 2 member / 3 guest       | Owner 管理个人设备                    | 不能改当前 Owner；不能设 Owner                                                     |
-| 4    | admitDevice   | `[4, kind, newSign, newEnc, canManage, possessionSig]` kind=0/1/2 | 本人有效 personal，或 R 仅可 personal | machine/recovery 的 canManage 必须 false                                           |
-| 5    | revokeDevice  | `[5, targetSign]`                                                 | 本人有效 personal                     | 仅本 Org 该目标；不沿批准关系传播                                                  |
-| 6    | transferOwner | `[6, successorMembershipId]`                                      | 当前 Owner 管理个人设备单签           | 接任者须已是有效成员且不是当前 Owner；前任变 Admin，接任者变 Owner。无接任者签名。 |
-| 7    | publishEpoch  | `[7, epoch, commitment, previousEpochKey72]` epoch≥1              | Owner/Admin 管理个人设备              | 代次连续；承诺在本 Org 不重复；包不解密                                            |
+| tag  | 操作          | 数组                                                              |
+| ---- | ------------- | ----------------------------------------------------------------- |
+| 创世 | createOrg     | `genesisBody`，见 §8.1                                            |
+| 1    | admitMember   | `[1, membershipId, joinRequest]`                                  |
+| 2    | removeMember  | `[2, membershipId]`                                               |
+| 3    | setRole       | `[3, membershipId, role]` role=1 admin / 2 member / 3 guest       |
+| 4    | admitDevice   | `[4, kind, newSign, newEnc, canManage, possessionSig]` kind=0/1/2 |
+| 5    | revokeDevice  | `[5, targetSign]`                                                 |
+| 6    | transferOwner | `[6, successorMembershipId]`                                      |
+| 7    | publishEpoch  | `[7, epoch, commitment, previousEpochKey72]` epoch≥1              |
+
+### 8.2.1 每条记录都要过的检查
+
+对应 `Ledger.verify` / `extend`（`ledger.ts`），在操作策略之前：
+
+1. 字节规范：DAG-CBOR 固定数组、无 map/文本/浮点/未知 tag、无尾随字节、不超过 §8.1 限制。`encode(decode(bytes))` 必须等于原文。
+2. 提交者签名：`signer` 对 `signingBytes` 的 Ed25519 有效。签名有效 ≠ 有权。
+3. 创世只能在位置 0；其 `recordHash` 必须等于外带 `anchor`。不能用空前驱的普通记录冒充创世。
+4. 位置 ≥ 1：`previousHash` 必须等于当前已验证链头，否则 `wrong-parent`。
+5. 未知操作 tag 拒绝。操作内嵌套证明（加入申请、持钥证明）在策略前验签，失败为 `bad-proof`。
+6. 不读系统时钟。`expiresAt`、申请表取消位只在宿主提交前检查，重放不得用「现在」否定当时已入账的记录。
+
+### 8.2.2 各操作的前置状态（`policy.ts`）
+
+下列「提交者」均须是**当前有效**设备（在 `devices` 里）。已撤销的公钥不能再当 signer。
+
+**创世 `createOrg`**（`applyGenesis`）
+
+- 之前没有任何记录。
+- `protocolVersion = 1`；签名公钥为规范素阶点；加密公钥 32 字节非全零。
+- 效果：该 `userId` / `membershipId` 成为唯一 Owner；创始设备为 personal 且 `canManage=true`；epoch=0，承诺为 `epoch0Commitment`。信任锚仍须外带确认。
+
+**`admitMember`**
+
+- 提交者：有效 personal **且** `canManage` **且** 角色为 Owner 或 Admin（`requirePersonalManage`）。Guest 不能邀请。
+- `membershipId` 从未在本 Org 用过；该 `userId` 当前没有有效成员资格。
+- `(firstSign, requestId)` 未消费；`firstSign` / `firstEnc` 从未在本 Org 出现过（含已撤设备）。
+- `joinRequest` 由 `firstSign` 签名，覆盖 genesis 与申请字段。核心不查 `expiresAt`。
+- 效果：恒为 Member（不能经此授予 Guest/Admin）；第一台设备为 personal、`canManage=false`。不发当前代密钥（宿主随后发信封）。
+
+**`removeMember`**
+
+- 提交者：Owner 的管理个人设备（`requireOwnerManage`）。Admin 不能移除成员。
+- 目标是当前有效成员，且不是当前 Owner。
+- 效果：该 `membershipId` 下全部设备失效；`rotationRequired=true`。不连带其他成员。
+
+**`setRole`**
+
+- 提交者：Owner 的管理个人设备。Admin 不能改角色。
+- 目标是当前有效成员，且不是当前 Owner；新角色 ∈ {admin, member, guest}，不能设为 Owner（转让走 `transferOwner`）；新角色不能与当前相同。
+- 效果：只改角色。不置 `rotationRequired`。
+
+**`admitDevice`**
+
+- 提交者：本人当前有效的 personal，**或** 本人的 R（`requireOwnPersonalOrRecovery`）。不要求提交者 `canManage`。
+- R 只能接纳 `kind=personal`。Guest 不能接纳 machine。
+- `machine` / `recovery` 的 `canManage` 必须 false。`canManage=true` 仅当新设备是 personal **且** 该成员当前为 Owner/Admin。
+- `newSign` / `newEnc` 从未在本 Org 出现。持钥证明由 **新设备** `newSign` 签署，绑定 genesis、新公钥、kind、`canManage`。
+- 效果：设备挂到提交者的当前 `membershipId`。不沿批准关系形成授权树。
+
+**`revokeDevice`**
+
+- 提交者：本人当前有效 **personal**（R 不能撤设备）。
+- 目标是本 Org 当前有效设备，且与提交者同一 `membershipId`。
+- 效果：只删该设备；`rotationRequired=true`。不撤销该设备曾经批准过的其它设备。
+
+**`transferOwner`**（D1 A）
+
+- 提交者：当前 Owner 的管理个人设备，单签。接任者不必签名。
+- 接任者已是有效成员，且不是当前 Owner。
+- 效果：前任变为 Admin，接任者变为 Owner。
+
+**`publishEpoch`**
+
+- 提交者：Owner 或 Admin 的管理个人设备。Guest/Member 不能换代；机器不能换代。
+- `epoch === 当前代次 + 1` 且 ≥ 1。`commitment` 从未在本 Org 出现。
+- `previousEpochKey` 为 72 字节；验证器当不透明字节，不解密、不核对其是否真是上一把 `K`（持钥模块解开后再对旧代 commitment）。
+- 效果：当前代次与承诺更新；`rotationRequired=false`。不表示每台设备已送到信封。
 
 `joinRequest = [requestId, userId, firstSign, firstEnc, expiresAt|null, signature]`。
-申请由首台个人设备签名，覆盖 `"lody-e2ee/join/v1\0" || encode([genesis, requestId, userId, firstSign, firstEnc, expiresAt])`。
-无用户根私钥。`expiresAt` 只供宿主提交前预检；重放不用“现在”否定历史。
+`firstSign` / `firstEnc` 是申请者第一台个人设备的签名公钥和加密公钥；`expiresAt` 是宿主提交前预检用的截止时间（毫秒），纯验证重放不读时钟。
+申请由该首台设备签名，覆盖 `"lody-e2ee/join/v1\0" || encode([genesis, requestId, userId, firstSign, firstEnc, expiresAt])`。
+无用户根私钥。重放不用“现在”否定历史。
 `(firstSign, requestId)` 永久消费。账本无 cancel 操作（D3）。
 
 持钥证明覆盖 `"lody-e2ee/possess/v1\0" || encode([genesis, newSign, newEnc, kind, canManage])`，由新设备签名。
+`revokeDevice` 的 `targetSign` 是被撤设备的签名公钥。
 
 设备 ID 即签名公钥。签名/加密公钥一旦在本 Org 出现即作废，重入新成员也不得复用。
 用户移除后可带新 membershipId 回来。公开 `devices` 只含有效条目。
 
-### 8.3 权限交集（D1–D5 已确认）
+### 8.3 权限交集（摘要）
 
 管理类操作（接纳/移除成员、改角色、换代、转让）要求：有效 personal **且** `canManage` **且** 当前角色允许。
 本人设备接纳/撤销不要求提交者 `canManage`。R 只能接纳本人 personal。
@@ -418,6 +618,9 @@ lody-e2ee/epoch-key/v1\0
 lody-e2ee/epoch-history/v1\0
 lody-e2ee/r-wrap/v1\0
 ```
+
+`r-wrap` 是包装 R 私钥（Passkey 或恢复文件）时用的域标签。当前恢复文件实现仍使用
+`lody-recovery-file/v1` / `lody-recovery-backup/v1`，尚未切到这一常量。
 
 ## 9. 公开 API 与调用示例（草案）
 
@@ -465,24 +668,12 @@ next.hashAt(0);
 发钥（宿主，非 verify 核心）：入账后按已验证收件人用 HPKE 封当前代密钥；
 失败显示同步失败并重试同一密文。换代记录已含 72 字节历史包，不再另发历史流。
 
-恢复（宿主）：`openRecoveryDevice` 解 R 私钥 → `Ledger.verify` → 打开已投递给 R 的当前代包并核对承诺 →
+恢复（宿主）：`openRecoveryDevice` 解 R 私钥 → `Ledger.verify` → 打开已投递给 R 的当前代信封并核对 commitment →
 沿历史包解旧钥 → R 签署 `admitDevice` personal（Owner/Admin 可显式 `canManage`）→ CAS 后清理 R 秘密。
 
 错误码：`canonical|truncated|trailing|oversize|nesting|unknown-version|unknown-operation|bad-signature|bad-proof|invalid-key|unauthorized|replay|wrong-parent|wrong-anchor|genesis-mismatch|owner-transfer-unconfirmed|invalid-operation`，可带失败位置。
 
-### 9.1 旧 export 分类
-
-| 符号                                                                | 处理                                         |
-| ------------------------------------------------------------------- | -------------------------------------------- |
-| `replayChain` / JSON `encodeRecord` / `team*` / `member.add` 多签   | 替换为 `Ledger`；旧入口暂留，P4 删除或内部化 |
-| `HistoryPublisher` / `StreamsHistoryRemote` / history outbox        | 删除方向：历史包已在换代记录内               |
-| `createUserIdentity` / `SqliteUserIdentityStore`                    | 删除方向：无用户根私钥；改为包装 R           |
-| `join-request` JSON 版                                              | 替换为第 8.2 节申请数组                      |
-| `ControlLogClient` / node-store / streams / `ControlFreshnessLease` | 保留概念，P2 换新记录格式                    |
-| `ContentCipher` / `streams-content` / HPKE `KeyEnvelopeCipher`      | 保留，内容仍走 streams-crdt                  |
-| `KeyDelivery` / received-key / device-store                         | 保留概念，上下文改绑新账本                   |
-
-旧 JSON/hex 与 v1/v2/v3 team 域：新验证器拒绝，不迁移、不删除用户磁盘文件。
+新验证器拒绝旧 JSON/hex 与 team v1/v2/v3 域，不把旧字节迁移成新记录，也不删除用户磁盘上的旧文件。
 
 ## 10. 宿主契约（恢复、发钥、申请、新鲜度）
 
@@ -490,21 +681,7 @@ next.hashAt(0);
 - 生产准入必须在 **原子提交点** 再查 `expiresAt` 与取消位；核心重放不读时钟。
 - 各 Org 独立登记 R；备份包装绑定预期 R 公钥、userId 与调用方提供的创世锚列表，服务端定位不能换锚。
 - 新鲜度：已知撤权立即失效；原始截止不因转发/重启延长；15 分钟 JWT/网关/长连接是宿主前提，本包不宣称已验证。
-- 调用方不得传 `verified=true` 跳过验签。现有磁盘对象仍走 `Ledger.verify`；新增快照
-  恢复入口须实现 §6.1 的认证与增量验证后方可使用，不以文档决定冒充已落地。
-
-## 11. 验收口径（快照决策修订）
-
-- 首次加入只给快照和后缀，不给前缀；结果应与测试基准完整重放所得状态一致。
-- 必须拒绝坏签名、错 Org/身份、head 正确但实际状态不受签名覆盖、缺少必要状态字段、越权后缀和回滚；已认证防重放事实须在后缀中生效。
-- 有效背书者签署的结构合法虚假状态不能靠验签识别；测试须承认可接受但尚未独立核对，并用独立诚实端检测差异，不宣称验证器证明了历史合法。
-- 核对覆盖未独立核对、可信同位置一致、位置不同、同位置不一致，以及邀请者单独
-  背书不冒充独立核对。不得把“已核对历史位置”显示成“全球最新”。
-- 历史取钥、R 恢复、重启与真实 SDK CAS/分页需分别从快照路径验收。
-- 内容快照与权限账本快照分离：有文档写权限的设备（含机器）可签署内容快照；
-  Guest/只读不可。不引入跨流事务。宿主已接纳的历史内容快照不因作者随后被撤
-  而自动失效；新伪造不能靠自报时间/账本 head/offset/验签冒充撤权前发表。发表
-  证据是宿主在该 continuation offset 接纳的快照字节，截止仍是既有最坏 15 分钟
-  后端信任（生产网关截止未验）。不自动裁剪账本历史或历史密钥包。
-- 性能报告分别标注引导/增量/全量审计、总字节、签名数、设备数及环境；保留统计
-  样本，手机功能验证不以桌面模拟代替。没有新的 100ms 或等价隐含门槛。
+- 调用方不得传 `verified=true` 跳过验签。磁盘对象走 `Ledger.verify`；快照恢复走 §6.1。
+- 内容快照与权限账本快照分离：有文档写权限的设备（含机器）可签署内容快照，Guest/只读不可。
+  不引入跨流事务。宿主已接纳的历史内容快照不因作者随后被撤而自动失效；发表证据是宿主在该
+  continuation offset 接纳的快照字节。不自动裁剪账本历史或历史密钥包。

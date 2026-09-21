@@ -4,7 +4,7 @@
 join verifies an authenticated device's signed authorization-state snapshot, then
 every increment. Full replay remains an optional audit. The 10k/100ms gate is
 withdrawn, not passed; SIMD/Wasm/multithreading optimization for that target is
-no longer required. See [snapshot trust and acceptance](../../specs/e2ee-ledger.zh.md#61-签名快照引导已确认方向尚未实现)
+no longer required. See [snapshot trust](../../specs/e2ee-ledger.zh.md#61-签名快照引导)
 (heading kept for the stable link). `Ledger.verifySnapshot` and
 `LedgerClient.openFromSnapshot` are implemented at
 `70ffef73edaa50f50a935f5fe8a78aadab4f13be`. Independent comparison binds actual
