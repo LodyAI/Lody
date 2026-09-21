@@ -165,7 +165,10 @@ describe('lab host lifecycle', () => {
     const joinReq = await bob.requestJoin(alice.genesisHex!);
     const signature = fromHex(joinReq.signature);
     signature[0] = (signature[0] ?? 0) ^ 0xff;
-    await expect(alice.approveJoin({ ...joinReq, signature: toHex(signature) })).rejects.toThrow();
+    const rejected = await alice.approveJoin({ ...joinReq, signature: toHex(signature) });
+    expect(rejected.admitted).toBe(false);
+    expect(rejected.roleConfigured).toBe(false);
+    expect(rejected.status).not.toBe('committed');
     expect((await alice.readLedger()).state.members.size).toBe(1);
   });
 

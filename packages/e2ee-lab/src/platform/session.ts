@@ -2,7 +2,7 @@ import { join } from 'node:path';
 import { LoroDoc } from 'loro-crdt';
 import type { Flock } from '@loro-dev/flock-wasm';
 import { StreamsClient } from '@loro-dev/streams-client';
-import { Ledger } from '@lody/e2ee-core';
+import { Ledger, LedgerError } from '@lody/e2ee-core';
 import {
   collectEpochPackets,
   commitEpochKey,
@@ -75,6 +75,21 @@ function parseNote(wire: ComparisonWire): ComparisonNote {
     stateDigest: fromHex(wire.stateDigest),
     noteSigner: fromHex(wire.noteSigner),
   };
+}
+
+function joinHelperStatus(error: unknown): string {
+  if (error instanceof LedgerError) {
+    if (
+      error.code === 'unauthorized' ||
+      error.code === 'replay' ||
+      error.code === 'bad-signature' ||
+      error.code === 'bad-proof'
+    ) {
+      return 'rejected';
+    }
+    if (error.code === 'invalid-operation' || error.code === 'wrong-parent') return 'conflict';
+  }
+  return 'unknown';
 }
 
 export class DemoSession {
@@ -355,7 +370,8 @@ export class DemoSession {
 
   async approveJoin(
     wire: JoinRequestWire,
-    role: 'admin' | 'member' | 'guest' = 'member'
+    role: 'admin' | 'member' | 'guest' = 'member',
+    options?: { membershipId?: Uint8Array }
   ): Promise<{
     status: string;
     membershipId: Uint8Array;
@@ -365,7 +381,6 @@ export class DemoSession {
     deviceCanManage: false;
     roleStatus?: string;
   }> {
-    const membershipId = this.random('approve-membership-id', 16);
     const request: JoinRequest = {
       requestId: fromHex(wire.requestId),
       userId: fromHex(wire.userId),
@@ -374,29 +389,138 @@ export class DemoSession {
       expiresAt: wire.expiresAt,
       signature: fromHex(wire.signature),
     };
-    const submitted = await this.submit({ type: 'admitMember', membershipId, request });
-    const admitted = submitted.status === 'committed';
-    if (role === 'member' || !admitted) {
+    const signingHex = toHex(request.signingPublicKey);
+    const result = (
+      status: string,
+      membershipId: Uint8Array,
+      admitted: boolean,
+      roleConfigured: boolean,
+      roleStatus?: string
+    ) => ({
+      status,
+      membershipId,
+      admitted,
+      roleConfigured,
+      requestedRole: role,
+      deviceCanManage: false as const,
+      ...(roleStatus === undefined ? {} : { roleStatus }),
+    });
+    const findMember = (ledger: Ledger) => {
+      const device = ledger.state.devices.get(signingHex);
+      if (!device) return null;
+      const member = ledger.state.members.get(toHex(device.membershipId));
+      return { membershipId: device.membershipId, role: member?.role };
+    };
+    const membershipHint = () => options?.membershipId ?? this.random('approve-membership-id', 16);
+
+    let ledger: Ledger;
+    try {
+      const resumed = await this.resume();
+      ledger = resumed.ledger;
+      const found = findMember(ledger);
+      if (resumed.status === 'unknown') {
+        return result(
+          'unknown',
+          found?.membershipId ?? membershipHint(),
+          found !== null,
+          found?.role === role || (found !== null && role === 'member'),
+          'unknown'
+        );
+      }
+      if (found && (role === 'member' || found.role === role)) {
+        return result('committed', found.membershipId, true, true, resumed.status);
+      }
+      if (found && role !== 'member') {
+        return this.configureJoinRole(found.membershipId, role);
+      }
+      if (resumed.status !== 'committed') {
+        return result(
+          resumed.status,
+          found?.membershipId ?? membershipHint(),
+          found !== null,
+          false
+        );
+      }
+    } catch (error) {
+      if (!(error instanceof LedgerError) || error.code !== 'invalid-operation') {
+        try {
+          ledger = await this.readLedger();
+        } catch {
+          return result('unknown', membershipHint(), false, false);
+        }
+        const found = findMember(ledger);
+        return result('unknown', found?.membershipId ?? membershipHint(), found !== null, false);
+      }
+    }
+
+    ledger = await this.readLedger();
+    const existing = findMember(ledger);
+    if (existing) {
+      if (role === 'member' || existing.role === role) {
+        return result('committed', existing.membershipId, true, true);
+      }
+      return this.configureJoinRole(existing.membershipId, role);
+    }
+
+    const membershipId = membershipHint();
+    let submitted: { status: string; ledger: Ledger };
+    try {
+      submitted = await this.submit({ type: 'admitMember', membershipId, request });
+    } catch (error) {
+      const status = joinHelperStatus(error);
+      return result(status, membershipId, false, false);
+    }
+    const admittedNow = findMember(submitted.ledger);
+    if (submitted.status !== 'committed' && !admittedNow) {
+      return result(submitted.status, membershipId, false, false);
+    }
+    const mid = admittedNow?.membershipId ?? membershipId;
+    if (role === 'member' || admittedNow?.role === role) {
+      return result(
+        submitted.status === 'committed' ? 'committed' : submitted.status,
+        mid,
+        true,
+        true
+      );
+    }
+    return this.configureJoinRole(mid, role);
+  }
+
+  private async configureJoinRole(
+    membershipId: Uint8Array,
+    role: 'admin' | 'guest'
+  ): Promise<{
+    status: string;
+    membershipId: Uint8Array;
+    admitted: boolean;
+    roleConfigured: boolean;
+    requestedRole: 'admin' | 'member' | 'guest';
+    deviceCanManage: false;
+    roleStatus?: string;
+  }> {
+    try {
+      const roleResult = await this.submit({ type: 'setRole', membershipId, role });
       return {
-        status: submitted.status,
+        status: roleResult.status,
         membershipId,
-        admitted,
-        roleConfigured: admitted && role === 'member',
+        admitted: true,
+        roleConfigured: roleResult.status === 'committed',
         requestedRole: role,
+        roleStatus: roleResult.status,
+        deviceCanManage: false,
+      };
+    } catch (error) {
+      const status = joinHelperStatus(error);
+      return {
+        status,
+        membershipId,
+        admitted: true,
+        roleConfigured: false,
+        requestedRole: role,
+        roleStatus: status,
         deviceCanManage: false,
       };
     }
-    const roleResult = await this.submit({ type: 'setRole', membershipId, role });
-    const roleConfigured = roleResult.status === 'committed';
-    return {
-      status: roleResult.status,
-      membershipId,
-      admitted: true,
-      roleConfigured,
-      requestedRole: role,
-      roleStatus: roleResult.status,
-      deviceCanManage: false,
-    };
   }
 
   async admitDevice(

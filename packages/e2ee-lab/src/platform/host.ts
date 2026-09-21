@@ -520,15 +520,11 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
             const current = await loadLedger(genesisHex);
             const operation = decoded.body.fields.operation;
             if (operation.type === 'admitMember' && operation.request.expiresAt !== null) {
-              const digest = toHex(await hashRecord(record));
-              const alreadyHead = toHex(current.head) === digest;
-              if (!alreadyHead && now >= operation.request.expiresAt) {
-                try {
-                  await current.extend([record], pointCache);
-                } catch {
-                  json(res, 403, { error: 'join-expired' });
-                  return;
-                }
+              const digest = await hashRecord(record);
+              const alreadyCommitted = current.hasRecordHash(digest);
+              // Check sits immediately before extend+CAS. The Riverrun await
+              // below is still an async gap, not a cross-stream transaction.
+              if (!alreadyCommitted && now >= operation.request.expiresAt) {
                 json(res, 403, { error: 'join-expired' });
                 return;
               }
@@ -641,7 +637,18 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
   const baseUrl = `http://${hostName}:${address.port}`;
   disk.writeText(
     join(options.dataDir, 'host.json'),
-    `${JSON.stringify({ pid: process.pid, baseUrl, riverrunUrl: riverrun.baseUrl, riverrunDbPath }, null, 2)}\n`
+    `${JSON.stringify(
+      testMode
+        ? {
+            pid: process.pid,
+            baseUrl,
+            riverrunUrl: riverrun.baseUrl,
+            riverrunDbPath,
+          }
+        : { pid: process.pid, baseUrl },
+      null,
+      2
+    )}\n`
   );
 
   return {

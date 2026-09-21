@@ -15,7 +15,7 @@ Translation: current
 
 ## 实施计划与唯一任务表
 
-当前状态：HEAD `c98f6804`（已提交）。本轮：定向修复 design-probe 第 1–6、8 项。原子 Guest 准入（第 2 项协议）和旧代上传（第 7 项）只交方案、不改 wire。不接入 Lody，不 push/PR/merge。
+当前状态：HEAD `04b90b58` 加上本轮 helper/过期/裁判补测。定向修复 design-probe 第 1–6、8 项。原子 Guest 准入（第 2 项协议）和旧代上传（第 7 项）只交方案、不改 wire。不接入 Lody，不 push/PR/merge。
 
 | 完成 | 阶段 | 门槛 |
 | ---- | ---- | ---- |
@@ -476,3 +476,12 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 线上可信证据是内容头里的 epoch（未验证路由元数据）加上当前成员资格。客户端自报创建时间不是证据。可选：（A）保可用性，只靠诚实客户端 `prepareWrite` 拒绝；（B）网关拒绝头 epoch ≠ `currentEpoch`，离线换代前密文会失败；（C）与最后所见代次绑定的租约，仍要可信时钟，也不能阻止串通在籍成员用别的方式泄密。
 
 建议维持（A），请用户确认：诚实网关是否必须接受头 epoch 落后于 `currentEpoch` 的密文，以便离线换代前上传仍然可用？
+
+### 2026-09-21 — helper 补强：部分准入、过期识别、裁判覆盖
+
+- 基线：HEAD `04b90b58`。D1–D6/D8 已落地；剩余 helper 缺口：`approveJoin` 在 `setRole` 失败时抛错（丢掉 `membershipId`）、每次生成新身份、宿主过期只把当前 head 当成丢 ACK 原提交。
+- **D2 helper：** 先 resume pending；按签名钥复用已有 membership；捕获 `setRole`/`admitMember` 失败并返回 `{admitted, roleConfigured, status, membershipId}`，不报虚假 Guest/Admin 完成。重试不新建成员。不是原子 Guest 准入。
+- **D3：** `hasRecordHash` 识别已验证账本中任意位置的过期前已提交记录，不只是 head。检查仍紧挨 extend+CAS；Riverrun await 仍是异步间隙。
+- **D4/D5 补测：** Guest Loro 导入（已有）、Flock 导入、仅后端存在、降级、快照作者被撤权、解码/归属不完整 → `contentScanIncomplete`。
+- **D1：** 带 token 的 `/v1/harness/clock` 仍能改时间；普通 `host.json` 在非 `testMode` 下不含 Riverrun 路径。
+- 证据：`pnpm --filter @lody/e2ee-lab check` 18 文件 / 125 测试。翻转签名改为结构化拒绝。未启用产品 E2EE。不 push/merge。

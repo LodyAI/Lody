@@ -1,3 +1,4 @@
+import { writeFileSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   canSendEpoch,
@@ -8,13 +9,33 @@ import {
 } from '@lody/e2ee-core/ledger';
 import { createAttackLab, inspectClient } from '../src/attack-lab';
 import { maliciousAppendCas } from '../src/attacks';
+import { recordContentWrite } from '../src/content-trace';
 import { composeIntegrity, judgeClaim, judgeUnauthorizedContent } from '../src/judge';
 import { readFlock, readLoro, writeFlock, writeLoro } from '../src/platform/content-session';
 import { exportDevice, generateDevice, possessionProof } from '../src/platform/device';
 import { fromHex, toHex } from '../src/platform/bytes';
+import { loroDocPath } from '../src/platform/persist';
 import { CONTROL_STREAM, FLOCK_STREAM, KEYS_STREAM, LORO_STREAM } from '../src/platform/protocol';
-import { cleanupLab, labClient, launchLab } from '../src/fixtures';
+import { cleanupLab, labClient, launchLab, tempDir } from '../src/fixtures';
 import { LabRuntime } from '../src/runtime';
+
+function joinRequest(wire: {
+  requestId: string;
+  userId: string;
+  signingPublicKey: string;
+  encryptionPublicKey: string;
+  expiresAt: number | null;
+  signature: string;
+}) {
+  return {
+    requestId: fromHex(wire.requestId),
+    userId: fromHex(wire.userId),
+    signingPublicKey: fromHex(wire.signingPublicKey),
+    encryptionPublicKey: fromHex(wire.encryptionPublicKey),
+    expiresAt: wire.expiresAt,
+    signature: fromHex(wire.signature),
+  };
+}
 
 afterEach(() => cleanupLab());
 
@@ -309,7 +330,15 @@ describe('design probes: ordinary plane vs harness', () => {
     });
     expect(stillFresh.status).not.toBe(401);
 
-    host.setNow(farFuture);
+    const harnessClock = await fetch(`${host.baseUrl}/v1/harness/clock`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${host.harnessToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ now: farFuture }),
+    });
+    expect(harnessClock.status).toBe(200);
     const expired = await fetch(`${host.baseUrl}/ds/${alice.genesisHex}/${CONTROL_STREAM}`, {
       headers: { authorization: `Bearer ${alice.credential!.token}` },
     });
@@ -524,25 +553,15 @@ describe('design probes: ordinary plane vs harness', () => {
     const join = await bob.requestJoin(alice.genesisHex!);
     const membershipId = alice.random('join-role-fail', 16);
     expect(
-      (
-        await alice.submit({
-          type: 'admitMember',
-          membershipId,
-          request: {
-            requestId: fromHex(join.requestId),
-            userId: fromHex(join.userId),
-            signingPublicKey: fromHex(join.signingPublicKey),
-            encryptionPublicKey: fromHex(join.encryptionPublicKey),
-            expiresAt: join.expiresAt,
-            signature: fromHex(join.signature),
-          },
-        })
-      ).status
+      (await alice.submit({ type: 'admitMember', membershipId, request: joinRequest(join) })).status
     ).toBe('committed');
     expect((await alice.submit({ type: 'removeMember', membershipId })).status).toBe('committed');
-    await expect(alice.submit({ type: 'setRole', membershipId, role: 'guest' })).rejects.toThrow(
-      /unauthorized/
-    );
+    const approved = await alice.approveJoin(join, 'guest', { membershipId });
+    expect(approved.admitted).toBe(false);
+    expect(approved.roleConfigured).toBe(false);
+    expect(approved.status).not.toBe('committed');
+    expect(toHex(approved.membershipId)).toBe(toHex(membershipId));
+    expect((await alice.readLedger()).state.devices.has(toHex(bob.device.publicKey))).toBe(false);
   });
 
   it('resumes a setRole after a dropped ACK', async () => {
@@ -553,33 +572,235 @@ describe('design probes: ordinary plane vs harness', () => {
     const join = await bob.requestJoin(alice.genesisHex!);
     const membershipId = alice.random('join-role-ack', 16);
     expect(
-      (
-        await alice.submit({
-          type: 'admitMember',
-          membershipId,
-          request: {
-            requestId: fromHex(join.requestId),
-            userId: fromHex(join.userId),
-            signingPublicKey: fromHex(join.signingPublicKey),
-            encryptionPublicKey: fromHex(join.encryptionPublicKey),
-            expiresAt: join.expiresAt,
-            signature: fromHex(join.signature),
-          },
-        })
-      ).status
+      (await alice.submit({ type: 'admitMember', membershipId, request: joinRequest(join) })).status
     ).toBe('committed');
+    const orig = alice.fetch.bind(alice);
+    alice.fetch = async (input, init) => {
+      const url = String(input);
+      if (url.includes(`/${CONTROL_STREAM}`) && init?.method === 'POST') {
+        throw new Error('lost-setrole-response');
+      }
+      return orig(input, init);
+    };
+    const first = await alice.approveJoin(join, 'guest', { membershipId });
+    alice.fetch = orig;
+    expect(first.admitted).toBe(true);
+    expect(first.roleConfigured).toBe(false);
+    expect(first.status).toBe('unknown');
+    expect(toHex(first.membershipId)).toBe(toHex(membershipId));
     host.setFailpoint('drop-control-ack');
-    let status = 'unknown';
-    try {
-      status = (await alice.submit({ type: 'setRole', membershipId, role: 'guest' })).status;
-    } catch {
-      host.setFailpoint('none');
-      status = (await alice.resume()).status;
-    }
+    const dropped = await alice.approveJoin(join, 'guest', { membershipId });
     host.setFailpoint('none');
-    expect(status).toBe('committed');
+    expect(dropped.admitted).toBe(true);
+    expect(dropped.roleConfigured).toBe(true);
+    expect(dropped.status).toBe('committed');
     await bob.readLedger();
     expect(bob.canWriteDocument).toBe(false);
+  });
+
+  it('returns conflict when setRole loses CAS after admit', async () => {
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice' });
+    const bob = await labClient({ host, account: 'bob' });
+    await alice.createSpace();
+    const join = await bob.requestJoin(alice.genesisHex!);
+    const membershipId = alice.random('join-role-conflict', 16);
+    expect(
+      (await alice.submit({ type: 'admitMember', membershipId, request: joinRequest(join) })).status
+    ).toBe('committed');
+    const alice2 = await labClient({
+      host,
+      account: 'alice',
+      device: await exportDevice(alice.device),
+      clientDir: tempDir('alice2-join-'),
+    });
+    await alice2.adoptGenesis(alice.genesisHex!);
+    await alice2.readLedger();
+    const orig = alice.fetch.bind(alice);
+    alice.fetch = async (input, init) => {
+      const url = String(input);
+      if (url.includes(`/${CONTROL_STREAM}`) && init?.method === 'POST') {
+        alice.fetch = orig;
+        expect((await alice2.submit({ type: 'setRole', membershipId, role: 'admin' })).status).toBe(
+          'committed'
+        );
+        return orig(input, init);
+      }
+      return orig(input, init);
+    };
+    const approved = await alice.approveJoin(join, 'guest', { membershipId });
+    alice.fetch = orig;
+    expect(approved.admitted).toBe(true);
+    expect(approved.roleConfigured).toBe(false);
+    expect(approved.status).toBe('conflict');
+    const member = (await alice.readLedger()).state.members.get(toHex(membershipId));
+    expect(member?.role).toBe('admin');
+  });
+
+  it('resumes Guest role configuration after process restart', async () => {
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice' });
+    const bob = await labClient({ host, account: 'bob' });
+    await alice.createSpace();
+    const join = await bob.requestJoin(alice.genesisHex!);
+    const membershipId = alice.random('join-role-restart', 16);
+    expect(
+      (await alice.submit({ type: 'admitMember', membershipId, request: joinRequest(join) })).status
+    ).toBe('committed');
+    const orig = alice.fetch.bind(alice);
+    alice.fetch = async (input, init) => {
+      const url = String(input);
+      if (url.includes(`/${CONTROL_STREAM}`) && init?.method === 'POST') {
+        throw new Error('lost-setrole-response');
+      }
+      return orig(input, init);
+    };
+    const first = await alice.approveJoin(join, 'guest', { membershipId });
+    alice.fetch = orig;
+    expect(first.roleConfigured).toBe(false);
+    expect(first.status).toBe('unknown');
+    const device = await exportDevice(alice.device);
+    const clientDir = alice.clientDir;
+    const genesisHex = alice.genesisHex!;
+    alice.close();
+    const restarted = await labClient({
+      host,
+      account: 'alice',
+      device,
+      clientDir,
+    });
+    await restarted.adoptGenesis(genesisHex);
+    const recovered = await restarted.approveJoin(join, 'guest', { membershipId });
+    expect(recovered.admitted).toBe(true);
+    expect(recovered.roleConfigured).toBe(true);
+    expect(recovered.status).toBe('committed');
+    await bob.readLedger();
+    expect(bob.canWriteDocument).toBe(false);
+  });
+
+  it('rejects an expired join at the admit boundary and still identifies a pre-expiry commit', async () => {
+    const host = await launchLab();
+    const now = 1_700_000_000_000;
+    host.setNow(now);
+    const alice = await labClient({ host, account: 'alice' });
+    const bob = await labClient({ host, account: 'bob' });
+    await alice.createSpace();
+    await bob.adoptGenesis(alice.genesisHex!);
+    bob.userId = bob.random('join-user-id-exp', 32);
+    const request = {
+      requestId: bob.random('join-request-id-exp', 16),
+      userId: bob.userId,
+      signingPublicKey: bob.device.publicKey,
+      encryptionPublicKey: bob.device.enc,
+      expiresAt: now + 60_000,
+    };
+    const signature = await bob.device.sign(
+      joinRequestSigningBytes(fromHex(alice.genesisHex!), request)
+    );
+    const wire = {
+      requestId: toHex(request.requestId),
+      userId: toHex(request.userId),
+      signingPublicKey: toHex(request.signingPublicKey),
+      encryptionPublicKey: toHex(request.encryptionPublicKey),
+      expiresAt: request.expiresAt,
+      signature: toHex(signature),
+    };
+    expect(
+      (
+        await bob.fetch(`/v1/spaces/${alice.genesisHex}/joins`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(wire),
+        })
+      ).ok
+    ).toBe(true);
+    host.setFailpoint('drop-control-ack');
+    const first = await alice.approveJoin(wire);
+    host.setFailpoint('none');
+    expect(first.admitted).toBe(true);
+    host.setNow(request.expiresAt + 1);
+    const retry = await alice.approveJoin(wire, 'member', { membershipId: first.membershipId });
+    expect(retry.admitted).toBe(true);
+    expect(retry.status).toBe('committed');
+    expect((await alice.readLedger()).state.devices.has(toHex(bob.device.publicKey))).toBe(true);
+    await expect(alice.readLedger()).resolves.toBeTruthy();
+
+    const carol = await labClient({ host, account: 'carol' });
+    await carol.adoptGenesis(alice.genesisHex!);
+    const lateReq = {
+      requestId: carol.random('join-request-id-crit', 16),
+      userId: carol.random('join-user-id-crit', 32),
+      signingPublicKey: carol.device.publicKey,
+      encryptionPublicKey: carol.device.enc,
+      expiresAt: now,
+    };
+    const lateSig = await carol.device.sign(
+      joinRequestSigningBytes(fromHex(alice.genesisHex!), lateReq)
+    );
+    const lateWire = {
+      requestId: toHex(lateReq.requestId),
+      userId: toHex(lateReq.userId),
+      signingPublicKey: toHex(lateReq.signingPublicKey),
+      encryptionPublicKey: toHex(lateReq.encryptionPublicKey),
+      expiresAt: lateReq.expiresAt,
+      signature: toHex(lateSig),
+    };
+    await carol.fetch(`/v1/spaces/${alice.genesisHex}/joins`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(lateWire),
+    });
+    const denied = await alice.approveJoin(lateWire);
+    expect(denied.admitted).toBe(false);
+    expect(denied.status).not.toBe('committed');
+    expect((await alice.readLedger()).state.devices.has(toHex(carol.device.publicKey))).toBe(false);
+  });
+
+  it('does not treat a later-revoked author as unauthorized history', async () => {
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice' });
+    await alice.createSpace();
+    await alice.readLedger();
+    const tablet = await generateDevice();
+    expect((await alice.admitDevice(tablet, 'personal', false)).status).toBe('committed');
+    await alice.deliverEpochKey(tablet, 0);
+    const writer = await labClient({
+      host,
+      account: 'alice',
+      device: await exportDevice(tablet),
+    });
+    await writer.adoptGenesis(alice.genesisHex!);
+    await writer.readLedger();
+    const frames = await writer.readKeyFrames();
+    await writer.receiveEpochKey(alice.device, 0, frames[0]!);
+    await writeLoro(writer, 'legal-before-revoke');
+    expect(await readLoro(alice)).toContain('legal-before-revoke');
+    expect((await alice.revokeDevice(tablet.publicKey)).status).toBe('committed');
+    const facts = await inspectClient(alice, host)();
+    expect(facts.unauthorizedContentAccepted).toBe(false);
+    expect(facts.contentScanIncomplete).not.toBe(true);
+  });
+
+  it('reports unmeasured when imported content cannot be decoded or attributed', async () => {
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice' });
+    await alice.createSpace();
+    await writeLoro(alice, 'unattributed-imported');
+    recordContentWrite({
+      genesisHex: alice.genesisHex!,
+      stream: 'loro',
+      deviceHex: toHex(alice.device.publicKey),
+      epoch: 0,
+      text: 'unattributed-imported',
+      writerMayWrite: undefined,
+    });
+    const incomplete = await inspectClient(alice, host)();
+    expect(incomplete.contentScanIncomplete).toBe(true);
+    expect(incomplete.unauthorizedContentAccepted).toBeUndefined();
+
+    writeFileSync(loroDocPath(alice.clientDir), Buffer.from('not-a-loro-snapshot'));
+    const decoded = await inspectClient(alice, host)();
+    expect(decoded.contentScanIncomplete).toBe(true);
   });
 
   it('lets a remaining member publish post-rotation content under epoch 0', async () => {

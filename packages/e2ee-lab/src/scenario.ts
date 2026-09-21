@@ -74,7 +74,7 @@ export interface CollabWorld {
   genesisHex: string;
   joins: Record<string, JoinRequestWire | undefined>;
   offlineWriter?: ReturnType<typeof loroWriter>;
-  /** Deterministic wall clock (Flock physicalTime, NOW_HEADER). */
+  /** Deterministic wall clock (Flock physicalTime; host clock is harness/DI). */
   readonly now: () => number;
 }
 

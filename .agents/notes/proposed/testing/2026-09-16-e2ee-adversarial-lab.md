@@ -15,7 +15,7 @@ The [specification](../../../../specs/e2ee-adversarial-lab.md) owns contracts; t
 
 ## Implementation plan and single task tracker
 
-Current state: HEAD `c98f6804` (committed). This round: targeted fixes for design-probe defects 1–6 and 8. Atomic guest admission (item 2 protocol) and stale-epoch upload (item 7) stay pending decisions; do not change wire. No Lody product integration, no push/PR/merge.
+Current state: HEAD `04b90b58` plus this round's helper/expiry/judge-test follow-up. Targeted fixes for design-probe defects 1–6 and 8. Atomic guest admission (item 2 protocol) and stale-epoch upload (item 7) stay pending decisions; do not change wire. No Lody product integration, no push/PR/merge.
 
 | Done | Stage | Gate |
 | ---- | ----- | ---- |
@@ -480,3 +480,12 @@ Current honest gateway `content-cas` checks membership write, not ciphertext epo
 Trusted evidence on the wire is the content header epoch (unverified routing metadata) plus current membership. Client-declared creation time is not evidence. Options: (A) keep availability, refuse only via honest client `prepareWrite`; (B) gateway rejects header epoch ≠ `currentEpoch`, which drops offline pre-rotation ciphertext; (C) a lease tied to last-seen epoch, which still needs a trusted clock and does not stop a colluding remaining member from leaking by other means.
 
 Recommend keeping (A) until the user answers: must the honest gateway accept ciphertext whose header epoch is behind `currentEpoch` so offline pre-rotation uploads remain available?
+
+### 2026-09-21 — Helper follow-up: partial join, expiry identity, judge coverage
+
+- Baseline: HEAD `04b90b58`. D1–D6/D8 were already implemented; remaining helper gaps: `approveJoin` threw on `setRole` failure (lost `membershipId`), always minted a new id, and host expiry only treated the current head as a lost-ACK identity.
+- **D2 helper:** resume pending first; reuse existing membership by signing key; catch `setRole`/`admitMember` failures and return `{admitted, roleConfigured, status, membershipId}` without fake Guest/Admin complete. Retry does not mint a second member. Not atomic guest admission.
+- **D3:** `hasRecordHash` identifies a pre-expiry commit anywhere in the authenticated ledger, not only the head. Check remains immediately before extend+CAS; the Riverrun await is still an async gap.
+- **D4/D5 tests:** guest Loro import (existing), Flock import, backend-only, demotion, revoked snapshot author, decode/attribution incomplete → `contentScanIncomplete`.
+- **D1:** harness `/v1/harness/clock` with token still moves time; ordinary `host.json` omits Riverrun paths unless `testMode`.
+- Evidence: `pnpm --filter @lody/e2ee-lab check` 18 files / 125 tests; core excluding the intended 10k filter still ran `ledger-long-chain` (391 tests, exit 0). Not product E2EE. No push/merge.
