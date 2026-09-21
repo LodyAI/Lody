@@ -5,14 +5,11 @@ Translation: current
 
 [English](composer-send-during-upload.md)
 
-以下是提议中的行为，仅存在于[隔离 POC](../packages/components/poc/send-during-upload/README.md)。
-正式源码仍保留上传期间阻止发送的现有行为。
-
 ## 场景与范围
 
 在已有会话中，用户可以在附件上传完成前按回车或发送。输入框接受一次本地发送意图，
 隐藏并锁定草稿，显示转圈。点击转圈可取消发送意图并恢复草稿，上传本身继续。
-本 POC 不修改新建会话首页，也不引入持久化的后台待发送队列。
+顶层新建会话首页继续沿用上传时阻止发送的行为，不引入持久化后台待发送队列。
 
 ## 生命周期
 
@@ -24,7 +21,7 @@ Translation: current
 提交时固定文字和引用。真正发送前再次核对附件集合；草稿发生变化时不能只发送部分附件。
 使用最新已提交的发送回调，在实际发送时判断忙闲、未完成轮次、Steer 支持和运行配置，
 并搭配当时的 Role。保留快捷键的反转标志，但忙时发送偏好在实际发送时读取。
-本 POC 不在首次回车时固定运行配置或发送偏好。
+运行配置与发送偏好不在首次回车时固定。
 
 下游接受成功后，只清理仍与提交快照相符的草稿字段；外部操作替换的新文字、附件或引用
 不能被旧发送清空。拒绝时恢复文字和已上传附件。token 有效期间反复回车不能创建第二次
@@ -35,9 +32,10 @@ Translation: current
 
 ## 证据与限制
 
-- [POC 运行器与范围](../packages/components/poc/send-during-upload/README.md)。
-- [试验补丁](../packages/components/poc/send-during-upload/prototype.patch) 仅在临时 checkout 中
-  应用实现和真实输入框测试。上传与下游接受是可控测试边界；使用现有路由解析器验证
-  Send、Steer 和 Queue。
-- 测试不证明 daemon 投递、真实网络或已安装 Electron 的行为。等待仅保存在内存中，
-  不支持重启恢复。
+- [会话输入框](../packages/components/src/components/sessions/session-chat-input-area.tsx)拥有等待，
+  父组件传递可见性，包括分享选择模式对输入框的隐藏。
+- [提交测试](../packages/components/tests/session-chat-input-submission.test.tsx)通过可控上传和接受
+  Promise 覆盖生命周期与草稿边界。
+- [浏览器测试](../packages/components/tests/e2e/composer-submission-focus.spec.ts)在真实输入框的
+  Storybook 界面中验证键盘输入与 XMLHttpRequest 上传处理，响应被测试拦截，下游发送回调模拟。
+- 测试不证明 daemon 投递或物理原生设备行为。等待仅保存在内存中，不支持重启恢复。

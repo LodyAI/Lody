@@ -5,17 +5,13 @@ Translation: current
 
 [中文](composer-send-during-upload.zh.md)
 
-The behavior below is proposed and exists only in an
-[isolated POC](../packages/components/poc/send-during-upload/README.md).
-Production sources retain their existing upload blocking behavior.
-
 ## Scenario and scope
 
 In an existing Session, a user presses Enter or Send before attachments finish
 uploading. The composer accepts one local send intent, hides and locks its draft,
 and shows a spinner. Clicking the spinner cancels that intent and restores the
-draft; uploads themselves continue. This proof of concept does not change the
-new-chat landing or introduce a durable background outbox.
+draft; uploads themselves continue. The top-level new-chat landing keeps its
+existing upload blocking behavior. There is no durable background outbox.
 
 ## Lifecycle
 
@@ -31,8 +27,8 @@ checked again before dispatch; a changed draft must not send a partial selection
 The current committed send handler resolves busy state, unfinished assistant turn,
 steer support, and run configuration at dispatch time. The current Role accompanies
 that configuration. The shortcut's invert flag is retained, but the busy-send
-preference itself is read at dispatch time. This POC does not freeze run configuration
-or preferences at the initial keypress.
+preference itself is read at dispatch time. Run configuration and preferences
+are not frozen at the initial keypress.
 
 Only downstream acceptance retires submitted draft fields that still match their
 captured versions; newer text, attachments, or references from external actions
@@ -46,10 +42,12 @@ Preparing, uploading, and verifying files all remain blocking until fully upload
 
 ## Evidence and limits
 
-- [POC runner and scope](../packages/components/poc/send-during-upload/README.md).
-- [Experimental patch](../packages/components/poc/send-during-upload/prototype.patch)
-  applies the implementation and its real-composer tests only inside a temporary
-  checkout. Uploads and downstream acceptance are controlled test boundaries; the
-  existing route resolver is exercised for Send, Steer, and Queue.
-- These tests do not establish daemon delivery, real network behavior, or installed
-  Electron behavior. Upload waits are memory-only and have no restart recovery.
+- [Session composer](../packages/components/src/components/sessions/session-chat-input-area.tsx)
+  owns the wait; the parent supplies visibility, including share-selection hiding.
+- [Submission tests](../packages/components/tests/session-chat-input-submission.test.tsx)
+  cover lifecycle and draft boundaries with controlled upload and acceptance promises.
+- [Browser tests](../packages/components/tests/e2e/composer-submission-focus.spec.ts)
+  exercise real keyboard input and XMLHttpRequest upload handling against intercepted
+  responses in the real composer Storybook surface. The downstream send callback is simulated.
+- Tests do not establish daemon delivery or physical native-device behavior.
+  Upload waits are memory-only and have no restart recovery.

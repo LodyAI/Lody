@@ -391,6 +391,7 @@ export interface SessionChatInputAreaProps {
   /** Claims a one-shot navigation focus request; absent for ordinary session visits. */
   claimNavigationFocus?: () => boolean;
   session: SessionMeta;
+  isVisible?: boolean;
   sessionLocalProjectRootPath: string | null;
   isMachineRemoved: boolean;
   isAgentBusy: boolean;
@@ -519,6 +520,7 @@ export const SessionChatInputArea = memo(
   forwardRef<SessionChatInputAreaHandle, SessionChatInputAreaProps>(function SessionChatInputArea(
     {
       session,
+      isVisible = true,
       claimNavigationFocus,
       sessionLocalProjectRootPath,
       isMachineRemoved,
@@ -1826,8 +1828,45 @@ export const SessionChatInputArea = memo(
       [pastedTextDrafts, session.id, updatePastedTextDraftsForSession]
     );
 
+    const uploadWaitRef = useRef<{ settle: (ready: boolean) => void; files: Set<File> } | null>(
+      null
+    );
+    const sendStateRef = useRef({ onSendMessage, blocked: false });
+    useLayoutEffect(() => {
+      sendStateRef.current = {
+        onSendMessage,
+        blocked:
+          !isVisible ||
+          isArchived ||
+          isMachineRemoved ||
+          isExternalHistoryRefreshing ||
+          durableAgentRoleReady === false ||
+          Boolean(freeTurnLimitNotice && freeTurnLimitNotice.current >= freeTurnLimitNotice.limit),
+      };
+      const wait = uploadWaitRef.current;
+      if (!wait) return;
+      const failed =
+        pendingImages.some((image) => image.status === 'failed') ||
+        pendingFiles.some((file) => wait.files.has(file.file) && file.status === 'failed');
+      const uploading =
+        pendingImages.some((image) => image.status === 'uploading') ||
+        pendingFiles.some((file) => isSessionFileTransferPhase(file.status));
+      if (failed || sendStateRef.current.blocked || !uploading) {
+        uploadWaitRef.current = null;
+        wait.settle(!failed && !sendStateRef.current.blocked);
+      }
+    });
+    useLayoutEffect(
+      () => () => {
+        uploadWaitRef.current?.settle(false);
+        uploadWaitRef.current = null;
+      },
+      [session.id]
+    );
+
     const sendMessage = useCallback(
       async (options?: SessionSendMessageOptions) => {
+        if (!isVisible) return;
         if (freeTurnLimitNotice && freeTurnLimitNotice.current >= freeTurnLimitNotice.limit) {
           capturePostHogEvent(postHog, 'session/input_blocked', {
             reason: 'free_session_turn_limit_reached',
@@ -1899,33 +1938,7 @@ export const SessionChatInputArea = memo(
               },
             ]
           : [];
-        const uploadedImages = pendingImages
-          .filter((image): image is PendingImage & { uploaded: SessionImagePayload } => {
-            return image.status === 'uploaded' && !!image.uploaded;
-          })
-          .map((image) => toImageInputBlock(image.uploaded));
-        const hasBlockingImages = pendingImages.some((image) => image.status !== 'uploaded');
-        // A still-uploading file (not failed) blocks send; failed ones are
-        // skipped so a single failed attachment doesn't trap the message.
-        const hasBlockingFiles = pendingFiles.some((file) =>
-          isSessionFileTransferPhase(file.status)
-        );
-        const uploadedFiles = pendingFiles
-          .filter((file): file is PendingFile & { uploaded: SessionFilePayload } => {
-            return file.status === 'uploaded' && !!file.uploaded;
-          })
-          .map((file) => toFileInputBlock(file.uploaded));
-        if (hasBlockingImages || hasBlockingFiles) {
-          capturePostHogEvent(postHog, 'session/input_blocked', {
-            reason: 'image_upload_in_progress',
-            entrypoint: 'session_chat',
-            project_kind: sessionProjectKind,
-            has_pending_images: true,
-            workspace_id: workspaceId ?? null,
-            session_id: session.id,
-          });
-          return;
-        }
+        if (pendingImages.some((image) => image.status === 'failed')) return;
         const commentRefBlocks: SessionInputBlock[] = commentReferencesRef.current.map((item) => ({
           type: 'comment_reference' as const,
           ...item.reference,
@@ -1941,8 +1954,8 @@ export const SessionChatInputArea = memo(
 
         if (
           textBlocks.length === 0 &&
-          uploadedImages.length === 0 &&
-          uploadedFiles.length === 0 &&
+          pendingImages.length === 0 &&
+          pendingFiles.every((file) => file.status === 'failed') &&
           commentRefBlocks.length === 0 &&
           visualAnnotationRefBlocks.length === 0
         ) {
@@ -1957,35 +1970,86 @@ export const SessionChatInputArea = memo(
           return;
         }
 
-        const inputBlocks: SessionInputBlock[] = [
-          ...commentRefBlocks,
-          ...visualAnnotationRefBlocks,
-          ...uploadedImages,
-          ...uploadedFiles,
-          ...textBlocks,
-        ];
         const submittedDraft = {
           text: sessionDraftsCache.get(session.id),
           images: sessionImageDraftsCache.get(session.id),
           files: sessionFileDraftsCache.get(session.id),
           pastedText: sessionPastedTextDraftsCache.get(session.id),
+          comments: commentReferencesRef.current,
+          annotations: visualAnnotationReferencesRef.current,
         };
         const submission = beginSubmission({ dismissKeyboard: usesMobileKeyboardAction });
         if (!submission) return;
         try {
-          const accepted = await onSendMessage(
+          const uploading =
+            pendingImages.some((image) => image.status === 'uploading') ||
+            pendingFiles.some((file) => isSessionFileTransferPhase(file.status));
+          if (uploading) {
+            const ready = await new Promise<boolean>((resolve) => {
+              uploadWaitRef.current = {
+                settle: resolve,
+                files: new Set(
+                  [...pendingImages, ...pendingFiles]
+                    .filter((item) => item.status !== 'failed')
+                    .map((item) => item.file)
+                ),
+              };
+            });
+            if (!ready || !submission.isCurrent() || sendStateRef.current.blocked) return;
+          }
+          const images = getSessionImageDrafts(session.id);
+          const files = getSessionFileDrafts(session.id);
+          // Uploads can replace an image with a local file. Match the original
+          // File objects so removal or an external draft edit cannot send a subset.
+          const expectedFiles = [...pendingImages, ...pendingFiles]
+            .filter((item) => item.status !== 'failed')
+            .map((item) => item.file);
+          const actualFiles = [...images, ...files]
+            .filter((item) => item.status === 'uploaded' && item.uploaded)
+            .map((item) => item.file);
+          if (
+            expectedFiles.length !== actualFiles.length ||
+            expectedFiles.some((file) => !actualFiles.includes(file)) ||
+            sessionDraftsCache.get(session.id) !== submittedDraft.text
+          )
+            return;
+          const inputBlocks: SessionInputBlock[] = [
+            ...commentRefBlocks,
+            ...visualAnnotationRefBlocks,
+            ...images.flatMap((image) =>
+              image.status === 'uploaded' && image.uploaded
+                ? [toImageInputBlock(image.uploaded)]
+                : []
+            ),
+            ...files.flatMap((file) =>
+              file.status === 'uploaded' && file.uploaded ? [toFileInputBlock(file.uploaded)] : []
+            ),
+            ...textBlocks,
+          ];
+          submittedDraft.images = sessionImageDraftsCache.get(session.id);
+          submittedDraft.files = sessionFileDraftsCache.get(session.id);
+          // Use the committed callback and Role after waiting: routing and run
+          // config must come from the same current composer state.
+          const accepted = await sendStateRef.current.onSendMessage(
             inputBlocks,
             agentRoleTurnSelectionRef.current,
             options
           );
           if (accepted) {
             if (submission.isCurrent()) {
-              clearInput();
-              clearPendingImages();
-              clearPendingFiles();
-              updatePastedTextDraftsForSession(session.id, () => []);
-              publishCommentReferences([]);
-              publishVisualAnnotationReferences([]);
+              // External actions can replace a disabled draft while acceptance is pending.
+              // Retire only the fields that still belong to this accepted submission.
+              if (sessionDraftsCache.get(session.id) === submittedDraft.text) clearInput();
+              if (sessionImageDraftsCache.get(session.id) === submittedDraft.images)
+                clearPendingImages();
+              if (sessionFileDraftsCache.get(session.id) === submittedDraft.files)
+                clearPendingFiles();
+              if (sessionPastedTextDraftsCache.get(session.id) === submittedDraft.pastedText)
+                updatePastedTextDraftsForSession(session.id, () => []);
+              if (commentReferencesRef.current === submittedDraft.comments)
+                publishCommentReferences([]);
+              if (visualAnnotationReferencesRef.current === submittedDraft.annotations)
+                publishVisualAnnotationReferences([]);
             } else if (
               sessionDraftsCache.get(session.id) === submittedDraft.text &&
               sessionImageDraftsCache.get(session.id) === submittedDraft.images &&
@@ -2015,7 +2079,7 @@ export const SessionChatInputArea = memo(
         durableAgentRoleReady,
         isExternalHistoryRefreshing,
         isMachineRemoved,
-        onSendMessage,
+        isVisible,
         onVisualAnnotationReferencesSubmitted,
         pendingFiles,
         pendingImages,
@@ -2065,21 +2129,22 @@ export const SessionChatInputArea = memo(
       pendingFiles.length > 0 ||
       commentReferences.length > 0 ||
       visualAnnotationReferences.length > 0;
-    const hasBlockingImages = pendingImages.some((image) => image.status !== 'uploaded');
+    const hasFailedImages = pendingImages.some((image) => image.status === 'failed');
     const hasUploadedImages = pendingImages.some((image) => image.status === 'uploaded');
-    const hasBlockingFiles = pendingFiles.some((file) => isSessionFileTransferPhase(file.status));
     const hasUploadedFiles = pendingFiles.some((file) => file.status === 'uploaded');
     const hasSendableContent =
       userInput.trim().length > 0 ||
       hasUploadedImages ||
+      pendingImages.some((image) => image.status === 'uploading') ||
       hasUploadedFiles ||
+      pendingFiles.some((file) => isSessionFileTransferPhase(file.status)) ||
       commentReferences.length > 0 ||
       visualAnnotationReferences.length > 0;
     const showStopButton = canStopAgent && !hasDraft && !isArchived;
     const isSendActionDisabled =
+      !isVisible ||
       submissionPending ||
-      hasBlockingImages ||
-      hasBlockingFiles ||
+      hasFailedImages ||
       isMachineRemoved ||
       isArchived ||
       isExternalHistoryRefreshing ||
@@ -2496,6 +2561,7 @@ export const SessionChatInputArea = memo(
     ) : null;
     /* Keep desktop actions compact while preserving the mobile touch target. */
     const primaryActionSizeClassName = isMobile ? 'h-8 w-8' : 'h-7 w-7';
+    const waitingForUploads = submissionPending && uploadWaitRef.current !== null;
     const primaryActionNode = showStopButton ? (
       <Button
         onClick={() => {
@@ -2520,12 +2586,21 @@ export const SessionChatInputArea = memo(
         type="button"
         size="icon"
         variant="ghost"
-        onClick={() => void sendMessage()}
-        disabled={!hasSendableContent || isSendActionDisabled}
+        onClick={() => {
+          if (waitingForUploads) {
+            uploadWaitRef.current?.settle(false);
+            uploadWaitRef.current = null;
+          } else {
+            void sendMessage();
+          }
+        }}
+        disabled={!waitingForUploads && (!hasSendableContent || isSendActionDisabled)}
         aria-label={
-          isExternalHistoryRefreshing && externalHistorySyncLabel
-            ? externalHistorySyncLabel
-            : t('sessions.send')
+          waitingForUploads
+            ? t('common.cancel', 'Cancel')
+            : isExternalHistoryRefreshing && externalHistorySyncLabel
+              ? externalHistorySyncLabel
+              : t('sessions.send')
         }
         className={cn(
           primaryActionSizeClassName,
@@ -2533,7 +2608,7 @@ export const SessionChatInputArea = memo(
           'bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]'
         )}
       >
-        {submissionPending || hasBlockingImages || isExternalHistoryRefreshing ? (
+        {submissionPending || isExternalHistoryRefreshing ? (
           <Spinner className={isMobile ? 'h-5 w-5' : 'h-4 w-4'} />
         ) : (
           <ArrowUp className={isMobile ? 'h-5 w-5' : 'h-4 w-4'} />

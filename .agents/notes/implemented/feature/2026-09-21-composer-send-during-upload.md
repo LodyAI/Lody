@@ -1,43 +1,39 @@
-# Composer send during upload POC
+# Composer send during upload
 
-Status: proposed
+Status: implemented
 Translation: current
 
 [中文](2026-09-21-composer-send-during-upload.zh.md)
 
 ## Abstract
 
-Early sending during attachment upload needs one submission lifetime spanning both
-upload waiting and downstream acceptance. An isolated real-composer POC exposed
-three boundary defects, now corrected only in the experimental patch. The resulting
-82 positive tests and component type check pass, and 12 targeted ablations each
-cause behavioral assertions to fail. Production sources remain unchanged; actual
-client visibility wiring, network transfer, and daemon delivery are not established
-by this experiment.
+Sending before attachment uploads finish now uses one submission lifetime spanning
+upload waiting and downstream acceptance in the production session composer. The
+composer locks the draft, waits for all selected attachments, and dispatches once
+using current routing while preserving the shortcut intent. Cancellation and failure
+restore the draft. Unit and browser coverage validate frontend boundaries; native
+provider delivery and restart recovery are outside this verification.
 
-## Decision and isolation
+## Decision
 
-Follow the [draft contract](../../../../specs/composer-send-during-upload.md).
+Implemented in [PR #879](https://github.com/LodyAI/Lody/pull/879), following the
+[draft contract](../../../../specs/composer-send-during-upload.md).
 Use the existing submission token across both phases, then call the latest committed
 send handler. Awaiting inside a captured handler retains stale routing; restarting
 submission on upload callbacks risks duplicates. The wait is event-driven, without
 timers. A File identity check permits image-to-local-file conversion while rejecting
 partial or replaced selections. Run configuration and Role resolve together at
 actual dispatch; a durable outbox and keypress-time config snapshot remain outside
-scope. The existing [focus decision](../../implemented/bug-fix/2026-09-12-composer-click-focus.md)
+scope. The existing [focus decision](../bug-fix/2026-09-12-composer-click-focus.md)
 continues to own focus interactions.
 
-The [runner](../../../../packages/components/poc/send-during-upload/README.md) applies
-one reviewable patch in a temporary worktree at current HEAD. This exercises the
-real composer, draft caches, submission token, and route resolver without shipping
-the experiment or copying the composer. Upload/local-file handoff and downstream
-acceptance are simulated. It reuses installed dependencies and removes temporary
-worktrees after completion. Production source, ordinary tests, and manifests remain
-unchanged in the authoring checkout.
+The parent supplies visibility including share-selection hiding. The implementation
+and behavioral tests now live in their ordinary source and test suites; the isolated
+patch runner has been removed. The top-level new-chat landing retains upload blocking.
 
 ## Boundary findings
 
-| Reproduced failure | Experimental correction |
+| Reproduced failure | Correction |
 | --- | --- |
 | A late acceptance erased text written through the public imperative handle while the input was disabled. This cleanup behavior was inherited from the existing composer. | Clear only draft fields still matching the accepted snapshot. Preserve replacement fields. |
 | A hidden composer still accepted a synthetic Enter without pending uploads. | Guard submission entry as well as upload waiting with visibility. |
@@ -52,11 +48,10 @@ not claims that each failure is reachable through ordinary physical keyboard inp
 
 ## Ablation evidence
 
-Reproduce with `node packages/components/poc/send-during-upload/run.mjs --ablate`.
-The runner requires the positive suites and type check first, restores source after
-each variant, and requires the named behavioral witness to fail with an assertion.
-Process errors or incomplete collection are inconclusive, not successful detection.
-All variants collect 82 tests.
+Before adoption, an isolated worktree experiment tested 12 targeted removals of
+protections. Each collected all 82 tests and failed its named behavioral assertion;
+process or compilation errors did not count as detection. This is historical evidence
+from the isolated experiment, not a newly run production mutation suite.
 
 | Removed protection | Failing tests |
 | --- | ---: |
@@ -81,16 +76,13 @@ removed. No sleeps, timers, network, or load-dependent races are used.
 
 ## Results and limits
 
-The final isolated run passed 82 tests (62 composer, 20 route) and component type
-checking. All 12 ablations were detected by behavioral assertions; no survivor is
-hidden by treating a compilation failure as a caught mutation. Root `pnpm format`, runner formatting, and diff whitespace checks pass. The
-pre-commit `pnpm check` stops in `packages/ignore` because its dependencies and
-Node type declarations are missing; subsequent root checks did not run. Documentation retains the same 34 pre-existing
-missing-submodule link errors, with no new errors.
+The production suites pass 82 tests (62 composer, 20 route) and component type
+checking. Eight browser cases pass in installed Chrome at 390px and 1280px widths:
+Enter, Cmd+Shift+Enter, cancel, and upload failure. They exercise the real Storybook
+composer and XMLHttpRequest transport with intercepted upload responses and a
+simulated downstream callback. The browser fixtures use synthetic attachments.
 
-This supports further POC use, not production readiness. The application still
-blocks early sending; new-chat landing and restart recovery are not implemented.
-The parent visibility prop is present in the patch but a running application's
-wiring is not exercised. Real upload transport, provider delivery, and physical
-Electron/mobile focus behavior require end-to-end validation. Passing this finite
-mutation set does not prove absence of other state interleavings.
+The original experiment detected all 12 ablations. The normal suites retain those
+boundary witnesses. Passing a finite mutation set does not prove absence of other
+state interleavings. Daemon delivery and physical Electron/mobile focus behavior
+remain unverified. Upload waits are memory-only and have no restart recovery.
