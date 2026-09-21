@@ -1451,6 +1451,7 @@ export const MachineAcpAuthenticationProgressMessageSchema = z
       'auth-methods',
       'authorization',
       'input-required',
+      'runtime-download',
       'output',
       'authenticated',
       'cancelled',
@@ -1481,6 +1482,11 @@ export const MachineAcpAuthenticationProgressMessageSchema = z
     stream: z.enum(['stdout', 'stderr']).optional(),
     output: z.string().max(16_384).optional(),
     error: z.string().max(65_536).optional(),
+    runtimeName: z.string().trim().min(1).max(ACP_AUTH_ID_MAX_LENGTH).optional(),
+    runtimePhase: z
+      .enum(['downloading', 'verifying', 'extracting', 'publishing', 'complete'])
+      .optional(),
+    runtimePercent: z.number().min(0).max(100).optional(),
   })
   .strict()
   .superRefine((value, context) => {
@@ -1489,6 +1495,13 @@ export const MachineAcpAuthenticationProgressMessageSchema = z
         code: 'custom',
         path: ['authorizationUrl'],
         message: 'authorizationUrl is required for authorization progress',
+      });
+    }
+    if (value.status === 'runtime-download' && (!value.runtimeName || !value.runtimePhase)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['runtimeName'],
+        message: 'runtime-download progress requires a runtime name and phase',
       });
     }
     if (

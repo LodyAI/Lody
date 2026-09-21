@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Logger } from '@/utils/logger';
 import { createStdinWritableStream, createStdoutReadableStream } from '@/utils/stream';
 import { AcpAuthenticationManager, probeBuiltinAuthentication } from './acp-authentication';
+import type { resolveBuiltinAuthenticationProcessLaunch } from './setting';
 
 const createSilentLogger = (): Logger => ({
   info: () => {},
@@ -276,6 +277,99 @@ describe('AcpAuthenticationManager', () => {
       disposition: 'cancelled',
     });
     expect(spawnProcess).toHaveBeenCalledOnce();
+  });
+
+  it('reports managed runtime download progress while resolving the login launch', async () => {
+    const successfulChild = createFakeChild();
+    const spawnProcess = vi.fn(() => {
+      queueMicrotask(() => {
+        successfulChild.exitCode = 0;
+        successfulChild.emit('exit', 0, null);
+      });
+      return successfulChild;
+    });
+    let capturedSignal: AbortSignal | undefined;
+    const resolveAuthenticationProcessLaunch: typeof resolveBuiltinAuthenticationProcessLaunch =
+      async (input) => {
+        capturedSignal = input.signal;
+        input.onManagedRuntimeProgress?.({
+          runtimeName: 'codex',
+          version: '0.154.0',
+          platformArch: 'linux-x64',
+          phase: 'downloading',
+          downloadedBytes: 50,
+          totalBytes: 100,
+          percent: 50,
+        });
+        return { command: '/test/codex', args: ['login', '--device-auth'] };
+      };
+    const progress = vi.fn();
+    const manager = new AcpAuthenticationManager(createSilentLogger(), {
+      spawnProcess: spawnProcess as never,
+      resolveLoginShellEnv: async () => ({}),
+      resolveAuthenticationProcessLaunch,
+    });
+
+    await expect(
+      manager.authenticate({
+        requestId: 'auth-codex-download',
+        cliType: 'builtin',
+        agentType: 'codex',
+        onProgress: progress,
+      })
+    ).resolves.toEqual({ success: true, disposition: 'authenticated' });
+
+    expect(capturedSignal).toBeInstanceOf(AbortSignal);
+    expect(progress).toHaveBeenCalledWith({
+      status: 'runtime-download',
+      runtimeName: 'codex',
+      runtimePhase: 'downloading',
+      runtimePercent: 50,
+    });
+    expect(spawnProcess).toHaveBeenCalledWith(
+      '/test/codex',
+      ['login', '--device-auth'],
+      expect.objectContaining({ cwd: expect.any(String) })
+    );
+  });
+
+  it('cancels while launch resolution is still installing the managed runtime', async () => {
+    const resolutionStarted = createDeferred<void>();
+    const resolveAuthenticationProcessLaunch: typeof resolveBuiltinAuthenticationProcessLaunch = (
+      input
+    ) => {
+      resolutionStarted.resolve();
+      return new Promise((_, reject) => {
+        input.signal?.addEventListener(
+          'abort',
+          () =>
+            reject(new DOMException('Managed runtime installation was cancelled', 'AbortError')),
+          { once: true }
+        );
+      });
+    };
+    const spawnProcess = vi.fn();
+    const progress = vi.fn();
+    const manager = new AcpAuthenticationManager(createSilentLogger(), {
+      spawnProcess: spawnProcess as never,
+      resolveLoginShellEnv: async () => ({}),
+      resolveAuthenticationProcessLaunch,
+    });
+    const authentication = manager.authenticate({
+      requestId: 'auth-codex-download-cancel',
+      cliType: 'builtin',
+      agentType: 'codex',
+      onProgress: progress,
+    });
+    await resolutionStarted.promise;
+
+    expect(manager.cancel('auth-codex-download-cancel')).toEqual({
+      success: true,
+      disposition: 'cancelled',
+    });
+    await expect(authentication).resolves.toEqual({ success: true, disposition: 'cancelled' });
+    expect(spawnProcess).not.toHaveBeenCalled();
+    expect(progress).toHaveBeenCalledWith({ status: 'cancelled' });
   });
 
   it('times out, escalates termination, and releases the login slot for retry', async () => {
