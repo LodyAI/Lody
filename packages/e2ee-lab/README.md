@@ -15,6 +15,7 @@ pnpm --filter @lody/e2ee-lab run attack:model   # needs a model key (OPENROUTER_
 pnpm --filter @lody/e2ee-lab run replay
 pnpm --filter @lody/e2ee-lab exec tsx src/repro-cli.ts replay /path/to/pack
 pnpm --filter @lody/e2ee-lab exec tsx src/cli.ts --data-dir /tmp/e2ee-lab-data
+pnpm --filter @lody/e2ee-lab exec tsx src/cli.ts --data-dir /tmp/e2ee-lab-data --test
 ```
 
 `check` is typecheck plus tests. Root commands do not build the old demo UI.

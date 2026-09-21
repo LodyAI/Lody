@@ -5,6 +5,9 @@
  * compared against these rules, not against its own decision function.
  */
 
+import type { OrgState } from '@lody/e2ee-core/ledger';
+import { toHex } from './platform/bytes';
+
 export type RefKind = 'personal' | 'machine' | 'recovery';
 export type RefRole = 'owner' | 'admin' | 'member' | 'guest';
 
@@ -22,6 +25,31 @@ export interface RefState {
   readonly ownerUser: string;
   readonly devices: ReadonlyMap<string, RefDevice>;
   readonly revoked: ReadonlySet<string>;
+}
+
+/** Map authenticated Org membership facts into the independent reference state. */
+export function refStateFromOrg(org: string, state: OrgState): RefState {
+  const devices = new Map<string, RefDevice>();
+  let ownerUser = '';
+  for (const [id, device] of state.devices) {
+    const member = state.members.get(toHex(device.membershipId));
+    const role = member?.role ?? 'guest';
+    if (role === 'owner' && member) ownerUser = toHex(member.userId);
+    devices.set(id, {
+      id,
+      user: member ? toHex(member.userId) : '',
+      kind: device.kind,
+      role,
+      canManage: device.canManage,
+    });
+  }
+  return {
+    org,
+    epoch: state.epoch.number,
+    ownerUser,
+    devices,
+    revoked: new Set(),
+  };
 }
 
 function deviceOf(state: RefState, deviceId: string): RefDevice | undefined {

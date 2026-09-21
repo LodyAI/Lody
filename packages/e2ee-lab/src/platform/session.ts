@@ -26,13 +26,13 @@ import {
 import { SqliteLedgerStore } from '@lody/e2ee-core/ledger-node';
 import { StreamsLedgerStream } from '@lody/e2ee-core/streams';
 import { liveEntropy, type Entropy } from '@lody/e2ee-core';
+import { refMayWriteDocument, refStateFromOrg } from '../reference-model';
 import { fromHex, toHex } from './bytes';
 import { type DemoDevice, deviceHex, generateDevice, possessionProof } from './device';
 import {
   CONTROL_STREAM,
   DEVICE_HEADER,
   KEYS_STREAM,
-  NOW_HEADER,
   type ComparisonWire,
   type IssuedCredential,
   type JoinRequestWire,
@@ -91,6 +91,8 @@ export class DemoSession {
   readonly now: () => number;
   readonly testMode: boolean;
   canWriteDocument = false;
+  /** Independent reference-model write right from the last authenticated ledger. */
+  authenticatedWriterMayWrite: boolean | undefined;
   /** Last authenticated ledger epoch. Content seal must use this, not max(local keys). */
   ledgerEpoch = 0;
   loroDoc: LoroDoc | null = null;
@@ -123,7 +125,6 @@ export class DemoSession {
     const headers = new Headers(extra);
     if (this.credential) headers.set('authorization', `Bearer ${this.credential.token}`);
     if (this.device) headers.set(DEVICE_HEADER, deviceHex(this.device));
-    if (this.testMode) headers.set(NOW_HEADER, String(this.now()));
     return headers;
   }
 
@@ -242,6 +243,14 @@ export class DemoSession {
         member.role !== 'guest'
       );
     });
+    if (this.genesisHex) {
+      this.authenticatedWriterMayWrite = refMayWriteDocument(
+        refStateFromOrg(this.genesisHex, ledger.state),
+        deviceHex(this.device),
+        this.genesisHex,
+        ledger.state.epoch.number
+      );
+    }
     return ledger;
   }
 
@@ -273,6 +282,7 @@ export class DemoSession {
     this.ledgerClient = null;
     this.ledgerEpoch = 0;
     this.canWriteDocument = true;
+    this.authenticatedWriterMayWrite = true;
     return { genesisHex: this.genesisHex };
   }
 
@@ -349,6 +359,11 @@ export class DemoSession {
   ): Promise<{
     status: string;
     membershipId: Uint8Array;
+    admitted: boolean;
+    roleConfigured: boolean;
+    requestedRole: 'admin' | 'member' | 'guest';
+    deviceCanManage: false;
+    roleStatus?: string;
   }> {
     const membershipId = this.random('approve-membership-id', 16);
     const request: JoinRequest = {
@@ -360,10 +375,28 @@ export class DemoSession {
       signature: fromHex(wire.signature),
     };
     const submitted = await this.submit({ type: 'admitMember', membershipId, request });
-    if (role !== 'member' && submitted.status === 'committed') {
-      await this.submit({ type: 'setRole', membershipId, role });
+    const admitted = submitted.status === 'committed';
+    if (role === 'member' || !admitted) {
+      return {
+        status: submitted.status,
+        membershipId,
+        admitted,
+        roleConfigured: admitted && role === 'member',
+        requestedRole: role,
+        deviceCanManage: false,
+      };
     }
-    return { status: submitted.status, membershipId };
+    const roleResult = await this.submit({ type: 'setRole', membershipId, role });
+    const roleConfigured = roleResult.status === 'committed';
+    return {
+      status: roleResult.status,
+      membershipId,
+      admitted: true,
+      roleConfigured,
+      requestedRole: role,
+      roleStatus: roleResult.status,
+      deviceCanManage: false,
+    };
   }
 
   async admitDevice(

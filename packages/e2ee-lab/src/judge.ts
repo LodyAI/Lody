@@ -125,6 +125,7 @@ export function composeIntegrity(input: {
   observed: boolean;
   acceptedUnauthorized: boolean;
   unauthorizedContentAccepted?: boolean;
+  contentScanIncomplete?: boolean;
   wrongContextAccepted?: boolean;
   claims?: readonly {
     kind: 'plaintext' | 'forged-accepted' | 'cursor-overrun';
@@ -134,6 +135,7 @@ export function composeIntegrity(input: {
   }[];
 }): JudgeVerdict {
   if (!input.observed) return 'harness-error';
+  if (input.contentScanIncomplete) return 'harness-error';
   const parts: JudgeVerdict[] = [
     judgeClientIntegrity({
       observed: true,

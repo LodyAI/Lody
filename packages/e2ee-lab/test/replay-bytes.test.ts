@@ -116,27 +116,15 @@ async function lostAckOnce(input?: {
   const extra = input?.extra
     ? await (await import('../src/platform/device')).importDevice(input.extra)
     : await generateDevice();
-  await fetch(`${host.baseUrl}/v1/failpoints`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name: 'drop-control-ack' }),
-  });
+  host.setFailpoint('drop-control-ack');
   let status = 'unknown';
   try {
     status = (await alice.admitDevice(extra, 'personal', false)).status;
   } catch {
-    await fetch(`${host.baseUrl}/v1/failpoints`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'none' }),
-    });
+    host.setFailpoint('none');
     status = (await alice.resume()).status;
   }
-  await fetch(`${host.baseUrl}/v1/failpoints`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name: 'none' }),
-  });
+  host.setFailpoint('none');
   const entropy = isRecordingEntropy(recorded) ? recorded.fills : [...input!.entropy!];
   return {
     material: { events: runtime.events(), frames: runtime.frames, entropy },

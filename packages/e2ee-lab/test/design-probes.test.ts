@@ -263,9 +263,8 @@ describe('design probes: binding, host cache, guest content', () => {
   });
 });
 
-// These cases encode currently observed defects, not intended contracts.
-describe('design probes: newly observed defects', () => {
-  it('leaks unauthenticated Riverrun and test-only host controls', async () => {
+describe('design probes: ordinary plane vs harness', () => {
+  it('does not leak Riverrun, failpoints, or clock control on ordinary HTTP', async () => {
     const host = await launchLab();
     const alice = await labClient({ host, account: 'alice' });
     await alice.createSpace();
@@ -273,37 +272,56 @@ describe('design probes: newly observed defects', () => {
 
     const ready = await fetch(`${host.baseUrl}/readyz`);
     expect(ready.status).toBe(200);
-    const body = (await ready.json()) as { riverrun?: string; riverrunDbPath?: string };
-    expect(body.riverrun, 'GET /readyz discloses the unauthenticated Riverrun URL').toBeTruthy();
-    const raw = await fetch(
-      `${String(body.riverrun).replace(/\/$/, '')}/ds/${alice.genesisHex}/${LORO_STREAM}`
-    );
-    expect(raw.ok, 'external attacker can bypass the gateway via /readyz').toBe(true);
+    const body = (await ready.json()) as {
+      ok?: boolean;
+      riverrun?: string;
+      riverrunDbPath?: string;
+    };
+    expect(body.ok).toBe(true);
+    expect(body.riverrun).toBeUndefined();
+    expect(body.riverrunDbPath).toBeUndefined();
 
     const unknown = await fetch(`${host.baseUrl}/v1/spaces/${'00'.repeat(32)}/genesis`);
     const known = await fetch(`${host.baseUrl}/v1/spaces/${alice.genesisHex}/genesis`);
-    expect(unknown.status).toBe(404);
-    expect(known.status, 'unauthenticated genesis GET is an existence oracle').toBe(401);
+    expect(unknown.status).toBe(401);
+    expect(known.status).toBe(401);
 
     const failpoints = await fetch(`${host.baseUrl}/v1/failpoints`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name: 'drop-control-ack' }),
     });
-    expect(failpoints.status, 'testMode failpoints are unauthenticated').toBe(200);
+    expect(failpoints.status).not.toBe(200);
+    const harnessDenied = await fetch(`${host.baseUrl}/v1/harness/failpoints`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'drop-control-ack' }),
+    });
+    expect(harnessDenied.status).toBe(401);
 
-    const farFuture = String(alice.credential!.issuedAt + 16 * 60 * 1000);
+    const farFuture = alice.credential!.issuedAt + 16 * 60 * 1000;
     const clock = await fetch(`${host.baseUrl}/healthz`, {
-      headers: { 'x-e2ee-demo-now': farFuture },
+      headers: { 'x-e2ee-demo-now': String(farFuture) },
     });
     expect(clock.status).toBe(200);
+    const stillFresh = await fetch(`${host.baseUrl}/ds/${alice.genesisHex}/${CONTROL_STREAM}`, {
+      headers: { authorization: `Bearer ${alice.credential!.token}` },
+    });
+    expect(stillFresh.status).not.toBe(401);
+
+    host.setNow(farFuture);
     const expired = await fetch(`${host.baseUrl}/ds/${alice.genesisHex}/${CONTROL_STREAM}`, {
       headers: { authorization: `Bearer ${alice.credential!.token}` },
     });
-    expect(expired.status, 'unauthenticated NOW_HEADER moves the host clock').toBe(401);
+    expect(expired.status).toBe(401);
+
+    const raw = await fetch(
+      `${host.riverrunUrl.replace(/\/$/, '')}/ds/${alice.genesisHex}/${LORO_STREAM}`
+    );
+    expect(raw.ok, 'malicious-server handle still reaches raw Riverrun').toBe(true);
   });
 
-  it('treats a guest-to-be as a writer between admitMember and setRole', async () => {
+  it('records that admitMember creates a member with write rights before setRole', async () => {
     const host = await launchLab();
     const alice = await labClient({ host, account: 'alice' });
     const bob = await labClient({ host, account: 'bob' });
@@ -324,7 +342,9 @@ describe('design probes: newly observed defects', () => {
     });
     expect(admitted.status).toBe('committed');
     await bob.readLedger();
-    expect(bob.canWriteDocument, 'admitMember always inserts role=member').toBe(true);
+    expect(bob.canWriteDocument, 'admitMember still inserts role=member; not atomic guest').toBe(
+      true
+    );
     await alice.deliverEpochKey(bob.device, 0);
     const frames = await bob.readKeyFrames();
     await bob.receiveEpochKey(alice.device, 0, frames[0]!);
@@ -338,7 +358,7 @@ describe('design probes: newly observed defects', () => {
     await expect(writeLoro(bob, 'after-guest-role')).rejects.toThrow();
   });
 
-  it('admits a join whose expiresAt is already in the past', async () => {
+  it('rejects host admission of a join whose expiresAt is already past', async () => {
     const host = await launchLab();
     const alice = await labClient({ host, account: 'alice' });
     const bob = await labClient({ host, account: 'bob' });
@@ -370,27 +390,36 @@ describe('design probes: newly observed defects', () => {
     });
     expect(posted.ok).toBe(true);
     const approved = await alice.approveJoin(wire);
-    expect(approved.status, 'host extend() never preflights join expiry').toBe('committed');
-    expect((await alice.readLedger()).state.devices.has(toHex(bob.device.publicKey))).toBe(true);
+    expect(approved.admitted).toBe(false);
+    expect(approved.roleConfigured).toBe(false);
+    expect(approved.status).not.toBe('committed');
+    expect((await alice.readLedger()).state.devices.has(toHex(bob.device.publicKey))).toBe(false);
   });
 
-  it('does not give the join device canSendEpoch after approveJoin(admin)', async () => {
+  it('reports role=admin without implying the join device can manage', async () => {
     const host = await launchLab();
     const alice = await labClient({ host, account: 'alice' });
     const bob = await labClient({ host, account: 'bob' });
     await alice.createSpace();
     const join = await bob.requestJoin(alice.genesisHex!);
-    expect((await alice.approveJoin(join, 'admin')).status).toBe('committed');
+    const approved = await alice.approveJoin(join, 'admin');
+    expect(approved.status).toBe('committed');
+    expect(approved.roleConfigured).toBe(true);
+    expect(approved.deviceCanManage).toBe(false);
     const ledger = await bob.readLedger();
     const member = [...ledger.state.members.values()].find((row) => row.role === 'admin');
     expect(member?.role).toBe('admin');
-    expect(
-      canSendEpoch(ledger.state, bob.device.publicKey),
-      'join device keeps canManage=false; helper looks like a working admin'
-    ).toBe(false);
+    expect(canSendEpoch(ledger.state, bob.device.publicKey)).toBe(false);
+    await expect(bob.deliverEpochKey(alice.device, 0)).rejects.toThrow();
+    const manager = await generateDevice();
+    expect((await bob.admitDevice(manager, 'personal', true)).status).toBe('committed');
+    const after = await bob.readLedger();
+    expect(canSendEpoch(after.state, manager.publicKey)).toBe(true);
+    const machine = await generateDevice();
+    await expect(bob.admitDevice(machine, 'machine', true)).rejects.toThrow();
   });
 
-  it('flags historical member content as unauthorized after setRole→guest', async () => {
+  it('does not flag historical member content after setRole→guest', async () => {
     const runtime = new LabRuntime({ mode: 'auto' });
     const host = await launchLab();
     const alice = await labClient({ host, account: 'alice', runtime });
@@ -416,12 +445,10 @@ describe('design probes: newly observed defects', () => {
       inspectHonest: inspectClient(alice, host),
     });
     const report = await lab.finish();
-    expect(report.integrity, 'judge treats demoted authors as unauthorized writers').toBe(
-      'outside-model'
-    );
+    expect(report.integrity).toBe('pass');
   });
 
-  it('misses guest-authored Flock content under malicious Riverrun', async () => {
+  it('flags imported guest-authored Flock content under malicious Riverrun', async () => {
     const runtime = new LabRuntime({ mode: 'auto' });
     const host = await launchLab();
     const alice = await labClient({ host, account: 'alice', runtime });
@@ -447,7 +474,112 @@ describe('design probes: newly observed defects', () => {
     await writeFlock(bob, 'guest-flock-pwn');
     await expect(readFlock(alice)).resolves.toContain('guest-flock-pwn');
     const facts = await inspectClient(alice, host)();
-    expect(facts.unauthorizedContentAccepted, 'inspectClient only scans LORO_STREAM').toBe(false);
+    expect(facts.unauthorizedContentAccepted).toBe(true);
+    expect(facts.contentScanIncomplete).not.toBe(true);
+  });
+
+  it('does not treat backend-only guest ciphertext as client acceptance', async () => {
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice' });
+    const bob = await labClient({ host, account: 'bob' });
+    await alice.createSpace();
+    const join = await bob.requestJoin(alice.genesisHex!);
+    expect((await alice.approveJoin(join, 'guest')).roleConfigured).toBe(true);
+    await bob.readLedger();
+    await alice.deliverEpochKey(bob.device, 0);
+    const keyFrames = await bob.readKeyFrames();
+    await bob.receiveEpochKey(alice.device, 0, keyFrames[0]!);
+    bob.prepareWrite = async () => undefined;
+    bob.canWriteDocument = true;
+    const orig = bob.fetch.bind(bob);
+    bob.fetch = async (input, init) => {
+      const url = String(input);
+      if (url.includes(`/${LORO_STREAM}`) && init?.method === 'POST') {
+        const dest = url.replace(host.baseUrl, host.riverrunUrl.replace(/\/$/, ''));
+        return fetch(dest, init);
+      }
+      return orig(input, init);
+    };
+    await writeLoro(bob, 'guest-loro-backend-only');
+    const facts = await inspectClient(alice, host)();
+    expect(facts.unauthorizedContentAccepted).toBe(false);
+  });
+
+  it('rejects guest writes on the honest gateway', async () => {
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice' });
+    const bob = await labClient({ host, account: 'bob' });
+    await alice.createSpace();
+    const join = await bob.requestJoin(alice.genesisHex!);
+    expect((await alice.approveJoin(join, 'guest')).roleConfigured).toBe(true);
+    await bob.readLedger();
+    await expect(writeLoro(bob, 'honest-guest-write')).rejects.toThrow();
+  });
+
+  it('does not report Guest/Admin complete when setRole does not commit', async () => {
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice' });
+    const bob = await labClient({ host, account: 'bob' });
+    await alice.createSpace();
+    const join = await bob.requestJoin(alice.genesisHex!);
+    const membershipId = alice.random('join-role-fail', 16);
+    expect(
+      (
+        await alice.submit({
+          type: 'admitMember',
+          membershipId,
+          request: {
+            requestId: fromHex(join.requestId),
+            userId: fromHex(join.userId),
+            signingPublicKey: fromHex(join.signingPublicKey),
+            encryptionPublicKey: fromHex(join.encryptionPublicKey),
+            expiresAt: join.expiresAt,
+            signature: fromHex(join.signature),
+          },
+        })
+      ).status
+    ).toBe('committed');
+    expect((await alice.submit({ type: 'removeMember', membershipId })).status).toBe('committed');
+    await expect(alice.submit({ type: 'setRole', membershipId, role: 'guest' })).rejects.toThrow(
+      /unauthorized/
+    );
+  });
+
+  it('resumes a setRole after a dropped ACK', async () => {
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice' });
+    const bob = await labClient({ host, account: 'bob' });
+    await alice.createSpace();
+    const join = await bob.requestJoin(alice.genesisHex!);
+    const membershipId = alice.random('join-role-ack', 16);
+    expect(
+      (
+        await alice.submit({
+          type: 'admitMember',
+          membershipId,
+          request: {
+            requestId: fromHex(join.requestId),
+            userId: fromHex(join.userId),
+            signingPublicKey: fromHex(join.signingPublicKey),
+            encryptionPublicKey: fromHex(join.encryptionPublicKey),
+            expiresAt: join.expiresAt,
+            signature: fromHex(join.signature),
+          },
+        })
+      ).status
+    ).toBe('committed');
+    host.setFailpoint('drop-control-ack');
+    let status = 'unknown';
+    try {
+      status = (await alice.submit({ type: 'setRole', membershipId, role: 'guest' })).status;
+    } catch {
+      host.setFailpoint('none');
+      status = (await alice.resume()).status;
+    }
+    host.setFailpoint('none');
+    expect(status).toBe('committed');
+    await bob.readLedger();
+    expect(bob.canWriteDocument).toBe(false);
   });
 
   it('lets a remaining member publish post-rotation content under epoch 0', async () => {

@@ -13,7 +13,8 @@ import {
 } from '@lody/e2ee-core/snapshot-admission';
 import { deviceMayWriteDocument } from '@lody/e2ee-core/streams-content';
 import { StreamsClient } from '@loro-dev/streams-client';
-import { fromHex, toHex } from './bytes';
+import { chmodSync, writeFileSync } from 'node:fs';
+import { fromHex, randomBytes, toHex } from './bytes';
 import { verifyPossession } from './device';
 import {
   authorizeCurrentMember,
@@ -31,7 +32,6 @@ import {
   FLOCK_STREAM,
   KEYS_STREAM,
   LORO_STREAM,
-  NOW_HEADER,
   type ComparisonWire,
   type Failpoint,
   type IssuedCredential,
@@ -57,6 +57,10 @@ export interface RunningDemoHost {
   readonly dataDir: string;
   readonly riverrunDbPath: string;
   readonly port: number;
+  /** Present only when testMode constructed this host. Not an attacker view. */
+  readonly harnessToken: string | null;
+  setNow(value: number | null): void;
+  setFailpoint(name: Failpoint): void;
   close(): Promise<void>;
 }
 
@@ -126,6 +130,16 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
   const wallClock = options.wallClock ?? makeLabClock(() => Date.now()).nowMs;
   const testMode = options.testMode === true;
   const hostName = options.host ?? '127.0.0.1';
+  const harnessToken = testMode ? toHex(randomBytes(32)) : null;
+  if (harnessToken) {
+    const tokenPath = join(options.dataDir, 'harness.token');
+    writeFileSync(tokenPath, `${harnessToken}\n`, { encoding: 'utf8' });
+    try {
+      chmodSync(tokenPath, 0o600);
+    } catch {
+      /* platform may ignore mode */
+    }
+  }
 
   const riverrun: RunningDevServer = await startDevServer({
     host: '127.0.0.1',
@@ -229,10 +243,6 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
         res.end();
         return;
       }
-      const nowHeader = req.headers[NOW_HEADER];
-      if (testMode && typeof nowHeader === 'string' && /^(0|[1-9][0-9]*)$/.test(nowHeader)) {
-        meta.setNow(Number(nowHeader));
-      }
       const now = meta.now(wallClock);
       const parts = pathParts(url);
 
@@ -242,15 +252,14 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
           return;
         }
         if (req.method === 'GET' && url.pathname === '/readyz') {
-          json(res, 200, {
-            ok: true,
-            riverrun: riverrun.baseUrl,
-            riverrunDbPath,
-            dataDir: options.dataDir,
-          });
+          json(res, 200, { ok: true });
           return;
         }
-        if (testMode && req.method === 'POST' && url.pathname === '/v1/clock') {
+        if (req.method === 'POST' && url.pathname === '/v1/harness/clock') {
+          if (!harnessToken || bearer(req) !== harnessToken) {
+            json(res, 401, { error: 'unauthorized' });
+            return;
+          }
           const payload = JSON.parse(new TextDecoder().decode(await readBody(req))) as {
             now?: number | null;
           };
@@ -258,7 +267,11 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
           json(res, 200, { now: meta.now(wallClock) });
           return;
         }
-        if (testMode && req.method === 'POST' && url.pathname === '/v1/failpoints') {
+        if (req.method === 'POST' && url.pathname === '/v1/harness/failpoints') {
+          if (!harnessToken || bearer(req) !== harnessToken) {
+            json(res, 401, { error: 'unauthorized' });
+            return;
+          }
           const payload = JSON.parse(new TextDecoder().decode(await readBody(req))) as {
             name?: Failpoint;
           };
@@ -353,13 +366,13 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
 
         if (req.method === 'GET' && parts[0] === 'v1' && parts[1] === 'spaces' && parts[2]) {
           const genesisHex = parts[2]!;
+          requireCredential(req, now);
           const space = meta.space(genesisHex);
           if (!space) {
             json(res, 404, { error: 'unknown-space' });
             return;
           }
           if (parts[3] === 'genesis') {
-            requireCredential(req, now);
             json(res, 200, { genesis: toHex(space.genesis) });
             return;
           }
@@ -459,11 +472,11 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
           const genesisHex = parts[1];
           const stream = parts[2];
           const sub = parts[3];
+          const credential = requireCredential(req, now);
           if (!isKnownStream(stream) || !meta.space(genesisHex)) {
             json(res, 404, { error: 'unknown-stream' });
             return;
           }
-          const credential = requireCredential(req, now);
           const ledger = await loadLedger(genesisHex);
           const decision = authorizeStreamRequest({
             state: ledger.state,
@@ -505,7 +518,22 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
               return;
             }
             const current = await loadLedger(genesisHex);
-            await current.extend([record]);
+            const operation = decoded.body.fields.operation;
+            if (operation.type === 'admitMember' && operation.request.expiresAt !== null) {
+              const digest = toHex(await hashRecord(record));
+              const alreadyHead = toHex(current.head) === digest;
+              if (!alreadyHead && now >= operation.request.expiresAt) {
+                try {
+                  await current.extend([record], pointCache);
+                } catch {
+                  json(res, 403, { error: 'join-expired' });
+                  return;
+                }
+                json(res, 403, { error: 'join-expired' });
+                return;
+              }
+            }
+            await current.extend([record], pointCache);
             const dest = `${riverrun.baseUrl}${url.pathname}${url.search}`;
             const headers = new Headers();
             for (const [name, value] of Object.entries(req.headers)) {
@@ -619,6 +647,9 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
   return {
     baseUrl,
     riverrunUrl: riverrun.baseUrl,
+    harnessToken,
+    setNow: (value) => meta.setNow(value),
+    setFailpoint: (name) => meta.setFailpoint(name),
     dataDir: options.dataDir,
     riverrunDbPath,
     port: address.port,

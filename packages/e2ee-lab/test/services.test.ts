@@ -21,6 +21,9 @@ function withDbPath(host: LabBackend, riverrunDbPath: string): LabBackend {
     dataDir: host.dataDir,
     port: host.port,
     riverrunDbPath,
+    harnessToken: host.harnessToken,
+    setNow: (value) => host.setNow(value),
+    setFailpoint: (name) => host.setFailpoint(name),
     close: () => host.close(),
   };
 }
@@ -104,6 +107,9 @@ describe('Lab services', () => {
       dataDir: host.dataDir,
       port: host.port,
       riverrunDbPath: '/lab/rr.sqlite',
+      harnessToken: host.harnessToken,
+      setNow: (value) => host.setNow(value),
+      setFailpoint: (name) => host.setFailpoint(name),
       close: async () => undefined,
     };
     const lab = createAttackLab({

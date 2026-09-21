@@ -15,7 +15,21 @@ Translation: current
 
 ## 实施计划与唯一任务表
 
-当前状态：HEAD `4989fad8` 加上保留的脏工作树（宿主网关、裁判、设计探针）。本轮唯一目标：实验室已捕获的失败能生成独立复现包，在新进程、新目录中重放，并缩成最小反例。不接入 Lody 产品，不改协议，不 push/PR/merge。实验室 Spec 仍为 draft。
+当前状态：HEAD `c98f6804`（已提交）。本轮：定向修复 design-probe 第 1–6、8 项。原子 Guest 准入（第 2 项协议）和旧代上传（第 7 项）只交方案、不改 wire。不接入 Lody，不 push/PR/merge。
+
+| 完成 | 阶段 | 门槛 |
+| ---- | ---- | ---- |
+| [x] | D1 普通面与 harness | `/readyz` 不含 Riverrun/路径；NOW_HEADER 与未登录 failpoint 不能改宿主；harness token/DI 仍能 |
+| [x] | D2 approveJoin 部分成功 | 第二步失败不得报 Guest/Admin 已完成；保留 pending；不是原子 Guest 准入 |
+| [x] | D3 宿主加入过期 | 非空 `expiresAt` 在可信准入拒绝；过期前已提交的丢 ACK 重试仍能识别；纯校验不含时钟 |
+| [x] | D4/D5 历史裁判 | 降级作者的历史仍合法；Loro+Flock；看导入事实不是后端能解开；未知为未测 |
+| [x] | D6 未鉴权存在性 | 未登录访问已知/未知空间不再 401/404 分流 |
+| [x] | D8 Admin ∩ canManage | helper 不暗示加入设备可管理；显式管理设备可以；机器不能 |
+| [x] | D2/D7 待决策 | 只写方案，不改 wire |
+
+下表为上一轮 R0–R7，勾选保留为历史证据。
+
+当前状态：HEAD `4989fad8` 加上保留的脏工作树（宿主网关、裁判、设计探针）。上一轮唯一目标：独立复现包。不接入 Lody 产品，不改协议，不 push/PR/merge。实验室 Spec 仍为 draft。
 
 | 完成 | 阶段 | 门槛 |
 | ---- | ---- | ---- |
@@ -432,3 +446,33 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 - **后端限制：** 保留 SIGKILL 崩溃矩阵。未刷盘 SQLite 页的断电、FS/OS 内部故障、以及传输检查点重放均未覆盖。
 - **Agent：** 破坏性命中只计 intercept 或 mutateBackend。本轮 `test/restricted-agent.test.ts` 2/2（模型密钥可用）。
 - 证据：`pnpm --filter @lody/e2ee-lab check` 18 文件 / 116 测试，含 `test/repro-pack.test.ts` 8/8（20 次 skip-verify + 子进程重放）、协作 S1–S3、真实模型介入。未启用产品 E2EE。无 push/merge。
+
+### 2026-09-21 — design-probe 定向修复（1–6、8）
+
+- 基线：HEAD `c98f6804`。`newly observed` 7/7 仍在断言缺陷。Guest 探针在 admitMember 与 setRole 之间分钥，证明的是中间状态可写，不是 helper 必然在该窗口分钥。后端能解密 ≠ 客户端已导入。隐藏 Riverrun URL 不是网络隔离。
+- **D1：** `/readyz` 只返回 `{ok:true}`。`x-e2ee-demo-now` 不再改宿主时钟。failpoint/时钟走 `host.setNow`/`setFailpoint` 或带 `harness.token` 的 `POST /v1/harness/*`。CLI 默认非 testMode，`--test` 才开 harness。恶意服务器测试仍用 `host.riverrunUrl`。隔离仍是能力句柄。
+- **D2 helper：** `approveJoin` 返回 `admitted` / `roleConfigured` / `deviceCanManage:false`，非 member 角色时 status 是 **setRole** 的结果。丢 ACK 的 setRole 仍可 resume。这**不能**消灭 `admitMember` 的临时 member 写权窗口。
+- **D3：** 宿主 control-cas 在 extend+CAS 前用宿主时钟检查非空 `expiresAt`。记录已是 `head` 则允许重试（丢 ACK）。纯 `Ledger.verify` 仍无时钟。剩余间隙：检查到 Riverrun CAS 之间时钟可能越过截止（无跨流事务）。
+- **D4/D5：** 裁判用持久化 Loro/Flock 加实验室写事实和 `refMayWriteDocument`（不用 `deviceMayWriteDocument`）。降级作者的历史仍合法。Guest Flock 导入会标记。仅后端密文不算接纳。无法归属则为 `contentScanIncomplete` → harness-error，不是 pass。
+- **D6：** 未登录访问 `/v1/spaces/...` 和 `/ds/...` 先鉴权再查存在性（401/401）。
+- **D8：** 加入设备保持 `canManage=false`。无管理能力的 Admin 不能 `canSendEpoch`。该 Admin 显式 `admitDevice(..., true)` 可以。机器不能 `canManage`。
+- **待决策 D2 协议 / D7 代次：** 见下。未改 wire。旧代上传探针仍作特征化保留。
+- 证据：`pnpm --filter @lody/e2ee-lab check` 18 文件 / 120 测试。未启用产品 E2EE。无 push/merge。
+
+### 待决策 — 原子 Guest 准入
+
+建议新的 ordinary op（或给 `admitMember` 增加角色字节），使一条签名记录直接写入 `role=guest`（或 admin/member），前面没有 member 状态。
+
+- **编码：** 现 `admitMember` 为 `[1, membershipId, request]`，固定 `role=member`。在数组末尾加角色会让旧解码失败。更稳妥是新 op 码，而不是悄悄加长数组。创世 `protocolVersion=1` 不变；普通记录没有版本字段。
+- **谁可准入何种角色：** 沿用现权限。Owner 或 Admin 的 personal+`canManage` 可准入 `member`/`guest`。仅 Owner personal+`canManage` 可准入 `admin`（与现 `setRole` 仅 Owner 一致）。加入设备仍 `canManage=false`。
+- **兼容：** 旧客户端不能产生或校验新 op。在切断前实验室/核心测试需双跑旧 `admitMember`+`setRole`。
+- **无临时写权的证明：** 该单条记录之后，加入设备 `refMayWriteDocument` 为假，`writeLoro` 抛错，控制流上不存在该设备为 `member` 的前缀。延后分钥**不是**这条证明。
+- 确认前不实现。
+
+### 待决策 — 旧代内容上传
+
+当前诚实网关 `content-cas` 只查成员写权，不查密文代次。诚实 `writeLoro` 用已认证账本代次密封。换代后仍在籍的成员若跳过 `prepareWrite`，仍可用 epoch 0 上传，诚实对端会打开。宿主无法把这与“换代前已密封、现在才上传”的离线设备区分开。
+
+线上可信证据是内容头里的 epoch（未验证路由元数据）加上当前成员资格。客户端自报创建时间不是证据。可选：（A）保可用性，只靠诚实客户端 `prepareWrite` 拒绝；（B）网关拒绝头 epoch ≠ `currentEpoch`，离线换代前密文会失败；（C）与最后所见代次绑定的租约，仍要可信时钟，也不能阻止串通在籍成员用别的方式泄密。
+
+建议维持（A），请用户确认：诚实网关是否必须接受头 epoch 落后于 `currentEpoch` 的密文，以便离线换代前上传仍然可用？

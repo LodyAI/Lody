@@ -19,9 +19,8 @@ import {
 import { canPermitEvent, type LabEvent } from './scheduler';
 import { firstReplayDivergence, type Divergence } from './replay';
 import { LabRuntime, type ProtocolFrame } from './runtime';
-import { ContentCipher, inspectContent } from '@lody/e2ee-core';
-import { deviceMayWriteDocument } from '@lody/e2ee-core/streams-content';
 import { Ledger } from '@lody/e2ee-core/ledger';
+import { contentWritesFor } from './content-trace';
 import { SqliteLedgerStore } from '@lody/e2ee-core/ledger-node';
 import { LoroDoc, VersionVector } from 'loro-crdt';
 import { Flock } from '@loro-dev/flock-wasm';
@@ -35,19 +34,6 @@ import {
   runLabPromise,
   type LabServices,
 } from './services';
-
-function unframeRecords(body: Uint8Array): Uint8Array[] {
-  const view = new DataView(body.buffer, body.byteOffset, body.byteLength);
-  const out: Uint8Array[] = [];
-  let start = 0;
-  while (body.byteLength - start >= 4) {
-    const length = view.getUint32(start, false);
-    if (length <= 0 || start + 4 + length > body.byteLength) break;
-    out.push(body.subarray(start + 4, start + 4 + length));
-    start += 4 + length;
-  }
-  return out;
-}
 
 export interface PublicView {
   readonly events: readonly Pick<
@@ -136,10 +122,13 @@ export interface HonestInspect {
   /** Live import/verify of remote state failed. */
   importFailed?: boolean;
   /**
-   * Client opened content whose signing device lacks current document-write
-   * rights (guest/revoked). Under malicious Riverrun this is a model limit.
+   * Client imported content whose writer lacked write rights at seal time
+   * (independent reference model + lab write facts). Not "backend ciphertext
+   * happens to decrypt". Later demotion of a former writer is not this flag.
    */
   unauthorizedContentAccepted?: boolean;
+  /** Imported content could not be attributed to a write-time permission fact. */
+  contentScanIncomplete?: boolean;
   /** Persisted journal genesis does not match the bound Org id. */
   wrongContextAccepted?: boolean;
   unmeasured?: boolean;
@@ -274,105 +263,66 @@ function inspectClientEffect(
       (facts.verifiedRecords !== undefined && facts.verifiedRecords > 0 && !journal) ||
       cursors.loss;
     facts.cursorAhead = cursors.ahead;
-    if (ledger) {
-      facts.unauthorizedContentAccepted = yield* unauthorizedContentEffect(
-        client,
-        host,
-        genesisHex,
-        ledger
-      );
-    }
+    const admitted = yield* importedUnauthorizedEffect(client, genesisHex);
+    if (admitted === undefined) facts.contentScanIncomplete = true;
+    else facts.unauthorizedContentAccepted = admitted;
     return facts;
   });
 }
 
 /**
- * Scan Loro stream frames: if ciphertext opens under a held epoch key but the
- * signing device is a current guest (still on the ledger without write rights),
- * the client would accept unauthorized content under a malicious Riverrun.
- *
- * Records use streams-crdt LSCE envelopes; the ContentCipher frame is embedded
- * after the envelope prefix (located via the canonical content-header domain).
+ * Judge imported content from persisted Loro/Flock plus lab write facts.
+ * Backend ciphertext that happens to decrypt is not acceptance. Writer rights
+ * come from the independent reference model at seal time, not the current role.
+ * Returns undefined when imported text cannot be attributed (unmeasured).
  */
-function unauthorizedContentEffect(
+function importedUnauthorizedEffect(
   client: HonestClient,
-  host: LabBackend,
-  genesisHex: string,
-  ledger: Ledger
-): Effect.Effect<boolean, never, LabHttp> {
+  genesisHex: string
+): Effect.Effect<boolean | undefined, never, LabFs> {
   return Effect.gen(function* () {
-    const http = yield* LabHttp;
-    const cipher = new ContentCipher({
-      authorize(header) {
-        return header.device;
-      },
-    });
-    const domain = new TextEncoder().encode('["lody-content/v1"');
-    let offset = '-1';
-    for (let page = 0; page < 32; page++) {
-      const response = yield* Effect.tryPromise({
-        try: () =>
-          http.fetch(
-            `${host.riverrunUrl.replace(/\/$/, '')}/ds/${genesisHex}/${LORO_STREAM}?offset=${encodeURIComponent(offset)}`
-          ),
-        catch: (error) => error,
-      }).pipe(Effect.catchAll(() => Effect.succeed(null)));
-      if (!response || !response.ok) return false;
-      const body = new Uint8Array(
-        yield* Effect.tryPromise({
-          try: () => response.arrayBuffer(),
-          catch: (error) => error,
-        }).pipe(Effect.catchAll(() => Effect.succeed(new ArrayBuffer(0))))
-      );
-      for (const record of unframeRecords(body)) {
-        for (let at = 0; at + domain.byteLength + 2 < record.byteLength; at++) {
-          let match = true;
-          for (let i = 0; i < domain.byteLength; i++) {
-            if (record[at + i] !== domain[i]) {
-              match = false;
-              break;
-            }
-          }
-          if (!match || at < 2) continue;
-          const sealed = record.subarray(at - 2);
-          let meta;
-          try {
-            meta = inspectContent(sealed);
-          } catch {
-            continue;
-          }
-          const epochKey = client.epochKeys.get(meta.epoch);
-          if (!epochKey) continue;
-          const opened = yield* Effect.tryPromise({
-            try: () =>
-              cipher.open(
-                {
-                  genesis: meta.genesis,
-                  resource: meta.resource,
-                  purpose: meta.purpose,
-                  epoch: meta.epoch,
-                },
-                epochKey,
-                sealed
-              ),
-            catch: (error) => error,
-          }).pipe(Effect.catchAll(() => Effect.succeed(null)));
-          if (!opened) continue;
-          opened.plaintext.fill(0);
-          // Guests remain in the ledger without write rights. Revoked devices are
-          // removed — do not flag their historical ciphertext (model allows it).
-          const device = ledger.state.devices.get(meta.device);
-          if (device && !deviceMayWriteDocument(ledger.state, meta.device)) return true;
+    const fs = yield* LabFs;
+    let loroText = '';
+    let flockText = '';
+    try {
+      const loroPath = loroDocPath(client.clientDir);
+      if (fs.exists(loroPath)) {
+        const doc = new LoroDoc();
+        try {
+          doc.import(new Uint8Array(fs.readBytes(loroPath)));
+          loroText = doc.getText('text').toString();
+        } finally {
+          doc.free();
         }
       }
-      const next =
-        response.headers.get('stream-next-offset') ??
-        response.headers.get('Stream-Next-Offset') ??
-        offset;
-      if (next === offset || body.byteLength === 0) break;
-      offset = next;
+    } catch {
+      return undefined;
     }
-    return false;
+    try {
+      const flockPath = flockDocPath(client.clientDir);
+      if (fs.exists(flockPath)) {
+        const flock = Flock.fromFile(new Uint8Array(fs.readBytes(flockPath)), 'inspector');
+        flockText = String(
+          (flock.get(['private', 'note']) as { value?: string } | undefined)?.value ?? ''
+        );
+      }
+    } catch {
+      return undefined;
+    }
+    let unauthorized = false;
+    let incomplete = false;
+    for (const fact of contentWritesFor(genesisHex)) {
+      const imported =
+        fact.stream === 'flock' ? flockText.includes(fact.text) : loroText.includes(fact.text);
+      if (!imported) continue;
+      if (fact.writerMayWrite === undefined) {
+        incomplete = true;
+        continue;
+      }
+      if (fact.writerMayWrite === false) unauthorized = true;
+    }
+    if (incomplete) return undefined;
+    return unauthorized;
   });
 }
 
@@ -847,6 +797,7 @@ function finishEffect(lab: AttackLab): Effect.Effect<PublicReport, unknown, LabS
         observed,
         acceptedUnauthorized: (measured.unverifiedAccepted ?? 0) > 0,
         unauthorizedContentAccepted: measured.unauthorizedContentAccepted,
+        contentScanIncomplete: measured.contentScanIncomplete,
         wrongContextAccepted: measured.wrongContextAccepted,
         claims: claimInputs,
       });

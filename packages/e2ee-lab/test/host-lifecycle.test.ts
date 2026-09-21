@@ -40,8 +40,16 @@ describe('lab host lifecycle', () => {
     expect(host.baseUrl.startsWith('http://127.0.0.1:')).toBe(true);
     expect((await fetch(`${host.baseUrl}/healthz`)).status).toBe(200);
     const ready = await fetch(`${host.baseUrl}/readyz`);
-    const body = (await ready.json()) as { riverrunDbPath: string };
-    expect(existsSync(body.riverrunDbPath)).toBe(true);
+    const body = (await ready.json()) as {
+      ok?: boolean;
+      riverrun?: string;
+      riverrunDbPath?: string;
+    };
+    expect(ready.status).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.riverrun).toBeUndefined();
+    expect(body.riverrunDbPath).toBeUndefined();
+    expect(existsSync(host.riverrunDbPath)).toBe(true);
   });
 
   it('rejects unjoined POST/DELETE on the control stream', async () => {
@@ -253,10 +261,12 @@ describe('lab host lifecycle', () => {
   it('rejects control writes after the original 15-minute lease', async () => {
     let now = 1_700_000_000_000;
     const host = await launchLab();
+    host.setNow(now);
     const alice = await labClient({ host, account: 'alice', now: () => now });
     await alice.createSpace();
     expect((await alice.readLedger()).length).toBe(1);
     now += MAX_LEASE_MS;
+    host.setNow(now);
     await expect(alice.readLedger()).rejects.toThrow();
   });
 
@@ -391,9 +401,13 @@ describe('lab host lifecycle', () => {
     });
     await alice.start();
     await alice.createSpace();
-    await fetch(`${first.baseUrl}/v1/failpoints`, {
+    const token = readFileSync(join(dir, 'harness.token'), 'utf8').trim();
+    await fetch(`${first.baseUrl}/v1/harness/failpoints`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
       body: JSON.stringify({ name: 'kill-after-commit' }),
     });
     await alice.admitDevice(await generateDevice(), 'personal', false).catch(() => undefined);
@@ -422,7 +436,7 @@ async function spawnLab(
 ): Promise<{ baseUrl: string; child: ReturnType<typeof spawn> }> {
   const child = spawn(
     process.execPath,
-    ['--import', tsxLoader, join(here, '../src/cli.ts'), '--data-dir', dataDir],
+    ['--import', tsxLoader, join(here, '../src/cli.ts'), '--data-dir', dataDir, '--test'],
     { cwd: join(here, '..'), stdio: ['ignore', 'pipe', 'pipe'] }
   );
   const output = await new Promise<string>((resolve, reject) => {

@@ -7,6 +7,8 @@ import { startLabBackend, type LabBackend } from './backend';
 import { liveEntropy, type Entropy } from '@lody/e2ee-core';
 import { prefixedEntropy } from './entropy';
 import { LabRuntime } from './runtime';
+import { clearContentWrites } from './content-trace';
+import type { Failpoint } from './platform/protocol';
 import { canPermitEvent, type LabEvent } from './scheduler';
 
 const dirs: string[] = [];
@@ -23,6 +25,7 @@ export function tempDir(prefix: string): string {
 }
 
 export async function cleanupLab(): Promise<void> {
+  clearContentWrites();
   LabRuntime.closeAll();
   while (clients.length > 0) {
     try {
@@ -39,6 +42,14 @@ export async function cleanupLab(): Promise<void> {
     }
   }
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+}
+
+export function setHostFailpoint(host: LabBackend, name: Failpoint): void {
+  host.setFailpoint(name);
+}
+
+export function setHostNow(host: LabBackend, now: number | null): void {
+  host.setNow(now);
 }
 
 export async function launchLab(dataDir?: string): Promise<LabBackend> {

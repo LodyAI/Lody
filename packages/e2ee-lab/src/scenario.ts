@@ -262,6 +262,11 @@ export async function createCollabWorld(options: CollabWorldOptions = {}): Promi
     get port() {
       return world.host.port;
     },
+    get harnessToken() {
+      return world.host.harnessToken;
+    },
+    setNow: (value) => world.host.setNow(value),
+    setFailpoint: (name) => world.host.setFailpoint(name),
     close: () => world.host.close(),
   };
   for (const name of MEMBERS) {
@@ -599,6 +604,7 @@ export function inspectClients(
       durableLoss: false,
       importFailed: false,
       unauthorizedContentAccepted: false,
+      contentScanIncomplete: false,
       wrongContextAccepted: false,
     };
     for (const client of live) {
@@ -615,6 +621,7 @@ export function inspectClients(
       merged.durableLoss ||= facts.durableLoss === true;
       merged.importFailed ||= facts.importFailed === true;
       merged.unauthorizedContentAccepted ||= facts.unauthorizedContentAccepted === true;
+      merged.contentScanIncomplete ||= facts.contentScanIncomplete === true;
       merged.wrongContextAccepted ||= facts.wrongContextAccepted === true;
     }
     return merged;

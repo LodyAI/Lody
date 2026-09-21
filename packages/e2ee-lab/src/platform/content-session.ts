@@ -27,6 +27,7 @@ import {
   persistFlockDocument,
   persistLoroDocument,
 } from './persist';
+import { recordContentWrite } from '../content-trace';
 
 function requestUrl(input: object): string {
   const value = input as { href?: unknown; url?: unknown };
@@ -60,6 +61,8 @@ export interface ContentClient {
   /** Lab crash points. SIGKILL, not a normal-exit finalizer. */
   crashAt?: 'after-import' | 'after-document' | 'before-cursor' | 'after-cursor';
   crashMarker?: string;
+  /** Independent reference-model write right at last authenticated ledger. */
+  authenticatedWriterMayWrite?: boolean;
 }
 
 async function withPhase<T>(
@@ -240,6 +243,16 @@ export async function writeLoro(session: ContentClient, text: string): Promise<v
   if (!appended.ok) {
     throw new Error(`loro-append-failed:${JSON.stringify(appended)}`);
   }
+  if (session.genesisHex) {
+    recordContentWrite({
+      genesisHex: session.genesisHex,
+      stream: 'loro',
+      deviceHex: deviceHex(session.device),
+      epoch: session.currentEpoch(),
+      text,
+      writerMayWrite: session.authenticatedWriterMayWrite,
+    });
+  }
   const value = 'value' in appended ? appended.value : undefined;
   if (session.clientDir && value && 'nextOffset' in value && typeof value.nextOffset === 'string') {
     await cursorStore.save({
@@ -318,6 +331,16 @@ export async function writeFlock(
     throw new Error(
       `flock-append-failed:${'result' in appended ? JSON.stringify(appended.result) : ''}`
     );
+  }
+  if (session.genesisHex) {
+    recordContentWrite({
+      genesisHex: session.genesisHex,
+      stream: 'flock',
+      deviceHex: deviceHex(session.device),
+      epoch: session.currentEpoch(),
+      text: value,
+      writerMayWrite: session.authenticatedWriterMayWrite,
+    });
   }
   const result = 'value' in appended ? appended.value : undefined;
   if (

@@ -15,7 +15,21 @@ The [specification](../../../../specs/e2ee-adversarial-lab.md) owns contracts; t
 
 ## Implementation plan and single task tracker
 
-Current state: HEAD `4989fad8` plus preserved dirty tree (host gateway, judge, design probes). This round's unique goal: a captured lab failure becomes an independent reproduction pack that replays in a new process and directory and shrinks to a minimal counterexample. No Lody product integration, no protocol redesign, no push/PR/merge. The lab spec stays draft.
+Current state: HEAD `c98f6804` (committed). This round: targeted fixes for design-probe defects 1–6 and 8. Atomic guest admission (item 2 protocol) and stale-epoch upload (item 7) stay pending decisions; do not change wire. No Lody product integration, no push/PR/merge.
+
+| Done | Stage | Gate |
+| ---- | ----- | ---- |
+| [x] | D1 Ordinary vs harness plane | `/readyz` has no Riverrun/path; NOW_HEADER and unauthenticated failpoints cannot move the host; harness token/DI still can |
+| [x] | D2 approveJoin partial success | Second-step failure is not reported as Guest/Admin complete; pending preserved; not atomic guest admission |
+| [x] | D3 Join expiry at host admit | Non-null `expiresAt` rejected at trusted admit; lost-ACK retry of a pre-expiry commit still identifies; verify stays timeless |
+| [x] | D4/D5 Historical judge | Demoted authors keep legal history; Loro+Flock; imported facts not backend-decrypt; unknown is unmeasured |
+| [x] | D6 Unauth existence | Unauthenticated known vs unknown space do not 401/404-split |
+| [x] | D8 Admin ∩ canManage | Helper does not imply join device can manage; explicit manage device can; machines cannot |
+| [x] | D2/D7 decisions | Written proposals only; no wire change |
+
+The R0–R7 table below is the previous round; checkmarks stay as historical evidence.
+
+Current state: HEAD `4989fad8` plus preserved dirty tree (host gateway, judge, design probes). Previous unique goal: independent reproduction packs. No Lody product integration, no protocol redesign, no push/PR/merge. The lab spec stays draft.
 
 | Done | Stage | Gate |
 | ---- | ----- | ---- |
@@ -436,3 +450,33 @@ Implementers choose filenames, service names and test organization without repea
 - **Backend limits:** SIGKILL crash matrix kept. Power-loss of unflushed SQLite pages, FS/OS internals, and transport-checkpoint replay are uncovered.
 - **Agent:** destructive hit is intercept or mutateBackend only. `test/restricted-agent.test.ts` 2/2 this round (model key present).
 - Evidence: `pnpm --filter @lody/e2ee-lab check` 18 files / 116 tests, including `test/repro-pack.test.ts` 8/8 (20× skip-verify + child-process replay), collab S1–S3, and real-model intervention. Not product E2EE. No push/merge.
+
+### 2026-09-21 — Design-probe targeted fixes (items 1–6, 8)
+
+- Baseline: HEAD `c98f6804`. `newly observed defects` 7/7 still asserted the bugs. Guest probe keys between admitMember and setRole; that window is protocol, not the helper. Backend-decrypt ≠ client import. Hiding Riverrun URL is not network isolation.
+- **D1:** `/readyz` is `{ok:true}`. `x-e2ee-demo-now` no longer moves the host. Failpoints/clock are `host.setNow`/`setFailpoint` or `POST /v1/harness/*` with `harness.token`. CLI default is not testMode; `--test` enables harness. Malicious-server tests keep `host.riverrunUrl`. Isolation is still the capability handle.
+- **D2 helper:** `approveJoin` returns `admitted` / `roleConfigured` / `deviceCanManage:false` and the **setRole** status when a non-member role is requested. Lost-ACK setRole still resumes. This does **not** remove the temporary member write window of `admitMember`.
+- **D3:** Host control-cas checks non-null `expiresAt` against the host clock immediately before extend+CAS. If the record is already `head`, retry is allowed (lost ACK). Pure `Ledger.verify` is still timeless. Remaining gap: clock can pass expiry between the check and Riverrun CAS (no cross-stream transaction).
+- **D4/D5:** Judge uses persisted Loro/Flock plus lab write facts and `refMayWriteDocument` (not `deviceMayWriteDocument`). Demoted authors stay legal. Guest Flock import is flagged. Backend-only ciphertext is not acceptance. Incomplete attribution is `contentScanIncomplete` → harness-error, not pass.
+- **D6:** Unauthenticated `/v1/spaces/...` and `/ds/...` require a credential before existence checks (401/401).
+- **D8:** Join device stays `canManage=false`. Admin role without manage cannot `canSendEpoch`. Explicit `admitDevice(..., true)` on that admin can. Machines cannot take `canManage`.
+- **Pending D2 protocol / D7 epoch:** proposals below. Wire unchanged. Stale-epoch probe kept as characterization.
+- Evidence: `pnpm --filter @lody/e2ee-lab check` 18 files / 120 tests. Not product E2EE. No push/merge.
+
+### Pending decision — atomic Guest admission
+
+Recommend a new ordinary op (or an extra role byte on `admitMember`) so one signed record inserts `role=guest` (or `admin`/`member`) with no prefix member state.
+
+- **Encoding:** today `admitMember` is `[1, membershipId, request]` and always stores `role=member`. Adding a trailing role byte breaks existing decoders (`unknown-operation` / length). Prefer a new op code rather than silently extending the array. Genesis `protocolVersion=1` is unchanged; ordinary records have no version field.
+- **Who may admit which role:** keep current authority. Owner or Admin personal+`canManage` may admit `member`/`guest`. Only Owner personal+`canManage` may admit `admin` (same as `setRole`, which is owner-only). Join device stays `canManage=false`.
+- **Compatibility:** old clients cannot produce or verify the new op. Lab/core tests would dual-run old `admitMember`+`setRole` until a cut.
+- **Proof of no temp write:** after that single record, `refMayWriteDocument` is false for the join device; `writeLoro` throws; no control-stream prefix exists where the device is `member`. Delayed key delivery is **not** this proof.
+- Do not implement until confirmed.
+
+### Pending decision — old-epoch content upload
+
+Current honest gateway `content-cas` checks membership write, not ciphertext epoch. Honest `writeLoro` seals the authenticated ledger epoch. A remaining member who skips `prepareWrite` can still upload epoch-0 after `publishEpoch`; honest peers open it. The host cannot distinguish that from an offline device that sealed under epoch 0 before rotation and now uploads.
+
+Trusted evidence on the wire is the content header epoch (unverified routing metadata) plus current membership. Client-declared creation time is not evidence. Options: (A) keep availability, refuse only via honest client `prepareWrite`; (B) gateway rejects header epoch ≠ `currentEpoch`, which drops offline pre-rotation ciphertext; (C) a lease tied to last-seen epoch, which still needs a trusted clock and does not stop a colluding remaining member from leaking by other means.
+
+Recommend keeping (A) until the user answers: must the honest gateway accept ciphertext whose header epoch is behind `currentEpoch` so offline pre-rotation uploads remain available?

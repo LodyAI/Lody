@@ -116,28 +116,16 @@ describe('P3 Spec §7 matrix', () => {
       }),
     });
 
-    await fetch(`${host.baseUrl}/v1/failpoints`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'drop-control-ack' }),
-    });
+    host.setFailpoint('drop-control-ack');
     const phone = await generateDevice();
     let lostStatus = 'unknown';
     try {
       lostStatus = (await alice.admitDevice(phone, 'personal', false)).status;
     } catch {
-      await fetch(`${host.baseUrl}/v1/failpoints`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: 'none' }),
-      });
+      host.setFailpoint('none');
       lostStatus = (await alice.resume()).status;
     }
-    await fetch(`${host.baseUrl}/v1/failpoints`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: 'none' }),
-    });
+    host.setFailpoint('none');
     rows.push({
       name: 'lost-ack-resume',
       control: 'pending bytes resume without re-sign',
