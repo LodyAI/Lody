@@ -59,7 +59,7 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 - `managed-agent-runtime.ts`: Codex pins come only from `codex-runtime-manifest.json`, Claude
   pins only from `claude-runtime-manifest.json`; reject a dependency/manifest version mismatch
   and never duplicate those pins or checksums beside the manager. Do not loosen the metadata
-  schema or accept unknown legacy fields. The Grok submodule is never the source for production
+  schema or accept unknown legacy fields. Definition drift is a miss; cleanup and update scans are best effort. The Grok submodule is never the source for production
   runtime binaries, and the desktop must not depend on the Kimi submodule workspace. Custom
   methods stay capability-gated. Inject the artifact base URL from
   `CloudPort.runtimeArtifacts`; never read deployment environment or derive the channel here.

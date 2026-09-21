@@ -11,6 +11,15 @@ The adapter is an isolated submodule, not part of the desktop dependency graph.
 Windows native modules must come from a successful build of that exact revision.
 Pi credentials remain on the execution machine or in the existing provider environment.
 
+A repacked runtime may retain its source version while its artifact pins change.
+Such a cache entry must not block daemon startup or be launched as the current
+runtime. Reinstall through the normal checksum-verified path; malformed metadata
+remains an error.
+
+Startup cleanup and background update scans are best effort: log and skip each
+failed runtime and continue with the others. Cache errors must not abort daemon
+startup; actual launch and installation keep strict validation.
+
 Registry generation excludes `pi-acp` from new-provider discovery. Existing registry
 providers remain runnable until their owner explicitly confirms the chat landing card.
 Startup must not auto-create builtin Pi while the same machine has a legacy Pi

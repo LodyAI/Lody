@@ -39,6 +39,7 @@ import {
   type ManagedBuiltinRuntimeName,
 } from '@lody/shared';
 import { formatErrorWithCauses } from '@/utils/format-error';
+import { getLogger } from '@/utils/logger';
 import { getCliHttpFetch, resolveCliHttpTransportConfig } from '@/utils/http-transport';
 import { resolveProxyUrl } from '@/utils/proxy';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
@@ -801,9 +802,10 @@ export class ManagedAgentRuntimeManager {
       installation.metadata.archiveSize !== archive.size ||
       installation.metadata.minNodeVersion !== definition.minNodeVersion
     ) {
-      throw new ManagedRuntimeError(
-        `Managed runtime cache metadata does not match the current definition for ${name}/${definition.version}/${platformArch}`
-      );
+      // A repacked artifact can keep its source version but change its integrity
+      // pins. It is not the current installation: never launch it, and let the
+      // normal verified install path replace it instead of blocking CLI startup.
+      return null;
     }
     return installation;
   }
@@ -909,9 +911,13 @@ export class ManagedAgentRuntimeManager {
   async listAvailableUpdates(): Promise<ManagedRuntimeName[]> {
     const updates: ManagedRuntimeName[] = [];
     for (const name of MANAGED_RUNTIME_NAMES) {
-      const status = await this.getRuntimeStatus(name);
-      if (status.kind === 'installed' && status.updateAvailable) {
-        updates.push(name);
+      try {
+        const status = await this.getRuntimeStatus(name);
+        if (status.kind === 'installed' && status.updateAvailable) {
+          updates.push(name);
+        }
+      } catch (error) {
+        this.warnCacheMaintenanceFailure(name, 'update scan', error);
       }
     }
     return updates;
@@ -937,7 +943,27 @@ export class ManagedAgentRuntimeManager {
 
   async prepareCache(): Promise<void> {
     for (const name of MANAGED_RUNTIME_NAMES) {
-      await this.pruneSupersededVersions(name);
+      try {
+        await this.pruneSupersededVersions(name);
+      } catch (error) {
+        // Cache maintenance must never prevent the daemon from starting or
+        // stop cleanup of unrelated runtimes. Launch/install still validate.
+        this.warnCacheMaintenanceFailure(name, 'startup cache cleanup', error);
+      }
+    }
+  }
+
+  private warnCacheMaintenanceFailure(
+    name: ManagedRuntimeName,
+    operation: string,
+    error: unknown
+  ): void {
+    try {
+      getLogger('managed-runtime').warn(
+        `Skipping failed ${operation} for ${name}: ${formatErrorWithCauses(error)}`
+      );
+    } catch {
+      // Even an unavailable log sink must not make maintenance fatal.
     }
   }
 
