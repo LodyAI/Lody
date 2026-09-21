@@ -37,7 +37,7 @@ const defaultLabels: SidebarFilterLabels = {
   showHeading: 'Tasks',
   organizeProject: 'Project',
   organizeUpdated: 'Updated',
-  updatedProjectNames: 'Origins',
+  updatedProjectNames: 'Show Project',
   updatedProjectNamesUnavailable: 'Available in Updated view',
   showMyTasks: 'My Tasks',
   showAllTasks: 'All Tasks',
@@ -117,13 +117,13 @@ export function SidebarFilterPopover({
 }: SidebarFilterPopoverProps) {
   const merged = { ...defaultLabels, ...labels };
   const [open, setOpen] = useState(false);
-  const [originsHintOpen, setOriginsHintOpen] = useState(false);
+  const [projectHintOpen, setProjectHintOpen] = useState(false);
   const sourceLabelsSwitchId = useId();
-  const originsAvailable = organize === 'updated';
+  const projectNamesAvailable = organize === 'updated';
 
   const handleOpenChange = (next: boolean) => {
     setOpen(next);
-    if (!next) setOriginsHintOpen(false);
+    if (!next) setProjectHintOpen(false);
   };
 
   const handleOrganizeSelect = (next: SidebarOrganizeMode) => {
@@ -203,38 +203,38 @@ export function SidebarFilterPopover({
         <div className={menuSeparatorClassName} aria-hidden="true" />
         <TooltipProvider delayDuration={300}>
           <Tooltip
-            open={originsAvailable ? false : originsHintOpen}
-            onOpenChange={setOriginsHintOpen}
+            open={projectNamesAvailable ? false : projectHintOpen}
+            onOpenChange={setProjectHintOpen}
           >
             <TooltipTrigger asChild>
               <div
                 data-sidebar-filter-section="display"
-                data-disabled={originsAvailable ? undefined : ''}
-                aria-disabled={originsAvailable ? undefined : true}
-                tabIndex={originsAvailable ? undefined : 0}
+                data-disabled={projectNamesAvailable ? undefined : ''}
+                aria-disabled={projectNamesAvailable ? undefined : true}
+                tabIndex={projectNamesAvailable ? undefined : 0}
                 onPointerDownCapture={(event) => {
-                  if (originsAvailable || event.pointerType !== 'touch') return;
+                  if (projectNamesAvailable || event.pointerType !== 'touch') return;
                   event.preventDefault();
-                  setOriginsHintOpen((current) => !current);
+                  setProjectHintOpen((current) => !current);
                 }}
                 className={cn(
                   'group flex min-h-7 items-center gap-2 rounded-md px-2 py-[3px]',
-                  originsAvailable ? 'text-popover-foreground' : 'text-muted-foreground/55'
+                  projectNamesAvailable ? 'text-popover-foreground' : 'text-muted-foreground/55'
                 )}
               >
                 <Eye
                   className={cn(
                     'h-3.5 w-3.5 shrink-0',
-                    originsAvailable ? 'text-muted-foreground' : 'text-muted-foreground/55'
+                    projectNamesAvailable ? 'text-muted-foreground' : 'text-muted-foreground/55'
                   )}
                   strokeWidth={1.75}
                   aria-hidden="true"
                 />
                 <label
-                  htmlFor={originsAvailable ? sourceLabelsSwitchId : undefined}
+                  htmlFor={projectNamesAvailable ? sourceLabelsSwitchId : undefined}
                   className={cn(
                     'min-w-0 flex-1 select-none truncate text-[0.9em] leading-tight',
-                    originsAvailable ? 'cursor-pointer' : 'cursor-default'
+                    projectNamesAvailable ? 'cursor-pointer' : 'cursor-default'
                   )}
                 >
                   {merged.updatedProjectNames}
@@ -242,11 +242,11 @@ export function SidebarFilterPopover({
                 <Switch
                   id={sourceLabelsSwitchId}
                   checked={showUpdatedProjectNames}
-                  disabled={!originsAvailable}
+                  disabled={!projectNamesAvailable}
                   onCheckedChange={onShowUpdatedProjectNamesChange}
                   aria-label={merged.updatedProjectNames}
                   aria-description={
-                    originsAvailable ? undefined : merged.updatedProjectNamesUnavailable
+                    projectNamesAvailable ? undefined : merged.updatedProjectNamesUnavailable
                   }
                   data-sidebar-filter-project-names=""
                   className={cn(
@@ -258,7 +258,7 @@ export function SidebarFilterPopover({
                 />
               </div>
             </TooltipTrigger>
-            {!originsAvailable ? (
+            {!projectNamesAvailable ? (
               <TooltipContent side="right" sideOffset={8} className="max-w-48">
                 {merged.updatedProjectNamesUnavailable}
               </TooltipContent>

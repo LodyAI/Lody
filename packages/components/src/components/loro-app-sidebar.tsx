@@ -2535,7 +2535,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       showHeading: t('sidebar.filter.showHeading', 'Tasks'),
       organizeProject: t('sidebar.filter.organizeProject', 'Project'),
       organizeUpdated: t('sidebar.filter.organizeUpdated', 'Updated'),
-      updatedProjectNames: t('sidebar.filter.updatedProjectNames', 'Origins'),
+      updatedProjectNames: t('sidebar.filter.updatedProjectNames', 'Show Project'),
       updatedProjectNamesUnavailable: t(
         'sidebar.filter.updatedProjectNamesUnavailable',
         'Available in Updated view'

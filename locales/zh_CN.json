@@ -3030,7 +3030,7 @@
   "sidebar.filter.organizeUpdated": "最近更新",
   "sidebar.filter.organizeProject": "项目",
   "sidebar.filter.showHeading": "任务",
-  "sidebar.filter.updatedProjectNames": "来源",
+  "sidebar.filter.updatedProjectNames": "显示项目",
   "sidebar.filter.updatedProjectNamesUnavailable": "仅可用于「最近更新」视图",
   "sidebar.filter.trigger": "筛选侧边栏",
   "sidebar.githubWorktrees": "GitHub Worktrees",

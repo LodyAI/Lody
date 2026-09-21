@@ -9,7 +9,7 @@ Translation: current
 
 The project line added to Updated rows improves orientation but also makes every
 row taller and lets colorful GitHub avatars compete with session titles. The
-sidebar view popover now exposes a persisted `Origins` switch, enabled by
+sidebar view popover now exposes a persisted `Show Project` switch, enabled by
 default, and renders GitHub owner avatars as quiet neutral marks. The control
 stays in the existing popover because this is a low-frequency view preference
 rather than a primary sidebar action.
@@ -17,7 +17,7 @@ rather than a primary sidebar action.
 ## Decision
 
 The popover remains a conventional menu. View and Tasks are flat radio groups
-with the same icon-label-check rows. `Origins` sits below both groups as a
+with the same icon-label-check rows. `Show Project` sits below both groups as a
 separate switch because it is a persistent display preference rather than a
 filter choice. Selecting a menu item closes the popover; changing the switch
 keeps it open. The switch remains visible in Project mode so its existence and
@@ -58,10 +58,9 @@ Segmented controls made the small popover feel like a settings panel rather than
 a menu. A switch at the bottom keeps the display preference visible and gives
 it a control distinct from the mutually exclusive menu choices.
 
-The label says `Origins` because the line identifies where each item belongs: a
-repository, local folder, or the Chats section. The switch already communicates show/hide. The
-project line still uses `Chats` as a section fallback where no repository or
-folder name exists.
+The label says `Show Project` to state the action directly. The project line can
+identify a repository, local folder, or the Chats section and still uses `Chats`
+as a fallback where no repository or folder name exists.
 
 ## Verification
 

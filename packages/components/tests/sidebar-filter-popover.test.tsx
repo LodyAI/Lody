@@ -71,7 +71,7 @@ describe('SidebarFilterPopover Updated project-name preference', () => {
     expect(document.body.querySelector('[data-sidebar-filter-project-names]')).not.toBeNull();
   });
 
-  it('disables Origins outside Updated view and explains its availability', () => {
+  it('disables Show Project outside Updated view and explains its availability', () => {
     const { onShowUpdatedProjectNamesChange } = render('workspace');
     const switchControl = document.body.querySelector<HTMLButtonElement>(
       '[data-sidebar-filter-project-names]'
@@ -128,13 +128,13 @@ describe('SidebarFilterPopover Updated project-name preference', () => {
     expect(trigger?.getAttribute('aria-expanded')).toBe('false');
   });
 
-  it('toggles Origins with a bottom switch and keeps the menu open', () => {
+  it('toggles Show Project with a bottom switch and keeps the menu open', () => {
     const { onShowUpdatedProjectNamesChange } = render('updated', true);
     const row = document.body.querySelector('[data-sidebar-filter-project-names]');
     expect(row).not.toBeNull();
     expect(row?.getAttribute('aria-checked')).toBe('true');
     expect(row?.getAttribute('role')).toBe('switch');
-    expect(row?.getAttribute('aria-label')).toBe('Origins');
+    expect(row?.getAttribute('aria-label')).toBe('Show Project');
     expect((row as HTMLButtonElement | null)?.disabled).toBe(false);
 
     flushSync(() => {

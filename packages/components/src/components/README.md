@@ -20,7 +20,7 @@ A child Tab may open an independent Session: the row sits under the root, but it
 navigation must still return to the precise creating Tab.
 
 Updated organize mode is a mixed recency list. The sidebar view popover exposes
-`Origins` as a switch below the View and Tasks menu groups. It controls the
+`Show Project` as a switch below the View and Tasks menu groups. It controls the
 second line with folder / muted GitHub owner mark + project name. The complete
 row acts as the Switch hover target, changing only the track color. It remains
 visible but disabled in Project mode, with a right-side tooltip explaining that

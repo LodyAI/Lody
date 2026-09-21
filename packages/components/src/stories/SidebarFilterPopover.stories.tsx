@@ -33,7 +33,7 @@ function FilterShell({
             <span className="font-medium">{scope}</span>
           </div>
           <div className="mt-1">
-            <span className="text-sidebar-foreground-muted">Origins:</span>{' '}
+            <span className="text-sidebar-foreground-muted">Show Project:</span>{' '}
             <span className="font-medium">{showUpdatedProjectNames ? 'on' : 'off'}</span>
           </div>
         </div>
