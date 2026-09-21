@@ -10,9 +10,9 @@ Translation: current
 The project line added to Updated rows improves orientation but also makes every
 row taller and lets colorful GitHub avatars compete with session titles. The
 sidebar view popover now exposes a persisted `Show Project` switch, enabled by
-default, and renders GitHub owner avatars as quiet neutral marks. The control
-stays in the existing popover because this is a low-frequency view preference
-rather than a primary sidebar action.
+default, and renders GitHub owner avatars in their original colors at 60%
+opacity. The control stays in the existing popover because this is a
+low-frequency view preference rather than a primary sidebar action.
 
 ## Decision
 
@@ -34,20 +34,12 @@ Turning it off removes the complete second line from both ordinary and Pinned
 rows while Updated mode is active. Nested opened Sessions remain single-line in
 either state.
 
-Only GitHub owner avatars receive adaptive tonal normalization. After the cached
-image loads, a 16px canvas sample measures alpha-weighted average luminance.
-Sources at or above 65% luminance keep identity brightness and contrast; the UI
-only removes color and applies 80% opacity. Opaque dark avatars progressively
-reduce contrast and increase brightness toward 68% gray. Marks with substantial
-transparent backgrounds use a 76% target and stronger contrast compression so
-their visible black regions converge with ordinary avatars without washing out
-opaque avatars. This one-sided mapping never
-darkens a pale source. When the row becomes active, filter and opacity transition
-for 200ms to restore the original color; hover alone does not change the mark.
-Reduced-motion users switch without animation. The mark renders at 16px without a backing tile. Canvas or
-CORS failure uses a neutral midpoint value. Folder and chat marks already
-inherit the muted foreground token. The calculation preserves the shared avatar
-source and fallback behavior without generating another image asset.
+GitHub owner avatars render at 16px without a backing tile. They keep the source
+colors and use a fixed 60% opacity; hover and active selection do not change
+their appearance. This avoids per-image filters and keeps every source subject
+to the same visual-weight rule. The shared avatar component still falls back to
+the GitHub glyph on an invalid owner or image-load failure. Folder and chat marks
+continue to inherit the muted foreground token.
 
 ## Alternatives and trade-offs
 
@@ -67,9 +59,10 @@ as a fallback where no repository or folder name exists.
 The filter-popover test covers the two flat menu groups, bottom switch, checked
 state, close behavior, and toggle callback. Sidebar tests cover hiding
 the line from Updated and Pinned rows, while the project-context test checks the
-one-sided adaptive tone and active-row treatment. The `Updated Mode · Show
-Project Overview` Storybook story combines Pinned, Chats, local and multiple
-GitHub sources with an active row inside the production-mirroring session page
-harness, where the menu remains interactive for visual review. Its All Tasks
-fixture gives every row kind an author, matching production's multi-member
-scope instead of creating an impossible mix of authored and unauthored rows.
+fixed owner-avatar opacity for ordinary and active rows. The `Updated Mode ·
+Show Project Overview` Storybook story combines Pinned, Chats, local and
+multiple GitHub sources with an active row inside the production-mirroring
+session page harness, where the menu remains interactive for visual review. Its
+All Tasks fixture gives every row kind an author, matching production's
+multi-member scope instead of creating an impossible mix of authored and
+unauthored rows.

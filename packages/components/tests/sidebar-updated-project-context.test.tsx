@@ -6,7 +6,6 @@ import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { createStore, Provider } from 'jotai';
 import {
-  resolveSidebarAvatarTone,
   resolveUpdatedItemProjectLabel,
   SidebarUpdatedSessionList,
   type SidebarUpdatedItem,
@@ -46,26 +45,6 @@ describe('resolveUpdatedItemProjectLabel', () => {
       )
     ).toBe('loro-dev/lody');
     expect(resolveUpdatedItemProjectLabel(makeItem({ id: 'chat', subtitle: null }))).toBe('Chats');
-  });
-});
-
-describe('resolveSidebarAvatarTone', () => {
-  const solidPixels = (value: number) =>
-    new Uint8ClampedArray([value, value, value, 255, value, value, value, 255]);
-
-  it('lightens dark avatars without changing light-source luminance', () => {
-    const darkTone = resolveSidebarAvatarTone(solidPixels(16));
-    const opaqueMidDarkTone = resolveSidebarAvatarTone(solidPixels(96));
-    const transparentMidDarkTone = resolveSidebarAvatarTone(
-      new Uint8ClampedArray([96, 96, 96, 255, 0, 0, 0, 0])
-    );
-    const lightTone = resolveSidebarAvatarTone(solidPixels(240));
-
-    expect(darkTone.brightness).toBeGreaterThan(1);
-    expect(darkTone.contrast).toBeLessThan(1);
-    expect(transparentMidDarkTone.brightness).toBeGreaterThan(opaqueMidDarkTone.brightness);
-    expect(transparentMidDarkTone.contrast).toBeLessThan(opaqueMidDarkTone.contrast);
-    expect(lightTone).toEqual({ brightness: 1, contrast: 1 });
   });
 });
 
@@ -183,15 +162,8 @@ describe('SidebarUpdatedSessionList project context', () => {
     expect(githubProject?.querySelector('img')?.getAttribute('src') ?? '').toContain(
       'avatars.githubusercontent.com/loro-dev'
     );
-    expect(
-      githubProject
-        ?.querySelector('img')
-        ?.classList.contains(
-          '[filter:grayscale(1)_contrast(var(--sidebar-avatar-contrast))_brightness(var(--sidebar-avatar-brightness))]'
-        )
-    ).toBe(true);
-    expect(githubProject?.querySelector('img')?.classList.contains('opacity-80')).toBe(true);
-    expect(githubProject?.querySelector('img')?.getAttribute('crossorigin')).toBe('anonymous');
+    expect(githubProject?.querySelector('img')?.classList.contains('opacity-60')).toBe(true);
+    expect(githubProject?.querySelector('img')?.getAttribute('style')).toBeNull();
 
     const chatProject = chat?.querySelector('[data-sidebar-updated-project="chat"]');
     expect(chatProject).not.toBeNull();
@@ -199,7 +171,7 @@ describe('SidebarUpdatedSessionList project context', () => {
     expect(chatProject?.querySelector('.lucide-message-circle')).not.toBeNull();
   });
 
-  it('restores the original avatar color only for the active row', () => {
+  it('keeps the owner avatar at the same opacity on the active row', () => {
     render(
       [
         makeItem({
@@ -217,13 +189,8 @@ describe('SidebarUpdatedSessionList project context', () => {
     const avatar = container?.querySelector<HTMLImageElement>(
       '[data-sidebar-updated-project="github"] img'
     );
-    expect(avatar?.classList.contains('opacity-100')).toBe(true);
-    expect(avatar?.classList.contains('[filter:grayscale(0)_contrast(1)_brightness(1)]')).toBe(
-      true
-    );
-    expect([...(avatar?.classList ?? [])].some((name) => name.startsWith('group-hover/'))).toBe(
-      false
-    );
+    expect(avatar?.classList.contains('opacity-60')).toBe(true);
+    expect(avatar?.getAttribute('style')).toBeNull();
   });
 
   it('hides the project line on nested opened Sessions', () => {
