@@ -69,7 +69,14 @@ export class HostMeta {
       | { name: string }
       | undefined;
     const name = row?.name ?? 'none';
-    if (name === 'drop-control-ack' || name === 'kill-after-commit' || name === 'none') return name;
+    if (
+      name === 'drop-control-ack' ||
+      name === 'kill-after-commit' ||
+      name === 'hang-control-ack' ||
+      name === 'none'
+    ) {
+      return name;
+    }
     return 'none';
   }
 

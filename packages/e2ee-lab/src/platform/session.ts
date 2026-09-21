@@ -616,7 +616,7 @@ export class DemoSession {
   async publishEpoch(): Promise<{ status: string; epoch: number }> {
     if (!this.genesis || !this.genesisHex) throw new Error('no-space');
     const recovered = await this.recoverEpochPublication();
-    if (recovered) return recovered;
+    if (recovered && recovered.status !== 'conflict') return recovered;
     const ledger = await this.readLedger();
     const previous = this.epochKeys.get(ledger.state.epoch.number);
     if (!previous) throw new Error('missing-epoch-key');
@@ -646,59 +646,98 @@ export class DemoSession {
       secretHex: toHex(next),
       recordHex: toHex(record),
     });
-    const submitted = await (await this.openLedger()).submit(record);
-    return this.finishEpochPublication(submitted.status, epoch, next);
+    try {
+      await (await this.openLedger()).submit(record);
+    } catch (error) {
+      if (error instanceof LedgerError && error.code === 'replay') {
+        return { status: 'unknown', epoch };
+      }
+      return { status: 'unknown', epoch };
+    }
+    return this.settleEpochCandidate();
   }
 
   private async recoverEpochPublication(): Promise<{ status: string; epoch: number } | null> {
     const candidate = this.loadEpochCandidate();
     if (!candidate || !this.genesisHex || candidate.genesisHex !== this.genesisHex) return null;
-    const ledger = await this.readLedger();
-    if (ledger.state.epoch.number === candidate.epoch) {
-      if (toHex(ledger.state.epoch.keyCommitment) === candidate.commitmentHex) {
-        this.epochKeys.set(candidate.epoch, candidate.secret);
-        this.ledgerEpoch = candidate.epoch;
-        this.persistEpochs();
-        this.clearEpochCandidate();
-        return { status: 'committed', epoch: candidate.epoch };
-      }
-      this.clearEpochCandidate();
-      return null;
+    const settled = await this.settleEpochCandidate();
+    return settled;
+  }
+
+  private async settleEpochCandidate(): Promise<{ status: string; epoch: number }> {
+    const candidate = this.loadEpochCandidate();
+    if (!candidate || !this.genesisHex) throw new Error('missing-epoch-candidate');
+    const bound = await this.epochCandidateBinding(candidate);
+    if (bound === 'mismatch') throw new Error('epoch-candidate-mismatch');
+    if (bound === 'current' || bound === 'historical') {
+      return this.installBoundCandidate(candidate, bound);
     }
-    if (ledger.state.epoch.number !== candidate.epoch - 1) {
-      this.clearEpochCandidate();
-      return null;
-    }
-    let status: string;
+    let submitStatus = 'unknown';
     try {
-      status = (await this.resume()).status;
+      submitStatus = (await (await this.openLedger()).submit(candidate.record)).status;
     } catch (error) {
-      if (!(error instanceof LedgerError) || error.code !== 'invalid-operation') {
-        status = 'unknown';
+      if (error instanceof LedgerError && error.code === 'replay') {
+        submitStatus = 'unknown';
+      } else if (error instanceof LedgerError && error.code === 'wrong-parent') {
+        submitStatus = 'conflict';
       } else {
-        status = (await (await this.openLedger()).submit(candidate.record)).status;
+        submitStatus = 'unknown';
       }
     }
-    return this.finishEpochPublication(status, candidate.epoch, candidate.secret);
-  }
-
-  private finishEpochPublication(
-    status: string,
-    epoch: number,
-    secret: Uint8Array
-  ): { status: string; epoch: number } {
-    if (status === 'committed') {
-      this.epochKeys.set(epoch, secret);
-      this.ledgerEpoch = epoch;
-      this.persistEpochs();
+    if (submitStatus === 'conflict') {
       this.clearEpochCandidate();
-    } else if (status === 'conflict') {
-      this.clearEpochCandidate();
+      return { status: 'conflict', epoch: candidate.epoch };
     }
-    return { status, epoch };
+    const after = await this.epochCandidateBinding(candidate);
+    if (after === 'mismatch') throw new Error('epoch-candidate-mismatch');
+    if (after === 'current' || after === 'historical') {
+      return this.installBoundCandidate(candidate, after);
+    }
+    return { status: 'unknown', epoch: candidate.epoch };
   }
 
-  async deliverEpochKey(recipient: DemoDevice, epoch = this.currentEpoch()): Promise<void> {
+  private async epochCandidateBinding(candidate: {
+    genesisHex: string;
+    epoch: number;
+    commitmentHex: string;
+    secret: Uint8Array;
+    record: Uint8Array;
+  }): Promise<'current' | 'historical' | 'absent' | 'mismatch'> {
+    if (!this.genesis || !this.genesisHex || candidate.genesisHex !== this.genesisHex) {
+      return 'mismatch';
+    }
+    const computed = toHex(await commitEpochKey(this.genesis, candidate.epoch, candidate.secret));
+    if (computed !== candidate.commitmentHex) return 'mismatch';
+    const decoded = decodeRecord(candidate.record, this.pointCache);
+    if (decoded.body.type !== 'ordinary') return 'mismatch';
+    const operation = decoded.body.fields.operation;
+    if (operation.type !== 'publishEpoch') return 'mismatch';
+    if (operation.epoch !== candidate.epoch) return 'mismatch';
+    if (toHex(operation.commitment) !== computed) return 'mismatch';
+    const ledger = await this.readLedger();
+    if (!ledger.hasRecordHash(await hashRecord(candidate.record))) return 'absent';
+    if (ledger.state.epoch.number === candidate.epoch) {
+      return toHex(ledger.state.epoch.keyCommitment) === computed ? 'current' : 'mismatch';
+    }
+    if (ledger.state.epoch.number > candidate.epoch) {
+      const row = ledger.historyPackets().get(candidate.epoch);
+      return row && toHex(row.commitment) === computed ? 'historical' : 'mismatch';
+    }
+    return 'mismatch';
+  }
+
+  private installBoundCandidate(
+    candidate: { epoch: number; secret: Uint8Array },
+    bound: 'current' | 'historical'
+  ): { status: string; epoch: number } {
+    this.epochKeys.set(candidate.epoch, candidate.secret);
+    if (bound === 'current') this.ledgerEpoch = candidate.epoch;
+    this.persistEpochs();
+    this.clearEpochCandidate();
+    return { status: 'committed', epoch: candidate.epoch };
+  }
+
+  async deliverEpochKey(recipient: DemoDevice, epoch = this.currentEpoch()): Promise<Uint8Array> {
     if (!this.device || !this.genesis) throw new Error('no-space');
     const key = this.epochKeys.get(epoch);
     if (!key) throw new Error('missing-epoch-key');
@@ -727,6 +766,7 @@ export class DemoSession {
       part: { contentType: 'application/octet-stream', body: frame },
     });
     if (!result.ok || result.result.kind !== 'ok') throw new Error('keys-cas');
+    return frame;
   }
 
   currentEpoch(): number {

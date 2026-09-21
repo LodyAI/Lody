@@ -15,13 +15,14 @@ The [specification](../../../../specs/e2ee-adversarial-lab.md) owns contracts; t
 
 ## Implementation plan and single task tracker
 
-Current state: HEAD `02b3f473`. This increment: second security review. Do not re-implement D1–D8. No Lody product integration, no push/PR/merge. Protocol/wire changes stay proposals.
+Current state: HEAD `e30cbe66`. This increment: bind epoch recovery to the exact candidate record. Do not re-implement D1–D8 or S1/S2/S4/S5. No Lody product integration, no push/PR/merge.
 
 | Done | Stage | Gate |
 | ---- | ----- | ---- |
 | [x] | S1 compareNotes same-head conflict | Same genesis+head with different length/digest is conflict; catch-up stays pending-sync; real signed snapshots |
 | [x] | S2 independent evidence | independent requires out-of-band confirmed signers; not a different key or snapshot member list |
 | [x] | S3 epoch candidate before CAS | Persist candidate+exact record before CAS; resume/restart without regenerating; losing candidate is not current |
+| [x] | S3b epoch recover binds record | `resume()` of another pending is not epoch success; install only if candidate record is on the verified ledger; real subprocess hang-after-CAS |
 | [x] | S4 possession binding | Reproduce mis-binding; proposal only; no v1 wire change |
 | [x] | S5 epoch u32 / snapshot resources / verify-before-import | Reject truncating epochs; bound snapshot length; signature before expensive import |
 | [x] | S6 classify remaining | Admin history-packet, canManage, openJournal, Convex, HKDF/X25519/legacy, Lean/product |
@@ -513,6 +514,14 @@ Recommend keeping (A) until the user answers: must the honest gateway accept cip
 - **S5:** `checkEpoch` rejects values that would truncate in uint32 AAD; snapshot claimed length > `MAX_SNAPSHOT_ARRAY_LENGTH` fails `oversize` without huge allocation; `verifySnapshot` verifies signatures before `importAuthState`.
 - **S6:** classified below. No `.lean` sources in this repo; `ledger-model-correspondence` TS trace still passes. Product E2EE still not enabled.
 - Evidence: lab check 18 files / 128 tests; core excluding 10k long-chain 34 files / 399 tests. `pnpm run docs check` errors `[]`. Not product E2EE. No push/merge.
+
+### 2026-09-21 — Epoch recover must bind the candidate record
+
+- Review of `e30cbe66`: `recoverEpochPublication` called `resume()` on whatever journal pending existed. A pending `admitDevice` that later committed was treated as epoch 1 success: local keys `[0,1]` while ledger epoch stayed 0.
+- **Correction:** the previous test “restores a committed epoch candidate after process restart” threw before the control POST left the client. It covered send-before-CAS retry in the same process, not server-accepted lost ACK or a new process. Renamed accordingly.
+- **Fix:** settle/install only after `hasRecordHash(candidate.record)` plus matching genesis, `publishEpoch` op, epoch, and `commitEpochKey(secret)`. Other pending yields `unknown` and keeps the candidate. Stale-candidate conflict clears it and allows a fresh publish against the current head. `hang-control-ack` writes `control-committed` after Riverrun accepts, then withholds the response.
+- **Crash:** child `publishEpoch` against a live host; parent waits for `control-committed` (not sleep); SIGKILL; new process recovers the same candidate, delivers K1, peer reads old and new plaintext; reopen is epoch 1 with no leftover candidate.
+- Evidence: `test/host-lifecycle.test.ts` + `test/design-probes.test.ts` 51 passed. Not product E2EE. No push/merge.
 
 ### Pending decision — possession proof target membership
 

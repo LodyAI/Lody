@@ -15,13 +15,14 @@ Translation: current
 
 ## 实施计划与唯一任务表
 
-当前状态：HEAD `02b3f473`。本轮增量：第二份安全 review。不重做 D1–D8。不接入 Lody，不 push/PR/merge。协议/wire 变化只提案。
+当前状态：HEAD `e30cbe66`。本轮增量：换代恢复必须绑定精确候选记录。不重做 D1–D8 或 S1/S2/S4/S5。不接入 Lody，不 push/PR/merge。
 
 | 完成 | 阶段 | 门槛 |
 | ---- | ---- | ---- |
 | [x] | S1 compareNotes 同 head 冲突 | 同 genesis+head 但 length/digest 不同为 conflict；追平仍 pending-sync；真实签名快照 |
 | [x] | S2 independent 证据 | independent 需要外带确认的签名者；不能只凭不同公钥或快照成员列表 |
 | [x] | S3 换代候选先落盘 | CAS 前保存候选+精确记录；重启/丢 ACK 不重新生成；落败候选不是当前密钥 |
+| [x] | S3b 换代恢复绑定记录 | 其他 pending 的 `resume()` 不能当换代成功；仅当候选记录已在已验证账本上才安装；真实子进程 CAS 后挂起 |
 | [x] | S4 持钥证明绑定 | 复现错误归属；只交方案；不改 v1 wire |
 | [x] | S5 epoch u32 / 快照资源 / 先验签 | 拒绝会截断的 epoch；限制宣称 length；昂贵导入前验签 |
 | [x] | S6 其余归类 | 恶意历史包、canManage、openJournal、Convex、HKDF/X25519/legacy、Lean/产品 |
@@ -509,6 +510,14 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 - **S5：** `checkEpoch` 拒绝会在 uint32 AAD 截断的值；快照宣称 length 超过 `MAX_SNAPSHOT_ARRAY_LENGTH` 为 `oversize`，不按宣称 length 巨额分配；`verifySnapshot` 在 `importAuthState` 前验签。
 - **S6：** 归类见下。本仓库无 `.lean` 源码；`ledger-model-correspondence` 的 TS trace 仍通过。未启用产品 E2EE。
 - 证据：lab check 18 文件 / 128 测试；core 排除 10k 长链 34 文件 / 399 测试。`pnpm run docs check` errors `[]`。未启用产品 E2EE。不 push/merge。
+
+### 2026-09-21 — 换代恢复必须绑定候选记录
+
+- 对 `e30cbe66` 的审查：`recoverEpochPublication` 对 journal 里任意 pending 调用 `resume()`。pending 的 `admitDevice` 一旦 committed，会被当成 epoch 1 成功：本地密钥 `[0,1]`，账本仍是 0。
+- **更正：** 旧测试“restores a committed epoch candidate after process restart”在控制流 POST 离开客户端之前就抛错。它覆盖的是同进程发送前失败重试，不是服务端已接受后丢 ACK，也不是新进程。已改名。
+- **修复：** 仅在 `hasRecordHash(candidate.record)` 且 genesis、`publishEpoch`、epoch、`commitEpochKey(secret)` 一致时安装。其他 pending 返回 `unknown` 并保留候选。过期候选冲突则清除，允许对当前 head 重新发布。`hang-control-ack` 在 Riverrun 接受后写 `control-committed` 并扣住响应。
+- **崩溃：** 子进程对活宿主 `publishEpoch`；父进程等待 `control-committed`（不用 sleep）；SIGKILL；新进程恢复同一候选、分发 K1、对端能读新旧明文；再打开仍是 epoch 1 且无残留候选。
+- 证据：`test/host-lifecycle.test.ts` + `test/design-probes.test.ts` 51 通过。未启用产品 E2EE。不 push/merge。
 
 ### 待决策 — 持钥证明绑定目标成员
 

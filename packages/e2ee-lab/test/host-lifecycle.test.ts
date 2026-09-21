@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, watch, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -10,6 +10,7 @@ import { cleanupLab, labClient, launchLab, tempDir } from '../src/fixtures';
 import { startLabBackend } from '../src/backend';
 import { CONTROL_STREAM, LORO_STREAM, MAX_LEASE_MS } from '../src/platform/protocol';
 import { exportDevice, generateDevice } from '../src/platform/device';
+import { riverrunRecordCount } from '../src/attacks';
 import { fromHex, toHex } from '../src/platform/bytes';
 import { maliciousAppendCas } from '../src/attacks';
 import { LoroDoc } from 'loro-crdt';
@@ -181,12 +182,11 @@ describe('lab host lifecycle', () => {
     expect((await alice.readLedger()).state.epoch.number).toBe(0);
   });
 
-  it('restores a committed epoch candidate after process restart', async () => {
+  it('retries publishEpoch after a send-before-CAS failure in the same process', async () => {
     const host = await launchLab();
     const alice = await labClient({ host, account: 'alice' });
     await alice.createSpace();
     await writeLoro(alice, 'epoch-zero-text');
-    host.setFailpoint('drop-control-ack');
     const orig = alice.fetch.bind(alice);
     alice.fetch = async (input, init) => {
       const url = String(input);
@@ -197,23 +197,170 @@ describe('lab host lifecycle', () => {
     };
     const first = await alice.publishEpoch();
     alice.fetch = orig;
-    host.setFailpoint('none');
     expect(first.status).not.toBe('committed');
-    const device = await exportDevice(alice.device);
+    const recovered = await alice.publishEpoch();
+    expect(recovered.status).toBe('committed');
+    expect(recovered.epoch).toBe(1);
+    expect((await alice.readLedger()).state.epoch.number).toBe(1);
+    const history = await alice.recoverEpochHistory();
+    expect(history.has(0)).toBe(true);
+    await writeLoro(alice, 'epoch-one-text');
+    expect(await readLoro(alice)).toContain('epoch-zero-text');
+    expect(await readLoro(alice)).toContain('epoch-one-text');
+  });
+
+  it('does not treat another pending commit as epoch publication', async () => {
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice' });
+    await alice.createSpace();
+    const tablet = await generateDevice();
+    const orig = alice.fetch.bind(alice);
+    alice.fetch = async (input, init) => {
+      const url = String(input);
+      if (url.includes(`/${CONTROL_STREAM}`) && init?.method === 'POST') {
+        throw new Error('lost-device-response');
+      }
+      return orig(input, init);
+    };
+    const pendingDevice = await alice.admitDevice(tablet, 'personal', false);
+    expect(pendingDevice.status).not.toBe('committed');
+    alice.fetch = orig;
+    const rotate1 = await alice.publishEpoch();
+    expect(rotate1.status).not.toBe('committed');
+    const rotate2 = await alice.publishEpoch();
+    expect(rotate2.status).not.toBe('committed');
+    expect((await alice.readLedger()).state.epoch.number).toBe(0);
+    expect([...alice.epochKeys.keys()].sort()).toEqual([0]);
+    const resumed = await alice.resume();
+    expect(resumed.status).toBe('committed');
+    expect((await alice.readLedger()).state.devices.has(toHex(tablet.publicKey))).toBe(true);
+    expect((await alice.readLedger()).state.epoch.number).toBe(0);
+    const rotated = await alice.publishEpoch();
+    expect(rotated.status).toBe('committed');
+    expect(rotated.epoch).toBe(1);
+    expect((await alice.readLedger()).state.epoch.number).toBe(1);
+  });
+
+  it('rejects a candidate whose secret does not match the stored commitment', async () => {
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice' });
+    await alice.createSpace();
+    const orig = alice.fetch.bind(alice);
+    alice.fetch = async (input, init) => {
+      const url = String(input);
+      if (url.includes(`/${CONTROL_STREAM}`) && init?.method === 'POST') {
+        throw new Error('lost-epoch-response');
+      }
+      return orig(input, init);
+    };
+    expect((await alice.publishEpoch()).status).not.toBe('committed');
+    alice.fetch = orig;
+    const path = join(alice.clientDir, 'epoch-candidate.json');
+    const row = JSON.parse(readFileSync(path, 'utf8')) as { secretHex: string };
+    row.secretHex = '00'.repeat(32);
+    writeFileSync(path, `${JSON.stringify(row)}\n`);
+    await expect(alice.publishEpoch()).rejects.toThrow('epoch-candidate-mismatch');
+    expect((await alice.readLedger()).state.epoch.number).toBe(0);
+    expect(alice.epochKeys.has(1)).toBe(false);
+  });
+
+  it('keeps a committed candidate as history after later records without rolling current back', async () => {
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice' });
+    await alice.createSpace();
+    expect((await alice.publishEpoch()).status).toBe('committed');
+    const path = join(alice.clientDir, 'epoch-candidate.json');
+    expect(existsSync(path)).toBe(false);
+    const tablet = await generateDevice();
+    expect((await alice.admitDevice(tablet, 'personal', false)).status).toBe('committed');
+    expect((await alice.publishEpoch()).status).toBe('committed');
+    expect((await alice.readLedger()).state.epoch.number).toBe(2);
+    expect(alice.ledgerEpoch).toBe(2);
+  });
+
+  it('recovers a server-accepted epoch in a new process and delivers the key', async () => {
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice' });
+    await alice.createSpace();
+    await writeLoro(alice, 'epoch-zero-text');
+    const tablet = await generateDevice();
+    expect((await alice.admitDevice(tablet, 'personal', false)).status).toBe('committed');
+    await alice.deliverEpochKey(tablet, 0);
+    const writer = await labClient({
+      host,
+      account: 'alice',
+      device: await exportDevice(tablet),
+    });
+    await writer.adoptGenesis(alice.genesisHex!);
+    await writer.readLedger();
+    const k0 = await writer.readKeyFrames();
+    await writer.receiveEpochKey(alice.device, 0, k0[0]!);
+    expect(await readLoro(writer)).toContain('epoch-zero-text');
+
+    const committed = join(host.dataDir, 'control-committed');
+    const deviceJson = await exportDevice(alice.device);
     const clientDir = alice.clientDir;
     const genesisHex = alice.genesisHex!;
     alice.close();
-    const restarted = await labClient({ host, account: 'alice', device, clientDir });
+    host.setFailpoint('hang-control-ack');
+    const marker = join(tempDir('e2ee-lab-epoch-crash-mark-'), 'marker');
+    const child = spawn(
+      process.execPath,
+      ['--import', tsxLoader, join(here, 'crash-epoch-client.ts')],
+      {
+        cwd: join(here, '..'),
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          LAB_BASE_URL: host.baseUrl,
+          LAB_CLIENT_DIR: clientDir,
+          LAB_MARKER: marker,
+          LAB_DEVICE: deviceJson,
+          LAB_GENESIS: genesisHex,
+        },
+      }
+    );
+    await waitForPath(committed);
+    const landed = (await riverrunRecordCount(host.riverrunUrl, genesisHex)).count;
+    expect(landed).toBeGreaterThanOrEqual(2);
+    child.kill('SIGKILL');
+    await new Promise<void>((resolve) => child.on('exit', () => resolve()));
+    host.setFailpoint('none');
+    expect(existsSync(marker)).toBe(false);
+
+    const restarted = await labClient({
+      host,
+      account: 'alice',
+      device: deviceJson,
+      clientDir,
+    });
     await restarted.adoptGenesis(genesisHex);
     const recovered = await restarted.publishEpoch();
     expect(recovered.status).toBe('committed');
     expect(recovered.epoch).toBe(1);
-    const history = await restarted.recoverEpochHistory();
-    expect(history.has(0)).toBe(true);
+    expect((await restarted.readLedger()).state.epoch.number).toBe(1);
+    const frame1 = await restarted.deliverEpochKey(tablet, 1);
+    await writer.receiveEpochKey(restarted.device, 1, frame1);
     await writeLoro(restarted, 'epoch-one-text');
     expect(await readLoro(restarted)).toContain('epoch-zero-text');
     expect(await readLoro(restarted)).toContain('epoch-one-text');
-  });
+    expect(await readLoro(writer)).toContain('epoch-zero-text');
+    expect(await readLoro(writer)).toContain('epoch-one-text');
+    const history = await restarted.recoverEpochHistory();
+    expect(history.has(0)).toBe(true);
+    expect(history.has(1)).toBe(true);
+    restarted.close();
+    const reopen = await labClient({
+      host,
+      account: 'alice',
+      device: deviceJson,
+      clientDir,
+    });
+    await reopen.adoptGenesis(genesisHex);
+    expect((await reopen.readLedger()).state.epoch.number).toBe(1);
+    expect(reopen.epochKeys.has(1)).toBe(true);
+    expect(existsSync(join(clientDir, 'epoch-candidate.json'))).toBe(false);
+  }, 90_000);
 
   it('rejects a member promoting itself to admin', async () => {
     const host = await launchLab();
@@ -506,6 +653,22 @@ describe('lab host lifecycle', () => {
     await new Promise<void>((resolve) => second.child.on('exit', () => resolve()));
   });
 });
+
+function waitForPath(path: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (existsSync(path)) {
+      resolve();
+      return;
+    }
+    const watcher = watch(dirname(path), () => {
+      if (existsSync(path)) {
+        watcher.close();
+        resolve();
+      }
+    });
+    watcher.on('error', reject);
+  });
+}
 
 async function spawnLab(
   dataDir: string

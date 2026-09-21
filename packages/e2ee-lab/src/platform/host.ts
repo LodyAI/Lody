@@ -548,6 +548,13 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
                 res.destroy();
                 return;
               }
+              if (fail === 'hang-control-ack') {
+                disk.writeText(
+                  join(options.dataDir, 'control-committed'),
+                  `${toHex(await hashRecord(record))}\n`
+                );
+                return;
+              }
               if (fail === 'kill-after-commit') {
                 disk.writeText(join(options.dataDir, 'killed-after-commit'), '1');
                 process.exit(0);

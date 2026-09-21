@@ -9,7 +9,7 @@ export const DEVICE_HEADER = 'x-e2ee-demo-device';
 export const NOW_HEADER = 'x-e2ee-demo-now';
 export const ACCOUNT_HEADER = 'x-e2ee-demo-account';
 
-export type Failpoint = 'drop-control-ack' | 'kill-after-commit' | 'none';
+export type Failpoint = 'drop-control-ack' | 'kill-after-commit' | 'hang-control-ack' | 'none';
 
 export interface IssuedCredential {
   readonly token: string;
