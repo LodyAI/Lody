@@ -70,4 +70,5 @@ state, close behavior, and toggle callback. Sidebar tests cover hiding
 the line from Updated and Pinned rows, while the project-context test checks the
 one-sided adaptive tone and active-row treatment. The `Updated Mode · Show
 Project Overview` Storybook story combines Pinned, Chats, local and multiple
-GitHub sources with an active row and the menu opened for visual review.
+GitHub sources with an active row inside the production-mirroring session page
+harness, where the menu remains interactive for visual review.

@@ -1,6 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { userEvent, within } from 'storybook/test';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { FolderPlus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type {
@@ -24,6 +23,7 @@ import type {
   SidebarUpdatedItem,
 } from '@/components/sidebar-updated-session-list';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { SessionConversationStoryHarness } from './SessionConversationPage.stories';
 import type {
   LocalProjectHistoryProvider,
   LocalProjectId,
@@ -277,7 +277,12 @@ const meta = {
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-function StoryLayout(args: Parameters<typeof LoroSidebar>[0]) {
+type StoryLayoutProps = Parameters<typeof LoroSidebar>[0] & {
+  storyContent?: ReactNode;
+  fullApp?: boolean;
+};
+
+function StoryLayout({ storyContent, fullApp = false, ...args }: StoryLayoutProps) {
   const [activeNav, setActiveNav] = useState<LoroSidebarNavKey>(args.activeNav ?? 'home');
   const [workspaceId, setWorkspaceId] = useState(args.currentWorkspaceId);
   const baseSessionListProps = args.sessionListProps ?? demoTaskListProps;
@@ -432,18 +437,29 @@ function StoryLayout(args: Parameters<typeof LoroSidebar>[0]) {
     );
   }
 
+  if (fullApp) {
+    return (
+      <div className="flex h-dvh w-full overflow-hidden bg-background text-foreground">
+        {sidebar}
+        <main className="min-w-0 flex-1 overflow-hidden">{storyContent}</main>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen w-full bg-background p-10 text-foreground">
       <div className="flex h-[calc(100vh-5rem)] items-start gap-8">
         {sidebar}
         <div className="flex-1">
-          <div className="rounded-2xl border border-border bg-card p-6 text-card-foreground shadow-xs">
-            <div className="text-lg font-semibold">Content</div>
-            <div className="mt-2 text-sm text-muted-foreground">
-              Use the filter button at the bottom-right of the sidebar to switch between Workspace
-              and Updated organize modes, toggle My Tasks vs All Tasks, and control Show Project.
+          {storyContent ?? (
+            <div className="rounded-2xl border border-border bg-card p-6 text-card-foreground shadow-xs">
+              <div className="text-lg font-semibold">Content</div>
+              <div className="mt-2 text-sm text-muted-foreground">
+                Use the filter button at the bottom-right of the sidebar to switch between Workspace
+                and Updated organize modes, toggle My Tasks vs All Tasks, and control Show Project.
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>
@@ -806,22 +822,37 @@ export const UpdatedMode: Story = {
 /**
  * Full review surface for Updated mode. It keeps the mixed project list,
  * Pinned section, Chats, local project, repository avatars, active row, and
- * status variants visible together, then opens the view menu so Show Project
- * can be reviewed and toggled in context.
+ * status variants beside the same production-mirroring session-page harness
+ * used by the conversation stories. Show Project remains interactive in the
+ * view menu.
  */
 export const UpdatedModeShowProjectOverview: Story = {
   name: 'Updated Mode · Show Project Overview',
-  render: (args) => <StoryLayout {...args} />,
+  render: (args) => (
+    <StoryLayout
+      {...args}
+      fullApp
+      storyContent={
+        <SessionConversationStoryHarness
+          state="idle"
+          frame="desktop"
+          embedded
+          sessionTitle="Polish repository identity"
+          repoFullName="wibus-wee/lody"
+          branchName="feat/repository-identity"
+          composerText="Review the project labels and visual hierarchy in the Updated sidebar."
+        />
+      }
+    />
+  ),
   args: {
     ...UpdatedMode.args!,
     sessionListProps: {
       ...demoUpdatedTaskListProps,
-      selectedSessionId: 'task-10',
+      selectedSessionId: 'task-8',
     },
   },
-  play: async ({ canvasElement }) => {
-    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Filter sidebar' }));
-  },
+  globals: { theme: 'light' },
 };
 
 /**

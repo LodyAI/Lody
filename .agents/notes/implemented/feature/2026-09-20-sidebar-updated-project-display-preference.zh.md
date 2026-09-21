@@ -26,4 +26,4 @@ Updated 行新增的项目行更容易辨认来源，但也会让每一行变高
 
 ## 验证
 
-筛选浮层测试覆盖两组扁平菜单项、底部 Switch、勾选状态、关闭行为和切换回调。侧栏测试覆盖隐藏 Updated 普通行和置顶行的项目行，项目上下文测试检查单向自适应明暗和 active 行样式。`Updated Mode · Show Project Overview` Storybook story 把置顶、Chats、本地项目、多种 GitHub 来源、active 行和打开的菜单放在同一画面中用于视觉检查。
+筛选浮层测试覆盖两组扁平菜单项、底部 Switch、勾选状态、关闭行为和切换回调。侧栏测试覆盖隐藏 Updated 普通行和置顶行的项目行，项目上下文测试检查单向自适应明暗和 active 行样式。`Updated Mode · Show Project Overview` Storybook story 把置顶、Chats、本地项目、多种 GitHub 来源和 active 行放进镜像生产会话页的集成 harness，菜单保持可交互以供视觉检查。
