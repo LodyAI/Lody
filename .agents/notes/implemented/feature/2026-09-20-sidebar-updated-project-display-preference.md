@@ -32,7 +32,8 @@ local storage and defaults to `true`, preserving the behavior introduced by the
 original [project-context decision](2026-09-20-sidebar-updated-project-context.md).
 Turning it off removes the complete second line from both ordinary and Pinned
 rows while Updated mode is active. Nested opened Sessions remain single-line in
-either state.
+either state. The project line is inset 16px from the title start to make its
+secondary relationship visible without changing the leading status slot.
 
 Only GitHub owner avatars receive adaptive tonal normalization. After the cached
 image loads, a 16px canvas sample measures alpha-weighted average luminance.
@@ -67,4 +68,6 @@ as a fallback where no repository or folder name exists.
 The filter-popover test covers the two flat menu groups, bottom switch, checked
 state, close behavior, and toggle callback. Sidebar tests cover hiding
 the line from Updated and Pinned rows, while the project-context test checks the
-one-sided adaptive tone and active-row treatment.
+one-sided adaptive tone and active-row treatment. The `Updated Mode · Show
+Project Overview` Storybook story combines Pinned, Chats, local and multiple
+GitHub sources with an active row and the menu opened for visual review.

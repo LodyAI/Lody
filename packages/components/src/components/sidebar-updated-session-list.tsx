@@ -789,7 +789,7 @@ function UpdatedItemProjectLine({ item, active }: { item: SidebarUpdatedItem; ac
   return (
     <div
       data-sidebar-updated-project={item.kind}
-      className="flex min-w-0 items-center gap-1 text-[11px] leading-tight text-sidebar-foreground-muted"
+      className="flex min-w-0 items-center gap-1 pl-4 text-[11px] leading-tight text-sidebar-foreground-muted"
     >
       <span
         className={cn(

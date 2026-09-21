@@ -1,4 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react';
+import { userEvent, within } from 'storybook/test';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FolderPlus } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -440,7 +441,7 @@ function StoryLayout(args: Parameters<typeof LoroSidebar>[0]) {
             <div className="text-lg font-semibold">Content</div>
             <div className="mt-2 text-sm text-muted-foreground">
               Use the filter button at the bottom-right of the sidebar to switch between Workspace
-              and Updated organize modes, and to toggle My Tasks vs All Tasks.
+              and Updated organize modes, toggle My Tasks vs All Tasks, and control Show Project.
             </div>
           </div>
         </div>
@@ -799,6 +800,27 @@ export const UpdatedMode: Story = {
     organizeMode: 'updated',
     chatScope: 'my',
     sessionListProps: demoUpdatedTaskListProps,
+  },
+};
+
+/**
+ * Full review surface for Updated mode. It keeps the mixed project list,
+ * Pinned section, Chats, local project, repository avatars, active row, and
+ * status variants visible together, then opens the view menu so Show Project
+ * can be reviewed and toggled in context.
+ */
+export const UpdatedModeShowProjectOverview: Story = {
+  name: 'Updated Mode · Show Project Overview',
+  render: (args) => <StoryLayout {...args} />,
+  args: {
+    ...UpdatedMode.args!,
+    sessionListProps: {
+      ...demoUpdatedTaskListProps,
+      selectedSessionId: 'task-10',
+    },
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(within(canvasElement).getByRole('button', { name: 'Filter sidebar' }));
   },
 };
 
