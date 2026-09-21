@@ -547,3 +547,9 @@ v1 `possessionSigningBytes` 为 `[genesis, signPub, encPub, kind, canManage]`。
 - **修复：** 仅在 `hasRecordHash(candidate.record)` 且 genesis、`publishEpoch`、epoch、`commitEpochKey(secret)` 一致时安装。其他 pending 返回 `unknown` 并保留候选。过期候选冲突则清除，允许对当前 head 重新发布。`hang-control-ack` 在 Riverrun 接受后写 `control-committed` 并扣住响应。
 - **崩溃：** 子进程对活宿主 `publishEpoch`；父进程等待 `control-committed`（不用 sleep）；SIGKILL；新进程恢复同一候选、分发 K1、对端能读新旧明文；再打开仍是 epoch 1 且无残留候选。
 - 证据：`test/host-lifecycle.test.ts` + `test/design-probes.test.ts` 51 通过。未启用产品 E2EE。不 push/merge。
+
+### 2026-09-21 — 损坏的换代候选不能当成缺失
+
+- 对 `5ea0fb5a` 的审查：`loadEpochCandidate` 在解析/读取失败时返回 `null`。`publishEpoch` 会生成新候选并覆盖文件，journal 仍留着旧换代 pending。复现：截断候选 → 重试 unknown 且文件被替换 → resume 旧 pending committed → 再次换代 `missing-epoch-key`。
+- **修复：** 文件不存在为 `absent`；存在但不可读/截断/字段非法为 `corrupt`，抛 `epoch-candidate-corrupt`，不生成、不提交。文件缺失且 journal pending 是 `publishEpoch` 时抛 `epoch-candidate-missing`。原文件和 pending 保留。测试：截断 JSON、读取失败、pending 仍在时删除文件。
+- 证据：`test/host-lifecycle.test.ts` 29 + `test/design-probes.test.ts` 25 = 54 通过。未启用产品 E2EE。不 push/merge。
