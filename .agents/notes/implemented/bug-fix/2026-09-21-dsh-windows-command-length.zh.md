@@ -41,3 +41,7 @@ shell 的 npx 包装器需要提供标准 npm 安装或使用原生启动器。
 POSIX 引导回归。将其视为发布验证前，仍需检查 Windows 原生打包执行。
 
 在 macOS 上，`pnpm check`、`pnpm format` 与 `pnpm run docs check` 均通过。
+
+## 集成
+
+- [Lody PR #871](https://github.com/LodyAI/Lody/pull/871)

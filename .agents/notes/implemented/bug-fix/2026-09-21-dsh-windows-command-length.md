@@ -51,3 +51,7 @@ The same suite retains the POSIX bootstrap regression. Native Windows packaged
 execution must still be checked before treating this as release verification.
 
 `pnpm check`, `pnpm format`, and `pnpm run docs check` passed on macOS.
+
+## Integration
+
+- [Lody PR #871](https://github.com/LodyAI/Lody/pull/871)
