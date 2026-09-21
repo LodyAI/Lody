@@ -490,6 +490,10 @@ function buildDemoUpdatedItems(
   });
 
   return filtered.map((task) => {
+    const owner =
+      scope === 'team'
+        ? (task.owner ?? { name: DEMO_OWNER_BY_TASK_ID[task.sessionId] ?? 'zxch3n' })
+        : null;
     if (DEMO_LOCAL_KIND_TASK_IDS.has(task.sessionId)) {
       return {
         id: task.sessionId,
@@ -504,6 +508,7 @@ function buildDemoUpdatedItems(
         hasUnreadMessages: task.hasUnreadMessages,
         isOffline: task.isOffline,
         isWaitingPermission: task.isWaitingPermission,
+        owner,
         openedBySessionId: task.openedBySessionId ?? null,
         openedByRowSessionId: task.openedByRowSessionId ?? null,
       };
@@ -528,7 +533,7 @@ function buildDemoUpdatedItems(
         prCiState: task.prCiState,
         prNumber: task.prNumber,
         prUrl: task.prUrl ?? null,
-        owner: task.owner ?? { name: DEMO_OWNER_BY_TASK_ID[task.sessionId] ?? 'zxch3n' },
+        owner,
         addedLines: task.addedLines,
         deletedLines: task.deletedLines,
       };
@@ -545,6 +550,7 @@ function buildDemoUpdatedItems(
       hasUnreadMessages: task.hasUnreadMessages,
       isOffline: task.isOffline,
       isWaitingPermission: task.isWaitingPermission,
+      owner,
       openedBySessionId: task.openedBySessionId ?? null,
       openedByRowSessionId: task.openedByRowSessionId ?? null,
     };
@@ -847,6 +853,7 @@ export const UpdatedModeShowProjectOverview: Story = {
   ),
   args: {
     ...UpdatedMode.args!,
+    chatScope: 'team',
     sessionListProps: {
       ...demoUpdatedTaskListProps,
       selectedSessionId: 'task-8',

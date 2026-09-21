@@ -27,10 +27,9 @@ visible but disabled in Project mode, with a right-side tooltip explaining that
 it is available in Updated view. Touch users open the same hint by tapping the
 disabled row, while keyboard focus also exposes it. GitHub marks sample their
 source luminance, leave pale avatars at their original luminance, and lift only
-dark avatars. The project line is inset 16px from the title start so it reads as
-secondary metadata. The active row restores the original color with a short
-transition. Nested opened Sessions stay one title line so the 30px tree trunk
-still meets. Workspace-mode Pinned omits the line.
+dark avatars. The active row restores the original color with a short transition.
+Nested opened Sessions stay one title line so the 30px tree trunk still meets.
+Workspace-mode Pinned omits the line.
 Decisions:
 [project context](../../../../.agents/notes/implemented/feature/2026-09-20-sidebar-updated-project-context.md)
 and [display preference](../../../../.agents/notes/implemented/feature/2026-09-20-sidebar-updated-project-display-preference.md).

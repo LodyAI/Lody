@@ -32,8 +32,7 @@ local storage and defaults to `true`, preserving the behavior introduced by the
 original [project-context decision](2026-09-20-sidebar-updated-project-context.md).
 Turning it off removes the complete second line from both ordinary and Pinned
 rows while Updated mode is active. Nested opened Sessions remain single-line in
-either state. The project line is inset 16px from the title start to make its
-secondary relationship visible without changing the leading status slot.
+either state.
 
 Only GitHub owner avatars receive adaptive tonal normalization. After the cached
 image loads, a 16px canvas sample measures alpha-weighted average luminance.
@@ -71,4 +70,6 @@ the line from Updated and Pinned rows, while the project-context test checks the
 one-sided adaptive tone and active-row treatment. The `Updated Mode · Show
 Project Overview` Storybook story combines Pinned, Chats, local and multiple
 GitHub sources with an active row inside the production-mirroring session page
-harness, where the menu remains interactive for visual review.
+harness, where the menu remains interactive for visual review. Its All Tasks
+fixture gives every row kind an author, matching production's multi-member
+scope instead of creating an impossible mix of authored and unauthored rows.
