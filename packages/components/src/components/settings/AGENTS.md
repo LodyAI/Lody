@@ -52,6 +52,9 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   verification.
 - Keep optional three.js/R3F usage behind the lazy usage-calendar module so lightweight
   and SSR consumers do not evaluate its renderer graph.
+- Usage day details persist bounded snapshots per auth session, workspace, and
+  date. Reuse for one hour; refresh expired selections without blanking cached
+  data. Preserve auth/capability gates; see [contract](../../../../../specs/usage-detail-cache.md).
 - Interface and terminal font choices exclude the known symbol families in
   `lib/local-fonts.ts`; persisted selections use the same filter. Font option names
   use the default interface font so they remain readable.
@@ -71,16 +74,12 @@ rolls back — is in the root [AGENTS.md](../../../../../AGENTS.md).
   dialog, because the public landing reuses that view. Typography and spacing come
   from the card's own `TEXT`, `PAD_X`, and `RHYTHM` constants — never a fresh
   `text-[…]` or an off-grid padding. `PAD_X` binds the footer too, so every band
-  shares one left edge. `ASPECT_SIZE` is the whole exported image including the
-  backdrop, so a framed card is 48px shorter — size the layout against the framed
-  case, and keep every band but the headline `shrink-0` so a card that does not fit
-  overflows visibly instead of eating its own padding. The graphic follows the range —
+  shares one left edge. `ASPECT_SIZE` includes the backdrop; size against the
+  48px-shorter framed case. Keep every band but the headline `shrink-0`.
+  The graphic follows the range —
   hour skyline, day-by-hour grid, or the 53-week calendar, matching the Usage
   screen — and every kind must fit the one `GRAPHIC_H` box so card height never
-  depends on range. The space beside the
-  headline number is empty by choice: six attempts to fill it (five brand-mark
-  treatments, one range chart) each either repeated a band below or read as
-  decoration. Leave it alone.
+  depends on range. Leave the space beside the headline empty.
 
 ## Agent Roles
 

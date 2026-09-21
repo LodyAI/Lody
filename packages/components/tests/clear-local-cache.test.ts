@@ -123,6 +123,7 @@ describe('maybeClearLodyCacheOnBoot', () => {
     );
     localStorage.setItem('lody:githubReposCache', '{}');
     localStorage.setItem('lody:githubBranchesCache', '{}');
+    localStorage.setItem('lody:usageDayDetails', '{}');
     localStorage.setItem('lody:auth-bootstrap', '{}');
     markCacheClearPending();
 
@@ -133,6 +134,7 @@ describe('maybeClearLodyCacheOnBoot', () => {
     expect(localStorage.getItem('lody:workspaceInfo')).toBeNull();
     expect(localStorage.getItem('lody:githubReposCache')).toBeNull();
     expect(localStorage.getItem('lody:githubBranchesCache')).toBeNull();
+    expect(localStorage.getItem('lody:usageDayDetails')).toBeNull();
     expect(localStorage.getItem('lody:auth-bootstrap')).toBeNull();
     // The user stays signed in and keeps preferences.
     expect(localStorage.getItem('lody_auth_token')).toBe('token');
