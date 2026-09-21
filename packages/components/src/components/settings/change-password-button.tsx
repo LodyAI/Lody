@@ -5,9 +5,9 @@ import { ArrowLeft } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import { toast } from 'sonner';
 import { validateNewPassword } from '@lody/shared';
-import { Button } from '@/ui/button';
-import { Label } from '@/ui/label';
-import { PasswordInput } from '@/ui/password-input';
+import { Button } from '@lody/ui/button';
+import { Field as UiField } from '@lody/ui/field';
+import { PasswordInput } from '@lody/ui/password-input';
 import {
   Dialog,
   DialogContent,
@@ -157,7 +157,7 @@ export function ChangePasswordButton({
     <>
       <Button
         variant="ghost"
-        size="sm"
+        size="small"
         className="bg-foreground/[0.06] font-normal hover:bg-foreground/[0.1]"
         disabled={disabled}
         onClick={() => setOpen(true)}
@@ -192,9 +192,9 @@ export function ChangePasswordButton({
                       transition={{ duration: 0.2, ease: 'easeInOut' }}
                       className="space-y-1.5"
                     >
-                      <Label htmlFor="current-password">
+                      <UiField.Label htmlFor="current-password">
                         {t('settings.profile.password.currentLabel')}
-                      </Label>
+                      </UiField.Label>
                       <PasswordInput
                         id="current-password"
                         autoComplete="current-password"
@@ -226,9 +226,9 @@ export function ChangePasswordButton({
                       className="space-y-3"
                     >
                       <div className="space-y-1.5">
-                        <Label htmlFor="new-password">
+                        <UiField.Label htmlFor="new-password">
                           {t('settings.profile.password.newLabel')}
-                        </Label>
+                        </UiField.Label>
                         <PasswordInput
                           id="new-password"
                           autoComplete="new-password"
@@ -238,9 +238,9 @@ export function ChangePasswordButton({
                         />
                       </div>
                       <div className="space-y-1.5">
-                        <Label htmlFor="confirm-password">
+                        <UiField.Label htmlFor="confirm-password">
                           {t('settings.profile.password.confirmLabel')}
-                        </Label>
+                        </UiField.Label>
                         <PasswordInput
                           id="confirm-password"
                           autoComplete="new-password"
@@ -267,15 +267,15 @@ export function ChangePasswordButton({
                 {step === 0 ? (
                   <>
                     <Button
-                      variant="outline"
-                      size="sm"
+                      variant="secondary"
+                      size="small"
                       onClick={() => handleOpenChange(false)}
                       disabled={isVerifying}
                     >
                       {t('common.cancel')}
                     </Button>
                     <Button
-                      size="sm"
+                      size="small"
                       onClick={() => {
                         void goToNewStep();
                       }}
@@ -287,12 +287,17 @@ export function ChangePasswordButton({
                   </>
                 ) : (
                   <>
-                    <Button variant="outline" size="sm" onClick={goBack} disabled={isSubmitting}>
+                    <Button
+                      variant="secondary"
+                      size="small"
+                      onClick={goBack}
+                      disabled={isSubmitting}
+                    >
                       <ArrowLeft className="mr-1.5 h-3.5 w-3.5" />
                       {t('common.back')}
                     </Button>
                     <Button
-                      size="sm"
+                      size="small"
                       onClick={() => {
                         void handleSubmit();
                       }}
@@ -315,15 +320,15 @@ export function ChangePasswordButton({
               </DialogHeader>
               <DialogFooter>
                 <Button
-                  variant="outline"
-                  size="sm"
+                  variant="secondary"
+                  size="small"
                   onClick={() => handleOpenChange(false)}
                   disabled={isSubmitting}
                 >
                   {t('common.cancel')}
                 </Button>
                 <Button
-                  size="sm"
+                  size="small"
                   onClick={() => {
                     void handleSetup();
                   }}

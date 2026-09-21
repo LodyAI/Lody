@@ -150,8 +150,8 @@ function DevbarSettingsControls() {
         )}
       >
         <Button
-          variant={config?.enabled ? 'outline' : 'default'}
-          size="sm"
+          variant={config?.enabled ? 'secondary' : 'primary'}
+          size="small"
           className="h-7 px-2.5"
           disabled={!config || pending}
           onClick={() => void update(!config?.enabled, false, config?.warmupEnabled ?? false)}

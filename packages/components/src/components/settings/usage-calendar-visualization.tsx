@@ -18,8 +18,8 @@ import { Box, Copy, Download, FileText, MousePointerClick, X } from 'lucide-reac
 import i18next from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import { Avatar, AvatarFallback, AvatarImage } from '@/ui/avatar';
-import { Button } from '@/ui/button';
+import { Avatar } from '@lody/ui/avatar';
+import { Button } from '@lody/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { formatCompactNumber, formatUsdAmount } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
@@ -1633,7 +1633,7 @@ function UsageDayDetailPanel({
         className="relative rounded-lg bg-muted/40 p-4"
       >
         <Button
-          size="icon"
+          icon
           variant="ghost"
           aria-label={t('common.close')}
           className="absolute right-2 top-2 h-6 w-6 text-muted-foreground"
@@ -1752,12 +1752,10 @@ function UsageDayDetailPanel({
                       label,
                       tokens: row.tokens,
                       icon: (
-                        <Avatar className="size-4 shrink-0">
-                          {user?.image ? <AvatarImage src={user.image} alt="" /> : null}
-                          <AvatarFallback className="bg-foreground/15 text-[8px] font-normal uppercase text-foreground/80">
-                            {label.slice(0, 2)}
-                          </AvatarFallback>
-                        </Avatar>
+                        <Avatar.Root size="mini">
+                          {user?.image ? <Avatar.Image src={user.image} alt="" /> : null}
+                          <Avatar.Fallback>{label.slice(0, 2).toUpperCase()}</Avatar.Fallback>
+                        </Avatar.Root>
                       ),
                     };
                   })}
@@ -1842,9 +1840,7 @@ function SummaryStat({ label, value, detail }: { label: string; value: string; d
   return (
     <div className="min-w-0">
       <dt className="truncate text-[11px] font-normal text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5 truncate text-sm font-normal tabular-nums text-foreground">
-        {value}
-      </dd>
+      <dd className="mt-0.5 truncate text-sm font-normal tabular-nums text-foreground">{value}</dd>
       {detail ? <p className="truncate text-[11px] text-muted-foreground/80">{detail}</p> : null}
     </div>
   );
@@ -2339,7 +2335,7 @@ export function UsageCalendarVisualization({
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button
-                      size="icon"
+                      icon
                       variant="ghost"
                       onClick={() => void copyAscii()}
                       aria-label={t('workspace.usage.skyline.copyAscii')}
@@ -2349,11 +2345,11 @@ export function UsageCalendarVisualization({
                   </TooltipTrigger>
                   <TooltipContent>{t('workspace.usage.skyline.copyAscii')}</TooltipContent>
                 </Tooltip>
-                <Button size="sm" variant="outline" onClick={exportAscii}>
+                <Button size="small" variant="secondary" onClick={exportAscii}>
                   <Download className="h-4 w-4" />
                   {t('workspace.usage.skyline.downloadAscii')}
                 </Button>
-                <Button size="sm" onClick={exportStl}>
+                <Button size="small" onClick={exportStl}>
                   <Box className="h-4 w-4" />
                   {t('workspace.usage.skyline.downloadBinaryStl')}
                 </Button>

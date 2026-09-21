@@ -3,7 +3,7 @@ import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import type { GitHubMergeMethod } from '@lody/shared';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -69,7 +69,7 @@ export function PrMergeButton({
   const { t } = useTranslation();
   const isDisabled = disabled || isMerging || !onMerge;
   const buttonVariant =
-    tone === 'ready' ? 'default' : tone === 'conflict' ? 'destructive' : 'outline';
+    tone === 'ready' ? 'primary' : tone === 'conflict' ? 'destructive' : 'secondary';
   // The full (non-compact) ready button uses GitHub's green so "merge" reads as
   // the positive terminal action, matching the compact info-bar merge control.
   const readyGreen = tone === 'ready' && !compact;
@@ -102,13 +102,13 @@ export function PrMergeButton({
       ) : (
         <Button
           type="button"
-          size="sm"
+          size="small"
           variant={buttonVariant}
           disabled={isDisabled}
           onClick={() => void onMerge?.(method)}
           className={cn(
             'h-8 gap-1 rounded-r-none',
-            buttonVariant === 'outline' ? 'border-r-0' : 'border-transparent',
+            buttonVariant === 'secondary' ? 'border-r-0' : 'border-transparent',
             readyGreen && greenClasses
           )}
         >
@@ -129,7 +129,7 @@ export function PrMergeButton({
           ) : (
             <Button
               type="button"
-              size="sm"
+              size="small"
               variant={buttonVariant}
               disabled={isMerging || !onSelectMethod}
               aria-label={t('sessions.prTab.chooseMergeMethod', 'Choose merge method')}

@@ -1,6 +1,6 @@
 import lodyLogo from '@/assets/lody-icon.png';
 import { cn } from '@/lib/utils';
-import { Avatar, AvatarFallback, AvatarImage } from '@/ui/avatar';
+import { Avatar } from '@lody/ui/avatar';
 
 /**
  * Who is looking at this share, as far as the reader can tell.
@@ -50,12 +50,10 @@ export function ShareViewerIdentity({ viewer }: { viewer: ShareViewer }) {
         <span className="hidden min-w-0 max-w-40 truncate text-xs text-muted-foreground sm:block">
           {viewer.name}
         </span>
-        <Avatar className="size-6">
-          {viewer.imageUrl ? <AvatarImage src={viewer.imageUrl} alt="" /> : null}
-          <AvatarFallback className="text-[10px] font-medium">
-            {initialsOf(viewer.name)}
-          </AvatarFallback>
-        </Avatar>
+        <Avatar.Root size="medium">
+          {viewer.imageUrl ? <Avatar.Image src={viewer.imageUrl} alt="" /> : null}
+          <Avatar.Fallback>{initialsOf(viewer.name)}</Avatar.Fallback>
+        </Avatar.Root>
       </div>
     );
   return null;

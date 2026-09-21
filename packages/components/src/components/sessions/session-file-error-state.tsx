@@ -318,7 +318,7 @@ export function SessionFileNoticeCard({
           <div className="mt-3 flex flex-col gap-0.5">
             {actions.onShare ? (
               <Button
-                size="sm"
+                size="small"
                 variant="secondary"
                 className={ACTION_BUTTON_CLASS}
                 onClick={actions.onShare}

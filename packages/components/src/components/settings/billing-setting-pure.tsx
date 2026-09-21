@@ -5,7 +5,7 @@ import { ArrowLeftRight, Check } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import { Badge, Button, Card, Input } from '@/ui';
 import { Progress } from '@/ui/progress';
-import { Skeleton } from '@/ui/skeleton';
+import { Skeleton } from '@lody/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { PricingPageLink } from '../shared/pricing-page-link';
 import { FounderCallLink } from '../shared/founder-call-link';
@@ -333,24 +333,16 @@ export function BillingSettingsView({
           {/* A gift always ends at its schedule boundary; its status line says
               so already, and a cancel badge would read as an error state. */}
           {overview.cancelAtPeriodEnd && !isPromotional ? (
-            <Badge variant="outline" className="font-normal">
-              {t('billing.cancelAtPeriodEnd')}
-            </Badge>
+            <Badge className="font-normal">{t('billing.cancelAtPeriodEnd')}</Badge>
           ) : null}
           {checkoutInProgress ? (
-            <Badge variant="secondary" className="font-normal">
-              {t('billing.checkoutPending')}
-            </Badge>
+            <Badge className="font-normal">{t('billing.checkoutPending')}</Badge>
           ) : null}
           {hasGiftTimeline && overview.autoRenewAfterGift ? (
-            <Badge variant="secondary" className="font-normal">
-              {t('billing.postGiftBillingScheduled')}
-            </Badge>
+            <Badge className="font-normal">{t('billing.postGiftBillingScheduled')}</Badge>
           ) : null}
           {overview.yearlyEarlyBirdEligible ? (
-            <Badge variant="secondary" className="font-normal">
-              {t('billing.yearlyPromoPrice')}
-            </Badge>
+            <Badge className="font-normal">{t('billing.yearlyPromoPrice')}</Badge>
           ) : null}
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
@@ -509,9 +501,7 @@ export function BillingSettingsView({
                 {t('billing.perSeatMonth')}
               </span>
               {selectedOfferLabel ? (
-                <Badge variant="secondary" className="mb-1 font-normal">
-                  {selectedOfferLabel}
-                </Badge>
+                <Badge className="mb-1 font-normal">{selectedOfferLabel}</Badge>
               ) : null}
             </div>
 
@@ -762,12 +752,7 @@ export function BillingSettingsView({
                       <span className="font-normal tabular-nums text-foreground">
                         {formatMoney(invoice.amountPaid, invoice.currency)}
                       </span>
-                      <Badge
-                        variant={invoice.status === 'paid' ? 'secondary' : 'outline'}
-                        className="capitalize font-normal"
-                      >
-                        {invoice.status}
-                      </Badge>
+                      <Badge className="capitalize font-normal">{invoice.status}</Badge>
                       {invoice.hostedInvoiceUrl ? (
                         <a
                           href={invoice.hostedInvoiceUrl}

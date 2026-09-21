@@ -25,8 +25,8 @@ import { CombinedMentionTextarea } from '@/components/mentions/combined-mention-
 import { getComposerMentionChip } from '@/components/mentions/mention-chips';
 import { toPersistedMentionRanges } from '@/components/mentions/mention-persistence';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
-import { Badge } from '@/ui/badge';
-import { Button } from '@/ui/button';
+import { Badge } from '@lody/ui/badge';
+import { Button } from '@lody/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import {
@@ -324,7 +324,7 @@ export function PromptShortcutsList({
           <TooltipTrigger asChild>
             <Button
               variant="ghost"
-              size="icon"
+              icon
               className="h-7 w-7 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
               aria-label={addLabel}
               disabled={!canCreate || busy}
@@ -347,7 +347,7 @@ export function PromptShortcutsList({
                 'No Prompt Shortcuts yet. Save a Prompt you retype often and call it with /.'
               )}
             </p>
-            <Button size="sm" className="mt-3" disabled={!canCreate || busy} onClick={onCreate}>
+            <Button size="small" className="mt-3" disabled={!canCreate || busy} onClick={onCreate}>
               <Plus className="mr-1.5 h-3.5 w-3.5" />
               {addLabel}
             </Button>
@@ -432,7 +432,7 @@ export function PromptShortcutRow({
               </span>
               {/* Visibility, not scope: the pills say where it can be called,
                   this says who can read it. */}
-              <Badge variant="secondary" className="shrink-0 px-1.5 py-0 text-[10px]">
+              <Badge className="shrink-0 px-1.5 py-0 text-[10px]">
                 {entry.visibility === 'workspace'
                   ? t('settings.promptShortcuts.shared', 'Shared')
                   : t('settings.promptShortcuts.private', 'Private')}
@@ -440,7 +440,7 @@ export function PromptShortcutRow({
               {/* Owned by someone else: the missing delete button is the only
                   other sign, and an absence is not a signal. */}
               {canManage ? null : (
-                <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px] font-normal">
+                <Badge className="shrink-0 px-1.5 py-0 text-[10px] font-normal">
                   {t('settings.promptShortcuts.readOnly', 'Read-only')}
                 </Badge>
               )}
@@ -475,7 +475,7 @@ export function PromptShortcutRow({
           {canManage ? (
             <Button
               type="button"
-              size="icon"
+              icon
               variant="ghost"
               className="h-7 w-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
               disabled={busy}
@@ -519,7 +519,7 @@ export function PromptShortcutReadOnlyView({
           </span>
           <span className="min-w-0 truncate text-sm font-normal">{shortcut.name}</span>
           <span className="font-mono text-[11px] text-muted-foreground">/{shortcut.slug}</span>
-          <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
+          <Badge className="px-1.5 py-0 text-[10px]">
             {t('settings.promptShortcuts.shared', 'Shared')}
           </Badge>
         </div>
@@ -538,7 +538,7 @@ export function PromptShortcutReadOnlyView({
         </Section>
       </div>
       <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-border/60 px-5 py-3">
-        <Button type="button" variant="outline" size="sm" onClick={onClose}>
+        <Button type="button" variant="secondary" size="small" onClick={onClose}>
           {t('common.close', 'Close')}
         </Button>
       </footer>

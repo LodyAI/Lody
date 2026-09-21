@@ -2,10 +2,10 @@ import { useEffect, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CreditCard, Shield, User } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
-import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
+import { Select } from '@lody/ui/select';
 import {
   Dialog,
   DialogContent,
@@ -129,9 +129,9 @@ export function InviteMemberDialog({
         ) : (
           <div className="space-y-4 px-5 pb-5">
             <div className="space-y-1.5">
-              <Label htmlFor="invite-email" className="text-xs text-muted-foreground">
+              <UiField.Label htmlFor="invite-email" className="text-xs text-muted-foreground">
                 {t('workspace.invite.email')}
-              </Label>
+              </UiField.Label>
               <Input
                 id="invite-email"
                 value={email}
@@ -147,28 +147,37 @@ export function InviteMemberDialog({
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="invite-role" className="text-xs text-muted-foreground">
+              <UiField.Label htmlFor="invite-role" className="text-xs text-muted-foreground">
                 {t('workspace.invite.role')}
-              </Label>
-              <Select value={role} onValueChange={(value) => setRole(value as InviteMemberRole)}>
-                <SelectTrigger id="invite-role" className="h-9 w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="member">
+              </UiField.Label>
+              <Select.Root
+                items={[
+                  { value: 'member', label: t('organization.role.member') },
+                  { value: 'admin', label: t('organization.role.admin') },
+                ]}
+                value={role}
+                onValueChange={(value) => {
+                  if (value != null) setRole(value as InviteMemberRole);
+                }}
+              >
+                <Select.Trigger id="invite-role" className="h-9 w-full">
+                  <Select.Value />
+                </Select.Trigger>
+                <Select.Content>
+                  <Select.Item value="member">
                     <div className="flex items-center gap-2">
                       <User className="h-3.5 w-3.5 text-muted-foreground" />
                       <span>{t('organization.role.member')}</span>
                     </div>
-                  </SelectItem>
-                  <SelectItem value="admin">
+                  </Select.Item>
+                  <Select.Item value="admin">
                     <div className="flex items-center gap-2">
                       <Shield className="h-3.5 w-3.5 text-muted-foreground" />
                       <span>{t('organization.role.admin')}</span>
                     </div>
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+                  </Select.Item>
+                </Select.Content>
+              </Select.Root>
               <p className="text-xs leading-relaxed text-muted-foreground">
                 {role === 'admin'
                   ? t('workspace.invite.roleHintAdmin')
@@ -182,8 +191,8 @@ export function InviteMemberDialog({
 
         <DialogFooter className="gap-2 border-t border-border/60 bg-muted/20 px-5 py-3.5">
           <Button
-            variant="outline"
-            size="sm"
+            variant="secondary"
+            size="small"
             onClick={() => onOpenChange(false)}
             disabled={inviting}
           >
@@ -194,7 +203,7 @@ export function InviteMemberDialog({
             billingUiAvailable &&
             onOpenBilling && (
               <Button
-                size="sm"
+                size="small"
                 onClick={() => {
                   onOpenChange(false);
                   onOpenBilling();
@@ -205,7 +214,7 @@ export function InviteMemberDialog({
               </Button>
             )
           ) : (
-            <Button size="sm" onClick={submit} disabled={!email.trim() || inviting}>
+            <Button size="small" onClick={submit} disabled={!email.trim() || inviting}>
               {inviting && <Spinner className="mr-1.5 h-3.5 w-3.5" />}
               {inviting ? t('common.inviting') : t('common.invite')}
             </Button>

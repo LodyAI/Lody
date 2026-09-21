@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { usePlatformSession } from '@lody/platform/react';
 import { ExternalLink, LogIn } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { OnboardingBackButton, OnboardingShell } from '../onboarding-shell';
 import { useOnboardingAnalytics } from '../onboarding-analytics';
 
@@ -97,7 +97,7 @@ export function LoginScreen({ onBack, onNext }: { onBack: () => void; onNext: ()
       )}
       secondaryAction={<OnboardingBackButton onClick={onBack} disabled={locked} />}
       primaryAction={
-        <Button size="lg" onClick={handleSignIn} disabled={locked}>
+        <Button size="large" onClick={handleSignIn} disabled={locked}>
           {locked ? <Spinner className="size-4" /> : <LogIn className="size-4" />}
           {openingBrowser
             ? t('onboarding.login.openBrowserAgain', 'Open browser again')

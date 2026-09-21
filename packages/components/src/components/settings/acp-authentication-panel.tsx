@@ -24,9 +24,9 @@ import {
   type MachineAcpAuthenticationArgs,
 } from '@/hooks/use-machine-acp-authentication';
 import { resyncMachineFlockRows } from '@/hooks/use-machine-flock-rows';
-import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
 import { isElectronRenderer } from '@/lib/electron';
 import { openExternalUrl } from '@/lib/native-browser';
 import { isNativeAppShell } from '@/lib/native-platform';
@@ -575,13 +575,13 @@ export function AcpAuthenticationPanel({
       <div className="flex flex-wrap items-center gap-2">
         {phase === 'running' ? (
           <>
-            <Button type="button" size="sm" variant="outline" disabled>
+            <Button type="button" size="small" variant="secondary" disabled>
               <Spinner className="h-3.5 w-3.5" />
               {t('agents.authentication.waiting', 'Waiting for {{provider}} sign-in', {
                 provider,
               })}
             </Button>
-            <Button type="button" size="sm" variant="ghost" onClick={handleCancel}>
+            <Button type="button" size="small" variant="ghost" onClick={handleCancel}>
               <Square className="h-3.5 w-3.5" />
               {t('common.cancel', 'Cancel')}
             </Button>
@@ -589,8 +589,8 @@ export function AcpAuthenticationPanel({
         ) : (
           <Button
             type="button"
-            size="sm"
-            variant="outline"
+            size="small"
+            variant="secondary"
             disabled={!authArgs || !interactiveProtocolSupported}
             onClick={handleStart}
           >
@@ -697,8 +697,8 @@ export function AcpAuthenticationAuthorizationView({
         </div>
         <Button
           type="button"
-          size="sm"
-          variant="outline"
+          size="small"
+          variant="secondary"
           disabled={authorizationConsentPending}
           onClick={onOpenAuthorization}
         >
@@ -730,7 +730,7 @@ export function AcpAuthenticationAuthorizationView({
                 {authorization.userCode}
               </code>
             </div>
-            <Button type="button" size="sm" variant="ghost" onClick={onCopyUserCode}>
+            <Button type="button" size="small" variant="ghost" onClick={onCopyUserCode}>
               {userCodeCopied ? (
                 <Check className="h-3.5 w-3.5" />
               ) : (
@@ -755,9 +755,9 @@ export function AcpAuthenticationAuthorizationView({
 
       {authorization.acceptsAuthorizationCode ? (
         <div className="mt-3 space-y-1.5">
-          <Label htmlFor={authorizationCodeInputId} className="text-xs">
+          <UiField.Label htmlFor={authorizationCodeInputId} className="text-xs">
             {t('agents.authentication.authorizationCode', 'Authorization code')}
-          </Label>
+          </UiField.Label>
           <div className="flex flex-col gap-2 sm:flex-row">
             <Input
               id={authorizationCodeInputId}
@@ -779,7 +779,7 @@ export function AcpAuthenticationAuthorizationView({
             />
             <Button
               type="button"
-              size="sm"
+              size="small"
               disabled={
                 authorizationCodeSubmitted ||
                 submittingAuthorizationCode ||
@@ -842,7 +842,7 @@ export function AcpAuthenticationInteractionView({
             <Button
               key={method.id}
               type="button"
-              variant="outline"
+              variant="secondary"
               className="h-auto justify-start px-3 py-2 text-left"
               disabled={submitting}
               onClick={() => onSubmit({ action: 'accept', methodId: method.id })}
@@ -880,10 +880,10 @@ export function AcpAuthenticationInteractionView({
       </div>
       {interaction.form.fields.map((field) => (
         <div key={field.id} className="space-y-1.5">
-          <Label className="text-xs">
+          <UiField.Label className="text-xs">
             {field.label}
             {!field.required ? ` ${t('common.optional', '(optional)')}` : ''}
-          </Label>
+          </UiField.Label>
           {field.type === 'select' ? (
             <select
               className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
@@ -917,7 +917,7 @@ export function AcpAuthenticationInteractionView({
       ))}
       <Button
         type="button"
-        size="sm"
+        size="small"
         disabled={submitting || invalid}
         onClick={() => onSubmit({ action: 'accept', content: values })}
       >

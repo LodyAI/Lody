@@ -53,7 +53,7 @@ import {
   X,
 } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { matchesKeyboardEvent } from '@/lib/commands/key-matcher';
@@ -193,9 +193,9 @@ import {
 } from '@/components/session-sharing';
 
 import { Drawer } from '@lody/ui/drawer';
-import { Badge } from '@/ui/badge';
+import { Badge } from '@lody/ui/badge';
 import { Input } from '@lody/ui/input';
-import { Separator } from '@/ui/separator';
+import { Separator } from '@lody/ui/separator';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { useSessionDoc } from '@/hooks/use-session-doc';
 import { useSessionActions } from '@/hooks/use-session-actions';
@@ -734,9 +734,10 @@ export function SessionHistoryButton({
 
   const trigger = (
     <Button
-      variant={compact ? 'ghost' : 'outline'}
-      size={compact ? 'icon' : 'sm'}
-      className={cn('shrink-0', compact ? 'h-8 w-8' : '')}
+      variant={compact ? 'ghost' : 'secondary'}
+      size="small"
+      icon={compact}
+      className="shrink-0"
       disabled={historySessions.length === 0}
     >
       <History className={cn('h-4 w-4', compact ? '' : 'mr-2')} />
@@ -796,9 +797,7 @@ export function SessionHistoryButton({
                         <span className="truncate">{statusLabel}</span>
                       </div>
                     </div>
-                    {isActive && (
-                      <Badge variant="secondary">{t('common.current', 'Current')}</Badge>
-                    )}
+                    {isActive && <Badge>{t('common.current', 'Current')}</Badge>}
                   </div>
                 </button>
               );
@@ -1138,7 +1137,7 @@ export function SessionHeaderMenu({
         <DropdownMenuTrigger asChild>
           <Button
             variant="ghost"
-            size="icon"
+            icon
             className="h-7 w-7 shrink-0 text-muted-foreground"
             aria-label={t('sessions.moreActions', 'More actions')}
           >
@@ -1618,7 +1617,7 @@ export function SessionSearchBar({
       <Button
         type="button"
         variant="ghost"
-        size="icon"
+        icon
         className="h-6 w-6 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground disabled:pointer-events-none disabled:text-muted-foreground/40"
         disabled={!hasResults}
         onClick={onClick}
@@ -1715,7 +1714,7 @@ export function SessionSearchBar({
               <Button
                 type="button"
                 variant="ghost"
-                size="icon"
+                icon
                 className="h-6 w-6 shrink-0 rounded-md text-muted-foreground transition-colors hover:bg-hover hover:text-foreground"
                 onClick={onClose}
                 aria-label={t('common.close', 'Close')}
@@ -5771,8 +5770,8 @@ export const SessionChatInterface = memo(
           <div className={cn(SESSION_PAGE_HEADER_PILLS_CLASS, 'items-center')}>
             <Button
               className="h-6 px-2 py-1 rounded-r-none border-r-0 gap-1"
-              variant="outline"
-              size="sm"
+              variant="secondary"
+              size="small"
               onClick={handleOpenInIde}
             >
               <SelectedPathLauncherIcon className="h-3.5 w-3.5" />
@@ -5782,8 +5781,8 @@ export const SessionChatInterface = memo(
               <DropdownMenuTrigger asChild>
                 <Button
                   className="h-6 px-1 py-1 rounded-l-none"
-                  variant="outline"
-                  size="sm"
+                  variant="secondary"
+                  size="small"
                   aria-label={t('sessions.selectPathLauncher', 'Select launcher')}
                 >
                   <ChevronDown className="h-3 w-3" />

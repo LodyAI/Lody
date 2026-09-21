@@ -59,7 +59,7 @@ import {
   X,
 } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { PiProviderMigrationCard } from './pi-provider-migration-card';
 
 import {
@@ -3423,7 +3423,7 @@ function WorkspaceChatLanding({
           <Button
             type="button"
             variant="ghost"
-            size="icon"
+            icon
             className="h-6 w-6 rounded-md px-0 text-status-error hover:text-status-error [&_svg]:size-3.5"
             onClick={handleLocalGitStateRetry}
             aria-label={t('chat.localGitStateRetry', 'Retry loading branches')}
@@ -3747,7 +3747,7 @@ function WorkspaceChatLanding({
         <Button
           type="button"
           variant="ghost"
-          size="sm"
+          size="small"
           className={cn(selectorTagClassName, 'text-[0.9em] leading-tight')}
           onClick={resetErrorBoundary}
           aria-label={t('chat.retryTargetSelector', 'Retry target selector')}
@@ -6163,7 +6163,7 @@ function WorkspaceChatLanding({
             primaryAction={
               <Button
                 type="button"
-                size="icon"
+                icon
                 variant="ghost"
                 onClick={() => {
                   void handleSubmit();
@@ -6629,7 +6629,7 @@ function WorkspaceChatLanding({
             <Button
               type="button"
               variant="ghost"
-              size="icon"
+              icon
               onClick={() => showNavigationSidebar()}
               aria-label={t('chat.leftSidebar.show', 'Show navigation sidebar')}
               className="h-7 w-7 shrink-0 text-muted-foreground"

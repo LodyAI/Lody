@@ -10,7 +10,7 @@ import {
 import { createPortal } from 'react-dom';
 import { Maximize, X, ZoomIn, ZoomOut } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 
 /**
@@ -489,7 +489,7 @@ function OpenMermaidDiagramViewer({
         <Button
           type="button"
           variant="ghost"
-          size="icon"
+          icon
           className={CONTROL_CLASS_NAME}
           onClick={() => zoomBy(1 / MERMAID_DIAGRAM_ZOOM_STEP)}
           disabled={zoom !== null && zoom <= MERMAID_DIAGRAM_MIN_ZOOM}
@@ -501,7 +501,7 @@ function OpenMermaidDiagramViewer({
         <Button
           type="button"
           variant="ghost"
-          size="icon"
+          icon
           className={cn(CONTROL_CLASS_NAME, 'w-auto min-w-11 px-2 font-mono text-xs tabular-nums')}
           onClick={resetZoom}
           title={resetZoomLabel}
@@ -512,7 +512,7 @@ function OpenMermaidDiagramViewer({
         <Button
           type="button"
           variant="ghost"
-          size="icon"
+          icon
           className={CONTROL_CLASS_NAME}
           onClick={() => zoomBy(MERMAID_DIAGRAM_ZOOM_STEP)}
           disabled={zoom !== null && zoom >= MERMAID_DIAGRAM_MAX_ZOOM}
@@ -525,7 +525,7 @@ function OpenMermaidDiagramViewer({
           ref={closeRef}
           type="button"
           variant="ghost"
-          size="icon"
+          icon
           data-testid="mermaid-diagram-viewer-close"
           className={CONTROL_CLASS_NAME}
           onClick={onClose}

@@ -1,6 +1,6 @@
 import { Component, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 
 export function SessionShareReadError() {
   const { t } = useTranslation();
@@ -16,7 +16,7 @@ export function SessionShareReadError() {
             'The shared document may contain unsupported content. Try reloading the page.'
           )}
         </p>
-        <Button variant="outline" onClick={() => window.location.reload()}>
+        <Button variant="secondary" onClick={() => window.location.reload()}>
           {t('sharing.reloadPage', 'Reload page')}
         </Button>
       </div>

@@ -8,7 +8,7 @@ import {
   SessionChatStreamView,
   type ChatStreamItem,
 } from '@/components/ai-gui/view';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 
 const sessionId = 'hydration-regression' as SessionId;
 const platform = createLocalPlatformProvider({

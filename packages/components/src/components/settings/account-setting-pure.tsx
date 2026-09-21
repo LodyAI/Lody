@@ -17,10 +17,10 @@ import {
   X,
 } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
-import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
-import { Badge } from '@/ui/badge';
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
+import { Badge } from '@lody/ui/badge';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -607,7 +607,7 @@ export function AccountSettingsPure({
           <CompactRow label={t('settings.account.signOut')}>
             <Button
               variant="ghost"
-              size="sm"
+              size="small"
               className="bg-foreground/[0.06] font-normal hover:bg-foreground/[0.1]"
               onClick={() => {
                 void onSignOut();
@@ -694,8 +694,8 @@ export function AccountSettingsPure({
               <div className="space-y-3 py-4 text-sm">
                 <p className="text-muted-foreground">{t('settings.account.cliAuth.usageHint')}</p>
                 <Button
-                  variant="outline"
-                  size="sm"
+                  variant="secondary"
+                  size="small"
                   onClick={() => {
                     void onCopyGeneratedCliApiKey?.();
                   }}
@@ -707,7 +707,9 @@ export function AccountSettingsPure({
               </div>
             ) : (
               <div className="space-y-2 py-4">
-                <Label htmlFor="cli-api-key-note">{t('settings.account.cliAuth.noteLabel')}</Label>
+                <UiField.Label htmlFor="cli-api-key-note">
+                  {t('settings.account.cliAuth.noteLabel')}
+                </UiField.Label>
                 <Input
                   id="cli-api-key-note"
                   value={cliApiKeyNote}
@@ -722,8 +724,8 @@ export function AccountSettingsPure({
             )}
             <DialogFooter>
               <Button
-                variant="outline"
-                size="sm"
+                variant="secondary"
+                size="small"
                 onClick={() => handleCliApiKeyDialogOpenChange(false)}
                 disabled={isCreatingCliApiKey}
               >
@@ -731,7 +733,7 @@ export function AccountSettingsPure({
               </Button>
               {!hasGeneratedCliApiKey && (
                 <Button
-                  size="sm"
+                  size="small"
                   onClick={() => {
                     void handleCreateCliApiKey();
                   }}
@@ -796,7 +798,7 @@ export function AccountSettingsPure({
           actions={
             hasAdminPermission && (
               <Button
-                size="icon"
+                icon
                 variant="ghost"
                 aria-label={t('workspace.members.invite')}
                 onClick={() => setInviteDialogOpen(true)}
@@ -872,7 +874,7 @@ export function AccountSettingsPure({
                   {isEditable && (
                     <Button
                       variant="ghost"
-                      size="icon"
+                      icon
                       className="h-7 w-7 text-muted-foreground hover:text-destructive"
                       onClick={() => {
                         setUserToDelete(member.id);
@@ -911,7 +913,7 @@ export function AccountSettingsPure({
                 <div className="flex shrink-0 items-center gap-1">
                   <Button
                     variant="ghost"
-                    size="sm"
+                    size="small"
                     className="h-7 text-xs text-muted-foreground hover:text-foreground"
                     onClick={() => {
                       void onCopyInviteLink(getInviteLink(invitation));
@@ -923,7 +925,7 @@ export function AccountSettingsPure({
                   {hasAdminPermission && (
                     <Button
                       variant="ghost"
-                      size="icon"
+                      icon
                       className="h-7 w-7 text-muted-foreground hover:text-destructive"
                       disabled={cancellingInvitationIds.has(invitation.id)}
                       onClick={() => {
@@ -973,7 +975,7 @@ export function AccountSettingsPure({
           actions={
             <Button
               variant="ghost"
-              size="sm"
+              size="small"
               className="h-7 w-auto bg-foreground/[0.06] px-2 font-normal text-foreground hover:bg-foreground/[0.1]"
               onClick={() => {
                 setCliApiKeyDialogOpen(true);
@@ -1017,9 +1019,7 @@ export function AccountSettingsPure({
                         {apiKey.note || t('settings.account.cliAuth.recordNoteFallback')}
                       </p>
                       {sourceLabel && (
-                        <Badge variant="outline" className="h-5 rounded-md px-1.5 text-[10px]">
-                          {sourceLabel}
-                        </Badge>
+                        <Badge className="h-5 rounded-md px-1.5 text-[10px]">{sourceLabel}</Badge>
                       )}
                       {createdAt && (
                         <time
@@ -1045,7 +1045,7 @@ export function AccountSettingsPure({
                   </div>
                   <Button
                     variant="ghost"
-                    size="sm"
+                    size="small"
                     className="bg-destructive/[0.06] text-destructive hover:bg-destructive/10 hover:text-destructive"
                     onClick={() => setCliApiKeyToRevoke(apiKey)}
                     disabled={revokingCliApiKeyId === apiKey.id}
@@ -1075,7 +1075,7 @@ export function AccountSettingsPure({
             >
               <Button
                 variant="ghost"
-                size="sm"
+                size="small"
                 className="bg-destructive/[0.06] text-destructive hover:bg-destructive/10 hover:text-destructive"
                 onClick={() => setLeaveDialogOpen(true)}
               >
@@ -1090,7 +1090,7 @@ export function AccountSettingsPure({
             >
               <Button
                 variant="ghost"
-                size="sm"
+                size="small"
                 className="bg-destructive/[0.06] text-destructive hover:bg-destructive/10 hover:text-destructive"
                 onClick={() => {
                   // A live subscription blocks deletion outright; surface the
@@ -1248,11 +1248,11 @@ export function AccountSettingsPure({
               </p>
             ) : null}
             <div className="space-y-2">
-              <Label htmlFor="confirmText">
+              <UiField.Label htmlFor="confirmText">
                 {t('workspace.danger.deleteWorkspace.typeToConfirm', {
                   workspace: organization.name,
                 })}
-              </Label>
+              </UiField.Label>
               <Input
                 id="confirmText"
                 value={deleteConfirmText}
@@ -1263,7 +1263,7 @@ export function AccountSettingsPure({
           </div>
           <DialogFooter>
             <Button
-              variant="outline"
+              variant="secondary"
               onClick={() => {
                 setDeleteDialogOpen(false);
                 setDeleteConfirmText('');
@@ -1328,11 +1328,11 @@ export function AccountSettingsPure({
           </DialogHeader>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
-              <Label htmlFor="deleteAccountConfirmText">
+              <UiField.Label htmlFor="deleteAccountConfirmText">
                 {t('settings.account.accountDeletion.typeToConfirm', {
                   email: currentUser?.email ?? '',
                 })}
-              </Label>
+              </UiField.Label>
               <Input
                 id="deleteAccountConfirmText"
                 value={deleteAccountConfirmText}
@@ -1348,7 +1348,7 @@ export function AccountSettingsPure({
           </div>
           <DialogFooter>
             <Button
-              variant="outline"
+              variant="secondary"
               onClick={() => {
                 setDeleteAccountDialogOpen(false);
                 setDeleteAccountConfirmText('');

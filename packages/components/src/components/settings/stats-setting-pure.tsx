@@ -2,7 +2,7 @@ import { lazy, Suspense, useMemo, useState, type ReactNode } from 'react';
 import NumberFlow from '@number-flow/react';
 import { useTranslation } from 'react-i18next';
 import { Coins, DollarSign, Share2 } from 'lucide-react';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { formatCompactNumber, formatUsdAmount } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
@@ -232,7 +232,7 @@ export function StatsSettingsView({
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  size="icon"
+                  icon
                   variant="ghost"
                   aria-label={t('workspace.usage.shareImage.action')}
                   onClick={() => setShareOpen(true)}

@@ -7,7 +7,7 @@ import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { getAppShareUrl } from '@/lib/app-location';
 import { Button } from '@lody/ui/button';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
+import { Select } from '@lody/ui/select';
 
 export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation();
@@ -51,21 +51,30 @@ export function WorkspaceJoinRequestsSettings({ workspaceId }: { workspaceId: st
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <Select value={expiresInDays} onValueChange={setExpiresInDays}>
-            <SelectTrigger
+          <Select.Root
+            items={[7, 30, 90].map((days) => ({
+              value: String(days),
+              label: t('joinRequest.admin.days', '{{count}} days', { count: days }),
+            }))}
+            value={expiresInDays}
+            onValueChange={(value) => {
+              if (value != null) setExpiresInDays(value);
+            }}
+          >
+            <Select.Trigger
               className="h-8 w-[5.5rem] text-xs"
               aria-label={t('joinRequest.admin.expiration', 'Link expiration')}
             >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
+              <Select.Value />
+            </Select.Trigger>
+            <Select.Content>
               {[7, 30, 90].map((days) => (
-                <SelectItem key={days} value={String(days)}>
+                <Select.Item key={days} value={String(days)}>
                   {t('joinRequest.admin.days', '{{count}} days', { count: days })}
-                </SelectItem>
+                </Select.Item>
               ))}
-            </SelectContent>
-          </Select>
+            </Select.Content>
+          </Select.Root>
           <Button
             variant={activeLink ? 'ghost' : 'primary'}
             size="small"

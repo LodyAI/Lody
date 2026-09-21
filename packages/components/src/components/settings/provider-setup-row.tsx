@@ -233,7 +233,7 @@ export function ProviderSetupRow({
           <Button
             type="button"
             variant="link"
-            size="sm"
+            size="small"
             className="h-auto p-0 text-xs"
             onClick={() => {
               void openExternalUrl(installDocsUrl);
