@@ -5,17 +5,8 @@ import { Spinner } from '@/ui/spinner';
 import type { ElectronUpdaterPhase } from '@lody/shared';
 import { useAtom } from 'jotai';
 import { Button } from '@lody/ui/button';
-<<<<<<< HEAD
-import { Switch } from '@/ui/switch';
-import { developerModeEnabledAtom, inboxBetaEnabledAtom } from '@/atoms/settings';
-=======
 import { Switch } from '@lody/ui/switch';
-import {
-  developerModeEnabledAtom,
-  inboxBetaEnabledAtom,
-  tasksBetaEnabledAtom,
-} from '@/atoms/settings';
->>>>>>> a1b67558 (feat(ui): add the @lody/ui choice controls (#568))
+import { developerModeEnabledAtom, inboxBetaEnabledAtom } from '@/atoms/settings';
 import { useElectronUpdaterState } from '@/hooks/use-electron-updater-state';
 import { OpenSourceAttributionsDialog } from '@/components/settings/open-source-attributions-dialog';
 import { JoinCommunityButton } from '@/components/settings/join-community-dialog';

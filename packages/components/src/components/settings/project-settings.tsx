@@ -50,7 +50,6 @@ import {
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useLocalProjectsAdmin } from '@/hooks/use-local-projects-admin';
 import { useOnlineMachineIds } from '@/hooks/use-machine-online-status';
-<<<<<<< HEAD
 import {
   useLocalProjectRemovalResultNotifications,
   usePendingLocalProjectRemovals,
@@ -65,28 +64,20 @@ import {
 } from '@/components/loro-app-sidebar';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { CompactRow, CompactSection } from './compact-layout';
-import { Button, type ButtonProps } from '@/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
-import { Checkbox } from '@/ui/checkbox';
-=======
 import { Button, type ButtonProps } from '@lody/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
 import { Checkbox } from '@lody/ui/checkbox';
->>>>>>> a1b67558 (feat(ui): add the @lody/ui choice controls (#568))
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/ui/dropdown-menu';
-<<<<<<< HEAD
-import { Switch } from '@/ui/switch';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/tabs';
-=======
 import { Switch } from '@lody/ui/switch';
->>>>>>> a1b67558 (feat(ui): add the @lody/ui choice controls (#568))
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/tabs';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
 import { getGitHubOwnerAvatarUrl } from '@/lib/github-avatar';
-import { Textarea } from '@/ui/textarea';
+import { Textarea } from '@lody/ui/textarea';
 
 import {
   AlertDialog,
@@ -842,7 +833,7 @@ function ProjectSettingsDesktop({
                   <Button
                     type="button"
                     variant="ghost"
-                    size="sm"
+                    size="small"
                     title={addFolderToMachineTitle}
                     className="h-7 shrink-0 gap-1 px-2 text-xs"
                     onClick={addToSelectedMachine}
@@ -854,7 +845,7 @@ function ProjectSettingsDesktop({
                   <Button
                     type="button"
                     variant="ghost"
-                    size="sm"
+                    size="small"
                     className="h-7 shrink-0 gap-1 px-2 text-xs"
                     onClick={onOpenGitHubSettings}
                   >
@@ -892,8 +883,8 @@ function ProjectSettingsDesktop({
                     {addToSelectedMachine ? (
                       <Button
                         type="button"
-                        variant="outline"
-                        size="sm"
+                        variant="secondary"
+                        size="small"
                         title={addFolderToMachineTitle}
                         className="h-7 gap-1 px-2 text-xs"
                         onClick={addToSelectedMachine}
@@ -1114,7 +1105,8 @@ function ProjectMasterRow({
             <Button
               type="button"
               variant="ghost"
-              size="icon"
+              size="small"
+              icon
               className="h-6 w-6 shrink-0"
               aria-label={t('sessions.moreActions', 'More actions')}
               onClick={(event) => event.stopPropagation()}
@@ -1182,7 +1174,8 @@ function ProjectAddMenu({
         <Button
           type="button"
           variant={variant ?? 'ghost'}
-          size={size ?? 'icon'}
+          size={size ?? 'small'}
+          icon
           className={className}
           aria-label={t('workspace.projects.addProjectMenu', 'Add project')}
           title={t('workspace.projects.addProjectMenu', 'Add project')}
@@ -1379,7 +1372,8 @@ function LocalProjectDetail({
                 <Button
                   type="button"
                   variant="ghost"
-                  size="icon"
+                  size="small"
+                  icon
                   className="h-6 w-6 shrink-0"
                   aria-label={t('sessions.copyPath', 'Copy path')}
                   onClick={() => copyProjectPath(rootPath, t)}
@@ -1390,7 +1384,8 @@ function LocalProjectDetail({
                   <Button
                     type="button"
                     variant="ghost"
-                    size="icon"
+                    size="small"
+                    icon
                     className="h-6 w-6 shrink-0"
                     aria-label={t('sidebar.localProjects.reveal', 'Reveal in file manager')}
                     onClick={() => revealProjectPath(rootPath, t)}
@@ -1481,7 +1476,7 @@ function LocalProjectDetail({
               <Button
                 type="button"
                 variant="destructive"
-                size="sm"
+                size="small"
                 disabled={removalState != null}
                 onClick={onRemove}
               >
@@ -1697,7 +1692,7 @@ function GithubProjectDetail({
           <Button
             type="button"
             variant="ghost"
-            size="sm"
+            size="small"
             className="h-7 shrink-0 gap-1 px-2 text-xs"
             onClick={onOpenGitHubSettings}
           >
@@ -2096,7 +2091,7 @@ export function ProjectHistoryImportPanel({
                     <Button
                       type="button"
                       variant="ghost"
-                      size="sm"
+                      size="small"
                       className={historyActionButtonClass}
                       disabled={state.isSyncing || state.isImporting}
                       onClick={() => {
@@ -2122,7 +2117,7 @@ export function ProjectHistoryImportPanel({
               <Button
                 type="button"
                 variant="ghost"
-                size="sm"
+                size="small"
                 className={historyActionButtonClass}
                 disabled={
                   state.selectedSessionIds.length === 0 || !canManageCatalog || !onImportHistory
@@ -2225,7 +2220,7 @@ export function ProjectHistoryImportPanel({
             {state.canSync ? (
               <Button
                 type="button"
-                size="sm"
+                size="small"
                 className="h-7 self-start"
                 disabled={state.isSyncing || state.isImporting || !onSyncHistory}
                 onClick={() => {
@@ -2321,7 +2316,7 @@ export function ProjectHistoryImportPanel({
                       <Button
                         type="button"
                         variant="ghost"
-                        size="sm"
+                        size="small"
                         className={historyActionButtonClass}
                         disabled={!canResolveConflict}
                         onClick={(event) => {

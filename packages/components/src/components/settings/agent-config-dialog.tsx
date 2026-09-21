@@ -68,11 +68,11 @@ import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-prog
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { Button } from '@lody/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/ui/collapsible';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
-import { Textarea } from '@/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
+import { Collapsible } from '@lody/ui/collapsible';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
+import { Textarea } from '@lody/ui/textarea';
+import { Select } from '@lody/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/tabs';
 import { EnvVarsTextarea, envVarsToText } from './env-vars-textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
@@ -3154,18 +3154,27 @@ function PresetPanel({
           )}
         >
           <div className="space-y-2">
-            <Select value={selectedBaseUrlOptionId} onValueChange={onBaseUrlOptionChange}>
-              <SelectTrigger className="h-9 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
+            <Select.Root
+              items={credentialMode.baseUrlOptions.map((option) => ({
+                value: option.id,
+                label: t(option.labelKey, option.labelDefault),
+              }))}
+              value={selectedBaseUrlOptionId}
+              onValueChange={(value) => {
+                if (value != null) onBaseUrlOptionChange(value);
+              }}
+            >
+              <Select.Trigger className="h-9 text-xs">
+                <Select.Value />
+              </Select.Trigger>
+              <Select.Content>
                 {credentialMode.baseUrlOptions.map((option) => (
-                  <SelectItem key={option.id} value={option.id} className="text-xs">
+                  <Select.Item key={option.id} value={option.id} className="text-xs">
                     {t(option.labelKey, option.labelDefault)}
-                  </SelectItem>
+                  </Select.Item>
                 ))}
-              </SelectContent>
-            </Select>
+              </Select.Content>
+            </Select.Root>
             {showCustomBaseUrl ? (
               <Input
                 id="preset-base-url"
@@ -3186,18 +3195,20 @@ function PresetPanel({
         </Field>
       ) : null}
 
-      <Collapsible>
-        <CollapsibleTrigger asChild>
-          <button
-            type="button"
-            className="group inline-flex items-center gap-1.5 rounded-md text-[11px] font-normal text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <ChevronDown className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180" />
-            {t('settings.agent.dialog.preset.showInjected', 'Show injected variables')}
-            <Lock className="h-3 w-3 opacity-70" aria-hidden="true" />
-          </button>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="mt-2">
+      <Collapsible.Root>
+        <Collapsible.Trigger
+          render={
+            <button
+              type="button"
+              className="group inline-flex items-center gap-1.5 rounded-md text-[11px] font-normal text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          }
+        >
+          <ChevronDown className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180" />
+          {t('settings.agent.dialog.preset.showInjected', 'Show injected variables')}
+          <Lock className="h-3 w-3 opacity-70" aria-hidden="true" />
+        </Collapsible.Trigger>
+        <Collapsible.Panel className="mt-2">
           <div className="rounded-md border border-border/60 bg-background/50">
             <dl className="divide-y divide-border/40 text-[11px]">
               {Object.entries(injectedEnv).map(([key, value]) => (
@@ -3218,8 +3229,8 @@ function PresetPanel({
               </div>
             </dl>
           </div>
-        </CollapsibleContent>
-      </Collapsible>
+        </Collapsible.Panel>
+      </Collapsible.Root>
     </div>
   );
 }
@@ -3241,9 +3252,9 @@ function Field({
     <div className="space-y-1.5">
       <div className="flex items-center gap-1.5">
         {icon && <span className="text-muted-foreground">{icon}</span>}
-        <Label htmlFor={htmlFor} className="text-xs font-normal">
+        <UiField.Label htmlFor={htmlFor} className="text-xs font-normal">
           {label}
-        </Label>
+        </UiField.Label>
       </div>
       {children}
       {hint && <p className="text-[11px] leading-snug text-muted-foreground">{hint}</p>}
@@ -3269,25 +3280,27 @@ function Section({
   action?: ReactNode;
 }) {
   return (
-    <Collapsible defaultOpen={defaultOpen}>
+    <Collapsible.Root defaultOpen={defaultOpen}>
       <div className="flex h-9 items-center gap-1 rounded-md border border-border/60 bg-card/40 pr-1 hover:bg-card/70">
-        <CollapsibleTrigger asChild>
-          <button
-            type="button"
-            className="group flex h-full min-w-0 flex-1 items-center gap-2 rounded-md px-3 text-left text-sm font-normal text-foreground/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <ChevronDown className="h-3 w-3 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
-            <span className="min-w-0 truncate">{title}</span>
-            {typeof count === 'number' && count > 0 ? (
-              <span className="ml-auto rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground">
-                {count}
-              </span>
-            ) : null}
-          </button>
-        </CollapsibleTrigger>
+        <Collapsible.Trigger
+          render={
+            <button
+              type="button"
+              className="group flex h-full min-w-0 flex-1 items-center gap-2 rounded-md px-3 text-left text-sm font-normal text-foreground/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          }
+        >
+          <ChevronDown className="h-3 w-3 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
+          <span className="min-w-0 truncate">{title}</span>
+          {typeof count === 'number' && count > 0 ? (
+            <span className="ml-auto rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground">
+              {count}
+            </span>
+          ) : null}
+        </Collapsible.Trigger>
         {action}
       </div>
-      <CollapsibleContent className="mt-2">
+      <Collapsible.Panel className="mt-2">
         <div className="pl-1">
           {disabled ? (
             <p className="px-1 py-2 text-xs text-muted-foreground">{disabledHint}</p>
@@ -3295,8 +3308,8 @@ function Section({
             children
           )}
         </div>
-      </CollapsibleContent>
-    </Collapsible>
+      </Collapsible.Panel>
+    </Collapsible.Root>
   );
 }
 
@@ -3345,7 +3358,7 @@ function TitleGenerationFields({
               key={sel.configId}
               className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center"
             >
-              <Label className="text-xs text-muted-foreground">{sel.label}</Label>
+              <UiField.Label className="text-xs text-muted-foreground">{sel.label}</UiField.Label>
               <Button
                 type="button"
                 variant="secondary"
@@ -3366,22 +3379,25 @@ function TitleGenerationFields({
             key={sel.configId}
             className="grid gap-2 sm:grid-cols-[120px_minmax(0,1fr)] sm:items-center"
           >
-            <Label className="text-xs text-muted-foreground">{sel.label}</Label>
-            <Select
+            <UiField.Label className="text-xs text-muted-foreground">{sel.label}</UiField.Label>
+            <Select.Root
+              items={sel.options}
               value={(stored as string | undefined) ?? sel.currentValue}
-              onValueChange={(value) => onChange(sel.configId, value)}
+              onValueChange={(value) => {
+                if (value != null) onChange(sel.configId, value);
+              }}
             >
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
+              <Select.Trigger className="h-8 text-xs">
+                <Select.Value />
+              </Select.Trigger>
+              <Select.Content>
                 {sel.options.map((opt) => (
-                  <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                  <Select.Item key={opt.value} value={opt.value} className="text-xs">
                     {opt.label}
-                  </SelectItem>
+                  </Select.Item>
                 ))}
-              </SelectContent>
-            </Select>
+              </Select.Content>
+            </Select.Root>
           </div>
         );
       })}

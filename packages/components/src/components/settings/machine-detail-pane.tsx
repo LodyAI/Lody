@@ -25,7 +25,7 @@ import {
   Users,
 } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
-import { Badge } from '@/ui/badge';
+import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Switch } from '@lody/ui/switch';
@@ -358,12 +358,12 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
   const metaBadges = (
     <>
       {isLocal && (
-        <Badge variant="secondary" className={MACHINE_META_PILL_CLASS}>
+        <Badge className={MACHINE_META_PILL_CLASS}>
           {t('workspace.machines.thisDevice', 'This device')}
         </Badge>
       )}
       {ownerName && !isOwn && (
-        <Badge variant="secondary" className={cn('gap-1', MACHINE_META_PILL_CLASS)}>
+        <Badge className={cn('gap-1', MACHINE_META_PILL_CLASS)}>
           <UserRound className="h-2.5 w-2.5" />
           {ownerName}
         </Badge>
@@ -379,11 +379,11 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
           )}
         />
       )}
-      <Badge variant="secondary" className={cn('gap-1', MACHINE_META_PILL_CLASS)}>
+      <Badge className={cn('gap-1', MACHINE_META_PILL_CLASS)}>
         <Laptop className="h-2.5 w-2.5" />
         {machine.os || '-'}
       </Badge>
-      <Badge variant="secondary" className={cn('font-mono', MACHINE_META_PILL_CLASS)}>
+      <Badge className={cn('font-mono', MACHINE_META_PILL_CLASS)}>
         {machine.cliVersion ? `v${machine.cliVersion}` : t('machines.never', 'Never')}
       </Badge>
     </>

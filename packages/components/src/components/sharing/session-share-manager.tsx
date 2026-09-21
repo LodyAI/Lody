@@ -4,8 +4,8 @@ import { Check, Copy, Globe } from 'lucide-react';
 import { SHARE_LIMITS } from '@lody/shared/session-sharing';
 import type { useSessionShareManagement } from '@/hooks/use-session-share-management';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
-import { Checkbox } from '@/ui/checkbox';
+import { Button } from '@lody/ui/button';
+import { Checkbox } from '@lody/ui/checkbox';
 import { Progress } from '@/ui/progress';
 import {
   AlertDialog,
@@ -78,7 +78,7 @@ function ShareLinkField({ url, onCopy, busy }: { url: string; onCopy: () => void
       <Button
         type="button"
         variant="ghost"
-        size="sm"
+        size="small"
         disabled={busy}
         onClick={onCopy}
         aria-label={t('settings.shares.copy', 'Copy link')}
@@ -256,7 +256,8 @@ export function SessionShareManager(props: SessionShareManagerProps) {
         {children.length > 0 && canPublish && !selectionLocked && (
           <label className="-mx-2 flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-hover has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60">
             <Checkbox
-              checked={includeChildren}
+              checked={includeChildren === true}
+              indeterminate={includeChildren === 'indeterminate'}
               disabled={busy}
               onCheckedChange={(checked) => toggleChildren(checked !== false)}
             />
@@ -304,8 +305,8 @@ export function SessionShareManager(props: SessionShareManagerProps) {
             </Note>
             <Button
               type="button"
-              variant="outline"
-              size="sm"
+              variant="secondary"
+              size="small"
               disabled={busy}
               onClick={() => setConfirming({ kind: 'reset', revision: entry.revision })}
             >
@@ -339,7 +340,7 @@ export function SessionShareManager(props: SessionShareManagerProps) {
           {entry?.canRevoke && (
             <Button
               variant="ghost"
-              size="sm"
+              size="small"
               disabled={busy}
               className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
               onClick={() => setConfirming({ kind: 'revoke', revision: entry.revision })}
@@ -348,7 +349,7 @@ export function SessionShareManager(props: SessionShareManagerProps) {
             </Button>
           )}
           <div className="flex-1" />
-          <Button size="sm" disabled={busy || !result?.url} onClick={() => void props.onCopy()}>
+          <Button size="small" disabled={busy || !result?.url} onClick={() => void props.onCopy()}>
             {t('settings.shares.copy', 'Copy link')}
           </Button>
         </>
@@ -358,7 +359,7 @@ export function SessionShareManager(props: SessionShareManagerProps) {
         {entry?.canRevoke && (
           <Button
             variant="ghost"
-            size="sm"
+            size="small"
             disabled={busy}
             className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
             onClick={() => setConfirming({ kind: 'revoke', revision: entry.revision })}
@@ -368,23 +369,28 @@ export function SessionShareManager(props: SessionShareManagerProps) {
         )}
         <div className="flex-1" />
         {active && props.shareLink && (
-          <Button variant="outline" size="sm" disabled={busy} onClick={() => void props.onCopy()}>
+          <Button
+            variant="secondary"
+            size="small"
+            disabled={busy}
+            onClick={() => void props.onCopy()}
+          >
             {t('settings.shares.copy', 'Copy link')}
           </Button>
         )}
         {!canPublish ? (
-          <Button variant="outline" size="sm" onClick={props.onClose}>
+          <Button variant="secondary" size="small" onClick={props.onClose}>
             {t('common.close', 'Close')}
           </Button>
         ) : (
           <>
             {!active && (
-              <Button variant="ghost" size="sm" disabled={busy} onClick={props.onClose}>
+              <Button variant="ghost" size="small" disabled={busy} onClick={props.onClose}>
                 {t('common.cancel', 'Cancel')}
               </Button>
             )}
             <Button
-              size="sm"
+              size="small"
               disabled={busy || (!props.canCapture && !conflict)}
               onClick={() => (conflict ? props.onDiscard() : void props.onPublish())}
             >

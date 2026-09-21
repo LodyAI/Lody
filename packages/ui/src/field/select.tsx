@@ -132,7 +132,7 @@ const sizeStyles = {
  * does, and renders the chevron itself so a caller never draws one.
  */
 export const SelectTrigger = forwardRef<HTMLButtonElement, SelectTriggerProps>(
-  function SelectTrigger({ size = 'medium', className, children, ...rest }, ref) {
+  function SelectTrigger({ size = 'medium', className, children, onKeyDownCapture, ...rest }, ref) {
     const ariaInvalid = rest['aria-invalid'];
     return (
       <BaseSelect.Trigger
@@ -140,6 +140,34 @@ export const SelectTrigger = forwardRef<HTMLButtonElement, SelectTriggerProps>(
         nativeButton
         data-size={size}
         {...rest}
+        onKeyDownCapture={(event) => {
+          onKeyDownCapture?.(event);
+          if (
+            event.defaultPrevented ||
+            event.currentTarget.getAttribute('aria-expanded') !== 'true' ||
+            !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)
+          ) {
+            return;
+          }
+
+          // A pointer-opened Base UI Select leaves focus on its trigger while
+          // highlighting the selected row. Its trigger navigation then treats
+          // every key as the first key into the list, so the highlight cannot
+          // advance. Hand the keyboard to the row Base UI already highlighted
+          // before its bubble handler computes the next row.
+          const listId = event.currentTarget.getAttribute('aria-controls');
+          const list = listId ? document.getElementById(listId) : null;
+          const options = list
+            ? [...list.querySelectorAll<HTMLElement>('[role="option"]:not([data-disabled])')]
+            : [];
+          const target =
+            event.key === 'Home'
+              ? options[0]
+              : event.key === 'End'
+                ? options.at(-1)
+                : list?.querySelector<HTMLElement>('[role="option"][data-highlighted]');
+          target?.focus({ preventScroll: true });
+        }}
         className={(state) =>
           appendClassName(
             stylex.props(

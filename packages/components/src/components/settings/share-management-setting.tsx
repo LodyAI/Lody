@@ -23,7 +23,7 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from '@/ui/alert-dialog';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { settingContainerClass } from '.';
 
 export function ShareManagementSetting() {
@@ -156,8 +156,8 @@ function ShareManagementList({
                   <div className="flex flex-wrap gap-2">
                     {sourceSession && workspaceSlug && (
                       <Button
-                        variant="outline"
-                        size="sm"
+                        variant="secondary"
+                        size="small"
                         onClick={() => openSession(sourceSession.id)}
                       >
                         {t('settings.shares.viewConversation', 'View conversation')}
@@ -165,8 +165,8 @@ function ShareManagementList({
                     )}
                     {hasSecret && (
                       <Button
-                        variant="outline"
-                        size="sm"
+                        variant="secondary"
+                        size="small"
                         disabled={actions.busy}
                         onClick={() => void actions.copy(entry)}
                       >
@@ -175,8 +175,8 @@ function ShareManagementList({
                     )}
                     {entry.canManage && sourceSession && (
                       <Button
-                        variant="outline"
-                        size="sm"
+                        variant="secondary"
+                        size="small"
                         disabled={actions.busy}
                         onClick={() => setEditor(entry)}
                       >
@@ -185,8 +185,8 @@ function ShareManagementList({
                     )}
                     {entry.canManage && (
                       <Button
-                        variant="outline"
-                        size="sm"
+                        variant="secondary"
+                        size="small"
                         disabled={actions.busy}
                         onClick={() => setConfirmation({ kind: 'reset', entry })}
                       >
@@ -195,8 +195,8 @@ function ShareManagementList({
                     )}
                     {entry.canRevoke && (
                       <Button
-                        variant="outline"
-                        size="sm"
+                        variant="secondary"
+                        size="small"
                         disabled={actions.busy}
                         onClick={() => setConfirmation({ kind: 'revoke', entry })}
                       >
@@ -210,16 +210,16 @@ function ShareManagementList({
           </ul>
           <div className="flex items-center justify-end gap-2">
             <Button
-              variant="outline"
-              size="sm"
+              variant="secondary"
+              size="small"
               disabled={cursors.length === 1}
               onClick={() => setCursors((value) => value.slice(0, -1))}
             >
               {t('settings.shares.previous', 'Previous')}
             </Button>
             <Button
-              variant="outline"
-              size="sm"
+              variant="secondary"
+              size="small"
               disabled={result.isDone}
               onClick={() => setCursors((value) => [...value, result.continueCursor])}
             >

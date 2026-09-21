@@ -177,7 +177,7 @@ describe('static publication client lifecycle', () => {
 
   it('blocks upload and publication on storage failure and reuses the deployment on retry', async () => {
     await render();
-    const write = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+    const write = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
       throw new Error('Storage disabled');
     });
     try {

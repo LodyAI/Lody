@@ -1,13 +1,13 @@
 import type { FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { CheckCircle2, KeyRound } from 'lucide-react';
+import { KeyRound } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 
-import { Alert, AlertDescription } from '@/ui/alert';
+import { Alert } from '@lody/ui/alert';
 import { Button } from '@lody/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/ui/card';
 import { Field as UiField } from '@lody/ui/field';
-import { PasswordInput } from '@/ui/password-input';
+import { PasswordInput } from '@lody/ui/password-input';
 
 export interface ResetPasswordPageProps {
   password: string;
@@ -70,23 +70,22 @@ export function ResetPasswordPage({
             aria-busy={submitting}
           >
             {!tokenAvailable ? (
-              <Alert variant="destructive">
-                <AlertDescription>
+              <Alert.Root tone="danger">
+                <Alert.Description>
                   {t(
                     'resetPassword.missingToken',
                     'This reset link is missing a token. Request a new password reset email.'
                   )}
-                </AlertDescription>
-              </Alert>
+                </Alert.Description>
+              </Alert.Root>
             ) : null}
 
             {success ? (
-              <Alert>
-                <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-                <AlertDescription>
+              <Alert.Root tone="success">
+                <Alert.Description>
                   {t('resetPassword.success', 'Password reset. You can now sign in.')}
-                </AlertDescription>
-              </Alert>
+                </Alert.Description>
+              </Alert.Root>
             ) : null}
 
             <div className="grid gap-2">
@@ -104,8 +103,10 @@ export function ResetPasswordPage({
                   'resetPassword.passwordPlaceholder',
                   'Letters and numbers, 8+ characters'
                 )}
-                showPasswordLabel={t('resetPassword.showPassword', 'Show password')}
-                hidePasswordLabel={t('resetPassword.hidePassword', 'Hide password')}
+                labels={{
+                  show: t('resetPassword.showPassword', 'Show password'),
+                  hide: t('resetPassword.hidePassword', 'Hide password'),
+                }}
               />
             </div>
 
@@ -120,15 +121,17 @@ export function ResetPasswordPage({
                 value={confirmPassword}
                 onChange={(event) => onConfirmPasswordChange(event.target.value)}
                 disabled={submitting || success || !tokenAvailable}
-                showPasswordLabel={t('resetPassword.showPassword', 'Show password')}
-                hidePasswordLabel={t('resetPassword.hidePassword', 'Hide password')}
+                labels={{
+                  show: t('resetPassword.showPassword', 'Show password'),
+                  hide: t('resetPassword.hidePassword', 'Hide password'),
+                }}
               />
             </div>
 
             {submitError !== null && submitError.length > 0 ? (
-              <Alert variant="destructive">
-                <AlertDescription id="reset-password-error">{submitError}</AlertDescription>
-              </Alert>
+              <Alert.Root tone="danger">
+                <Alert.Description id="reset-password-error">{submitError}</Alert.Description>
+              </Alert.Root>
             ) : null}
 
             <Button

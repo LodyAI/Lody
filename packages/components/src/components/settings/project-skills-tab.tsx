@@ -15,7 +15,7 @@ import {
   type ProjectSkillsStatus,
 } from '@/hooks/use-project-skills';
 import { Button } from '@lody/ui/button';
-import { Input } from '@/ui/input';
+import { Input } from '@lody/ui/input';
 
 /**
  * Desktop "Skills" sub-tab for a project detail pane (local + GitHub).

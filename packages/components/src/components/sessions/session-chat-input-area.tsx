@@ -13,7 +13,7 @@ import {
 import { useAtomValue } from 'jotai';
 import { ArrowUp } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
 import { useSessionAgentRole, type SessionAgentRoleControl } from '@/hooks/use-session-agent-role';
 import { buildAgentRoleFormValueFromRunConfig } from '@/lib/agent-role-form';
@@ -2502,7 +2502,7 @@ export const SessionChatInputArea = memo(
           void onStop();
         }}
         variant="ghost"
-        size="icon"
+        icon
         aria-label={t('sessions.stop')}
         className={cn(
           primaryActionSizeClassName,
@@ -2518,7 +2518,7 @@ export const SessionChatInputArea = memo(
     ) : (
       <Button
         type="button"
-        size="icon"
+        icon
         variant="ghost"
         onClick={() => void sendMessage()}
         disabled={!hasSendableContent || isSendActionDisabled}

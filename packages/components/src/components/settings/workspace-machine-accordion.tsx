@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { MachineViewMeta } from '@lody/shared';
 import { Bot, ChevronDown, Folder, Laptop, LockKeyhole } from 'lucide-react';
-import { Badge } from '@/ui/badge';
+import { Badge } from '@lody/ui/badge';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { UserAvatar } from '@/components/user-avatar';
 import { cn } from '@/lib/utils';
@@ -41,21 +41,21 @@ export function WorkspaceMachineAccordionSummary({
       )}
     >
       {isLocal ? (
-        <Badge variant="secondary" className={MACHINE_META_PILL_CLASS}>
+        <Badge className={MACHINE_META_PILL_CLASS}>
           {t('workspace.machines.thisDevice', 'This device')}
         </Badge>
       ) : null}
       {isPrivate ? (
-        <Badge variant="secondary" className={cn('gap-1', MACHINE_META_PILL_CLASS)}>
+        <Badge className={cn('gap-1', MACHINE_META_PILL_CLASS)}>
           <LockKeyhole className="h-2.5 w-2.5" aria-hidden />
           {t('workspace.machines.private', 'Private')}
         </Badge>
       ) : null}
-      <Badge variant="secondary" className={cn('gap-1', MACHINE_META_PILL_CLASS)}>
+      <Badge className={cn('gap-1', MACHINE_META_PILL_CLASS)}>
         <Laptop className="h-2.5 w-2.5" aria-hidden />
         <span className="max-w-24 truncate">{machine.os || '-'}</span>
       </Badge>
-      <Badge variant="secondary" className={cn('font-mono', MACHINE_META_PILL_CLASS)}>
+      <Badge className={cn('font-mono', MACHINE_META_PILL_CLASS)}>
         {machine.cliVersion ? `v${machine.cliVersion}` : t('machines.never', 'Never')}
       </Badge>
       <span className="inline-flex shrink-0 items-center gap-1 px-1">

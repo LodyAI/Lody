@@ -36,9 +36,9 @@ import {
   type ShareAttachmentAccess,
 } from './share-attachments';
 import { SessionShareErrorBoundary } from './session-share-error-boundary';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { TabPillStrip, TAB_PILL_ACTIVE_CLASS } from '@/components/shared/tab-pill-strip';
-import { Sheet, SheetContent, SheetTitle } from '@/ui/sheet';
+import { Drawer } from '@lody/ui/drawer';
 import { cn } from '@/lib/utils';
 import { clamp } from '@/lib/clamp';
 import { useTheme } from '@/theme-provider';
@@ -60,7 +60,7 @@ function ShareLanguageToggle() {
     <Button
       type="button"
       variant="ghost"
-      size="icon"
+      icon
       className="h-8 w-8 shrink-0 text-muted-foreground"
       aria-label={label}
       title={label}
@@ -95,7 +95,7 @@ function ShareThemeToggle() {
     <Button
       type="button"
       variant="ghost"
-      size="icon"
+      icon
       className="h-8 w-8 shrink-0 text-muted-foreground"
       aria-label={label}
       aria-pressed={dark}
@@ -427,7 +427,7 @@ export function SessionShareSurface(props: {
                   the tree in place, the narrow one has no room and opens it as
                   a drawer. CSS decides, so neither can flash the wrong one. */}
               <Button
-                size="icon"
+                icon
                 variant="ghost"
                 className="hidden h-8 w-8 sm:inline-flex"
                 aria-expanded={treeVisible}
@@ -437,7 +437,7 @@ export function SessionShareSurface(props: {
                 <PanelLeft className="h-4 w-4" />
               </Button>
               <Button
-                size="icon"
+                icon
                 variant="ghost"
                 className="h-8 w-8 sm:hidden"
                 aria-expanded={treeSheetOpen}
@@ -489,55 +489,56 @@ export function SessionShareSurface(props: {
             </div>
           </nav>
         )}
-        {hasTree && treeVisible && (
-          // A 12px grab area straddling the tree's border, with a 2px line as the
-          // visible affordance. Absolute, so the columns keep their own widths and
-          // the handle cannot claim layout space of its own. Arrow keys step it for
-          // a visitor who is not dragging anything.
-          <div
-            role="separator"
-            aria-orientation="vertical"
-            aria-label={t('sharing.resizeTree', 'Resize the conversation tree')}
-            aria-valuenow={treeWidth}
-            aria-valuemin={TREE_MIN_WIDTH}
-            aria-valuemax={treeMaxWidth}
-            tabIndex={0}
-            style={{ left: treeWidth }}
-            className={cn(
-              'absolute inset-y-0 z-20 hidden w-3 -translate-x-1/2 cursor-col-resize sm:block',
-              'after:absolute after:inset-y-0 after:left-[5px] after:w-[2px] after:transition-colors',
-              'focus-visible:outline-hidden focus-visible:after:bg-foreground/40',
-              resizingTree ? 'after:bg-foreground/30' : 'hover:after:bg-foreground/20'
-            )}
-            onPointerDown={(event) => {
-              if (event.button !== 0) return;
-              event.preventDefault();
-              try {
-                event.currentTarget.setPointerCapture(event.pointerId);
-              } catch {
-                // Capture is unavailable in some environments; the drag still tracks moves.
-              }
-              resizeRef.current = {
-                pointerId: event.pointerId,
-                startX: event.clientX,
-                startWidth: treeWidth,
-              };
-              setResizingTree(true);
-            }}
-            onPointerMove={(event) => {
-              const { pointerId, startX, startWidth } = resizeRef.current;
-              if (pointerId !== event.pointerId) return;
-              fitTreeWidth(startWidth + (event.clientX - startX));
-            }}
-            onPointerUp={(event) => endTreeResize(event.currentTarget, event.pointerId)}
-            onPointerCancel={(event) => endTreeResize(event.currentTarget, event.pointerId)}
-            onKeyDown={(event) => {
-              if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
-              event.preventDefault();
-              fitTreeWidth(treeWidth + (event.key === 'ArrowLeft' ? -16 : 16));
-            }}
-          />
-        )}
+        {hasTree &&
+          treeVisible && (
+            // A 12px grab area straddling the tree's border, with a 2px line as the
+            // visible affordance. Absolute, so the columns keep their own widths and
+            // the handle cannot claim layout space of its own. Arrow keys step it for
+            // a visitor who is not dragging anything.
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              aria-label={t('sharing.resizeTree', 'Resize the conversation tree')}
+              aria-valuenow={treeWidth}
+              aria-valuemin={TREE_MIN_WIDTH}
+              aria-valuemax={treeMaxWidth}
+              tabIndex={0}
+              style={{ left: treeWidth }}
+              className={cn(
+                'absolute inset-y-0 z-20 hidden w-3 -translate-x-1/2 cursor-col-resize sm:block',
+                'after:absolute after:inset-y-0 after:left-[5px] after:w-[2px] after:transition-colors',
+                'focus-visible:outline-hidden focus-visible:after:bg-foreground/40',
+                resizingTree ? 'after:bg-foreground/30' : 'hover:after:bg-foreground/20'
+              )}
+              onPointerDown={(event) => {
+                if (event.button !== 0) return;
+                event.preventDefault();
+                try {
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                } catch {
+                  // Capture is unavailable in some environments; the drag still tracks moves.
+                }
+                resizeRef.current = {
+                  pointerId: event.pointerId,
+                  startX: event.clientX,
+                  startWidth: treeWidth,
+                };
+                setResizingTree(true);
+              }}
+              onPointerMove={(event) => {
+                const { pointerId, startX, startWidth } = resizeRef.current;
+                if (pointerId !== event.pointerId) return;
+                fitTreeWidth(startWidth + (event.clientX - startX));
+              }}
+              onPointerUp={(event) => endTreeResize(event.currentTarget, event.pointerId)}
+              onPointerCancel={(event) => endTreeResize(event.currentTarget, event.pointerId)}
+              onKeyDown={(event) => {
+                if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+                event.preventDefault();
+                fitTreeWidth(treeWidth + (event.key === 'ArrowLeft' ? -16 : 16));
+              }}
+            />
+          )}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <ShareConversationPane
             key={panes.main.id}
@@ -554,18 +555,18 @@ export function SessionShareSurface(props: {
         </div>
       </div>
       {hasTree && (
-        <Sheet open={treeSheetOpen} onOpenChange={setTreeSheetOpen}>
-          <SheetContent
-            side="left"
+        <Drawer.Root side="start" open={treeSheetOpen} onOpenChange={setTreeSheetOpen}>
+          <Drawer.Content
+            side="start"
             aria-label={t('sharing.conversationTree', 'Conversation tree')}
             className="w-72 overflow-y-auto p-2 pt-12 sm:max-w-xs"
           >
-            <SheetTitle className="sr-only">
+            <Drawer.Title className="sr-only">
               {t('sharing.conversationTree', 'Conversation tree')}
-            </SheetTitle>
+            </Drawer.Title>
             {treeRows()}
-          </SheetContent>
-        </Sheet>
+          </Drawer.Content>
+        </Drawer.Root>
       )}
     </main>
   );

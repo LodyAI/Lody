@@ -207,7 +207,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/ui/alert-dialog';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { stripRecommended } from '@/components/shared/acp-selector-options';
 import { DiffViewer } from '@/ui/diff-viewer/diff-viewer';
 import { Skeleton } from '@lody/ui/skeleton';
@@ -2164,7 +2164,7 @@ export const SessionChatStreamView = forwardRef<
                 <ConversationColumn className="flex justify-end">
                   <Button
                     variant="secondary"
-                    size="icon"
+                    icon
                     className="pointer-events-auto rounded-full border-[0.5px] border-border bg-white text-foreground shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.04)] hover:bg-white dark:bg-secondary dark:text-secondary-foreground dark:shadow-none"
                     onClick={scrollToBottom}
                     aria-label={t('sessions.scrollToLatest')}
@@ -3345,7 +3345,7 @@ const UserMessageRowView = ({
                     <Button
                       type="button"
                       variant="ghost"
-                      size="icon"
+                      icon
                       className={cn(
                         'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground transition-opacity',
                         !isMobile &&
@@ -3371,7 +3371,7 @@ const UserMessageRowView = ({
                     <Button
                       type="button"
                       variant="ghost"
-                      size="icon"
+                      icon
                       className={cn(
                         'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground transition-opacity',
                         !isMobile &&
@@ -3405,7 +3405,7 @@ const UserMessageRowView = ({
                   <Button
                     type="button"
                     variant="ghost"
-                    size="icon"
+                    icon
                     className={cn(
                       'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground transition-opacity',
                       !isMobile &&
@@ -4184,7 +4184,7 @@ const AssistantForkButton = ({
     <Button
       type="button"
       variant="ghost"
-      size="icon"
+      icon
       className={cn(
         'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground',
         className
@@ -4375,7 +4375,7 @@ export const AssistantTurnFooter = ({
                       <Button
                         type="button"
                         variant="ghost"
-                        size="icon"
+                        icon
                         className="h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground"
                         onClick={() => copyContext?.(message.id)}
                         aria-label={t('sessions.copyContextMarkdown', 'Copy context as Markdown')}
@@ -4395,7 +4395,7 @@ export const AssistantTurnFooter = ({
                       <Button
                         type="button"
                         variant="ghost"
-                        size="icon"
+                        icon
                         className="h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground"
                         onClick={() => {
                           void handleCopy();
@@ -4458,8 +4458,8 @@ export const AssistantTurnFooter = ({
               <Button
                 key={action.id}
                 type="button"
-                variant={isAccent ? 'default' : 'outline'}
-                size="sm"
+                variant={isAccent ? 'primary' : 'secondary'}
+                size="small"
                 className={cn(
                   'h-8 gap-1.5 rounded-md px-3 text-xs font-medium transition-colors',
                   isAccent
@@ -5955,7 +5955,7 @@ const UserPlainTextBlock = ({
             <Button
               type="button"
               variant="ghost"
-              size="sm"
+              size="small"
               className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
               onClick={() => setIsExpanded((prev) => !prev)}
             >
@@ -6234,7 +6234,7 @@ const PlanPanel = ({
               <Button
                 type="button"
                 variant="ghost"
-                size="icon"
+                icon
                 className="-mr-1 h-6 w-6 shrink-0 text-muted-foreground hover:bg-hover hover:text-foreground"
                 onClick={() => {
                   void handleCopy();

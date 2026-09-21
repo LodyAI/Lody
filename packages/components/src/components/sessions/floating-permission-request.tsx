@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/ui/card';
 import { ScrollArea } from '@/ui/scroll-area';
 import { cn } from '@/lib/utils';
@@ -279,7 +279,7 @@ export function PermissionRequestCard({
             return (
               <Button
                 key={option.optionId}
-                size="sm"
+                size="small"
                 type="button"
                 disabled={disabled}
                 variant="ghost"

@@ -2,8 +2,8 @@ import { useCallback, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { cn } from '@/lib/utils';
-import { Label } from '@/ui/label';
-import { Textarea, type TextareaProps } from '@/ui/textarea';
+import { Field as UiField } from '@lody/ui/field';
+import { Textarea, type TextareaProps } from '@lody/ui/textarea';
 
 /**
  * The shared grammar of the settings editors.
@@ -54,9 +54,9 @@ export function Field({
     <div className="space-y-1.5">
       <div className="flex items-center gap-1.5">
         {icon ? <span className="text-muted-foreground">{icon}</span> : null}
-        <Label htmlFor={htmlFor} className="text-xs font-normal">
+        <UiField.Label htmlFor={htmlFor} className="text-xs font-normal">
           {label}
-        </Label>
+        </UiField.Label>
       </div>
       {children}
       {hint ? <p className="text-[11px] leading-snug text-muted-foreground">{hint}</p> : null}

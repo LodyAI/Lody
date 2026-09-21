@@ -11,12 +11,12 @@ import {
   type PromptShortcutScope,
 } from '@lody/shared/prompt-shortcuts/model';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
-import { Textarea } from '@/ui/textarea';
-import { Label } from '@/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger } from '@/ui/select';
-import { Switch } from '@/ui/switch';
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Textarea } from '@lody/ui/textarea';
+import { Field as UiField } from '@lody/ui/field';
+import { Select } from '@lody/ui/select';
+import { Switch } from '@lody/ui/switch';
 import type { PersistedMentionRange } from '@/components/mentions/mention-persistence';
 import {
   shortcutMentionRanges,
@@ -344,9 +344,9 @@ export function PromptShortcutForm({
           <div className="space-y-2 rounded-lg border border-border/70 bg-card/60 px-3 py-2.5">
             <div className="flex items-center justify-between gap-4">
               <div className="min-w-0">
-                <Label htmlFor={`${fieldId}-share`} className="text-sm">
+                <UiField.Label htmlFor={`${fieldId}-share`} className="text-sm">
                   {t('settings.promptShortcuts.share', 'Share with workspace')}
-                </Label>
+                </UiField.Label>
                 <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
                   {t(
                     'settings.promptShortcuts.shareHint',
@@ -378,10 +378,10 @@ export function PromptShortcutForm({
       </div>
 
       <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-border/60 px-5 py-3">
-        <Button type="button" variant="outline" size="sm" disabled={saving} onClick={onCancel}>
+        <Button type="button" variant="secondary" size="small" disabled={saving} onClick={onCancel}>
           {t('common.cancel', 'Cancel')}
         </Button>
-        <Button type="submit" size="sm" disabled={saving || blocked}>
+        <Button type="submit" size="small" disabled={saving || blocked}>
           {saving ? <Spinner className="h-3.5 w-3.5" aria-hidden="true" /> : null}
           {isNew ? t('settings.promptShortcuts.create', 'Create') : t('common.save', 'Save')}
         </Button>
@@ -424,11 +424,17 @@ function ScopeSelect({
       ? [...options, { value, label: fallbackLabel || value }]
       : options;
   return (
-    <Select
+    <Select.Root
+      items={[
+        { value: SHORTCUT_SCOPE_NONE, label: t('settings.promptShortcuts.none', 'None') },
+        ...entries,
+      ]}
       value={value || SHORTCUT_SCOPE_NONE}
-      onValueChange={(next) => onChange(next === SHORTCUT_SCOPE_NONE ? '' : next)}
+      onValueChange={(next) => {
+        if (next != null) onChange(next === SHORTCUT_SCOPE_NONE ? '' : next);
+      }}
     >
-      <SelectTrigger id={id} className="h-9 gap-1.5 text-xs" aria-label={label}>
+      <Select.Trigger id={id} className="h-9 gap-1.5 text-xs" aria-label={label}>
         {/* Not a <span>: the trigger line-clamps its direct span children, which
             turns a flex row into a stacked box. The axis names itself here
             because these three sit inline above the prompt with no field label
@@ -441,17 +447,17 @@ function ScopeSelect({
               t('settings.promptShortcuts.none', 'None')}
           </span>
         </div>
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value={SHORTCUT_SCOPE_NONE}>
+      </Select.Trigger>
+      <Select.Content>
+        <Select.Item value={SHORTCUT_SCOPE_NONE}>
           {t('settings.promptShortcuts.none', 'None')}
-        </SelectItem>
+        </Select.Item>
         {entries.map((option) => (
-          <SelectItem key={option.value} value={option.value}>
+          <Select.Item key={option.value} value={option.value}>
             {option.label}
-          </SelectItem>
+          </Select.Item>
         ))}
-      </SelectContent>
-    </Select>
+      </Select.Content>
+    </Select.Root>
   );
 }

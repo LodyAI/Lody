@@ -9,19 +9,10 @@ import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useResolvedTheme } from '@/theme-provider';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui/dialog';
-<<<<<<< HEAD
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Slider } from '@/ui/slider';
 import { copyShareImage, exportShareImage } from '@/lib/share-image-export';
-=======
-import { Field as UiField } from '@lody/ui/field';
-import { Input } from '@lody/ui/input';
-import { Button } from '@lody/ui/button';
-import { copyChatShareImage, exportChatShareImage } from '@/lib/chat-share-image-export';
-import { Switch } from '@lody/ui/switch';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
->>>>>>> a1b67558 (feat(ui): add the @lody/ui choice controls (#568))
 import {
   ChatShareCard,
   CHAT_SHARE_BACKDROPS,
@@ -558,12 +549,12 @@ export function ChatShareImageDialog({
   // at the default size the two buttons are the only `text-sm` thing in it. The
   // drawer keeps the default size instead — there they are the primary touch
   // targets, and `h-9` is already under the 44pt guidance without shrinking it.
-  const actionSize = isMobile ? 'default' : 'sm';
+  const actionSize = isMobile ? 'medium' : 'small';
   const iconSize = isMobile ? 'size-4' : 'size-3.5';
 
   const copyButton = (
     <Button
-      variant="outline"
+      variant="secondary"
       size={actionSize}
       onClick={() => void handleCopy()}
       disabled={exporting || !hasMessages}

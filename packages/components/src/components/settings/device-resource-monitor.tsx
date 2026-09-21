@@ -18,7 +18,7 @@ import {
   TerminalSquare,
 } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Card } from '@/ui/card';
 import {
   AlertDialog,
@@ -470,7 +470,7 @@ function SessionActionButton({
       <TooltipTrigger asChild>
         <Button
           type="button"
-          size="icon"
+          icon
           variant="ghost"
           className={cn(
             'h-8 w-8 md:h-7 md:w-7',

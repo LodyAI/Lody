@@ -11,7 +11,7 @@ import { useAppCapability } from '@/lib/app-platform';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useResolvedWorkspaceScope } from '@/hooks/use-resolved-workspace-scope';
 import { ErrorBoundary } from '@/components/error-boundary';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { useSessionShareManagement } from '@/hooks/use-session-share-management';
 
 /** Approval lives in authenticated cloud state, never in agent-writable history. */
@@ -52,7 +52,7 @@ function RequestsUnavailable({ onRetry }: { onRetry: () => void }) {
       <span role="status">
         {t('sharing.request.unavailable', 'Could not load pending share requests.')}
       </span>
-      <Button size="sm" variant="ghost" onClick={onRetry}>
+      <Button size="small" variant="ghost" onClick={onRetry}>
         {t('common.retry', 'Retry')}
       </Button>
     </div>
@@ -206,14 +206,14 @@ export function SessionShareConsent({
       )}
       {!published && (
         <div className="flex justify-end gap-2">
-          <Button size="sm" variant="ghost" disabled={busy} onClick={onDeny}>
+          <Button size="small" variant="ghost" disabled={busy} onClick={onDeny}>
             {request.status === 'confirmed'
               ? t('sharing.request.abandon', 'Abandon deployment')
               : t('sharing.request.deny', 'Do not share')}
           </Button>
           {(request.status === 'pending' || management.hasPending) && (
             <Button
-              size="sm"
+              size="small"
               disabled={busy || !management.canCapture || management.conflict}
               onClick={onApprove}
             >

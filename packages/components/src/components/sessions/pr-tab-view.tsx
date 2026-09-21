@@ -38,8 +38,8 @@ import {
   isDraftPr,
   isPullRequestMergeabilityPending,
 } from '@/lib/github-pr-details-state';
-import { Avatar, AvatarFallback, AvatarImage } from '@/ui/avatar';
-import { Button } from '@/ui/button';
+import { Avatar, type AvatarSize } from '@lody/ui/avatar';
+import { Button } from '@lody/ui/button';
 import { ScrollArea } from '@/ui/scroll-area';
 import { Skeleton } from '@lody/ui/skeleton';
 import { Textarea } from '@lody/ui/textarea';
@@ -134,22 +134,17 @@ function prToBadgeMeta(pr: GitHubPullRequestDetails): SessionPullRequestMeta {
 
 function UserAvatar({
   user,
-  size = 'md',
+  size = 'medium',
 }: {
   user: { login: string; avatarUrl: string } | null | undefined;
-  size?: 'xs' | 'sm' | 'md';
+  size?: AvatarSize;
 }) {
   const login = user?.login ?? 'ghost';
-  const sizeClass = size === 'xs' ? 'h-4 w-4' : size === 'sm' ? 'h-5 w-5' : 'h-6 w-6';
-  const fallbackTextClass =
-    size === 'xs' ? 'text-[8px]' : size === 'sm' ? 'text-[0.75em]' : 'text-[0.8em]';
   return (
-    <Avatar className={cn('shrink-0', sizeClass)}>
-      {user?.avatarUrl && <AvatarImage src={user.avatarUrl} alt={login} />}
-      <AvatarFallback className={fallbackTextClass}>
-        {login.slice(0, 2).toUpperCase()}
-      </AvatarFallback>
-    </Avatar>
+    <Avatar.Root size={size} className="shrink-0">
+      {user?.avatarUrl && <Avatar.Image src={user.avatarUrl} alt={login} />}
+      <Avatar.Fallback>{login.slice(0, 2).toUpperCase()}</Avatar.Fallback>
+    </Avatar.Root>
   );
 }
 
@@ -323,8 +318,8 @@ function ChecksPermissionNotice({
       {onGrantChecksPermission && (
         <Button
           type="button"
-          size="sm"
-          variant="outline"
+          size="small"
+          variant="secondary"
           onClick={onGrantChecksPermission}
           className="h-6 gap-1 text-[0.8em]"
         >
@@ -390,7 +385,7 @@ const IssueCommentItem = memo(function IssueCommentItem({
       <header className="flex items-center gap-2 border-b border-border bg-muted/30 px-3 py-2">
         <UserAvatar
           user={comment.user ? { login, avatarUrl: comment.user.avatarUrl } : null}
-          size="md"
+          size="medium"
         />
         <span className="text-[0.9em] font-medium leading-none">{login}</span>
         <span className="text-[0.8em] text-muted-foreground leading-none">
@@ -493,7 +488,7 @@ const ReviewSubmissionItem = memo(function ReviewSubmissionItem({
       <header className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/30 px-3 py-2">
         <UserAvatar
           user={review.user ? { login, avatarUrl: review.user.avatarUrl } : null}
-          size="md"
+          size="medium"
         />
         <span className="text-[0.9em] font-medium leading-none">{login}</span>
         <ReviewStateBadge state={review.state} />
@@ -698,7 +693,7 @@ function PrHeaderActionButton({
       <div data-pr-merge-action="" className="flex items-stretch overflow-hidden rounded-md">
         <Button
           type="button"
-          size="sm"
+          size="small"
           onClick={() => void onMerge(mergeMethod)}
           disabled={busy}
           className={cn(PR_ACTION_BTN, PR_MERGE_BTN_GREEN, 'rounded-r-none border-transparent')}
@@ -710,7 +705,7 @@ function PrHeaderActionButton({
           <DropdownMenuTrigger asChild>
             <Button
               type="button"
-              size="sm"
+              size="small"
               disabled={busy}
               aria-label={t('sessions.prTab.moreActions', 'More actions')}
               className={cn('h-7 rounded-l-none px-1.5', PR_MERGE_BTN_GREEN, PR_SPLIT_DIVIDER)}
@@ -758,8 +753,8 @@ function PrHeaderActionButton({
       <div className="flex items-stretch overflow-hidden rounded-md">
         <Button
           type="button"
-          size="sm"
-          variant="outline"
+          size="small"
+          variant="secondary"
           onClick={canResolve ? onResolveConflicts : undefined}
           disabled={!canResolve}
           title={tip}
@@ -777,8 +772,8 @@ function PrHeaderActionButton({
             <DropdownMenuTrigger asChild>
               <Button
                 type="button"
-                size="sm"
-                variant="outline"
+                size="small"
+                variant="secondary"
                 disabled={busy}
                 aria-label={t('sessions.prTab.moreActions', 'More actions')}
                 className="h-7 rounded-l-none border-l px-1.5"
@@ -808,8 +803,8 @@ function PrHeaderActionButton({
       <div className="flex items-stretch overflow-hidden rounded-md">
         <Button
           type="button"
-          size="sm"
-          variant="outline"
+          size="small"
+          variant="secondary"
           disabled
           title={tip}
           className={cn(PR_ACTION_BTN, canClose && 'rounded-r-none border-r-0')}
@@ -826,8 +821,8 @@ function PrHeaderActionButton({
             <DropdownMenuTrigger asChild>
               <Button
                 type="button"
-                size="sm"
-                variant="outline"
+                size="small"
+                variant="secondary"
                 disabled={busy}
                 aria-label={t('sessions.prTab.moreActions', 'More actions')}
                 className="h-7 rounded-l-none border-l px-1.5"
@@ -850,7 +845,7 @@ function PrHeaderActionButton({
       <div className="flex items-stretch overflow-hidden rounded-md">
         <Button
           type="button"
-          size="sm"
+          size="small"
           onClick={() => void onMarkReadyForReview()}
           disabled={busy}
           className={cn(PR_ACTION_BTN, canClose && 'rounded-r-none')}
@@ -867,7 +862,7 @@ function PrHeaderActionButton({
             <DropdownMenuTrigger asChild>
               <Button
                 type="button"
-                size="sm"
+                size="small"
                 disabled={busy}
                 aria-label={t('sessions.prTab.moreActions', 'More actions')}
                 className={cn('h-7 rounded-l-none px-1.5', PR_SPLIT_DIVIDER)}
@@ -889,8 +884,8 @@ function PrHeaderActionButton({
     return (
       <Button
         type="button"
-        size="sm"
-        variant="outline"
+        size="small"
+        variant="secondary"
         onClick={() => void onSetState?.('open')}
         disabled={busy}
         className={PR_ACTION_BTN}
@@ -913,8 +908,8 @@ function PrHeaderActionButton({
     return (
       <Button
         type="button"
-        size="sm"
-        variant="outline"
+        size="small"
+        variant="secondary"
         onClick={() => void onDeleteBranch?.()}
         disabled={busy}
         className={cn(
@@ -941,8 +936,8 @@ function PrHeaderActionButton({
     return (
       <Button
         type="button"
-        size="sm"
-        variant="outline"
+        size="small"
+        variant="secondary"
         onClick={() => void onSetState?.('closed')}
         disabled={busy}
         className={cn(PR_ACTION_BTN, 'text-status-danger')}
@@ -1044,7 +1039,7 @@ function Composer({
       <div className="flex justify-end">
         <Button
           type="button"
-          size="sm"
+          size="small"
           onClick={() => void submit()}
           disabled={!canSubmit}
           className="gap-1"
@@ -1156,8 +1151,8 @@ export const PrTabView = memo(function PrTabView({
             {onRefresh && (
               <Button
                 type="button"
-                size="sm"
-                variant="outline"
+                size="small"
+                variant="secondary"
                 onClick={onRefresh}
                 className="h-6 text-[0.8em]"
               >
@@ -1193,7 +1188,7 @@ export const PrTabView = memo(function PrTabView({
                   <>
                     <UserAvatar
                       user={{ login: pr.user.login, avatarUrl: pr.user.avatarUrl }}
-                      size="xs"
+                      size="mini"
                     />
                     <span className="font-normal text-foreground">{pr.user.login}</span>
                   </>
@@ -1336,7 +1331,7 @@ export const PrTabView = memo(function PrTabView({
                 <Button
                   type="button"
                   variant="ghost"
-                  size="icon"
+                  icon
                   className="h-7 w-7 text-muted-foreground"
                   onClick={onRefresh}
                   aria-label={t('sessions.prTab.refresh', 'Refresh')}
@@ -1350,20 +1345,20 @@ export const PrTabView = memo(function PrTabView({
                 </Button>
               )}
               <Button
-                asChild
+                render={
+                  <a
+                    href={badgeMeta.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={t('sessions.prTab.openOnGitHub', 'Open on GitHub')}
+                  />
+                }
                 variant="ghost"
-                size="icon"
+                icon
                 className="h-7 w-7 text-muted-foreground"
                 title={t('sessions.prTab.openOnGitHub', 'Open on GitHub')}
               >
-                <a
-                  href={badgeMeta.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-label={t('sessions.prTab.openOnGitHub', 'Open on GitHub')}
-                >
-                  <Github className="h-3.5 w-3.5" />
-                </a>
+                <Github className="h-3.5 w-3.5" />
               </Button>
               {mergeAction}
             </div>

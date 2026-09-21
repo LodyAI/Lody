@@ -18,22 +18,14 @@ import {
   type AgentRoleRunConfigIssue,
 } from '@/lib/agent-role-form';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
-<<<<<<< HEAD
-import { Switch } from '@/ui/switch';
-import { Textarea } from '@/ui/textarea';
-import { EmojiField } from './emoji-field';
-import { Field, FormMessage, Section } from './form-primitives';
-=======
+import { Button } from '@lody/ui/button';
+import { Input } from '@lody/ui/input';
+import { Field as UiField } from '@lody/ui/field';
+import { Select } from '@lody/ui/select';
 import { Switch } from '@lody/ui/switch';
 import { Textarea } from '@lody/ui/textarea';
-import { Field, Section } from './form-primitives';
-
-const AgentRoleEmojiPicker = lazy(() => import('./agent-role-emoji-picker'));
->>>>>>> a1b67558 (feat(ui): add the @lody/ui choice controls (#568))
+import { EmojiField } from './emoji-field';
+import { Field, FormMessage, Section } from './form-primitives';
 
 export type AgentRoleMachineOption = {
   machineId: MachineId;
@@ -159,25 +151,30 @@ export function AgentRoleForm({
         >
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label={t('settings.agentRoles.form.machine')}>
-              <Select
-                value={value.machineId ?? ''}
-                onValueChange={(machineId) =>
+              <Select.Root
+                items={machines.map((machine) => ({
+                  value: machine.machineId,
+                  label: machine.label,
+                }))}
+                value={value.machineId ?? null}
+                onValueChange={(machineId) => {
+                  if (machineId == null) return;
                   // Changing machine clears the config: an agent config belongs
                   // to exactly one machine, and carrying the old id over is how
                   // a Role would silently point at nothing.
-                  update({ machineId: machineId as MachineId, agentConfigId: null })
-                }
+                  update({ machineId: machineId as MachineId, agentConfigId: null });
+                }}
               >
-                <SelectTrigger
+                <Select.Trigger
                   className="h-9 text-xs"
                   aria-label={t('settings.agentRoles.form.machine')}
                   aria-invalid={hasError('machine_required') || undefined}
                 >
-                  <SelectValue placeholder={t('settings.agentRoles.form.machinePlaceholder')} />
-                </SelectTrigger>
-                <SelectContent>
+                  <Select.Value placeholder={t('settings.agentRoles.form.machinePlaceholder')} />
+                </Select.Trigger>
+                <Select.Content>
                   {machines.map((machine) => (
-                    <SelectItem key={machine.machineId} value={machine.machineId}>
+                    <Select.Item key={machine.machineId} value={machine.machineId}>
                       <span className="flex items-center gap-1.5">
                         {machine.label}
                         {machine.online ? null : (
@@ -186,16 +183,21 @@ export function AgentRoleForm({
                           </span>
                         )}
                       </span>
-                    </SelectItem>
+                    </Select.Item>
                   ))}
-                </SelectContent>
-              </Select>
+                </Select.Content>
+              </Select.Root>
             </Field>
             <Field label={t('settings.agentRoles.form.agentConfig')}>
-              <Select
-                value={value.agentConfigId ?? ''}
+              <Select.Root
+                items={agentConfigs.map((config) => ({
+                  value: config.agentConfigId,
+                  label: config.label,
+                }))}
+                value={value.agentConfigId ?? null}
                 disabled={!value.machineId || agentConfigs.length === 0}
-                onValueChange={(agentConfigId) =>
+                onValueChange={(agentConfigId) => {
+                  if (agentConfigId == null) return;
                   update({
                     agentConfigId: agentConfigId as AgentConfigId,
                     // Capabilities belong to the config; keeping the old model
@@ -203,24 +205,26 @@ export function AgentRoleForm({
                     modeId: null,
                     modelId: null,
                     configOptionValues: {},
-                  })
-                }
+                  });
+                }}
               >
-                <SelectTrigger
+                <Select.Trigger
                   className="h-9 text-xs"
                   aria-label={t('settings.agentRoles.form.agentConfig')}
                   aria-invalid={hasError('agent_config_required') || undefined}
                 >
-                  <SelectValue placeholder={t('settings.agentRoles.form.agentConfigPlaceholder')} />
-                </SelectTrigger>
-                <SelectContent>
+                  <Select.Value
+                    placeholder={t('settings.agentRoles.form.agentConfigPlaceholder')}
+                  />
+                </Select.Trigger>
+                <Select.Content>
                   {agentConfigs.map((config) => (
-                    <SelectItem key={config.agentConfigId} value={config.agentConfigId}>
+                    <Select.Item key={config.agentConfigId} value={config.agentConfigId}>
                       {config.label}
-                    </SelectItem>
+                    </Select.Item>
                   ))}
-                </SelectContent>
-              </Select>
+                </Select.Content>
+              </Select.Root>
             </Field>
           </div>
           {value.machineId && agentConfigs.length === 0 ? (
@@ -305,9 +309,9 @@ export function AgentRoleForm({
 
         <div className="flex items-center justify-between gap-4 rounded-lg border border-border/70 bg-card/60 px-3 py-2.5">
           <div className="min-w-0">
-            <Label htmlFor={`${fieldId}-share`} className="text-sm">
+            <UiField.Label htmlFor={`${fieldId}-share`} className="text-sm">
               {t('settings.agentRoles.form.share')}
-            </Label>
+            </UiField.Label>
             <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
               {t('settings.agentRoles.form.shareHint')}
             </p>
@@ -323,10 +327,16 @@ export function AgentRoleForm({
       </div>
 
       <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-border/60 px-5 py-3">
-        <Button type="button" variant="outline" size="sm" disabled={submitting} onClick={onCancel}>
+        <Button
+          type="button"
+          variant="secondary"
+          size="small"
+          disabled={submitting}
+          onClick={onCancel}
+        >
           {t('common.cancel')}
         </Button>
-        <Button type="submit" size="sm" disabled={submitting || errors.length > 0}>
+        <Button type="submit" size="small" disabled={submitting || errors.length > 0}>
           {submitting ? <Spinner className="h-3.5 w-3.5" aria-hidden="true" /> : null}
           {isEditing ? t('common.save') : t('settings.agentRoles.form.create')}
         </Button>
@@ -388,18 +398,24 @@ function ValueSelect({
   onChange: (value: string) => void;
 }) {
   return (
-    <Select value={value ?? ''} onValueChange={onChange}>
-      <SelectTrigger className="h-9 text-xs" aria-label={label}>
-        <SelectValue />
-      </SelectTrigger>
-      <SelectContent>
+    <Select.Root
+      items={options}
+      value={value}
+      onValueChange={(next) => {
+        if (next != null) onChange(next);
+      }}
+    >
+      <Select.Trigger className="h-9 text-xs" aria-label={label}>
+        <Select.Value />
+      </Select.Trigger>
+      <Select.Content>
         {options.map((option) => (
-          <SelectItem key={option.value} value={option.value}>
+          <Select.Item key={option.value} value={option.value}>
             {option.label}
-          </SelectItem>
+          </Select.Item>
         ))}
-      </SelectContent>
-    </Select>
+      </Select.Content>
+    </Select.Root>
   );
 }
 
@@ -417,9 +433,9 @@ function ConfigOptionField({
     return (
       <div className="flex items-center justify-between gap-4">
         <div className="min-w-0">
-          <Label htmlFor={fieldId} className="text-xs font-normal">
+          <UiField.Label htmlFor={fieldId} className="text-xs font-normal">
             {selector.label}
-          </Label>
+          </UiField.Label>
           {selector.description ? (
             <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
               {selector.description}

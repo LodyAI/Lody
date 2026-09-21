@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
-import { Badge } from '@/ui/badge';
+import { Badge } from '@lody/ui/badge';
 import { ArrowUpRight, Book, Github, Search } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import { useCloudAction, useCloudMutation } from '@lody/platform/react';
@@ -438,7 +438,7 @@ function MobileCloudIntegrationsSettings() {
         title={t('settings.integrations.github.authorizedReposTitle', 'Authorized Repositories')}
         actions={
           repos.length > 0 ? (
-            <Badge variant="outline" className="text-[11px]">
+            <Badge className="text-[11px]">
               {searchQuery && filteredRepos.length !== repos.length
                 ? `${filteredRepos.length} / ${repos.length}`
                 : `${enabledCount} / ${repos.length}`}{' '}
@@ -490,7 +490,7 @@ function MobileCloudIntegrationsSettings() {
                       {repo.repoFullName}
                     </span>
                     {repo.private && (
-                      <Badge variant="outline" className="px-1 py-0 text-[10px]">
+                      <Badge className="px-1 py-0 text-[10px]">
                         {t('settings.integrations.github.private')}
                       </Badge>
                     )}

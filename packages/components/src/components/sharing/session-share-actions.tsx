@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Copy, MessageSquare } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConversationColumn } from '@/components/shared/conversation-column';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 
 /**
  * The share reader's foot: the two things a visitor can actually do with a
@@ -54,8 +54,8 @@ export function SessionShareActions({
           {createAgentPrompt && (
             <Button
               type="button"
-              size="sm"
-              variant="outline"
+              size="small"
+              variant="secondary"
               disabled={busy || copyDisabled}
               onClick={() => void copyAgentPrompt()}
               title={t(
@@ -67,7 +67,7 @@ export function SessionShareActions({
               <span className="truncate">{t('sharing.copyAgentPrompt', 'Copy Agent Prompt')}</span>
             </Button>
           )}
-          <Button type="button" size="sm" disabled={copyDisabled} onClick={onCopyMarkdown}>
+          <Button type="button" size="small" disabled={copyDisabled} onClick={onCopyMarkdown}>
             <Copy className="size-3.5" aria-hidden />
             <span className="truncate">{t('sharing.copyMarkdown', 'Copy as Markdown')}</span>
           </Button>

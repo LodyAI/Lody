@@ -9,19 +9,11 @@ import {
   McpTransportIcon,
 } from '@/components/shared/mcp-transport';
 import { cn } from '@/lib/utils';
-<<<<<<< HEAD
-import { Button } from '@/ui/button';
-import { Input } from '@/ui/input';
-import { Label } from '@/ui/label';
-import { Switch } from '@/ui/switch';
-import { Textarea } from '@/ui/textarea';
-=======
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
 import { Switch } from '@lody/ui/switch';
 import { Textarea } from '@lody/ui/textarea';
->>>>>>> a1b67558 (feat(ui): add the @lody/ui choice controls (#568))
 import { Field, Section } from './form-primitives';
 
 type KeyValueDraft = { key: string; value: string };
@@ -308,9 +300,9 @@ export function McpConnectionForm({
 
         <div className="flex items-center justify-between gap-4 rounded-lg border border-border/70 bg-card/60 px-3 py-2.5">
           <div className="min-w-0">
-            <Label htmlFor={`${fieldId}-default`} className="text-sm">
+            <UiField.Label htmlFor={`${fieldId}-default`} className="text-sm">
               {t('settings.mcp.form.defaultEnabled')}
-            </Label>
+            </UiField.Label>
             <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
               {t('settings.mcp.form.defaultEnabledHint')}
             </p>
@@ -335,10 +327,16 @@ export function McpConnectionForm({
       </div>
 
       <footer className="flex shrink-0 items-center justify-end gap-2 border-t border-border/60 px-5 py-3">
-        <Button type="button" variant="outline" size="sm" disabled={submitting} onClick={onCancel}>
+        <Button
+          type="button"
+          variant="secondary"
+          size="small"
+          disabled={submitting}
+          onClick={onCancel}
+        >
           {t('common.cancel')}
         </Button>
-        <Button type="submit" size="sm" disabled={submitting || draft.name.trim().length === 0}>
+        <Button type="submit" size="small" disabled={submitting || draft.name.trim().length === 0}>
           {submitting ? <Spinner className="h-3.5 w-3.5" aria-hidden="true" /> : null}
           {submitting ? t('settings.mcp.form.saving') : t('common.save')}
         </Button>
@@ -411,7 +409,7 @@ function ListEditor({
         <Button
           type="button"
           variant="ghost"
-          size="sm"
+          size="small"
           className="h-7 gap-1 px-2 text-xs font-normal text-muted-foreground hover:text-foreground"
           onClick={onAdd}
         >
@@ -428,7 +426,8 @@ function RemoveRowButton({ onClick }: { onClick: () => void }) {
   return (
     <Button
       type="button"
-      size="icon"
+      size="small"
+      icon
       variant="ghost"
       className="h-8 w-8 shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
       aria-label={t('common.remove')}

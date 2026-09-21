@@ -27,7 +27,7 @@ import {
   useMacTrafficLightRowPadClass,
 } from '@/ui/window-drag-region';
 import { useElectronFullscreen } from '@/lib/electron';
-import { Badge } from '@/ui/badge';
+import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Kbd } from '@/ui/kbd';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
@@ -890,8 +890,7 @@ export const LoroSidebar = memo(function LoroSidebar({
           name: workspaceName,
           logo: workspaces.find((ws) => ws.id === currentWorkspaceId)?.logo,
         }}
-        className="h-5 w-5 text-[10px]"
-        fallbackClassName="bg-sidebar-hover/60 text-sidebar-foreground"
+        size="small"
       />
       <span className="min-w-0 flex flex-1 items-center gap-2">
         <span className="min-w-0 flex-1 truncate font-medium">{workspaceName}</span>
@@ -945,8 +944,8 @@ export const LoroSidebar = memo(function LoroSidebar({
               <div className="flex min-w-0 items-center gap-2.5 px-2 py-2" data-current-workspace>
                 <WorkspaceAvatar
                   workspace={{ name: currentWorkspace.name, logo: currentWorkspace.logo }}
-                  className="h-9 w-9 shrink-0 rounded-lg text-sm"
-                  fallbackClassName="rounded-lg"
+                  size="large"
+                  className="shrink-0"
                 />
                 <div className="flex min-w-0 flex-col gap-0.5">
                   <span className="truncate text-[0.95em] font-medium leading-tight text-foreground">
@@ -1001,10 +1000,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                         />
                         <span className="min-w-0 truncate">{ws.name}</span>
                         {ws.planTier ? (
-                          <Badge
-                            variant="secondary"
-                            className="ml-auto shrink-0 border-transparent bg-foreground/[0.06] px-1.5 py-0 text-[10px] font-normal text-muted-foreground"
-                          >
+                          <Badge className="ml-auto shrink-0 border-transparent bg-foreground/[0.06] px-1.5 py-0 text-[10px] font-normal text-muted-foreground">
                             {ws.planTier === 'enterprise'
                               ? mergedLabels.planEnterprise
                               : mergedLabels.planPlus}

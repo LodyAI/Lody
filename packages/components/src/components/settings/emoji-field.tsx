@@ -1,7 +1,7 @@
 import { lazy, Suspense, useRef, useState } from 'react';
 import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
 
 const EmojiPickerPanel = lazy(() => import('./emoji-picker-panel'));
@@ -77,7 +77,7 @@ export function EmojiField({
             <Button
               type="button"
               variant="ghost"
-              size="sm"
+              size="small"
               className="h-7 w-full justify-start text-xs text-muted-foreground"
               onClick={() => {
                 onChange('');

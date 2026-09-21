@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, ChevronRight, CircleDashed, Copy, X } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
 import type { MessageContent } from '@lody/shared';
 import { formatDurationCompact } from '@/lib/format-duration';
@@ -261,7 +261,7 @@ const SubagentTaskDetailsDialog = ({
                 <Button
                   type="button"
                   variant="ghost"
-                  size="sm"
+                  size="small"
                   className="h-6 gap-1 px-1.5 text-xs text-muted-foreground hover:text-foreground"
                   onClick={() => {
                     void writeTextToClipboard(body).then((ok) => {

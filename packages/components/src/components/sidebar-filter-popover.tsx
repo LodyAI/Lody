@@ -5,7 +5,7 @@ import type { LucideIcon } from 'lucide-react';
 import { CarbonSettingsAdjust } from '@/components/icons/carbon-settings-adjust';
 import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import {
   menuGroupLabelClassName,
   menuSeparatorClassName,
@@ -127,7 +127,7 @@ export function SidebarFilterPopover({
           <Button
             type="button"
             variant="ghost"
-            size="icon"
+            icon
             aria-label={merged.triggerAriaLabel}
             data-state-open={open || undefined}
             className={cn(

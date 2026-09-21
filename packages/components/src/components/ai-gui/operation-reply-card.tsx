@@ -5,7 +5,7 @@ import type { SessionId } from '@lody/shared';
 
 import type { SessionNavigationTarget } from '@/lib/session-navigation';
 import { cn } from '@/lib/utils';
-import { Button } from '@/ui/button';
+import { Button } from '@lody/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
 import { useOperationTargetTitle } from './created-session-operation-card';
 import { MarkdownRenderer } from './markdown-renderer';
@@ -111,7 +111,7 @@ export function OperationReplyCard(props: OperationReplyCardProps) {
       <Button
         type="button"
         variant="ghost"
-        size="sm"
+        size="small"
         className="h-7 shrink-0 gap-1 px-2 text-xs text-muted-foreground hover:text-foreground"
         disabled={!navigate}
         onClick={navigate}
@@ -135,8 +135,8 @@ export function OperationReplyCard(props: OperationReplyCardProps) {
               {navigate ? (
                 <Button
                   type="button"
-                  variant="outline"
-                  size="sm"
+                  variant="secondary"
+                  size="small"
                   className="h-7 shrink-0 gap-1 px-2.5 text-xs"
                   onClick={() => {
                     setOpen(false);
