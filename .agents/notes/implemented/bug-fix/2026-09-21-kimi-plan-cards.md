@@ -44,3 +44,7 @@ the fix. Lody's history test verifies Markdown replacement and retention beside
 the completed tool card. No UI screenshot or production runtime is validated by
 these tests. Publishing the separately built checksummed Kimi runtime and updating
 the managed-runtime manifest remain required before installed clients receive it.
+
+Adapter PR: [Kimi #14](https://github.com/LodyAI/acp-extension-kimi/pull/14).
+Consumer pin and regression: [Lody #870](https://github.com/LodyAI/Lody/pull/870).
+Merge the adapter first; neither PR publishes a production runtime.

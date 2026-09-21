@@ -36,3 +36,7 @@ Plan 布尔开关及审批决策不变。`TodoList` 继续使用稳定的 ACP �
 Lody 历史测试验证正文替换，以及工具完成后卡片仍保留。本次测试不代表完成了
 界面截图验收或生产运行时验证。仍需发布独立构建并带校验和的 Kimi 运行时，
 更新 managed-runtime 清单，已安装客户端才能获得修复。
+
+适配器 PR：[Kimi #14](https://github.com/LodyAI/acp-extension-kimi/pull/14)。
+消费端版本与回归测试：[Lody #870](https://github.com/LodyAI/Lody/pull/870)。
+先合并适配器；这两个 PR 均不发布生产运行时。
