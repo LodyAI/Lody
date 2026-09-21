@@ -152,26 +152,27 @@ describe('P4 restricted LLM Agent', () => {
       (outcome) => outcome.error && !outcome.name.startsWith('agent:')
     );
     const attackActions = run.material.actions.filter(
-      (action) =>
-        action.op === 'intercept' ||
-        action.op === 'mutateBackend' ||
-        action.op === 'readBackend' ||
-        action.op === 'submitClaim'
+      (action) => action.op === 'intercept' || action.op === 'mutateBackend'
     );
     // A real attack, chosen while collaboration was in flight — not just
-    // observe/finish at the end.
+    // observe/readBackend/submitClaim/finish.
     expect(attackActions.length).toBeGreaterThan(0);
     const attackIndex = run.material.actions.findIndex((action) => action === attackActions[0]);
     expect(run.material.marks[attackIndex]).toBeLessThan(collabScript().length);
-    // Hit evidence: an intercepted response (status 0 / replaced body), a
-    // landed backend mutation, or a submitted claim.
-    const intercepted = run.material.frames.some((frame) => frame.responseStatus === 0);
+    const interceptIds = new Set(
+      attackActions
+        .filter((action) => action.op === 'intercept')
+        .map((action) => String(action.input?.eventId ?? ''))
+    );
+    const intercepted = run.material.frames.some(
+      (frame) =>
+        interceptIds.has(frame.eventId) &&
+        (frame.responseStatus === 0 || frame.responseHex.length > 0)
+    );
     const mutated = run.material.actions.some(
       (action) => action.op === 'mutateBackend' && action.input?.receipt === true
     );
-    const claimed = run.material.actions.some((action) => action.op === 'submitClaim');
-    const probed = run.material.actions.some((action) => action.op === 'readBackend');
-    expect(intercepted || mutated || claimed || probed).toBe(true);
+    expect(intercepted || mutated).toBe(true);
     expect(JSON.stringify(run.lab.actions())).not.toContain(world.secret);
 
     // Same record replays model-free in three fresh directory sets.
@@ -196,7 +197,7 @@ describe('P4 restricted LLM Agent', () => {
             model: endpointUsed.model,
             attackOps: attackActions.map((action) => action.op),
             marks: run.material.marks,
-            hit: { intercepted, mutated, claimed, probed },
+            hit: { intercepted, mutated },
             report: run.report,
             replays: replays.map((r) => ({ report: r.report, divergence: r.divergence })),
           },

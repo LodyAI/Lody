@@ -35,8 +35,15 @@ import { LabRuntime, type ProtocolFrame } from './runtime';
 import type { LabEvent } from './scheduler';
 import type { HonestClient } from './actors';
 import { exportDevice, generateDevice, importDevice, type DemoDevice } from './platform/device';
-import { isRecordingEntropy, recordingEntropy, replayEntropy, type EntropyFill } from './entropy';
+import {
+  isRecordingEntropy,
+  isReplayEntropy,
+  recordingEntropy,
+  replayEntropy,
+  type EntropyFill,
+} from './entropy';
 import { drainUntil, labClient, launchLab, tempDir } from './fixtures';
+import type { ScheduleChoice } from './schedule';
 import { toHex } from './platform/bytes';
 import { persistLoroDocument } from './platform/persist';
 import type { JoinRequestWire } from './platform/protocol';
@@ -98,7 +105,7 @@ export interface CollabOutcome {
 
 /** Private replay bundle. Never exposed through AttackLab. */
 export interface CollabMaterial {
-  readonly version: 1;
+  readonly version: 1 | 2;
   readonly scenario: string;
   readonly secret: string;
   readonly genesisHex: string;
@@ -112,6 +119,9 @@ export interface CollabMaterial {
   readonly frames: readonly ProtocolFrame[];
   readonly clients: readonly ClientDigest[];
   readonly report: PublicReport;
+  /** Permit/start choices that drive strict replay. Required for version 2. */
+  readonly schedule?: readonly ScheduleChoice[];
+  readonly starts?: readonly ScheduleChoice[];
 }
 
 export interface CollabRun {
@@ -588,6 +598,8 @@ export function inspectClients(
       cursorAhead: false,
       durableLoss: false,
       importFailed: false,
+      unauthorizedContentAccepted: false,
+      wrongContextAccepted: false,
     };
     for (const client of live) {
       const facts = await inspectClient(client, host)();
@@ -602,6 +614,8 @@ export function inspectClients(
       else if (merged.cursorAhead !== undefined) merged.cursorAhead ||= facts.cursorAhead;
       merged.durableLoss ||= facts.durableLoss === true;
       merged.importFailed ||= facts.importFailed === true;
+      merged.unauthorizedContentAccepted ||= facts.unauthorizedContentAccepted === true;
+      merged.wrongContextAccepted ||= facts.wrongContextAccepted === true;
     }
     return merged;
   };
@@ -712,6 +726,7 @@ export async function runCollabScenario(options: CollabRunOptions): Promise<Coll
   const debug = Boolean(process.env.E2EE_SCENARIO_DEBUG);
   for (const [index, collabStep] of script.entries()) {
     if (debug) console.error(`[collab] step ${index} ${collabStep.name}`);
+    world.runtime.recordStart({ actor: 'script', operation: collabStep.name });
     const pending = collabStep.run(world);
     const outcome = pending.then(
       () => ({ name: collabStep.name }),
@@ -772,7 +787,7 @@ export async function runCollabScenario(options: CollabRunOptions): Promise<Coll
   const base = await harnessReplayMaterial(lab);
   if (debug) console.error('[collab] material captured');
   const material: CollabMaterial = {
-    version: 1,
+    version: 2,
     scenario: COLLAB_SCENARIO,
     secret: world.secret,
     genesisHex: world.genesisHex,
@@ -785,6 +800,8 @@ export async function runCollabScenario(options: CollabRunOptions): Promise<Coll
     frames: base.frames,
     clients: base.clients,
     report,
+    schedule: [...world.runtime.permitLog],
+    starts: [...world.runtime.startLog],
   };
   return { outcomes, report, material, lab };
 }
@@ -798,12 +815,17 @@ export interface CollabReplay {
 /**
  * Model-free replay: rebuild the world from identical private material, run
  * the same script, apply the recorded attack actions at the same step
- * boundaries, then compare events, frames, client digests and the verdict.
+ * boundaries. Auto-advance is the recorded rule "oldest runnable event"
+ * (`permitNext`). Nested streams-crdt import/read request order is not a
+ * controlled JS-microtask boundary; identity-accurate ScheduleDriver replay
+ * is used when the original run made an explicit non-FIFO choice.
  */
 export async function replayCollabScenario(material: CollabMaterial): Promise<CollabReplay> {
+  if (!material.schedule) throw new Error('repro-missing-schedule');
+  const entropy = replayEntropy(material.fills);
   const world = await createCollabWorld({
     mode: 'manual',
-    entropy: replayEntropy(material.fills),
+    entropy,
     devices: material.devices,
     secret: material.secret,
     seeds: material.seeds,
@@ -830,6 +852,7 @@ export async function replayCollabScenario(material: CollabMaterial): Promise<Co
   const debug = Boolean(process.env.E2EE_SCENARIO_DEBUG);
   for (const [index, collabStep] of script.entries()) {
     if (debug) console.error(`[collab-replay] step ${index} ${collabStep.name}`);
+    world.runtime.recordStart({ actor: 'script', operation: collabStep.name });
     const pending = collabStep.run(world);
     const outcome = pending.then(
       () => ({ name: collabStep.name }),
@@ -853,12 +876,32 @@ export async function replayCollabScenario(material: CollabMaterial): Promise<Co
   }
   if (!report) report = await drainUntil(world.runtime, lab.finish());
   const actual = await harnessReplayMaterial(lab);
-  const divergence = firstCollabDivergence(material, {
+  let divergence = firstCollabDivergence(material, {
     events: actual.events,
     frames: actual.frames,
     clients: actual.clients,
     report,
   });
+  if (!divergence && material.starts) {
+    const expectedStarts = material.starts.map((row) => row.identity.operation).join('|');
+    const actualStarts = world.runtime.startLog.map((row) => row.identity.operation).join('|');
+    if (expectedStarts !== actualStarts) {
+      divergence = {
+        index: 0,
+        field: 'schedule.start',
+        expected: expectedStarts,
+        actual: actualStarts,
+      };
+    }
+  }
+  if (!divergence && isReplayEntropy(entropy) && entropy.remaining().length > 0) {
+    divergence = {
+      index: entropy.consumed(),
+      field: 'entropy.tail',
+      expected: 'consumed',
+      actual: entropy.remaining()[0]!.label,
+    };
+  }
   return { outcomes, report, divergence };
 }
 

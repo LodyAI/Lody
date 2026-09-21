@@ -13,6 +13,8 @@ import {
   permitUntil,
 } from '../src/fixtures';
 import { LabRuntime } from '../src/runtime';
+import { ScheduleDriver } from '../src/driver';
+import { choiceKey } from '../src/schedule';
 
 afterEach(() => cleanupLab());
 
@@ -69,7 +71,8 @@ describe('P2 permit runtime', () => {
     await alice.createSpace();
     await drainUntil(runtime, alice.readLedger());
     const pending = writeLoro(alice, 'gated-content');
-    await runtime.whenRequested(1);
+    // prepareWrite re-reads the ledger; wait until the content POST is queued.
+    await permitUntil(runtime, (event) => event.operation === 'content');
     expect(runtime.events().some((event) => event.operation === 'content')).toBe(true);
     const stop = drainRuntime(runtime);
     try {
@@ -176,5 +179,44 @@ describe('P2 permit runtime', () => {
     await expect(runtime.gate('alice', 'submit', 'request-queued')).rejects.toThrow(
       'runtime-closed'
     );
+  });
+
+  it('records each permit and replays only that schedule', async () => {
+    const runtime = new LabRuntime({ mode: 'manual' });
+    const recorder = new ScheduleDriver(runtime, 'record');
+    const work = Promise.all([
+      runtime.phase('alice', 'submit', 'request-queued', async () => 'alice'),
+      runtime.phase('bob', 'submit', 'request-queued', async () => 'bob'),
+    ]);
+    await runtime.whenRequested(2);
+    const bob = runtime
+      .events()
+      .find((event) => event.actor === 'bob' && event.status === 'requested')!;
+    runtime.permit(bob.eventId);
+    await recorder.drive(work);
+    expect(runtime.permitLog.map((row) => row.identity.actor)).toEqual(['bob', 'alice']);
+
+    const replay = new LabRuntime({ mode: 'manual' });
+    const driver = new ScheduleDriver(replay, runtime.permitLog);
+    await driver.drive(
+      Promise.all([
+        replay.phase('alice', 'submit', 'request-queued', async () => 'alice'),
+        replay.phase('bob', 'submit', 'request-queued', async () => 'bob'),
+      ])
+    );
+    expect(replay.permitLog.map((row) => row.identity.actor)).toEqual(['bob', 'alice']);
+    expect(driver.leftoverDivergence()).toBeNull();
+    expect(choiceKey(runtime.permitLog[0]!)).toContain('bob');
+  });
+
+  it('reports leftover requested events instead of auto-draining them', async () => {
+    const runtime = new LabRuntime({ mode: 'manual' });
+    const driver = new ScheduleDriver(runtime, []);
+    const pending = runtime.gate('alice', 'submit', 'request-queued');
+    await runtime.whenRequested(1);
+    const leftover = driver.leftoverDivergence();
+    expect(leftover?.field).toBe('schedule.extra');
+    runtime.close();
+    await pending.catch(() => undefined);
   });
 });

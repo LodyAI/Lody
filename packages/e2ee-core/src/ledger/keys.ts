@@ -137,7 +137,7 @@ export function collectEpochPackets(
   return packets;
 }
 
-function canSendEpoch(state: OrgState, sender: SigningPublicKey): boolean {
+export function canSendEpoch(state: OrgState, sender: SigningPublicKey): boolean {
   const device = state.devices.get(keyId(sender));
   if (!device || device.kind !== 'personal' || !device.canManage) return false;
   const member = state.members.get(keyId(device.membershipId));
@@ -207,6 +207,7 @@ export async function openEpochEnvelope(input: {
   frame: Uint8Array;
   cache?: SigningPointCache;
 }): Promise<Uint8Array> {
+  if (!canSendEpoch(input.state, input.sender)) fail('unauthorized');
   if (!canReceiveEpoch(input.state, input.recipient)) fail('unauthorized');
   if (input.epoch !== input.state.epoch.number) fail('invalid-operation');
   const aad = envelopeAad(input);

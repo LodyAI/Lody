@@ -79,8 +79,9 @@ is a protocol peer for tests. Hosted `streams-api.loro.dev` still returns 501 fo
 Experimental local journal (not frozen): `@lody/e2ee-core/ledger-node`. Epoch history
 unwrap and HPKE device envelopes: `sealHistoryPacket` / `recoverHistory` /
 `sealEpochEnvelope` from `@lody/e2ee-core/ledger`. `openEpochEnvelope` returns
-plaintext only when `epoch` matches the current ledger epoch and
-`commitEpochKey` equals that epoch's commitment. Exact-byte key outbox:
+plaintext only when the sender currently may distribute keys, the recipient is
+admitted, `epoch` matches the current ledger epoch, and `commitEpochKey` equals
+that epoch's commitment. Exact-byte key outbox:
 `LedgerKeyDelivery` / `MemoryLedgerKeyOutbox`; experimental sqlite
 `SqliteLedgerKeyOutbox` from `@lody/e2ee-core/ledger-node`. Owner transfer is
 unilateral (D1 A).
@@ -572,7 +573,7 @@ builder once, checks the binding before returning plaintext, and declares its
 outgoing overhead within the SDK's 4096-byte cap. Existing update framing is
 unchanged; no alternate crypto suite.
 
-Honest clients require `mayWriteDocument` to **seal** a snapshot. That does not
+Honest clients require `mayWriteDocument` to **seal** updates and snapshots. That does not
 constrain a malicious client. Publication admission is the host port
 `createContentSnapshotPublication` from `@lody/e2ee-core/snapshot-admission`:
 current device document-write, authenticated submitting device bound to the
@@ -583,7 +584,8 @@ must not extend it. Identical retries
 are idempotent; different bytes cannot occupy an already admitted offset; a later
 offset may become current, an earlier offset cannot. The independent-package test
 host fail-closes snapshot PUT until that port is supplied. Production JWT/gateway
-wiring is unimplemented and not claimed. Clients still verify signatures,
+wiring is unimplemented and not claimed. The lab honest host is a local gateway
+in front of sqlite Riverrun, not Org RBAC inside Riverrun. Clients still verify signatures,
 Org/document/epoch/purpose/offset on **open**; a later revoke does not invalidate
 an already admitted snapshot. Decryption, transport offset, old head, a
 self-declared timestamp, or `verified=true` are not publication permission. This

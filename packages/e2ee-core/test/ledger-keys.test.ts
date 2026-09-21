@@ -5,6 +5,7 @@ import { LedgerError } from '../src/ledger';
 import { encodeCbor } from '../src/ledger/cbor';
 import { decodeRecord } from '../src/ledger/schema';
 import {
+  canSendEpoch,
   collectEpochPackets,
   commitEpochKey,
   openEpochEnvelope,
@@ -18,8 +19,10 @@ import {
   admitDeviceOp,
   append,
   ed25519,
+  hex,
   random,
   signGenesis,
+  signJoin,
   type DeviceKeys,
 } from './ledger-fixtures';
 
@@ -278,7 +281,7 @@ describe('P3 key delivery and history unwrap', () => {
         recipientKeyPair: phone.dh,
         frame,
       })
-    ).rejects.toMatchObject({ code: 'invalid-operation' });
+    ).rejects.toMatchObject({ code: 'unauthorized' });
     expect(await commitEpochKey(created.anchor, 0, fakeKey)).not.toEqual(
       created.ledger.state.epoch.keyCommitment
     );
@@ -397,7 +400,7 @@ describe('P3 key delivery and history unwrap', () => {
         recipientKeyPair: phone.dh,
         frame,
       })
-    ).rejects.toMatchObject({ code: 'canonical' });
+    ).rejects.toMatchObject({ code: 'unauthorized' });
     await expect(
       openEpochEnvelope({
         state: admitted.ledger.state,
@@ -473,6 +476,68 @@ describe('P3 key delivery and history unwrap', () => {
         recipient: phone.publicKey,
         recipientKeyPair: phone.dh,
         frame,
+      })
+    ).rejects.toMatchObject({ code: 'unauthorized' });
+  });
+
+  it('rejects a current-epoch envelope whose sender cannot distribute keys', async () => {
+    const owner = await device();
+    const k0 = random(32);
+    const created = await signGenesis(owner, k0);
+    const member = await device();
+    const joined = await append(created.ledger, owner, {
+      type: 'admitMember',
+      membershipId: random(16),
+      request: await signJoin(created.anchor, member),
+    });
+    const laptop = await device();
+    const admitted = await append(
+      joined.ledger,
+      owner,
+      await admitDeviceOp(created.anchor, laptop, 'personal', false)
+    );
+    expect(canSendEpoch(admitted.ledger.state, owner.publicKey)).toBe(true);
+    expect(canSendEpoch(admitted.ledger.state, member.publicKey)).toBe(false);
+    await expect(
+      sealEpochEnvelope({
+        state: admitted.ledger.state,
+        genesis: created.anchor,
+        epoch: 0,
+        sender: member.publicKey,
+        recipient: laptop.publicKey,
+        recipientEncryptionKey: laptop.enc,
+        epochKey: k0,
+        sign: (bytes) => member.sign(bytes),
+      })
+    ).rejects.toMatchObject({ code: 'unauthorized' });
+
+    const memberDevice = admitted.ledger.state.devices.get(hex(member.publicKey));
+    if (!memberDevice) throw new Error('missing-member-device');
+    const fakeDevices = new Map(admitted.ledger.state.devices);
+    fakeDevices.set(hex(member.publicKey), { ...memberDevice, canManage: true });
+    const fakeMembers = new Map(admitted.ledger.state.members);
+    const memberRow = fakeMembers.get(hex(memberDevice.membershipId));
+    if (!memberRow) throw new Error('missing-member-row');
+    fakeMembers.set(hex(memberDevice.membershipId), { ...memberRow, role: 'admin' });
+    const forged = await sealEpochEnvelope({
+      state: { ...admitted.ledger.state, devices: fakeDevices, members: fakeMembers },
+      genesis: created.anchor,
+      epoch: 0,
+      sender: member.publicKey,
+      recipient: laptop.publicKey,
+      recipientEncryptionKey: laptop.enc,
+      epochKey: k0,
+      sign: (bytes) => member.sign(bytes),
+    });
+    await expect(
+      openEpochEnvelope({
+        state: admitted.ledger.state,
+        genesis: created.anchor,
+        epoch: 0,
+        sender: member.publicKey,
+        recipient: laptop.publicKey,
+        recipientKeyPair: laptop.dh,
+        frame: forged,
       })
     ).rejects.toMatchObject({ code: 'unauthorized' });
   });

@@ -126,7 +126,8 @@ describe('lab host lifecycle', () => {
     expect(history.has(1)).toBe(true);
     expect((await alice.revokeDevice(tablet.publicKey)).status).toBe('committed');
     expect(await readLoro(alice)).toContain('epoch-zero');
-    expect(await readLoro(writer)).toContain('epoch-zero');
+    expect(writer.loroDoc?.getText('text').toString()).toContain('epoch-zero');
+    await expect(readLoro(writer)).rejects.toThrow(/unauthorized|403|loro-sync-failed/);
     await expect(writeLoro(writer, 'after-revoke')).rejects.toThrow();
     await writeLoro(alice, 'epoch-one');
     expect(await readLoro(alice)).toContain('epoch-zero');

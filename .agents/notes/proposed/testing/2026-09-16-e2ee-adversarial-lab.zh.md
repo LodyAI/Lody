@@ -15,7 +15,20 @@ Translation: current
 
 ## 实施计划与唯一任务表
 
-当前状态：HEAD `c3f60b8e`（已提交）。本轮目标：多人持续协作期间受限攻击 Agent 在指定事件边界介入、攻击过程可独立重放。先补无攻击对照，再接攻击；模型只决定攻击动作与时机，诚实端动作全部由固定脚本驱动。无 push/merge。实验室 Spec 仍为 draft。
+当前状态：HEAD `4989fad8` 加上保留的脏工作树（宿主网关、裁判、设计探针）。本轮唯一目标：实验室已捕获的失败能生成独立复现包，在新进程、新目录中重放，并缩成最小反例。不接入 Lody 产品，不改协议，不 push/PR/merge。实验室 Spec 仍为 draft。
+
+| 完成 | 阶段 | 门槛 |
+| ---- | ---- | ---- |
+| [x] | R0 基线 | 记录 HEAD/脏树；保留已有网关与裁判改动；本表为唯一任务表 |
+| [x] | R1 事件驱动执行 | 每次许可写入 schedule；自动推进规则是最早可运行 FIFO；显式并发用身份 `ScheduleDriver`；剩余 requested 报 `schedule.extra` |
+| [x] | R2 独立复现包 | `e2ee-lab-repro/v1` 绑定脏树哈希、vendor/lock 哈希、private 0700；新进程 CLI 重放；缺私有材料/不支持的格式失败闭合；随机记录必须 `remaining()` 为空 |
+| [x] | R3 精确比较 | multipart 只规范化分隔符；失败指纹含规则 ID；分别改顺序/载荷/随机尾项/判定都能定位字段 |
+| [x] | R4 真实后端 | 保留 SIGKILL 崩溃矩阵；未刷盘 SQLite 页的断电丢失不建模 |
+| [x] | R5 独立裁判 | 实验室参考模型不导入被测权限函数；跳过验签、cursor 先于文档、错误上下文 journal 走真实路径 |
+| [x] | R6 缩减 | 有界 ddmin 去掉噪音，保持同一安全指纹，拒绝缩成 harness-error |
+| [x] | R7 真实模型命中 | 破坏性命中只计 intercept 或 mutateBackend；observe/readBackend/submitClaim/finish 不算 |
+
+下表为上一轮 S1–S4，勾选保留为历史证据。
 
 | 完成 | 阶段 | 门槛 |
 | ---- | ---- | ---- |
@@ -28,7 +41,7 @@ Translation: current
 
 | 完成 | 阶段 | 门槛 |
 | ---- | ---- | ---- |
-| [ ] | A 裁判观测 | 合法 admitDevice 不是 violation；后端多写且客户端拒绝不是客户端完整性失守；缺观测 → harness-error |
+| [x] | A 裁判观测 | 合法 admitDevice 不是 violation；后端多写且客户端拒绝不是客户端完整性失守；缺观测 → harness-error；恶意 Riverrun 下 guest 内容 → outside-model |
 | [ ] | B 真实落盘 | document-persisted 写出文档字节；cursor-persisted 在文档之后写游标；崩溃重启不跳过未读数据 |
 | [ ] | C 同一攻击重放 | 成功 xor 的 needle 在恢复的私有材料下仍命中；改回执/字节会报首次分歧 |
 | [ ] | Effect 组合 | 一套 submit/delivery Effect；Promise 仅包装；取消不丢 pending |
@@ -43,7 +56,7 @@ Translation: current
 | [x]  | C3 其余流程    | 分钥、恢复、准入与资源管理     | E3–E6，权限重查与原始截止不回退             |
 | [ ]  | P1 常驻协作    | lab 包、真实后端、三副本       | 离线重连与耐久恢复，不是一次性读写          |
 | [ ]  | P2 确定性      | 调度器、记录、重放             | 三次新目录重放一致，首分歧可定位            |
-| [ ]  | P3 固定攻击    | Spec 场景矩阵、有效裁判        | 真实改库被检验，注入已知缺陷时裁判失败      |
+| [x]  | P3 固定攻击    | Spec 场景矩阵、有效裁判        | 真实改库被检验，注入已知缺陷时裁判失败；guest 内容 → outside-model |
 | [x]  | P4 Agent       | 受限 API、自由攻击记录         | 隔离自测通过，至少一轮真实 Agent 运行可重放 |
 | [ ]  | P5 交接        | 干净检出验收、旧 demo 删除     | 下述完成定义逐项通过，未通过项显式保留      |
 
@@ -368,3 +381,54 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 - `restricted-agent` 的 LLM `fetch` 改为可注入 `LabFetch`；`scenario` 的 secret/seed 走 recording entropy，marker 读经 `LabFs`。
 - **仍直接用 Node**：crash 子进程 `spawn`、`cli.ts`、fixtures 的 `mkdtemp`/`rmSync`（进程生命周期边界，非 AttackLab 主路径）。
 - 证据：`pnpm --filter @lody/e2ee-lab check` 退出 0（13 文件 / 73 测试）。未启用产品 E2EE。无 push/merge。
+
+### 2026-09-18 — 有效裁判、加深 Agent、设计探查
+
+- **裁判：** `composeIntegrity` / `composeDurability` / `judgeClaim` / `judgeUnauthorizedContent` 把测量事实与 claim 接上。恶意 Riverrun 下 guest 作者内容记为 `outside-model`，不再静默 pass。
+- **修复：** host `loadLedger` 不再粘性缓存；`adoptGenesis` 绑定 `hash(genesis)`；honest `mayWriteDocument` 同时约束 update seal。
+- **模型限制（不改 trust）：** open 仍接受恶意主机 + 持有 epoch key 的 guest/revoked 设备密文；矩阵与 design-probes 记为 outside-model。
+- **Agent：** 多步 mutate/intercept；collab 可带 followUp；无命中证据的 claim 不算成功。
+- 证据：lab check 14 文件 / 78 测试退出 0。未启用产品 E2EE。
+
+### 2026-09-18 — 新探针：分钥发送者、宿主成员 ACL、旧代密封
+
+- **新发现（矩阵原先未覆盖）：**
+  1. `openEpochEnvelope` 验了接收者、代次、HPKE 和密钥承诺，但没有 `canSendEpoch`。已持有当前代密钥的成员（或被降级的 Admin）可在本地伪造 admin 状态封出真实信封，诚实接收端用真实账本仍会打开。白皮书：只有 Owner/Admin 分发当前钥；入账不等于密钥可用。
+  2. 诚实 lab host 的 `/ds/` GET/HEAD 把 `credential.genesisHex == null` 当成无约束，并接受客户端自报的 `genesisHex` 发凭证。任意已登录设备可读其他 Org 的控制/密钥/内容流和申请列表。A5 云端 ACL：会话须核对当前账本资格。
+  3. 内容密封用 `max(本地代次密钥)`，不是已认证账本代次。`publishEpoch` 后滞后的诚实成员仍用 epoch-0 写新密文，被撤且仍持 `K0` 的设备一旦拿到字节就能读“换代后的新内容”。白皮书：只有新代内容对被撤者保密。
+- **修复：** `openEpochEnvelope` 打开前检查 `canSendEpoch`。Host `/ds/` 与 joins/notes 读取要求设备在该 Org 账本上。诚实 `writeLoro`/`writeFlock`/快照密封走 `prepareWrite`，缺当前代密钥则 `missing-current-epoch-key`。被撤设备可保留本地明文，云端再读为 403。
+- **未改的模型限制：** 恶意 Riverrun 下 guest/已撤设备密文仍是 `outside-model`（`open` 不复查当前写权）。
+- 证据：`test/ledger-keys.test.ts` 未授权发送者信封；`test/design-probes.test.ts` 外人读取、成员伪造信封、旧代写入。`pnpm --filter @lody/e2ee-lab check` 退出 0（14 文件 / 81 测试，含真实模型 S4）。核心 keys+delivery+krc-loop 28 项退出 0。未启用产品 E2EE。无 push/merge。
+
+### 2026-09-18 — sqlite Riverrun 前的薄宿主网关
+
+- **决定：** 云端 ACL 不进 Riverrun sqlite。诚实宿主是薄网关：现读已验证账本，使用 `deviceMayWriteDocument` 和导出的 `canSendEpoch`。设备不是当前成员则不签发声称 genesis 的令牌。创世 GET 需要登录。加入 POST 把请求公钥绑到凭证设备。快照写权用请求范围的 `AsyncLocalStorage`，不用全局 genesis。直连 `riverrunUrl` 仍无鉴权。记在[宿主网关笔记](../../implemented/architecture/2026-09-18-e2ee-host-gateway.zh.md)。
+- **未改：** 生产 JWT/网关未实现；恶意 Riverrun 下 guest 内容仍是 `outside-model`。
+- 证据：`test/gateway.test.ts`；`test/design-probes.test.ts` 外人读取 vs 裸 Riverrun、声称 genesis 签发 403、guest 读写分流。`pnpm --filter @lody/e2ee-lab check` 类型检查加沙箱内 14 文件 / 88 测试；联网后 `test/restricted-agent.test.ts` 2/2（15 文件 / 90 测试）。核心 `test/ledger-keys.test.ts` 6/6。`pnpm run docs check` errors `[]`。未启用产品 E2EE。无 push/merge。
+
+### 2026-09-21 — 设计探针：宿主旁路、guest 准入窗口、裁判缺口
+
+- **不是修复。** `test/design-probes.test.ts`（`newly observed defects`）目前断言缺陷现状，避免静默消失，不是目标契约。Spec 未改。未启用产品 E2EE。
+- **已测到：**
+  1. 诚实宿主 `/readyz` 无需登录，返回 `riverrun` 和数据库路径。只用宿主 HTTP 的调用者即可直连 sqlite Riverrun 读 Org 密文，把 Spec §4 的外部攻击者与恶意服务器两种模式叠在一起。Lab CLI 也会打印 `riverrunUrl`，并以 `testMode: true` 启动。未鉴权的 `/v1/failpoints` 以及任意 testMode 请求（含 `/healthz`）上的 `x-e2ee-demo-now` 会改进程级宿主时钟，并可让现有凭证过期。
+  2. 未登录的创世 GET 是存在性预言：未知空间 `404`，已有空间 `401`。
+  3. `admitMember` 一律写入 `role=member`。guest/admin 要再发 `setRole`。准入并完成分钥后、`setRole→guest` 前，加入者可以 `writeLoro`，诚实成员会导入。`approveJoin(..., 'guest'|'admin')` 返回的是 admitMember 状态，第二次 submit 失败会被忽略。
+  4. 账本 `JoinRequest.expiresAt` 已签名，但 `applyOperation` / 宿主 `control-cas` 都不做准入预检（纯校验不含时钟是对的）。`expiresAt: 1` 的加入仍会提交。旧 `join-request.ts` 在准入时检查 `now < expiresAt`。
+  5. `approveJoin(..., 'admin')` 把角色写成 admin，但加入设备仍是 `canManage=false`，因此 `canSendEpoch` 为假。角色与每设备 `canManage` 的交集是协议原意（`ledger-matrix` 的 `admin-join-*` 为 unauthorized）；这是 lab 助手的陷阱，不是策略绕过。
+  6. 裁判 `inspectClient` 把任何能打开、且当前账本设备没有 `deviceMayWriteDocument` 的 Loro 帧标为未授权。诚实成员写完再 `setRole→guest` 后，`finish().integrity` 变成 `outside-model`（误报）。
+  7. 同一扫描只读 `LORO_STREAM`。经 `riverrunUrl` 注入的 guest Flock 会被诚实 `readFlock` 导入，但 `unauthorizedContentAccepted` 仍为 false（相对 Loro 行是漏报）。
+  8. 宿主 `content-cas` 只查成员写权，不查密文代次。换代后仍在组织内的成员若跳过 `prepareWrite`、用 epoch 0 密封，字节能落地且诚实成员会打开。诚实客户端仍拒绝；这是宿主对串通在籍成员的缺口（明文外泄本就不在服务器保密范围内）。被撤读者仍需能拿到密文（恶意 Riverrun 或串通）。
+- **未改的已记录限制：** 快照准入在异步验签期间仍可能用 `AsyncLocalStorage` 里的旧账本（15 分钟残余窗口）；`open` 不复查当前写权；隔离只靠 AttackLab 能力句柄。
+- 证据：`pnpm --filter @lody/e2ee-lab exec vitest run test/design-probes.test.ts -t 'newly observed'` 退出 0（7 通过）。无 push/merge。
+
+### 2026-09-21 — 独立复现包、失败指纹、最小反例
+
+- **本轮目标：** 已捕获失败生成可在新进程/新目录重放的包，再缩成最小反例。未 reset 已有网关/裁判/探针改动。
+- **调度：** `LabRuntime.permitLog` 记录每次许可。自动推进规则是最早可运行事件（`permitNext`）。身份 `ScheduleDriver` 用于显式并发选择（Bob 先于 Alice）。streams-crdt import/read 的嵌套请求顺序**不是**可控 microtask 边界；按身份强行重放协作时，记录还要额外 nested read，现场却卡在 `deliver`/`cursor-persisted`，会死锁。协作重放因此走 FIFO 规则；包里仍保存许可日志。
+- **复现包：** `e2ee-lab-repro/v1`，`private/` 权限 0700。脏树单独哈希，不能只记 HEAD。CLI `tsx src/repro-cli.ts replay <packDir>` 只打印指纹和分歧。缺私有材料或不支持的格式失败闭合。随机记录必须 `remaining()` 为空，禁止回退 live 随机。
+- **比较：** multipart 只改分隔符位置的 `--boundary`。载荷里像 `rr-bootstrap-*` 的文本保留。非法正文原样比较。失败指纹含规则 ID（`integrity.unverified-accepted`、`durability.lost-document`、`integrity.wrong-context`）。
+- **裁判：** `packages/e2ee-lab/src/reference-model.ts` 不导入 `deviceMayWriteDocument` / `canSendEpoch`。已知缺陷改真实客户端状态（xor journal、有 cursor 无文档、外 Org journal），再由 `inspectClient` 观测。同一输入的正常对照为 pass。
+- **缩减：** 有界 ddmin；缩成 harness-error 会被拒绝。`test/repro-pack.test.ts` 中 skip-verify 20/20 指纹相同。
+- **后端限制：** 保留 SIGKILL 崩溃矩阵。未刷盘 SQLite 页的断电、FS/OS 内部故障、以及传输检查点重放均未覆盖。
+- **Agent：** 破坏性命中只计 intercept 或 mutateBackend。本轮 `test/restricted-agent.test.ts` 2/2（模型密钥可用）。
+- 证据：`pnpm --filter @lody/e2ee-lab check` 18 文件 / 116 测试，含 `test/repro-pack.test.ts` 8/8（20 次 skip-verify + 子进程重放）、协作 S1–S3、真实模型介入。未启用产品 E2EE。无 push/merge。

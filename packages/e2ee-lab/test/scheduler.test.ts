@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { firstDivergence, firstReplayDivergence } from '../src/replay';
-import { judgeClientDurability, judgeClientIntegrity } from '../src/judge';
+import { judgeClientDurability, judgeClientIntegrity, composeIntegrity } from '../src/judge';
 import { exploreSubmitInterleavings } from '../src/model';
 import {
   advanceTime,
@@ -132,6 +132,13 @@ describe('client integrity/durability judge', () => {
     );
     expect(judgeClientIntegrity({ observed: true, acceptedUnauthorized: false })).toBe('pass');
     expect(judgeClientIntegrity({ observed: true, acceptedUnauthorized: true })).toBe('violation');
+    expect(
+      composeIntegrity({
+        observed: true,
+        acceptedUnauthorized: false,
+        unauthorizedContentAccepted: true,
+      })
+    ).toBe('outside-model');
   });
 
   it('flags cursor-ahead and lost durable data only from client facts', () => {

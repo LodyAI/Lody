@@ -45,6 +45,9 @@ export interface ContentClient {
   canWriteDocument: boolean;
   currentEpoch(): number;
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
+  /** Refresh ledger epoch/write rights before sealing. Honest clients must not
+   *  seal under a stale local key index after `publishEpoch`. */
+  prepareWrite?(): Promise<void>;
   random?(label: string, length: number): Uint8Array;
   /** Deterministic wall-clock hook for Flock physicalTime when provided. */
   now?: () => number;
@@ -197,6 +200,10 @@ function flockCursorStore(session: ContentClient): RemoteCursorStore {
 }
 
 export async function writeLoro(session: ContentClient, text: string): Promise<void> {
+  await session.prepareWrite?.();
+  if (!session.epochKeys.has(session.currentEpoch())) {
+    throw new Error('missing-current-epoch-key');
+  }
   const doc = sessionLoro(session);
   const streamUrl = `${session.baseUrl}/ds/${session.genesisHex}/${LORO_STREAM}`;
   const cursorStore = loroCursorStore(session);
@@ -278,6 +285,10 @@ export async function writeFlock(
   value: string,
   path: readonly string[] = ['private', 'note']
 ): Promise<void> {
+  await session.prepareWrite?.();
+  if (!session.epochKeys.has(session.currentEpoch())) {
+    throw new Error('missing-current-epoch-key');
+  }
   const flock = sessionFlock(session);
   const streamUrl = `${session.baseUrl}/ds/${session.genesisHex}/${FLOCK_STREAM}`;
   const cursorStore = flockCursorStore(session);
@@ -516,6 +527,10 @@ export async function sealLoroSnapshot(
   offset: string,
   plaintext: string
 ): Promise<Uint8Array> {
+  await session.prepareWrite?.();
+  if (!session.epochKeys.has(session.currentEpoch())) {
+    throw new Error('missing-current-epoch-key');
+  }
   const sealed = await provider(session, 'loro', 'loro').seal({
     plaintext: new TextEncoder().encode(plaintext),
     context: {
@@ -552,6 +567,10 @@ export async function loroTailOffset(session: ContentClient): Promise<string> {
 }
 
 export async function uploadLoroSnapshot(session: ContentClient, text: string): Promise<void> {
+  await session.prepareWrite?.();
+  if (!session.epochKeys.has(session.currentEpoch())) {
+    throw new Error('missing-current-epoch-key');
+  }
   const doc = bindLoroPeer(new LoroDoc(), session);
   const crdt = new StreamsCrdt({
     streamUrl: `${session.baseUrl}/ds/${session.genesisHex}/${LORO_STREAM}`,

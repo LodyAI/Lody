@@ -69,6 +69,7 @@ export type {
 } from './schema';
 export type { Device, EpochState, Member, OrgState } from './policy';
 export {
+  canSendEpoch,
   collectEpochPackets,
   envelopeAad,
   openEpochEnvelope,

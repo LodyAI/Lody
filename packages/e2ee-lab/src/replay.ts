@@ -1,4 +1,5 @@
 import type { EntropyFill } from './entropy';
+import { normalizeFrameHex } from './multipart';
 import type { ProtocolFrame } from './runtime';
 import type { LabEvent } from './scheduler';
 
@@ -119,24 +120,7 @@ export function eventSignature(events: readonly LabEvent[]): string {
     .join('|');
 }
 
-/**
- * Riverrun wraps stream payloads in multipart bodies whose boundary token
- * (`rr-bootstrap-<random>`) is generated per request by the pinned server —
- * per-run noise like ephemeral ports. Normalize it out; the protected payload
- * bytes between boundaries still compare byte-for-byte.
- */
-function normalizeFrameHex(hex: string): string {
-  let text = '';
-  for (let i = 0; i < hex.length; i += 2) {
-    text += String.fromCharCode(Number.parseInt(hex.slice(i, i + 2), 16));
-  }
-  const normalized = text.replace(/rr-bootstrap-[0-9a-zA-Z-]+/g, 'rr-bootstrap-*');
-  let out = '';
-  for (let i = 0; i < normalized.length; i++) {
-    out += normalized.charCodeAt(i).toString(16).padStart(2, '0');
-  }
-  return out;
-}
+export { normalizeFrameHex } from './multipart';
 
 function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
   if (left.byteLength !== right.byteLength) return false;

@@ -91,6 +91,8 @@ export class DemoSession {
   readonly now: () => number;
   readonly testMode: boolean;
   canWriteDocument = false;
+  /** Last authenticated ledger epoch. Content seal must use this, not max(local keys). */
+  ledgerEpoch = 0;
   loroDoc: LoroDoc | null = null;
   flockDoc: Flock | null = null;
   crashAt?: 'after-import' | 'after-document' | 'before-cursor' | 'after-cursor';
@@ -224,8 +226,13 @@ export class DemoSession {
     return this.ledgerClient;
   }
 
+  async prepareWrite(): Promise<void> {
+    await this.readLedger();
+  }
+
   async readLedger(): Promise<Ledger> {
     const ledger = await (await this.openLedger()).read();
+    this.ledgerEpoch = ledger.state.epoch.number;
     this.canWriteDocument = [...ledger.state.devices.entries()].some(([id, device]) => {
       if (id !== deviceHex(this.device)) return false;
       const member = ledger.state.members.get(toHex(device.membershipId));
@@ -264,6 +271,8 @@ export class DemoSession {
     });
     if (!response.ok) throw new Error(`create-space-${response.status}:${await response.text()}`);
     this.ledgerClient = null;
+    this.ledgerEpoch = 0;
+    this.canWriteDocument = true;
     return { genesisHex: this.genesisHex };
   }
 
@@ -271,9 +280,13 @@ export class DemoSession {
     const response = await this.fetch(`/v1/spaces/${genesisHex}/genesis`);
     if (!response.ok) throw new Error(`genesis-${response.status}`);
     const payload = (await response.json()) as { genesis: string };
-    this.genesis = fromHex(payload.genesis);
+    const genesis = fromHex(payload.genesis);
+    const bound = toHex(await hashRecord(genesis));
+    if (bound !== genesisHex) throw new Error('genesis-binding-mismatch');
+    this.genesis = genesis;
     this.genesisHex = genesisHex;
     this.ledgerClient = null;
+    this.ledgerEpoch = 0;
   }
 
   async submit(operation: Operation): Promise<{ status: string; ledger: Ledger }> {
@@ -408,6 +421,7 @@ export class DemoSession {
     });
     if (submitted.status === 'committed') {
       this.epochKeys.set(epoch, next);
+      this.ledgerEpoch = epoch;
       this.persistEpochs();
     }
     return { status: submitted.status, epoch };
@@ -445,7 +459,7 @@ export class DemoSession {
   }
 
   currentEpoch(): number {
-    return Math.max(0, ...this.epochKeys.keys());
+    return this.ledgerEpoch;
   }
 
   async receiveEpochKey(sender: DemoDevice, epoch: number, frame: Uint8Array): Promise<void> {

@@ -340,6 +340,34 @@ it('rejects cross-document snapshots, tampering, wrong epoch keys, and offset sw
   ).rejects.toThrow('snapshot-offset-mismatch');
 });
 
+it('checks device document-write on update seals, not only snapshots', async () => {
+  const plaintext = new TextEncoder().encode('doc');
+  const binding = new Uint8Array([9]);
+  const writer = provider(
+    'doc-1',
+    () => key,
+    () => true
+  );
+  const guest = provider(
+    'doc-1',
+    () => key,
+    () => false
+  );
+  await expect(
+    guest.seal({
+      plaintext,
+      context,
+      additionalData: () => binding,
+    })
+  ).rejects.toThrow('unauthorized');
+  const sealed = await writer.seal({
+    plaintext,
+    context,
+    additionalData: () => binding,
+  });
+  expect(await guest.open({ ...sealed, context, additionalData: binding })).toEqual(plaintext);
+});
+
 it('checks device document-write capability, not mere possession of a key', async () => {
   const owner = await ed25519();
   const created = await signGenesis(owner);

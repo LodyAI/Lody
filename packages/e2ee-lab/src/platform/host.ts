@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { isAbsolute, join, resolve } from 'node:path';
@@ -14,6 +15,13 @@ import { deviceMayWriteDocument } from '@lody/e2ee-core/streams-content';
 import { StreamsClient } from '@loro-dev/streams-client';
 import { fromHex, toHex } from './bytes';
 import { verifyPossession } from './device';
+import {
+  authorizeCurrentMember,
+  authorizeJoinSigner,
+  authorizeMembership,
+  authorizeStreamRequest,
+  isKnownStream,
+} from './gateway';
 import { credentialExpired, HostMeta } from './host-meta';
 import {
   AUTH_HEADER,
@@ -126,13 +134,13 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
     protocol: 'http1',
   });
 
-  const ledgers = new Map<string, Ledger>();
   // Host-scoped verification cache: no mutable cache state shared across runs.
   const pointCache = new SigningPointCache();
+  const snapshotWriteLedger = new AsyncLocalStorage<Ledger>();
 
   async function loadLedger(genesisHex: string): Promise<Ledger> {
-    const cached = ledgers.get(genesisHex);
-    if (cached) return cached;
+    // Always re-read from Riverrun. A sticky cache would authorize content
+    // writes against stale membership after a malicious-server control append.
     const space = meta.space(genesisHex);
     if (!space) throw new Error('unknown-space');
     const genesis = space.genesis;
@@ -155,7 +163,6 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
       offset = response.result.nextOffset;
       if (response.result.upToDate) break;
     }
-    ledgers.set(genesisHex, ledger);
     return ledger;
   }
 
@@ -171,7 +178,6 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
     return credential;
   }
 
-  let admitGenesis = '';
   const publication = createContentSnapshotPublication({
     store: snapshotStore,
     cipher: new ContentCipher({
@@ -181,7 +187,7 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
     }),
     now: () => meta.now(wallClock),
     mayWriteDocument(author) {
-      const ledger = ledgers.get(admitGenesis);
+      const ledger = snapshotWriteLedger.getStore();
       if (!ledger) return false;
       return deviceMayWriteDocument(ledger.state, author.device);
     },
@@ -282,10 +288,22 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
             json(res, 403, { error: 'unauthorized' });
             return;
           }
+          const genesisHex = payload.genesisHex ?? null;
+          if (genesisHex) {
+            if (!meta.space(genesisHex)) {
+              json(res, 403, { error: 'unauthorized' });
+              return;
+            }
+            const ledger = await loadLedger(genesisHex);
+            if (!authorizeMembership(ledger.state, payload.deviceHex)) {
+              json(res, 403, { error: 'unauthorized' });
+              return;
+            }
+          }
           const credential = meta.issueCredential({
             account: payload.account,
             deviceHex: payload.deviceHex,
-            genesisHex: payload.genesisHex ?? null,
+            genesisHex,
             now,
             ttlMs: payload.ttlMs,
           });
@@ -329,10 +347,6 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
           }
           meta.putSpace({ genesisHex, ownerDeviceHex: credential.deviceHex }, genesis);
           meta.bindCredential(credential.token, genesisHex);
-          ledgers.set(
-            genesisHex,
-            await Ledger.verify({ anchor: fromHex(genesisHex), records: [genesis], pointCache })
-          );
           json(res, 200, { genesisHex, ownerDeviceHex: credential.deviceHex });
           return;
         }
@@ -345,16 +359,41 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
             return;
           }
           if (parts[3] === 'genesis') {
+            requireCredential(req, now);
             json(res, 200, { genesis: toHex(space.genesis) });
             return;
           }
           if (parts[3] === 'joins') {
-            requireCredential(req, now);
+            const credential = requireCredential(req, now);
+            const ledger = await loadLedger(genesisHex);
+            if (
+              !authorizeCurrentMember({
+                state: ledger.state,
+                deviceHex: credential.deviceHex,
+                credentialGenesisHex: credential.genesisHex,
+                requestGenesisHex: genesisHex,
+              })
+            ) {
+              json(res, 403, { error: 'unauthorized' });
+              return;
+            }
             json(res, 200, { requests: meta.joins(genesisHex) });
             return;
           }
           if (parts[3] === 'notes') {
-            requireCredential(req, now);
+            const credential = requireCredential(req, now);
+            const ledger = await loadLedger(genesisHex);
+            if (
+              !authorizeCurrentMember({
+                state: ledger.state,
+                deviceHex: credential.deviceHex,
+                credentialGenesisHex: credential.genesisHex,
+                requestGenesisHex: genesisHex,
+              })
+            ) {
+              json(res, 403, { error: 'unauthorized' });
+              return;
+            }
             json(res, 200, { notes: meta.notes(genesisHex) });
             return;
           }
@@ -367,11 +406,20 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
           parts[2] &&
           parts[3] === 'joins'
         ) {
-          requireCredential(req, now);
+          const credential = requireCredential(req, now);
+          const genesisHex = parts[2]!;
+          if (!meta.space(genesisHex)) {
+            json(res, 404, { error: 'unknown-space' });
+            return;
+          }
           const request = JSON.parse(
             new TextDecoder().decode(await readBody(req))
           ) as JoinRequestWire;
-          meta.putJoin(parts[2]!, request);
+          if (!authorizeJoinSigner(credential.deviceHex, request.signingPublicKey)) {
+            json(res, 403, { error: 'unauthorized' });
+            return;
+          }
+          meta.putJoin(genesisHex, request);
           json(res, 200, { ok: true });
           return;
         }
@@ -391,7 +439,14 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
             return;
           }
           const ledger = await loadLedger(genesisHex);
-          if (!ledger.state.devices.has(credential.deviceHex)) {
+          if (
+            !authorizeCurrentMember({
+              state: ledger.state,
+              deviceHex: credential.deviceHex,
+              credentialGenesisHex: credential.genesisHex,
+              requestGenesisHex: genesisHex,
+            })
+          ) {
             json(res, 403, { error: 'unauthorized' });
             return;
           }
@@ -404,30 +459,35 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
           const genesisHex = parts[1];
           const stream = parts[2];
           const sub = parts[3];
-          const known =
-            stream === CONTROL_STREAM ||
-            stream === KEYS_STREAM ||
-            stream === LORO_STREAM ||
-            stream === FLOCK_STREAM;
-          if (!known || !meta.space(genesisHex)) {
+          if (!isKnownStream(stream) || !meta.space(genesisHex)) {
             json(res, 404, { error: 'unknown-stream' });
             return;
           }
           const credential = requireCredential(req, now);
-          if (credential.genesisHex && credential.genesisHex !== genesisHex) {
-            json(res, 403, { error: 'unauthorized' });
+          const ledger = await loadLedger(genesisHex);
+          const decision = authorizeStreamRequest({
+            state: ledger.state,
+            deviceHex: credential.deviceHex,
+            credentialGenesisHex: credential.genesisHex,
+            requestGenesisHex: genesisHex,
+            stream,
+            method: req.method ?? '',
+            sub,
+          });
+          if (!decision.ok) {
+            json(res, decision.status, { error: decision.error });
             return;
           }
-          const isRead = req.method === 'GET' || req.method === 'HEAD';
-          const isSnapshotGet = isRead && sub === 'snapshot';
-          const isBootstrapGet = isRead && sub === 'bootstrap';
-          const isStreamRead = isRead && sub === undefined;
-          if (isStreamRead || isSnapshotGet || isBootstrapGet) {
+          if (
+            decision.action === 'read' ||
+            decision.action === 'keys-cas' ||
+            decision.action === 'content-cas'
+          ) {
             await proxy(req, res, url);
             return;
           }
 
-          if (req.method === 'POST' && parts[3] === 'append-cas' && stream === CONTROL_STREAM) {
+          if (decision.action === 'control-cas') {
             const body = await readBody(req);
             const records = unframe(body);
             if (records.length !== 1) {
@@ -445,7 +505,7 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
               return;
             }
             const current = await loadLedger(genesisHex);
-            const next = await current.extend([record]);
+            await current.extend([record]);
             const dest = `${riverrun.baseUrl}${url.pathname}${url.search}`;
             const headers = new Headers();
             for (const [name, value] of Object.entries(req.headers)) {
@@ -459,7 +519,6 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
               body: Buffer.from(body),
             });
             if (response.status === 200 || response.status === 204) {
-              ledgers.set(genesisHex, next);
               const fail = meta.failpoint();
               if (fail === 'drop-control-ack') {
                 res.destroy();
@@ -480,26 +539,7 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
             return;
           }
 
-          if (req.method === 'POST' && parts[3] === 'append-cas' && stream === KEYS_STREAM) {
-            const ledger = await loadLedger(genesisHex);
-            const device = ledger.state.devices.get(credential.deviceHex);
-            const member = device
-              ? ledger.state.members.get(toHex(device.membershipId))
-              : undefined;
-            if (
-              !device ||
-              device.kind !== 'personal' ||
-              !device.canManage ||
-              (member?.role !== 'owner' && member?.role !== 'admin')
-            ) {
-              json(res, 403, { error: 'unauthorized' });
-              return;
-            }
-            await proxy(req, res, url);
-            return;
-          }
-
-          if (req.method === 'PUT' && parts[3] === 'snapshot' && parts[4]) {
+          if (decision.action === 'snapshot-put' && parts[4]) {
             const body = await readBody(req);
             const offset = decodeURIComponent(parts[4]);
             const headerDevice = req.headers[SNAPSHOT_ADMISSION_DEVICE_HEADER.toLowerCase()];
@@ -510,8 +550,8 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
               json(res, 403, { error: 'snapshot-device-mismatch' });
               return;
             }
-            const ledger = await loadLedger(genesisHex);
-            if (!deviceMayWriteDocument(ledger.state, credential.deviceHex)) {
+            const fresh = await loadLedger(genesisHex);
+            if (!deviceMayWriteDocument(fresh.state, credential.deviceHex)) {
               json(res, 403, { error: 'unauthorized' });
               return;
             }
@@ -520,17 +560,18 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
               return;
             }
             const resource = stream === FLOCK_STREAM ? 'flock' : 'loro';
-            admitGenesis = genesisHex;
-            await publication.admit({
-              streamKey: `${genesisHex}/${stream}`,
-              offset,
-              body,
-              submittingDevice: credential.deviceHex,
-              leaseIssuedAt: credential.issuedAt,
-              leaseExpiresAt: credential.expiresAt,
-              expectedGenesis: genesisHex,
-              expectedResource: resource,
-            });
+            await snapshotWriteLedger.run(fresh, () =>
+              publication.admit({
+                streamKey: `${genesisHex}/${stream}`,
+                offset,
+                body,
+                submittingDevice: credential.deviceHex,
+                leaseIssuedAt: credential.issuedAt,
+                leaseExpiresAt: credential.expiresAt,
+                expectedGenesis: genesisHex,
+                expectedResource: resource,
+              })
+            );
             const dest = `${riverrun.baseUrl}${url.pathname}${url.search}`;
             const response = await httpFetch(dest, {
               method: 'PUT',
@@ -544,20 +585,6 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
             });
             res.writeHead(response.status, outHeaders);
             res.end(Buffer.from(await response.arrayBuffer()));
-            return;
-          }
-
-          if (
-            req.method === 'POST' &&
-            (sub === undefined || sub === 'append-cas') &&
-            (stream === LORO_STREAM || stream === FLOCK_STREAM)
-          ) {
-            const ledger = await loadLedger(genesisHex);
-            if (!deviceMayWriteDocument(ledger.state, credential.deviceHex)) {
-              json(res, 403, { error: 'unauthorized' });
-              return;
-            }
-            await proxy(req, res, url);
             return;
           }
 

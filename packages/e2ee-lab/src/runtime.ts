@@ -9,6 +9,7 @@ import {
   type SchedulerState,
 } from './scheduler';
 import { toHex } from './platform/bytes';
+import { eventIdentity, identityKey, type ScheduleChoice } from './schedule';
 
 export interface ProtocolFrame {
   readonly eventId: string;
@@ -48,6 +49,11 @@ export class LabRuntime {
   private readonly mode: 'auto' | 'manual';
   private readonly fetchImpl: typeof globalThis.fetch;
   private closed = false;
+  /** Every permit, in order. Replay uses this instead of an unbounded drain. */
+  readonly permitLog: ScheduleChoice[] = [];
+  private readonly identityCounts = new Map<string, number>();
+  /** Honest-operation starts recorded for strict replay. */
+  readonly startLog: ScheduleChoice[] = [];
 
   constructor(options?: {
     mode?: 'auto' | 'manual';
@@ -105,7 +111,29 @@ export class LabRuntime {
   permit(eventId: string): void {
     const next = permitEvent(this.state, eventId);
     this.state = next.state;
+    const identity = eventIdentity(next.event, this.state.events);
+    const key = identityKey(identity);
+    const occurrence = this.identityCounts.get(key) ?? 0;
+    this.identityCounts.set(key, occurrence + 1);
+    this.permitLog.push({
+      kind: 'permit',
+      identity,
+      occurrence,
+      eventId: next.event.eventId,
+    });
     this.dispatch();
+  }
+
+  recordStart(input: { actor: string; operation: string; phase?: string }): void {
+    this.startLog.push({
+      kind: 'start',
+      identity: {
+        actor: input.actor,
+        operation: input.operation,
+        phase: input.phase ?? 'start',
+      },
+      occurrence: this.startLog.length,
+    });
   }
 
   complete(eventId: string): void {

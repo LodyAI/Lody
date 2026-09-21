@@ -28,6 +28,7 @@ import {
   judgeImport,
   judgeLeak,
   judgeUnauthorized,
+  judgeUnauthorizedContent,
   type ScenarioRecord,
 } from '../src/judge';
 
@@ -278,6 +279,17 @@ describe('P3 Spec §7 matrix', () => {
       actual: sqliteRejected ? 'pass' : 'unavailable',
     });
 
+    rows.push({
+      name: 'unauthorized-content-model-limit',
+      control: 'open accepts AEAD+sig; write rights are host/seal-only',
+      attack: 'guest or revoked epoch-key holder under malicious Riverrun',
+      expected: 'outside-model',
+      actual: judgeUnauthorizedContent({
+        observed: true,
+        acceptedUnauthorizedWriter: true,
+      }),
+    });
+
     for (const row of rows) {
       expect(row.actual, row.name).toBe(row.expected);
     }
@@ -294,6 +306,7 @@ describe('P3 Spec §7 matrix', () => {
       'fork-without-independent-evidence',
       'tamper-signature-malicious-server',
       'sqlite-mutation',
+      'unauthorized-content-model-limit',
     ]);
   });
 });

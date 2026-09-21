@@ -27,11 +27,21 @@ export function recordingEntropy(inner: Entropy = liveEntropy): RecordingEntropy
   };
 }
 
-export function replayEntropy(script: readonly EntropyFill[]): Entropy {
+export type ReplayEntropy = Entropy & {
+  remaining(): readonly EntropyFill[];
+  consumed(): number;
+};
+
+export function isReplayEntropy(value: Entropy): value is ReplayEntropy {
+  return typeof (value as ReplayEntropy).remaining === 'function';
+}
+
+export function replayEntropy(script: readonly EntropyFill[]): ReplayEntropy {
   const remaining = script.map((fill) => ({
     label: fill.label,
     bytes: new Uint8Array(fill.bytes),
   }));
+  const total = remaining.length;
   return {
     fill(label, bytes) {
       const next = remaining.shift();
@@ -43,6 +53,8 @@ export function replayEntropy(script: readonly EntropyFill[]): Entropy {
       bytes.set(next.bytes);
       return bytes;
     },
+    remaining: () => remaining,
+    consumed: () => total - remaining.length,
   };
 }
 

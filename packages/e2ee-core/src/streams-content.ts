@@ -22,9 +22,10 @@ export interface StreamsContentOptions {
   readonly readKey: (epoch: number) => Uint8Array | undefined;
   /**
    * Honest-client seal check: device document-write, not account role or mere
-   * possession of the epoch key. Does not constrain a malicious client. Host
-   * publication uses `./snapshot-admission`. Open of an admitted snapshot does
-   * not re-check this (historical snapshots stay valid after later revoke).
+   * possession of the epoch key. Applies to both update and snapshot seals.
+   * Does not constrain a malicious client. Host publication uses
+   * `./snapshot-admission`. Open of an admitted snapshot does not re-check
+   * this (historical snapshots stay valid after later revoke).
    */
   readonly mayWriteDocument?: (author: ContentAuthor) => boolean;
 }
@@ -117,6 +118,10 @@ export function createStreamsContentProvider(
       const offset = isSnapshot ? encoder.encode(continuationOffset(input.context)) : null;
       if (isSnapshot) {
         invariant(mayWriteDocument?.(author) === true, 'unauthorized');
+      } else if (mayWriteDocument) {
+        // Honest clients refuse update seals without document-write rights.
+        // Malicious clients can omit the check; open still trusts host admission.
+        invariant(mayWriteDocument(author) === true, 'unauthorized');
       }
       const header = new Uint8Array([isSnapshot ? SNAPSHOT_HEADER : UPDATE_HEADER]);
       const binding = aad(input.additionalData(header));

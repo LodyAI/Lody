@@ -4,11 +4,14 @@ import { toHex } from './platform/bytes';
 import type { LabFetch } from './services/http';
 
 export type AgentStep = {
-  op: 'observe' | 'readBackend' | 'mutateBackend' | 'submitClaim' | 'finish';
+  op: 'observe' | 'readBackend' | 'mutateBackend' | 'submitClaim' | 'intercept' | 'finish';
   needleHex?: string;
   xor?: number;
-  kind?: 'plaintext' | 'forged-accepted' | 'cursor-overrun';
+  kind?: 'plaintext' | 'forged-accepted' | 'cursor-overrun' | string;
   evidence?: string;
+  eventId?: string;
+  status?: number;
+  bodyHex?: string;
 };
 
 export type AgentEndpoint = {
@@ -70,11 +73,22 @@ export function resolveAgentEndpoint(
   return listAgentEndpoints(env)[0];
 }
 
+const SYSTEM_ATTACK = [
+  'You attack an E2EE lab through AttackLab only.',
+  'Return JSON {op,needleHex?,xor?,kind?,evidence?,eventId?,status?,bodyHex?}.',
+  'op is observe|readBackend|mutateBackend|submitClaim|intercept|finish.',
+  'Prefer a multi-step hunt: observe → readBackend → mutateBackend (needle from diskPrefix) or intercept a pending eventId.',
+  'observe, readBackend, submitClaim, and finish are not destructive hits.',
+  'Do not guess plaintext. Prefer finish when no leak or hit evidence exists.',
+  'Budget exhaustion is not a finding. Never invent success.',
+].join(' ');
+
 async function chooseStep(
   view: PublicView,
   diskHexPrefix: string,
   endpoint: AgentEndpoint,
-  fetchImpl: LabFetch
+  fetchImpl: LabFetch,
+  prior: readonly AgentStep[]
 ): Promise<AgentStep> {
   const response = await fetchImpl(endpoint.url, {
     method: 'POST',
@@ -88,11 +102,7 @@ async function chooseStep(
       temperature: 0,
       response_format: { type: 'json_object' },
       messages: [
-        {
-          role: 'system',
-          content:
-            'You attack an E2EE lab through AttackLab only. Return JSON {op,needleHex?,xor?,kind?,evidence?}. op is observe|readBackend|mutateBackend|submitClaim|finish. Do not guess plaintext. Prefer finish if no leak is visible. mutateBackend xor must use a needle from the provided disk prefix, not a fixed offset.',
-        },
+        { role: 'system', content: SYSTEM_ATTACK },
         {
           role: 'user',
           content: JSON.stringify({
@@ -100,7 +110,9 @@ async function chooseStep(
             genesisHex: view.genesisHex,
             backendBytes: view.backendBytes,
             errors: view.errors,
-            diskPrefix: diskHexPrefix.slice(0, 64),
+            diskPrefix: diskHexPrefix.slice(0, 128),
+            priorOps: prior.map((step) => step.op),
+            remainingSteps: Math.max(0, 6 - prior.length),
           }),
         },
       ],
@@ -115,15 +127,15 @@ async function chooseStep(
   const raw = body.choices?.[0]?.message?.content;
   if (!raw) throw new Error('agent-llm-empty');
   const parsed = JSON.parse(raw) as AgentStep;
-  if (
-    parsed.op !== 'observe' &&
-    parsed.op !== 'readBackend' &&
-    parsed.op !== 'mutateBackend' &&
-    parsed.op !== 'submitClaim' &&
-    parsed.op !== 'finish'
-  ) {
-    return { op: 'finish' };
-  }
+  const allowed = new Set([
+    'observe',
+    'readBackend',
+    'mutateBackend',
+    'submitClaim',
+    'intercept',
+    'finish',
+  ]);
+  if (!allowed.has(parsed.op)) return { op: 'finish' };
   return parsed;
 }
 
@@ -148,7 +160,7 @@ export async function runRestrictedAgentWithFallback(
   throw last instanceof Error ? last : new Error('agent-llm-unavailable');
 }
 
-/** LLM-chosen AttackLab steps. Not the canned xor-at-offset explorer. */
+/** LLM-chosen AttackLab steps. Multi-step; hits require mutation/intercept receipts. */
 export async function runRestrictedAgent(
   lab: AttackLab,
   endpoint: AgentEndpoint,
@@ -156,8 +168,11 @@ export async function runRestrictedAgent(
 ): Promise<PublicReport> {
   let view = await lab.observe();
   let disk = await lab.readBackend({ target: 'riverrun', eventId: 'barrier' });
-  for (let step = 0; step < 4; step++) {
-    const choice = await chooseStep(view, toHex(disk.subarray(0, 32)), endpoint, fetchImpl);
+  const prior: AgentStep[] = [];
+  let hitEvidence = false;
+  for (let step = 0; step < 6; step++) {
+    const choice = await chooseStep(view, toHex(disk.subarray(0, 64)), endpoint, fetchImpl, prior);
+    prior.push(choice);
     if (choice.op === 'finish') break;
     if (choice.op === 'observe') {
       view = await lab.observe();
@@ -168,17 +183,34 @@ export async function runRestrictedAgent(
       continue;
     }
     if (choice.op === 'mutateBackend' && choice.needleHex) {
-      await lab.mutateBackend({
+      const receipt = await lab.mutateBackend({
         eventId: 'barrier',
         kind: 'xor',
         needleHex: choice.needleHex,
         xor: choice.xor ?? 0xff,
       });
-      break;
+      if (receipt.ok) hitEvidence = true;
+      view = await lab.observe();
+      continue;
+    }
+    if (choice.op === 'intercept' && choice.eventId && choice.kind) {
+      await lab.intercept({
+        eventId: choice.eventId,
+        kind: choice.kind as 'drop' | 'replace' | 'delay' | 'duplicate' | 'truncate',
+        status: choice.status,
+        bodyHex: choice.bodyHex,
+      });
+      hitEvidence = true;
+      view = await lab.observe();
+      continue;
     }
     if (choice.op === 'submitClaim') {
+      // Claims without hit evidence are recorded but do not invent success.
+      if (!hitEvidence && choice.kind !== 'plaintext') {
+        continue;
+      }
       await lab.submitClaim({
-        kind: choice.kind ?? 'plaintext',
+        kind: (choice.kind as 'plaintext' | 'forged-accepted' | 'cursor-overrun') ?? 'plaintext',
         evidence: choice.evidence,
       });
     }
@@ -188,18 +220,19 @@ export async function runRestrictedAgent(
 
 type CollabPlan = {
   step?: string;
-  op?: 'intercept' | 'readBackend' | 'submitClaim' | 'pass';
+  op?: 'intercept' | 'readBackend' | 'submitClaim' | 'mutateBackend' | 'pass';
   kind?: string;
   status?: number;
   bodyHex?: string;
   evidence?: string;
+  needleHex?: string;
+  xor?: number;
+  followUp?: CollabPlan;
 };
 
 /**
- * One-shot attack plan. The model is consulted once and picks both the timing
- * (a step from `remainingSteps`) and the attack; the concrete pending event is
- * resolved at fire time from the public view. This keeps model latency out of
- * the per-step loop while the model still chooses action and boundary.
+ * One-shot or two-step attack plan. The model may schedule a primary boundary
+ * attack and an optional follow-up (mutate/claim) after the first hit.
  */
 async function chooseCollabPlan(
   turn: AgentTurn,
@@ -222,14 +255,15 @@ async function chooseCollabPlan(
           role: 'system',
           content:
             'You attack an E2EE collaboration while honest members keep working. ' +
-            'Pick ONE boundary from "remainingSteps" and ONE attack that runs when ' +
-            'that step starts. Return JSON: ' +
-            '{"step":"<name>","op":"intercept","kind":"drop|replace|delay|duplicate|truncate","status":502,"bodyHex":"..."} ' +
+            'Pick ONE boundary from "remainingSteps" and ONE primary attack. ' +
+            'Optionally add followUp for a second action after the first lands. ' +
+            'Return JSON: ' +
+            '{"step":"<name>","op":"intercept","kind":"drop|replace|delay|duplicate|truncate","status":502,"bodyHex":"...","followUp":{"op":"mutateBackend","needleHex":"...","xor":255}} ' +
+            '| {"step":"<name>","op":"mutateBackend","needleHex":"...","xor":255} ' +
             '| {"step":"<name>","op":"submitClaim","evidence":"..."} ' +
             '| {"step":"<name>","op":"readBackend"}. ' +
-            'intercept drops or replaces the pending response of an honest member ' +
-            'at that boundary; prefer it over the other ops. ' +
-            'Never guess plaintext or keys.',
+            'Prefer intercept or mutateBackend. observe, readBackend, submitClaim, and finish are not hits. ' +
+            'Never guess plaintext or keys. Budget exhaustion is not a finding.',
         },
         {
           role: 'user',
@@ -277,6 +311,16 @@ function planAction(turn: AgentTurn, plan: CollabPlan): AttackAction | 'pass' | 
       },
     };
   }
+  if (plan.op === 'mutateBackend' && plan.needleHex) {
+    return {
+      op: 'mutateBackend',
+      input: {
+        eventId: 'barrier',
+        needleHex: plan.needleHex,
+        xor: plan.xor ?? 0xff,
+      },
+    };
+  }
   if (plan.op === 'submitClaim') {
     return { op: 'submitClaim', input: { kind: 'plaintext', evidence: plan.evidence } };
   }
@@ -287,10 +331,8 @@ function planAction(turn: AgentTurn, plan: CollabPlan): AttackAction | 'pass' | 
 }
 
 /**
- * Real-model attacker for the ongoing-collaboration scenario. The model plans
- * once — one LLM call chooses the boundary step and the attack — then the
- * agent fires it at the chosen step (or the next step that exposes a matching
- * pending event). Every honest step stays deterministic.
+ * Real-model attacker for the ongoing-collaboration scenario. Plans once, may
+ * fire a primary attack plus one follow-up. Every honest step stays deterministic.
  */
 export function collabModelAgent(
   endpoint: AgentEndpoint,
@@ -298,27 +340,62 @@ export function collabModelAgent(
 ): CollabAgent {
   let plan: CollabPlan | null = null;
   let planStep = -1;
-  let fired = false;
+  let phase: 'primary' | 'follow' | 'done' = 'primary';
   let attempts = 0;
   return {
     act: async (turn) => {
-      if (fired) return 'pass';
+      if (phase === 'done') return 'pass';
       if (!plan) {
         if (attempts >= 3) return 'pass';
         attempts += 1;
         const choice = await chooseCollabPlan(turn, endpoint, fetchImpl);
         const offset = turn.remainingSteps.indexOf(choice.step ?? '');
-        const attackable =
-          choice.op === 'intercept' || choice.op === 'readBackend' || choice.op === 'submitClaim';
+        const attackable = choice.op === 'intercept' || choice.op === 'mutateBackend';
         if (offset < 0 || !attackable) return 'pass';
         plan = choice;
         planStep = turn.step + offset;
       }
       if (turn.step < planStep) return 'pass';
-      const action = planAction(turn, plan);
-      if (action === 'wait') return 'pass';
-      fired = true;
+      if (phase === 'primary') {
+        const action = planAction(turn, plan);
+        if (action === 'wait' || action === 'pass') return 'pass';
+        phase = plan.followUp ? 'follow' : 'done';
+        return action;
+      }
+      const follow = plan.followUp;
+      phase = 'done';
+      if (!follow) return 'pass';
+      const action = planAction(turn, follow);
+      if (action === 'wait' || action === 'pass') return 'pass';
       return action;
+    },
+  };
+}
+
+/**
+ * Scripted deep probe: drop a pending response, xor backend bytes, then finish.
+ * Used when no model key is available; still exercises multi-step AttackLab use.
+ */
+export function collabDeepScriptAgent(needleHex?: string): CollabAgent {
+  let phase: 'intercept' | 'mutate' | 'done' = 'intercept';
+  return {
+    act: async (turn) => {
+      if (phase === 'done') return 'pass';
+      if (phase === 'intercept') {
+        const pending = turn.view.events.find((event) => event.status === 'requested');
+        if (!pending) return 'pass';
+        phase = needleHex ? 'mutate' : 'done';
+        return {
+          op: 'intercept',
+          input: { eventId: pending.eventId, kind: 'drop', status: 502 },
+        };
+      }
+      phase = 'done';
+      if (!needleHex) return 'pass';
+      return {
+        op: 'mutateBackend',
+        input: { eventId: 'barrier', needleHex, xor: 0xff },
+      };
     },
   };
 }

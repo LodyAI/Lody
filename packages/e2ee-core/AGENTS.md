@@ -40,8 +40,10 @@ in-package tests only; do not re-export it.
 - Persist exact pending bytes before CAS. Conflicts never re-sign; retry the
   same bytes. `LedgerClient.submit`/`resume` are Promise wrappers over one
   Effect implementation; do not add a second simulated submit path.
-  `openEpochEnvelope` returns plaintext only when epoch matches and
-  `commitEpochKey` equals the ledger commitment.
+  `openEpochEnvelope` returns plaintext only when the sender currently
+  may distribute keys (`canSendEpoch`, also exported for the host gateway),
+  the recipient is admitted, the epoch matches, and `commitEpochKey`
+  equals the ledger commitment.
 - Roles owner/admin/member/guest; guest read-only; machines have no Org
   management. Device revoke is this-Org and the named device only. Owner
   transfer is unilateral `[6, successorMembershipId]`; predecessor becomes

@@ -15,7 +15,20 @@ The [specification](../../../../specs/e2ee-adversarial-lab.md) owns contracts; t
 
 ## Implementation plan and single task tracker
 
-Current state: HEAD `c3f60b8e` (committed). This round's goal: during ongoing multi-member collaboration the restricted attack Agent intervenes at recorded event boundaries, and the attack run replays without a model. Build the no-attack control first, then attacks; the model only chooses attack actions and timing while all honest moves come from a fixed script. No push/merge. The lab spec stays draft.
+Current state: HEAD `4989fad8` plus preserved dirty tree (host gateway, judge, design probes). This round's unique goal: a captured lab failure becomes an independent reproduction pack that replays in a new process and directory and shrinks to a minimal counterexample. No Lody product integration, no protocol redesign, no push/PR/merge. The lab spec stays draft.
+
+| Done | Stage | Gate |
+| ---- | ----- | ---- |
+| [x] | R0 Baseline | HEAD/dirty tree recorded; existing gateway/judge work kept; this unique table |
+| [x] | R1 Event-driven execution | Every permit is logged; auto-advance is oldest-runnable FIFO; identity `ScheduleDriver` controls explicit concurrent choice; leftover requested events report `schedule.extra` |
+| [x] | R2 Independent pack | `e2ee-lab-repro/v1` binds dirty-tree hash, vendor/lock hashes, private 0700 bundle; new-process CLI replay; missing private/unsupported format fail closed; entropy `remaining()` must be empty |
+| [x] | R3 Precise compare | Multipart normalizes delimiter tokens only; fingerprints include rule ids; mutating order/payload/entropy tail/verdict each locates a field |
+| [x] | R4 Real backend | SIGKILL crash matrix retained; power-loss of unflushed SQLite pages is not modeled |
+| [x] | R5 Independent judge | Lab reference model does not import SUT policy functions; skip-verify, cursor-before-document, and wrong-context journal are real-path defects |
+| [x] | R6 Minimize | Bounded ddmin drops noise, keeps the same security fingerprint, rejects harness-error shrinks |
+| [x] | R7 Real-model hit | Destructive hit is intercept or mutateBackend only; observe/readBackend/submitClaim/finish do not count |
+
+The S1–S4 table below is the previous round; checkmarks stay as historical evidence.
 
 | Done | Stage | Gate |
 | ---- | ----- | ---- |
@@ -28,7 +41,7 @@ The tables below are earlier stage records; checkmarks are backed by per-stage l
 
 | Done | Stage | Gate |
 | ---- | ----- | ---- |
-| [ ] | A Judge observations | Legal admitDevice is not a violation; backend extra + client reject is not client integrity loss; missing client facts → harness-error |
+| [x] | A Judge observations | Legal admitDevice is not a violation; backend extra + client reject is not client integrity loss; missing client facts → harness-error; guest content under malicious Riverrun → outside-model |
 | [ ] | B Real persist | document-persisted writes doc bytes; cursor-persisted writes cursor after doc; crash/restart does not skip unread data |
 | [ ] | C Same-attack replay | Successful xor needle hits again under restored private material; mutated receipt/bytes report first divergence |
 | [ ] | Effect compose | One submit/delivery Effect; Promise wrap only; cancel does not drop pending |
@@ -43,7 +56,7 @@ The tables below are earlier stage records; checkmarks are backed by per-stage l
 | [x]  | C3 Remaining workflows      | Delivery, recovery, admission, resources                | E3–E6; live authority and original expiry preserved              |
 | [ ]  | P1 Persistent collaboration | Lab package, real backend, three replicas               | Offline/restart durability, not one-shot read/write              |
 | [ ]  | P2 Determinism              | Scheduler, recording, replay                            | Three fresh-directory replays; first-divergence detection        |
-| [ ]  | P3 Fixed attacks            | Scenario matrix and effective judge                     | Real database mutation; known injected defects fail judging      |
+| [x]  | P3 Fixed attacks            | Scenario matrix and effective judge                     | Real database mutation; known injected defects fail judging; guest content → outside-model |
 | [x]  | P4 Agent                    | Restricted API and exploration trace                    | Isolation checks; at least one real replayable Agent run         |
 | [ ]  | P5 Handoff                  | Clean-checkout acceptance and old-demo removal          | Complete done criteria below; explicit unpassed items            |
 
@@ -368,3 +381,58 @@ Implementers choose filenames, service names and test organization without repea
 - Restricted-agent LLM `fetch` is injectable `LabFetch`; scenario secrets/seeds use recording entropy, and marker reads go through `LabFs`.
 - **Still Node-direct:** crash-subprocess `spawn`, `cli.ts`, and fixture `mkdtemp`/`rmSync` (process-lifecycle boundaries, not the AttackLab path).
 - Evidence: `pnpm --filter @lody/e2ee-lab check` exit 0 (13 files / 73 tests). Not product E2EE. No push/merge.
+
+### 2026-09-18 — Effective judge, deeper Agent, design probes
+
+- **Judge:** `composeIntegrity` / `composeDurability` / `judgeClaim` / `judgeUnauthorizedContent` wire measured facts and claims. Guest-authored content under malicious Riverrun is `outside-model`, not a silent pass. Unsupported claims without matching facts still do not invent violations.
+- **Measure:** `inspectClient` scans LSCE-wrapped Loro frames for ContentCipher headers; current guest writers (still on the ledger without document-write) set `unauthorizedContentAccepted`.
+- **Fixes found by probing:**
+  1. Host `loadLedger` no longer sticky-caches across Riverrun-only control appends (revokes via `maliciousAppendCas` now block content writes).
+  2. `adoptGenesis` binds URL id to `hash(genesis)` (`genesis-binding-mismatch` on intercept/replace).
+  3. Honest `mayWriteDocument` now gates update seals as well as snapshots (`streams-content`).
+- **Model limit (not fixed):** open still accepts AEAD+sig from a colluding revoked/guest epoch-key holder when Riverrun bypasses the host — documented matrix row `unauthorized-content-model-limit` + design probe → `outside-model`.
+- **Agent:** multi-step restricted agent (observe/read/mutate/intercept/claim); collab plan may include `followUp`; `collabDeepScriptAgent` for model-free multi-step probes. Claims without hit evidence are not treated as success.
+- Evidence: `pnpm --filter @lody/e2ee-lab check` exit 0 (14 files / 78 tests, including design-probes + real-model S4); `streams-content` 10 tests exit 0. Not product E2EE.
+
+### 2026-09-18 — New probes: key-distribution sender, host membership ACL, stale-epoch seal
+
+- **Found (not previously in the matrix):**
+  1. `openEpochEnvelope` verified recipient, epoch, HPKE, and key commitment, but not `canSendEpoch`. A member (or demoted admin) who already has `K_current` could locally forge an admin `OrgState`, seal a real envelope, and an honest recipient with the true ledger would open it. Whitepaper: only Owner/Admin distribute current keys; join ≠ key available.
+  2. Honest lab host `/ds/` GET/HEAD treated `credential.genesisHex == null` as unconstrained, and issued tokens with a client-claimed `genesisHex`. Any logged-in device could read another Org’s control/keys/content streams and join lists. A5 cloud ACL: JWT/session must check current ledger qualification.
+  3. Content seal used `max(local epoch keys)`, not the authenticated ledger epoch. After `publishEpoch`, a lagging honest member still wrote epoch-0 ciphertext, so a revoked `K0` holder who obtained bytes could read “new” post-rotation content. Whitepaper: only new-epoch content is confidential from the revoked.
+- **Fixes:** `openEpochEnvelope` calls `canSendEpoch` before opening. Host `/ds/` and join/note reads require `ledger.state.devices.has(credential.deviceHex)`. Honest `writeLoro`/`writeFlock`/snapshot seal `prepareWrite` + refuse `missing-current-epoch-key`. Revoked devices can keep local plaintext but cloud reads now 403.
+- **Unchanged model limit:** guest/revoked ciphertext under malicious Riverrun still `outside-model` (open does not re-check current write).
+- Evidence: `test/ledger-keys.test.ts` unauthorized-sender envelope; `test/design-probes.test.ts` outsider-read, forged member envelope, stale-epoch write. `pnpm --filter @lody/e2ee-lab check` exit 0 (14 files / 81 tests, including real-model S4). Core keys+delivery+krc-loop 28 tests exit 0. Not product E2EE. No push/merge.
+
+### 2026-09-18 — Thin host gateway in front of sqlite Riverrun
+
+- **Decision:** cloud ACL stays out of Riverrun sqlite. Honest host is a thin gateway that re-reads the verified ledger and uses `deviceMayWriteDocument` / exported `canSendEpoch`. Claimed-genesis tokens are not issued unless the device is a current member. Genesis GET requires a login. Join POST binds the request key to the credential device. Snapshot write-checks use request-scoped `AsyncLocalStorage`, not a global genesis. Direct `riverrunUrl` remains unauthenticated. Recorded in [host gateway note](../../implemented/architecture/2026-09-18-e2ee-host-gateway.md).
+- **Unchanged:** production JWT/gateway unimplemented; malicious Riverrun guest content still `outside-model`.
+- Evidence: `test/gateway.test.ts`; `test/design-probes.test.ts` outsider-read vs raw Riverrun, claimed-genesis issue 403, guest read/write split. `pnpm --filter @lody/e2ee-lab check` typecheck plus 14 files / 88 tests in sandbox; `test/restricted-agent.test.ts` 2/2 with network (15 files / 90 tests). Core `test/ledger-keys.test.ts` 6/6. `pnpm run docs check` errors `[]`. Not product E2EE. No push/merge.
+
+### 2026-09-21 — Design-probe round: host bypass, guest admit window, judge gaps
+
+- **Not a fix.** Characterization tests in `test/design-probes.test.ts` (`newly observed defects`) currently assert the defective outcomes so the bugs cannot disappear silently. They are not intended contracts. Spec unchanged. Product E2EE is not enabled.
+- **Found (measured):**
+  1. Honest-host `/readyz` is unauthenticated and returns `riverrun` plus db path. A caller who only uses host HTTP can then read Org ciphertext on sqlite Riverrun, collapsing Spec §4 external-attacker vs malicious-server. Lab CLI also prints `riverrunUrl` and starts with `testMode: true`. Unauthenticated `/v1/failpoints` and `x-e2ee-demo-now` on any testMode request (including `/healthz`) move the process-global host clock and can expire live credentials.
+  2. Unauthenticated genesis GET is an existence oracle: unknown space `404`, existing space `401`.
+  3. `admitMember` always inserts `role=member`. Guest/admin need a later `setRole`. After admit and key delivery, before `setRole→guest`, the joiner can `writeLoro` and honest members import it. `approveJoin(..., 'guest'|'admin')` returns the admitMember status and ignores a failed second submit.
+  4. Ledger `JoinRequest.expiresAt` is signed but `applyOperation` / host `control-cas` never preflight it (pure verify correctly omits clocks). A join with `expiresAt: 1` still commits. Legacy `join-request.ts` did check `now < expiresAt` at admission.
+  5. `approveJoin(..., 'admin')` yields role admin on a join device with `canManage=false`, so `canSendEpoch` is false. Protocol intersection of role and per-device `canManage` is intentional (`ledger-matrix` `admin-join-*` unauthorized); the lab helper is a footgun, not a policy bypass.
+  6. Judge `inspectClient` flags any openable Loro frame whose current ledger device lacks `deviceMayWriteDocument`. After honest member writes then `setRole→guest`, `finish().integrity` is `outside-model` (false positive).
+  7. The same scanner only reads `LORO_STREAM`. Guest Flock injection via `riverrunUrl` is imported by honest `readFlock` but `unauthorizedContentAccepted` stays false (false pass vs the Loro row).
+  8. Host `content-cas` checks membership write, not ciphertext epoch. A remaining member who skips `prepareWrite` and seals under epoch 0 after `publishEpoch` lands bytes that honest members open. Honest clients still refuse; this is host-enforcement vs a colluding remaining member (plaintext exfiltration is already outside server confidentiality). Revoked readers still need ciphertext access (malicious Riverrun or collusion).
+- **Unchanged documented limits:** 15-minute snapshot-admission race against a stale `AsyncLocalStorage` ledger; `open` does not re-check current write; isolation is the AttackLab handle.
+- Evidence: `pnpm --filter @lody/e2ee-lab exec vitest run test/design-probes.test.ts -t 'newly observed'` exit 0 (7 passed). No push/merge.
+
+### 2026-09-21 — Independent repro pack, fingerprints, minimizer
+
+- **Goal this round:** captured failures become a pack that a new process/directory can replay, then shrink. Existing gateway/judge/probe work was not reset.
+- **Schedule:** `LabRuntime.permitLog` records every permit. Auto-advance rule is oldest runnable (`permitNext`). Identity `ScheduleDriver` is for explicit concurrent choice (Bob-before-Alice). Nested streams-crdt import/read request order is **not** a controlled microtask boundary; forcing identity-accurate collab replay deadlocks when a later `deliver`/`cursor-persisted` is live while the record still wants extra nested reads. Collab replay therefore uses the FIFO rule; the pack still stores the permit log.
+- **Pack:** `e2ee-lab-repro/v1` + `private/` mode 0700. Dirty tree is hashed; HEAD alone is not source identity. CLI `tsx src/repro-cli.ts replay <packDir>` prints fingerprint/divergence only. Missing private or unsupported format fails closed. Entropy `remaining()` must be empty; no live-random fallback.
+- **Compare:** multipart rewrites `--boundary` only at delimiter positions. Payload text that looks like `rr-bootstrap-*` is kept. Illegal bodies are unchanged. Failure fingerprints include rule ids (`integrity.unverified-accepted`, `durability.lost-document`, `integrity.wrong-context`).
+- **Judge:** `packages/e2ee-lab/src/reference-model.ts` does not import `deviceMayWriteDocument` / `canSendEpoch`. Known defects mutate real client state (xor journal byte, cursor without doc, foreign journal) then `inspectClient` observes them. Honest control on the same setup stays pass.
+- **Minimize:** bounded ddmin; harness-error shrinks are rejected. skip-verify 20/20 same fingerprint in `test/repro-pack.test.ts`.
+- **Backend limits:** SIGKILL crash matrix kept. Power-loss of unflushed SQLite pages, FS/OS internals, and transport-checkpoint replay are uncovered.
+- **Agent:** destructive hit is intercept or mutateBackend only. `test/restricted-agent.test.ts` 2/2 this round (model key present).
+- Evidence: `pnpm --filter @lody/e2ee-lab check` 18 files / 116 tests, including `test/repro-pack.test.ts` 8/8 (20× skip-verify + child-process replay), collab S1–S3, and real-model intervention. Not product E2EE. No push/merge.
