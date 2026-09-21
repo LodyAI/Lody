@@ -4068,5 +4068,17 @@
   "promptShortcut.bodyOffline": "Body is not available offline. Reconnect and select again.",
   "promptShortcut.loadFailed": "Could not load Shortcut. Select it again to retry.",
   "settings.beta.promptShortcutsHelper": "Create reusable prompts and insert them with /. In development — expect rough edges.",
-  "settings.promptShortcuts.disabled": "Enable Prompt Shortcuts under Developer mode in Settings → About to use this feature."
+  "settings.promptShortcuts.disabled": "Enable Prompt Shortcuts under Developer mode in Settings → About to use this feature.",
+  "storageCrisis.title": "Lody ran out of local storage",
+  "storageCrisis.descriptionQuota": "This device is out of space, so Lody could not save your work locally. It has stopped writing to local storage to avoid losing data.",
+  "storageCrisis.descriptionUnavailable": "Lody's local database stopped responding, usually because the device ran out of space. It has stopped writing to local storage to avoid losing data.",
+  "storageCrisis.stepsTitle": "How to recover",
+  "storageCrisis.stepFreeSpace": "Free up disk space on this device — empty the trash, or delete large files you no longer need.",
+  "storageCrisis.stepRestartDesktop": "Restart Lody. Freeing space is not enough on its own: the local database only reopens in a new app process.",
+  "storageCrisis.stepRestartManually": "Fully quit and reopen your browser or the app hosting Lody. On mobile, close it from the app switcher before reopening it. Refreshing the page is not enough. If the problem persists, restart your device.",
+  "storageCrisis.bridgeFailed": "Lody could not restart or quit automatically. Fully quit Lody using your operating system, then open it again. If the problem persists, restart your device. Refreshing the page will not fix it.",
+  "storageCrisis.syncedWorkSafe": "Work that already synced is unaffected. Changes that were neither saved nor synced may be lost when you restart.",
+  "storageCrisis.restart": "Restart Lody",
+  "storageCrisis.quit": "Quit Lody",
+  "storageCrisis.technicalDetails": "Technical details"
 }

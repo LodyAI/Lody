@@ -13,6 +13,7 @@ import type {
   SessionDocStore,
 } from '../atoms/runtime';
 import type { WorkspaceWriter } from './workspace-writer';
+import { assertStorageWritable } from '../lib/storage-crisis';
 
 // # WorkspaceWriter implementation
 //
@@ -39,9 +40,11 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
     sessionId: string,
     fn: (store: SessionDocStore) => T | Promise<T>
   ): Promise<T> => {
+    assertStorageWritable('session mutation');
     const id = sessionId as SessionId;
     const store = await deps.acquireSessionStore(id);
     try {
+      assertStorageWritable('session mutation');
       return await fn(store);
     } finally {
       deps.releaseSessionStoreRef(id);
@@ -51,6 +54,7 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
   // Renderer-side, every message-queue mutation also bumps `messageQueueUpdatedAt`
   // so the CLI dispatch watcher re-evaluates.
   const bumpMessageQueueWatermark = async (sessionId: string): Promise<void> => {
+    assertStorageWritable('message queue watermark');
     await deps.repo.upsertDocMeta(getSessionRoomId(sessionId as SessionId), {
       messageQueueUpdatedAt: getServerNow(),
     });
@@ -60,8 +64,10 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
     sessionId: SessionId,
     fn: (store: PreviewVisualCommentDocStore) => T | Promise<T>
   ): Promise<T> => {
+    assertStorageWritable('preview comment mutation');
     const store = await deps.acquirePreviewVisualCommentStore(sessionId);
     try {
+      assertStorageWritable('preview comment mutation');
       return await fn(store);
     } finally {
       deps.releasePreviewVisualCommentStoreRef(sessionId);
@@ -70,10 +76,12 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
 
   return {
     async upsertDocMeta(roomId, patch) {
+      assertStorageWritable('upsertDocMeta');
       await deps.repo.upsertDocMeta(roomId, patch as Parameters<LoroRepo['upsertDocMeta']>[1]);
     },
 
     async startSession(sessionId, meta, entry, dispatch) {
+      assertStorageWritable('startSession');
       await Promise.all([
         deps.repo.upsertDocMeta(
           getSessionRoomId(sessionId as SessionId),
@@ -87,19 +95,25 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
     },
 
     async deleteDoc(roomId) {
+      assertStorageWritable('deleteDoc');
       await deps.repo.deleteDoc(roomId);
     },
 
     async flockRowPut(flockDocId, key, value) {
+      assertStorageWritable('flockRowPut');
       const handle = await deps.repo.openFlockDoc(flockDocId);
+      assertStorageWritable('flockRowPut');
       handle.flock.set([...key], value as Parameters<typeof handle.flock.set>[1]);
       handle.flock.commit();
     },
 
     async flockRowUpdate(flockDocId, key, update) {
+      assertStorageWritable('flockRowUpdate');
       const handle = await deps.repo.openFlockDoc(flockDocId);
+      assertStorageWritable('flockRowUpdate');
       return handle.flock.txn(() => {
         const next = update(handle.flock.get([...key]));
+        assertStorageWritable('flockRowUpdate');
         if (next === undefined) return false;
         handle.flock.set([...key], next as Parameters<typeof handle.flock.set>[1]);
         return true;
@@ -111,7 +125,9 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
       key: readonly string[],
       value: unknown
     ): Promise<{ inserted: boolean; value: unknown }> {
+      assertStorageWritable('flockRowPutIfAbsent');
       const handle = await deps.repo.openFlockDoc(flockDocId);
+      assertStorageWritable('flockRowPutIfAbsent');
       return handle.flock.txn(() => {
         const existing = handle.flock.get([...key]);
         if (existing !== undefined) {
@@ -124,7 +140,9 @@ export function createDirectWorkspaceWriter(deps: DirectWorkspaceWriterDeps): Wo
     },
 
     async flockRowDelete(flockDocId, key) {
+      assertStorageWritable('flockRowDelete');
       const handle = await deps.repo.openFlockDoc(flockDocId);
+      assertStorageWritable('flockRowDelete');
       handle.flock.delete([...key]);
       handle.flock.commit();
     },

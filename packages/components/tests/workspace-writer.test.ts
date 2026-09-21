@@ -1,4 +1,9 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  enterStorageCrisis,
+  resetStorageCrisisForTests,
+  StorageCrisisError,
+} from '../src/lib/storage-crisis';
 import { Flock } from '@loro-dev/flock-wasm';
 import { LoroDoc } from 'loro-crdt';
 import {
@@ -45,6 +50,83 @@ const anchor: MinimalVisualAnnotationAnchor = {
 };
 
 describe('createDirectWorkspaceWriter', () => {
+  afterEach(resetStorageCrisisForTests);
+
+  it.each(['put', 'update', 'insert', 'delete'] as const)(
+    'rejects cached Flock %s without changing memory when storage fails during acquisition',
+    async (operation) => {
+      const flock = new Flock('crisis');
+      flock.set(['key'], 'before');
+      flock.commit();
+      let resume!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      const writer = createDirectWorkspaceWriter({
+        repo: {
+          openFlockDoc: async () => {
+            await gate;
+            return { flock };
+          },
+        },
+      } as never);
+      const mutate = () =>
+        operation === 'put'
+          ? writer.flockRowPut('catalog', ['key'], 'after')
+          : operation === 'update'
+            ? writer.flockRowUpdate('catalog', ['key'], () => 'after')
+            : operation === 'insert'
+              ? writer.flockRowPutIfAbsent('catalog', ['new'], 'after')
+              : writer.flockRowDelete('catalog', ['key']);
+      const pending = mutate();
+      enterStorageCrisis({ kind: 'quota', operation: 'save', detail: 'synthetic quota' });
+      resume();
+      await expect(pending).rejects.toBeInstanceOf(StorageCrisisError);
+      await expect(mutate()).rejects.toBeInstanceOf(StorageCrisisError);
+      expect(flock.get(['key'])).toBe('before');
+      expect(flock.get(['new'])).toBeUndefined();
+    }
+  );
+
+  it.each(['session', 'preview'] as const)(
+    'rejects %s mutation and releases its store if storage fails while acquiring',
+    async (kind) => {
+      let resume!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        resume = resolve;
+      });
+      let references = 0;
+      const state = { mq: [] };
+      const store = { setState: (update: (draft: typeof state) => void) => update(state) };
+      const acquire = async () => {
+        references++;
+        await gate;
+        return store;
+      };
+      const release = () => {
+        references--;
+      };
+      const writer = createDirectWorkspaceWriter({
+        acquireSessionStore: acquire,
+        releaseSessionStoreRef: release,
+        acquirePreviewVisualCommentStore: acquire,
+        releasePreviewVisualCommentStoreRef: release,
+      } as never);
+      const pending =
+        kind === 'session'
+          ? writer.enqueueSessionMessage('session', { $cid: 'message' })
+          : writer.mutatePreviewVisualComments('session' as never, {} as never);
+      enterStorageCrisis({
+        kind: 'unavailable',
+        operation: 'loadDoc',
+        detail: 'synthetic closing connection',
+      });
+      resume();
+      await expect(pending).rejects.toBeInstanceOf(StorageCrisisError);
+      expect(state).toEqual({ mq: [] });
+      expect(references).toBe(0);
+    }
+  );
   it.each(['unchanged', 'edited', 'deleted', 'cancelled', 'other-owner', 'write-failure'] as const)(
     'reconciles the durable role without overwriting intervening changes: %s',
     async (scenario) => {

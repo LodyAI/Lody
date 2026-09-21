@@ -483,4 +483,21 @@ export class AppIpc extends IpcService {
     const window = findWindow(event.sender)
     if (window) requestRendererReload(window)
   }
+
+  /**
+   * Quit and relaunch in a NEW process. Required by the storage-crisis recovery
+   * screen: a renderer reload keeps the same process, and Chromium keeps a
+   * dying IndexedDB backing store bound to it, so only a relaunch recovers once
+   * the user has freed disk space.
+   */
+  @IpcMethod()
+  async restartApp() {
+    app.relaunch()
+    app.quit()
+  }
+
+  @IpcMethod()
+  async quitApp() {
+    app.quit()
+  }
 }
