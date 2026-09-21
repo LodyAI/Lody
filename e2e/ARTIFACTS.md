@@ -36,6 +36,13 @@ the command to create a new round instead of editing an existing result.
 
 Scout rounds use `scout/<round-id>/summary.json` as the CI discovery contract:
 
+Load rounds use `load/<round-id>/load-result.json` as a replayable synthetic
+baseline. The seed phase owns the isolated profile and creates the persisted
+Sessions; the reopen phase launches that profile again and records the user
+surface, textless-frame/blank-surface trace, and resource trace. `body-bytes`
+is capped at 256 KiB per synthetic response, and the fixture never contains
+user or agent transcripts.
+
 ```text
 scout/<round-id>/
   summary.json

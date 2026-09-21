@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { shouldRequestNativeQueueSteer } from '../src/components/sessions/message-queue/queued-message-steer';
 import { resolveSessionMessageSubmitRoute } from '../src/components/sessions/session-message-submit-route';
 
 const resolve = (overrides: Partial<Parameters<typeof resolveSessionMessageSubmitRoute>[0]> = {}) =>
@@ -6,6 +7,7 @@ const resolve = (overrides: Partial<Parameters<typeof resolveSessionMessageSubmi
     forceDirect: false,
     forceQueue: false,
     invertBehavior: false,
+    nativeSteerAvailable: true,
     isPromptBusy: false,
     hasUnfinishedAssistantTurn: false,
     queuedMessageBehavior: 'queue',
@@ -77,9 +79,10 @@ describe('resolveSessionMessageSubmitRoute', () => {
   });
 
   it('never steers an inverted submission without positive live activity', () => {
-    expect(
-      resolve({ invertBehavior: true, hasUnfinishedAssistantTurn: true })
-    ).toEqual({ type: 'queue', reason: 'unfinished_assistant_turn' });
+    expect(resolve({ invertBehavior: true, hasUnfinishedAssistantTurn: true })).toEqual({
+      type: 'queue',
+      reason: 'unfinished_assistant_turn',
+    });
     expect(resolve({ invertBehavior: true })).toEqual({ type: 'direct_dispatch' });
     expect(resolve({ invertBehavior: true, isPromptBusy: true })).toEqual({
       type: 'queue',
@@ -96,5 +99,47 @@ describe('resolveSessionMessageSubmitRoute', () => {
         hasUnfinishedAssistantTurn: true,
       })
     ).toEqual({ type: 'queue', reason: 'forced' });
+  });
+
+  describe.each([
+    ['configured guide', 'guide', false],
+    ['inverted queue', 'queue', true],
+  ] as const)('%s', (_label, queuedMessageBehavior, invertBehavior) => {
+    it.each([
+      ['authoritative', { acknowledgedSteer: true }, 'guide'],
+      ['authoritative', { acknowledgedSteer: false }, 'queue'],
+      ['authoritative', undefined, 'queue'],
+      ['provisional', { acknowledgedSteer: true }, 'queue'],
+      ['unavailable', { acknowledgedSteer: true }, 'queue'],
+    ] as const)('routes %s capability %o to %s', (authority, capability, type) => {
+      expect(
+        resolve({
+          isPromptBusy: true,
+          hasUnfinishedAssistantTurn: true,
+          queuedMessageBehavior,
+          invertBehavior,
+          nativeSteerAvailable: shouldRequestNativeQueueSteer(authority, capability),
+        })
+      ).toEqual(type === 'guide' ? { type } : { type, reason: 'prompt_busy' });
+    });
+  });
+
+  it('keeps idle dispatch and explicit overrides available without native steering', () => {
+    expect(resolve({ nativeSteerAvailable: false, queuedMessageBehavior: 'guide' })).toEqual({
+      type: 'direct_dispatch',
+    });
+    expect(resolve({ nativeSteerAvailable: false, forceQueue: true })).toEqual({
+      type: 'queue',
+      reason: 'forced',
+    });
+    expect(
+      resolve({
+        nativeSteerAvailable: false,
+        forceDirect: true,
+        isPromptBusy: true,
+        hasUnfinishedAssistantTurn: true,
+        queuedMessageBehavior: 'guide',
+      })
+    ).toEqual({ type: 'direct_dispatch' });
   });
 });

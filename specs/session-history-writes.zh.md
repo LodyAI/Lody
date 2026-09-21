@@ -35,16 +35,16 @@ Translation: current
   变成 seen/read，且其他字段完全不变；它不是崩溃恢复或分布式事务。
   外部 provider 导入仍是新输入，不能借用已存历史复制权限。
 - 这里的接受表示本地 CRDT 写入。持久化、权限和远端同步仍由原有 repo 和传输层负责。
-- 在历史边界之前被归类为临时态的 provider 更新，绝不能进入 `HistoryWriter`。内置 Codex 的
-  `agent_thought_chunk` 就属于这一类：它可以经由临时 presence 发布有长度上限的 live 状态，
-  但不得创建 assistant `thought` item，导出和重新打开会话时也不得出现，并且必须在该轮的
-  presence 被清除时消失。这只约束今后的写入；打开会话不得清理旧客户端已持久化的 thought item。
-  其他 ACP provider 的标准 thought chunk 仍走普通历史路径。
 - 除 type/toolCallId 外，工具字段只解析本次变化的值，不重验未修改的工具内容；
   只修改 outcome 时保留已有请求信息。修改工具身份需完整 item 解析；变化的 content block
   单独解析。新增字段非法时，整条命令在写入前拒绝。
 - 新历史接受原有内置 CLI selector 的归一化，不重写旧历史。steer 配置编辑只校验变化的字段。
 - 队列提升必须在历史接受后才删除队列行；写入失败保留队列行。
+- 输入框 steering 必须同时具备权威 ACP acknowledged steering 能力、活跃 prompt 和已知未结束
+  assistant turn。忙碌期间，Guide 偏好或反转 Queue 的发送若不具备该能力，直接追加到正规 Queue；
+  能力信息不可用或仅为 provisional 时也如此。消息保留队列顺序及正常提升前的编辑/删除能力，
+  不创建 pending-apply 历史，也不发出 steer 请求。这是投递前的路由决策；已经提交的原生 steer
+  仍遵循下文的投递结果规则。
 - 手动 Codex 压缩持有 native turn 直到完成。Stop 中断该 turn，并保留 ACP prompt，
   直到 `turn/completed` 确认结果或 provider 连接关闭。对已 in-flight 且 ACP session 就绪的
   prompt，Lody 记录取消并发送 provider cancel，不中断 owner fiber。ACP 返回前保留 owner
@@ -52,8 +52,12 @@ Translation: current
   配置也纳入同一收尾流程。Stop 后五秒仍有请求未结束时，Lody 终止旧 session，让连接关闭
   结束请求。计时不等待 cancel ACK，
   也不因重复 Stop 重置。终止失败则继续持有 owner，直到 ACP 结束。start/interrupt ACK
-  和压缩 item 的完成均不能释放执行 ownership。CLI 在取消确认后、接受下一轮前，
-  将尚未结束的压缩标记为 failed。打开 Session 不触发历史修复 RPC，也不改写旧结果。
+  和压缩 item 的完成均不能释放执行 ownership。助手 turn 收尾时会结算其遗留的上下文
+  压缩标记，适用于所有路径而不只是取消确认之后：provider 从未推进到终态的标记，在接受
+  下一轮之前持久化为 failed。若同一 turn 中还有更晚的压缩标记，被取代的标记属于同一次
+  压缩的重复身份（adapter 重复声明了已在进行中的压缩），予以移除，使一次压缩只呈现一
+  行。之后若 provider 仍为同一 `toolCallId` 发来更新，以该更新为准。
+  打开 Session 不触发历史修复 RPC，也不改写旧结果。
 - steer adapter 只报告三种最终投递结果：`applied`、`not-applied` 或 `unknown`。只有
   `not-applied` 可以把同一个用户轮次交回普通 dispatch；`applied` 表示已经消费，
   `unknown` 则在历史中变为 `delivery_unknown` 并返回 `delivery-unknown`，绝不自动调度。

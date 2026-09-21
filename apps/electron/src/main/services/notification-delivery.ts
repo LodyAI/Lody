@@ -6,8 +6,22 @@ function formatNotificationError(error: unknown): string {
 }
 
 export function showNativeNotification(
-  notification: Notification
+  notification: Notification,
+  activeNotifications: Set<Notification>
 ): Promise<ShowSessionCompletionNotificationResult> {
+  // Electron detaches the native click delegate when the JS wrapper is collected.
+  // Delivery success must not end its lifetime while the user can still click it.
+  activeNotifications.add(notification)
+  const release = (): void => {
+    activeNotifications.delete(notification)
+    notification.removeListener('click', release)
+    notification.removeListener('close', release)
+    notification.removeListener('failed', release)
+  }
+  notification.once('click', release)
+  notification.once('close', release)
+  notification.once('failed', release)
+
   return new Promise((resolve) => {
     let settled = false
 
@@ -29,6 +43,7 @@ export function showNativeNotification(
     try {
       notification.show()
     } catch (error) {
+      release()
       settle({ shown: false, reason: formatNotificationError(error) })
     }
   })

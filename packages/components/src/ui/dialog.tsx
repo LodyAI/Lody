@@ -29,7 +29,8 @@ const DialogOverlay = React.forwardRef<
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      'fixed inset-0 z-[var(--z-dialog-overlay)] bg-black/80',
+      // Match content so later portals cover earlier dialogs, not just the page.
+      'fixed inset-0 z-[var(--z-dialog)] bg-black/80',
       !noAnimation && dialogOverlayAnimationClasses,
       className
     )}

@@ -48,7 +48,10 @@ this page is the full text of the rules summarised there.
   `MenuOptionSearchList`: a provider may publish dozens of models, and scrolling
   is not a way to find one. A search field inside a Radix menu must be
   `DropdownMenuSearchInput`, which owns the fight with the menu's typeahead and
-  roving focus (its jsdoc has the details); the same tasks-side Model submenu
+  roving focus (its jsdoc has the details). `DropdownMenuSubTrigger` preserves
+  that field's focus when a precise pointer keeps moving or clicks over the
+  parent row after opening; touch still requires explicit field activation.
+  The same tasks-side Model submenu
   (`tasks/task-agent-run-config-menu.tsx`) is still an unsearchable clone and
   should adopt it.
   `DesktopRunConfigMenu` gains a **Role** row when the caller passes

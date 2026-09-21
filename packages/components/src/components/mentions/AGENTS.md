@@ -20,9 +20,9 @@ Pipeline background: [ui-mentions.md](../../../../../.agents/docs/ui-mentions.md
   `/cmd`): reaching a type through `@` must not change what the agent receives.
   Directory candidates carry BOTH `navigateText` (`@dir/`, descend) and
   `insertText` (`@dir`, commit).
-- `MentionCategory.getCandidates` stays lazy: a query scoped to one category
-  never ranks files for other categories; bare `@` calls none. Aggregate results
-  are capped by `selectMentionMenuView`; the Role category lists all readable Roles.
+- `getCandidates` stays lazy; bare `@` ranks nothing. File menus index/search
+  in a Worker, cancel stale work, and publish current-source results only; no
+  UI-thread fallback. Aggregate results are capped; Roles list all readable entries.
 - Issues and PRs rank over their own slice of the shared cache, partitioned once
   by `useMentionCategories`.
 - File, Session, Agent Role, Issue, and PR candidates use the vendored VS Code

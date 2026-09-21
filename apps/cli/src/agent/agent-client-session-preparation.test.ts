@@ -1,4 +1,8 @@
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { RequestError } from '@agentclientprotocol/sdk';
 import type { MachineId, SessionId, WorkspaceId } from '@lody/shared';
 import type { Logger } from '@/utils/logger';
 
@@ -13,7 +17,8 @@ const connectionMocks = vi.hoisted(() => ({
   cancel: vi.fn(),
 }));
 
-vi.mock('@agentclientprotocol/sdk', () => ({
+vi.mock('@agentclientprotocol/sdk', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@agentclientprotocol/sdk')>()),
   PROTOCOL_VERSION: 1,
   ClientSideConnection: class {
     readonly initialize = connectionMocks.initialize;
@@ -62,83 +67,43 @@ describe('AgentClient session preparation gate', () => {
     connectionMocks.newSession.mockResolvedValue({ sessionId: 'acp-session-1' });
   });
 
-  it('keeps Codex reasoning out of history while publishing a transient status label', async () => {
-    const onUpdateMessage = vi.fn();
-    const onLiveReasoningStatus = vi.fn();
+  it('returns ACP resource-not-found for missing files while preserving reads and other failures', async () => {
+    const workdir = await mkdtemp(join(tmpdir(), 'lody-acp-files-'));
     const client = new AgentClient({
       logger: createLogger(),
-      sessionId: 'codex-live-reasoning' as SessionId,
+      sessionId: 'file-read-session' as SessionId,
       terminalManager: {} as never,
-      agentConfig: { cliType: 'builtin', agentType: 'codex' },
-      onUpdateMessage,
-      onLiveReasoningStatus,
+      onUpdateMessage: vi.fn(),
       onRequestPermission: vi.fn(),
     });
-
-    await client.sessionUpdate({
-      sessionId: 'acp-session-1',
-      update: {
-        sessionUpdate: 'agent_thought_chunk',
-        messageId: 'thought-1',
-        content: { type: 'text', text: '**Inspecting' },
-      },
-    } as never);
-
-    expect(onUpdateMessage).not.toHaveBeenCalled();
-
-    await client.sessionUpdate({
-      sessionId: 'acp-session-1',
-      update: {
-        sessionUpdate: 'agent_thought_chunk',
-        messageId: 'thought-1',
-        content: { type: 'text', text: ' workspace**' },
-      },
-    } as never);
-
-    expect(onUpdateMessage).not.toHaveBeenCalled();
-    expect(onLiveReasoningStatus).toHaveBeenLastCalledWith('Inspecting workspace');
-
-    await client.sessionUpdate({
-      sessionId: 'acp-session-1',
-      update: {
-        sessionUpdate: 'tool_call',
-        toolCallId: 'tool-1',
-        title: 'Read package.json',
-        kind: 'read',
-        status: 'in_progress',
-      },
-    } as never);
-
-    expect(onLiveReasoningStatus).toHaveBeenLastCalledWith(null);
-    expect(onUpdateMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ update: expect.objectContaining({ sessionUpdate: 'tool_call' }) })
-    );
-  });
-
-  it('continues to persist thought chunks from non-Codex ACP providers', async () => {
-    const onUpdateMessage = vi.fn();
-    const client = new AgentClient({
-      logger: createLogger(),
-      sessionId: 'claude-thought-history' as SessionId,
-      terminalManager: {} as never,
-      agentConfig: { cliType: 'builtin', agentType: 'claude' },
-      onUpdateMessage,
-      onRequestPermission: vi.fn(),
-    });
-
-    await client.sessionUpdate({
-      sessionId: 'acp-session-1',
-      update: {
-        sessionUpdate: 'agent_thought_chunk',
-        content: { type: 'text', text: 'I should inspect the workspace.' },
-      },
-    } as never);
-
-    expect(onUpdateMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        update: expect.objectContaining({ sessionUpdate: 'agent_thought_chunk' }),
-      })
-    );
+    try {
+      await client.startSession({} as never, workdir);
+      const missing = join(workdir, 'missing-plan.md');
+      await expect(
+        client.readTextFile({ sessionId: 'acp-session-1', path: missing })
+      ).rejects.toMatchObject({
+        code: -32002,
+        data: { uri: missing },
+      });
+      await expect(
+        client.readTextFile({ sessionId: 'acp-session-1', path: missing })
+      ).rejects.toBeInstanceOf(RequestError);
+      const path = join(workdir, 'plan.md');
+      await writeFile(path, 'first\nsecond\nthird\n');
+      await expect(
+        client.readTextFile({ sessionId: 'acp-session-1', path, line: 2, limit: 1 })
+      ).resolves.toEqual({ content: 'second' });
+      const notDirectory = join(path, 'child');
+      await expect(readFile(notDirectory)).rejects.toMatchObject({ code: 'ENOTDIR' });
+      await expect(
+        client.readTextFile({ sessionId: 'acp-session-1', path: notDirectory })
+      ).rejects.toMatchObject({ code: 'ENOTDIR' });
+      await expect(
+        client.readTextFile({ sessionId: 'other-session', path: missing })
+      ).rejects.toThrow('Mismatched ACP session');
+    } finally {
+      await rm(workdir, { recursive: true, force: true });
+    }
   });
 
   it.each(['new', 'load', 'resume', 'fork'] as const)(

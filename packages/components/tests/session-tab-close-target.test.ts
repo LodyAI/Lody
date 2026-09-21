@@ -56,15 +56,40 @@ describe('getSessionTabCloseTarget', () => {
     ).toEqual({ kind: 'conversation', tabId: 'parent-session' });
   });
 
-  it('closes the last parent tab before closing the window', () => {
+  it.each(['parent-session', 'child-session', 'draft:local'])(
+    'closes the window for the last conversation tab (%s)',
+    (activeConversationTabId) => {
+      expect(
+        getSessionTabCloseTarget({
+          ...BASE_INPUT,
+          activeConversationTabId,
+          conversationTabCount: 1,
+        })
+      ).toEqual({ kind: 'window' });
+    }
+  );
+
+  it('keeps side-panel close priority with only one conversation tab', () => {
     expect(
       getSessionTabCloseTarget({
         ...BASE_INPUT,
-        activeConversationTabId: 'parent-session',
+        focusRegion: 'side-panel',
         conversationTabCount: 1,
       })
-    ).toEqual({ kind: 'conversation', tabId: 'parent-session' });
+    ).toEqual({ kind: 'side-panel', tabId: 'changes' });
   });
+
+  it('closes the window when the last-focused panel is hidden and one conversation remains', () => {
+    expect(
+      getSessionTabCloseTarget({
+        ...BASE_INPUT,
+        focusRegion: 'side-panel',
+        sidePanelOpen: false,
+        conversationTabCount: 1,
+      })
+    ).toEqual({ kind: 'window' });
+  });
+
   it('yields the window close accelerator on the empty surface', () => {
     expect(
       getSessionTabCloseTarget({
@@ -73,7 +98,7 @@ describe('getSessionTabCloseTarget', () => {
         sidePanelOpen: false,
         conversationTabCount: 0,
       })
-    ).toEqual({ kind: 'landing' });
+    ).toEqual({ kind: 'window' });
   });
   it('closes an available side-panel tab before yielding window close on the empty surface', () => {
     expect(

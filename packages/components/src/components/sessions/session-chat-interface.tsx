@@ -2202,6 +2202,13 @@ export const SessionChatInterface = memo(
       selectedModelId: sessionConfigCandidates.modelId,
       configOptionValues: sessionConfigCandidates.configOptionValues,
     });
+    const steerCapability = session.agentConfigId
+      ? sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)]
+      : undefined;
+    const nativeSteerAvailable = shouldRequestNativeQueueSteer(
+      capabilityAuthority,
+      steerCapability
+    );
     const sessionSelectorOptions = useMemo(
       () => ({
         capabilityAuthority,
@@ -2838,10 +2845,6 @@ export const SessionChatInterface = memo(
       }
       return resolveActivityFromHistory(sessionHistory);
     }, [liveSessionStatus, sessionHistory]);
-    const runningReasoningLabel =
-      session.agentType === 'codex' && liveSessionStatus?.type === 'running'
-        ? (liveSessionStatus.detail ?? null)
-        : null;
 
     const activeAssistantTurnId = useMemo(() => {
       return resolveActiveAssistantTurnId(sessionHistory);
@@ -3635,15 +3638,13 @@ export const SessionChatInterface = memo(
         : isSessionActive
           ? liveSessionStatus?.type === 'requestPermission'
             ? t('sessions.statusIndicator.requestPermission')
-            : // Codex's transient reasoning summary, when it reports one.
-              (runningReasoningLabel ??
-              (runningActivity === 'imageGenerating'
-                ? t('sessions.statusIndicator.imageGenerating')
-                : // Reading, running and editing all read as "Working"; the
-                  // collapsed tool groups above already say which.
-                  runningActivity === 'exploring' || runningActivity === 'writing'
-                  ? t('sessions.working', 'Working')
-                  : t('sessions.statusIndicator.thinking')))
+            : runningActivity === 'imageGenerating'
+              ? t('sessions.statusIndicator.imageGenerating')
+              : // Reading, running and editing all read as "Working"; the
+                // collapsed tool groups above already say which.
+                runningActivity === 'exploring' || runningActivity === 'writing'
+                ? t('sessions.working', 'Working')
+                : t('sessions.statusIndicator.thinking')
           : hasPendingDispatch && statusStripState == null
             ? // Pre-start only while the turn can actually start: any
               // connection/machine problem (browser offline, machine removed or
@@ -3955,6 +3956,7 @@ export const SessionChatInterface = memo(
           isPromptBusy: isAgentBusy,
           hasUnfinishedAssistantTurn: activeAssistantTurnId != null,
           queuedMessageBehavior,
+          nativeSteerAvailable,
         });
         const startedAtMs = getPerformanceNowMs();
         const inputSummary = summarizeInputBlocksForAnalytics(normalized);
@@ -4064,6 +4066,7 @@ export const SessionChatInterface = memo(
         isAgentBusy,
         queueInputBlocks,
         queuedMessageBehavior,
+        nativeSteerAvailable,
         sessionDocReady,
         selectedModeId,
         selectedModelId,
@@ -5238,33 +5241,21 @@ export const SessionChatInterface = memo(
       ]
     );
 
-    const queueSteerCapability = session.agentConfigId
-      ? sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)]
-      : undefined;
-    const shouldUseNativeQueueSteer = shouldRequestNativeQueueSteer(
-      capabilityAuthority,
-      queueSteerCapability
-    );
     const handleSteerQueuedMessage = useCallback(
       async (item: MessageQueueItem) => {
         // Interrupt-and-send always runs the queue head next, so it is only a
         // valid steer substitute for the first item. Later items are steerable
         // exclusively through native acknowledged steering.
-        if (messageQueue[0]?.$cid !== item.$cid && !shouldUseNativeQueueSteer) {
+        if (messageQueue[0]?.$cid !== item.$cid && !nativeSteerAvailable) {
           return;
         }
-        if (shouldUseNativeQueueSteer) {
+        if (nativeSteerAvailable) {
           await handleNativeSteerQueuedMessage(item);
           return;
         }
         await handleInterruptAndSend(item);
       },
-      [
-        handleInterruptAndSend,
-        handleNativeSteerQueuedMessage,
-        messageQueue,
-        shouldUseNativeQueueSteer,
-      ]
+      [handleInterruptAndSend, handleNativeSteerQueuedMessage, messageQueue, nativeSteerAvailable]
     );
 
     const handleReorderQueueItem = useCallback(
@@ -6204,7 +6195,7 @@ export const SessionChatInterface = memo(
                             !!activeAssistantTurnId &&
                             !isExternalHistoryRefreshing
                           }
-                          nativeSteerAvailable={shouldUseNativeQueueSteer}
+                          nativeSteerAvailable={nativeSteerAvailable}
                         />
                       ) : undefined
                     }

@@ -185,11 +185,7 @@ const SILENT_TURN_FAILURE_MESSAGE =
   'new session if this conversation has grown too long.';
 
 type TurnFinalizationEffects = {
-  finalizeACPState: (
-    sessionId: SessionId,
-    turnId?: string,
-    options?: { settleContextCompactionAsFailed?: boolean }
-  ) => Promise<void>;
+  finalizeACPState: (sessionId: SessionId, turnId?: string) => Promise<void>;
   persistCodeCollabTurnDiffs?: (sessionId: SessionId, turnId: string) => Promise<boolean>;
   flushSessionUsage: (sessionId: SessionId) => Promise<void>;
   syncSessionBranchName: (sessionId: SessionId, session: ISession) => Promise<string | null>;
@@ -2429,9 +2425,7 @@ export class SessionExecutionService {
           options.sessionId,
           'Failed to settle context compaction after cancelled ACP prompt stopped',
           self.tryPromise(async () => {
-            await self.deps.turnFinalization.finalizeACPState(options.sessionId, options.turnId, {
-              settleContextCompactionAsFailed: true,
-            });
+            await self.deps.turnFinalization.finalizeACPState(options.sessionId, options.turnId);
             await self.persistTurnDiffsAndFlushUsage(options.sessionId, options.turnId);
           })
         );
@@ -2653,9 +2647,7 @@ export class SessionExecutionService {
     if (options.userTurnId) {
       await this.markTurnFailed(options.sessionId, options.sessionDoc, options.userTurnId);
     }
-    await this.handleTurnError(options.sessionId, options.sessionDoc, options.error, {
-      providerPromptSettled: options.runtime.promptStarted && !options.runtime.promptInFlight,
-    });
+    await this.handleTurnError(options.sessionId, options.sessionDoc, options.error);
     await options.onUnhandledError?.(options.error);
   }
 
@@ -2758,18 +2750,13 @@ export class SessionExecutionService {
   private async handleTurnError(
     sessionId: SessionId,
     sessionDoc: SessionDocument,
-    error?: unknown,
-    options?: { providerPromptSettled?: boolean }
+    error?: unknown
   ): Promise<void> {
     const acpError = error ? parseACPError(error) : null;
     const providerDisconnected = error ? isAgentDisconnectedError(error) : false;
     await this.deps.turnFinalization.finalizeACPState(
       sessionId,
-      this.currentTurnBySession.get(sessionId),
-      {
-        settleContextCompactionAsFailed:
-          options?.providerPromptSettled === true || acpError !== null || providerDisconnected,
-      }
+      this.currentTurnBySession.get(sessionId)
     );
     await this.persistCodeCollabTurnDiffsAfterACPFinalization(
       sessionId,
@@ -5555,7 +5542,6 @@ export class SessionExecutionService {
                   turnId,
                   endedAt: getServerNow(),
                   force: true,
-                  settleContextCompactionAsFailed: true,
                 });
 
                 await this.finalizeCancelledTurn({

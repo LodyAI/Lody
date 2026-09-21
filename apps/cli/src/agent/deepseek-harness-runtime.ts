@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, realpathSync } from 'node:fs';
 import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -25,6 +26,62 @@ const RAW_SESSION_ARTIFACT = 'session.jsonl';
 const ZSTD_SESSION_ARTIFACT = 'session.jsonl.zstd';
 const DSH_NODE_EXECUTABLE_ENV = 'LODY_DSH_NODE_EXECUTABLE';
 const DSH_NODE_ARGS_ENV = 'LODY_DSH_NODE_ARGS';
+
+/** Keep npx's logical command/argv for cache recovery; bypass its Windows shell shim only at spawn. */
+export function resolveDeepSeekHarnessSpawn(options: {
+  command: string;
+  args: string[];
+  env: NodeJS.ProcessEnv;
+  workdir: string;
+  platform?: NodeJS.Platform;
+}): { command: string; args: string[] } {
+  const { command, args, env, workdir } = options;
+  if (
+    (options.platform ?? process.platform) !== 'win32' ||
+    command !== 'npx' ||
+    !env[DSH_NODE_EXECUTABLE_ENV]
+  ) {
+    return { command, args };
+  }
+
+  const envValue = (name: string) => {
+    const key = Object.keys(env)
+      .sort()
+      .find((candidate) => candidate.toLowerCase() === name);
+    return key ? env[key] : undefined;
+  };
+  const directories = [workdir, ...(envValue('path') ?? '').split(';')];
+  const extensions = (envValue('pathext') ?? '.COM;.EXE;.BAT;.CMD').split(';');
+  for (const directory of directories) {
+    if (!directory) continue;
+    for (const extension of extensions) {
+      const executable = resolve(
+        workdir,
+        directory.replace(/^"|"$/g, ''),
+        `npx${extension.toLowerCase()}`
+      );
+      if (!existsSync(executable)) continue;
+      // Native shims already avoid cmd.exe and its 8191-character limit.
+      if (/\.(exe|com)$/i.test(extension)) return { command: executable, args };
+      const entry = join(
+        dirname(realpathSync(executable)),
+        'node_modules',
+        'npm',
+        'bin',
+        'npx-cli.js'
+      );
+      if (!existsSync(entry)) {
+        throw new Error(
+          `Cannot launch DeepSeek Harness without cmd.exe: npm's npx-cli.js is missing beside ${executable}. Install Node.js with npm and retry.`
+        );
+      }
+      return { command: process.execPath, args: [entry, ...args] };
+    }
+  }
+  throw new Error(
+    'Cannot launch DeepSeek Harness: npx was not found on PATH. Install Node.js with npm and retry.'
+  );
+}
 
 function encodeBase64(value: string): string {
   return Buffer.from(value, 'utf8').toString('base64');

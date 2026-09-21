@@ -223,6 +223,9 @@ export interface LoroSidebarProps {
    * the visual contract aligned with `SessionList.isLoading` in Workspace mode.
    */
   updatedIsLoading?: boolean;
+  /** Whether Updated-mode rows show their project mark and name below the title. */
+  showUpdatedProjectNames?: boolean;
+  onShowUpdatedProjectNamesChange?: (next: boolean) => void;
   onOrganizeModeChange?: (mode: LoroSidebarOrganizeMode) => void;
   onChatScopeChange?: (scope: LoroSidebarChatScope) => void;
   onSelectUpdatedItem?: (id: string, tabSessionId?: string) => void;
@@ -305,10 +308,12 @@ const defaultLabels: LoroSidebarLabels = {
   workspaceSyncing: 'Syncing workspace…',
   filter: {
     triggerAriaLabel: 'Filter sidebar',
-    organizeHeading: 'Organize',
-    showHeading: 'Show',
+    organizeHeading: 'View',
+    showHeading: 'Tasks',
     organizeProject: 'Project',
     organizeUpdated: 'Updated',
+    updatedProjectNames: 'Show Project',
+    updatedProjectNamesUnavailable: 'Available in Updated view',
     showMyTasks: 'My Tasks',
     showAllTasks: 'All Tasks',
   },
@@ -720,6 +725,8 @@ export const LoroSidebar = memo(function LoroSidebar({
   updatedBucketsCollapsed,
   updatedShowFullBuckets,
   updatedIsLoading = false,
+  showUpdatedProjectNames = true,
+  onShowUpdatedProjectNamesChange,
   onOrganizeModeChange,
   onChatScopeChange,
   onSelectUpdatedItem,
@@ -867,6 +874,8 @@ export const LoroSidebar = memo(function LoroSidebar({
       scope={chatScope}
       onOrganizeChange={onOrganizeModeChange}
       onScopeChange={onChatScopeChange}
+      showUpdatedProjectNames={showUpdatedProjectNames}
+      onShowUpdatedProjectNamesChange={onShowUpdatedProjectNamesChange}
       labels={mergedLabels.filter}
       side="bottom"
       align="end"
@@ -1245,6 +1254,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                   now={now}
                   isMobile={isMobile}
                   showPinnedIcon={false}
+                  showProjectContext={organizeMode === 'updated' && showUpdatedProjectNames}
                   selectedItemId={updatedSelectedItemId ?? null}
                   collapsedBuckets={pinnedSectionCollapsed ? PINNED_BUCKETS_COLLAPSED : undefined}
                   labels={{
@@ -1286,6 +1296,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     now={now}
                     isMobile={isMobile}
                     isLoading={updatedIsLoading}
+                    showProjectContext={showUpdatedProjectNames}
                     selectedItemId={updatedSelectedItemId ?? null}
                     labels={mergedLabels.updated}
                     collapsedBuckets={updatedBucketsCollapsed}
@@ -1440,6 +1451,8 @@ export const LoroSidebar = memo(function LoroSidebar({
               scope={chatScope}
               onOrganizeChange={onOrganizeModeChange}
               onScopeChange={onChatScopeChange}
+              showUpdatedProjectNames={showUpdatedProjectNames}
+              onShowUpdatedProjectNamesChange={onShowUpdatedProjectNamesChange}
               labels={mergedLabels.filter}
             />
           ) : null}

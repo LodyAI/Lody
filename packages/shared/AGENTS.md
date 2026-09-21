@@ -62,6 +62,9 @@ Exact deletion bypasses discovery. See [relations](../../specs/session-relations
 
 ## Machine protocol negotiation
 
+- Ask Question consumers must preserve Core note/replacement semantics and validate
+  associations per the [notes contract](../../specs/ask-question-answer-notes.md).
+
 - Independent Plan configuration uses Core's boolean `plan_mode`, including static
   capabilities, semantic dispatch, and UI toggles. Preserve `collaboration_mode`
   default/plan only for agents that advertise the legacy option; planning must not

@@ -56,6 +56,7 @@ import {
   createAcpStartupMonitor,
 } from './acp-startup-monitor';
 import { withLodyNpmCacheForNpx } from './npx-cache';
+import { resolveDeepSeekHarnessSpawn } from './deepseek-harness-runtime';
 import { runNpxStartupWithRecovery } from './acp-npx-startup-policy';
 import { truncateLogText } from '@/utils/log-format';
 import {
@@ -96,7 +97,6 @@ export type CreateAcpClientOptions = {
   machineId?: MachineId;
   onStartupStage?: (event: AcpStartupStageEvent) => void;
   onUpdateMessage(message: AcpSessionNotification): void;
-  onLiveReasoningStatus?(label: string | null): void;
   onRequestPermission(
     requestId: string,
     request: RequestPermissionRequest
@@ -134,7 +134,6 @@ export const createAcpClient = async (options: CreateAcpClientOptions) => {
     terminalEnabled: options.terminalEnabled,
     onStartupStage: options.onStartupStage,
     onUpdateMessage: options.onUpdateMessage,
-    onLiveReasoningStatus: options.onLiveReasoningStatus,
     onRequestPermission: options.onRequestPermission,
     onUsageUpdate: options.onUsageUpdate,
     onContextWindowUsageUpdate: options.onContextWindowUsageUpdate,
@@ -260,7 +259,14 @@ export const spawnAcpProcess = (options: SpawnAcpProcessOptions): ChildProcess =
   }
   const spawnFn = options.spawnImpl ?? spawn;
 
-  return spawnFn(command, args, {
+  const executable = resolveDeepSeekHarnessSpawn({
+    command,
+    args,
+    env: options.env,
+    workdir: options.workdir,
+  });
+
+  return spawnFn(executable.command, executable.args, {
     cwd: options.workdir,
     env: options.env,
     stdio: ['pipe', 'pipe', 'pipe'],

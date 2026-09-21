@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from 'react';
+import { useId, useState, type CSSProperties, type ReactEventHandler, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { SessionRowOpenedByTreeSlot } from './session-row-leading-slot';
 export {
@@ -489,15 +489,21 @@ export function SidebarRowEndSlot({
 export function GitHubOwnerIcon({
   repoFullName,
   className,
+  style,
+  crossOrigin,
+  onImageLoad,
 }: {
   repoFullName: string | null;
   className?: string;
+  style?: CSSProperties;
+  crossOrigin?: 'anonymous' | 'use-credentials' | '';
+  onImageLoad?: ReactEventHandler<HTMLImageElement>;
 }) {
   const ownerHandle = repoFullName ? (repoFullName.split('/')[0] ?? '').trim() : '';
   const [failed, setFailed] = useState(false);
 
   if (!ownerHandle || failed) {
-    return <Github className={className} aria-hidden="true" />;
+    return <Github className={className} style={style} aria-hidden="true" />;
   }
   return (
     <CachedAvatarImg
@@ -505,6 +511,9 @@ export function GitHubOwnerIcon({
       alt=""
       aria-hidden="true"
       className={cn('rounded-sm object-cover', className)}
+      style={style}
+      crossOrigin={crossOrigin}
+      onLoad={onImageLoad}
       onError={() => setFailed(true)}
     />
   );
@@ -526,7 +535,7 @@ const SECTION_HEADER_BUTTON_CLASS = cn(
 
 const SECTION_HEADER_CHEVRON_CLASS = cn(
   'h-3.5 w-3.5 shrink-0 text-current opacity-0',
-  'transition-[opacity,translate,scale] duration-150 ease-out'
+  'transition-[opacity,translate,scale,rotate] duration-150 ease-out'
 );
 
 /**
@@ -560,7 +569,7 @@ export function SidebarSectionHeader({
     if (canToggle) onToggleCollapsed?.();
   };
   return (
-    <div className="group flex h-7 items-center gap-1 rounded-md pr-2 has-[[role=button]:focus-visible]:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.5)]">
+    <div className="group flex h-7 items-center gap-1 rounded-md has-[[role=button]:focus-visible]:shadow-[inset_0_0_0_1px_hsl(var(--primary)/0.5)]">
       <div
         role={canToggle ? 'button' : undefined}
         tabIndex={canToggle ? 0 : -1}

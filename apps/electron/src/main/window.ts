@@ -27,6 +27,8 @@ import { formatUnknownError, normalizeExternalHttpUrl } from './utils'
 import { describeDeepLinkForAuthDebug } from './auth-debug'
 import { captureElectronMainException } from './posthog-error-reporting'
 import { createRendererProcessGoneHandling } from './renderer-process-gone'
+import { createRendererHangWatchdog } from './renderer-hang-watchdog'
+import { recordRendererHang, registerRendererHangDocument } from './renderer-hang-diagnostics'
 import { resolveMainWindowRuntimePolicy } from './window-runtime-policy'
 import { IPC_PUSH_CHANNELS, type ElectronWindowTarget } from '@lody/shared/electron-ipc'
 import { serializePreferredSystemLanguagesArgument } from '../system-language-argument'
@@ -34,7 +36,6 @@ import { isDevbarRendererEnabled } from './services/devbar/service'
 import { devbarRendererEntry } from './services/devbar/control'
 import {
   clearMountWatchdog,
-  clearUnresponsiveWatchdog,
   disposeWatchdogState,
   isInRecovery,
   loadRecoveryPage,
@@ -42,7 +43,6 @@ import {
   requestRendererReload,
   setReloadTarget,
   startMountWatchdog,
-  startUnresponsiveWatchdog,
   type ReloadTarget,
   type RecoveryContext
 } from './renderer-recovery'
@@ -76,11 +76,6 @@ const DEEP_LINK_DEBUG_PREFIX = '[electron-auth-debug]'
 // we'd rather err on the long side than spuriously open DevTools.
 const MOUNT_WATCHDOG_TIMEOUT_MS = 20_000
 
-// How long Electron's `unresponsive` must persist before we surface a dialog.
-// `unresponsive` fires when the renderer event loop blocks for a few seconds;
-// most of those resolve on their own (GC, jank, sync layout). Only show the
-// dialog after a longer outage so we don't pester the user.
-const UNRESPONSIVE_DIALOG_DELAY_MS = 10_000
 const pendingInitialMaximize = new WeakSet<BrowserWindow>()
 
 function logDeepLinkDebug(message: string, meta?: Record<string, unknown>): void {
@@ -248,46 +243,6 @@ function installNavigationGuard(window: BrowserWindow, targets: readonly ReloadT
   window.webContents.on('will-redirect', preventUntrustedNavigation)
 }
 
-async function showUnresponsiveDialog(window: BrowserWindow): Promise<void> {
-  if (window.isDestroyed()) return
-  let response: number
-  try {
-    const result = await dialog.showMessageBox(window, {
-      type: 'warning',
-      buttons: ['Wait', 'Reload window', 'Force quit'],
-      defaultId: 0,
-      cancelId: 0,
-      title: 'Lody is unresponsive',
-      message: 'Lody is not responding.',
-      detail:
-        'You can keep waiting, reload the window (your in-progress edits in this window will be lost), or force-quit the app.'
-    })
-    response = result.response
-  } catch (error) {
-    console.error('[Electron] Failed to show unresponsive dialog', formatUnknownError(error))
-    return
-  }
-  if (response === 1) {
-    requestRendererReload(window)
-    return
-  }
-  if (response === 2) {
-    app.exit(1)
-    return
-  }
-  // User chose "Wait". Electron only fires `unresponsive` on the first stall;
-  // if the window stays stuck after the dialog closes, no follow-up event
-  // re-arms our watchdog. Re-arm here so we ask again after another stall.
-  if (!window.isDestroyed()) {
-    startUnresponsiveWatchdog(window, {
-      timeoutMs: UNRESPONSIVE_DIALOG_DELAY_MS,
-      onTimeout: () => {
-        void showUnresponsiveDialog(window)
-      }
-    })
-  }
-}
-
 function attachMainWindowDiagnostics(window: BrowserWindow, recoveryTarget: ReloadTarget): void {
   const { webContents } = window
 
@@ -301,23 +256,38 @@ function attachMainWindowDiagnostics(window: BrowserWindow, recoveryTarget: Relo
     loadRecoveryPage(window, recoveryTarget, context)
   }
 
+  const hangWatchdog = createRendererHangWatchdog({
+    now: Date.now,
+    schedule: (callback, delay) => {
+      const timer = setTimeout(callback, delay)
+      return () => clearTimeout(timer)
+    },
+    record: (event, incident, details) => recordRendererHang(window, event, incident, details),
+    showDialog: async () => {
+      const { response } = await dialog.showMessageBox(window, {
+        type: 'warning',
+        buttons: ['Wait', 'Reload window', 'Force quit'],
+        defaultId: 0,
+        cancelId: 0,
+        title: 'Lody is unresponsive',
+        message: 'Lody is not responding.',
+        detail:
+          'You can keep waiting, reload the window (your in-progress edits in this window will be lost), or force-quit the app.'
+      })
+      return response
+    },
+    reload: () => requestRendererReload(window),
+    quit: () => app.exit(1)
+  })
   window.on('unresponsive', () => {
-    console.error('[Electron] Main window became unresponsive')
-    // The recovery page already shows Reload / Copy buttons of its own; don't
-    // stack a second "unresponsive" dialog on top of it. If recovery itself
-    // hangs the user can close the window from the OS.
-    if (isInRecovery(window)) return
-    startUnresponsiveWatchdog(window, {
-      timeoutMs: UNRESPONSIVE_DIALOG_DELAY_MS,
-      onTimeout: () => {
-        void showUnresponsiveDialog(window)
-      }
-    })
+    if (!isInRecovery(window)) hangWatchdog.unresponsive()
   })
-  window.on('responsive', () => {
-    console.info('[Electron] Main window became responsive')
-    clearUnresponsiveWatchdog(window)
+  window.on('responsive', () => hangWatchdog.responsive())
+  webContents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
+    if (isMainFrame && !isInPlace) hangWatchdog.navigation()
   })
+  webContents.on('render-process-gone', () => hangWatchdog.navigation())
+  window.once('closed', () => hangWatchdog.dispose())
 
   webContents.on('did-fail-load', (_event, ...args: unknown[]) => {
     const details = readLoadFailureDetails(args)
@@ -476,7 +446,9 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
   const standardTarget = resolveMainRendererTarget(options.initialPath, false)
   const devbarTarget = resolveMainRendererTarget(options.initialPath, true)
   const recoveryTarget = resolveRecoveryTarget()
-  installNavigationGuard(window, [standardTarget, devbarTarget, recoveryTarget])
+  const trustedTargets = [standardTarget, devbarTarget, recoveryTarget]
+  installNavigationGuard(window, trustedTargets)
+  registerRendererHangDocument(window, (url) => isTrustedNavigation(url, trustedTargets))
   installContextMenu(window)
   setReloadTarget(window, mainTarget)
   attachMainWindowDiagnostics(window, recoveryTarget)
@@ -544,7 +516,6 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
 
   window.on('closed', () => {
     clearMountWatchdog(window)
-    clearUnresponsiveWatchdog(window)
     disposeWatchdogState(window)
   })
 

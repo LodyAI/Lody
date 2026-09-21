@@ -242,6 +242,37 @@ describe('LoroSidebar pinned section', () => {
     expect(
       pinnedRow?.compareDocumentPosition(updatedRow as Node) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
+    expect(
+      pinnedRow?.querySelector('[data-sidebar-updated-project="github"]')?.textContent
+    ).toContain('loro-dev/lody');
+    expect(
+      updatedRow?.querySelector('[data-sidebar-updated-project="chat"]')?.textContent
+    ).toContain('Chats');
+  });
+
+  it('does not show project context on pinned rows in Workspace mode', () => {
+    renderSidebar({ organizeMode: 'workspace' });
+    const pinnedRow = container?.querySelector('[data-sidebar-updated-id="pinned-session"]');
+    expect(pinnedRow).not.toBeNull();
+    expect(pinnedRow?.querySelector('[data-sidebar-updated-project]')).toBeNull();
+  });
+
+  it('hides project context throughout Updated mode when Project names is off', () => {
+    renderSidebar({
+      organizeMode: 'updated',
+      showUpdatedProjectNames: false,
+      updatedItems: [
+        {
+          id: 'updated-session',
+          kind: 'chat',
+          title: 'Recently updated conversation',
+          sectionLabel: 'Chats',
+          latestMessageAt: new Date('2026-07-14T09:00:00.000Z'),
+        },
+      ],
+    });
+
+    expect(container?.querySelector('[data-sidebar-updated-project]')).toBeNull();
   });
 
   it('collapses pinned conversations and keeps the folded chevron visible', () => {

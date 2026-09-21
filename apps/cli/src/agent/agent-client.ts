@@ -1,4 +1,4 @@
-import type { LodyWorktreeProject } from 'acp-extension-core';
+import type { LodyClientExtensionCapabilities, LodyWorktreeProject } from 'acp-extension-core';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
@@ -463,22 +463,6 @@ export type ImageGenerationEndEvent = {
 };
 
 const IMAGE_GENERATION_REVISED_PROMPT_PREFIX = 'Revised prompt: ';
-const MAX_LIVE_REASONING_LABEL_LENGTH = 280;
-
-const latestCodexReasoningSummaryLine = (text: string): string | null => {
-  for (const rawLine of text.split(/\r?\n/u).reverse()) {
-    let line = rawLine.trim();
-    if (!line || line.startsWith('<!--')) continue;
-    line = line.replace(/^#+\s*/u, '').trim();
-    if (line.startsWith('**')) {
-      const closing = line.indexOf('**', 2);
-      if (closing < 0) continue;
-      line = `${line.slice(2, closing)}${line.slice(closing + 2)}`.trim();
-    }
-    if (line) return line.slice(0, MAX_LIVE_REASONING_LABEL_LENGTH);
-  }
-  return null;
-};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
@@ -601,8 +585,6 @@ export interface AgentClientOptions {
   terminalEnabled?: boolean;
   onStartupStage?: (event: AcpStartupStageEvent) => void;
   onUpdateMessage(message: AcpSessionNotification): void;
-  /** Ephemeral Codex reasoning label; never a transcript or history callback. */
-  onLiveReasoningStatus?(label: string | null): void;
   onRequestPermission(
     requestId: string,
     request: acp.RequestPermissionRequest
@@ -659,8 +641,6 @@ export class AgentClient implements acp.Client {
   /** Session config options returned by the agent; the source of model/mode choices and names. */
   private configOptions: acp.SessionConfigOption[] = [];
   private readonly configOptionsListeners = new Set<() => void>();
-  private codexReasoningMessageId: string | null = null;
-  private codexReasoningText = '';
   /** Desired config retained across same-client replacement sessions. */
   private readonly configOptionValues: NonNullable<SessionTurnInputConfig['configOptionValues']>;
   /** Legacy top-level `models` state proves that `session/set_model` is supported. */
@@ -980,49 +960,8 @@ export class AgentClient implements acp.Client {
       return;
     }
 
-    if (this.handleCodexLiveReasoning(notification)) {
-      return;
-    }
-
     this.options.onUpdateMessage(notification);
     return;
-  }
-
-  /**
-   * Codex thought chunks are transient status information, not conversation
-   * history. Other ACP providers retain the standard thought-history path.
-   */
-  private handleCodexLiveReasoning(notification: AcpSessionNotification): boolean {
-    if (!this.isCodexAgent()) return false;
-
-    const { update } = notification;
-    if (update.sessionUpdate === 'agent_thought_chunk') {
-      if (update.content.type !== 'text') return true;
-      const messageId = update.messageId ?? '__current__';
-      if (this.codexReasoningMessageId !== messageId) {
-        this.codexReasoningMessageId = messageId;
-        this.codexReasoningText = '';
-      }
-      this.codexReasoningText += update.content.text;
-      this.options.onLiveReasoningStatus?.(
-        latestCodexReasoningSummaryLine(this.codexReasoningText)
-      );
-      return true;
-    }
-
-    switch (update.sessionUpdate) {
-      case 'agent_message_chunk':
-      case 'tool_call':
-      case 'tool_call_update':
-      case 'plan':
-        if (this.codexReasoningMessageId !== null) {
-          this.codexReasoningMessageId = null;
-          this.codexReasoningText = '';
-          this.options.onLiveReasoningStatus?.(null);
-        }
-        break;
-    }
-    return false;
   }
 
   private handleGoalSessionInfoUpdate(notification: AcpSessionNotification): void {
@@ -1338,7 +1277,15 @@ export class AgentClient implements acp.Client {
     // ACP file reads can return large payloads; they are streamed to the UI via notifications,
     this.ensureSessionMatch(params.sessionId as ACPSessionId);
     const resolvedPath = this.resolvePath(params.path);
-    const content = await fs.readFile(resolvedPath, 'utf8');
+    let content: string;
+    try {
+      content = await fs.readFile(resolvedPath, 'utf8');
+    } catch (error) {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+        throw acp.RequestError.resourceNotFound(resolvedPath);
+      }
+      throw error;
+    }
     const sliced = sliceTextByLines(content, params.line ?? null, params.limit ?? null);
     return { content: sliced };
   }
@@ -1909,9 +1856,12 @@ export class AgentClient implements acp.Client {
               elicitation: {
                 form: {},
               },
-              ...(devinClientCapabilitiesMeta !== undefined
-                ? { _meta: devinClientCapabilitiesMeta }
-                : {}),
+              _meta: {
+                ...devinClientCapabilitiesMeta,
+                lody: {
+                  elicitation: { version: 1, answerNotes: true },
+                } satisfies LodyClientExtensionCapabilities,
+              },
             },
           }),
           startupAbort

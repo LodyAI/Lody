@@ -136,6 +136,34 @@ const placeholderItemFor = (row: TurnIndexRow, turnIndex: number): PlaceholderSe
  * context-window usage / quick actions attach to the last rendered assistant
  * message whether or not it is hydrated.
  */
+/** Notices the emitting agent turn owns; anything else keeps its own row. */
+const MERGEABLE_NOTICE_NAMES = new Set(['agent_warning', 'chat_failed']);
+
+/**
+ * Index of the assistant row this notice belongs to, or `null` to leave it in
+ * place. Requires the assistant to be the row immediately before it AND to be
+ * hydrated: in a windowed view the neighbour may be a placeholder, and a notice
+ * must never attach to a row whose content has not been read.
+ */
+function mergeableNoticeTargetIndex(
+  items: ChatStreamItem[],
+  message: SessionHistoryParsed
+): number | null {
+  if (message.role !== 'system') return null;
+  if (!message.items.length) return null;
+  const allMergeable = message.items.every(
+    (item) =>
+      item.type === 'system_notice' && 'name' in item && MERGEABLE_NOTICE_NAMES.has(item.name)
+  );
+  if (!allMergeable) return null;
+
+  const previousIndex = items.length - 1;
+  const previous = items[previousIndex];
+  if (!previous || previous.type !== 'message') return null;
+  if (previous.message.role !== 'assistant') return null;
+  return previousIndex;
+}
+
 export function buildChatStreamItems(
   view: ConversationView | null,
   sessionId: SessionId,
@@ -216,6 +244,31 @@ export function buildChatStreamItems(
 
     if (isEmptyAssistantMessage(message)) continue;
     if (seenIds.has(message.id)) continue;
+
+    // An agent warning / failure is durably its OWN system turn — the CLI keeps
+    // it out of the assistant entry so it never reaches titles or replay
+    // prompts. That is right for storage and wrong for reading: on its own row
+    // it lands after the turn's footer, so the timestamp and copy button sit
+    // between the agent's answer and the agent's own warning about it.
+    //
+    // So fold it back at RENDER time only. `buildConversationMarkdown` reads the
+    // ConversationView, not these items, so copy/share/replay stay unpolluted.
+    // With no assistant turn to attach to (a notice that opens a session, or one
+    // following a user turn) it stays exactly where it is.
+    const mergeTarget = mergeableNoticeTargetIndex(items, message);
+    if (mergeTarget !== null) {
+      const target = items[mergeTarget] as ChatStreamItem & { type: 'message' };
+      seenIds.add(message.id);
+      items[mergeTarget] = {
+        ...target,
+        message: { ...target.message, items: [...target.message.items, ...message.items] },
+      };
+      // The host entry is unchanged, so a cached copy of it would be reused
+      // WITHOUT this notice on the next build. Drop it and rebuild instead.
+      cache.delete(target.message.id);
+      continue;
+    }
+
     seenIds.add(message.id);
 
     const cachedMessageItem = createCachedMessageItem(entry, sessionId, turnIndex, message);

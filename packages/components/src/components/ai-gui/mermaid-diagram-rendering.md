@@ -23,8 +23,9 @@ why they read the way they do. Coverage:
 - Clicking a diagram with a mouse, pen, or the keyboard ACTIVATES it: that one
   diagram becomes a canvas, where a trackpad pinch (a ctrl- or meta-modified
   wheel) zooms around the pointer and a held button drags. Escape, a press
-  anywhere else, or the full-screen viewer releases it, and releasing resets the
-  transform — the copy in the conversation is a preview, not a saved view.
+  anywhere else, or the full-screen viewer releases it while preserving its
+  current pan and zoom. Reactivation resumes that view for the same rendered SVG.
+  View state is local to the mounted diagram; replacing it starts a new view.
 - Touch never activates: inline pinch would mean taking `touch-action` from the
   browser and reimplementing inertial panning for the phone case the viewer
   exists to serve. A tap opens the viewer, where the control bar's buttons zoom.
@@ -32,12 +33,9 @@ why they read the way they do. Coverage:
   never writes to. Its own canvas stays pinned at `transform: none` with
   `touch-action: auto`, so its remaining handlers cannot move anything and a
   finger resting on a diagram still scrolls the conversation.
-- The activated ring is written inline with `important` because it cannot come
-  from a stylesheet: activating focuses the diagram, and `tailwind/index.css`
-  carries a global `*:focus, *:focus-visible { outline: none !important }`.
-  Specificity does not beat `important`, so only an inline `important` of our own
-  wins. The grab cursor, which is not focus-gated, does live in that stylesheet
-  beside the resting `zoom-in`.
+- Activation adds no outline or ring. The grab cursor indicates the active state.
+  The full-screen viewer receives a clone with the inline transform removed and
+  dimensions corrected for its scale; opening it leaves the inline view intact.
 - Every key the canvas answers — Escape included — is read only while focus is
   inside the activated diagram. An activated diagram sitting further up the
   scrollback must not swallow the Escape that dismisses a dialog, nor pull the

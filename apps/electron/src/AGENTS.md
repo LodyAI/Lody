@@ -47,11 +47,11 @@ native-dependency, and OSS-composition rules stay in `apps/electron/AGENTS.md`.
   `releaseNotes` fallback. Main validates and bounds those remote strings before
   exposing them through `ElectronUpdaterState`; renderer code must use the shared
   safe Markdown renderer rather than raw HTML.
-- React render failures are split by owner: the root `createRoot` error callbacks
-  persist fatal IPC diagnostics, while `ErrorBoundary` owns caught-error UI and
-  PostHog reporting. De-duplicate the same error across React and window events.
-  Renderer-mounted notification must come from a committed layout-effect sentinel,
-  never a timer or microtask guess.
+- React root callbacks persist fatal IPC diagnostics; ErrorBoundary owns caught-error
+  UI and PostHog. Deduplicate errors; report mounted only from a committed layout effect.
+  Keep hang capture local and bounded, Wait tied to active stalls, and stack opt-in
+  limited to trusted product main frames.
+  Contract: [renderer recovery](../../../specs/renderer-fatal-recovery.md).
 - A CLI-armed reset (`lody app reset-cache`) is consumed once, before any window
   loads. `hard` is applied natively here because the renderer may not boot; `cache`
   is handed to the renderer exactly once, because only it can spare the Shortcut

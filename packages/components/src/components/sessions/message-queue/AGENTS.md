@@ -9,7 +9,8 @@ queued-turn list (`message-queue-display.tsx`, `message-queue-row.tsx`,
 `../session-message-submit-route.ts` and is described in
 [.agents/docs/sessions-live-status.md](../../../../../../.agents/docs/sessions-live-status.md).
 
-A queued item's Steer action uses native acknowledged steering only when the
+Composer routing and queued-row native steering share one capability predicate.
+Native acknowledged steering is available only when the
 authoritative ACP capability cache advertises it. Never infer steering support
 from built-in/custom config type or agent identity. Every row offers Steer
 while native steering is available; without it only the FIRST row keeps the

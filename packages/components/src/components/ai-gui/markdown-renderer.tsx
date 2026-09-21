@@ -1,3 +1,4 @@
+import { useSelectionStableValue } from '@/hooks/use-conversation-text-selection';
 import {
   type ComponentPropsWithoutRef,
   type CSSProperties,
@@ -954,6 +955,11 @@ const STREAMDOWN_CONTROLS = {
   table: false,
 } satisfies ControlsConfig;
 
+// Remend treats `<q` in a formula such as `p<q` as an unfinished HTML tag
+// and drops the entire document suffix, even after the formula has closed.
+// Leave tags to the Markdown parser; raw HTML is still opt-in and sanitized.
+const STREAMDOWN_REMEND_OPTIONS = { htmlTags: false };
+
 /** Matches a fenced ```mermaid block, so blocks without one skip the observer. */
 const MERMAID_FENCE_PATTERN = /^[ \t]{0,3}(?:`{3,}|~{3,})[ \t]*mermaid\b/mu;
 
@@ -1252,16 +1258,23 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
   onAgentFileLinkClick?: (href: string) => void;
   searchBlockId?: string;
 }) {
+  ({ text, size, allowHtml, isStreaming, searchBlockId } = useSelectionStableValue({
+    text,
+    size,
+    allowHtml,
+    isStreaming,
+    searchBlockId,
+  }));
   const { t } = useTranslation();
-  const resolvedTheme = useResolvedTheme();
+  const resolvedTheme = useSelectionStableValue(useResolvedTheme());
   const readonly = useContext(SessionReadonlyContext);
   const getAgentFileLinkContextMenuItems = useContext(AgentFileLinkContextMenuItemsContext);
   const containerRef = useRef<HTMLDivElement>(null);
   /** Whether this block currently holds search marks that need unwrapping. */
   const markedRef = useRef(false);
-  const search = useSessionSearch();
-  const searchMatch = useSessionSearchBlock(searchBlockId ?? '');
-  const copyCodeLabel = t('common.copyCode', 'Copy code');
+  const search = useSelectionStableValue(useSessionSearch());
+  const searchMatch = useSelectionStableValue(useSessionSearchBlock(searchBlockId ?? ''));
+  const copyCodeLabel = useSelectionStableValue(t('common.copyCode', 'Copy code'));
   const copyAgentFileLabel = t('sessions.copyAgentFilePath', 'Copy agent file path');
   const openAgentFileLabel = t('sessions.openAgentFile', 'Open agent file');
   const canvasLabel = t('sessions.diagram.canvas', 'Zoom and pan diagram');
@@ -1287,7 +1300,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     canvasLabel,
   });
 
-  const components = useMemo(
+  const currentComponents = useMemo(
     () =>
       createMarkdownComponents({
         copyAgentFileLabel,
@@ -1305,6 +1318,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
     ]
   );
 
+  const components = useSelectionStableValue(currentComponents);
   const rehypePlugins = useMemo(() => (allowHtml ? [rehypeRaw, rehypeSanitize] : []), [allowHtml]);
   const streamdownTranslations = useMemo(
     () =>
@@ -1477,6 +1491,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
           // rendering and diagram colors update correctly.
           key={streamdownKey}
           mode="streaming"
+          remend={STREAMDOWN_REMEND_OPTIONS}
           className="space-y-0"
           controls={STREAMDOWN_CONTROLS}
           isAnimating={isStreaming}

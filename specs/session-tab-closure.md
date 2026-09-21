@@ -13,8 +13,8 @@ or a local new-conversation draft inside the same Session workspace.
 ## State and lifecycle
 
 `SessionMeta.isTabClosed?: boolean` is independent of `isArchived`. Missing means
-open. The main Session's flag affects only its conversation tab, never its children,
-sidebar row, running agent, pending work, terminal, or worktree. New close actions
+open. The main Session's flag closes only its conversation tab; children, sidebar row
+presence, running agent, pending work, terminal, and worktree remain intact. New close actions
 only write this flag; even persisted empty conversations are not deleted.
 
 The closed list includes `isTabClosed === true || isArchived === true`. This retains
@@ -23,6 +23,14 @@ conversation runs the existing restoration checks and containment rules, then cl
 the selected conversation's close flag. Root restoration includes direct children,
 preserves their independent close flags, and excludes opened-by descendants. A failed
 restore is visible and retryable. No bulk migration guesses the reason for an archive.
+
+Closed and archived conversations do not display or contribute unread indicators,
+including parent summaries, project counts, and window badges. Existing closed
+conversations and later background output obey the same rule. Closing does not
+change `lastReadAt` or add another state: reopening resumes the timestamp comparison,
+and viewing the conversation sends the normal read receipt. Open children still
+contribute unread even when the main tab is closed. Working and permission indicators
+remain independent of unread suppression.
 
 ## Navigation and synchronization
 

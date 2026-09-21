@@ -105,36 +105,26 @@ export function RecentRunConfigMenuGroup({
               className="h-4 w-4 shrink-0"
             />
           )}
-          {/* One left-packed phrase — "Claude · Opus 5 · High" reads as a single
-              configuration, the way the trigger face does. The dots only work
-              while the parts stay adjacent, so nothing in here may grow; the
-              row's slack goes to the spacer before the glyph column instead.
-              Name and model both shrink, proportionally to their length, so
-              the longer one gives up more: a fixed-width model truncated names
-              to "Cla…", and a min-width floor padded a short name like "Grok"
-              and reopened the gap before the dot. */}
-          <span className="flex min-w-0 items-center gap-1.5">
-            <span className="min-w-0 truncate">{item.role?.name ?? item.agent.name}</span>
+          {/* Agent holds the left edge; model and reasoning are pushed to a
+              right-hand column so all three scan down the list the way the
+              Agent / Model / Reasoning rows below this group do. The name takes
+              the row's slack and truncates first, because the right column is
+              the part a returning user is comparing between rows. */}
+          <span className="min-w-0 flex-1 truncate">{item.role?.name ?? item.agent.name}</span>
+          {/* No dot between name and model: the separator only reads as one
+              phrase while the parts are adjacent, and they no longer are. The
+              model keeps its own cap so a long name cannot push it off the cap
+              set on the row. */}
+          <span className="flex shrink-0 items-center gap-1.5 pl-2 text-xs text-muted-foreground">
             {item.modelLabel ? (
-              <>
-                <RowDot />
-                <span className="min-w-0 max-w-32 truncate text-xs text-muted-foreground">
-                  {item.modelLabel}
-                </span>
-              </>
+              <span className="min-w-0 max-w-32 truncate">{item.modelLabel}</span>
             ) : null}
-            {item.reasoningLabel ? (
-              <>
-                <RowDot />
-                <span className="shrink-0 text-xs text-muted-foreground">
-                  {item.reasoningLabel}
-                </span>
-              </>
-            ) : null}
+            {item.modelLabel && item.reasoningLabel ? <RowDot /> : null}
+            {item.reasoningLabel ? <span className="shrink-0">{item.reasoningLabel}</span> : null}
           </span>
           {/* Glyphs park in a right-hand column so plan/fast can be scanned
               down the list instead of hunted at the end of each phrase. */}
-          <span className="ml-auto flex shrink-0 items-center gap-1 pl-2">
+          <span className="flex shrink-0 items-center gap-1 pl-2">
             {item.planOn ? (
               <ListChecks
                 className="h-3.5 w-3.5 text-primary"
