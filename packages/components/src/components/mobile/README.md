@@ -8,8 +8,8 @@ directory index. Stories: `src/stories/Mobile*.stories.tsx`.
 ## Screens and chrome
 
 - `mobile-app-icon-settings.tsx` — host-provided icon previews and native selection
-  in both narrow and wide General settings (including iPad). The optional
-  `__LODY_APP_ICON__` bridge owns the catalog and
+  below Font size in both narrow and wide Appearance settings (including iPad).
+  The optional `__LODY_APP_ICON__` bridge owns the catalog and
   installed state; shared UI contains no native artwork or Capacitor dependency.
   See [app icon contract](../../../../../specs/app-icon-selection.md).
 

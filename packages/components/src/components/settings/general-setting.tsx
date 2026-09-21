@@ -34,7 +34,6 @@ import { ClearCacheConfirmDialog, useClearCache } from './clear-cache';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { isMobileKeyboardAction } from '@/lib/mobile-keyboard-action';
 import { MobileGeneralSettings } from '@/components/mobile/mobile-general-settings';
-import { MobileAppIconSettings } from '@/components/mobile/mobile-app-icon-settings';
 import { PathLaunchersSettings } from './path-launchers-setting';
 import { QueuedMessageBehaviorControl } from './queued-message-behavior-control';
 import { CliDaemonSetting } from './cli-daemon-setting';
@@ -612,7 +611,6 @@ export function GeneralSettingsComponent() {
   return (
     <>
       <div className={settingContainerClass}>
-        <MobileAppIconSettings />
         {showMobileInputSettings ? (
           <CompactSection title={t('settings.input.title')}>
             <CompactRow

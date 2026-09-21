@@ -5,9 +5,9 @@ Translation: current
 
 [中文](app-icon-selection.zh.md)
 
-In a native host that supports alternate app icons, a person can open General
-settings, select a bundled icon by its preview, and later restore the default.
-Hosts without this capability show no icon picker.
+In a native host that supports alternate app icons, a person can open Appearance
+settings and select a bundled icon by its preview immediately below Font size,
+then later restore the default. Hosts without this capability show no icon picker.
 
 The host provides the icon catalog and reads and changes the installed icon.
 The shared UI waits for native confirmation before moving the checkmark, disables

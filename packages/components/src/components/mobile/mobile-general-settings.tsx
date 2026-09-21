@@ -44,7 +44,6 @@ import { QueuedMessageBehaviorControl } from '@/components/settings/queued-messa
 import { useAppCapability } from '@/lib/app-platform';
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { useElectronAutoLaunch } from '@/hooks/use-electron-auto-launch';
-import { MobileAppIconSettings } from './mobile-app-icon-settings';
 
 type ElectronPlatform = 'darwin' | 'win32' | 'linux' | 'unknown';
 
@@ -580,7 +579,6 @@ export function MobileGeneralSettings() {
   return (
     <>
       <MobileInlinePickerCoordinator>
-        <MobileAppIconSettings />
         {/* Notifications surface above the keyboard-action row because
             users come here far more often to fix "I'm not getting
             notifications" than to flip the return-key behavior. */}

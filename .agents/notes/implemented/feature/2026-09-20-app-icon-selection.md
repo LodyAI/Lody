@@ -7,11 +7,12 @@ Translation: current
 
 ## Abstract
 
-General settings had no way to select an alternate native app icon. The shared
-picker now consumes an optional host bridge that supplies previews and native
-state. It waits for successful native completion before changing the selection
-and keeps failed changes retryable. The public package ships no host artwork or
-native dependency; physical-device behavior remains a host verification concern.
+Appearance settings now place alternate native app icon selection immediately
+below Font size in both narrow and wide mobile layouts. The shared picker consumes
+an optional host bridge that supplies previews and native state. It waits for
+successful native completion before changing the selection and keeps failed
+changes retryable. The public package ships no host artwork or native dependency;
+physical-device behavior remains a host verification concern.
 
 ## Decision and evidence
 
