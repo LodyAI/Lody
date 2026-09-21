@@ -33,7 +33,10 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { type DraftSessionTab, getDraftTabLabel } from '@/lib/session-draft-tabs';
-import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
+import {
+  closedSessionHasUnreadMessages,
+  sessionHasUnreadMessages,
+} from '@/lib/session-read-receipt';
 import { isSessionTabClosed } from '@/lib/session-tab-url';
 import { TAB_PILL_ACTIVE_CLASS, TAB_PILL_INACTIVE_CLASS } from '@/components/shared/tab-pill-strip';
 import { AdaptiveTabStrip, AdaptiveTabStripItem } from './adaptive-tab-strip';
@@ -861,6 +864,8 @@ export function ClosedTabsPopover({
     () => [...archivedSessions].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
     [archivedSessions]
   );
+  const hasUnread = archivedSessions.some(closedSessionHasUnreadMessages);
+  const triggerLabel = t('sessions.tabs.closedTabs', 'Closed conversations');
 
   return (
     <Popover>
@@ -870,9 +875,20 @@ export function ClosedTabsPopover({
             <button
               type="button"
               className={cn(TAB_BAR_ACTION_CLASS, 'relative')}
-              aria-label={t('sessions.tabs.closedTabs', 'Closed conversations')}
+              aria-label={
+                hasUnread
+                  ? `${triggerLabel}: ${t('sessions.unreadMessages', 'Unread messages')}`
+                  : triggerLabel
+              }
             >
               <History className="h-4 w-4" />
+              {hasUnread ? (
+                <span
+                  aria-hidden
+                  data-closed-tabs-unread=""
+                  className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-primary"
+                />
+              ) : null}
             </button>
           </PopoverTrigger>
         </TooltipTrigger>
@@ -928,7 +944,7 @@ function ClosedConversationStatus({ session }: { session: SessionMeta }) {
       />
     );
   if (status) return <Spinner className="h-3 w-3" />;
-  if (sessionHasUnreadMessages(session))
+  if (closedSessionHasUnreadMessages(session))
     return (
       <span
         className="block h-2 w-2 rounded-full bg-primary"

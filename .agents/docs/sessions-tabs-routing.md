@@ -52,7 +52,8 @@ this page is the full text of the rules summarised there.
     both amber in the shipped themes, so an amber waiting dot beside a primary
     unread dot reads as the same marker. Unread comes from
     `sessionHasUnreadMessages` (`lib/session-read-receipt.ts`, the same
-    timestamp comparison as read receipts, excluding closed/archived conversations) and is
+    timestamp comparison as read receipts, excluding closed/archived conversations; only the
+    closed-list trigger and its rows surface theirs, via `closedSessionHasUnreadMessages`) and is
     suppressed on the ACTIVE tab, which is the surface clearing it. A child tab
     is the only place its own unread state can surface — sub-sessions get no
     sidebar row — so do not drop the marker from any tab renderer.

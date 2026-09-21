@@ -27,3 +27,14 @@ could not start because this worktree has no dependencies (`vitest` and `tsgo` m
 An isolated Vitest 3.2.4 run passed all nine read-receipt tests; direct Node assertions
 also validate the production helper. Formatting and `git diff --check` passed. Documentation checking
 reports existing links into absent ACP submodules; native visual validation remains undone.
+
+## Closed-list unread marker
+
+Suppressing everything left new output in a closed tab undiscoverable. The closed-list
+trigger in the top bar now carries a small unread dot whenever a listed conversation
+has output newer than its `lastReadAt`, and that row shows the unread dot in place of
+its agent icon. `closedSessionHasUnreadMessages` applies the same timestamp comparison
+only to closed/archived conversations; `sessionHasUnreadMessages` keeps suppressing
+them everywhere else, including the desktop sidebar and the mobile session list. A never-read closed conversation with messages counts as unread,
+matching open tabs. Covered by the read-receipt and tab-bar suites and the
+`Unread output in a closed tab` story, checked in Storybook in both themes.

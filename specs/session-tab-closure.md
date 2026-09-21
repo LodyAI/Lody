@@ -24,9 +24,12 @@ the selected conversation's close flag. Root restoration includes direct childre
 preserves their independent close flags, and excludes opened-by descendants. A failed
 restore is visible and retryable. No bulk migration guesses the reason for an archive.
 
-Closed and archived conversations do not display or contribute unread indicators,
-including parent summaries, project counts, and window badges. Existing closed
-conversations and later background output obey the same rule. Closing does not
+Closed and archived conversations do not contribute unread indicators to the desktop
+sidebar, the mobile session list, tabs, parent summaries, project counts, or window
+badges. Existing closed conversations and later background output obey the same rule.
+The one surface that shows their unread state is the desktop top bar's
+closed-conversations list: its trigger shows an unread dot while any listed
+conversation has output newer than its `lastReadAt`, and that row shows the dot. Closing does not
 change `lastReadAt` or add another state: reopening resumes the timestamp comparison,
 and viewing the conversation sends the normal read receipt. Open children still
 contribute unread even when the main tab is closed. Working and permission indicators
