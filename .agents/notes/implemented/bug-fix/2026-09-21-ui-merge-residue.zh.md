@@ -32,7 +32,10 @@ Codex、core、DSH 和 Grok 五个 gitlink 与 `origin/main` 对齐后，CLI 所
 
 现有 package manifest 已声明 v2 UI workspace 依赖和 StyleX 构建插件，但锁文件早于这些声明。
 重新生成锁文件后，冻结安装恢复。components 的 Vitest 配置也接入与应用构建相同的 StyleX
-transform，因此导入 v2 基础组件的测试不再需要临时配置。
+transform，因此导入 v2 基础组件的测试不再需要临时配置。Storybook 的 preview 管线同样通过
+`@stylexjs/unplugin` 应用该包的 `stylex-options.ts`；缺少它时 preview 入口会原样执行
+`@lody/ui` 的 `.stylex.ts` 源码，`stylex.defineVars` 在模块求值阶段抛错，所有 story 渲染为
+空白根节点且不显示任何错误。
 
 通过指针打开 Base UI Select 时，DOM focus 留在 trigger 上，但选中行已进入 highlighted 状态。
 因此 trigger 会把每次方向键都当作首次进入列表，Home/End 也无法到达列表导航。v2 trigger

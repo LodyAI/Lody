@@ -38,7 +38,10 @@ single-version runtime contracts without changing the CLI itself.
 The existing package manifests already declared the v2 UI workspace dependency and StyleX build
 plugins, but the lockfile predated those declarations. Regenerating it restores frozen installs.
 The components Vitest configuration now runs the same StyleX transform as the application build,
-so tests importing v2 primitives execute without a temporary configuration.
+so tests importing v2 primitives execute without a temporary configuration. The Storybook preview
+pipeline applies the same `@stylexjs/unplugin` transform with the package's `stylex-options.ts`;
+without it the preview entry evaluates `@lody/ui` `.stylex.ts` sources raw, `stylex.defineVars`
+throws during module evaluation, and every story renders a blank root with no surfaced error.
 
 A pointer-opened Base UI Select kept DOM focus on its trigger while highlighting the selected row.
 Its trigger navigation consequently treated every arrow press as the first entry into the list,
