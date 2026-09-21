@@ -179,16 +179,22 @@ export class DemoSession {
     this.disk.writeText(this.epochCandidatePath(), `${JSON.stringify(row)}\n`);
   }
 
-  private loadEpochCandidate(): {
-    genesisHex: string;
-    epoch: number;
-    commitmentHex: string;
-    secret: Uint8Array;
-    record: Uint8Array;
-  } | null {
+  private loadEpochCandidate():
+    | { kind: 'absent' }
+    | { kind: 'corrupt' }
+    | {
+        kind: 'ok';
+        value: {
+          genesisHex: string;
+          epoch: number;
+          commitmentHex: string;
+          secret: Uint8Array;
+          record: Uint8Array;
+        };
+      } {
     const path = this.epochCandidatePath();
+    if (!this.disk.exists(path)) return { kind: 'absent' };
     try {
-      if (!this.disk.exists(path)) return null;
       const row = JSON.parse(this.disk.readText(path)) as {
         genesisHex?: string;
         epoch?: number;
@@ -203,17 +209,20 @@ export class DemoSession {
         typeof row.secretHex !== 'string' ||
         typeof row.recordHex !== 'string'
       ) {
-        return null;
+        return { kind: 'corrupt' };
       }
       return {
-        genesisHex: row.genesisHex,
-        epoch: row.epoch,
-        commitmentHex: row.commitmentHex,
-        secret: fromHex(row.secretHex),
-        record: fromHex(row.recordHex),
+        kind: 'ok',
+        value: {
+          genesisHex: row.genesisHex,
+          epoch: row.epoch,
+          commitmentHex: row.commitmentHex,
+          secret: fromHex(row.secretHex),
+          record: fromHex(row.recordHex),
+        },
       };
     } catch {
-      return null;
+      return { kind: 'corrupt' };
     }
   }
 
@@ -658,15 +667,44 @@ export class DemoSession {
   }
 
   private async recoverEpochPublication(): Promise<{ status: string; epoch: number } | null> {
-    const candidate = this.loadEpochCandidate();
-    if (!candidate || !this.genesisHex || candidate.genesisHex !== this.genesisHex) return null;
-    const settled = await this.settleEpochCandidate();
-    return settled;
+    if (!this.genesisHex) return null;
+    const loaded = this.loadEpochCandidate();
+    if (loaded.kind === 'corrupt') throw new Error('epoch-candidate-corrupt');
+    if (loaded.kind === 'absent') {
+      if (await this.journalPendingIsPublishEpoch()) throw new Error('epoch-candidate-missing');
+      return null;
+    }
+    if (loaded.value.genesisHex !== this.genesisHex) throw new Error('epoch-candidate-mismatch');
+    return this.settleEpochCandidate();
+  }
+
+  private async journalPendingIsPublishEpoch(): Promise<boolean> {
+    const journalPath = join(this.clientDir, 'ledger.sqlite');
+    if (!this.disk.exists(journalPath)) return false;
+    const store = new SqliteLedgerStore(journalPath);
+    let pending: Uint8Array | null = null;
+    try {
+      const journal = await store.exclusive(async (tx) => tx.load());
+      pending = journal?.pending ?? null;
+    } catch {
+      return false;
+    }
+    if (!pending) return false;
+    try {
+      const decoded = decodeRecord(pending, this.pointCache);
+      return (
+        decoded.body.type === 'ordinary' && decoded.body.fields.operation.type === 'publishEpoch'
+      );
+    } catch {
+      return false;
+    }
   }
 
   private async settleEpochCandidate(): Promise<{ status: string; epoch: number }> {
-    const candidate = this.loadEpochCandidate();
-    if (!candidate || !this.genesisHex) throw new Error('missing-epoch-candidate');
+    const loaded = this.loadEpochCandidate();
+    if (loaded.kind === 'corrupt') throw new Error('epoch-candidate-corrupt');
+    if (loaded.kind === 'absent' || !this.genesisHex) throw new Error('epoch-candidate-missing');
+    const candidate = loaded.value;
     const bound = await this.epochCandidateBinding(candidate);
     if (bound === 'mismatch') throw new Error('epoch-candidate-mismatch');
     if (bound === 'current' || bound === 'historical') {

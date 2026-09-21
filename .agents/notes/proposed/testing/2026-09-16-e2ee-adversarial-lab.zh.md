@@ -23,6 +23,7 @@ Translation: current
 | [x] | S2 independent 证据 | independent 需要外带确认的签名者；不能只凭不同公钥或快照成员列表 |
 | [x] | S3 换代候选先落盘 | CAS 前保存候选+精确记录；重启/丢 ACK 不重新生成；落败候选不是当前密钥 |
 | [x] | S3b 换代恢复绑定记录 | 其他 pending 的 `resume()` 不能当换代成功；仅当候选记录已在已验证账本上才安装；真实子进程 CAS 后挂起 |
+| [x] | S3c 损坏候选不是缺失 | 截断/不可读候选失败闭合；文件缺失但 journal 有换代 pending 时不生成新候选 |
 | [x] | S4 持钥证明绑定 | 复现错误归属；只交方案；不改 v1 wire |
 | [x] | S5 epoch u32 / 快照资源 / 先验签 | 拒绝会截断的 epoch；限制宣称 length；昂贵导入前验签 |
 | [x] | S6 其余归类 | 恶意历史包、canManage、openJournal、Convex、HKDF/X25519/legacy、Lean/产品 |

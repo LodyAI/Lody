@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, watch, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, unlinkSync, watch, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -260,6 +260,86 @@ describe('lab host lifecycle', () => {
     row.secretHex = '00'.repeat(32);
     writeFileSync(path, `${JSON.stringify(row)}\n`);
     await expect(alice.publishEpoch()).rejects.toThrow('epoch-candidate-mismatch');
+    expect((await alice.readLedger()).state.epoch.number).toBe(0);
+    expect(alice.epochKeys.has(1)).toBe(false);
+  });
+
+  it('does not replace a truncated epoch candidate with a new publication', async () => {
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice' });
+    await alice.createSpace();
+    const orig = alice.fetch.bind(alice);
+    alice.fetch = async (input, init) => {
+      const url = String(input);
+      if (url.includes(`/${CONTROL_STREAM}`) && init?.method === 'POST') {
+        throw new Error('lost-epoch-response');
+      }
+      return orig(input, init);
+    };
+    expect((await alice.publishEpoch()).status).not.toBe('committed');
+    alice.fetch = orig;
+    const path = join(alice.clientDir, 'epoch-candidate.json');
+    const before = readFileSync(path);
+    writeFileSync(path, '{');
+    await expect(alice.publishEpoch()).rejects.toThrow('epoch-candidate-corrupt');
+    expect(readFileSync(path, 'utf8')).toBe('{');
+    expect(before.byteLength).toBeGreaterThan(1);
+    expect((await alice.readLedger()).state.epoch.number).toBe(0);
+    expect(alice.epochKeys.has(1)).toBe(false);
+  });
+
+  it('does not replace an unreadable epoch candidate with a new publication', async () => {
+    const host = await launchLab();
+    const { makeLiveFs } = await import('../src/services/fs');
+    const live = makeLiveFs();
+    let failRead = false;
+    const fs = {
+      ...live,
+      readText(path: string) {
+        if (failRead && path.endsWith('epoch-candidate.json')) throw new Error('read-failure');
+        return live.readText(path);
+      },
+    };
+    const alice = await labClient({ host, account: 'alice', fs });
+    await alice.createSpace();
+    const orig = alice.fetch.bind(alice);
+    alice.fetch = async (input, init) => {
+      const url = String(input);
+      if (url.includes(`/${CONTROL_STREAM}`) && init?.method === 'POST') {
+        throw new Error('lost-epoch-response');
+      }
+      return orig(input, init);
+    };
+    expect((await alice.publishEpoch()).status).not.toBe('committed');
+    alice.fetch = orig;
+    const path = join(alice.clientDir, 'epoch-candidate.json');
+    const before = readFileSync(path, 'utf8');
+    failRead = true;
+    await expect(alice.publishEpoch()).rejects.toThrow('epoch-candidate-corrupt');
+    failRead = false;
+    expect(readFileSync(path, 'utf8')).toBe(before);
+    expect((await alice.readLedger()).state.epoch.number).toBe(0);
+    expect(alice.epochKeys.has(1)).toBe(false);
+  });
+
+  it('does not mint a new epoch candidate when the file is gone but journal pending remains', async () => {
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice' });
+    await alice.createSpace();
+    const orig = alice.fetch.bind(alice);
+    alice.fetch = async (input, init) => {
+      const url = String(input);
+      if (url.includes(`/${CONTROL_STREAM}`) && init?.method === 'POST') {
+        throw new Error('lost-epoch-response');
+      }
+      return orig(input, init);
+    };
+    expect((await alice.publishEpoch()).status).not.toBe('committed');
+    alice.fetch = orig;
+    const path = join(alice.clientDir, 'epoch-candidate.json');
+    unlinkSync(path);
+    await expect(alice.publishEpoch()).rejects.toThrow('epoch-candidate-missing');
+    expect(existsSync(path)).toBe(false);
     expect((await alice.readLedger()).state.epoch.number).toBe(0);
     expect(alice.epochKeys.has(1)).toBe(false);
   });

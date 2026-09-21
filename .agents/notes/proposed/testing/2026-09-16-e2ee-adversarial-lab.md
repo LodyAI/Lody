@@ -23,6 +23,7 @@ Current state: HEAD `e30cbe66`. This increment: bind epoch recovery to the exact
 | [x] | S2 independent evidence | independent requires out-of-band confirmed signers; not a different key or snapshot member list |
 | [x] | S3 epoch candidate before CAS | Persist candidate+exact record before CAS; resume/restart without regenerating; losing candidate is not current |
 | [x] | S3b epoch recover binds record | `resume()` of another pending is not epoch success; install only if candidate record is on the verified ledger; real subprocess hang-after-CAS |
+| [x] | S3c corrupt candidate is not absent | Truncated/unreadable candidate fails closed; missing file with epoch pending does not mint a new candidate |
 | [x] | S4 possession binding | Reproduce mis-binding; proposal only; no v1 wire change |
 | [x] | S5 epoch u32 / snapshot resources / verify-before-import | Reject truncating epochs; bound snapshot length; signature before expensive import |
 | [x] | S6 classify remaining | Admin history-packet, canManage, openJournal, Convex, HKDF/X25519/legacy, Lean/product |
@@ -522,6 +523,12 @@ Recommend keeping (A) until the user answers: must the honest gateway accept cip
 - **Fix:** settle/install only after `hasRecordHash(candidate.record)` plus matching genesis, `publishEpoch` op, epoch, and `commitEpochKey(secret)`. Other pending yields `unknown` and keeps the candidate. Stale-candidate conflict clears it and allows a fresh publish against the current head. `hang-control-ack` writes `control-committed` after Riverrun accepts, then withholds the response.
 - **Crash:** child `publishEpoch` against a live host; parent waits for `control-committed` (not sleep); SIGKILL; new process recovers the same candidate, delivers K1, peer reads old and new plaintext; reopen is epoch 1 with no leftover candidate.
 - Evidence: `test/host-lifecycle.test.ts` + `test/design-probes.test.ts` 51 passed. Not product E2EE. No push/merge.
+
+### 2026-09-21 — Corrupt epoch candidate is not “absent”
+
+- Review of `5ea0fb5a`: `loadEpochCandidate` returned `null` on parse/read failure. `publishEpoch` then minted a new candidate over the file while journal still held the old `publishEpoch` pending. Repro: truncated candidate → retry unknown and replaced file → resume old pending committed → next rotate `missing-epoch-key`.
+- **Fix:** file missing is `absent`; exists-but-unreadable/truncated/invalid is `corrupt` and throws `epoch-candidate-corrupt` without generating or submitting. Missing file plus journal pending `publishEpoch` throws `epoch-candidate-missing`. Original file and pending stay. Tests: truncated JSON, read failure, unlink while pending remains.
+- Evidence: `test/host-lifecycle.test.ts` (29) + `test/design-probes.test.ts` (25) = 54 passed. Not product E2EE. No push/merge.
 
 ### Pending decision — possession proof target membership
 
