@@ -595,9 +595,13 @@ export class DemoSession {
     canManage: boolean
   ): Promise<{ status: string }> {
     if (!this.genesis || !this.genesisHex) throw new Error('no-space');
+    const ledger = await this.readLedger();
+    const actor = ledger.state.devices.get(deviceHex(this.device));
+    if (!actor) throw new Error('unauthorized');
     const possessionSignature = await target.sign(
       possessionSigningBytes({
         genesis: fromHex(this.genesisHex),
+        targetMembershipId: actor.membershipId,
         signingPublicKey: target.publicKey,
         encryptionPublicKey: target.enc,
         kind,

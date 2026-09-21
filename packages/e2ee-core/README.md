@@ -1,5 +1,12 @@
 # @lody/e2ee-core
 
+**2026-09-21 protocol revision:** `possessionSigningBytes` now requires
+`targetMembershipId` and uses `possess/v2`. Verification derives the target from
+the actor's preceding verified membership, including worker-assisted replay.
+Old v1 device proofs/pending records cannot be replayed by this revision; keep
+old data for explicit old-version audit, never silently re-sign or migrate it.
+See [protocol details and compatibility](../../specs/e2ee-ledger.zh.md#82-操作编码).
+
 **Design update (2026-09-13; snapshot stage landed 2026-09-14):** normal first
 join verifies an authenticated device's signed authorization-state snapshot, then
 every increment. Full replay remains an optional audit. The 10k/100ms gate is

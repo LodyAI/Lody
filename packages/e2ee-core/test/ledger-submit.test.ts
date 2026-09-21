@@ -44,14 +44,14 @@ describe('L5 CAS and unknown results', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, phone, 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
       )
     ).record;
     const recB = (
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, laptop, 'personal', false)
+        await admitDeviceOp(created.anchor, created.membershipId, laptop, 'personal', false)
       )
     ).record;
     const first = await a.client.submit(recA);
@@ -72,7 +72,7 @@ describe('L5 CAS and unknown results', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, phone, 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
       )
     ).record;
     stream.mode = 'lost-response';
@@ -89,7 +89,7 @@ describe('L5 CAS and unknown results', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, phone, 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
       )
     ).record;
     stream.mode = 'false-ack';
@@ -123,7 +123,7 @@ describe('L5 CAS and unknown results', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, phone, 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
       )
     ).record;
     stream.mode = 'unsupported';
@@ -140,7 +140,7 @@ describe('L5 CAS and unknown results', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, phone, 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
       )
     ).record;
     const gate = deferred();
@@ -164,7 +164,7 @@ describe('L5 CAS and unknown results', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, phone, 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
       )
     ).record;
     expect((await a.client.submit(record)).status).toBe('committed');
@@ -181,14 +181,14 @@ describe('L5 CAS and unknown results', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, phone, 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
       )
     ).record;
     const recB = (
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, laptop, 'personal', false)
+        await admitDeviceOp(created.anchor, created.membershipId, laptop, 'personal', false)
       )
     ).record;
     expect((await a.client.submit(recA)).status).toBe('committed');
@@ -197,7 +197,11 @@ describe('L5 CAS and unknown results', () => {
     expect(stream.records).toEqual([recA]);
     const refreshed = await b.client.read();
     const recB2 = (
-      await append(refreshed, owner, await admitDeviceOp(created.anchor, laptop, 'personal', false))
+      await append(
+        refreshed,
+        owner,
+        await admitDeviceOp(created.anchor, created.membershipId, laptop, 'personal', false)
+      )
     ).record;
     expect((await b.client.submit(recB2)).status).toBe('committed');
     expect(stream.records).toEqual([recA, recB2]);
@@ -210,7 +214,7 @@ describe('L5 CAS and unknown results', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, phone, 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
       )
     ).record;
     stream.mode = 'false-ack';
@@ -231,7 +235,7 @@ describe('L5 disk save faults', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, phone, 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
       )
     ).record;
     a.store.failSave = 'before';
@@ -246,7 +250,7 @@ describe('L5 disk save faults', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, phone, 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
       )
     ).record;
     a.store.failSave = 'after';
@@ -289,7 +293,7 @@ describe('C2 Promise/Effect single implementation', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, phone, 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
       )
     ).record;
     const streamA = new MemoryLedgerStream();
@@ -313,7 +317,7 @@ describe('C2 Promise/Effect single implementation', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, phone, 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
       )
     ).record;
     const streamA = new MemoryLedgerStream();
@@ -342,7 +346,7 @@ describe('C2 Promise/Effect single implementation', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, phone, 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
       )
     ).record;
     const stream = new MemoryLedgerStream();
@@ -383,12 +387,12 @@ describe('L6 page and cursor catch-up', () => {
     const good = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, phone, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
     );
     const chained = await append(
       good.ledger,
       owner,
-      await admitDeviceOp(created.anchor, laptop, 'personal', false)
+      await admitDeviceOp(created.anchor, created.membershipId, laptop, 'personal', false)
     );
     const bad = new Uint8Array(chained.record);
     const last = bad.byteLength - 1;
@@ -406,12 +410,12 @@ describe('L6 page and cursor catch-up', () => {
     const first = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, phone, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
     );
     const second = await append(
       first.ledger,
       owner,
-      await admitDeviceOp(created.anchor, laptop, 'personal', false)
+      await admitDeviceOp(created.anchor, created.membershipId, laptop, 'personal', false)
     );
     stream.pageSize = 1;
     stream.records = [first.record, second.record];

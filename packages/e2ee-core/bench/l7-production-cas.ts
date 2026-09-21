@@ -77,6 +77,7 @@ async function main() {
       possessionSignature: await extra.sign(
         possessionSigningBytes({
           genesis: await hashRecord(genesis),
+          targetMembershipId: ledger.state.owner,
           signingPublicKey: extra.publicKey,
           encryptionPublicKey: extra.enc,
           kind: 'personal',

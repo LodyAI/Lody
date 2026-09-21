@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { Ledger, LedgerError } from '../src/ledger';
-import { decodeSnapshotCbor, encodeSnapshotCbor } from '../src/ledger/cbor';
+import { decodeSnapshotCbor, encodeSnapshotCbor, encodeCbor } from '../src/ledger/cbor';
+import { encodeSignedRecord } from '../src/ledger/schema';
+import { createNodeSignatureVerifyExecutor } from '../src/ledger/node-sig-pool';
 import {
   commitEpochKey,
   headAttestationSigningBytes,
@@ -67,13 +69,77 @@ async function mixedLedger() {
 }
 
 describe('signed snapshot bootstrap', () => {
+  it.each(['machine', 'recovery'] as const)(
+    'rejects a signed snapshot granting management to %s',
+    async (kind) => {
+      const owner = await ed25519();
+      const created = await signGenesis(owner);
+      const device = await ed25519();
+      const added = await append(
+        created.ledger,
+        owner,
+        await admitDeviceOp(created.anchor, created.membershipId, device, kind, false)
+      );
+      const signed = await signSnapshot(added.ledger, owner);
+      const root = decodeSnapshotCbor(signed.snapshot) as unknown[];
+      const body = root[0] as unknown[];
+      const auth = body[5] as unknown[];
+      const rows = auth[2] as unknown[][];
+      const row = rows.find((candidate) =>
+        Buffer.from(candidate[0] as Uint8Array).equals(Buffer.from(device.publicKey))
+      )!;
+      row[4] = true;
+      const bytes = encodeSnapshotCbor(body as never);
+      const snapshot = encodeSignedSnapshot(bytes, await owner.sign(snapshotSigningBytes(bytes)));
+      await expect(Ledger.verifySnapshot({ trust: signed.trust, snapshot })).rejects.toMatchObject({
+        code: 'canonical',
+      });
+    }
+  );
+
+  it('imports a valid guest snapshot retaining machines and inactive personal management flags after demotion', async () => {
+    const owner = await ed25519();
+    const created = await signGenesis(owner);
+    const member = await ed25519();
+    const id = random(16);
+    let { ledger } = await append(created.ledger, owner, {
+      type: 'admitMember',
+      membershipId: id,
+      request: await signJoin(created.anchor, member),
+    });
+    ({ ledger } = await append(ledger, owner, {
+      type: 'setRole',
+      membershipId: id,
+      role: 'admin',
+    }));
+    const machine = await ed25519(),
+      personal = await ed25519();
+    ({ ledger } = await append(
+      ledger,
+      member,
+      await admitDeviceOp(created.anchor, id, machine, 'machine', false)
+    ));
+    ({ ledger } = await append(
+      ledger,
+      member,
+      await admitDeviceOp(created.anchor, id, personal, 'personal', true)
+    ));
+    ({ ledger } = await append(ledger, owner, {
+      type: 'setRole',
+      membershipId: id,
+      role: 'guest',
+    }));
+    const signed = await signSnapshot(ledger, owner);
+    const restored = await Ledger.verifySnapshot(signed);
+    expect(restored.state).toEqual(ledger.state);
+  });
   it('snapshot plus suffix matches full-history audit', async () => {
     const { owner, created, ledger, records } = await mixedLedger();
     const extra = await ed25519();
     const suffixOp = await append(
       ledger,
       owner,
-      await admitDeviceOp(created.anchor, extra, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, extra, 'personal', true)
     );
     const { snapshot, trust } = await signSnapshot(ledger, owner);
     const joined = await Ledger.verifySnapshot({
@@ -208,7 +274,7 @@ describe('signed snapshot bootstrap', () => {
     const admitted = await append(
       ledger,
       owner,
-      await admitDeviceOp(created.anchor, tablet, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, tablet, 'personal', true)
     );
     const { snapshot, trust } = await signSnapshot(admitted.ledger, owner);
     const joined = await Ledger.verifySnapshot({ trust, snapshot });
@@ -250,7 +316,7 @@ describe('signed snapshot bootstrap', () => {
     const suffix = await append(
       ledger,
       owner,
-      await admitDeviceOp(created.anchor, extra, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, extra, 'personal', true)
     );
     const afterLocal = await joined.extend([suffix.record]);
     const afterRemote = suffix.ledger;
@@ -284,7 +350,7 @@ describe('signed snapshot bootstrap', () => {
     const longer = await append(
       ledger,
       owner,
-      await admitDeviceOp(created.anchor, extra, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, extra, 'personal', true)
     );
     const { snapshot, trust } = await signSnapshot(ledger, owner);
     const joined = await Ledger.verifySnapshot({ trust, snapshot });
@@ -303,12 +369,12 @@ describe('signed snapshot bootstrap', () => {
     const a = await append(
       ledger,
       owner,
-      await admitDeviceOp(created.anchor, left, 'personal', false)
+      await admitDeviceOp(created.anchor, created.membershipId, left, 'personal', false)
     );
     const b = await append(
       ledger,
       owner,
-      await admitDeviceOp(created.anchor, right, 'personal', false)
+      await admitDeviceOp(created.anchor, created.membershipId, right, 'personal', false)
     );
     expect(a.ledger.length).toBe(b.ledger.length);
     expect(a.ledger.head).not.toEqual(b.ledger.head);
@@ -375,7 +441,7 @@ describe('signed snapshot bootstrap', () => {
     const good = await append(
       ledger,
       owner,
-      await admitDeviceOp(created.anchor, extra, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, extra, 'personal', true)
     );
     const damaged = Uint8Array.from(good.record);
     const recLast = damaged.at(-1);
@@ -388,7 +454,7 @@ describe('signed snapshot bootstrap', () => {
 });
 
 describe('device possession binding characterization', () => {
-  it('lets another member submit a copied proof and bind the device to themselves', async () => {
+  it('rejects a copied proof for another membership without consuming its keys', async () => {
     const owner = await ed25519();
     const created = await signGenesis(owner);
     const bob = await ed25519();
@@ -400,12 +466,48 @@ describe('device possession binding characterization', () => {
       request: join,
     });
     const phone = await ed25519();
-    const proof = await admitDeviceOp(created.anchor, phone, 'personal', false);
-    const stolen = await append(admitted.ledger, bob, proof);
-    const bound = stolen.ledger.state.devices.get(Buffer.from(phone.publicKey).toString('hex'));
-    expect(bound).toBeDefined();
-    expect(Buffer.from(bound!.membershipId)).toEqual(Buffer.from(bobId));
-    await expect(append(stolen.ledger, owner, proof)).rejects.toMatchObject({ code: 'replay' });
+    const proof = await admitDeviceOp(
+      created.anchor,
+      created.membershipId,
+      phone,
+      'personal',
+      false
+    );
+    await expect(append(admitted.ledger, bob, proof)).rejects.toMatchObject({ code: 'bad-proof' });
+    const proposal = admitted.ledger.prepare(proof, bob.publicKey);
+    const attackRecord = encodeSignedRecord(
+      proposal.bodyBytes,
+      await bob.sign(proposal.signingBytes)
+    );
+    const records = [created.record, admitted.record, attackRecord];
+    await expect(Ledger.verify({ anchor: created.anchor, records })).rejects.toMatchObject({
+      code: 'bad-proof',
+      position: 2,
+    });
+    await expect(
+      Ledger.verify({
+        anchor: created.anchor,
+        records,
+        executor: createNodeSignatureVerifyExecutor(),
+      })
+    ).rejects.toMatchObject({ code: 'bad-proof', position: 2 });
+    const accepted = await append(admitted.ledger, owner, proof);
+    const bound = accepted.ledger.state.devices.get(Buffer.from(phone.publicKey).toString('hex'));
+    expect(bound?.membershipId).toEqual(created.membershipId);
+  });
+
+  it('rejects v1 proofs instead of accepting an unbound fallback', async () => {
+    const owner = await ed25519(),
+      phone = await ed25519();
+    const created = await signGenesis(owner);
+    const op = await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', false);
+    const domain = new TextEncoder().encode('lody-e2ee/possess/v1\0');
+    const payload = encodeCbor([created.anchor, phone.publicKey, phone.enc, 0, false]);
+    const bytes = new Uint8Array(domain.length + payload.length);
+    bytes.set(domain);
+    bytes.set(payload, domain.length);
+    const old = { ...op, possessionSignature: await phone.sign(bytes) };
+    await expect(append(created.ledger, owner, old)).rejects.toMatchObject({ code: 'bad-proof' });
   });
 
   it('lets an Owner personal device without canManage admit a managing device (current spec §8.3)', async () => {
@@ -415,13 +517,13 @@ describe('device possession binding characterization', () => {
     const withoutManage = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, tablet, 'personal', false)
+      await admitDeviceOp(created.anchor, created.membershipId, tablet, 'personal', false)
     );
     const phone = await ed25519();
     const promoted = await append(
       withoutManage.ledger,
       tablet,
-      await admitDeviceOp(created.anchor, phone, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
     );
     const row = promoted.ledger.state.devices.get(Buffer.from(phone.publicKey).toString('hex'));
     expect(row?.canManage).toBe(true);

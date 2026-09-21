@@ -336,7 +336,7 @@ it('uses current ledger document-write, not mere key possession', async () => {
   const withMachine = await append(
     created.ledger,
     owner,
-    await admitDeviceOp(created.anchor, machine, 'machine', false)
+    await admitDeviceOp(created.anchor, created.membershipId, machine, 'machine', false)
   );
   const ownerHex = hex(owner.publicKey);
   const machineHex = hex(machine.publicKey);
@@ -363,7 +363,7 @@ it('rejects recovery-device snapshots through ledger-backed host admission', asy
   const admitted = await append(
     created.ledger,
     owner,
-    await admitDeviceOp(created.anchor, recovery, 'recovery', false)
+    await admitDeviceOp(created.anchor, created.membershipId, recovery, 'recovery', false)
   );
   const device = hex(recovery.publicKey);
   const author = { actor: 'A', memberInstance: 'A1', device };

@@ -89,7 +89,7 @@ describe('S3 snapshot LedgerClient', () => {
     const suffix = await append(
       ledger,
       owner,
-      await admitDeviceOp(created.anchor, extra, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, extra, 'personal', true)
     );
     await ownerClient.submit(suffix.record);
     const joined = await joiner.read();
@@ -189,7 +189,7 @@ describe('S3 snapshot LedgerClient', () => {
     const suffix = await append(
       ledger,
       owner,
-      await admitDeviceOp(created.anchor, extra, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, extra, 'personal', true)
     );
     await ownerClient.submit(suffix.record);
     const ahead = await ownerClient.read();
@@ -221,10 +221,18 @@ describe('S3 snapshot LedgerClient', () => {
     const phone = await ed25519();
     const laptop = await ed25519();
     const recA = (
-      await append(ledger, owner, await admitDeviceOp(created.anchor, phone, 'personal', true))
+      await append(
+        ledger,
+        owner,
+        await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
+      )
     ).record;
     const recB = (
-      await append(ledger, owner, await admitDeviceOp(created.anchor, laptop, 'personal', false))
+      await append(
+        ledger,
+        owner,
+        await admitDeviceOp(created.anchor, created.membershipId, laptop, 'personal', false)
+      )
     ).record;
     const first = await ownerClient.submit(recA);
     expect(first.status).toBe('committed');
@@ -270,7 +278,7 @@ describe('S3 snapshot LedgerClient', () => {
     const suffix = await append(
       ledger,
       owner,
-      await admitDeviceOp(created.anchor, extra, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, extra, 'personal', true)
     );
     await first.submit(suffix.record);
     await expect(
@@ -341,18 +349,18 @@ describe('S3 snapshot LedgerClient', () => {
     const first = await append(
       g.ledger,
       owner,
-      await admitDeviceOp(g.anchor, await ed25519(), 'personal', true)
+      await admitDeviceOp(g.anchor, g.membershipId, await ed25519(), 'personal', true)
     );
     const { snapshot, trust } = await signSnapshot(first.ledger, owner);
     const fork = await append(
       g.ledger,
       owner,
-      await admitDeviceOp(g.anchor, await ed25519(), 'personal', true)
+      await admitDeviceOp(g.anchor, g.membershipId, await ed25519(), 'personal', true)
     );
     const suffix = await append(
       first.ledger,
       owner,
-      await admitDeviceOp(g.anchor, await ed25519(), 'personal', true)
+      await admitDeviceOp(g.anchor, g.membershipId, await ed25519(), 'personal', true)
     );
 
     const stream = new MemoryLedgerStream();
@@ -439,13 +447,13 @@ describe('S3 snapshot LedgerClient', () => {
     const first = await append(
       g.ledger,
       owner,
-      await admitDeviceOp(g.anchor, await ed25519(), 'personal', true)
+      await admitDeviceOp(g.anchor, g.membershipId, await ed25519(), 'personal', true)
     );
     const { snapshot, trust } = await signSnapshot(first.ledger, owner);
     const suffix = await append(
       first.ledger,
       owner,
-      await admitDeviceOp(g.anchor, await ed25519(), 'personal', true)
+      await admitDeviceOp(g.anchor, g.membershipId, await ed25519(), 'personal', true)
     );
     const foreign = await signGenesis(await ed25519());
 
@@ -546,13 +554,13 @@ describe('S3 snapshot LedgerClient', () => {
     const first = await append(
       g.ledger,
       owner,
-      await admitDeviceOp(g.anchor, await ed25519(), 'personal', true)
+      await admitDeviceOp(g.anchor, g.membershipId, await ed25519(), 'personal', true)
     );
     const { snapshot, trust } = await signSnapshot(first.ledger, owner);
     const suffix = await append(
       first.ledger,
       owner,
-      await admitDeviceOp(g.anchor, await ed25519(), 'personal', true)
+      await admitDeviceOp(g.anchor, g.membershipId, await ed25519(), 'personal', true)
     );
 
     const stream = new MemoryLedgerStream();
@@ -583,14 +591,14 @@ describe('S3 snapshot LedgerClient', () => {
     const first = await append(
       g.ledger,
       owner,
-      await admitDeviceOp(g.anchor, await ed25519(), 'personal', true)
+      await admitDeviceOp(g.anchor, g.membershipId, await ed25519(), 'personal', true)
     );
     const { snapshot, trust } = await signSnapshot(first.ledger, owner);
     const foreign = await signGenesis(await ed25519());
     const fork = await append(
       g.ledger,
       owner,
-      await admitDeviceOp(g.anchor, await ed25519(), 'personal', true)
+      await admitDeviceOp(g.anchor, g.membershipId, await ed25519(), 'personal', true)
     );
 
     const pagedJunk = (junk: Uint8Array): LedgerStream => ({

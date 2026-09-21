@@ -44,7 +44,7 @@ describe('K1 durable epoch-key delivery', () => {
     const admitted = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, phone, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
     );
     const frame = await sealEpochEnvelope({
       state: admitted.ledger.state,
@@ -152,7 +152,7 @@ describe('K1 durable epoch-key delivery', () => {
     const admitted = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, phone, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
     );
     const frame = await sealEpochEnvelope({
       state: admitted.ledger.state,
@@ -244,7 +244,7 @@ describe('K1 durable epoch-key delivery', () => {
     const admitted = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, phone, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
     );
     const frame = await sealEpochEnvelope({
       state: admitted.ledger.state,
@@ -290,7 +290,7 @@ describe('K1 durable epoch-key delivery', () => {
     const admitted = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, phone, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
     );
     const frame = await sealEpochEnvelope({
       state: admitted.ledger.state,
@@ -344,7 +344,7 @@ describe('K1 durable epoch-key delivery', () => {
     const admitted = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, phone, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
     );
     const frame = await sealEpochEnvelope({
       state: admitted.ledger.state,
@@ -419,7 +419,7 @@ describe('K1 durable epoch-key delivery', () => {
     const admitted = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, phone, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
     );
     const frame = await sealEpochEnvelope({
       state: admitted.ledger.state,

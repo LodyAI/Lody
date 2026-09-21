@@ -36,7 +36,7 @@ describe('L4 opaque paged two-client reconcile', () => {
     const competing = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, await ed25519(), 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, await ed25519(), 'personal', true)
     );
     const late = await LedgerClient.open(created.record, new MemoryLedgerStore(), stream);
     const conflict = await late.submit(competing.record);

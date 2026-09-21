@@ -232,7 +232,7 @@ describe('L7 Streams CAS peer', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, phone, 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
       )
     ).record;
     const backend = new HttpPeer();
@@ -262,7 +262,13 @@ describe('L7 Streams CAS peer', () => {
       const next = await append(
         ledger,
         owner,
-        await admitDeviceOp(created.anchor, await ed25519(), 'personal', i === 0)
+        await admitDeviceOp(
+          created.anchor,
+          created.membershipId,
+          await ed25519(),
+          'personal',
+          i === 0
+        )
       );
       records.push(next.record);
       ledger = next.ledger;
@@ -297,12 +303,12 @@ describe('L7 Streams CAS peer', () => {
     const firstStep = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, await ed25519(), 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, await ed25519(), 'personal', true)
     );
     const secondStep = await append(
       firstStep.ledger,
       owner,
-      await admitDeviceOp(created.anchor, await ed25519(), 'personal', false)
+      await admitDeviceOp(created.anchor, created.membershipId, await ed25519(), 'personal', false)
     );
     const first = firstStep.record;
     const second = secondStep.record;
@@ -354,12 +360,12 @@ describe('L7 Streams CAS peer', () => {
     const firstStep = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, await ed25519(), 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, await ed25519(), 'personal', true)
     );
     const goodStep = await append(
       firstStep.ledger,
       owner,
-      await admitDeviceOp(created.anchor, await ed25519(), 'personal', false)
+      await admitDeviceOp(created.anchor, created.membershipId, await ed25519(), 'personal', false)
     );
     const first = firstStep.record;
     const good = goodStep.record;
@@ -388,7 +394,7 @@ describe('L7 Streams CAS peer', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, await ed25519(), 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, await ed25519(), 'personal', true)
       )
     ).record;
     const backend = new HttpPeer();
@@ -407,7 +413,7 @@ describe('L7 Streams CAS peer', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, await ed25519(), 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, await ed25519(), 'personal', true)
       )
     ).record;
     const backend = new HttpPeer();
@@ -435,14 +441,20 @@ describe('L7 Streams CAS peer', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, await ed25519(), 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, await ed25519(), 'personal', true)
       )
     ).record;
     const second = (
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, await ed25519(), 'personal', false)
+        await admitDeviceOp(
+          created.anchor,
+          created.membershipId,
+          await ed25519(),
+          'personal',
+          false
+        )
       )
     ).record;
     const backend = new HttpPeer();
@@ -497,14 +509,20 @@ describe('L7 Streams CAS peer', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, await ed25519(), 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, await ed25519(), 'personal', true)
       )
     ).record;
     const second = (
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, await ed25519(), 'personal', false)
+        await admitDeviceOp(
+          created.anchor,
+          created.membershipId,
+          await ed25519(),
+          'personal',
+          false
+        )
       )
     ).record;
     const peer = new TcpCasPeer();
@@ -547,14 +565,20 @@ describe('L7 Streams CAS peer', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, await ed25519(), 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, await ed25519(), 'personal', true)
       )
     ).record;
     const second = (
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, await ed25519(), 'personal', false)
+        await admitDeviceOp(
+          created.anchor,
+          created.membershipId,
+          await ed25519(),
+          'personal',
+          false
+        )
       )
     ).record;
     const { server, streamUrl } = await listenDurableCas();
@@ -600,7 +624,7 @@ describe('L7 Streams CAS peer', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, await ed25519(), 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, await ed25519(), 'personal', true)
       )
     ).record;
     const peer = new TcpCasPeer();
@@ -627,7 +651,7 @@ describe('L7 Streams CAS peer', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, await ed25519(), 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, await ed25519(), 'personal', true)
       )
     ).record;
     const peer = new TcpCasPeer();
@@ -664,7 +688,13 @@ describe('L7 Streams CAS peer', () => {
       const next = await append(
         ledger,
         owner,
-        await admitDeviceOp(created.anchor, await ed25519(), 'personal', i === 0)
+        await admitDeviceOp(
+          created.anchor,
+          created.membershipId,
+          await ed25519(),
+          'personal',
+          i === 0
+        )
       );
       records.push(next.record);
       ledger = next.ledger;
@@ -709,7 +739,7 @@ describe('L7 Streams CAS peer', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, await ed25519(), 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, await ed25519(), 'personal', true)
       )
     ).record;
     const backend = new HttpPeer();

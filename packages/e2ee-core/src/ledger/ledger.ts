@@ -10,6 +10,7 @@ import {
   hashRecordBytes,
   headAttestationSigningBytes,
   isTrustedSignatureVerifyExecutor,
+  keyId,
   recordSigningBytes,
   sequentialSignatureVerify,
   snapshotSigningBytes,
@@ -33,7 +34,6 @@ import {
   encodeOrdinaryBody,
   encodeSignedRecord,
   joinRequestSigningBytes,
-  possessionSigningBytes,
   signingBytesForBody,
   type DecodedRecord,
   type Operation,
@@ -95,21 +95,8 @@ function collectProofJobs(genesis: Hash, decoded: DecodedRecord): SignatureJob[]
       },
     ];
   }
-  if (op.type === 'admitDevice') {
-    return [
-      {
-        pk: op.signingPublicKey,
-        msg: possessionSigningBytes({
-          genesis,
-          signingPublicKey: op.signingPublicKey,
-          encryptionPublicKey: op.encryptionPublicKey,
-          kind: op.kind,
-          canManage: op.canManage,
-        }),
-        sig: op.possessionSignature,
-      },
-    ];
-  }
+  // Device proofs bind the actor's membership in the preceding verified state.
+  // They must be checked during policy replay, including in the worker path.
   return [];
 }
 
@@ -136,7 +123,14 @@ function applyDecoded(
     fail('wrong-parent', position);
   }
   withPosition(position, () => {
-    if (!proofsChecked) verifyOperationProofs(state.genesis, ordinary.operation, cache);
+    if (!proofsChecked || ordinary.operation.type === 'admitDevice') {
+      verifyOperationProofs(
+        state.genesis,
+        ordinary.operation,
+        cache,
+        state.devices.get(keyId(ordinary.signer))?.membershipId
+      );
+    }
     applyOperation(state, ordinary.signer, ordinary.operation, cache);
   });
   state.hashes.push(recordHash);

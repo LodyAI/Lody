@@ -181,12 +181,12 @@ describe('L1 full-operation DAG-CBOR golden vectors', () => {
       'c4c4beea624a4e8dfc5ab3f9a47d935ca9632b62bfcd7defd8e81b20f559aaad',
       '70af9f3171ac870499319cc23ddcbf74da3c7214bb34e6cd0f8541e5590bab59',
       '19c1d73823746fc5170ffc4144eb06390c551dadb53a340c1313738277ada798',
-      '756c76c265c16cd0e766d0baed37b69b8398c2b519591505b61dbeced5101561',
-      '23dfaa6c960b3dc08fc220f487e518276e790e8f445fef4e2b61575361ed2dfb',
-      '289f6f9c4c7b5537e89b1d4a0283795f23f0434fd052511d703b7d169a7322d6',
-      'c8fa02c237a1ce486bf872b693f9cb2871b829bc7b3ffaa0424b29d0c641b012',
-      '3f112f7bfe11e120fc47a765673a0d441d86ad67300aca3c3e8164c7b6b3faad',
-      'c1ec25af059a3a2cda48e8e3034a30c52eefdc98ac69003ae4351e1cc5c4eb8a',
+      '56016c3bfaa21ba5d3b636863b5446c7790414f2de01b4f82ce38b7ab807521a',
+      '59678924dfa8990b6c0db05d4bb48788fa83dba45980818c0d0ebd266b0b8ea1',
+      '5ca399a6b1dc9b30305424ec7b11cbad19846267f22f6b5c35a89a253e7c05ed',
+      '6c290462a102f0dc6e677de554dba36999150b78fd05ea2cacbfe23051f00ce8',
+      'b4c6435f2e2bf80de0e583bf758492af7a215a75f0a5c7a3d5def11b9ecd48da',
+      'ca00d2feafc19de9a5f0453915842520dbf3eb943a11979d54d52e0fcc05164d',
     ]);
 
     const full = await Ledger.verify({ anchor: genesisHash, records });
@@ -232,6 +232,7 @@ async function possess(
     possessionSignature: await deviceKeys.sign(
       possessionSigningBytes({
         genesis,
+        targetMembershipId: fill(0x22, 16),
         signingPublicKey: deviceKeys.publicKey,
         encryptionPublicKey: deviceKeys.enc,
         kind,

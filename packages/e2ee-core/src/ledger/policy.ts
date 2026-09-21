@@ -206,7 +206,8 @@ function markRotation(state: InternalState): void {
 export function verifyOperationProofs(
   genesis: Hash,
   operation: Operation,
-  cache?: SigningPointCache
+  cache?: SigningPointCache,
+  targetMembershipId?: Uint8Array
 ): void {
   if (operation.type === 'admitMember') {
     assertSignature(
@@ -219,10 +220,12 @@ export function verifyOperationProofs(
     return;
   }
   if (operation.type === 'admitDevice') {
+    if (!targetMembershipId) fail('unauthorized');
     assertSignature(
       operation.signingPublicKey,
       possessionSigningBytes({
         genesis,
+        targetMembershipId,
         signingPublicKey: operation.signingPublicKey,
         encryptionPublicKey: operation.encryptionPublicKey,
         kind: operation.kind,

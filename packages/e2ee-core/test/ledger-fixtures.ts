@@ -80,6 +80,7 @@ export async function signJoin(genesis: Uint8Array, applicant: DeviceKeys): Prom
 
 export async function admitDeviceOp(
   genesis: Uint8Array,
+  targetMembershipId: Uint8Array,
   device: DeviceKeys,
   kind: 'personal' | 'machine' | 'recovery',
   canManage: boolean
@@ -87,6 +88,7 @@ export async function admitDeviceOp(
   const possessionSignature = await device.sign(
     possessionSigningBytes({
       genesis,
+      targetMembershipId,
       signingPublicKey: device.publicKey,
       encryptionPublicKey: device.enc,
       kind,
@@ -150,7 +152,13 @@ export async function buildMixedChain(count: number) {
       const next = await append(
         ledger,
         members[members.length - 1]!,
-        await admitDeviceOp(created.anchor, device, 'personal', false)
+        await admitDeviceOp(
+          created.anchor,
+          ledger.state.devices.get(hex(members[members.length - 1]!.publicKey))!.membershipId,
+          device,
+          'personal',
+          false
+        )
       );
       records.push(next.record);
       ledger = next.ledger;
@@ -159,7 +167,7 @@ export async function buildMixedChain(count: number) {
       const next = await append(
         ledger,
         owner,
-        await admitDeviceOp(created.anchor, machine, 'machine', false)
+        await admitDeviceOp(created.anchor, created.membershipId, machine, 'machine', false)
       );
       records.push(next.record);
       ledger = next.ledger;
@@ -187,7 +195,7 @@ export async function buildMixedChain(count: number) {
       const next = await append(
         ledger,
         owner,
-        await admitDeviceOp(created.anchor, recovery, 'recovery', false)
+        await admitDeviceOp(created.anchor, created.membershipId, recovery, 'recovery', false)
       );
       records.push(next.record);
       ledger = next.ledger;

@@ -133,7 +133,8 @@ epoch = 0:  commitment = SHA-256("lody-e2ee/epoch-key/v1\0" || K)
 ```
 
 `K` 是 32 字节内容密钥；`genesis` 是本 Org 创世记录 hash；`epoch` 是 4 字节大端无符号代次编号。
-带标签的哈希（domain-separated digest）把 Org 身份和代次编进输入，同一把 `K` 不能拿去冒充另一个工作区或另一代。
+epoch ≥ 1 的承诺把 Org 身份和代次编进输入；epoch 0 不具有这层上下文绑定。
+承诺不能检测秘密密钥跨 Org 复用：每次创建 Org 必须独立随机生成 K0，不能复用。
 创世代（epoch 0）要等创世记录自己算出 hash 才有 genesis，因此这一代的承诺不编 genesis。
 承诺可以公开，但不能加密文档，也反推不出原密钥。
 
@@ -316,7 +317,7 @@ Passkey 与恢复文件分别包装相同 R 的私钥；不引入每入口独立
 
 每一代生成独立随机的 Org 对称密钥 `K_n`，不是轮换设备公私钥。除创世代外，
 换代操作必须携带一个历史包：用 `K_n` 认证加密上一代密钥 `K_(n-1)`。
-加密上下文绑定可信 genesis、前后代次和独立的历史密钥用途；具体编码随密码学
+加密上下文绑定可信 genesis、当前代次 n（上一代固定为 n−1）和历史包用途标签；具体编码随密码学
 模块定稿。操作字段的逻辑名称为 `previousEpochKey: Uint8Array`，实际仍编码为
 DAG-CBOR 固定数组中的 byte string，包含解密所需的 nonce、密文与认证标签。
 
@@ -593,7 +594,14 @@ epoch = 0:    commitment = SHA-256("lody-e2ee/epoch-key/v1\0" || K)
 无用户根私钥。重放不用“现在”否定历史。
 `(firstSign, requestId)` 永久消费。账本无 cancel 操作（D3）。
 
-持钥证明覆盖 `"lody-e2ee/possess/v1\0" || encode([genesis, newSign, newEnc, kind, canManage])`，由新设备签名。
+持钥证明覆盖 `"lody-e2ee/possess/v2\0" || encode([genesis, targetMembershipId, newSign, newEnc, kind, canManage])`，由新设备签名。
+`targetMembershipId` 为 16 字节的目标成员实例。调用方必须先向新设备确认该目标；验证器从前置已验证状态中的记录签署设备取得成员实例，再重建上述签名字节。
+操作 `[4, kind, newSign, newEnc, canManage, possessionSig]` 不重复存成员实例，也不绑定某台批准设备；同一成员的其它合法个人设备或 R 仍可按权限规则批准。
+首次成员加入仍使用 `joinRequest`，不要求申请者提供尚未分配的成员实例。
+
+这是不兼容的实验协议修订：记录数组形状与创世版本保持不变，但持钥证明域改为 v2。
+旧 v1 持钥证明（包括磁盘 pending、历史中的 admitDevice）不能在新版重放中通过，不双读、不自动重签、不改写历史或删除旧文件。
+需要完整重放的旧实验 Org 应用旧版本审计，或显式创建新的实验 Org；旧权限快照仍是外带背书状态，不因此成为历史证明。
 `revokeDevice` 的 `targetSign` 是被撤设备的签名公钥。
 
 设备 ID 即签名公钥。签名/加密公钥一旦在本 Org 出现即作废，重入新成员也不得复用。
@@ -613,14 +621,45 @@ Admin 可接纳 Member 并换代，不可改角色、移除成员或转让。机
 lody-e2ee/sig/v1\0
 lody-e2ee/rec/v1\0
 lody-e2ee/join/v1\0
-lody-e2ee/possess/v1\0
+lody-e2ee/possess/v2\0
 lody-e2ee/epoch-key/v1\0
 lody-e2ee/epoch-history/v1\0
+lody-e2ee/snapshot/v1\0
+lody-e2ee/snapshot-digest/v1\0
+lody-e2ee/head-attest/v1\0
+lody-e2ee/hpke-epoch/v1\0
+lody-e2ee/epoch-env/v1\0
 lody-e2ee/r-wrap/v1\0
 ```
 
 `r-wrap` 是包装 R 私钥（Passkey 或恢复文件）时用的域标签。当前恢复文件实现仍使用
 `lody-recovery-file/v1` / `lody-recovery-backup/v1`，尚未切到这一常量。
+
+`snapshot` 签署完整权限状态；`snapshot-digest` 用于对账状态摘要；`head-attest` 签署外带链头。
+`hpke-epoch` 是 HPKE info，`epoch-env` 是信封外层签名域。`r-wrap` 仅为规划常量，不声称已实现。
+
+### 8.5 信封与历史包的精确上下文
+
+固定 HPKE 套件：DHKEM(X25519, HKDF-SHA256) / HKDF-SHA256 / ChaCha20Poly1305。
+信封布局：`AAD || enc32 || ciphertext48 || signature64`。
+AAD 为规范 DAG-CBOR `encode([genesis32, epoch, senderSign32, recipientSign32])`，签名覆盖
+`"lody-e2ee/epoch-env/v1\0" || AAD || enc32 || ciphertext48`。
+HPKE info 为 `"lody-e2ee/hpke-epoch/v1\0"`，明文是 32 字节当前代密钥。
+接收方核对当前发送权限、接收设备资格、epoch、精确长度和 AAD，验证签名后才解密；本地加密公钥必须匹配账本接收设备，解密结果必须匹配当前承诺。
+
+历史包为 `nonce24 || ciphertext32 || tag16`，直接以 K*n 作 XChaCha20-Poly1305 密钥；
+AAD 为 `"lody-e2ee/epoch-history/v1\0" || genesis32 || uint32be(n)`，明文固定 K*(n−1)。
+当前用途隔离指 AAD 标签，不声称已用 HKDF 派生独立历史子密钥。若未来引入派生，须显式定义新版本及旧包读取方案。
+
+### 8.6 快照不变量与记录身份
+
+快照中的 machine/recovery 必须 `canManage=false`，与从创世重放一致。
+不要把操作准入条件误作永久状态不变量：成员降级为 Guest 后可以保留已登记的 machine，
+降级后的个人设备也可以保留 `canManage=true` 标志；实际权限仍取当前角色、设备种类和标志的交集。
+结构校验不能证明背书者没有撒谎，独立核对与按需历史审计仍不可替代。
+
+严格 Ed25519 检查不保证持有私钥者对同一 body 只能生成一个有效签名。
+recordHash 标识精确记录字节，不是业务操作的唯一身份；未知提交必须重试已保存的原字节，不能重签。
 
 ## 9. 公开 API 与调用示例（草案）
 

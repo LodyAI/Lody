@@ -106,6 +106,7 @@ async function joinRequest(genesis: Uint8Array, applicant: Device): Promise<Join
 
 async function admitDevice(
   genesis: Uint8Array,
+  targetMembershipId: Uint8Array,
   target: Device,
   kind: 'personal' | 'machine' | 'recovery',
   canManage: boolean
@@ -119,6 +120,7 @@ async function admitDevice(
     possessionSignature: await target.sign(
       possessionSigningBytes({
         genesis,
+        targetMembershipId: targetMembershipId,
         signingPublicKey: target.publicKey,
         encryptionPublicKey: target.enc,
         kind,
@@ -225,9 +227,17 @@ describe('C2 public-package black-box consumer', () => {
     const stale = afterJoin;
 
     const recovery = await device();
-    await commit(leader, owner, await admitDevice(anchor, recovery, 'recovery', false));
+    await commit(
+      leader,
+      owner,
+      await admitDevice(anchor, ownerMembership, recovery, 'recovery', false)
+    );
     const phone = await device();
-    await commit(leader, owner, await admitDevice(anchor, phone, 'personal', true));
+    await commit(
+      leader,
+      owner,
+      await admitDevice(anchor, ownerMembership, phone, 'personal', true)
+    );
     await commit(leader, owner, { type: 'revokeDevice', target: phone.publicKey });
     const afterRevoke = await leader.read();
     expect(afterRevoke.state.devices.has(hex(phone.publicKey))).toBe(false);
@@ -248,7 +258,11 @@ describe('C2 public-package black-box consumer', () => {
     });
 
     const laptop = await device();
-    await commit(leader, recovery, await admitDevice(anchor, laptop, 'personal', true));
+    await commit(
+      leader,
+      recovery,
+      await admitDevice(anchor, ownerMembership, laptop, 'personal', true)
+    );
     const recoveredView = await leader.read();
     expect(recoveredView.state.devices.get(hex(laptop.publicKey))?.kind).toBe('personal');
     expect(recoveredView.state.devices.get(hex(laptop.publicKey))?.canManage).toBe(true);
@@ -303,7 +317,7 @@ describe('C2 public-package black-box consumer', () => {
     }
 
     const stranger = await device();
-    const competing = await admitDevice(anchor, stranger, 'personal', false);
+    const competing = await admitDevice(anchor, ownerMembership, stranger, 'personal', false);
     const proposal = stale.prepare(competing, owner.publicKey);
     const fork = await stale.finalize(proposal, await owner.sign(proposal.signingBytes));
     const conflict = await follower.submit(fork);
@@ -339,7 +353,11 @@ describe('C2 public-package black-box consumer', () => {
     }
 
     try {
-      await commit(leader, member, await admitDevice(anchor, await device(), 'personal', false));
+      await commit(
+        leader,
+        member,
+        await admitDevice(anchor, ownerMembership, await device(), 'personal', false)
+      );
       throw new Error('removed-member-admitted');
     } catch (error) {
       expect(error).toBeInstanceOf(LedgerError);

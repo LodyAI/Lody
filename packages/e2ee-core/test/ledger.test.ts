@@ -84,6 +84,7 @@ async function signJoin(genesis: Uint8Array, applicant: DeviceKeys): Promise<Joi
 
 async function admitDeviceOp(
   genesis: Uint8Array,
+  targetMembershipId: Uint8Array,
   device: DeviceKeys,
   kind: 'personal' | 'machine' | 'recovery',
   canManage: boolean
@@ -91,6 +92,7 @@ async function admitDeviceOp(
   const possessionSignature = await device.sign(
     possessionSigningBytes({
       genesis,
+      targetMembershipId,
       signingPublicKey: device.publicKey,
       encryptionPublicKey: device.enc,
       kind,
@@ -193,7 +195,13 @@ describe('ledger verify and permissions', () => {
     expect(again.length).toBe(1);
     expect(again.state.devices.size).toBe(1);
 
-    const phoneOp = await admitDeviceOp(created.anchor, phone, 'personal', true);
+    const phoneOp = await admitDeviceOp(
+      created.anchor,
+      created.membershipId,
+      phone,
+      'personal',
+      true
+    );
     const { ledger: withPhone, record: phoneRecord } = await append(created.ledger, owner, phoneOp);
     expect(withPhone.length).toBe(2);
     expect(created.ledger.length).toBe(1);
@@ -249,7 +257,7 @@ describe('ledger verify and permissions', () => {
       await append(
         guested.ledger,
         guestDevice,
-        await admitDeviceOp(created.anchor, machine, 'machine', false)
+        await admitDeviceOp(created.anchor, membershipId, machine, 'machine', false)
       );
       throw new Error('guest-machine');
     } catch (error) {
@@ -263,12 +271,12 @@ describe('ledger verify and permissions', () => {
     const withLaptop = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, laptop, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, laptop, 'personal', true)
     );
     const withPhone = await append(
       withLaptop.ledger,
       laptop,
-      await admitDeviceOp(created.anchor, phone, 'personal', false)
+      await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', false)
     );
     const revoked = await append(withPhone.ledger, owner, {
       type: 'revokeDevice',
@@ -281,14 +289,20 @@ describe('ledger verify and permissions', () => {
     const still = await append(
       revoked.ledger,
       phone,
-      await admitDeviceOp(created.anchor, tablet, 'personal', false)
+      await admitDeviceOp(created.anchor, created.membershipId, tablet, 'personal', false)
     );
     expect(still.ledger.state.devices.has(hex(tablet.publicKey))).toBe(true);
     try {
       await append(
         still.ledger,
         laptop,
-        await admitDeviceOp(created.anchor, await ed25519(), 'personal', false)
+        await admitDeviceOp(
+          created.anchor,
+          created.membershipId,
+          await ed25519(),
+          'personal',
+          false
+        )
       );
       throw new Error('revoked-approver-still-signed');
     } catch (error) {
@@ -301,13 +315,13 @@ describe('ledger verify and permissions', () => {
     const withR = await append(
       created.ledger,
       owner,
-      await admitDeviceOp(created.anchor, recovery, 'recovery', false)
+      await admitDeviceOp(created.anchor, created.membershipId, recovery, 'recovery', false)
     );
     const restored = await ed25519();
     const recovered = await append(
       withR.ledger,
       recovery,
-      await admitDeviceOp(created.anchor, restored, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, restored, 'personal', true)
     );
     expect(recovered.ledger.state.devices.get(hex(restored.publicKey))?.canManage).toBe(true);
 
@@ -321,14 +335,26 @@ describe('ledger verify and permissions', () => {
     const memberWithR = await append(
       withMember.ledger,
       member,
-      await admitDeviceOp(created.anchor, memberR, 'recovery', false)
+      await admitDeviceOp(
+        created.anchor,
+        withMember.ledger.state.devices.get(hex(member.publicKey))!.membershipId,
+        memberR,
+        'recovery',
+        false
+      )
     );
     const memberPhone = await ed25519();
     try {
       await append(
         memberWithR.ledger,
         memberR,
-        await admitDeviceOp(created.anchor, memberPhone, 'personal', true)
+        await admitDeviceOp(
+          created.anchor,
+          withMember.ledger.state.devices.get(hex(member.publicKey))!.membershipId,
+          memberPhone,
+          'personal',
+          true
+        )
       );
       throw new Error('member-r-manage');
     } catch (error) {
@@ -472,13 +498,19 @@ describe('ledger verify and permissions', () => {
       const next = await append(
         ledger,
         owner,
-        await admitDeviceOp(created.anchor, device, 'personal', false)
+        await admitDeviceOp(created.anchor, created.membershipId, device, 'personal', false)
       );
       records.push(next.record);
       ledger = next.ledger;
     }
     const attacker = await ed25519();
-    const forgedOp = await admitDeviceOp(created.anchor, attacker, 'personal', false);
+    const forgedOp = await admitDeviceOp(
+      created.anchor,
+      created.membershipId,
+      attacker,
+      'personal',
+      false
+    );
     forgedOp.possessionSignature[0] = (forgedOp.possessionSignature[0] ?? 0) ^ 0xff;
     const proposal = ledger.prepare(forgedOp, owner.publicKey);
     const forgedRecord = encodeSignedRecord(
@@ -519,7 +551,13 @@ describe('incremental extend', () => {
     });
     records.push(admitted.record);
     ledger = admitted.ledger;
-    const phoneOp = await admitDeviceOp(created.anchor, phone, 'personal', true);
+    const phoneOp = await admitDeviceOp(
+      created.anchor,
+      created.membershipId,
+      phone,
+      'personal',
+      true
+    );
     const withPhone = await append(ledger, owner, phoneOp);
     records.push(withPhone.record);
     ledger = withPhone.ledger;
@@ -567,7 +605,7 @@ describe('readable host loop', () => {
     const afterR = await append(
       afterJoin.ledger,
       ownerKeys,
-      await admitDeviceOp(created.anchor, r, 'recovery', false)
+      await admitDeviceOp(created.anchor, created.membershipId, r, 'recovery', false)
     );
 
     const epoch1 = random(32);
@@ -592,7 +630,7 @@ describe('readable host loop', () => {
     const restored = await append(
       ledger1,
       r,
-      await admitDeviceOp(created.anchor, newLaptop, 'personal', true)
+      await admitDeviceOp(created.anchor, created.membershipId, newLaptop, 'personal', true)
     );
     expect(restored.ledger.state.devices.get(hex(newLaptop.publicKey))?.kind).toBe('personal');
     expect(restored.ledger.state.devices.get(hex(newLaptop.publicKey))?.canManage).toBe(true);

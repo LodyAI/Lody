@@ -36,7 +36,13 @@ describe('10k ledger through LedgerClient', () => {
       await append(
         view,
         built.owner,
-        await admitDeviceOp(built.created.anchor, extra, 'personal', false)
+        await admitDeviceOp(
+          built.created.anchor,
+          built.created.membershipId,
+          extra,
+          'personal',
+          false
+        )
       )
     ).record;
     const submitted = await client.submit(next);
@@ -60,7 +66,13 @@ describe('10k ledger through LedgerClient', () => {
       await append(
         again,
         built.owner,
-        await admitDeviceOp(built.created.anchor, extra2, 'personal', false)
+        await admitDeviceOp(
+          built.created.anchor,
+          built.created.membershipId,
+          extra2,
+          'personal',
+          false
+        )
       )
     ).record;
     expect((await restarted.submit(appended)).status).toBe('committed');
@@ -108,7 +120,7 @@ describe('10k ledger through LedgerClient', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, phone, 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
       )
     ).record;
     expect((await client.submit(record)).status).toBe('committed');

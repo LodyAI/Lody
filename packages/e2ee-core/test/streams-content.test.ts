@@ -375,7 +375,7 @@ it('checks device document-write capability, not mere possession of a key', asyn
   const withMachine = await append(
     created.ledger,
     owner,
-    await admitDeviceOp(created.anchor, machine, 'machine', false)
+    await admitDeviceOp(created.anchor, created.membershipId, machine, 'machine', false)
   );
   const ownerHex = hex(owner.publicKey);
   const machineHex = hex(machine.publicKey);

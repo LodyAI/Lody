@@ -202,6 +202,7 @@ describe('L1 canonical vectors and rejects', () => {
     const possession = await applicant.sign(
       possessionSigningBytes({
         genesis: created.anchor,
+        targetMembershipId: created.membershipId,
         signingPublicKey: applicant.publicKey,
         encryptionPublicKey: applicant.enc,
         kind: 'personal',

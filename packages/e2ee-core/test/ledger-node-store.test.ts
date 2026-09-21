@@ -44,7 +44,7 @@ describe('L6 sqlite journal restart', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, phone, 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
       )
     ).record;
     const stream = new MemoryLedgerStream();
@@ -101,7 +101,7 @@ describe('L6 sqlite journal restart', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, phone, 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
       )
     ).record;
     const withPending = { ...baseline, pending };
@@ -176,7 +176,7 @@ describe('L6 sqlite journal restart', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, phone, 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
       )
     ).record;
     const stream = new MemoryLedgerStream();
@@ -237,7 +237,7 @@ describe('L6 sqlite journal restart', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, phone, 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, phone, 'personal', true)
       )
     ).record;
     const proposal = created.ledger.prepareSnapshot(owner.publicKey);
@@ -285,7 +285,7 @@ describe('L6 sqlite journal restart', () => {
       await append(
         created.ledger,
         owner,
-        await admitDeviceOp(created.anchor, await ed25519(), 'personal', true)
+        await admitDeviceOp(created.anchor, created.membershipId, await ed25519(), 'personal', true)
       )
     ).record;
     const proposal = created.ledger.prepareSnapshot(owner.publicKey);

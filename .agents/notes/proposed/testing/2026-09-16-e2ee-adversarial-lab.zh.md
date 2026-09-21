@@ -520,7 +520,11 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 - **崩溃：** 子进程对活宿主 `publishEpoch`；父进程等待 `control-committed`（不用 sleep）；SIGKILL；新进程恢复同一候选、分发 K1、对端能读新旧明文；再打开仍是 epoch 1 且无残留候选。
 - 证据：`test/host-lifecycle.test.ts` + `test/design-probes.test.ts` 51 通过。未启用产品 E2EE。不 push/merge。
 
-### 待决策 — 持钥证明绑定目标成员
+### 已解决 — 持钥证明绑定目标成员（2026-09-21）
+
+验证：core 类型检查与完整 Vitest 405 项通过（含一万条持久化/重启），README 消费示例通过；lab 类型检查与 Vitest 133 项通过，排除外部模型 `restricted-agent.test.ts`。根 `pnpm check` 类型检查通过，停在已有 lint 错误；消除本轮测试变量遮蔽后，`pnpm lint` 仍报告原有 9 项错误。文档状态无错误。未 push、未启用产品。这些测试不等于完整安全证明。
+
+用户已授权实现。`possess/v2` 绑定 targetMembershipId；验证从前一已验证状态中的签署设备推导目标，包括 worker 辅助重放。没有新增操作字段或 opcode。拒绝旧 v1 证明，不自动迁移或降级接受。快照导入拒绝 machine/recovery 的管理位，保留 Guest 降级后可达的设备状态。下文方案为历史记录，不再是待审批门槛。epoch 0 改算法、历史 HKDF、X25519 黑名单不在本轮范围。
 
 v1 `possessionSigningBytes` 为 `[genesis, signPub, encPub, kind, canManage]`。`admitDevice` 绑到提交者的 membership。任何看到证明的成员都能占用这对密钥。
 

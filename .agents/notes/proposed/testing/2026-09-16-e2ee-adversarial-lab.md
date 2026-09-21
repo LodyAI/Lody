@@ -530,7 +530,11 @@ Recommend keeping (A) until the user answers: must the honest gateway accept cip
 - **Fix:** file missing is `absent`; exists-but-unreadable/truncated/invalid is `corrupt` and throws `epoch-candidate-corrupt` without generating or submitting. Missing file plus journal pending `publishEpoch` throws `epoch-candidate-missing`. Original file and pending stay. Tests: truncated JSON, read failure, unlink while pending remains.
 - Evidence: `test/host-lifecycle.test.ts` (29) + `test/design-probes.test.ts` (25) = 54 passed. Not product E2EE. No push/merge.
 
-### Pending decision — possession proof target membership
+### Resolved — possession proof target membership (2026-09-21)
+
+Validation: core typecheck + full Vitest 405 passed (including 10k persistence/restart); README consumer passed; lab typecheck + Vitest 133 passed, excluding the external-model `restricted-agent.test.ts`. Root `pnpm check` passed typecheck but stops at baseline lint errors; after removing the newly introduced test-variable shadowing, `pnpm lint` reports the same 9 pre-existing errors. Docs status has no errors. No push or product enablement. These tests are not a complete security proof.
+
+User authorized implementation. `possess/v2` binds targetMembershipId; verification derives it from the actor in the preceding verified state, including worker-assisted replay. No new operation field or opcode. Old v1 proofs are rejected, not migrated or accepted as fallback. Snapshot import now rejects machine/recovery management flags, while allowing reachable Guest demotion states. The proposal below is historical, not a remaining approval gate. Epoch-zero redesign, history HKDF, and X25519 blacklist are outside this repair.
 
 v1 `possessionSigningBytes` is `[genesis, signPub, encPub, kind, canManage]`. `admitDevice` binds to the submitter’s membership. Any member who sees the proof can occupy the keys.
 

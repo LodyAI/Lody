@@ -69,7 +69,11 @@ export async function buildChain(count: number) {
       const device = await ed25519();
       const kind = step === 5 ? 'machine' : step === 6 ? 'recovery' : 'personal';
       if (kind === 'personal') extraOwnerDevices.push(device);
-      next = await append(ledger, owner, await admitDeviceOp(created.anchor, device, kind, false));
+      next = await append(
+        ledger,
+        owner,
+        await admitDeviceOp(created.anchor, created.membershipId, device, kind, false)
+      );
     }
     records.push(next.record);
     ledger = next.ledger;

@@ -289,6 +289,7 @@ function importAuthState(
     const enc = checkEncryptionPublicKey(asExactBytes(tuple[3]!, ENCRYPTION_KEY_BYTES));
     const canManage = asBool(tuple[4]!);
     if (!members.has(keyId(membershipId))) fail('canonical');
+    if (kind !== 'personal' && canManage) fail('canonical');
     devices.set(keyId(signPub), {
       membershipId: copyBytes(membershipId),
       kind,

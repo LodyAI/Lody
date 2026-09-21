@@ -124,6 +124,7 @@ const proposal = first.prepare(
     possessionSignature: await extra.sign(
       possessionSigningBytes({
         genesis: anchor,
+        targetMembershipId: first.state.owner,
         signingPublicKey: extra.publicKey,
         encryptionPublicKey: extra.enc,
         kind: 'personal',

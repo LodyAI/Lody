@@ -53,20 +53,35 @@ describe('L3 confirmed permission matrix', () => {
     const adminMembership = findMembership(ledger, adminJoin.userId);
     await track(owner, { type: 'setRole', membershipId: adminMembership, role: 'admin' });
     const adminManage = await ed25519();
-    await track(admin, await admitDeviceOp(created.anchor, adminManage, 'personal', true));
+    await track(
+      admin,
+      await admitDeviceOp(created.anchor, adminMembership, adminManage, 'personal', true)
+    );
     const adminMachine = await ed25519();
-    await track(admin, await admitDeviceOp(created.anchor, adminMachine, 'machine', false));
+    await track(
+      admin,
+      await admitDeviceOp(created.anchor, adminMembership, adminMachine, 'machine', false)
+    );
     const adminRecovery = await ed25519();
-    await track(admin, await admitDeviceOp(created.anchor, adminRecovery, 'recovery', false));
+    await track(
+      admin,
+      await admitDeviceOp(created.anchor, adminMembership, adminRecovery, 'recovery', false)
+    );
 
     const member = await ed25519();
     const memberJoin = await signJoin(created.anchor, member);
     await track(owner, { type: 'admitMember', membershipId: random(16), request: memberJoin });
     const memberMembership = findMembership(ledger, memberJoin.userId);
     const memberMachine = await ed25519();
-    await track(member, await admitDeviceOp(created.anchor, memberMachine, 'machine', false));
+    await track(
+      member,
+      await admitDeviceOp(created.anchor, memberMembership, memberMachine, 'machine', false)
+    );
     const memberRecovery = await ed25519();
-    await track(member, await admitDeviceOp(created.anchor, memberRecovery, 'recovery', false));
+    await track(
+      member,
+      await admitDeviceOp(created.anchor, memberMembership, memberRecovery, 'recovery', false)
+    );
 
     const subject = await ed25519();
     const subjectJoin = await signJoin(created.anchor, subject);
@@ -81,12 +96,21 @@ describe('L3 confirmed permission matrix', () => {
     await track(owner, { type: 'setRole', membershipId: guestMembership, role: 'guest' });
     expect([...ledger.state.members.values()].some((row) => row.role === 'guest')).toBe(true);
     const guestRecovery = await ed25519();
-    await track(guest, await admitDeviceOp(created.anchor, guestRecovery, 'recovery', false));
+    await track(
+      guest,
+      await admitDeviceOp(created.anchor, guestMembership, guestRecovery, 'recovery', false)
+    );
 
     const ownerMachine = await ed25519();
-    await track(owner, await admitDeviceOp(created.anchor, ownerMachine, 'machine', false));
+    await track(
+      owner,
+      await admitDeviceOp(created.anchor, created.membershipId, ownerMachine, 'machine', false)
+    );
     const ownerRecovery = await ed25519();
-    await track(owner, await admitDeviceOp(created.anchor, ownerRecovery, 'recovery', false));
+    await track(
+      owner,
+      await admitDeviceOp(created.anchor, created.membershipId, ownerRecovery, 'recovery', false)
+    );
 
     const epochOp = async () => ({
       type: 'publishEpoch' as const,
@@ -237,109 +261,127 @@ describe('L3 confirmed permission matrix', () => {
       {
         name: 'owner-personal-admit-personal',
         signer: owner,
-        op: async () => admitDeviceOp(created.anchor, await ed25519(), 'personal', false),
+        op: async () =>
+          admitDeviceOp(created.anchor, created.membershipId, await ed25519(), 'personal', false),
         expect: 'ok',
       },
       {
         name: 'admin-manage-admit-personal-manage',
         signer: adminManage,
-        op: async () => admitDeviceOp(created.anchor, await ed25519(), 'personal', true),
+        op: async () =>
+          admitDeviceOp(created.anchor, adminMembership, await ed25519(), 'personal', true),
         expect: 'ok',
       },
       {
         name: 'member-admit-personal',
         signer: member,
-        op: async () => admitDeviceOp(created.anchor, await ed25519(), 'personal', false),
+        op: async () =>
+          admitDeviceOp(created.anchor, memberMembership, await ed25519(), 'personal', false),
         expect: 'ok',
       },
       {
         name: 'member-admit-personal-manage',
         signer: member,
-        op: async () => admitDeviceOp(created.anchor, await ed25519(), 'personal', true),
+        op: async () =>
+          admitDeviceOp(created.anchor, memberMembership, await ed25519(), 'personal', true),
         expect: 'unauthorized',
       },
       {
         name: 'guest-admit-personal',
         signer: guest,
-        op: async () => admitDeviceOp(created.anchor, await ed25519(), 'personal', false),
+        op: async () =>
+          admitDeviceOp(created.anchor, guestMembership, await ed25519(), 'personal', false),
         expect: 'ok',
       },
       {
         name: 'guest-admit-personal-manage',
         signer: guest,
-        op: async () => admitDeviceOp(created.anchor, await ed25519(), 'personal', true),
+        op: async () =>
+          admitDeviceOp(created.anchor, guestMembership, await ed25519(), 'personal', true),
         expect: 'unauthorized',
       },
       {
         name: 'guest-admit-machine',
         signer: guest,
-        op: async () => admitDeviceOp(created.anchor, await ed25519(), 'machine', false),
+        op: async () =>
+          admitDeviceOp(created.anchor, guestMembership, await ed25519(), 'machine', false),
         expect: 'unauthorized',
       },
       {
         name: 'owner-machine-cannot-admit',
         signer: ownerMachine,
-        op: async () => admitDeviceOp(created.anchor, await ed25519(), 'personal', false),
+        op: async () =>
+          admitDeviceOp(created.anchor, created.membershipId, await ed25519(), 'personal', false),
         expect: 'unauthorized',
       },
       {
         name: 'admin-machine-cannot-admit',
         signer: adminMachine,
-        op: async () => admitDeviceOp(created.anchor, await ed25519(), 'personal', false),
+        op: async () =>
+          admitDeviceOp(created.anchor, adminMembership, await ed25519(), 'personal', false),
         expect: 'unauthorized',
       },
       {
         name: 'member-machine-cannot-admit',
         signer: memberMachine,
-        op: async () => admitDeviceOp(created.anchor, await ed25519(), 'personal', false),
+        op: async () =>
+          admitDeviceOp(created.anchor, memberMembership, await ed25519(), 'personal', false),
         expect: 'unauthorized',
       },
       {
         name: 'owner-recovery-admit-personal-manage',
         signer: ownerRecovery,
-        op: async () => admitDeviceOp(created.anchor, await ed25519(), 'personal', true),
+        op: async () =>
+          admitDeviceOp(created.anchor, created.membershipId, await ed25519(), 'personal', true),
         expect: 'ok',
       },
       {
         name: 'owner-recovery-cannot-admit-machine',
         signer: ownerRecovery,
-        op: async () => admitDeviceOp(created.anchor, await ed25519(), 'machine', false),
+        op: async () =>
+          admitDeviceOp(created.anchor, created.membershipId, await ed25519(), 'machine', false),
         expect: 'unauthorized',
       },
       {
         name: 'admin-recovery-grant-manage',
         signer: adminRecovery,
-        op: async () => admitDeviceOp(created.anchor, await ed25519(), 'personal', true),
+        op: async () =>
+          admitDeviceOp(created.anchor, adminMembership, await ed25519(), 'personal', true),
         expect: 'ok',
       },
       {
         name: 'member-recovery-cannot-grant-manage',
         signer: memberRecovery,
-        op: async () => admitDeviceOp(created.anchor, await ed25519(), 'personal', true),
+        op: async () =>
+          admitDeviceOp(created.anchor, memberMembership, await ed25519(), 'personal', true),
         expect: 'unauthorized',
       },
       {
         name: 'member-recovery-admit-personal',
         signer: memberRecovery,
-        op: async () => admitDeviceOp(created.anchor, await ed25519(), 'personal', false),
+        op: async () =>
+          admitDeviceOp(created.anchor, memberMembership, await ed25519(), 'personal', false),
         expect: 'ok',
       },
       {
         name: 'guest-recovery-admit-personal',
         signer: guestRecovery,
-        op: async () => admitDeviceOp(created.anchor, await ed25519(), 'personal', false),
+        op: async () =>
+          admitDeviceOp(created.anchor, guestMembership, await ed25519(), 'personal', false),
         expect: 'ok',
       },
       {
         name: 'guest-recovery-grant-manage',
         signer: guestRecovery,
-        op: async () => admitDeviceOp(created.anchor, await ed25519(), 'personal', true),
+        op: async () =>
+          admitDeviceOp(created.anchor, guestMembership, await ed25519(), 'personal', true),
         expect: 'unauthorized',
       },
       {
         name: 'guest-recovery-admit-machine',
         signer: guestRecovery,
-        op: async () => admitDeviceOp(created.anchor, await ed25519(), 'machine', false),
+        op: async () =>
+          admitDeviceOp(created.anchor, guestMembership, await ed25519(), 'machine', false),
         expect: 'unauthorized',
       },
       {
@@ -358,7 +400,8 @@ describe('L3 confirmed permission matrix', () => {
       {
         name: 'revoked-device-cannot-admit',
         signer: memberMachine,
-        op: async () => admitDeviceOp(created.anchor, await ed25519(), 'personal', false),
+        op: async () =>
+          admitDeviceOp(created.anchor, memberMembership, await ed25519(), 'personal', false),
         expect: 'unauthorized',
       },
       {
@@ -531,7 +574,7 @@ describe('L3 confirmed permission matrix', () => {
     const stale = await tryAppend(
       ledger,
       member,
-      await admitDeviceOp(created.anchor, await ed25519(), 'personal', false)
+      await admitDeviceOp(created.anchor, created.membershipId, await ed25519(), 'personal', false)
     );
     expect(stale.ok).toBe(false);
     if (!stale.ok) expectCode(stale.error, 'unauthorized');

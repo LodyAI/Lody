@@ -62,6 +62,7 @@ describe('P3 Spec §7 matrix', () => {
         possessionSignature: await extra.sign(
           possessionSigningBytes({
             genesis: fromHex(alice.genesisHex!),
+            targetMembershipId: (await alice.readLedger()).state.owner,
             signingPublicKey: extra.publicKey,
             encryptionPublicKey: extra.enc,
             kind: 'personal',

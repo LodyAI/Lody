@@ -269,6 +269,7 @@ describe('M3 Lean model ↔ public Ledger API', () => {
             possessionSignature: await target.sign(
               possessionSigningBytes({
                 genesis: anchor,
+                targetMembershipId: memberMembership,
                 signingPublicKey: target.publicKey,
                 encryptionPublicKey: target.enc,
                 kind: 'personal',
@@ -305,6 +306,7 @@ describe('M3 Lean model ↔ public Ledger API', () => {
           possessionSignature: await recovery.sign(
             possessionSigningBytes({
               genesis: anchor,
+              targetMembershipId: ownerMembership,
               signingPublicKey: recovery.publicKey,
               encryptionPublicKey: recovery.enc,
               kind: 'recovery',
@@ -349,6 +351,7 @@ describe('M3 Lean model ↔ public Ledger API', () => {
           possessionSignature: await extra.sign(
             possessionSigningBytes({
               genesis: anchor,
+              targetMembershipId: ownerMembership,
               signingPublicKey: extra.publicKey,
               encryptionPublicKey: extra.enc,
               kind: 'personal',
@@ -375,6 +378,7 @@ describe('M3 Lean model ↔ public Ledger API', () => {
           possessionSignature: await extra.sign(
             possessionSigningBytes({
               genesis: anchor,
+              targetMembershipId: ownerMembership,
               signingPublicKey: extra.publicKey,
               encryptionPublicKey: extra.enc,
               kind: 'personal',
@@ -422,6 +426,7 @@ describe('M3 Lean model ↔ public Ledger API', () => {
           possessionSignature: await plainRecovery.sign(
             possessionSigningBytes({
               genesis: anchor,
+              targetMembershipId: plainMembership,
               signingPublicKey: plainRecovery.publicKey,
               encryptionPublicKey: plainRecovery.enc,
               kind: 'recovery',
@@ -446,6 +451,7 @@ describe('M3 Lean model ↔ public Ledger API', () => {
           possessionSignature: await granted.sign(
             possessionSigningBytes({
               genesis: anchor,
+              targetMembershipId: plainMembership,
               signingPublicKey: granted.publicKey,
               encryptionPublicKey: granted.enc,
               kind: 'personal',
@@ -479,6 +485,7 @@ describe('M3 Lean model ↔ public Ledger API', () => {
           possessionSignature: await guestMachine.sign(
             possessionSigningBytes({
               genesis: anchor,
+              targetMembershipId: plainMembership,
               signingPublicKey: guestMachine.publicKey,
               encryptionPublicKey: guestMachine.enc,
               kind: 'machine',

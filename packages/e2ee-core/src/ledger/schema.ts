@@ -171,6 +171,7 @@ export function joinRequestSigningBytes(
 
 export function possessionSigningBytes(input: {
   genesis: Hash;
+  targetMembershipId: Uint8Array;
   signingPublicKey: SigningPublicKey;
   encryptionPublicKey: EncryptionPublicKey;
   kind: DeviceKind;
@@ -178,6 +179,7 @@ export function possessionSigningBytes(input: {
 }): Uint8Array {
   return possessSigningBytes([
     copyBytes(input.genesis),
+    copyBytes(asExactBytes(input.targetMembershipId, MEMBERSHIP_ID_BYTES)),
     copyBytes(input.signingPublicKey),
     copyBytes(input.encryptionPublicKey),
     encodeKind(input.kind),

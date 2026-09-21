@@ -42,7 +42,7 @@ function random(n: number) {
   return crypto.getRandomValues(new Uint8Array(n));
 }
 
-async function admit(anchor: Uint8Array) {
+async function admit(anchor: Uint8Array, membershipId: Uint8Array) {
   const extra = await ed25519();
   return {
     type: 'admitDevice' as const,
@@ -53,6 +53,7 @@ async function admit(anchor: Uint8Array) {
     possessionSignature: await extra.sign(
       possessionSigningBytes({
         genesis: anchor,
+        targetMembershipId: membershipId,
         signingPublicKey: extra.publicKey,
         encryptionPublicKey: extra.enc,
         kind: 'personal',
@@ -81,8 +82,14 @@ async function main() {
     anchor: await hashRecord(genesis),
     records: [genesis],
   });
-  const first = ledger.prepare(await admit(await hashRecord(genesis)), owner.publicKey);
-  const second = ledger.prepare(await admit(await hashRecord(genesis)), owner.publicKey);
+  const first = ledger.prepare(
+    await admit(await hashRecord(genesis), ledger.state.owner),
+    owner.publicKey
+  );
+  const second = ledger.prepare(
+    await admit(await hashRecord(genesis), ledger.state.owner),
+    owner.publicKey
+  );
   const recA = encodeSignedRecord(first.bodyBytes, await owner.sign(first.signingBytes));
   const recB = encodeSignedRecord(second.bodyBytes, await owner.sign(second.signingBytes));
   const sdk = () =>

@@ -44,6 +44,11 @@ in-package tests only; do not re-export it.
   may distribute keys (`canSendEpoch`, also exported for the host gateway),
   the recipient is admitted, the epoch matches, and `commitEpochKey`
   equals the ledger commitment.
+- Device possession uses `possess/v2` and binds the target membership inferred
+  from the actor's preceding verified state. Check during replay even with a
+  worker verifier. v1 proofs are rejected, not silently migrated or re-signed.
+  Snapshots reject machine/recovery canManage; demotion may retain machines
+  and personal management flags (effective rights still intersect the role).
 - Roles owner/admin/member/guest; guest read-only; machines have no Org
   management. Device revoke is this-Org and the named device only. Owner
   transfer is unilateral `[6, successorMembershipId]`; predecessor becomes

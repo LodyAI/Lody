@@ -130,6 +130,9 @@ async function setup() {
       possessionSignature: await recovery.sign(
         possessionSigningBytes({
           genesis: anchor,
+          targetMembershipId: ledger.state.devices.get(
+            Buffer.from(admitSigner.publicKey).toString('hex')
+          )!.membershipId,
           signingPublicKey: recovery.publicKey,
           encryptionPublicKey: recovery.enc,
           kind: 'recovery',
@@ -276,6 +279,8 @@ async function restore() {
       possessionSignature: await nextHandle.sign(
         possessionSigningBytes({
           genesis: read('anchor.bin'),
+          targetMembershipId: ledger.state.devices.get(Buffer.from(r.publicKey).toString('hex'))!
+            .membershipId,
           signingPublicKey: nextMaterial.publicKey,
           encryptionPublicKey: nextMaterial.enc,
           kind: 'personal',
@@ -351,6 +356,8 @@ async function restoreSnapshot() {
       possessionSignature: await nextHandle.sign(
         possessionSigningBytes({
           genesis: read('anchor.bin'),
+          targetMembershipId: ledger.state.devices.get(Buffer.from(r.publicKey).toString('hex'))!
+            .membershipId,
           signingPublicKey: nextMaterial.publicKey,
           encryptionPublicKey: nextMaterial.enc,
           kind: 'personal',
