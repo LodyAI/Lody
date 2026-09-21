@@ -46,15 +46,16 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   `acp-session-start-gate.ts` (default 2, `LODY_MAX_CONCURRENT_ACP_SESSION_STARTS`). Never bypass
   that gate.
 - `setting.ts`: every builtin requires `resolveACPProcessLaunchAsync()`.
-- `deepseek-harness-runtime.ts` is NOT a managed runtime: keep it out of runtime download,
-  prefetch, override, and auth flows. npx installs the closure; run `dsh --profile` with packaged
+- `deepseek-harness-runtime.ts` is NOT managed: no runtime download, prefetch, override, or
+  auth integration. Keep logical npx argv for recovery; Windows spawns use
+  npm's JS entry without cmd.exe. npx installs the closure; run `dsh --profile` with packaged
   `process.execPath` and inherited `ELECTRON_RUN_AS_NODE`. Credentials stay in agent env; never
-  write them into the generated config. The adapter applies model/reasoning selection
-  through the Agent-scoped request waterfall, permissions through Harness presets,
-  and `agent_preset` through `AgentPresets.mount/recompose` — never as UI-only state. Presets
-  may change only before the first prompt. Per-Agent ACP stdio/HTTP MCP servers belong in the
-  extension adapter, not the immutable host composition. JSONL encoding detection is READ-ONLY:
-  fail a mixed root naming both paths; never migrate, rename, or delete session artifacts.
+  write them into config. The adapter applies model/reasoning through the Agent-scoped
+  request waterfall, permissions through Harness presets, and `agent_preset` through
+  `AgentPresets.mount/recompose`, never UI-only state. Presets change only before the first
+  prompt. Per-Agent ACP stdio/HTTP MCP servers belong in the adapter, not immutable host
+  composition. JSONL encoding detection is READ-ONLY: fail mixed roots naming both paths;
+  never migrate, rename, or delete session artifacts.
 - `managed-agent-runtime.ts`: Codex pins come only from `codex-runtime-manifest.json`, Claude
   pins only from `claude-runtime-manifest.json`; reject a dependency/manifest version mismatch
   and never duplicate those pins or checksums beside the manager. Do not loosen the metadata

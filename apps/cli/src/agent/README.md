@@ -138,6 +138,16 @@ the endpoint's `/models` list rather than local catalog additions. Harness JSONL
 stores: an empty or zstd root uses upstream's `zstd`, a raw-only legacy root keeps `none`,
 and a mixed root fails with both paths named.
 
+On Windows, both session and probe/title spawns resolve the selected npx shim from
+the final child PATH and execute its adjacent `node_modules/npm/bin/npx-cli.js`
+with Lody's Node. This keeps the full pinned closure out of `cmd.exe`, whose
+8191-character limit is smaller than the package argument list. Native executable
+shims remain direct launches; a script shim without the standard npm entry fails
+with an actionable error instead of falling through to another installation.
+Cache isolation, startup budgets, and retries still see the original npx command
+and arguments; conversion happens after those policies, on each spawn attempt.
+See the [Windows command-length fix](../../../../.agents/notes/implemented/bug-fix/2026-09-21-dsh-windows-command-length.md).
+
 ### Managed runtimes
 
 Codex version/archive pins come from `codex-runtime-manifest.json`, which the outer
