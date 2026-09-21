@@ -305,9 +305,11 @@ describe('static share presentation', () => {
   });
 
   it('still switches the page when browser storage is unavailable', async () => {
-    const storage = vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
-      throw new DOMException('Storage disabled', 'SecurityError');
-    });
+    const storage = vi
+      .spyOn(Object.getPrototypeOf(localStorage) as Storage, 'setItem')
+      .mockImplementation(() => {
+        throw new DOMException('Storage disabled', 'SecurityError');
+      });
     try {
       await render();
       await act(async () =>

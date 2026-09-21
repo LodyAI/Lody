@@ -87,7 +87,7 @@ describe('useAppStoreReviewPrompt lifecycle', () => {
       configurable: true,
       value: 'visible',
     });
-    setItemSpy = vi.spyOn(localStorage, 'setItem');
+    setItemSpy = vi.spyOn(Object.getPrototypeOf(localStorage) as Storage, 'setItem');
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
