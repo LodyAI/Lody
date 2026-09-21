@@ -538,3 +538,11 @@ v1 `possessionSigningBytes` 为 `[genesis, signPub, encPub, kind, canManage]`。
 - **X25519：** `checkEncryptionPublicKey` 只拒全零和长度错误。不套用 Ed25519 子群规则。低阶点/别名本轮不改套件。
 - **legacy 导出：** `./legacy` 仍供包内测试，不删除。
 - **Lean / 产品：** 本仓库无 Lean 文件（同角色 `setRole` 在 TS 为 `invalid-operation`；未重跑 Lean）。二维码/Passkey/JWT/机器仍范围外。有限 trace 不是全部对应关系证明。
+
+### 2026-09-21 — 换代恢复必须绑定候选记录
+
+- 对 `e30cbe66` 的审查：`recoverEpochPublication` 对 journal 里任意 pending 调用 `resume()`。pending 的 `admitDevice` 一旦 committed，会被当成 epoch 1 成功：本地密钥 `[0,1]`，账本仍是 0。
+- **更正：** 旧测试“restores a committed epoch candidate after process restart”在控制流 POST 离开客户端之前就抛错。它覆盖的是同进程发送前失败重试，不是服务端已接受后丢 ACK，也不是新进程。已改名。
+- **修复：** 仅在 `hasRecordHash(candidate.record)` 且 genesis、`publishEpoch`、epoch、`commitEpochKey(secret)` 一致时安装。其他 pending 返回 `unknown` 并保留候选。过期候选冲突则清除，允许对当前 head 重新发布。`hang-control-ack` 在 Riverrun 接受后写 `control-committed` 并扣住响应。
+- **崩溃：** 子进程对活宿主 `publishEpoch`；父进程等待 `control-committed`（不用 sleep）；SIGKILL；新进程恢复同一候选、分发 K1、对端能读新旧明文；再打开仍是 epoch 1 且无残留候选。
+- 证据：`test/host-lifecycle.test.ts` + `test/design-probes.test.ts` 51 通过。未启用产品 E2EE。不 push/merge。
