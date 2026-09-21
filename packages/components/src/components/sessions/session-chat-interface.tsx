@@ -228,9 +228,12 @@ import { PrLinkProvider } from '@/components/ai-gui/pr-link-context';
 import {
   COMMIT_AND_PUSH_PROMPT,
   CREATE_DRAFT_PR_BASE_PROMPT,
+  CREATE_DRAFT_PR_ORIGIN_PROMPT,
   CREATE_PR_BASE_PROMPT,
+  CREATE_PR_ORIGIN_PROMPT,
   PR_BRANCH_UPKEEP_PROMPT,
   withPrBranchUpkeep,
+  withQuickActionOrigin,
 } from './create-pr-prompt';
 import { AutoReviewMenuItem } from './auto-review-menu-item';
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
@@ -4408,13 +4411,18 @@ export const SessionChatInterface = memo(
     // Composed, not two fully-inlined strings: the upkeep paragraph then lives in
     // one key per language instead of being repeated inside both prompts.
     const prBranchUpkeep = t('sessions.prompts.prBranchUpkeep', PR_BRANCH_UPKEEP_PROMPT);
-    const createPrPrompt = withPrBranchUpkeep(
-      t('sessions.prompts.createPr', CREATE_PR_BASE_PROMPT),
-      prBranchUpkeep
+    // The origin line tells the user, reading back, that this message came from
+    // the button rather than from something they typed.
+    const createPrPrompt = withQuickActionOrigin(
+      t('sessions.prompts.createPrOrigin', CREATE_PR_ORIGIN_PROMPT),
+      withPrBranchUpkeep(t('sessions.prompts.createPr', CREATE_PR_BASE_PROMPT), prBranchUpkeep)
     );
-    const createDraftPrPrompt = withPrBranchUpkeep(
-      t('sessions.prompts.createDraftPr', CREATE_DRAFT_PR_BASE_PROMPT),
-      prBranchUpkeep
+    const createDraftPrPrompt = withQuickActionOrigin(
+      t('sessions.prompts.createDraftPrOrigin', CREATE_DRAFT_PR_ORIGIN_PROMPT),
+      withPrBranchUpkeep(
+        t('sessions.prompts.createDraftPr', CREATE_DRAFT_PR_BASE_PROMPT),
+        prBranchUpkeep
+      )
     );
     const commitAndPushPrompt = t('sessions.prompts.commitAndPush', COMMIT_AND_PUSH_PROMPT);
 
