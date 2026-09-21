@@ -6,7 +6,7 @@ import { MobileSettingsSection } from './mobile-settings-row';
 
 export type AppIconState = { supported: boolean; name: string };
 export type AppIconBridge = {
-  icons: readonly { name: string; previewUrl: string }[];
+  icons: readonly { name: string; displayName?: string; previewUrl: string }[];
   getState: () => Promise<AppIconState>;
   setIcon: (options: { name: string }) => Promise<AppIconState>;
 };
@@ -69,7 +69,7 @@ export function MobileAppIconSettings({
           const label =
             icon.name === 'default'
               ? t('settings.appIcon.default')
-              : t('settings.appIcon.alternate', { number: index + 1 });
+              : (icon.displayName ?? t('settings.appIcon.alternate', { number: index + 1 }));
           return (
             <Button
               key={icon.name}

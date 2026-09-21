@@ -63,6 +63,18 @@ describe('app icon settings', () => {
     expect(button('Icon 2').getAttribute('aria-pressed')).toBe('true');
   });
 
+  it('displays the host-provided name while switching with the stable icon identifier', async () => {
+    bridge.icons = [
+      { name: 'default', previewUrl: '/default.png' },
+      { name: 'alternate', displayName: 'Aqua', previewUrl: '/alternate.png' },
+    ];
+    await act(async () => root.render(<MobileAppIconSettings bridge={bridge} />));
+    await act(async () => button('Aqua').click());
+    expect(current).toBe('alternate');
+    expect(button('Aqua').getAttribute('aria-pressed')).toBe('true');
+    expect(container.textContent).not.toContain('Icon 2');
+  });
+
   it('keeps the old selection and blocks overlapping changes until native completion', async () => {
     let finish!: (state: AppIconState) => void;
     bridge.setIcon = () =>
