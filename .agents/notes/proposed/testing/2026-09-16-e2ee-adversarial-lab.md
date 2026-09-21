@@ -15,6 +15,19 @@ The [specification](../../../../specs/e2ee-adversarial-lab.md) owns contracts; t
 
 ## Implementation plan and single task tracker
 
+Current state: HEAD `02b3f473`. This increment: second security review. Do not re-implement D1–D8. No Lody product integration, no push/PR/merge. Protocol/wire changes stay proposals.
+
+| Done | Stage | Gate |
+| ---- | ----- | ---- |
+| [x] | S1 compareNotes same-head conflict | Same genesis+head with different length/digest is conflict; catch-up stays pending-sync; real signed snapshots |
+| [x] | S2 independent evidence | independent requires out-of-band confirmed signers; not a different key or snapshot member list |
+| [x] | S3 epoch candidate before CAS | Persist candidate+exact record before CAS; resume/restart without regenerating; losing candidate is not current |
+| [x] | S4 possession binding | Reproduce mis-binding; proposal only; no v1 wire change |
+| [x] | S5 epoch u32 / snapshot resources / verify-before-import | Reject truncating epochs; bound snapshot length; signature before expensive import |
+| [x] | S6 classify remaining | Admin history-packet, canManage, openJournal, Convex, HKDF/X25519/legacy, Lean/product |
+
+The D1–D8 table below is the previous round; checkmarks stay as historical evidence.
+
 Current state: HEAD `04b90b58` plus this round's helper/expiry/judge-test follow-up. Targeted fixes for design-probe defects 1–6 and 8. Atomic guest admission (item 2 protocol) and stale-epoch upload (item 7) stay pending decisions; do not change wire. No Lody product integration, no push/PR/merge.
 
 | Done | Stage | Gate |
@@ -489,3 +502,34 @@ Recommend keeping (A) until the user answers: must the honest gateway accept cip
 - **D4/D5 tests:** guest Loro import (existing), Flock import, backend-only, demotion, revoked snapshot author, decode/attribution incomplete → `contentScanIncomplete`.
 - **D1:** harness `/v1/harness/clock` with token still moves time; ordinary `host.json` omits Riverrun paths unless `testMode`.
 - Evidence: `pnpm --filter @lody/e2ee-lab check` 18 files / 125 tests; core excluding the intended 10k filter still ran `ledger-long-chain` (391 tests, exit 0). Not product E2EE. No push/merge.
+
+### 2026-09-21 — Second review increment (compareNotes, independent, epoch candidate)
+
+- Baseline: HEAD `02b3f473`, dirty tree only unrelated untracked files. Did not reset D1–D8.
+- **S1:** `compareNotes` no longer returns pending-sync when genesis+head match but length/digest differ. Same length + different heads is conflict. Different heads + different lengths stay pending-sync. Real signed snapshot: true head, fake state, length+1, then both append the same record — still conflict. Journal reopen does not downgrade. Do not infer length from HTTP offsets.
+- **S2:** `independent` requires `confirmedNoteSigners` supplied by the caller (out-of-band). Different keys, endorser second device, or snapshot member lists are not enough. Lab `compareIndependent` treats the extra channel as confirmation of `remote.noteSigner`; server mailbox notes do not. Agreement is not globally-latest or full-history honesty.
+- **S3:** lab `publishEpoch` persists `{genesis, epoch, commitment, secret, record}` before `LedgerClient.submit`. Storage failure skips CAS. Lost ACK / restart resumes the saved record and installs the candidate only when the ledger commitment matches. Conflict discards the candidate. Not a cross-system transaction.
+- **S4:** reproduced: Bob can submit Alice’s device possession proof and bind the device to Bob; Alice’s later submit is `replay`. v1 proof bytes still omit membershipId. Proposal below; wire unchanged.
+- **S5:** `checkEpoch` rejects values that would truncate in uint32 AAD; snapshot claimed length > `MAX_SNAPSHOT_ARRAY_LENGTH` fails `oversize` without huge allocation; `verifySnapshot` verifies signatures before `importAuthState`.
+- **S6:** classified below. No `.lean` sources in this repo; `ledger-model-correspondence` TS trace still passes. Product E2EE still not enabled.
+- Evidence: lab check 18 files / 128 tests; core excluding 10k long-chain 34 files / 399 tests. `pnpm run docs check` errors `[]`. Not product E2EE. No push/merge.
+
+### Pending decision — possession proof target membership
+
+v1 `possessionSigningBytes` is `[genesis, signPub, encPub, kind, canManage]`. `admitDevice` binds to the submitter’s membership. Any member who sees the proof can occupy the keys.
+
+Recommend a new proof encoding (do not silently lengthen v1): bind `targetMembershipId` when adding a device to an existing member. First `admitMember` still uses the join request (no membershipId yet). Keep recovery-device R admitting that user’s personal devices. `usedSigningKeys`/`usedEncKeys` still consume keys Org-wide; a request id would additionally stop replay of an unused proof. Old pending proofs remain v1. Do not implement until confirmed.
+
+### Pending decision — require actor canManage to grant canManage
+
+Current spec §8.3 and `policy.ts` allow an Owner/Admin personal device with `canManage=false` to admit a new personal device with `canManage=true`. That is not a transitive cap. Characterization test kept. Tightening would be: actor.canManage required to set canManage, with an explicit exception for recovery device R restoring a managing personal device. Do not implement until confirmed.
+
+### Classified (not silently “fixed”)
+
+- **Malicious Admin history packet:** accepted availability limit. Garbage 72-byte packet commits; `recoverHistory` fails; no resend opcode added.
+- **openJournal:** reload calls `verifySnapshot` with persisted trust. Disk is not a second pin. Attacker who rewrites all local trusted storage is outside the journal’s threat model.
+- **Convex backup:** private product, not modified. Risk is latest-revision pollution / recovery availability, not proven permanent deletion. Same identity can upload junk ciphertext; pinning backupId+revision+identity is a later product fix.
+- **HKDF / history AEAD:** using the epoch key as the history-packet AEAD key is purpose-isolated (domain AAD, 72-byte packet). Not treated as a vulnerability by itself.
+- **X25519:** `checkEncryptionPublicKey` rejects all-zero and wrong length only. Do not apply Ed25519 subgroup rules. Low-order/aliases not currently rejected; no suite change this round.
+- **Legacy exports:** `./legacy` stays for in-package tests. Not deleted.
+- **Lean / product:** no Lean files in this repo (same-role `setRole` is `invalid-operation` in TS; Lean not re-run). QR/Passkey/JWT/machines remain out of scope. Finite traces are not a full correspondence proof.

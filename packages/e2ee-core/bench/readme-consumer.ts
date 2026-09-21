@@ -145,7 +145,7 @@ if (fromSnapshot.head.some((byte, i) => byte !== fromZero.head[i]))
 const note = LedgerA.compareNotes(
   fromSnapshot.comparisonNote(extra.publicKey),
   fromZero.comparisonNote(applicant.publicKey),
-  { originalEndorser: owner.publicKey }
+  { originalEndorser: owner.publicKey, confirmedNoteSigners: [applicant.publicKey] }
 );
 if (note.kind !== 'agree' || !note.independent) throw new Error('snapshot-compare');
 

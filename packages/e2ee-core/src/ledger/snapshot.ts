@@ -7,6 +7,7 @@ import {
   copyBytes,
   decodeSnapshotCbor,
   encodeSnapshotCbor,
+  MAX_SNAPSHOT_ARRAY_LENGTH,
   type CborValue,
 } from './cbor';
 import {
@@ -353,7 +354,9 @@ function importAuthState(
     if (!usedMembershipIds.has(id)) fail('canonical');
   }
 
-  if (!Number.isSafeInteger(length) || length < 1) fail('canonical');
+  if (!Number.isSafeInteger(length) || length < 1 || length > MAX_SNAPSHOT_ARRAY_LENGTH) {
+    fail('oversize');
+  }
   const genesisEqHead = bytesEqual(genesis, head);
   if ((length === 1) !== genesisEqHead) fail('canonical');
 
@@ -387,6 +390,54 @@ function importAuthState(
   return state;
 }
 
+export function parseSignedSnapshot(
+  bytes: Uint8Array,
+  cache?: SigningPointCache
+): {
+  bodyBytes: Uint8Array;
+  signature: Signature;
+  genesis: Hash;
+  length: number;
+  head: Hash;
+  signer: SigningPublicKey;
+  auth: CborValue;
+} {
+  const root = asArray(decodeSnapshotCbor(bytes));
+  if (root.length !== 2) fail('canonical');
+  const body = asArray(root[0]!);
+  if (body.length !== 6) fail('canonical');
+  if (asUint(body[0]!) !== SNAPSHOT_VERSION) fail('unknown-version');
+  const genesis = checkHash(asExactBytes(body[1]!, HASH_BYTES));
+  const length = asUint(body[2]!);
+  if (length < 1 || length > MAX_SNAPSHOT_ARRAY_LENGTH) fail('oversize');
+  const head = checkHash(asExactBytes(body[3]!, HASH_BYTES));
+  const signer = checkSigningPublicKey(asExactBytes(body[4]!, SIGNING_KEY_BYTES), cache);
+  const signature = asExactBytes(root[1]!, SIGNATURE_BYTES);
+  return {
+    bodyBytes: encodeSnapshotCbor(body),
+    signature,
+    genesis,
+    length,
+    head,
+    signer,
+    auth: body[5]!,
+  };
+}
+
+export function snapshotStateFromParsed(
+  parsed: ReturnType<typeof parseSignedSnapshot>,
+  cache?: SigningPointCache
+): InternalState {
+  return importAuthState(
+    parsed.auth,
+    parsed.genesis,
+    parsed.length,
+    parsed.head,
+    parsed.signer,
+    cache
+  );
+}
+
 export function decodeSignedSnapshot(
   bytes: Uint8Array,
   cache?: SigningPointCache
@@ -399,32 +450,45 @@ export function decodeSignedSnapshot(
   signer: SigningPublicKey;
   state: InternalState;
 } {
-  const root = asArray(decodeSnapshotCbor(bytes));
-  if (root.length !== 2) fail('canonical');
-  const body = asArray(root[0]!);
-  if (body.length !== 6) fail('canonical');
-  if (asUint(body[0]!) !== SNAPSHOT_VERSION) fail('unknown-version');
-  const genesis = checkHash(asExactBytes(body[1]!, HASH_BYTES));
-  const length = asUint(body[2]!);
-  const head = checkHash(asExactBytes(body[3]!, HASH_BYTES));
-  const signer = checkSigningPublicKey(asExactBytes(body[4]!, SIGNING_KEY_BYTES), cache);
-  const signature = asExactBytes(root[1]!, SIGNATURE_BYTES);
-  const bodyBytes = encodeSnapshotCbor(body);
-  const state = importAuthState(body[5]!, genesis, length, head, signer, cache);
-  return { bodyBytes, signature, genesis, length, head, signer, state };
+  const parsed = parseSignedSnapshot(bytes, cache);
+  const state = importAuthState(
+    parsed.auth,
+    parsed.genesis,
+    parsed.length,
+    parsed.head,
+    parsed.signer,
+    cache
+  );
+  return {
+    bodyBytes: parsed.bodyBytes,
+    signature: parsed.signature,
+    genesis: parsed.genesis,
+    length: parsed.length,
+    head: parsed.head,
+    signer: parsed.signer,
+    state,
+  };
 }
 
 export function compareNotes(
   local: ComparisonNote,
   remote: ComparisonNote,
-  originalEndorser: SigningPublicKey
+  originalEndorser: SigningPublicKey,
+  confirmedNoteSigners: readonly SigningPublicKey[] = []
 ): Comparison {
   if (!bytesEqual(local.genesis, remote.genesis)) return { kind: 'different-org' };
-  if (local.length !== remote.length) {
-    return { kind: 'pending-sync', localLength: local.length, remoteLength: remote.length };
-  }
-  if (bytesEqual(local.stateDigest, remote.stateDigest) && bytesEqual(local.head, remote.head)) {
+  if (bytesEqual(local.head, remote.head)) {
+    if (local.length !== remote.length || !bytesEqual(local.stateDigest, remote.stateDigest)) {
+      return {
+        kind: 'conflict',
+        length: local.length,
+        localDigest: copyBytes(local.stateDigest),
+        remoteDigest: copyBytes(remote.stateDigest),
+      };
+    }
+    const confirmed = confirmedNoteSigners.some((key) => bytesEqual(key, remote.noteSigner));
     const independent =
+      confirmed &&
       !bytesEqual(remote.noteSigner, originalEndorser) &&
       !bytesEqual(remote.noteSigner, local.noteSigner);
     return {
@@ -434,12 +498,15 @@ export function compareNotes(
       independent,
     };
   }
-  return {
-    kind: 'conflict',
-    length: local.length,
-    localDigest: copyBytes(local.stateDigest),
-    remoteDigest: copyBytes(remote.stateDigest),
-  };
+  if (local.length === remote.length) {
+    return {
+      kind: 'conflict',
+      length: local.length,
+      localDigest: copyBytes(local.stateDigest),
+      remoteDigest: copyBytes(remote.stateDigest),
+    };
+  }
+  return { kind: 'pending-sync', localLength: local.length, remoteLength: remote.length };
 }
 
 export { headAttestationSigningBytes, snapshotSigningBytes };

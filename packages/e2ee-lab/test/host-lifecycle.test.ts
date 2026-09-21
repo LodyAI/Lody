@@ -142,6 +142,79 @@ describe('lab host lifecycle', () => {
     expect(await readLoro(alice)).toContain('epoch-one');
   });
 
+  it('saves the epoch candidate before CAS and resumes without regenerating', async () => {
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice' });
+    await alice.createSpace();
+    await writeLoro(alice, 'before-rotation');
+    host.setFailpoint('drop-control-ack');
+    const first = await alice.publishEpoch();
+    host.setFailpoint('none');
+    expect(first.epoch).toBe(1);
+    if (first.status !== 'committed') {
+      const second = await alice.publishEpoch();
+      expect(second.status).toBe('committed');
+      expect(second.epoch).toBe(1);
+    }
+    const history = await alice.recoverEpochHistory();
+    expect(history.has(0)).toBe(true);
+    expect(history.has(1)).toBe(true);
+    await writeLoro(alice, 'after-rotation');
+    expect(await readLoro(alice)).toContain('before-rotation');
+    expect(await readLoro(alice)).toContain('after-rotation');
+  });
+
+  it('does not CAS when epoch candidate persistence fails', async () => {
+    const host = await launchLab();
+    const { makeLiveFs } = await import('../src/services/fs');
+    const live = makeLiveFs();
+    const fs = {
+      ...live,
+      writeText(path: string, text: string) {
+        if (path.endsWith('epoch-candidate.json')) throw new Error('disk-failure');
+        return live.writeText(path, text);
+      },
+    };
+    const alice = await labClient({ host, account: 'alice', fs });
+    await alice.createSpace();
+    await expect(alice.publishEpoch()).rejects.toThrow('disk-failure');
+    expect((await alice.readLedger()).state.epoch.number).toBe(0);
+  });
+
+  it('restores a committed epoch candidate after process restart', async () => {
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice' });
+    await alice.createSpace();
+    await writeLoro(alice, 'epoch-zero-text');
+    host.setFailpoint('drop-control-ack');
+    const orig = alice.fetch.bind(alice);
+    alice.fetch = async (input, init) => {
+      const url = String(input);
+      if (url.includes(`/${CONTROL_STREAM}`) && init?.method === 'POST') {
+        throw new Error('lost-epoch-response');
+      }
+      return orig(input, init);
+    };
+    const first = await alice.publishEpoch();
+    alice.fetch = orig;
+    host.setFailpoint('none');
+    expect(first.status).not.toBe('committed');
+    const device = await exportDevice(alice.device);
+    const clientDir = alice.clientDir;
+    const genesisHex = alice.genesisHex!;
+    alice.close();
+    const restarted = await labClient({ host, account: 'alice', device, clientDir });
+    await restarted.adoptGenesis(genesisHex);
+    const recovered = await restarted.publishEpoch();
+    expect(recovered.status).toBe('committed');
+    expect(recovered.epoch).toBe(1);
+    const history = await restarted.recoverEpochHistory();
+    expect(history.has(0)).toBe(true);
+    await writeLoro(restarted, 'epoch-one-text');
+    expect(await readLoro(restarted)).toContain('epoch-zero-text');
+    expect(await readLoro(restarted)).toContain('epoch-one-text');
+  });
+
   it('rejects a member promoting itself to admin', async () => {
     const host = await launchLab();
     const alice = await labClient({ host, account: 'alice' });

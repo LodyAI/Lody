@@ -100,7 +100,7 @@ describe('S3 snapshot LedgerClient', () => {
     const cmp = Ledger.compareNotes(
       joined.comparisonNote(member.publicKey),
       ownerView.comparisonNote(extra.publicKey),
-      { originalEndorser: owner.publicKey }
+      { originalEndorser: owner.publicKey, confirmedNoteSigners: [extra.publicKey] }
     );
     expect(cmp.kind).toBe('agree');
     if (cmp.kind === 'agree') expect(cmp.independent).toBe(true);
@@ -136,6 +136,43 @@ describe('S3 snapshot LedgerClient', () => {
     expect(cmp.kind).toBe('conflict');
     expect((await joiner.read()).head).toEqual(before);
     expect((await ownerClient.read()).head).toEqual(honestView.head);
+  });
+
+  it('keeps a same-head length conflict after journal reopen', async () => {
+    const { owner, member, ledger, stream, ownerClient } = await seeded();
+    const honest = await signSnapshot(ledger, owner);
+    const root = decodeSnapshotCbor(honest.snapshot) as unknown[];
+    const body = [...(root[0] as unknown[])];
+    const auth = [...(body[5] as unknown[])];
+    auth[5] = !auth[5];
+    body[2] = (body[2] as number) + 1;
+    body[5] = auth;
+    const bodyBytes = encodeSnapshotCbor(body as never);
+    const falseSnap = encodeSignedSnapshot(
+      bodyBytes,
+      await owner.sign(snapshotSigningBytes(bodyBytes))
+    );
+    const store = new MemoryLedgerStore();
+    const joiner = await LedgerClient.openFromSnapshot({
+      trust: honest.trust,
+      snapshot: falseSnap,
+      store,
+      stream,
+    });
+    const honestView = await ownerClient.read();
+    const first = Ledger.compareNotes(
+      (await joiner.read()).comparisonNote(member.publicKey),
+      honestView.comparisonNote(owner.publicKey),
+      { originalEndorser: owner.publicKey }
+    );
+    expect(first.kind).toBe('conflict');
+    const reopened = await LedgerClient.openJournal(honest.trust.genesis, store, stream);
+    const again = Ledger.compareNotes(
+      (await reopened.read()).comparisonNote(member.publicKey),
+      honestView.comparisonNote(owner.publicKey),
+      { originalEndorser: owner.publicKey }
+    );
+    expect(again.kind).toBe('conflict');
   });
 
   it('treats different positions as pending-sync and inviter re-notes as not independent', async () => {

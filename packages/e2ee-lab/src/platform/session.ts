@@ -165,6 +165,63 @@ export class DemoSession {
     this.disk.writeText(join(this.clientDir, 'epochs.json'), `${JSON.stringify(rows)}\n`);
   }
 
+  private epochCandidatePath(): string {
+    return join(this.clientDir, 'epoch-candidate.json');
+  }
+
+  private persistEpochCandidate(row: {
+    genesisHex: string;
+    epoch: number;
+    commitmentHex: string;
+    secretHex: string;
+    recordHex: string;
+  }): void {
+    this.disk.writeText(this.epochCandidatePath(), `${JSON.stringify(row)}\n`);
+  }
+
+  private loadEpochCandidate(): {
+    genesisHex: string;
+    epoch: number;
+    commitmentHex: string;
+    secret: Uint8Array;
+    record: Uint8Array;
+  } | null {
+    const path = this.epochCandidatePath();
+    try {
+      if (!this.disk.exists(path)) return null;
+      const row = JSON.parse(this.disk.readText(path)) as {
+        genesisHex?: string;
+        epoch?: number;
+        commitmentHex?: string;
+        secretHex?: string;
+        recordHex?: string;
+      };
+      if (
+        typeof row.genesisHex !== 'string' ||
+        typeof row.epoch !== 'number' ||
+        typeof row.commitmentHex !== 'string' ||
+        typeof row.secretHex !== 'string' ||
+        typeof row.recordHex !== 'string'
+      ) {
+        return null;
+      }
+      return {
+        genesisHex: row.genesisHex,
+        epoch: row.epoch,
+        commitmentHex: row.commitmentHex,
+        secret: fromHex(row.secretHex),
+        record: fromHex(row.recordHex),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private clearEpochCandidate(): void {
+    const path = this.epochCandidatePath();
+    if (this.disk.exists(path)) this.disk.unlink(path);
+  }
+
   private loadEpochs(): void {
     const path = join(this.clientDir, 'epochs.json');
     try {
@@ -557,7 +614,9 @@ export class DemoSession {
   }
 
   async publishEpoch(): Promise<{ status: string; epoch: number }> {
-    if (!this.genesis) throw new Error('no-space');
+    if (!this.genesis || !this.genesisHex) throw new Error('no-space');
+    const recovered = await this.recoverEpochPublication();
+    if (recovered) return recovered;
     const ledger = await this.readLedger();
     const previous = this.epochKeys.get(ledger.state.epoch.number);
     if (!previous) throw new Error('missing-epoch-key');
@@ -570,18 +629,73 @@ export class DemoSession {
       epoch,
       this.options.entropy ?? liveEntropy
     );
-    const submitted = await this.submit({
-      type: 'publishEpoch',
+    const commitment = await commitEpochKey(this.genesis, epoch, next);
+    const proposal = ledger.prepare(
+      { type: 'publishEpoch', epoch, commitment, previousEpochKey: packet },
+      this.device.publicKey,
+      this.pointCache
+    );
+    const record = encodeSignedRecord(
+      proposal.bodyBytes,
+      await this.device.sign(proposal.signingBytes)
+    );
+    this.persistEpochCandidate({
+      genesisHex: this.genesisHex,
       epoch,
-      commitment: await commitEpochKey(this.genesis, epoch, next),
-      previousEpochKey: packet,
+      commitmentHex: toHex(commitment),
+      secretHex: toHex(next),
+      recordHex: toHex(record),
     });
-    if (submitted.status === 'committed') {
-      this.epochKeys.set(epoch, next);
+    const submitted = await (await this.openLedger()).submit(record);
+    return this.finishEpochPublication(submitted.status, epoch, next);
+  }
+
+  private async recoverEpochPublication(): Promise<{ status: string; epoch: number } | null> {
+    const candidate = this.loadEpochCandidate();
+    if (!candidate || !this.genesisHex || candidate.genesisHex !== this.genesisHex) return null;
+    const ledger = await this.readLedger();
+    if (ledger.state.epoch.number === candidate.epoch) {
+      if (toHex(ledger.state.epoch.keyCommitment) === candidate.commitmentHex) {
+        this.epochKeys.set(candidate.epoch, candidate.secret);
+        this.ledgerEpoch = candidate.epoch;
+        this.persistEpochs();
+        this.clearEpochCandidate();
+        return { status: 'committed', epoch: candidate.epoch };
+      }
+      this.clearEpochCandidate();
+      return null;
+    }
+    if (ledger.state.epoch.number !== candidate.epoch - 1) {
+      this.clearEpochCandidate();
+      return null;
+    }
+    let status: string;
+    try {
+      status = (await this.resume()).status;
+    } catch (error) {
+      if (!(error instanceof LedgerError) || error.code !== 'invalid-operation') {
+        status = 'unknown';
+      } else {
+        status = (await (await this.openLedger()).submit(candidate.record)).status;
+      }
+    }
+    return this.finishEpochPublication(status, candidate.epoch, candidate.secret);
+  }
+
+  private finishEpochPublication(
+    status: string,
+    epoch: number,
+    secret: Uint8Array
+  ): { status: string; epoch: number } {
+    if (status === 'committed') {
+      this.epochKeys.set(epoch, secret);
       this.ledgerEpoch = epoch;
       this.persistEpochs();
+      this.clearEpochCandidate();
+    } else if (status === 'conflict') {
+      this.clearEpochCandidate();
     }
-    return { status: submitted.status, epoch };
+    return { status, epoch };
   }
 
   async deliverEpochKey(recipient: DemoDevice, epoch = this.currentEpoch()): Promise<void> {
@@ -713,7 +827,7 @@ export class DemoSession {
     const other = payload.notes.find((row) => row.deviceHex !== deviceHex(this.device));
     if (!other) return { kind: 'pending-sync', source: 'server' };
     return {
-      ...this.finishCompare(local, parseNote(JSON.parse(other.body) as ComparisonWire)),
+      ...this.finishCompare(local, parseNote(JSON.parse(other.body) as ComparisonWire), false),
       source: 'server',
     };
   }
@@ -723,15 +837,16 @@ export class DemoSession {
   ): Promise<{ kind: string; independent?: boolean; source: 'independent' }> {
     const ledger = await this.readLedger();
     const local = ledger.comparisonNote(this.device.publicKey, this.pointCache);
-    return { ...this.finishCompare(local, parseNote(remote)), source: 'independent' };
+    return { ...this.finishCompare(local, parseNote(remote), true), source: 'independent' };
   }
 
-  private finishCompare(local: ComparisonNote, remote: ComparisonNote) {
+  private finishCompare(local: ComparisonNote, remote: ComparisonNote, channelConfirmed: boolean) {
     if (!this.genesis) throw new Error('no-space');
     const decoded = decodeRecord(this.genesis, this.pointCache);
     if (decoded.body.type !== 'genesis') throw new Error('not-genesis');
     return Ledger.compareNotes(local, remote, {
       originalEndorser: decoded.body.fields.signer,
+      confirmedNoteSigners: channelConfirmed ? [remote.noteSigner] : [],
       pointCache: this.pointCache,
     });
   }

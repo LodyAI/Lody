@@ -5,6 +5,7 @@ import { LedgerError } from '../src/ledger';
 import { encodeCbor } from '../src/ledger/cbor';
 import { decodeRecord } from '../src/ledger/schema';
 import {
+  EPOCH_U32_MAX,
   canSendEpoch,
   collectEpochPackets,
   commitEpochKey,
@@ -40,6 +41,50 @@ function genesisCommitment(record: Uint8Array) {
 }
 
 describe('P3 key delivery and history unwrap', () => {
+  it('rejects epoch numbers that would truncate in uint32 AAD', async () => {
+    const genesis = random(32);
+    const secret = random(32);
+    const previous = random(32);
+    await expect(commitEpochKey(genesis, EPOCH_U32_MAX + 1, secret)).rejects.toMatchObject({
+      code: 'invalid-operation',
+    });
+    expect(() => sealHistoryPacket(secret, previous, genesis, EPOCH_U32_MAX + 1)).toThrowError(
+      LedgerError
+    );
+    await expect(commitEpochKey(genesis, EPOCH_U32_MAX, secret)).resolves.toBeInstanceOf(
+      Uint8Array
+    );
+    expect(sealHistoryPacket(secret, previous, genesis, EPOCH_U32_MAX).byteLength).toBe(
+      HISTORY_PACKET_BYTES
+    );
+  });
+
+  it('commits a garbage history packet and then cannot unwrap (accepted availability limit)', async () => {
+    const owner = await device();
+    const k0 = random(32);
+    const created = await signGenesis(owner, k0);
+    const junk = random(HISTORY_PACKET_BYTES);
+    const next = random(32);
+    const published = await append(created.ledger, owner, {
+      type: 'publishEpoch',
+      epoch: 1,
+      commitment: await commitEpochKey(created.anchor, 1, next),
+      previousEpochKey: junk,
+    });
+    expect(published.ledger.state.epoch.number).toBe(1);
+    await expect(
+      recoverHistory({
+        genesis: created.anchor,
+        latestEpoch: 1,
+        latestKey: next,
+        packets: collectEpochPackets(
+          [created.record, published.record],
+          genesisCommitment(created.record)
+        ),
+      })
+    ).rejects.toMatchObject({ code: 'invalid-operation' });
+  });
+
   it('recovers every retained epoch from the latest key only', async () => {
     const owner = await device();
     const k0 = random(32);

@@ -21,6 +21,7 @@ import {
   SIGNING_KEY_BYTES,
   USER_ID_BYTES,
   checkEncryptionPublicKey,
+  checkEpoch,
   checkHash,
   checkHistoryPacket,
   checkMembershipId,
@@ -323,7 +324,7 @@ function decodeOperation(value: CborValue, cache?: SigningPointCache): Operation
       const epoch = asUint(parts[1]!, 'invalid-operation');
       const commitment = checkHash(asExactBytes(parts[2]!, HASH_BYTES, 'invalid-operation'));
       const previous = asExactBytes(parts[3]!, HISTORY_PACKET_BYTES, 'invalid-operation');
-      if (epoch < 1) fail('invalid-operation');
+      checkEpoch(epoch, 1);
       return {
         type: 'publishEpoch',
         epoch,

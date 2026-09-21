@@ -11,6 +11,7 @@ import {
   checkEncryptionPublicKey,
   checkHash,
   checkSigningPublicKey,
+  checkEpoch,
   commitEpochKey,
   concat,
   keyId,
@@ -46,7 +47,7 @@ export function sealHistoryPacket(
   entropy: Entropy = liveEntropy
 ): Uint8Array {
   if (currentKey.byteLength !== 32 || previousKey.byteLength !== 32) fail('invalid-operation');
-  if (!Number.isSafeInteger(epoch) || epoch < 1) fail('invalid-operation');
+  checkEpoch(epoch, 1);
   const nonce = entropy.fill('history-packet-nonce', new Uint8Array(NONCE_BYTES));
   const sealed = xchacha20poly1305(
     Uint8Array.from(currentKey),
@@ -69,7 +70,7 @@ export function openHistoryPacket(
   if (currentKey.byteLength !== 32 || packet.byteLength !== HISTORY_PACKET_BYTES) {
     fail('invalid-operation');
   }
-  if (!Number.isSafeInteger(epoch) || epoch < 1) fail('invalid-operation');
+  checkEpoch(epoch, 1);
   try {
     return xchacha20poly1305(
       Uint8Array.from(currentKey),
@@ -178,6 +179,7 @@ export async function sealEpochEnvelope(input: {
   const expectedEnc = input.state.devices.get(keyId(input.recipient))?.encryptionPublicKey;
   if (!expectedEnc || !bytesEqual(expectedEnc, input.recipientEncryptionKey)) fail('unauthorized');
   if (input.epochKey.byteLength !== 32) fail('invalid-operation');
+  checkEpoch(input.epoch, 0);
   const aad = envelopeAad(input);
   const recipientPublicKey = await suite.kem.deserializePublicKey(input.recipientEncryptionKey);
   const sealed = await suite.seal(
@@ -210,6 +212,7 @@ export async function openEpochEnvelope(input: {
   if (!canSendEpoch(input.state, input.sender)) fail('unauthorized');
   if (!canReceiveEpoch(input.state, input.recipient)) fail('unauthorized');
   if (input.epoch !== input.state.epoch.number) fail('invalid-operation');
+  checkEpoch(input.epoch, 0);
   const aad = envelopeAad(input);
   if (input.frame.byteLength !== aad.byteLength + 32 + 48 + 64) fail('canonical');
   const enc = input.frame.subarray(aad.byteLength, aad.byteLength + 32);

@@ -15,6 +15,19 @@ Translation: current
 
 ## 实施计划与唯一任务表
 
+当前状态：HEAD `02b3f473`。本轮增量：第二份安全 review。不重做 D1–D8。不接入 Lody，不 push/PR/merge。协议/wire 变化只提案。
+
+| 完成 | 阶段 | 门槛 |
+| ---- | ---- | ---- |
+| [x] | S1 compareNotes 同 head 冲突 | 同 genesis+head 但 length/digest 不同为 conflict；追平仍 pending-sync；真实签名快照 |
+| [x] | S2 independent 证据 | independent 需要外带确认的签名者；不能只凭不同公钥或快照成员列表 |
+| [x] | S3 换代候选先落盘 | CAS 前保存候选+精确记录；重启/丢 ACK 不重新生成；落败候选不是当前密钥 |
+| [x] | S4 持钥证明绑定 | 复现错误归属；只交方案；不改 v1 wire |
+| [x] | S5 epoch u32 / 快照资源 / 先验签 | 拒绝会截断的 epoch；限制宣称 length；昂贵导入前验签 |
+| [x] | S6 其余归类 | 恶意历史包、canManage、openJournal、Convex、HKDF/X25519/legacy、Lean/产品 |
+
+下表 D1–D8 为上一轮，勾选保留为历史证据。
+
 当前状态：HEAD `04b90b58` 加上本轮 helper/过期/裁判补测。定向修复 design-probe 第 1–6、8 项。原子 Guest 准入（第 2 项协议）和旧代上传（第 7 项）只交方案、不改 wire。不接入 Lody，不 push/PR/merge。
 
 | 完成 | 阶段 | 门槛 |
@@ -485,3 +498,34 @@ P5 从干净检出运行 README 和核心/实验室全部检查。按 P0 映射�
 - **D4/D5 补测：** Guest Loro 导入（已有）、Flock 导入、仅后端存在、降级、快照作者被撤权、解码/归属不完整 → `contentScanIncomplete`。
 - **D1：** 带 token 的 `/v1/harness/clock` 仍能改时间；普通 `host.json` 在非 `testMode` 下不含 Riverrun 路径。
 - 证据：`pnpm --filter @lody/e2ee-lab check` 18 文件 / 125 测试。翻转签名改为结构化拒绝。未启用产品 E2EE。不 push/merge。
+
+### 2026-09-21 — 第二份 review 增量（compareNotes、independent、换代候选）
+
+- 基线：HEAD `02b3f473`，脏树仅无关未跟踪文件。未重做 D1–D8。
+- **S1：** 同 genesis+head 但 length/digest 不同不再是 pending-sync。同 length 不同 head 为 conflict。不同 head 且不同 length 仍 pending-sync。真实签名快照：真 head、假状态、length+1，双方再追加同一记录仍 conflict。journal 重开不降级。不从 HTTP offset 反算 length。
+- **S2：** `independent` 需要调用方提供外带 `confirmedNoteSigners`。不同公钥、背书者第二台设备或快照成员列表不够。实验室 `compareIndependent` 把额外信道当作对 `remote.noteSigner` 的确认；服务器邮箱笔记不算。核对成功不是全球最新或全历史诚实。
+- **S3：** `publishEpoch` 在 `LedgerClient.submit` 之前写入 `{genesis, epoch, commitment, secret, record}`。存储失败不发 CAS。丢 ACK/重启恢复原记录，仅当账本 commitment 匹配才安装候选。冲突丢弃候选。不是跨系统事务。
+- **S4：** 已复现：Bob 可提交 Alice 设备证明并把设备绑到自己；Alice 再提交是 `replay`。v1 证明仍不绑 membershipId。方案见下；未改 wire。
+- **S5：** `checkEpoch` 拒绝会在 uint32 AAD 截断的值；快照宣称 length 超过 `MAX_SNAPSHOT_ARRAY_LENGTH` 为 `oversize`，不按宣称 length 巨额分配；`verifySnapshot` 在 `importAuthState` 前验签。
+- **S6：** 归类见下。本仓库无 `.lean` 源码；`ledger-model-correspondence` 的 TS trace 仍通过。未启用产品 E2EE。
+- 证据：lab check 18 文件 / 128 测试；core 排除 10k 长链 34 文件 / 399 测试。`pnpm run docs check` errors `[]`。未启用产品 E2EE。不 push/merge。
+
+### 待决策 — 持钥证明绑定目标成员
+
+v1 `possessionSigningBytes` 为 `[genesis, signPub, encPub, kind, canManage]`。`admitDevice` 绑到提交者的 membership。任何看到证明的成员都能占用这对密钥。
+
+建议新证明编码（不要悄悄加长 v1）：为已有成员加设备时绑定 `targetMembershipId`。首次 `admitMember` 仍用加入申请（当时还没有 membershipId）。保留 R 给该用户准入个人设备。`usedSigningKeys`/`usedEncKeys` 仍在 Org 内消费密钥；请求 id 还能阻止未使用证明被重放。旧 pending 仍是 v1。确认前不实现。
+
+### 待决策 — 授予 canManage 是否要求 actor.canManage
+
+当前 spec §8.3 与 `policy.ts` 允许 Owner/Admin 的 `canManage=false` 个人设备给新个人设备设 `canManage=true`。这不是传递性上限。已保留表征测试。若收紧：设置 canManage 需要 actor.canManage，R 恢复管理个人设备作为显式例外。确认前不实现。
+
+### 已归类（不写成“已修复”）
+
+- **恶意 Admin 历史包：** 已接受的可用性限制。任意 72 字节包可提交；`recoverHistory` 失败；不新增重发 opcode。
+- **openJournal：** 再加载会用持久化 trust 调用 `verifySnapshot`。磁盘不是第二份 pin。能改写全部本地可信存储的攻击者超出 journal 威胁模型。
+- **Convex 备份：** 私有产品，本轮不改。风险是最新 revision 污染/恢复可用性，不是已证明的永久删除。同一 identity 也可上传垃圾密文；pin backupId+revision+identity 是后续产品修复。
+- **HKDF / 历史 AEAD：** 用 epoch key 做历史包 AEAD 有域分离 AAD 和 72 字节包。本身不标成漏洞。
+- **X25519：** `checkEncryptionPublicKey` 只拒全零和长度错误。不套用 Ed25519 子群规则。低阶点/别名本轮不改套件。
+- **legacy 导出：** `./legacy` 仍供包内测试，不删除。
+- **Lean / 产品：** 本仓库无 Lean 文件（同角色 `setRole` 在 TS 为 `invalid-operation`；未重跑 Lean）。二维码/Passkey/JWT/机器仍范围外。有限 trace 不是全部对应关系证明。

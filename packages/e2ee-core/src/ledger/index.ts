@@ -43,6 +43,8 @@ export {
   SIGNATURE_DOMAIN,
   SIGNING_KEY_BYTES,
   USER_ID_BYTES,
+  EPOCH_U32_MAX,
+  checkEpoch,
   commitEpochKey,
   hashRecord,
   headAttestationSigningBytes,

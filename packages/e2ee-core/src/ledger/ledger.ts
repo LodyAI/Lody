@@ -41,7 +41,8 @@ import {
 import {
   assertEndorserEligible,
   compareNotes,
-  decodeSignedSnapshot,
+  parseSignedSnapshot,
+  snapshotStateFromParsed,
   encodeSignedSnapshot,
   encodeSnapshotBody,
   stateDigestOf,
@@ -416,18 +417,18 @@ export class Ledger {
       'bad-signature',
       input.pointCache
     );
-    const decoded = decodeSignedSnapshot(copyBytes(input.snapshot), input.pointCache);
-    if (!bytesEqual(decoded.genesis, genesis)) fail('wrong-anchor');
-    if (!bytesEqual(decoded.signer, endorser)) fail('wrong-anchor');
-    if (!bytesEqual(decoded.head, attestedHead)) fail('wrong-anchor');
+    const parsed = parseSignedSnapshot(copyBytes(input.snapshot), input.pointCache);
+    if (!bytesEqual(parsed.genesis, genesis)) fail('wrong-anchor');
+    if (!bytesEqual(parsed.signer, endorser)) fail('wrong-anchor');
+    if (!bytesEqual(parsed.head, attestedHead)) fail('wrong-anchor');
     assertSignature(
-      decoded.signer,
-      snapshotSigningBytes(decoded.bodyBytes),
-      decoded.signature,
+      parsed.signer,
+      snapshotSigningBytes(parsed.bodyBytes),
+      parsed.signature,
       'bad-signature',
       input.pointCache
     );
-    const ledger = new Ledger(decoded.state);
+    const ledger = new Ledger(snapshotStateFromParsed(parsed, input.pointCache));
     const suffix = input.suffix ?? [];
     if (suffix.length === 0) return ledger;
     return ledger.extend(suffix, input.pointCache);
@@ -450,12 +451,20 @@ export class Ledger {
   static compareNotes(
     local: ComparisonNote,
     remote: ComparisonNote,
-    opts: { originalEndorser: SigningPublicKey; pointCache?: SigningPointCache }
+    opts: {
+      originalEndorser: SigningPublicKey;
+      confirmedNoteSigners?: readonly SigningPublicKey[];
+      pointCache?: SigningPointCache;
+    }
   ): Comparison {
+    const confirmed = (opts.confirmedNoteSigners ?? []).map((key) =>
+      checkSigningPublicKey(key, opts.pointCache)
+    );
     return compareNotes(
       local,
       remote,
-      checkSigningPublicKey(opts.originalEndorser, opts.pointCache)
+      checkSigningPublicKey(opts.originalEndorser, opts.pointCache),
+      confirmed
     );
   }
 }

@@ -71,6 +71,7 @@ export async function labClient(input: {
   device?: string;
   clientDir?: string;
   now?: () => number;
+  fs?: import('./services/fs').LabFsShape;
 }): Promise<HonestClient> {
   const device = input.device ? await importDevice(input.device) : await generateDevice();
   const client = new HonestClient({
@@ -83,6 +84,7 @@ export async function labClient(input: {
     entropy: prefixedEntropy(input.account, input.entropy ?? liveEntropy),
     fetch: input.runtime?.gatedFetch(input.account),
     runtime: input.runtime,
+    fs: input.fs,
   });
   await client.start();
   clients.push(client);

@@ -182,13 +182,22 @@ export async function hashRecord(recordBytes: Uint8Array): Promise<Hash> {
   return hashRecordBytes(recordBytes);
 }
 
+/** Epoch numbers that fit the uint32 commitment/history AAD encoding. */
+export const EPOCH_U32_MAX = 0xffff_ffff;
+
+export function checkEpoch(epoch: number, min = 0): number {
+  if (!Number.isSafeInteger(epoch) || epoch < min || epoch > EPOCH_U32_MAX)
+    fail('invalid-operation');
+  return epoch;
+}
+
 export async function commitEpochKey(
   genesis: Hash,
   epoch: number,
   secret: Uint8Array
 ): Promise<Hash> {
   if (secret.byteLength !== 32) fail('invalid-operation');
-  if (!Number.isSafeInteger(epoch) || epoch < 0) fail('invalid-operation');
+  checkEpoch(epoch, 0);
   let tagged: Uint8Array<ArrayBuffer>;
   if (epoch === 0) {
     tagged = concat([EPOCH_COMMIT_DOMAIN, secret]);

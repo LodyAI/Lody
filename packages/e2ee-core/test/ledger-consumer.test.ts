@@ -383,7 +383,7 @@ describe('C2 public-package black-box consumer', () => {
     const cmp = Ledger.compareNotes(
       joined.comparisonNote(peer.publicKey),
       audited.comparisonNote(other.publicKey),
-      { originalEndorser: owner.publicKey }
+      { originalEndorser: owner.publicKey, confirmedNoteSigners: [other.publicKey] }
     );
     expect(cmp.kind).toBe('agree');
     if (cmp.kind === 'agree') expect(cmp.independent).toBe(true);
