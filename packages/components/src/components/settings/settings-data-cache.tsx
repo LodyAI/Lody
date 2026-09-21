@@ -306,7 +306,7 @@ export function useSettingsUsageDay(dayStartMs: number | null): {
       : undefined;
 
   useEffect(() => {
-    if (!cachedEntry || !fresh) return;
+    if (!cachedEntry || !fresh) return undefined;
     const timer = setTimeout(
       () => setRefreshRevision((revision) => revision + 1),
       Math.max(0, cachedEntry.fetchedAt + USAGE_DAY_CACHE_TTL_MS - Date.now())
