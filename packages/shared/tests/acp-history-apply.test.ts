@@ -89,6 +89,34 @@ const ACP_NOTIFICATION_FIXTURES = [
 ] as const;
 
 describe('acp history apply', () => {
+  it('stores ACP markdown plans beside their mode-switch card without duplicating updates', () => {
+    const plan = (content: string) => makeNotification({
+      sessionUpdate: 'plan_update',
+      plan: { type: 'markdown', planId: '1:submit_plan', content },
+      _meta: { lody: { turnId: '0' } },
+    });
+    const history = applyNotificationOnHistory([], [
+      makeNotification({
+        sessionUpdate: 'tool_call', toolCallId: '1:submit_plan',
+        title: 'ExitPlanMode', kind: 'switch_mode', status: 'in_progress',
+      }),
+      plan('# Draft'),
+      plan('# Final plan\n\n- Verify the adapter.'),
+      makeNotification({
+        sessionUpdate: 'tool_call_update', toolCallId: '1:submit_plan', status: 'completed',
+      }),
+    ]);
+    expect(history).toHaveLength(1);
+    const items = history[0]!.items as unknown as MessageContent[];
+    expect(items.filter((item) => item.type === 'proposed_plan')).toEqual([{
+      type: 'proposed_plan', turnId: '1:submit_plan',
+      markdown: '# Final plan\n\n- Verify the adapter.', status: 'delta', isLatest: true,
+    }]);
+    expect(items.find((item) => item.type === 'tool_call')).toMatchObject({
+      toolCallId: '1:submit_plan', kind: 'switch_mode', status: 'completed',
+    });
+  });
+
   it('persists the provider turn id on the assistant entry', () => {
     const history = applyNotificationOnHistory(
       [],
