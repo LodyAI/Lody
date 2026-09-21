@@ -39,6 +39,9 @@ vi.mock('jotai', async (original) => ({
 vi.mock('../src/hooks/use-session-share-management', () => ({
   useSessionShareLinkActions: () => ({
     secretFor: () => null,
+    // No credential on this device, so there is no link to build — the detail
+    // dialog must offer neither "Open published page" nor "Copy link".
+    linkFor: () => null,
     busy: false,
     error: null,
     notice: null,
@@ -122,8 +125,21 @@ describe('share management settings inventory', () => {
       continueCursor: '',
     });
     await render();
+    // A revoked share is history: the inventory is about what is live, so it
+    // stays out of the list until asked for, and the switch names how many.
+    expect(container.textContent).not.toContain('Archived copy');
+    expect(container.textContent).toContain('Show revoked');
+
+    const toggle = container.querySelector<HTMLButtonElement>('#share-show-revoked');
+    expect(toggle).not.toBeNull();
+    await act(async () => {
+      toggle?.click();
+    });
+
     expect(container.textContent).toContain('Archived copy');
     expect(container.textContent).toContain('Revoked');
+    // The link actions live in the detail dialog now, and a revoked share has
+    // no live link to offer there either.
     expect(container.textContent).not.toContain('Copy link');
     expect(container.textContent).not.toContain('Update share');
   });
@@ -144,16 +160,31 @@ describe('share management settings inventory', () => {
       canRevoke: true,
     };
     mocks.query.mockReturnValue({ page: [entry], isDone: true, continueCursor: '' });
-    const viewButton = () =>
-      [...container.querySelectorAll<HTMLButtonElement>('button')].find(
-        (button) => button.textContent === 'View conversation'
+    // The card opens a detail dialog; the jump lives in there, and is offered
+    // only when the local metadata cache actually holds the session — a share
+    // outlives its source.
+    const openCard = async () => {
+      const card = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
+        button.textContent?.includes('Shared run')
       );
+      expect(card).toBeDefined();
+      await act(async () => card?.click());
+    };
+    // The detail dialog is a Radix portal, so it lands on document.body rather
+    // than inside the settings container.
+    const openConversationButton = () =>
+      [...document.body.querySelectorAll<HTMLButtonElement>('button')].find(
+        (button) => button.textContent === 'Open conversation'
+      );
+
     await render();
-    expect(viewButton()).toBeUndefined();
+    await openCard();
+    expect(openConversationButton()).toBeUndefined();
 
     mocks.sessionMeta = { 'session-1': { id: 'session-1' } };
     await render();
-    await act(async () => viewButton()!.click());
+    await openCard();
+    await act(async () => openConversationButton()!.click());
     // Settings is a desktop modal over the workspace; the session is only visible
     // once it closes.
     expect(mocks.setSettingsDialogOpen).toHaveBeenCalledWith(false);

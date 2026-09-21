@@ -1058,8 +1058,15 @@ export class SessionForkService {
             : String(publicError.detail ?? error)
         }`
       );
+      return;
     } finally {
       this.activeOperations.delete(operation.id);
+    }
+    // The fork is durable; a display projection cannot authorize compensation.
+    try {
+      await targetDoc.syncModelSummary();
+    } catch {
+      this.deps.logger.warn(`[${targetSessionId}] Failed to publish fork model summary`);
     }
   }
 }

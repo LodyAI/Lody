@@ -107,6 +107,16 @@ minimumReleaseAgeExclude:
   - '@devframes/plugin-terminals@1.0.0'
   - '@devframes/vite@1.0.0'
   - '@openai/codex@0.154.0'
+  - '@anthropic-ai/sdk@0.126.0'
+  - prettier@3.9.7
+  - vitest@5.0.1
+  - '@vitest/expect@5.0.1'
+  - '@vitest/mocker@5.0.1'
+  - '@vitest/pretty-format@5.0.1'
+  - '@vitest/runner@5.0.1'
+  - '@vitest/snapshot@5.0.1'
+  - '@vitest/spy@5.0.1'
+  - '@vitest/utils@5.0.1'
   - devframe@1.0.0
   - electron-sparkle-updater@0.5.1
   - loro-mirror@2.3.2

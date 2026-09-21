@@ -68,6 +68,34 @@ remain in memory, with no telemetry or persistence. A Devbar failure degrades to
 no diagnostics rather than affecting the application: Hub request errors answer
 HTTP errors, and a renderer failure removes only the bar.
 
+## Conversation capture
+
+The enabled footer offers **Capture chat** before navigating into a session. It
+starts synchronously in the current renderer, displays an active recording state,
+and offers **Stop capture** and then **Copy capture**. This does not restart the
+app, require a debugging port, clear caches, or claim that the entry is cold.
+For a cold-entry investigation, enable Devbar before opening the target session
+and start capture before selecting it; enabling Devbar reloads the primary renderer.
+
+This opt-in recorder observes the conversation viewport once per animation frame
+and retains changed samples. It distinguishes initial reveal from later hiding,
+viewport removal/replacement, loss of visible rows, and displacement of a retained
+reading row at an unchanged scroll offset. Long Task intervals, input kinds and
+maximum callback gap share the same relative clock. These are observations, not
+proof of the cause of a flash: it captures neither presented pixels, JavaScript
+stacks, nor internal source/projection identity. Legitimate layout changes can
+also displace a row.
+
+Recording stops after 60 seconds, at 1,800 changed samples, on explicit stop,
+window hiding, unmount, or sampler failure. A frame inspects at most 200 mounted
+rows and reports truncation; input and Long Task histories retain at most 200 and
+100 entries. Listeners, observers, timers and frame callbacks are released on stop.
+No sampling runs before the action or after stop. Reports remain renderer-local
+in memory until replaced or unmounted; copying is an explicit clipboard action.
+They use capture-local aliases for routes and row identities and contain no
+message text, session titles, raw URLs, keyboard values, screenshots or DOM HTML.
+They are not automatically persisted, uploaded, or exposed through the Hub/MCP.
+
 ## Devframe Hub
 
 When the bar is enabled, Desktop starts one Devframe Hub on `127.0.0.1`, choosing

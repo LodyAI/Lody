@@ -955,6 +955,11 @@ const STREAMDOWN_CONTROLS = {
   table: false,
 } satisfies ControlsConfig;
 
+// Remend treats `<q` in a formula such as `p<q` as an unfinished HTML tag
+// and drops the entire document suffix, even after the formula has closed.
+// Leave tags to the Markdown parser; raw HTML is still opt-in and sanitized.
+const STREAMDOWN_REMEND_OPTIONS = { htmlTags: false };
+
 /** Matches a fenced ```mermaid block, so blocks without one skip the observer. */
 const MERMAID_FENCE_PATTERN = /^[ \t]{0,3}(?:`{3,}|~{3,})[ \t]*mermaid\b/mu;
 
@@ -1486,6 +1491,7 @@ export const MarkdownRenderer = memo(function MarkdownRenderer({
           // rendering and diagram colors update correctly.
           key={streamdownKey}
           mode="streaming"
+          remend={STREAMDOWN_REMEND_OPTIONS}
           className="space-y-0"
           controls={STREAMDOWN_CONTROLS}
           isAnimating={isStreaming}

@@ -3001,8 +3001,8 @@ export class MessageHandler {
           userTurnId
         ),
       turnFinalization: {
-        finalizeACPState: async (sessionId, turnId, options) =>
-          await this.finalizeACPState(sessionId, turnId, options),
+        finalizeACPState: async (sessionId, turnId) =>
+          await this.finalizeACPState(sessionId, turnId),
         persistCodeCollabTurnDiffs: async (sessionId, turnId) =>
           await this.persistCodeCollabTurnDiffs(sessionId, turnId),
         flushSessionUsage: async (sessionId) => await this.flushSessionUsage(sessionId),
@@ -3569,10 +3569,6 @@ export class MessageHandler {
     // session history. We buffer them briefly to reduce the number of CRDT writes.
     this.sessionManager.on('onACPUpdateMessage', (sessionId, update) => {
       this.enqueueACPUpdate(sessionId, update);
-    });
-
-    this.sessionManager.on('onCodexLiveReasoningStatus', (sessionId, label) => {
-      this.setSessionActivePresencePhase(sessionId, 'thinking', label ?? undefined);
     });
 
     this.sessionManager.on('onWriteTextFile', (sessionId, event) => {
@@ -5428,11 +5424,7 @@ export class MessageHandler {
     }
   }
 
-  private async finalizeACPState(
-    sessionId: SessionId,
-    turnId?: string,
-    options?: { settleContextCompactionAsFailed?: boolean }
-  ): Promise<void> {
+  private async finalizeACPState(sessionId: SessionId, turnId?: string): Promise<void> {
     // Finalization marks the last assistant entry finished — that entry must
     // exist and be correctly ordered first, so wait for the turn history gate
     // (bounded; opens on user-turn sync or timeout).
@@ -5463,7 +5455,6 @@ export class MessageHandler {
         turnId,
         endedAt,
         permissionWaitMs,
-        settleContextCompactionAsFailed: options?.settleContextCompactionAsFailed,
       });
       await sessionDoc.waitUntilSynced();
     } catch (error) {
@@ -8096,6 +8087,7 @@ export class MessageHandler {
     model?: ModelInfo,
     agentClient?: Pick<AgentClient, 'getAutomaticToolPermissionOutcome' | 'subscribeConfigOptions'>
   ): Promise<RequestPermissionResponse> {
+    const permissionTurnId = this.store.getTurnId(sessionId);
     const isAskUserQuestionRequest = isAskUserQuestionPermissionRequest(request);
     const askUserQuestionMeta = isAskUserQuestionRequest
       ? parseAskUserQuestionPermissionMeta(request._meta)
@@ -8162,6 +8154,23 @@ export class MessageHandler {
     let permissionRequestPersisted = false;
 
     try {
+      // Notifications only enqueue on receipt. A permission request is a
+      // separate RPC and must not synthesize its tool row ahead of that queue:
+      // doing so splits an already-started text block at a batch boundary.
+      await this.awaitTurnHistoryGate(sessionId);
+      await this.flushACPUpdatesNow(sessionId);
+      if (
+        this.deletedSessionIds.has(sessionId) ||
+        this.store.getTurnId(sessionId) !== permissionTurnId
+      ) {
+        throw new Error('Permission owner changed while draining ACP history');
+      }
+      const acpState = this.store.get(sessionId);
+      if (acpState.acpUpdateBuffer.length > 0 || acpState.acpFlushInFlight) {
+        // The bounded drain can return with failed writes still queued. Do not
+        // overtake them; use the existing unobservable-permission cancellation.
+        throw new Error('ACP history has not drained before permission persistence');
+      }
       permissionRequestPersisted = await ensurePermissionRequestOnToolCall(
         doc,
         requestId,

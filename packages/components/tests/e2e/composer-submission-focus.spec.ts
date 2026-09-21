@@ -1,5 +1,95 @@
 import { expect, test } from '@playwright/test';
 
+for (const openWith of ['click', 'keyboard'] as const) {
+  test(`project search receives focus on ${openWith} and on reopening`, async ({ page }) => {
+    await page.goto('/iframe.html?id=chat-unifiedprojectselector--selected-private&viewMode=story');
+    const trigger = page.getByRole('button', { name: 'lody', exact: true });
+    const search = page.getByPlaceholder('Search projects', { exact: true });
+    for (let opening = 0; opening < 2; opening += 1) {
+      if (openWith === 'keyboard') {
+        await trigger.focus();
+        await page.keyboard.press('Enter');
+      } else {
+        await trigger.click();
+      }
+      await expect(search).toBeFocused();
+      await expect(search).toHaveValue('');
+      await page.getByRole('menuitem').first().hover();
+      await page.keyboard.type('loro-inspector');
+      await expect(search).toHaveValue('loro-inspector');
+      await expect(
+        page.getByRole('menuitem', { name: 'loro-inspector', exact: true })
+      ).toBeVisible();
+      await expect(page.getByRole('menuitem')).toHaveCount(4);
+      await page.keyboard.press('Escape');
+      await expect(search).toBeHidden();
+    }
+  });
+}
+
+for (const openWith of ['hover', 'click', 'keyboard'] as const) {
+  test(`model search receives focus on ${openWith} and on reopening`, async ({ page }) => {
+    await page.goto('/iframe.html?id=sessions-composerrunconfigmenu--model-search&viewMode=story');
+    const search = page.getByRole('textbox', { name: 'Search models', exact: true });
+    // The story opens the submenu for its preview. Start our interactions closed.
+    await expect(search).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(search).toBeHidden();
+    const trigger = page.getByRole('button', { name: 'Run configuration', exact: true });
+    const model = page.getByRole('menuitem', { name: /^Model/ });
+    for (let opening = 0; opening < 2; opening += 1) {
+      await trigger.click();
+      if (openWith === 'keyboard') {
+        await model.focus();
+        await page.keyboard.press('ArrowRight');
+      } else if (openWith === 'click') {
+        await model.click();
+      } else {
+        await model.hover();
+      }
+      await expect(search).toBeFocused();
+      if (openWith !== 'keyboard') {
+        // A real pointer keeps moving over the trigger after the submenu opens.
+        await model.hover({ position: { x: 12, y: 12 } });
+        if (openWith === 'click') await model.click({ position: { x: 12, y: 12 } });
+        await expect(search).toBeFocused();
+      }
+      await page.keyboard.type('54m');
+      await expect(search).toHaveValue('54m');
+      const match = page.getByRole('menuitemradio');
+      await expect(match).toHaveText(['5.4-mini']);
+      await page.keyboard.press('ArrowDown');
+      await expect(match).toBeFocused();
+      await page.keyboard.press('Escape');
+      await expect(search).toBeHidden();
+      await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+      await page.mouse.move(0, 0);
+    }
+  });
+}
+
+test.describe('model search on touch', () => {
+  test.use({ hasTouch: true });
+
+  test('opening the submenu does not autofocus until the field is tapped', async ({ page }) => {
+    await page.goto('/iframe.html?id=sessions-composerrunconfigmenu--model-search&viewMode=story');
+    const search = page.getByRole('textbox', { name: 'Search models', exact: true });
+    await expect(search).toBeVisible();
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Run configuration', exact: true }).tap();
+    const model = page.getByRole('menuitem', { name: /^Model/ });
+    await model.tap();
+    await expect(search).toBeVisible();
+    await expect(search).not.toBeFocused();
+    await model.tap();
+    await expect(search).not.toBeFocused();
+    await search.tap();
+    await page.keyboard.type('54m');
+    await expect(search).toHaveValue('54m');
+    await expect(page.getByRole('menuitemradio')).toHaveText(['5.4-mini']);
+  });
+});
+
 test('editing a sent message focuses its input with the caret at the end', async ({ page }) => {
   await page.goto('/iframe.html?id=ai-gui-usermessageeditor--from-message-edit&viewMode=story');
   await page.getByRole('button', { name: 'Edit message', exact: true }).click();

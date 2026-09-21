@@ -440,6 +440,16 @@ export function getChatLandingLocalProjectAvailability({
   return isMachineFlockRemoteSynced ? 'unavailable' : 'pending';
 }
 
+export function shouldReportLocalProjectUnavailable({
+  availability,
+  removalInProgress,
+}: {
+  availability: 'pending' | 'available' | 'unavailable';
+  removalInProgress: boolean;
+}): boolean {
+  return availability === 'unavailable' && !removalInProgress;
+}
+
 export function getChatLandingSelectedMachineProjectStatus({
   contextType,
   selectedMachineId,

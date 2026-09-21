@@ -1,13 +1,14 @@
 # Codex reasoning is a live status, not session history
 
-Status: implemented
+Status: rejected
 Translation: current
 
 [中文](2026-09-18-codex-transient-reasoning.zh.md)
 
 ## Abstract
 
-Builtin Codex emitted `agent_thought_chunk` through the ordinary ACP history
+The approach below shipped and was reverted the next day; it is preserved as the
+rejected alternative, and the section after it records why. Builtin Codex emitted `agent_thought_chunk` through the ordinary ACP history
 callback, so its transient reasoning remained visible after the turn ended and
 in exported or reopened sessions. The client now intercepts only those Codex
 chunks before `HistoryWriter`, extracts a bounded current summary, and publishes
@@ -16,6 +17,28 @@ The activity row displays that detail only while the presence is fresh; ordinary
 assistant/tool updates clear it and turn cleanup removes it. Existing persisted
 thought entries are deliberately not rewritten, because opening history is not a
 migration or authorization to delete user data.
+
+## Rejected on 2026-09-20
+
+This change shipped in PR #807 (merged 2026-09-19 without review) and was
+reverted the next day. Two reasons, both owned by the Lody team:
+
+- **Reasoning is session history by product intent.** Codex thought chunks must
+  stay in the transcript like every other ACP provider's thoughts. Hiding them
+  was the wrong fix for the reported symptom, so the `HistoryWriter` bypass and
+  the `running.detail` presence field are removed rather than rate-limited.
+- **It flooded the presence transport.** Every thought chunk changed
+  `running.detail`, and `setPhase()` publishes any changed detail immediately.
+  A single Codex session wrote 4,000 session-presence entries in three seconds.
+  Session presence and the machine heartbeat share one workspace
+  `EphemeralStreamCrdt`, whose `pendingLocal` queue is a strict FIFO with no
+  coalescing, so the heartbeat behind that burst arrived with an `updatedAt`
+  older than the 90-second freshness window and the machine showed as offline
+  in that workspace only. The presence queue weakness itself is tracked
+  separately; this note only records why the producer was removed.
+
+The rest of this note is the original rationale, kept so the same approach is
+not proposed again without addressing both points.
 
 ## Decision
 

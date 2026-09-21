@@ -105,6 +105,7 @@ const LOCAL_STORAGE_CACHE_KEYS = [
   'lody:workspaceInfo',
   'lody:githubReposCache',
   'lody:githubBranchesCache',
+  'lody:usageDayDetails',
   // Cached current-user snapshot (`auth-bootstrap.ts`); the auth token itself
   // is deliberately kept — a cache clear does not sign the user out.
   'lody:auth-bootstrap',

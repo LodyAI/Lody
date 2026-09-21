@@ -65,8 +65,11 @@ export const menuItemDestructiveClassName =
 export const menuItemExtraClassName =
   'ms-auto ps-3 font-mono text-[0.8em] text-muted-foreground/80';
 
+/* Sentence case, not caps: a shouted "RECENTLY USED" reads as chrome from a
+   different decade. The old `tracking-[0.6px]` went with it — positive letter
+   spacing is a legibility fix for caps and only loosens lowercase. */
 export const menuGroupLabelClassName =
-  'select-none px-2 pb-0.5 pt-1.5 text-[0.75em] font-normal uppercase leading-tight tracking-[0.6px] text-muted-foreground/80';
+  'select-none px-2 pb-0.5 pt-1.5 text-[0.75em] font-normal leading-tight text-muted-foreground/80';
 
 export const menuSeparatorClassName = 'my-0.5 h-px bg-foreground/[0.10] dark:bg-white/[0.18]';
 

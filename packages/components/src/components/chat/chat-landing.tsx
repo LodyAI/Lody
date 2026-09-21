@@ -1,3 +1,4 @@
+import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import {
   useCallback,
   useEffect,
@@ -224,6 +225,7 @@ import { withGitHubTokenRetry } from '@/lib/github-token';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useVisibleLocalProjectsFromMachineIndex } from '@/hooks/use-visible-local-projects';
 import {
+  isLocalProjectRemovalCompletionSuppressed,
   useLocalProjectRemovalResultNotifications,
   usePendingLocalProjectRemovals,
 } from '@/hooks/use-remove-local-project';
@@ -378,6 +380,7 @@ import {
   getSharingReviewTeamHasNoVisibleLocalResources,
   getSharingReviewTeamLooksEmpty,
   shouldRetrySharingReviewConflict,
+  shouldReportLocalProjectUnavailable,
   getChatLandingSubmitDisabled,
   getChatLandingVisibleComposerStatus,
   isChatLandingMachineReachable,
@@ -1156,6 +1159,7 @@ function WorkspaceChatLanding({
   const fireProjectSelectedOnChange = useFireOnKeyChange();
   const fireAgentConfigOnChange = useFireOnKeyChange();
   const preSelectionAppliedRef = useRef<string | null>(null);
+  const previousPreSelectionKeyRef = useRef<string | null>(null);
   // False while a just-applied URL intent has not rendered yet; the selection
   // mirror must not compare against that pre-application state.
   const selectionSyncArmedRef = useRef(false);
@@ -1401,6 +1405,8 @@ function WorkspaceChatLanding({
     repo: preSelectedRepo,
   });
   useEffect(() => {
+    const previousPreSelectionKey = previousPreSelectionKeyRef.current;
+    previousPreSelectionKeyRef.current = preSelectionKey;
     if (preSelectionAppliedRef.current === preSelectionKey) return;
     preSelectionAppliedRef.current = preSelectionKey;
     // The applied selection reaches state next render; disarm the mirror so it
@@ -1425,6 +1431,11 @@ function WorkspaceChatLanding({
     } else if (preSelectedRepo) {
       setContextType('github');
       setSelectedRepo(preSelectedRepo);
+    } else if (previousPreSelectionKey?.startsWith('local|')) {
+      // A sidebar removal navigates from a URL-named local project to plain
+      // `/chat` while this landing stays mounted. Clear the stale local
+      // selection before the optimistic Flock overlay can report it missing.
+      handleSelectedLocalProjectChange(null);
     }
   }, [
     preSelectionKey,
@@ -1510,7 +1521,24 @@ function WorkspaceChatLanding({
       isDocMetaCacheReady: docMetaCacheReady,
       isMetaRoomFirstSyncPending,
     });
-    if (localProjectAvailability !== 'unavailable') return;
+    const localProjectKey = buildLocalProjectKey(
+      selectedLocalProject.machineId,
+      selectedLocalProject.localProjectId
+    );
+    const removalInProgress =
+      pendingLocalProjectRemovals.has(localProjectKey) ||
+      isLocalProjectRemovalCompletionSuppressed(
+        selectedLocalProject.machineId,
+        selectedLocalProject.localProjectId
+      );
+    if (
+      !shouldReportLocalProjectUnavailable({
+        availability: localProjectAvailability,
+        removalInProgress,
+      })
+    ) {
+      return;
+    }
     toast.error(t('sidebar.localProjects.forbidden', 'Local project is not available'));
     handleSelectedLocalProjectChange(null);
     setContextType(hasGitHubRepos ? 'github' : 'chat');
@@ -1526,6 +1554,7 @@ function WorkspaceChatLanding({
     visibleLocalProjectAccess,
     visibleLocalProjectsLoading,
     isMetaRoomFirstSyncPending,
+    pendingLocalProjectRemovals,
     hasGitHubRepos,
     t,
     handleSelectedLocalProjectChange,
@@ -4448,8 +4477,7 @@ function WorkspaceChatLanding({
       if (typeof session.lastMessageAt === 'number' && Number.isFinite(session.lastMessageAt)) {
         const prev = latest.get(key) ?? 0;
         if (session.lastMessageAt > prev) latest.set(key, session.lastMessageAt);
-        const isUnread =
-          typeof session.lastReadAt !== 'number' || session.lastMessageAt > session.lastReadAt;
+        const isUnread = sessionHasUnreadMessages(session);
         if (isUnread) unread.set(key, (unread.get(key) ?? 0) + 1);
       }
     }
@@ -4525,19 +4553,13 @@ function WorkspaceChatLanding({
     return counts;
   }, [visibleSessions]);
   const githubRepositoryLatestMessageAt = mobileSheetRecency.byRepo;
-  /* Unread-session count per repository — drives the row's trailing
-     badge. Mirrors `localProjectActivity.unread` semantics: a session
-     is unread when `lastMessageAt` is newer than `lastReadAt` (or
-     `lastReadAt` is missing entirely). */
+  /* Unread-session count per repository drives the row's trailing badge. */
   const githubRepositoryUnreadCount = useMemo(() => {
     const unread = new Map<string, number>();
     for (const session of visibleSessions) {
       const repoFullName = getSessionGitHubRepoFullName(session);
       if (!repoFullName) continue;
-      if (typeof session.lastMessageAt !== 'number') continue;
-      const isUnread =
-        typeof session.lastReadAt !== 'number' || session.lastMessageAt > session.lastReadAt;
-      if (!isUnread) continue;
+      if (!sessionHasUnreadMessages(session)) continue;
       unread.set(repoFullName, (unread.get(repoFullName) ?? 0) + 1);
     }
     return unread;

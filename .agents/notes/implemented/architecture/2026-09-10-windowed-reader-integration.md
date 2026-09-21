@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+[中文](2026-09-10-windowed-reader-integration.zh.md)
+
 ## Abstract
 
 Opening a session uses a control-plane Mirror and one reader-backed
@@ -45,6 +47,28 @@ A browser regression holds the real destination-row ResizeObserver delivery:
 the previous hook reveals while held; the fixed hook stays hidden and opens at
 the measured tail after release, including remount. Unit coverage retains cached
 reading positions, user escape, composer resize suppression and row growth.
+
+### Projection refresh after reveal
+
+Accepted-history reconciliation can replace a display wrapper without changing
+its underlying conversation. Resetting initial readiness on wrapper identity made
+an already visible chat hidden again while the replacement lease settled; it also
+reset the reading window to the tail. Readiness and the visible range now belong
+to `factSource ?? view`, while leases still target the current projection. A new
+source resets readiness even when its session id is unchanged. Caching readiness
+by session id alone would incorrectly reveal a replacement document before loading.
+
+The [hook regression suite](../../../../packages/components/tests/conversation-view-hooks.test.tsx)
+holds replacement range promises explicitly and checks visibility and retained
+off-tail hydration across repeated projection refreshes and removal. The visibility
+assertion fails on the previous implementation. The existing source-replacement
+regression also covers both pending and previously revealed sources.
+[RefreshAcceptedHistory](../../../../packages/components/src/stories/ConversationViewStream.stories.tsx)
+exercises the real list over 3,000 synthetic turns. In the production browser probe,
+three refreshes previously each toggled visibility; after the fix none did, and row
+count, scroll offset and height stayed unchanged. The 37 focused hook/scroll tests,
+component typecheck and production Storybook build pass. This repairs a demonstrated
+re-hide path; it does not establish that every reported post-open flash has this cause.
 
 ## Cold virtualizer blank on open
 

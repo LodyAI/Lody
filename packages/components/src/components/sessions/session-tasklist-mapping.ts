@@ -1,3 +1,4 @@
+import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import type {
   LocalProjectHistoryProvider,
   MachineId,
@@ -99,13 +100,6 @@ export function getEffectiveLatestMessageAt(
     }
   }
   return maxMs;
-}
-
-function sessionHasUnreadMessages(session: SessionMeta): boolean {
-  const lastMessageAt = parseTimestamp(session.lastMessageAt);
-  if (lastMessageAt === null) return false;
-  const lastReadAt = parseTimestamp(session.lastReadAt);
-  return lastReadAt === null || lastMessageAt > lastReadAt;
 }
 
 export type EffectiveSessionActivitySummary = {
@@ -211,10 +205,7 @@ export function mapSessionMetaToTaskListTask(
       ? session.lastMessageAt
       : normalizeString(typeof session.lastMessageAt === 'string' ? session.lastMessageAt : '') ||
         session.createdAt;
-  const lastMessageAt = parseTimestamp(session.lastMessageAt);
-  const lastReadAt = parseTimestamp(session.lastReadAt);
-  const hasUnreadMessages =
-    lastMessageAt !== null && (lastReadAt === null || lastMessageAt > lastReadAt);
+  const hasUnreadMessages = sessionHasUnreadMessages(session);
 
   // A session is offline if we have online machine tracking and its machine is not in the set
   const isOffline = onlineMachineIds ? !onlineMachineIds.has(session.machineId) : false;

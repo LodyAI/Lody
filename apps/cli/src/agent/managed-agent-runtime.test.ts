@@ -504,6 +504,72 @@ describe('ManagedAgentRuntimeManager', () => {
     }
   });
 
+  it('bounds download progress by elapsed time rather than by changed percent', async () => {
+    // Every progress event is republished as session presence, and presence is a shared
+    // serial queue the machine heartbeat also uses. The emit ceiling must therefore be a
+    // property of this publisher: a clock that never advances must suppress every
+    // chunk-driven emit no matter how many chunks arrive, or how much the percent moves.
+    const { archiveBytes, definition, originalArchive } =
+      await installTinyCodexArchiveDefinition('throttled-codex.tar.zst');
+
+    try {
+      const chunkCount = 64;
+      const chunkSize = Math.ceil(archiveBytes.byteLength / chunkCount);
+      let deliveredChunks = 0;
+      const fetchImpl = vi.fn<FetchImpl>(async () => ({
+        ok: true,
+        status: 200,
+        headers: new Headers(),
+        body: new ReadableStream<Uint8Array>({
+          start(controller) {
+            for (let offset = 0; offset < archiveBytes.byteLength; offset += chunkSize) {
+              controller.enqueue(new Uint8Array(archiveBytes.subarray(offset, offset + chunkSize)));
+              deliveredChunks += 1;
+            }
+            controller.close();
+          },
+        }) as unknown as NonNullable<Awaited<ReturnType<FetchImpl>>['body']>,
+      }));
+
+      const throttledManager = new ManagedAgentRuntimeManager({
+        rootDir,
+        platform: 'linux',
+        arch: 'x64',
+        runtimeBaseUrl: 'https://runtime.example.test',
+        fetchImpl,
+      });
+
+      // Fake ONLY Date: the download pipeline still needs real I/O scheduling.
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(new Date('2026-09-20T00:00:00.000Z'));
+      const progressEvents: ManagedRuntimeProgressEvent[] = [];
+      try {
+        await throttledManager.ensureCurrentRuntime('codex', {
+          onProgress: (event) => {
+            progressEvents.push(event);
+          },
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+
+      const downloadEvents = progressEvents.filter((event) => event.phase === 'downloading');
+      expect(deliveredChunks).toBeGreaterThan(8);
+      // A frozen clock leaves only the three lifecycle emits: attempt start, the forced
+      // one before the pipeline, and the forced one after it settles. The count is
+      // independent of deliveredChunks; per-chunk emission would scale with it.
+      expect(downloadEvents).toHaveLength(3);
+      // The terminal byte count is still reported, so a bounded rate never hides completion.
+      expect(downloadEvents.at(-1)).toMatchObject({
+        phase: 'downloading',
+        downloadedBytes: archiveBytes.byteLength,
+        totalBytes: archiveBytes.byteLength,
+      });
+    } finally {
+      definition.platforms['linux-x64'] = originalArchive;
+    }
+  });
+
   it('keeps a shared runtime download alive when one consumer cancels', async () => {
     const { archiveBytes, definition, originalArchive } =
       await installTinyCodexArchiveDefinition('shared-codex.tar.zst');

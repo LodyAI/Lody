@@ -172,3 +172,14 @@ html[data-desktop-devbar] #root :is(.min-h-screen, .min-h-\[100dvh\]) {
     display: none;
   }
 }
+
+.desktop-devbar-capture {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.desktop-devbar-capture-status {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

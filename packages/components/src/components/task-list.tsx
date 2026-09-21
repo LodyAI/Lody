@@ -591,7 +591,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
                 <ChevronDown
                   className={cn(
                     'absolute left-0 top-1/2 -translate-y-1/2 h-4 w-4',
-                    'transition-[opacity,translate,scale] duration-150 ease-out',
+                    'transition-[opacity,translate,scale,rotate] duration-150 ease-out',
                     isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
                     group.collapsed ? '-rotate-90' : 'rotate-0'
                   )}
@@ -604,7 +604,7 @@ const TaskGroupSection = memo(function TaskGroupSection({
             <ChevronDown
               className={cn(
                 'h-3.5 w-3.5 shrink-0 text-current',
-                'transition-[opacity,translate,scale] duration-150 ease-out',
+                'transition-[opacity,translate,scale,rotate] duration-150 ease-out',
                 group.collapsed || isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
                 // Chats is a top-level sidebar section, so its collapsed chevron
                 // stays visible without hover.

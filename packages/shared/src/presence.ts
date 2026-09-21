@@ -2,9 +2,24 @@ import { z } from 'zod';
 import type { MachineId, SessionId } from './index';
 import type { SessionStatus } from './schema';
 
+/**
+ * The workspace liveness channel. It is a SHARED, SERIAL delivery budget: one ephemeral
+ * transport per workspace, one update in flight, and a FIFO that neither coalesces nor
+ * prioritizes the machine heartbeat. A writer that outruns the network therefore delays
+ * the heartbeat, whose `updatedAt` is stamped at creation rather than at send, so it can
+ * arrive already past {@link LODY_PRESENCE_TTL_MS} and read as offline while the room
+ * still reports `joined`.
+ *
+ * Publish only small, low-frequency liveness state here. Drive writes from a timer, a
+ * lifecycle transition, or a user navigation — never from a stream/progress/chunk
+ * callback — and keep every field size-bounded below.
+ * Bounds and rationale: `specs/loro-ephemeral-presence-channel.md`.
+ */
 export const LODY_PRESENCE_CHANNEL = 'presence';
 export const LODY_PRESENCE_TTL_MS = 90_000;
 export const LODY_PRESENCE_HEARTBEAT_MS = 30_000;
+/** Upper bound for any free-text presence detail; presence is not a transcript store. */
+export const LODY_PRESENCE_DETAIL_MAX_LENGTH = 280;
 
 export type LodyPresenceInstanceId = string & { __brand: 'LodyPresenceInstanceId' };
 
@@ -70,9 +85,6 @@ const ActiveSessionStatusSchema = z.preprocess(
     z.object({
       type: z.literal('running'),
       activity: z.enum(['image_generation']).optional(),
-      // Presence is an ephemeral UI surface. Bound provider-supplied detail so
-      // an untrusted ACP stream cannot inflate the presence document.
-      detail: z.string().min(1).max(280).optional(),
     }),
     z.object({
       type: z.literal('requestPermission'),
@@ -80,7 +92,10 @@ const ActiveSessionStatusSchema = z.preprocess(
     z.object({
       type: z.literal('initializing'),
       stage: z.enum(['git-clone', 'managed-runtime', 'acp', 'resuming']).optional(),
-      detail: z.string().optional(),
+      // Presence is a liveness channel, not a data path: every field is size-bounded so
+      // no producer can inflate the presence document. See
+      // specs/loro-ephemeral-presence-channel.md.
+      detail: z.string().max(LODY_PRESENCE_DETAIL_MAX_LENGTH).optional(),
     }),
   ])
 );

@@ -1,5 +1,5 @@
-import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import type { WorktreeCleanupScriptConfig, WorktreeSetupScriptConfig } from '@lody/shared';
 import { currentWorkspaceIdAtom } from '@/atoms/workspace-context';
@@ -9,11 +9,19 @@ import {
 } from '@/atoms/local-storage-cache';
 import { useOrganization } from '@/hooks/useOrganization';
 import { useAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
-import { useCloudQuery } from '@lody/platform/react';
+import { useCloudQuery, usePlatformCapability } from '@lody/platform/react';
 import {
   canRunAuthedWorkspaceQuery,
   isAuthedWorkspaceQueryLoading,
 } from '@/lib/authed-convex-query';
+import {
+  EMPTY_USAGE_DAY_CACHE,
+  MAX_CACHED_USAGE_DAYS,
+  USAGE_DAY_CACHE_TTL_MS,
+  readUsageDayCache,
+  writeUsageDayCache,
+  usageDayCacheAtom,
+} from './usage-day-cache';
 
 export type SettingsUsageRange = 'day' | 'week' | 'month' | 'total';
 
@@ -263,21 +271,82 @@ export function useSettingsDataCache() {
 }
 
 /**
- * Fetch the breakdown behind one usage-calendar cell. Kept out of the provider
- * because it is on-demand: nothing is queried until a day is selected.
+ * Reuse persisted day details for one hour after a successful fetch. Expiry
+ * refreshes only the selected day and keeps the old snapshot visible.
  */
 export function useSettingsUsageDay(dayStartMs: number | null): {
   day: SettingsUsageDayData | undefined;
   loading: boolean;
 } {
   const { workspaceId } = useSettingsDataCache();
-  const day = useCloudQuery(
+  const { authSessionId, confirmedUnauthenticated } = useAuthenticatedConvex();
+  const usageAvailable = usePlatformCapability('usageAnalytics');
+  const cacheSessionId = usageAvailable && !confirmedUnauthenticated ? authSessionId : null;
+  const enabled = Boolean(cacheSessionId && workspaceId && dayStartMs !== null);
+  const [storedCache, setCache] = useAtom(usageDayCacheAtom);
+  const [initialCache] = useState(readUsageDayCache);
+  const cache = storedCache ?? initialCache;
+  const cachedEntry =
+    enabled && cache.authSessionId === cacheSessionId
+      ? cache.days.find(
+          ({ day }) => day.workspaceId === workspaceId && day.dayStartMs === dayStartMs
+        )
+      : undefined;
+  const [, setRefreshRevision] = useState(0);
+  const ageMs = cachedEntry ? Date.now() - cachedEntry.fetchedAt : Infinity;
+  const fresh = ageMs >= 0 && ageMs < USAGE_DAY_CACHE_TTL_MS;
+  const shouldQuery = enabled && !fresh;
+  const result = useCloudQuery(
     cloudOperations.usage.getWorkspaceUsageDay,
-    workspaceId && dayStartMs !== null ? { workspaceId, dayStartMs } : 'skip'
+    shouldQuery && workspaceId && dayStartMs !== null ? { workspaceId, dayStartMs } : 'skip'
   ) as SettingsUsageDayData | undefined;
+  const liveDay =
+    shouldQuery && result?.workspaceId === workspaceId && result?.dayStartMs === dayStartMs
+      ? result
+      : undefined;
+
+  useEffect(() => {
+    if (!cachedEntry || !fresh) return undefined;
+    const timer = setTimeout(
+      () => setRefreshRevision((revision) => revision + 1),
+      Math.max(0, cachedEntry.fetchedAt + USAGE_DAY_CACHE_TTL_MS - Date.now())
+    );
+    return () => clearTimeout(timer);
+  }, [cachedEntry, fresh]);
+
+  useEffect(() => {
+    setCache((stored) => {
+      const previous = stored ?? initialCache;
+      if (confirmedUnauthenticated || !usageAvailable) return EMPTY_USAGE_DAY_CACHE;
+      // An unresolved session during recovery is not a sign-out. Hide its data
+      // until identity returns, but preserve it for the same session to resume.
+      if (!cacheSessionId) return previous;
+      const current =
+        previous.authSessionId === cacheSessionId
+          ? previous
+          : { authSessionId: cacheSessionId, days: [] };
+      if (!liveDay) return current;
+      return {
+        authSessionId: cacheSessionId,
+        days: [
+          ...current.days.filter(
+            ({ day }) =>
+              day.workspaceId !== liveDay.workspaceId || day.dayStartMs !== liveDay.dayStartMs
+          ),
+          { fetchedAt: Date.now(), day: liveDay },
+        ].slice(-MAX_CACHED_USAGE_DAYS),
+      };
+    });
+  }, [cacheSessionId, confirmedUnauthenticated, initialCache, liveDay, setCache, usageAvailable]);
+
+  useEffect(() => {
+    if (storedCache) writeUsageDayCache(storedCache);
+  }, [storedCache]);
+
+  const day = liveDay ?? cachedEntry?.day;
 
   return {
     day,
-    loading: dayStartMs !== null && day?.dayStartMs !== dayStartMs,
+    loading: enabled && day === undefined,
   };
 }

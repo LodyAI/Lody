@@ -64,28 +64,31 @@ export function useConversationStreamItems(
   const version = useConversationVersion(view);
   const turnCount = view?.turnCount ?? 0;
 
-  const initialRef = useRef({ view, ready: false });
-  if (initialRef.current.view !== view) initialRef.current = { view, ready: false };
+  // Projection wrappers change as accepted turns reconcile. Only replacing the
+  // underlying conversation starts a new initial load or resets its read window.
+  const source = view?.factSource ?? view;
+  const initialRef = useRef({ source, ready: false });
+  if (initialRef.current.source !== source) initialRef.current = { source, ready: false };
   const [visible, setVisibleRange] = useState<{
-    view: ConversationView;
+    source: ConversationView;
     range: VisibleTurnRange;
   } | null>(null);
-  const visibleRange = visible?.view === view ? visible.range : null;
+  const visibleRange = visible?.source === source ? visible.range : null;
   const onVisibleTurnRangeChange = useCallback(
     (next: VisibleTurnRange) => {
-      if (!view || !initialRef.current.ready) return;
+      if (!source || !initialRef.current.ready) return;
       setVisibleRange((current) => {
         if (
-          current?.view === view &&
+          current?.source === source &&
           Math.abs(current.range.from - next.from) < VISIBLE_RANGE_HYSTERESIS_TURNS &&
           Math.abs(current.range.to - next.to) < VISIBLE_RANGE_HYSTERESIS_TURNS
         ) {
           return current;
         }
-        return { view, range: next };
+        return { source, range: next };
       });
     },
-    [view]
+    [source]
   );
   const hydrationWindow = useMemo(
     () => resolveHydrationWindow(turnCount, visibleRange),

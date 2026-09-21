@@ -4,7 +4,11 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoroMap } from 'loro-crdt';
-import { createHistoryWriter, resolveSessionConversationConfig } from '@lody/shared';
+import {
+  createHistoryWriter,
+  resolveSessionConversationConfig,
+  type WorkspaceId,
+} from '@lody/shared';
 import {
   useConversationVersion,
   useConversationTail,
@@ -13,6 +17,7 @@ import {
 import { useIncrementalSearchBlocks } from '../src/hooks/use-incremental-search-blocks';
 import {
   createConversationSession,
+  createProjectedConversationView,
   collectConversationConfigSources,
   type ConversationView,
 } from '../src/lib/conversation-view';
@@ -65,6 +70,48 @@ const flush = async () => {
 };
 
 describe('conversation view React readers', () => {
+  it('keeps revealed content and its reading window through projection refreshes', async () => {
+    const { view } = await openView(150);
+    let stream!: ReturnType<typeof useConversationStreamItems>;
+    function Probe({ current }: { current: ConversationView }) {
+      stream = useConversationStreamItems(current, FIXTURE_SESSION_ID);
+      return (
+        <span style={{ visibility: stream.initialWindowReady ? 'visible' : 'hidden' }}>
+          Conversation
+        </span>
+      );
+    }
+    await act(async () => root.render(<Probe current={view} />));
+    await act(async () => stream.onVisibleTurnRangeChange({ from: 20, to: 28 }));
+    await flush();
+    const entry = view.turn(20)!;
+    const acquire = view.acquireRange.bind(view);
+    let releaseReady!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      releaseReady = resolve;
+    });
+    vi.spyOn(view, 'acquireRange').mockImplementation((...args) => {
+      const lease = acquire(...args);
+      return { ...lease, ready: lease.ready.then(() => gate) };
+    });
+    for (let refresh = 0; refresh < 3; refresh++) {
+      const projected = createProjectedConversationView(view, [
+        {
+          workspaceId: 'projection-fixture' as WorkspaceId,
+          sessionId: FIXTURE_SESSION_ID,
+          entry,
+        },
+      ]);
+      await act(async () => root.render(<Probe current={projected} />));
+      await flush();
+      expect(getComputedStyle(container.firstElementChild!).visibility).toBe('visible');
+      expect(view.isHydrated(20)).toBe(true);
+    }
+    await act(async () => root.render(<Probe current={view} />));
+    expect(getComputedStyle(container.firstElementChild!).visibility).toBe('visible');
+    await act(async () => releaseReady());
+  });
+
   it('holds the initial tail window until ready and never hides later window loads', async () => {
     const { view } = await openView(150);
     const acquire = view.acquireRange.bind(view);
@@ -101,35 +148,42 @@ describe('conversation view React readers', () => {
     expect(container.textContent).toBe('true');
   });
 
-  it("does not accept a previous view's pending initial window after switching sessions", async () => {
-    const { view: first } = await openView(30);
-    const { view: second } = await openView(31);
-    const releases: (() => void)[] = [];
-    for (const view of [first, second]) {
-      const acquire = view.acquireRange.bind(view);
-      const gate = new Promise<void>((resolve) => {
-        releases.push(resolve);
+  it.each([false, true])(
+    'requires a new source to load even with the same session id; previous ready=%s',
+    async (firstReady) => {
+      const { view: first } = await openView(30);
+      const { view: second } = await openView(31);
+      const releases: (() => void)[] = [];
+      for (const view of [first, second]) {
+        const acquire = view.acquireRange.bind(view);
+        const gate = new Promise<void>((resolve) => {
+          releases.push(resolve);
+        });
+        vi.spyOn(view, 'acquireRange').mockImplementation((...args) => {
+          const lease = acquire(...args);
+          return { ...lease, ready: lease.ready.then(() => gate) };
+        });
+      }
+      function Probe({ view }: { view: ConversationView }) {
+        const stream = useConversationStreamItems(view, FIXTURE_SESSION_ID);
+        return <span>{String(stream.initialWindowReady)}</span>;
+      }
+      await act(async () => root.render(<Probe view={first} />));
+      if (firstReady) {
+        await act(async () => releases[0]!());
+        expect(container.textContent).toBe('true');
+      }
+      await act(async () => root.render(<Probe view={second} />));
+      await act(async () => {
+        releases[0]!();
       });
-      vi.spyOn(view, 'acquireRange').mockImplementation((...args) => {
-        const lease = acquire(...args);
-        return { ...lease, ready: lease.ready.then(() => gate) };
+      expect(container.textContent).toBe('false');
+      await act(async () => {
+        releases[1]!();
       });
+      expect(container.textContent).toBe('true');
     }
-    function Probe({ view }: { view: ConversationView }) {
-      const stream = useConversationStreamItems(view, FIXTURE_SESSION_ID);
-      return <span>{String(stream.initialWindowReady)}</span>;
-    }
-    await act(async () => root.render(<Probe view={first} />));
-    await act(async () => root.render(<Probe view={second} />));
-    await act(async () => {
-      releases[0]!();
-    });
-    expect(container.textContent).toBe('false');
-    await act(async () => {
-      releases[1]!();
-    });
-    expect(container.textContent).toBe('true');
-  });
+  );
 
   it('rehydrates a mounted viewport after same-length replacement and releases it on unmount', async () => {
     const { doc, view, idle } = await openView(150);

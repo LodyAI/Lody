@@ -58,6 +58,10 @@ one-release compatibility path; new provider output must use the Core contract.
 
 ## Flush, evidence, and shutdown
 
+Permission requests must drain earlier buffered/in-flight ACP updates before
+materializing a missing tool row. If the bounded drain leaves queued writes,
+cancel the request rather than inserting a tool into an unfinished text stream.
+
 Turn finalization cancels unanswered permission/question requests in the owning
 assistant entry through the existing history write. Preserve answered outcomes
 and other turns; the history subscription releases the waiter and the renderer

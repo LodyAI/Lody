@@ -40,6 +40,8 @@ strings on i18n rather than the registry's inline English.
 
 ## Menus and viewers
 
+- Dialog overlays and content share `--z-dialog`; portal DOM order puts each
+  new overlay above earlier dialogs and below its own content.
 - Dialog-contained `OptionSelector` menus must portal into the nearest
   `[data-lody-dialog-content]`; a body portal is outside Radix remove-scroll handling.
 - `DiffViewer` uses the shared `@pierre/diffs` worker pools for syntax work regardless
