@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: [#885](https://github.com/LodyAI/Lody/pull/885)
 
 [中文](2026-09-22-warm-window-content-readiness.zh.md)
 
