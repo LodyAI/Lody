@@ -1509,6 +1509,11 @@ const SortableLocalProjectItem = memo(
     localProjectItemPropsEqual(prev, next)
 );
 
+export const hasWorkspaceSidebarTopContent = (
+  localProjectSectionCount: number,
+  showGithubWorktrees: boolean
+): boolean => localProjectSectionCount > 0 || showGithubWorktrees;
+
 export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   const { t, i18n } = useTranslation();
   const router = useRouter();
@@ -3010,7 +3015,10 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   ]);
 
   const githubWorktreesLabel = useMemo(() => t('sidebar.githubWorktrees', 'GitHub Worktrees'), [t]);
-  const sidebarTopContent = (
+  const sidebarTopContent = hasWorkspaceSidebarTopContent(
+    localProjectSections.length,
+    showGithubWorktrees
+  ) ? (
     // Sections carry their own bottom margin: 12px expanded (wider than the
     // 10px between repo groups and the 2-4px between a section header and its
     // content, so headers bind to the list below them), 4px collapsed so a
@@ -3032,7 +3040,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         />
       ) : null}
     </div>
-  );
+  ) : null;
 
   // Chats renders after the GitHub Worktrees list so it reads as the last
   // section in Workspace mode.

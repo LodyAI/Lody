@@ -221,6 +221,39 @@ describe('LoroSidebar pinned section', () => {
     ).toBeTruthy();
   });
 
+  it('keeps the filter reachable when the workspace scope hides every section', () => {
+    renderSidebar({
+      organizeMode: 'workspace',
+      chatScope: 'my',
+      pinnedItems: [],
+      topContent: undefined,
+      sessionListProps: {
+        sessions: [],
+        repos: [],
+      },
+    });
+
+    expect(container?.querySelectorAll('button[aria-label="Filter sidebar"]')).toHaveLength(1);
+  });
+
+  it('mounts one filter when Chats is the only visible Workspace section', () => {
+    const filterAction = <button aria-label="Filter sidebar" />;
+    renderSidebar({
+      organizeMode: 'workspace',
+      chatScope: 'my',
+      pinnedItems: [],
+      topContent: undefined,
+      desktopFilterAction: filterAction,
+      sessionListProps: {
+        sessions: [],
+        repos: [],
+      },
+      afterSessionListContent: <div>{filterAction}</div>,
+    });
+
+    expect(container?.querySelectorAll('button[aria-label="Filter sidebar"]')).toHaveLength(1);
+  });
+
   it('renders pinned conversations before the Updated section', () => {
     renderSidebar({
       organizeMode: 'updated',

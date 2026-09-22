@@ -185,6 +185,8 @@ export interface LoroSidebarProps {
    * In-flow content rendered after {@link sessionListProps} inside the scroll
    * viewport (workspace mode only). LoroAppSidebar uses this to place the Chats
    * section below the GitHub Worktrees list so Chats reads as the last section.
+   * When present without top or pinned content, that section owns the desktop
+   * filter action; the preceding list must not mount a second fallback action.
    */
   afterSessionListContent?: ReactNode;
   bottomFloatingContent?: ReactNode;
@@ -1329,7 +1331,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     {...sessionListProps}
                     className={sessionListClassName}
                     headerAction={
-                      topContent || hasPinnedItems
+                      topContent || hasPinnedItems || afterSessionListContent
                         ? sessionListProps.headerAction
                         : (sessionListProps.headerAction ?? sectionHeaderFilterAction ?? undefined)
                     }
