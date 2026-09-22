@@ -33,6 +33,17 @@ not pass the prop (stories). The overlay wrapper and both placeholder sizes are
 deleted. `SidebarFilterPopover` accepts optional controlled `open` props and
 otherwise keeps its internal state, so the mobile footer instance is unchanged.
 
+Every header action render site insets the action `mr-2`/`pr-2` — the
+`SidebarSectionHeader` wrapper, the session-list group header, and the
+standalone `justify-end` action rows (loading/empty fallbacks in SessionList
+and `HeaderActionRow` in the updated list). This preserves the overlay's
+`right-2` geometry in-flow: the trigger's right edge lands on the content-box
+right edge that the `px-2` session rows establish, centering its glyph on the
+rows' status column (unread dot axis at cx 295 vs trigger cx 296, matching the
+old overlay's 1px offset). Without it the trigger sat flush to the row edge,
+8px right of that column — the inset is a property of the header row, not of
+the action element, so it holds for any action content.
+
 Lifting `open` is the correct owner rather than gratuitous lifting: the
 trigger's position is owned by sidebar layout above every candidate slot, and
 the popover's other state (organize mode, task scope, labels, change handlers)
@@ -48,11 +59,12 @@ this bug.
 In the `Components/LodySidebar` storybook story, which mirrors the production
 topContent composition, the Local Projects header measures label, import
 button, and filter trigger all centered at the row's centerline (centerY 278px
-on the 28px row) and the popover opens anchored to the trigger. `tsgo
---noEmit` and `oxlint` pass on the changed files. Behavior when the first
-section changes while the popover is open (e.g. a pinned session appearing via
-sync) is covered by the lifted controlled state but was verified only by
-reasoning, not by a live app run.
+on the 28px row), the trigger centered 1px off the session rows' status column
+(cx 296 vs 295 — the same offset the old `right-2` overlay produced), and the
+popover opens anchored to the trigger. `tsgo --noEmit` and `oxlint` pass on the
+changed files. Behavior when the first section changes while the popover is
+open (e.g. a pinned session appearing via sync) is covered by the lifted
+controlled state but was verified only by reasoning, not by a live app run.
 
 ## Integration
 

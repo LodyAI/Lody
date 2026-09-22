@@ -184,7 +184,7 @@ export type SidebarUpdatedContextMenuLabels = {
  * state), so the control stays reachable in every list state.
  */
 function HeaderActionRow({ action }: { action: ReactNode }) {
-  return <div className="flex h-7 shrink-0 items-center justify-end">{action}</div>;
+  return <div className="flex h-7 shrink-0 items-center justify-end pr-2">{action}</div>;
 }
 
 function parseGitHubPrNumber(url: string): number | null {

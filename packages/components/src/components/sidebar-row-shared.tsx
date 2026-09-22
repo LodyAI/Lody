@@ -609,7 +609,7 @@ export function SidebarSectionHeader({
         ) : null}
         <span className="flex-1" aria-hidden="true" />
       </div>
-      {action ? <div className="shrink-0">{action}</div> : null}
+      {action ? <div className="mr-2 shrink-0">{action}</div> : null}
     </div>
   );
 }
