@@ -5769,7 +5769,7 @@ export const SessionChatInterface = memo(
         {shouldShowOpenInIdeButton && isElectronRendererForPathLaunch && (
           <div className={cn(SESSION_PAGE_HEADER_PILLS_CLASS, 'items-center')}>
             <Button
-              className="h-6 px-2 py-1 rounded-r-none border-r-0 gap-1"
+              className="h-6 px-2 py-1 rounded-r-none border-r-0 gap-1 shadow-none"
               variant="outline"
               size="sm"
               onClick={handleOpenInIde}
@@ -5780,7 +5780,7 @@ export const SessionChatInterface = memo(
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
-                  className="h-6 px-1 py-1 rounded-l-none"
+                  className="h-6 px-1 py-1 rounded-l-none shadow-none"
                   variant="outline"
                   size="sm"
                   aria-label={t('sessions.selectPathLauncher', 'Select launcher')}
