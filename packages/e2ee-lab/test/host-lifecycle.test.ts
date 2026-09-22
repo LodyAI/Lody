@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { cleanupLab, labClient, launchLab, tempDir } from '../src/fixtures';
+import { makeLiveFs } from '../src/services/fs';
 import { startLabBackend } from '../src/backend';
 import { CONTROL_STREAM, LORO_STREAM, MAX_LEASE_MS } from '../src/platform/protocol';
 import { exportDevice, generateDevice } from '../src/platform/device';
@@ -15,6 +16,7 @@ import { fromHex, toHex } from '../src/platform/bytes';
 import { maliciousAppendCas } from '../src/attacks';
 import { LoroDoc } from 'loro-crdt';
 import { InMemoryRemoteCursorStore } from '@loro-dev/streams-crdt/loro';
+import { openEpochEnvelope } from '@lody/e2ee-core/ledger';
 import {
   bootstrapLoroFromSnapshot,
   readLoro,
@@ -126,6 +128,18 @@ describe('lab host lifecycle', () => {
     await writer.adoptGenesis(alice.genesisHex!);
     await writer.readLedger();
     const frames = await writer.readKeyFrames();
+    // Cross-check the Lab wire with the core's Org hash, not the signed genesis record.
+    const verified = await writer.readLedger();
+    const opened = await openEpochEnvelope({
+      state: verified.state,
+      genesis: verified.state.genesis,
+      epoch: 0,
+      sender: alice.device.publicKey,
+      recipient: writer.device.publicKey,
+      recipientKeyPair: writer.device.encryption,
+      frame: frames[0]!,
+    });
+    expect(opened).toEqual(alice.epochKeys.get(0));
     await writer.receiveEpochKey(alice.device, 0, frames[0]!);
     expect(await readLoro(writer)).toContain('epoch-zero');
     expect((await alice.publishEpoch()).status).toBe('committed');
@@ -167,7 +181,6 @@ describe('lab host lifecycle', () => {
 
   it('does not CAS when epoch candidate persistence fails', async () => {
     const host = await launchLab();
-    const { makeLiveFs } = await import('../src/services/fs');
     const live = makeLiveFs();
     const fs = {
       ...live,
@@ -178,8 +191,58 @@ describe('lab host lifecycle', () => {
     };
     const alice = await labClient({ host, account: 'alice', fs });
     await alice.createSpace();
-    await expect(alice.publishEpoch()).rejects.toThrow('disk-failure');
+    await expect(alice.publishEpoch()).rejects.toMatchObject({
+      _tag: 'StorageError',
+      reason: 'io',
+    });
     expect((await alice.readLedger()).state.epoch.number).toBe(0);
+  });
+
+  it('does not install a committed candidate in memory until key persistence succeeds', async () => {
+    const host = await launchLab();
+    const live = makeLiveFs();
+    let failKeys = false;
+    const alice = await labClient({
+      host,
+      account: 'alice',
+      fs: {
+        ...live,
+        writeText(path, text) {
+          if (failKeys && path.endsWith('epochs.json')) throw new Error('key-disk-failure');
+          return live.writeText(path, text);
+        },
+      },
+    });
+    await alice.createSpace();
+    const oldKeyFile = readFileSync(join(alice.clientDir, 'epochs.json'), 'utf8');
+    failKeys = true;
+    await expect(alice.publishEpoch()).rejects.toMatchObject({
+      _tag: 'StorageError',
+      reason: 'io',
+    });
+    expect((await alice.readLedger()).state.epoch.number).toBe(1);
+    expect(alice.epochKeys.has(1)).toBe(false);
+    expect(readFileSync(join(alice.clientDir, 'epochs.json'), 'utf8')).toBe(oldKeyFile);
+    const candidatePath = join(alice.clientDir, 'epoch-candidate.json');
+    const candidate = JSON.parse(readFileSync(candidatePath, 'utf8')) as { secretHex: string };
+    failKeys = false;
+    expect(await alice.publishEpoch()).toEqual({ status: 'committed', epoch: 1 });
+    expect(toHex(alice.epochKeys.get(1)!)).toBe(candidate.secretHex);
+    expect(existsSync(candidatePath)).toBe(false);
+    expect((await alice.readLedger()).state.epoch.number).toBe(1);
+  });
+
+  it('does not interpret a corrupt pending journal as permission to generate a fresh candidate', async () => {
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice' });
+    await alice.createSpace();
+    await alice.readLedger();
+    const journalPath = join(alice.clientDir, 'ledger.sqlite');
+    writeFileSync(journalPath, 'damaged-journal');
+    await expect(alice.publishEpoch()).rejects.toThrow();
+    expect(readFileSync(journalPath, 'utf8')).toBe('damaged-journal');
+    expect(existsSync(join(alice.clientDir, 'epoch-candidate.json'))).toBe(false);
+    expect(alice.epochKeys.has(1)).toBe(false);
   });
 
   it('retries publishEpoch after a send-before-CAS failure in the same process', async () => {
@@ -225,10 +288,9 @@ describe('lab host lifecycle', () => {
     const pendingDevice = await alice.admitDevice(tablet, 'personal', false);
     expect(pendingDevice.status).not.toBe('committed');
     alice.fetch = orig;
-    const rotate1 = await alice.publishEpoch();
-    expect(rotate1.status).not.toBe('committed');
-    const rotate2 = await alice.publishEpoch();
-    expect(rotate2.status).not.toBe('committed');
+    await expect(alice.publishEpoch()).rejects.toMatchObject({ _tag: 'PendingOperationExists' });
+    await expect(alice.publishEpoch()).rejects.toMatchObject({ _tag: 'PendingOperationExists' });
+    expect(existsSync(join(alice.clientDir, 'epoch-candidate.json'))).toBe(false);
     expect((await alice.readLedger()).state.epoch.number).toBe(0);
     expect([...alice.epochKeys.keys()].sort()).toEqual([0]);
     const resumed = await alice.resume();
@@ -290,13 +352,13 @@ describe('lab host lifecycle', () => {
 
   it('does not replace an unreadable epoch candidate with a new publication', async () => {
     const host = await launchLab();
-    const { makeLiveFs } = await import('../src/services/fs');
     const live = makeLiveFs();
     let failRead = false;
+    const readFailure = new Error('read-failure');
     const fs = {
       ...live,
       readText(path: string) {
-        if (failRead && path.endsWith('epoch-candidate.json')) throw new Error('read-failure');
+        if (failRead && path.endsWith('epoch-candidate.json')) throw readFailure;
         return live.readText(path);
       },
     };
@@ -315,7 +377,10 @@ describe('lab host lifecycle', () => {
     const path = join(alice.clientDir, 'epoch-candidate.json');
     const before = readFileSync(path, 'utf8');
     failRead = true;
-    await expect(alice.publishEpoch()).rejects.toThrow('epoch-candidate-corrupt');
+    await expect(alice.publishEpoch()).rejects.toMatchObject({
+      _tag: 'StorageError',
+      reason: 'io',
+    });
     failRead = false;
     expect(readFileSync(path, 'utf8')).toBe(before);
     expect((await alice.readLedger()).state.epoch.number).toBe(0);
@@ -559,6 +624,98 @@ describe('lab host lifecycle', () => {
     await writeLoro(writer, 'before-revoke');
     expect((await alice.revokeDevice(tablet.publicKey)).status).toBe('committed');
     await expect(writeLoro(writer, 'after-revoke')).rejects.toThrow();
+  });
+
+  it('retries the exact outbox frame after restart and does not re-encrypt', async () => {
+    const host = await launchLab();
+    const clientDir = tempDir('e2ee-lab-key-outbox-');
+    const alice = await labClient({ host, account: 'alice', clientDir });
+    await alice.createSpace();
+    const tablet = await generateDevice();
+    expect((await alice.admitDevice(tablet, 'personal', false)).status).toBe('committed');
+    const first = await alice.deliverEpochKey(tablet, 0);
+    const deviceJson = await exportDevice(alice.device);
+    const genesisHex = alice.genesisHex!;
+    alice.close();
+    const restarted = await labClient({
+      host,
+      account: 'alice',
+      device: deviceJson,
+      clientDir,
+    });
+    await restarted.adoptGenesis(genesisHex);
+    const second = await restarted.deliverEpochKey(tablet, 0);
+    expect(second).toEqual(first);
+    expect(existsSync(join(clientDir, 'key-outbox.sqlite'))).toBe(true);
+  });
+
+  it('does not install a received key when keyring persistence fails', async () => {
+    const host = await launchLab();
+    const alice = await labClient({ host, account: 'alice' });
+    await alice.createSpace();
+    const tablet = await generateDevice();
+    expect((await alice.admitDevice(tablet, 'personal', false)).status).toBe('committed');
+    await alice.deliverEpochKey(tablet, 0);
+    const live = makeLiveFs();
+    let allowWrite = true;
+    const writer = await labClient({
+      host,
+      account: 'alice',
+      device: await exportDevice(tablet),
+      fs: {
+        ...live,
+        writeText(path, text) {
+          if (!allowWrite && path.endsWith('epochs.json')) throw new Error('disk-full');
+          live.writeText(path, text);
+        },
+      },
+    });
+    await writer.adoptGenesis(alice.genesisHex!);
+    await writer.readLedger();
+    const frames = await writer.readKeyFrames();
+    allowWrite = false;
+    await expect(writer.receiveEpochKey(alice.device, 0, frames[0]!)).rejects.toMatchObject({
+      reason: 'io',
+    });
+    expect(writer.epochKeys.has(0)).toBe(false);
+  });
+
+  it('keeps pending ciphertext when keys CAS is not observed', async () => {
+    const host = await launchLab();
+    let blockPut = true;
+    const alice = await labClient({
+      host,
+      account: 'alice',
+      fetch: async (input, init) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        if (
+          blockPut &&
+          request.method === 'POST' &&
+          request.url.includes('/keys/') &&
+          request.url.includes('append-cas')
+        ) {
+          return new Response('', { status: 503 });
+        }
+        return globalThis.fetch(request);
+      },
+    });
+    await alice.createSpace();
+    const tablet = await generateDevice();
+    expect((await alice.admitDevice(tablet, 'personal', false)).status).toBe('committed');
+    await expect(alice.deliverEpochKey(tablet, 0)).rejects.toThrow('pending-key-delivery');
+    expect(existsSync(join(alice.clientDir, 'key-outbox.sqlite'))).toBe(true);
+    blockPut = false;
+    const observed = await alice.deliverEpochKey(tablet, 0);
+    expect(observed.byteLength).toBeGreaterThan(0);
+    const writer = await labClient({
+      host,
+      account: 'alice',
+      device: await exportDevice(tablet),
+    });
+    await writer.adoptGenesis(alice.genesisHex!);
+    await writer.readLedger();
+    await writer.receiveEpochKey(alice.device, 0, observed);
+    expect(writer.epochKeys.has(0)).toBe(true);
   });
 
   it('rejects control writes after the original 15-minute lease', async () => {

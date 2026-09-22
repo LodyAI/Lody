@@ -6,6 +6,8 @@ import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import type { Entropy } from '@lody/e2ee-core';
 import { liveEntropy } from '@lody/e2ee-core';
+import { parseEpochEnvelopeChunk } from '@lody/e2ee-core/effect';
+import { Either } from 'effect';
 import {
   applyAttackAction,
   createAttackLab,
@@ -135,61 +137,17 @@ function expectText(text: string, marker: string): void {
   if (!text.includes(marker)) throw new Error(`missing:${marker}:${text.slice(0, 64)}`);
 }
 
-/**
- * Skip one CBOR item, returning its end offset. Covers the fixed envelopeAad
- * shape `[32B hash, epoch uint, 32B key, 32B key]` — byte strings and
- * unsigned ints only.
- */
-function cborItemEnd(body: Uint8Array, start: number): number {
-  const head = body[start];
-  if (head === undefined) throw new Error('cbor-truncated');
-  const major = head >> 5;
-  const info = head & 0x1f;
-  const readUint = (at: number): { value: number; end: number } => {
-    if (info < 24) return { value: info, end: at };
-    const widths = { 24: 1, 25: 2, 26: 4, 27: 8 } as Record<number, number>;
-    const width = widths[info];
-    if (!width) throw new Error('cbor-unsupported');
-    let value = 0;
-    for (let i = 0; i < width; i++) value = value * 256 + (body[at + i] ?? 0);
-    return { value, end: at + width };
-  };
-  if (major === 0) return readUint(start + 1).end;
-  if (major === 2) {
-    const length = readUint(start + 1);
-    return length.end + length.value;
-  }
-  if (major === 4) {
-    let cursor = start + 1;
-    for (let i = 0; i < info; i++) cursor = cborItemEnd(body, cursor);
-    return cursor;
-  }
-  throw new Error(`cbor-major:${major}`);
-}
-
-/** Frame = envelopeAad + enc(32) + ct(48) + sig(64); pages pack raw frames. */
-function splitKeyFrames(body: Uint8Array): Uint8Array[] {
-  const frames: Uint8Array[] = [];
-  let cursor = 0;
-  while (cursor < body.byteLength) {
-    const end = cborItemEnd(body, cursor) + 144;
-    frames.push(body.subarray(cursor, end));
-    cursor = end;
-  }
-  return frames;
-}
-
-/**
- * Key-delivery frames arrive as raw envelopes packed inside stream pages.
- * Split the pages and take the last frame — the envelope the scenario just
- * delivered.
- */
+/** Raw pages may split a header or ciphertext. Parsing does not authenticate the frame. */
 async function lastFrame(client: HonestClient): Promise<Uint8Array> {
   const pages = await client.readKeyFrames();
+  let tail: Uint8Array = new Uint8Array();
   let last: Uint8Array | undefined;
-  for (const body of pages) {
-    for (const frame of splitKeyFrames(body)) last = frame;
+  for (const page of pages) {
+    const parsed = Either.getOrThrowWith(parseEpochEnvelopeChunk(tail, page), (error) => error);
+    tail = parsed.tail;
+    for (const frame of parsed.frames) last = frame.bytes;
   }
+  if (tail.length !== 0) throw new Error('truncated-key-frame');
   if (!last) throw new Error('no-key-frame');
   return last;
 }

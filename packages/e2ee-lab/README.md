@@ -6,6 +6,13 @@ Local deterministic E2EE collaboration lab. Not product E2EE and not Lody
 integration. Honest clients are programs; only an attacker Agent (P4) explores
 malicious-server mutations at recorded event boundaries.
 
+Rotation recovery uses core's exact-record candidate classification. A corrupt
+pending journal is not treated as empty; a confirmed candidate is persisted to the
+key file before becoming available in memory. Failed key persistence retains the
+candidate for retry. Key commitments and envelopes use the Org hash, not the full
+genesis record. Old captures with the incorrect record context are not silently
+migrated; record new evidence against the corrected tree.
+
 ## Commands
 
 ```sh
@@ -50,6 +57,17 @@ real-model intervention is in `test/restricted-agent.test.ts`. AttackLab
 clock/fs/HTTP go through Effect `LabClock` / `LabFs` / `LabHttp`
 (`src/services/`); Promise methods provide `LiveLabLayer`. Isolation is the
 capability handle only: not an OS container, and Effect is not a sandbox.
+
+Epoch rotation now delegates to the core Effect workflow, rather than a second Lab
+implementation of candidate signing/retry/installation. Normal file writes use the
+native atomic/fsynced adapter; injected `LabFs` remains available for deterministic
+fault tests. JSON key/candidate formats are unchanged; `.lock.sqlite` files contain
+only operational locking metadata. Different pending operations produce the typed
+`PendingOperationExists` failure, and storage faults produce `StorageError` rather
+than a generic unknown result. Listed Promise SDK boundaries that remain: host
+`Ledger.verify`/`extend` per HTTP request, `createStreamsContentProvider` for
+streams-crdt, `createContentSnapshotPublication`, and demo `backup.ts` file wrap.
+Those unwrap core workflows; they are not a second content or admission algorithm.
 Reproduction packs, fingerprints, and minimizer coverage live in
 `test/repro-pack.test.ts`. Nested streams-crdt import/read request order is not
 a controlled microtask boundary; collab replay uses the oldest-runnable FIFO

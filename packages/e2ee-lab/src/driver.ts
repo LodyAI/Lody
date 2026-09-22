@@ -43,15 +43,19 @@ export class ScheduleDriver {
 
   async drive<T>(work: Promise<T>): Promise<T> {
     const pump = setInterval(() => this.tickSafe(), 0);
-    try {
-      const result = await work;
-      if (this.failed) throw this.failed;
-      return result;
-    } finally {
-      clearInterval(pump);
-      this.tickSafe();
-      if (this.failed) throw this.failed;
-    }
+    const outcome = await work
+      .then(
+        (value) => ({ ok: true as const, value }),
+        (error: unknown) => ({ ok: false as const, error })
+      )
+      .finally(() => {
+        clearInterval(pump);
+        this.tickSafe();
+      });
+    // Preserve the scheduler's failure priority explicitly, not via a throw in finally.
+    if (this.failed) throw this.failed;
+    if (!outcome.ok) throw outcome.error;
+    return outcome.value;
   }
 
   private tickSafe(): void {

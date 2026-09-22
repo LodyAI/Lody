@@ -225,7 +225,7 @@ describe('design probes: binding, host cache, guest content', () => {
     expect(
       await openEpochEnvelope({
         state: (await alice.readLedger()).state,
-        genesis: alice.genesis!,
+        genesis: fromHex(alice.genesisHex!),
         epoch: 0,
         sender: bob.device.publicKey,
         recipient: alice.device.publicKey,
@@ -258,7 +258,7 @@ describe('design probes: binding, host cache, guest content', () => {
     const ledger = await bob.readLedger();
     const wrongKey = await sealEpochEnvelope({
       state: ledger.state,
-      genesis: bob.genesis!,
+      genesis: ledger.state.genesis,
       epoch: 0,
       sender: bob.device.publicKey,
       recipient: carol.device.publicKey,
@@ -266,9 +266,10 @@ describe('design probes: binding, host cache, guest content', () => {
       epochKey: bob.random('wrong-epoch-key', 32),
       sign: (bytes) => bob.device.sign(bytes),
     });
-    await expect(carol.receiveEpochKey(bob.device, 0, wrongKey)).rejects.toThrow(
-      'invalid-operation'
-    );
+    await expect(carol.receiveEpochKey(bob.device, 0, wrongKey)).rejects.toMatchObject({
+      _tag: 'ContextMismatch',
+      context: 'epoch',
+    });
     expect(carol.epochKeys.has(0)).toBe(false);
 
     // The real key, forwarded by Bob through the gateway, is accepted.

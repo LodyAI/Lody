@@ -5,17 +5,7 @@ import ts from 'typescript';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const failures = [];
-const transitional = new Set([
-  'workflows/enrollment.ts -> ../ledger/crypto',
-  'workflows/enrollment.ts -> ../ledger/schema',
-  'workflows/ledger-engine.ts -> ../ledger/ledger',
-  'workflows/ledger-engine.ts -> ../ledger/crypto',
-  'workflows/ledger-engine.ts -> ../ledger/schema',
-  'workflows/protocol.ts -> ../ledger/error',
-  'workflows/verification.ts -> ../ledger/ledger',
-  'workflows/verification.ts -> ../ledger/schema',
-  'workflows/verification.ts -> ../ledger/crypto',
-]);
+const transitional = new Set();
 const observedBridges = new Set();
 
 function files(path) {

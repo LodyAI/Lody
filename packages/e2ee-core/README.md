@@ -32,19 +32,167 @@ const revoke = Effect.gen(function* () {
 // Run the Effect at the application boundary, not inside another workflow.
 ```
 
-`create` accepts an already signed genesis and requires empty storage; `restore`
-requires an existing valid journal. `createFromSnapshot` requires independent
+`create` accepts checked user/membership IDs, an encryption public key and an
+`EpochCommitment`; the bound device signs genesis and the client derives its anchor.
+It creates the local journal in empty storage, not remote publication or a key backup.
+The initial key must already be retained by the key lifecycle; this remaining P3
+composition is not yet a self-contained Org onboarding flow. `importGenesis` is the
+explicit raw signed-genesis import/audit path. `restore` requires an existing valid
+journal. `createFromSnapshot` requires independent
 genesis/endorser/head trust. `resume` returns `Idle` if nothing is pending and
 rejects another device's pending record. Byte exports and state inspection return
 copies. A signature-checked record is not yet authorized; an authorized preview
 is not a server commit. Snapshot-origin views do not claim full-history replay.
 
-**Not complete:** protocol validators still use a temporary typed-error bridge;
-key delivery/rotation, content, recovery and existing consumers still need their
-Effect-native migration. Do not remove compatibility exports until those consumers
-move. `check:effect-boundaries` checks the migrated folders only; `--complete`
-deliberately fails while its protocol exceptions remain. Neither this migration
-nor its tests enable production E2EE.
+Node applications can explicitly compose `nodeJournalStoreLayer({ path, mode })`
+from `@lody/e2ee-core/effect/platform-node`. Use `create` once for a new SQLite
+database and `open` on subsequent acquisitions. Opening validates the database and
+stored envelope without initializing missing/foreign files. Creating the database
+alone does not create a ledger: use the same Layer in `LedgerClient.create` to
+write genesis. A failed creation may leave a file; errors never delete/recreate it.
+Directories must be application-owned; this is not protection from a concurrent
+local filesystem attacker. This Node Layer acquires/releases synchronous SQLite
+leases directly with Effect, including interruption cleanup; it does not use the
+Promise transaction adapter. Older callers still use that temporary adapter over
+the same SQLite implementation. `pure/journal-codec.ts` owns the unchanged v0/v1
+persisted envelope.
+
+`pure/ledger-policy.ts` computes typed authorization changes without mutating its
+inputs. The temporary replay adapter applies them only after complete success to
+the privately owned accumulator, without copying full history per record.
+This internal delta is not a public authorization token or patch-state API.
+
+`pure/ledger-schema.ts` owns the Either codec and signature-message construction;
+the old schema entry only unwraps its result. `SigningFacts` is immutable evidence
+of public-key point validity, not permission or a verified signature. Parsing takes
+these facts explicitly and returns updated facts without mutating the input; no
+global cache lives in the pure layer. The legacy cache adapter remains temporary.
+
+`pure/operation-proofs.ts` constructs owned signature jobs for joining and device
+possession. Both replay paths share it. Device proofs still require the actor's
+preceding verified membership; constructing a job is not verifying it.
+
+`pure/ledger-snapshot.ts` owns snapshot encoding, structural validation and state
+import as Either computations. Parsed snapshots do not establish signature trust;
+the existing validator still checks the independent anchor and endorsements.
+`verifyRecordSignature`, `prepareDeviceAdmission` and `prepareJoinRequest` require
+`SignatureVerifier`; explicitly provide
+`signatureVerifierLayer` from `./effect/platform`. The layer uses real strict
+Ed25519 verification with an instance-owned cache. Its underlying legacy crypto
+adapter (including hash configuration) is temporary, not completed purity.
+
+`pure/epoch-envelope.ts` owns forwarding eligibility, recipient-key lookup and
+envelope framing. `pure/epoch-history.ts` owns deterministic history encryption,
+decryption, packet collection and complete-chain recovery. It takes an explicit
+nonce, with no entropy or key handles. Legacy APIs delegate to these functions;
+framing/collection alone authenticates neither the ledger nor its keys.
+`HpkeSender` / `HpkeRecipient` provide typed crypto Services through explicit
+`hpkeSenderLayer` / `hpkeRecipientLayer` platform composition. The latter retains
+the private key handle. `EpochKey` is opaque with no public byte export; commitments
+are a different type. Legacy HPKE callers share the same platform driver.
+Native HPKE requires `CryptoEntropy`; production explicitly composes
+`hpkeSenderLayer().pipe(Layer.provide(cryptoEntropyLayer))`. Tests provide their own
+Service. Each seal execution requests fresh entropy, never during construction.
+`LedgerClient.prepareEpochEnvelope(recipient, key)` looks up the recipient's key
+in its verified view, checks the current key commitment, seals/signs, and refreshes
+again to recheck the relevant authority and epoch. The caller supplies neither
+recipient encryption key nor genesis/epoch/signer fields. Its opaque `Prepared`
+result is not proof of persistence or delivery.
+`LedgerClient.openEpochEnvelope(sender, bytes)` checks the bound recipient, verifies
+the signature, opens and checks the current commitment, then refreshes and rechecks
+authority. The returned secret is not yet durably installed. These workflows do
+not establish global freshness; exact-byte outbox, key sources and installation
+still need migration. The legacy HPKE driver retains its temporary entropy adapter.
+
+`workflows/key-delivery.ts` is the shared exact-frame outbox engine, also used by
+the legacy delivery entrypoint. Frame selection and observation are pure; storage
+and transport are typed Services. Only transport failures may become Pending;
+protocol rejection, defects and interruption propagate. Inputs and authorization
+arguments are copied so callbacks cannot replace the persisted ciphertext.
+For the raw epoch-envelope stream, compose `epochStreamDeliveryLayer` with
+`streamsEpochLayer(selectedStreamsClient)` from `./effect/platform`. The application
+selects the authenticated stream; the adapter never creates it. Full bounded reads
+carry partial frames across pages and reject truncated suffixes. CAS conflicts are
+reconciled by exact-byte readback, not new encryption. SDK auth/protocol failures
+remain distinct from transient transport errors; upstream response bodies are not
+included in diagnostics. This is not the legacy length-framed key stream adapter.
+`LedgerClient.deliverEpochEnvelope(deliveryId, prepared)` and
+`resumeEpochDelivery(deliveryId, recipient)` own authorization: they refresh the
+ledger, bind the current genesis/epoch/sender/recipient, verify the saved signature,
+and refresh again. Resume uses no epoch secret or HPKE Service. `DeliveryId` is a
+checked 16-byte identifier distinct from a join `RequestId`. Observed means exact
+remote ciphertext readback, not recipient installation. The Promise-store lease
+is temporary for unmigrated callers; `nodeKeyOutboxLayer({ path, mode })` from
+`./effect/platform-node` owns synchronous SQLite leases directly through Effect.
+Choose `create` or `open` explicitly; open never creates a missing file or initializes
+foreign storage. The pure outbox codec preserves the old v0 payload, shared with
+legacy callers. Saves commit independently, including when later work is cancelled.
+`LedgerClient.sendCurrentEpochKey(recipient)` is the ordinary send path: it looks up
+the current secret from `EpochKeyring` and the recipient encryption key from the
+verified view. Callers name the recipient device, not an encryption key. The
+advanced `sendEpochKey(recipient, key)` still exists for tests that inject a secret.
+Both derive a stable 16-byte local slot from a domain-separated SHA-256 of canonical
+genesis/epoch/sender/recipient context; the slot is not authorization evidence and
+does not change envelope or outbox formats. Under the outbox lock they reuse saved
+ciphertext, preparing only when absent. Repeated/concurrent calls and restart do
+not re-encrypt after persistence. Outcomes are `Observed` or `Pending` plus the
+exact frame and delivery ID. Observed is exact remote read-back, not recipient
+installation. `receiveEpochKey(sender, frame)` verifies the envelope against the
+bound view, persists through `EpochKeyring.put`, and only then reports `Installed`.
+A failed keyring write leaves the previous key map unchanged. Lab Promise
+`deliverEpochKey` / `receiveEpochKey` compose these workflows with
+`streamsEpochLayer`, `epochStreamDeliveryLayer` and `nodeKeyOutboxLayer`; they no
+longer seal with a caller-supplied `recipientEncryptionKey` or append without an
+outbox.
+The internal authorization
+callback is not a public API. Tracing uses an Effect span without secret fields.
+
+`parseEpochEnvelopeChunk(tail, chunk)` parses the existing raw key-stream envelopes
+across arbitrary transport page boundaries. It returns complete, owned frames with
+unverified local delivery IDs and a copied tail for the next page. At end of stream,
+the caller must reject a nonempty tail. Neither parsing nor the ID proves signatures,
+membership or key authenticity. Canonical headers are checked here; curve/signature
+validation belongs to the existing envelope verification workflow, not routing.
+
+`LedgerClient.rotateEpoch()` and `resumeEpochRotation()` now own native rotation
+orchestration with `EpochCandidateStore` and `EpochKeyring` Services. New rotations
+also require `CryptoEntropy`; recovery never requests fresh entropy or signatures.
+An existing candidate is retried exactly, not replaced. Save failure prevents CAS;
+installation requires the exact record in a verified view and durable key storage
+before candidate removal. Historical recovery adds a key without changing the
+ledger's current epoch. Keyring writes must be idempotent and reject conflicting
+keys; candidate storage must provide a per-Org cross-process exclusive lease.
+`nodeEpochFilesLayer({ genesis, candidatePath, keyringPath })` in
+`./effect/platform-node` opens the existing Lab JSON files, preserves their format,
+and uses separate `.lock.sqlite` sidecars for exclusion across processes. Writes use
+atomic replacement and file/directory fsync. Missing/corrupt keyrings are not created;
+the application must explicitly initialize a new keyring. Closed transaction handles
+reject further use. This compatibility Layer stores plaintext like the old Lab: it
+is NOT OS-protected product storage. Lab now delegates rotation to the same workflow
+through a temporary legacy-client bridge; other consumers, native Lab session APIs
+and production key protection remain outstanding. Do not treat this as complete
+rotation acceptance.
+
+`pure/epoch-candidate.ts` owns rotation candidate classification, queried through
+verified Ledger/LedgerView instances. It binds the secret commitment and exact
+published record, distinguishes current/historical/absent/mismatch, and never
+installs a key or rolls back the current epoch. Lab shares this query and the
+native rotation/delivery workflows.
+
+Native `verifyLedger` / `extendLedger` / `verifySnapshot` replay in
+`workflows/verification.ts` using `SignatureVerifier.verifyMany` for one batched
+Effect, then pure policy application. The Promise `Ledger` class remains for
+`./ledger` callers and reconstructs from a verified view. `check:effect-boundaries
+--complete` now requires zero workflow imports of `../ledger/`.
+`pure/content-frame.ts` and `workflows/content.ts` own content parse/seal/open;
+`ContentCipher` is the Promise unwrap (`ContentError` → `ControlLogError`).
+Policy callback throws stay defects. Listed Promise SDK/app boundaries:
+`createStreamsContentProvider` (streams-crdt), `createContentSnapshotPublication`,
+Promise `Ledger` (Lab host HTTP), recovery-file create/parse wrappers, and
+Electron IPC. `UserIdentityStore.sealBackup` / `recover` are native Effect
+methods. Ordinary Org create still composes local genesis, keyring persistence
+and remote publication at the application boundary. Neither this migration nor
+its tests enable production E2EE.
 Track scope, remaining gates and evidence in the
 [migration note](../../.agents/notes/proposed/architecture/2026-09-22-e2ee-effect-api.md).
 

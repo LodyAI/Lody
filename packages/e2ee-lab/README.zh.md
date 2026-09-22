@@ -5,6 +5,11 @@
 本地确定性 E2EE 协作实验室。不是产品 E2EE，也不接入 Lody。诚实客户端是程序；
 只有攻击 Agent（P4）在已记录的事件边界探索恶意服务器改动。
 
+轮换恢复使用 core 对精确候选记录的分类。损坏的 pending journal 不当作空状态；
+已确认候选先保存到密钥文件，再对内存开放。写盘失败保留候选用于重试。密钥承诺
+和信封使用 Org 哈希，不使用创世记录全文。旧错误上下文的录制不会静默迁移，须
+在修正后的代码上重新录制证据。
+
 ## 命令
 
 ```sh
@@ -41,6 +46,15 @@ P4 AttackLab 隔离与无 LLM 动作重放见 `test/attack-lab.test.ts`。多人
 `test/restricted-agent.test.ts`。AttackLab 的时钟/文件/HTTP 经 Effect
 `LabClock` / `LabFs` / `LabHttp`（`src/services/`）；Promise 方法提供
 `LiveLabLayer`。隔离只是能力句柄，不是 OS 容器，Effect 也不是沙箱。
+
+轮换已委托 core Effect 流程，不再在 Lab 重复实现候选签名、重试与安装。
+正常文件写入使用原子替换/fsync 适配器；注入 `LabFs` 仍支持确定性故障测试。
+密钥与候选 JSON 格式不变，`.lock.sqlite` 只存锁的运行元数据。
+不同操作占用 pending 时返回类型化 `PendingOperationExists`，磁盘失败返回
+`StorageError`，不再笼统视为结果未知。仍列出的 Promise SDK 边界：host 每次
+HTTP 请求上的 `Ledger.verify`/`extend`、streams-crdt 的
+`createStreamsContentProvider`、`createContentSnapshotPublication`，以及演示
+`backup.ts` 文件封装。它们只解包 core 流程，不是第二套内容或准入算法。
 复现包、指纹和缩减见 `test/repro-pack.test.ts`。streams-crdt import/read 的嵌套
 请求顺序不是可控 microtask 边界；协作重放使用最早可运行 FIFO。SIGKILL 崩溃
 恢复有测试；未刷盘 SQLite 页的断电未建模。见

@@ -5,50 +5,62 @@ Binding surface: [ledger spec](../../specs/e2ee-ledger.zh.md) and
 [README.md](README.md). JSON/hex control-log lives in `src/legacy.ts` for
 in-package tests only; do not re-export it.
 
-- Public exports: root `Ledger`/`LedgerError`/`ContentCipher`/recovery-file/
-  `createUserIdentity`/`restoreUserIdentity`/`ControlFreshnessLease`; subpaths
-  `./ledger`, `./ledger-node`, `./streams`, `./streams-content`,
-  `./snapshot-admission`. Never pass `verified=true`. Snapshot join uses
-  out-of-band genesis, endorser, attested head, and the endorser's signature
-  over that head.
+## Required source style
+
+- **Effect v3 only**: exact workspace catalog pin (currently `3.18.4`).
+  No v4/prereleases without approval.
+- `pure/`: deterministic values or typed `Either`; no I/O, ambient state,
+  clocks, randomness, logging or input mutation. Only unobservable local scratch
+  mutation is allowed.
+- `workflows/`: `Effect<A, E, R>` descriptions with declared Services for ALL
+  side effects and external/global dependencies (storage, network, crypto handles,
+  entropy, time, environment, process). No eager execution, hidden Live defaults
+  or internal runtime starts.
+- `platform/`: thin Service implementations/Layers; direct external API access
+  belongs here or in composition. Concentrate complexity in pure first, workflows
+  second; keep domain policy/state transitions out of platform.
+- No expected `throw`: pure returns typed `Either`; workflows use typed Effect
+  failures. Only unexpected fatal defects may throw. Never disguise defects or
+  interruption as ordinary failure or Pending.
+- Use Effect logging/tracing and injected Services, never `console` or ambient
+  loggers. Platform/composition configures sinks; pure returns diagnostic data.
+  Never log secrets.
+- Required migration target, not completed purity: existing bridges remain
+  explicit, temporary exceptions, not permission to add more.
+
+## Protocol and integration invariants
+
+- Public entrypoints are mapped in README. Never accept `verified=true`.
 - Org identity is the genesis record hash. `protocolVersion=1` only in genesis.
   Ordinary records omit Org ID, sequence, and generic operation IDs. Wire is
   `@ipld/dag-cbor` fixed arrays; keys, signatures, and hashes are raw bytes.
-- `Ledger.verify`/`extend` are pure and immutable. Parse, hash, verify every
-  signature including nested proofs, then replay policy. Never skip an invalid
-  record or grant unverified authority. The 10k/100ms gate is withdrawn, not
-  passed; no required SIMD/Wasm/multithreading work for that target.
-  Sequential verify is the default; Node workers are an explicit
-  `createNodeSignatureVerifyExecutor` adapter, not env/auto detection.
-  Inject entropy, clocks, timers and verify executors; production defaults stay
-  live `crypto.getRandomValues` / real time. Do not add `verified=true`.
-- Approved direction (§6.1): authenticated signed authorization-state snapshot
-  for first join, then fully verified increments; full replay remains optional
-  audit. Snapshot signer trust must be established outside that snapshot.
-  Bind actual complete state, replay facts, Org/genesis, position and head;
-  comparing only the head does not authenticate the imported state. Independent
-  comparison detects divergent views, not globally latest or honest history.
-  Confirmed DEC-001 (2026-09-14): `verifySnapshot` trust is out-of-band
-  genesis + endorser + attested head + endorser signature over that head.
-  Only Owner/Admin personal+canManage may endorse. No `verified=true`.
-  Preserve rollback/CAS/freshness, historical-key and recovery guarantees.
-  Snapshot refresh may skip stream prefix until the attested head is observed
-  or a suffix extends it; after that bound, any record that does not extend
-  the attested chain (wrong parent, foreign genesis, duplicate known hash)
-  fails closed and must not advance the journal cursor. Unknown prefix must
-  not become up-to-date success, including junk followed by an empty final page.
+- `Ledger.verify`/`extend` are pure and immutable: parse, hash, verify all
+  signatures (including nested proofs), then replay policy. Never skip invalid
+  records or grant unverified authority. The 10k/100ms target is withdrawn, not
+  passed; SIMD/Wasm/threads are not required. Verification defaults to sequential;
+  Node workers require explicit `createNodeSignatureVerifyExecutor`, no detection.
+  Inject entropy/clocks/timers/executors; production uses live secure randomness
+  and real time through platform adapters.
+- Snapshot join (§6.1, DEC-001): out-of-band genesis, endorser, attested head
+  and endorser signature; only Owner/Admin personal+canManage may endorse.
+  Bind complete state, replay facts, genesis, position and head, not head alone.
+  Verify increments; full replay is optional audit. Independent comparison detects
+  divergence, not global freshness or honest history. Preserve rollback, CAS,
+  freshness, historical-key and recovery guarantees. Refresh may skip prefix until
+  observing/extending the attested head; thereafter wrong parents, foreign genesis
+  or duplicate known hashes fail closed without cursor advance. Unknown prefix,
+  even junk followed by an empty final page, must not become up-to-date success.
 - Persist exact pending bytes before CAS. Conflicts never re-sign; retry the
   same bytes. `./effect` has the intent client; old `./ledger` submit/resume
   delegate to the same `workflows/ledger-engine.ts`. No second submit path.
-  Migration is incomplete: see README and the Effect migration note. Guard
-  `pure/ports/workflows` with `check:effect-boundaries`; its 9 listed protocol
-  bridges must disappear before declaring completion. Do not add a runtime
-  inside workflows or turn defects/malformed pages into Pending.
-  `openEpochEnvelope` returns plaintext only when the sender is a current
-  non-recovery device (`canSendEpoch`, also exported for the host gateway;
-  any active personal/machine device may forward, R only receives), the
-  recipient is admitted, the epoch matches, and `commitEpochKey` equals
-  the ledger commitment. Sender role is not key-authenticity evidence.
+  Guard `pure/ports/workflows` with `check:effect-boundaries --complete`.
+  Native verify/extend live in `workflows/verification.ts`; `./ledger` unwraps.
+  See the migration note in README.
+  Malformed pages must not become Pending.
+  `openEpochEnvelope` requires `canSendEpoch` (also exported for gateways), an
+  admitted recipient, current epoch and matching `commitEpochKey`. Every active
+  personal/machine device, including Guest, may forward; R only receives.
+  Sender role is not key-authenticity evidence.
 - Device possession uses `possess/v2` and binds the target membership inferred
   from the actor's preceding verified state. Check during replay even with a
   worker verifier. v1 proofs are rejected, not silently migrated or re-signed.
@@ -65,39 +77,38 @@ in-package tests only; do not re-export it.
 - Signing keys must be canonical nonzero prime-subgroup Ed25519 points.
   Verification uses pinned noble-ed25519 with `zip215: false` and explicit
   subgroup checks for A and R. Only native signing handles private keys.
-- Device storage stays in Electron main. Inject ports; only opt-in Streams
-  adapters call the supplied SDK. Never create streams or choose anchors
-  implicitly. Synthetic fixtures only; real signatures; no crypto stubs.
-- `content.ts`: fixed XChaCha20-Poly1305, HKDF-SHA-256, strict Ed25519. Caller
-  policy supplies authority; `inspectContent` is UNVERIFIED routing metadata.
-  `authenticate` verifies a signature without decrypting and is not publication
-  permission. `streams-content.ts` seals updates and content snapshots through
-  the existing streams-crdt provider `seal`/`open`. Honest clients require
-  `deviceMayWriteDocument` to seal snapshots; guests and recovery devices cannot.
-  Only active personal/machine devices may write content. Bind Org/genesis,
-  resource, kind/model, epoch, and the opaque continuation offset. Publication
-  admission is `./snapshot-admission`: current device write, submitter bound to
-  signing device, and the 15-minute lease. Recheck that original lease after
-  async verify, immediately before storing exact bytes; do not restart it.
-  Identical retries are idempotent; different bytes at
-  an admitted offset are rejected. Open does not re-check current write.
-  Decryption, transport offset, old head, self-declared time, or `verified=true`
-  are not admission evidence. Production JWT/gateway is unimplemented. Do not
-  enable production E2EE.
-- `snapshot-publication-store.ts` is the platform-neutral, synchronous atomic
-  storage port; default memory storage is not durable. `node-snapshot-publication-store.ts`
-  is exported only via `./node-snapshot-publication-store`. Explicit `{ create: true }`
-  creates a new SQLite file; ordinary open never recreates missing/foreign storage.
-  Verify outside the lock, re-read identity and current after acquiring it, then
-  recheck original lease and device permission before the atomic ciphertext/identity/
-  pointer commit. Return success only after commit. Busy is retryable with unchanged
-  input, not a reason to erase or steal a lock. No cross-stream transaction or JWT wiring.
+- Device storage stays in Electron main. Only opt-in Streams adapters call the
+  supplied SDK; no implicit stream creation or anchor choice. Synthetic fixtures,
+  real signatures, no crypto stubs.
+- `content.ts`: XChaCha20-Poly1305, HKDF-SHA-256, strict Ed25519. Caller policy
+  supplies authority; `inspectContent` is UNVERIFIED routing metadata;
+  `authenticate` checks signatures without decryption, not publication permission.
+  `streams-content.ts` uses existing streams-crdt `seal`/`open` for updates and
+  snapshots. Only active personal/machine writers may write; snapshot sealing
+  requires `deviceMayWriteDocument`, excluding Guest/R. Bind genesis, resource,
+  kind/model, epoch and opaque continuation offset. `./snapshot-admission`
+  requires current write permission, submitter/signing-device binding and the
+  original 15-minute lease, rechecked after async verification immediately before
+  storing exact bytes, never restarted. Exact retries are idempotent; different
+  bytes at an admitted offset fail. Open does not recheck current write.
+  Decryption, offset, old head or self-declared time cannot prove admission.
+  Production JWT/gateway remains unimplemented; keep product E2EE off.
+- `snapshot-publication-store.ts`: platform-neutral synchronous atomic port;
+  memory default is not durable. Node implementation is exported only through
+  `./node-snapshot-publication-store`. Only `{ create: true }` creates SQLite;
+  ordinary open never recreates missing/foreign storage. Verify outside the lock;
+  inside, re-read identity/current and recheck original lease/device permission
+  before atomic ciphertext/identity/pointer commit. Success follows commit.
+  Busy retries unchanged input, never erases/steals locks. No cross-stream
+  transactions or JWT wiring; synchronous transactions must remain synchronous.
 - `streams.ts` uses the pinned SDK read/`appendCas` APIs and length framing.
   Never invent offsets, fall back to ordinary append, or auto-re-sign. HTTP
   reads can split frames; checkpoint only complete frames/pages.
 - `./ledger-node` and `node-store.ts` are Node-only; never re-export from the
   root. Application-owned local filesystem; SQLite EXCLUSIVE; corrupt/foreign
   journals fail closed. Experimental journal/outbox formats are not V4.
+  `./effect/platform-node` requires explicit create/open; open must never
+  initialize missing/foreign storage. Pure journal codecs preserve v0/v1 bytes.
 - Legacy JSON/hex (`team.ts`, `KeyDelivery`, `EpochPublisher`, v3 genesis):
   still reject old v1/v2 unchanged; `canManage` is explicit; machines false;
   admit/cancel consume `(identity, requestId)` permanently; expiry is checked

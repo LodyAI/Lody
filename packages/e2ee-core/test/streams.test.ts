@@ -1,4 +1,7 @@
 import { StreamsClient } from '@loro-dev/streams-client';
+import { Effect } from 'effect';
+import { EpochStream } from '../src/ports/epoch-stream';
+import { streamsEpochLayer } from '../src/platform/streams-epoch';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   ControlLogClient,
@@ -20,6 +23,91 @@ import { MAX_WIRE_BYTES } from '../src/wire';
 import { MemoryStore, deferred, HttpLedger, concat, readResponse } from './control-fixtures';
 
 const url = 'https://streams.example.test/v1/buckets/synthetic/streams/org-control';
+
+describe('Effect raw epoch SDK adapter', () => {
+  it.each(['previous', 'foreign'])(
+    'binds CAS mismatch to the requested offset (%s)',
+    async (expected) => {
+      const client = new StreamsClient({
+        url,
+        retry: { maxAttempts: 0 },
+        fetch: async () =>
+          new Response(null, {
+            status: 409,
+            headers: {
+              'stream-expected-offset': expected,
+              'stream-cas-mismatch': 'true',
+              'stream-next-offset': 'other-writer',
+            },
+          }),
+      });
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          return yield* Effect.either((yield* EpochStream).append('previous', new Uint8Array([1])));
+        }).pipe(Effect.provide(streamsEpochLayer(client)))
+      );
+      expect(result).toMatchObject(
+        expected === 'previous'
+          ? { _tag: 'Right', right: 'conflict' }
+          : { _tag: 'Left', left: { _tag: 'StreamProtocolError' } }
+      );
+    }
+  );
+  it.each([401, 403, 404, 410, 500])(
+    'classifies HTTP %s without exposing response bodies',
+    async (status) => {
+      const client = new StreamsClient({
+        url,
+        retry: { maxAttempts: 0 },
+        fetch: async () => new Response('sensitive upstream diagnostic', { status }),
+      });
+      const result = await Effect.runPromise(
+        Effect.gen(function* () {
+          return yield* Effect.either((yield* EpochStream).read('-1'));
+        }).pipe(Effect.provide(streamsEpochLayer(client)))
+      );
+      expect(result).toMatchObject({
+        _tag: 'Left',
+        left: {
+          _tag:
+            status === 401 || status === 403
+              ? 'ValidationError'
+              : status === 500
+                ? 'TransportError'
+                : 'StreamProtocolError',
+        },
+      });
+      expect(JSON.stringify(result)).not.toContain('sensitive upstream diagnostic');
+    }
+  );
+
+  it('uses CAS with owned raw bytes and performs no work before execution', async () => {
+    const input = new Uint8Array([1, 2, 3]);
+    const observed: Uint8Array[] = [];
+    const client = new StreamsClient({
+      url,
+      retry: { maxAttempts: 0 },
+      fetch: async (_url, init) => {
+        expect(init?.method).toBe('POST');
+        const headers = new Headers(init?.headers);
+        expect(headers.get('content-type')).toBe('application/octet-stream');
+        expect(headers.get('stream-expected-offset')).toBe('previous');
+        observed.push(new Uint8Array(await new Response(init?.body).arrayBuffer()));
+        return new Response(null, { status: 204, headers: { 'stream-next-offset': 'next' } });
+      },
+    });
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const stream = yield* EpochStream;
+        const pending = stream.append('previous', input);
+        input.fill(0);
+        expect(observed).toEqual([]);
+        expect(yield* pending).toBe('accepted');
+        expect(observed).toEqual([new Uint8Array([1, 2, 3])]);
+      }).pipe(Effect.provide(streamsEpochLayer(client)))
+    );
+  });
+});
 const genesis = 'a1'.repeat(32);
 const crypto = new WebCryptoControl();
 let key: CryptoKey;

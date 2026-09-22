@@ -152,6 +152,7 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
   const pointCache = new SigningPointCache();
   const snapshotWriteLedger = new AsyncLocalStorage<Ledger>();
 
+  /** Promise Ledger SDK boundary; host HTTP cannot own an Effect runtime per request. */
   async function loadLedger(genesisHex: string): Promise<Ledger> {
     // Always re-read from Riverrun. A sticky cache would authorize content
     // writes against stale membership after a malicious-server control append.

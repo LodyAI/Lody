@@ -9,6 +9,7 @@ import { prefixedEntropy } from './entropy';
 import { LabRuntime } from './runtime';
 import { clearContentWrites } from './content-trace';
 import type { Failpoint } from './platform/protocol';
+import type { LabFetch } from './services/http';
 import { canPermitEvent, type LabEvent } from './scheduler';
 
 const dirs: string[] = [];
@@ -72,6 +73,7 @@ export async function labClient(input: {
   clientDir?: string;
   now?: () => number;
   fs?: import('./services/fs').LabFsShape;
+  fetch?: LabFetch;
 }): Promise<HonestClient> {
   const device = input.device ? await importDevice(input.device) : await generateDevice();
   const client = new HonestClient({
@@ -82,7 +84,7 @@ export async function labClient(input: {
     device,
     now: input.now,
     entropy: prefixedEntropy(input.account, input.entropy ?? liveEntropy),
-    fetch: input.runtime?.gatedFetch(input.account),
+    fetch: input.fetch ?? input.runtime?.gatedFetch(input.account),
     runtime: input.runtime,
     fs: input.fs,
   });

@@ -3,12 +3,14 @@ import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { LoroDoc } from 'loro-crdt';
 import { Flock } from '@loro-dev/flock-wasm';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { Either } from 'effect';
 import {
   ContentCipher,
   inspectContent,
   MAX_CONTENT_BYTES,
   type ContentScope,
 } from '../src/content';
+import { inspectContentFrame } from '../src/pure/content-frame';
 import { fromHex, toHex } from '../src/wire';
 import { deferred } from './control-fixtures';
 
@@ -219,6 +221,8 @@ describe('signed content envelope', () => {
       new DataView(length.buffer).setUint16(0, bytes.byteLength);
       const changed = Buffer.concat([length, bytes, wire.subarray(2 + parsed.length)]);
       expect(() => inspectContent(changed)).toThrow(error);
+      const inspected = inspectContentFrame(changed);
+      expect(Either.isLeft(inspected) && inspected.left.code).toBe(error);
       await expect(cipher().open(scope, epochKey, changed)).rejects.toMatchObject({
         message: error,
       });

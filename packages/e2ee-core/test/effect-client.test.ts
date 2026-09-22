@@ -8,15 +8,22 @@ import {
   PendingOperationExists,
   StorageError,
   prepareDeviceAdmission,
+  EpochCandidateStore,
+  EpochCandidateStorage,
+  EpochKeyring,
+  type EpochKey,
+  CryptoEntropy,
 } from '@lody/e2ee-core/effect';
 import {
   deviceSignerLayer,
   journalStoreLayer,
   ledgerTransportLayer,
+  signatureVerifierLayer,
 } from '@lody/e2ee-core/effect/platform';
 import { MemoryLedgerStore, MemoryLedgerStream, type LedgerStore } from '../src/ledger/submit';
 import type { LedgerCommand, CommandOutcome } from '@lody/e2ee-core/effect';
-import { ed25519, signGenesis, random } from './ledger-fixtures';
+import { ed25519, signGenesis, random, append as appendFixture } from './ledger-fixtures';
+import { commitEpochKey, sealHistoryPacket } from '../src/ledger';
 import { ControlLogError } from '../src/pure/legacy-error';
 
 const value = <A, E>(either: Either.Either<A, E>): A =>
@@ -46,11 +53,15 @@ async function setup() {
   const layer = Layer.mergeAll(
     journalStoreLayer(store),
     ledgerTransportLayer(stream),
-    deviceSignerLayer(value(Bytes.signingPublicKey(owner.publicKey)), owner.sign)
+    deviceSignerLayer(value(Bytes.signingPublicKey(owner.publicKey)), owner.sign),
+    signatureVerifierLayer
   );
-  const create = LedgerClient.create({ anchor, genesisRecord: created.record }).pipe(
-    Effect.provide(layer)
-  );
+  const create = LedgerClient.create({
+    userId: value(Bytes.userId(created.userId)),
+    membershipId: value(Bytes.membershipId(created.membershipId)),
+    encryptionPublicKey: value(Bytes.encryptionPublicKey(owner.enc)),
+    epochCommitment: value(Bytes.epochCommitment(created.commitment)),
+  }).pipe(Effect.provide(layer));
   const phone = await ed25519();
   const command = await Effect.runPromise(
     prepareDeviceAdmission({
@@ -59,17 +70,311 @@ async function setup() {
       encryptionPublicKey: value(Bytes.encryptionPublicKey(phone.enc)),
       grant: { kind: 'personal', canManage: false },
     }).pipe(
-      Effect.provide(deviceSignerLayer(value(Bytes.signingPublicKey(phone.publicKey)), phone.sign))
+      Effect.provide(deviceSignerLayer(value(Bytes.signingPublicKey(phone.publicKey)), phone.sign)),
+      Effect.provide(signatureVerifierLayer)
     )
   );
   return { owner, created, anchor, store, stream, layer, create, command };
 }
 
+describe('Effect rotation recovery', () => {
+  async function candidateSetup() {
+    const s = await setup();
+    const client = await Effect.runPromise(s.create);
+    const secret = random(32);
+    const commitment = await commitEpochKey(s.created.anchor, 1, secret);
+    const first = await appendFixture(s.created.ledger, s.owner, {
+      type: 'publishEpoch',
+      epoch: 1,
+      commitment,
+      previousEpochKey: sealHistoryPacket(secret, s.created.secret, s.created.anchor, 1),
+    });
+    const text = value(
+      EpochCandidateStorage.encodeEpochCandidate({
+        genesis: s.created.anchor,
+        epoch: 1,
+        commitment,
+        secret,
+        record: first.record,
+      })
+    );
+    let saved: string | null = text;
+    let failInstall = false;
+    let failSave = false;
+    const installed = new Map<number, EpochKey>();
+    const semaphore = Effect.unsafeMakeSemaphore(1);
+    const layer = Layer.mergeAll(
+      Layer.succeed(EpochCandidateStore, {
+        exclusive: (genesis, work) =>
+          semaphore.withPermits(1)(
+            Effect.suspend(() => {
+              expect(genesis.equals(s.anchor)).toBe(true);
+              return work({
+                load: Effect.sync(() => saved),
+                save: (next) =>
+                  Effect.suspend(() => {
+                    if (failSave) return Effect.fail(new StorageError({ reason: 'io' }));
+                    saved = next;
+                    return Effect.void;
+                  }),
+                clear: Effect.sync(() => {
+                  saved = null;
+                }),
+              });
+            })
+          ),
+      }),
+      Layer.succeed(EpochKeyring, {
+        get: (_, epoch) => Effect.sync(() => installed.get(epoch) ?? null),
+        put: (genesis, epoch, key) =>
+          Effect.suspend(() => {
+            expect(genesis.equals(s.anchor)).toBe(true);
+            if (failInstall) return Effect.fail(new StorageError({ reason: 'io' }));
+            installed.set(epoch, key);
+            return Effect.void;
+          }),
+      })
+    );
+    const recover = () =>
+      Effect.runPromise(client.resumeEpochRotation().pipe(Effect.provide(layer)));
+    return {
+      ...s,
+      client,
+      first,
+      secret,
+      text,
+      installed,
+      layer,
+      recover,
+      saved: () => saved,
+      replace: (nextText: string | null) => {
+        saved = nextText;
+      },
+      failSave: (fail: boolean) => {
+        failSave = fail;
+      },
+      failInstall: (fail: boolean) => {
+        failInstall = fail;
+      },
+    };
+  }
+
+  it('owns generation and persists before CAS; retries pending bytes without entropy', async () => {
+    const s = await candidateSetup();
+    s.replace(null);
+    s.installed.set(0, value(Bytes.epochKey(s.created.secret)));
+    const next = random(32);
+    const nonce = random(24);
+    const entropy = Layer.succeed(CryptoEntropy, {
+      bytes: (label, length) =>
+        Effect.sync(() => {
+          const bytes = label === 'publish-epoch-secret' ? next : nonce;
+          expect(bytes.length).toBe(length);
+          return bytes;
+        }),
+    });
+    const original = s.stream.appendCas.bind(s.stream);
+    s.stream.appendCas = async (offset, bytes) => {
+      const candidate = value(EpochCandidateStorage.decodeEpochCandidate(s.saved() ?? ''));
+      expect(candidate.record).toEqual(bytes);
+      expect(s.store.journal?.pending).toEqual(bytes);
+      return original(offset, bytes);
+    };
+    s.stream.mode = 'false-ack';
+    const rotation = s.client.rotateEpoch().pipe(Effect.provide(s.layer), Effect.provide(entropy));
+    expect(s.saved()).toBeNull(); // Construction is inert.
+    expect(await Effect.runPromise(rotation)).toMatchObject({ _tag: 'Pending', epoch: 1 });
+    expect(s.installed.has(1)).toBe(false);
+    const exact = s.saved();
+    s.stream.mode = 'ok';
+    const noEntropy = Layer.succeed(CryptoEntropy, {
+      bytes: () => Effect.die('must-not-regenerate'),
+    });
+    expect(
+      await Effect.runPromise(
+        s.client.rotateEpoch().pipe(Effect.provide(s.layer), Effect.provide(noEntropy))
+      )
+    ).toMatchObject({ _tag: 'Committed', epoch: 1 });
+    expect(s.stream.records).toEqual([
+      value(EpochCandidateStorage.decodeEpochCandidate(exact ?? '')).record,
+    ]);
+    expect(s.saved()).toBeNull();
+    expect(s.installed.has(1)).toBe(true);
+    expect(next.some((byte) => byte !== 0)).toBe(true); // Service-owned input is not wiped.
+  });
+
+  it('does not submit if candidate storage fails', async () => {
+    const s = await candidateSetup();
+    s.replace(null);
+    s.installed.set(0, value(Bytes.epochKey(s.created.secret)));
+    s.failSave(true);
+    const entropy = Layer.succeed(CryptoEntropy, {
+      bytes: (_, length) => Effect.sync(() => random(length)),
+    });
+    const result = await Effect.runPromise(
+      s.client.rotateEpoch().pipe(Effect.provide(s.layer), Effect.provide(entropy), Effect.either)
+    );
+    expect(result).toMatchObject({ _tag: 'Left', left: { _tag: 'StorageError', reason: 'io' } });
+    expect(s.stream.records).toEqual([]);
+    expect(s.store.journal?.pending).toBeNull();
+    expect(s.installed.has(1)).toBe(false);
+  });
+
+  it('keeps the exact candidate after installation failure and resumes without signing', async () => {
+    const s = await candidateSetup();
+    s.failInstall(true);
+    const failure = await Effect.runPromise(
+      s.client.resumeEpochRotation().pipe(Effect.provide(s.layer), Effect.either)
+    );
+    expect(failure).toMatchObject({ _tag: 'Left', left: { _tag: 'StorageError', reason: 'io' } });
+    expect(s.saved()).toBe(s.text);
+    expect(s.installed.size).toBe(0);
+    expect(s.stream.records).toEqual([s.first.record]);
+    expect(s.store.journal?.pending).toBeNull();
+    s.failInstall(false);
+    expect(await s.recover()).toMatchObject({ _tag: 'Committed', epoch: 1, binding: 'current' });
+    expect(s.installed.has(1)).toBe(true);
+    expect(s.saved()).toBeNull();
+    expect(s.stream.records).toEqual([s.first.record]);
+    expect(await s.recover()).toMatchObject({ _tag: 'Idle' });
+  });
+
+  it('recovers after interruption between durable installation and candidate removal', async () => {
+    const s = await candidateSetup();
+    const atClear = await Effect.runPromise(Deferred.make<void>());
+    const blockedStore = Layer.succeed(EpochCandidateStore, {
+      exclusive: (_, work) =>
+        work({
+          load: Effect.sync(s.saved),
+          save: (text) => Effect.sync(() => s.replace(text)),
+          clear: Deferred.succeed(atClear, undefined).pipe(Effect.zipRight(Effect.never)),
+        }),
+    });
+    const fiber = await Effect.runPromise(
+      s.client
+        .resumeEpochRotation()
+        .pipe(Effect.provide(blockedStore), Effect.provide(s.layer), Effect.forkDaemon)
+    );
+    await Effect.runPromise(Deferred.await(atClear));
+    await Effect.runPromise(Fiber.interrupt(fiber));
+    expect(s.installed.has(1)).toBe(true);
+    expect(s.saved()).toBe(s.text);
+    expect(await s.recover()).toMatchObject({ _tag: 'Committed', epoch: 1 });
+    expect(s.stream.records).toEqual([s.first.record]);
+    expect(s.saved()).toBeNull();
+  });
+
+  it('serializes concurrent recovery of the same candidate', async () => {
+    const s = await candidateSetup();
+    const results = await Effect.runPromise(
+      Effect.all([s.client.resumeEpochRotation(), s.client.resumeEpochRotation()], {
+        concurrency: 2,
+      }).pipe(Effect.provide(s.layer))
+    );
+    expect(results.map((result) => result._tag).sort()).toEqual(['Committed', 'Idle']);
+    expect(s.stream.records).toEqual([s.first.record]);
+    expect(s.installed.size).toBe(1);
+    expect(s.saved()).toBeNull();
+  });
+
+  it('distinguishes absent, corrupt and mismatched candidates without installing keys', async () => {
+    const s = await candidateSetup();
+    for (const [text, reason] of [
+      ['{', 'candidate-corrupt'],
+      [s.text.replace('"secretHex":"', '"secretHex":"00'), 'candidate-corrupt'],
+      [JSON.stringify({ ...JSON.parse(s.text), secretHex: '00'.repeat(32) }), 'candidate-mismatch'],
+    ] as const) {
+      s.replace(text);
+      const result = await Effect.runPromise(
+        s.client.resumeEpochRotation().pipe(Effect.provide(s.layer), Effect.either)
+      );
+      expect(result).toMatchObject({ _tag: 'Left', left: { _tag: 'EpochRotationError', reason } });
+      expect(s.saved()).toBe(text);
+      expect(s.installed.size).toBe(0);
+      expect(s.stream.records).toEqual([]);
+    }
+    s.replace(null);
+    if (!s.store.journal) throw new Error('missing fixture journal');
+    s.store.journal = { ...s.store.journal, pending: s.first.record };
+    const result = await Effect.runPromise(
+      s.client.resumeEpochRotation().pipe(Effect.provide(s.layer), Effect.either)
+    );
+    expect(result).toMatchObject({ _tag: 'Left', left: { reason: 'candidate-missing' } });
+    expect(s.store.journal.pending).toEqual(s.first.record);
+  });
+
+  it('installs a confirmed historical key without rolling back the current ledger epoch', async () => {
+    const s = await candidateSetup();
+    const next = random(32);
+    const second = await appendFixture(s.first.ledger, s.owner, {
+      type: 'publishEpoch',
+      epoch: 2,
+      commitment: await commitEpochKey(s.created.anchor, 2, next),
+      previousEpochKey: sealHistoryPacket(next, s.secret, s.created.anchor, 2),
+    });
+    s.stream.records.push(s.first.record, second.record);
+    expect(await s.recover()).toMatchObject({ _tag: 'Committed', epoch: 1, binding: 'historical' });
+    expect(s.installed.has(1)).toBe(true);
+    expect((await Effect.runPromise(s.client.refresh())).inspectState().epoch.number).toBe(2);
+    expect(s.stream.records).toEqual([s.first.record, second.record]);
+  });
+});
+
 describe('Effect client owns submissions', () => {
+  it('creates exact legacy genesis bytes from an intent and owns its input selection', async () => {
+    const s = await setup();
+    const command = {
+      userId: value(Bytes.userId(s.created.userId)),
+      membershipId: value(Bytes.membershipId(s.created.membershipId)),
+      encryptionPublicKey: value(Bytes.encryptionPublicKey(s.owner.enc)),
+      epochCommitment: value(Bytes.epochCommitment(s.created.commitment)),
+    };
+    const create = LedgerClient.create(command).pipe(Effect.provide(s.layer));
+    command.membershipId = value(Bytes.membershipId(random(16)));
+    command.epochCommitment = value(Bytes.epochCommitment(random(32)));
+    expect(s.store.journal).toBeNull();
+    const client = await Effect.runPromise(create);
+    expect(s.store.journal?.records).toEqual([s.created.record]);
+    expect(s.store.journal?.genesis).toEqual(s.created.anchor);
+    expect(s.stream.records).toEqual([]); // Local creation is not remote publication.
+    const view = await Effect.runPromise(client.refresh());
+    expect(view.genesis.equals(s.anchor)).toBe(true);
+    const reopened = await Effect.runPromise(
+      LedgerClient.restore(view.genesis).pipe(Effect.provide(s.layer))
+    );
+    expect((await Effect.runPromise(reopened.refresh())).head.equals(view.head)).toBe(true);
+  });
+
+  it('refuses creation with a mismatched signing capability without persisting a journal', async () => {
+    const s = await setup();
+    const wrong = await ed25519();
+    const create = LedgerClient.create({
+      userId: value(Bytes.userId(s.created.userId)),
+      membershipId: value(Bytes.membershipId(s.created.membershipId)),
+      encryptionPublicKey: value(Bytes.encryptionPublicKey(s.owner.enc)),
+      epochCommitment: value(Bytes.epochCommitment(s.created.commitment)),
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          journalStoreLayer(s.store),
+          ledgerTransportLayer(s.stream),
+          deviceSignerLayer(value(Bytes.signingPublicKey(s.owner.publicKey)), wrong.sign),
+          signatureVerifierLayer
+        )
+      )
+    );
+    expect(await Effect.runPromise(Effect.either(create))).toMatchObject({
+      _tag: 'Left',
+      left: { code: 'bad-signature', position: 0 },
+    });
+    expect(s.store.journal).toBeNull();
+    expect(s.stream.records).toEqual([]);
+  });
+
   it('captures construction inputs without doing I/O or following later caller mutations', async () => {
     const s = await setup();
     const input = { anchor: s.anchor, genesisRecord: new Uint8Array(s.created.record) };
-    const create = LedgerClient.create(input).pipe(Effect.provide(s.layer));
+    const create = LedgerClient.importGenesis(input).pipe(Effect.provide(s.layer));
     input.anchor = value(Bytes.genesisHash(random(32)));
     input.genesisRecord.fill(0);
     expect(s.store.journal).toBeNull();
@@ -145,9 +450,14 @@ describe('Effect client owns submissions', () => {
       sign: () => Effect.die('must-not-sign-an-invalid-proof'),
     });
     const client = await Effect.runPromise(
-      LedgerClient.create({ anchor: s.anchor, genesisRecord: s.created.record }).pipe(
+      LedgerClient.importGenesis({ anchor: s.anchor, genesisRecord: s.created.record }).pipe(
         Effect.provide(
-          Layer.mergeAll(journalStoreLayer(s.store), ledgerTransportLayer(s.stream), badSigner)
+          Layer.mergeAll(
+            journalStoreLayer(s.store),
+            ledgerTransportLayer(s.stream),
+            badSigner,
+            signatureVerifierLayer
+          )
         )
       )
     );
@@ -275,7 +585,8 @@ describe('transaction lifetime', () => {
           Layer.mergeAll(
             journalStoreLayer(s.store),
             ledgerTransportLayer(s.stream),
-            deviceSignerLayer(value(Bytes.signingPublicKey(other.publicKey)), other.sign)
+            deviceSignerLayer(value(Bytes.signingPublicKey(other.publicKey)), other.sign),
+            signatureVerifierLayer
           )
         )
       )
@@ -335,10 +646,11 @@ describe('transaction lifetime', () => {
       const layer = Layer.mergeAll(
         journalStoreLayer(store),
         ledgerTransportLayer(s.stream),
-        deviceSignerLayer(value(Bytes.signingPublicKey(s.owner.publicKey)), s.owner.sign)
+        deviceSignerLayer(value(Bytes.signingPublicKey(s.owner.publicKey)), s.owner.sign),
+        signatureVerifierLayer
       );
       const client = await Effect.runPromise(
-        LedgerClient.create({ anchor: s.anchor, genesisRecord: s.created.record }).pipe(
+        LedgerClient.importGenesis({ anchor: s.anchor, genesisRecord: s.created.record }).pipe(
           Effect.provide(layer)
         )
       );

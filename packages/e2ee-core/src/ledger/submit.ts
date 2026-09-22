@@ -1,12 +1,15 @@
-import { Effect } from 'effect';
+import { Effect, Layer } from 'effect';
 import { runPromiseThrow } from '../effect-run';
 import { copyBytes, bytesEqual } from './cbor';
 import { hashRecord, type Hash, type SigningPointCache } from './crypto';
 import { fail, LedgerError } from './error';
-import { genesisHash } from '../pure/bytes';
-import { rawLedger } from '../pure/records';
+import { genesisHash, type SigningPublicKey } from '../pure/bytes';
+import { viewState, type LedgerView } from '../pure/records';
+import { makeSignatureVerifier } from '../platform/signature-verifier';
 import type { ClientError } from '../pure/errors';
-import { JournalStore, LedgerTransport } from '../ports/ledger';
+import { DeviceSigner, JournalStore, LedgerTransport, SignatureVerifier } from '../ports/ledger';
+import { rotateEpoch } from '../workflows/epoch-rotation';
+import { LedgerClient as EffectLedgerClient } from '../workflows/ledger-client';
 import { journalStoreLayer, ledgerTransportLayer } from '../platform/ledger-ports';
 import { LedgerEngine, type ResumeOutcome } from '../workflows/ledger-engine';
 import { Ledger } from './ledger';
@@ -190,6 +193,15 @@ export class LedgerClient {
   }
 
   private engine: LedgerEngine | undefined;
+  private readonly signatures = makeSignatureVerifier();
+
+  private provide<A, E, R>(effect: Effect.Effect<A, E, R>) {
+    return effect.pipe(
+      Effect.provide(Layer.succeed(SignatureVerifier, this.signatures)),
+      Effect.provide(journalStoreLayer(this.store)),
+      Effect.provide(ledgerTransportLayer(this.stream))
+    );
+  }
 
   private engineEffect(): Effect.Effect<LedgerEngine, ClientError> {
     return Effect.suspend(() => {
@@ -204,24 +216,24 @@ export class LedgerClient {
           self.genesisRecord,
           store,
           stream,
+          self.signatures,
           self.pointCache
         );
         self.engine = engine;
         return engine;
-      }).pipe(
-        Effect.provide(journalStoreLayer(this.store)),
-        Effect.provide(ledgerTransportLayer(this.stream))
-      );
+      }).pipe(this.provide.bind(this));
     });
   }
 
   /** Temporary Promise boundary. All state transitions live in LedgerEngine. */
   read(): Promise<Ledger> {
     return runPromiseThrow(
-      this.engineEffect().pipe(
-        Effect.flatMap((engine) => engine.refresh()),
-        Effect.map(rawLedger),
-        Effect.mapError(legacyError)
+      this.provide(
+        this.engineEffect().pipe(
+          Effect.flatMap((engine) => engine.refresh()),
+          Effect.map(asLedger),
+          Effect.mapError(legacyError)
+        )
       )
     );
   }
@@ -230,24 +242,61 @@ export class LedgerClient {
     return runPromiseThrow(this.submitEffect(record));
   }
 
+  /** Transitional consumer bridge; rotation behavior lives only in the native workflow. */
+  rotateEpochEffect() {
+    return this.provide(
+      Effect.gen(this, function* () {
+        const engine = yield* this.engineEffect();
+        const signer = yield* DeviceSigner;
+        return yield* rotateEpoch(engine, signer);
+      })
+    );
+  }
+
+  /** Transitional consumer bridge; send/install live only in the native workflows. */
+  sendCurrentEpochKeyEffect(recipient: SigningPublicKey) {
+    return this.provide(
+      Effect.gen(this, function* () {
+        const engine = yield* this.engineEffect();
+        const signer = yield* DeviceSigner;
+        return yield* EffectLedgerClient.fromEngine(engine, signer).sendCurrentEpochKey(recipient);
+      })
+    );
+  }
+
+  receiveEpochKeyEffect(sender: SigningPublicKey, frame: Uint8Array) {
+    const owned = copyBytes(frame);
+    return this.provide(
+      Effect.gen(this, function* () {
+        const engine = yield* this.engineEffect();
+        const signer = yield* DeviceSigner;
+        return yield* EffectLedgerClient.fromEngine(engine, signer).receiveEpochKey(sender, owned);
+      })
+    );
+  }
+
   resume(): Promise<LedgerSubmitResult> {
     return runPromiseThrow(this.resumeEffect());
   }
 
   submitEffect(record: Uint8Array): Effect.Effect<LedgerSubmitResult, ClientError | LedgerError> {
     const owned = copyBytes(record);
-    return this.engineEffect().pipe(
-      Effect.flatMap((engine) => engine.submitEncoded(owned)),
-      Effect.flatMap(legacyResult),
-      Effect.mapError(legacyError)
+    return this.provide(
+      this.engineEffect().pipe(
+        Effect.flatMap((engine) => engine.submitEncoded(owned)),
+        Effect.flatMap(legacyResult),
+        Effect.mapError(legacyError)
+      )
     );
   }
 
   resumeEffect(): Effect.Effect<LedgerSubmitResult, ClientError | LedgerError> {
-    return this.engineEffect().pipe(
-      Effect.flatMap((engine) => engine.resume()),
-      Effect.flatMap(legacyResult),
-      Effect.mapError(legacyError)
+    return this.provide(
+      this.engineEffect().pipe(
+        Effect.flatMap((engine) => engine.resume()),
+        Effect.flatMap(legacyResult),
+        Effect.mapError(legacyError)
+      )
     );
   }
 }
@@ -269,7 +318,11 @@ function legacyResult(result: ResumeOutcome): Effect.Effect<LedgerSubmitResult, 
         : result._tag === 'Unsupported'
           ? 'unsupported'
           : 'unknown';
-  return Effect.succeed({ status, ledger: rawLedger(result.ledger) });
+  return Effect.succeed({ status, ledger: asLedger(result.ledger) });
+}
+
+function asLedger(view: LedgerView): Ledger {
+  return Ledger.fromInternal(viewState(view));
 }
 
 export class MemoryLedgerStore implements LedgerStore {

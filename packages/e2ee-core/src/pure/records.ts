@@ -1,7 +1,9 @@
 import { Either } from 'effect';
-import type { Ledger } from '../ledger/ledger';
 import type { GenesisHash, RecordHash, SigningPublicKey } from './bytes';
+import { bytesEqual } from './cbor';
 import { ContextMismatch } from './errors';
+import { classifyEpochCandidate, type EpochCandidate } from './epoch-candidate';
+import { publicState, type InternalState } from './ledger-state';
 
 const recordMaterial = Symbol('recordMaterial');
 const viewMaterial = Symbol('viewMaterial');
@@ -26,29 +28,35 @@ class RecordValue<Stage extends 'Decoded' | 'SignatureChecked'> {
 }
 
 class ViewValue {
-  readonly #ledger: Ledger;
+  readonly #state: InternalState;
   readonly origin: 'FullReplay' | 'EndorsedSnapshot';
   constructor(
-    ledger: Ledger,
+    state: InternalState,
     readonly genesis: GenesisHash,
     readonly head: RecordHash
   ) {
-    this.#ledger = ledger;
-    this.origin = ledger.origin === 'genesis' ? 'FullReplay' : 'EndorsedSnapshot';
+    this.#state = state;
+    this.origin = state.origin === 'genesis' ? 'FullReplay' : 'EndorsedSnapshot';
     Object.freeze(this);
   }
   get length(): number {
-    return this.#ledger.length;
+    return this.#state.hashes.length;
   }
   get deviceCount(): number {
-    return this.#ledger.state.devices.size;
+    return this.#state.devices.size;
+  }
+  hasRecordHash(digest: Uint8Array): boolean {
+    return this.#state.hashes.some((hash) => hash !== undefined && bytesEqual(hash, digest));
   }
   /** Inspection is a defensive copy, never an authorization token. */
   inspectState() {
-    return this.#ledger.state;
+    return publicState(this.#state);
   }
-  [viewMaterial](): Ledger {
-    return this.#ledger;
+  inspectEpochCandidate(candidate: EpochCandidate) {
+    return classifyEpochCandidate(this.#state, candidate);
+  }
+  [viewMaterial](): InternalState {
+    return this.#state;
   }
 }
 
@@ -78,11 +86,14 @@ export const decodedRecord = (bytes: Uint8Array, signer: SigningPublicKey): Deco
   new RecordValue('Decoded', bytes, signer);
 export const checkedRecord = (record: DecodedRecord): SignatureCheckedRecord =>
   new RecordValue('SignatureChecked', record[recordMaterial](), record.signer);
-export const ledgerView = (ledger: Ledger, genesis: GenesisHash, head: RecordHash): LedgerView =>
-  new ViewValue(ledger, genesis, head);
+export const ledgerView = (
+  state: InternalState,
+  genesis: GenesisHash,
+  head: RecordHash
+): LedgerView => new ViewValue(state, genesis, head);
 export const applicableRecord = (base: LedgerView, next: LedgerView): ApplicableRecord =>
   new ApplicableValue(base, next);
-export const rawLedger = (view: LedgerView): Ledger => view[viewMaterial]();
+export const viewState = (view: LedgerView): InternalState => view[viewMaterial]();
 export const applyAuthorizedRecord = (
   base: LedgerView,
   record: ApplicableRecord

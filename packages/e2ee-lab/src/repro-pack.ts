@@ -15,7 +15,7 @@ import {
 import type { ScheduleChoice } from './schedule';
 import type { KnownDefect } from './defects';
 import { applyKnownDefect, measureClient } from './defects';
-import { labClient, launchLab, tempDir } from './fixtures';
+import { labClient, launchLab } from './fixtures';
 import type { Divergence } from './replay';
 import type { AttackAction } from './attack-lab';
 import type { CollabMaterial } from './scenario';

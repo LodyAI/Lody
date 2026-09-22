@@ -1,4 +1,7 @@
 import type { SignatureJob, SignatureVerifyExecutor } from '../capabilities';
+import { Either } from 'effect';
+import { operationProofJobs } from '../pure/operation-proofs';
+import { classifyEpochCandidate, type EpochCandidate } from '../pure/epoch-candidate';
 import { copyBytes } from './cbor';
 import {
   assertSignature,
@@ -33,7 +36,6 @@ import {
   decodeRecord,
   encodeOrdinaryBody,
   encodeSignedRecord,
-  joinRequestSigningBytes,
   signingBytesForBody,
   type DecodedRecord,
   type Operation,
@@ -83,17 +85,13 @@ function withPosition(position: number, run: () => void): void {
   }
 }
 
-function collectProofJobs(genesis: Hash, decoded: DecodedRecord): SignatureJob[] {
+function collectProofJobs(genesis: Hash, decoded: DecodedRecord): readonly SignatureJob[] {
   if (decoded.body.type !== 'ordinary') return [];
   const op = decoded.body.fields.operation;
   if (op.type === 'admitMember') {
-    return [
-      {
-        pk: op.request.signingPublicKey,
-        msg: joinRequestSigningBytes(genesis, op.request),
-        sig: op.request.signature,
-      },
-    ];
+    const result = operationProofJobs(genesis, op);
+    if (Either.isLeft(result)) fail(result.left.code, result.left.position);
+    return result.right;
   }
   // Device proofs bind the actor's membership in the preceding verified state.
   // They must be checked during policy replay, including in the worker path.
@@ -177,6 +175,11 @@ export class Ledger {
     Object.freeze(this);
   }
 
+  /** Promise-adapter reconstruction from a verified view. Not an authority claim. */
+  static fromInternal(state: InternalState): Ledger {
+    return new Ledger(state);
+  }
+
   get head(): Hash {
     const head = this.internal.hashes[this.internal.hashes.length - 1];
     if (!head) fail('invalid-operation');
@@ -233,6 +236,11 @@ export class Ledger {
       if (hash && bytesEqual(hash, want)) return true;
     }
     return false;
+  }
+
+  /** Inspection only; installing a candidate still requires durable lifecycle handling. */
+  inspectEpochCandidate(candidate: EpochCandidate) {
+    return classifyEpochCandidate(this.internal, candidate);
   }
 
   static async verify(input: {

@@ -30,8 +30,11 @@ export type EncryptionPublicKey = OwnedBytes<'EncryptionPublicKey'>;
 export type Signature = OwnedBytes<'Signature'>;
 export type GenesisHash = OwnedBytes<'GenesisHash'>;
 export type RecordHash = OwnedBytes<'RecordHash'>;
+export type EpochCommitment = OwnedBytes<'EpochCommitment'>;
+export { epochKey, type EpochKey } from './epoch-key';
 export type MembershipId = OwnedBytes<'MembershipId'>;
 export type RequestId = OwnedBytes<'RequestId'>;
+export type DeliveryId = OwnedBytes<'DeliveryId'>;
 export type UserId = OwnedBytes<'UserId'>;
 export type EpochNumber = number & Brand.Brand<'EpochNumber'>;
 const epochBrand = Brand.nominal<EpochNumber>();
@@ -78,8 +81,10 @@ export function encryptionPublicKey(
 export const signature = (input: unknown) => exact('Signature', 64, input);
 export const genesisHash = (input: unknown) => exact('GenesisHash', 32, input);
 export const recordHash = (input: unknown) => exact('RecordHash', 32, input);
+export const epochCommitment = (input: unknown) => exact('EpochCommitment', 32, input);
 export const membershipId = (input: unknown) => exact('MembershipId', 16, input);
 export const requestId = (input: unknown) => exact('RequestId', 16, input);
+export const deliveryId = (input: unknown) => exact('DeliveryId', 16, input);
 export const userId = (input: unknown) => exact('UserId', 32, input);
 
 export function epochNumber(input: unknown): Either.Either<EpochNumber, ValidationError> {

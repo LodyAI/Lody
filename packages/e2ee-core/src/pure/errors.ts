@@ -66,6 +66,41 @@ export class CryptoError extends Data.TaggedError('CryptoError')<{
 
 export class PendingOperationExists extends Data.TaggedError('PendingOperationExists')<{}> {}
 
+export class EpochRotationError extends Data.TaggedError('EpochRotationError')<{
+  readonly reason: 'candidate-missing' | 'candidate-corrupt' | 'candidate-mismatch' | 'key-missing';
+}> {
+  override get message(): string {
+    return this.reason === 'key-missing' ? 'missing-epoch-key' : `epoch-${this.reason}`;
+  }
+}
+
+/** Host snapshot admission failures keep the pre-migration wire codes. */
+export class SnapshotAdmissionError extends Data.TaggedError('SnapshotAdmissionError')<{
+  readonly code: string;
+}> {
+  override get message(): string {
+    return this.code;
+  }
+}
+
+/** Content-frame failures keep the pre-migration wire codes. */
+export class ContentError extends Data.TaggedError('ContentError')<{
+  readonly code: string;
+}> {
+  override get message(): string {
+    return this.code;
+  }
+}
+
+/** Recovery-file failures keep the pre-migration wire codes. */
+export class RecoveryError extends Data.TaggedError('RecoveryError')<{
+  readonly code: string;
+}> {
+  override get message(): string {
+    return this.code;
+  }
+}
+
 export type ProtocolError = ValidationError | AuthorizationError | ContextMismatch;
 export type ClientError =
   | ProtocolError

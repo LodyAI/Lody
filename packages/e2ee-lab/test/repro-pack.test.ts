@@ -341,6 +341,24 @@ describe('minimal counterexample reduction', () => {
     expect(result.items).toContain('create');
     expect(result.items).not.toContain('noise-a');
     expect(result.items).not.toContain('noise-b');
+    const noTrials = await minimizeCounterexample({
+      items: original,
+      fingerprint: baseline.attack.fingerprint,
+      maxTrials: 0,
+      run: async () => {
+        throw new Error('budget must prevent execution');
+      },
+    });
+    expect(noTrials.items).toEqual(original);
+    expect(noTrials.trials).toBe(0);
+    const oneTrial = await minimizeCounterexample({
+      items: original,
+      fingerprint: baseline.attack.fingerprint,
+      maxTrials: 1,
+      run: async () => ({ fingerprint: baseline.attack.fingerprint }),
+    });
+    expect(oneTrial.trials).toBe(1);
+    expect(oneTrial.items).toEqual(original.slice(2));
   }, 180_000);
 });
 

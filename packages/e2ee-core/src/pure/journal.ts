@@ -1,4 +1,4 @@
-import type { SnapshotTrust } from '../ledger/snapshot';
+import type { SnapshotTrust } from './ledger-snapshot';
 /** Cumulative verified records a client may retain. 10k from-zero chains must fit. */
 export const MAX_LEDGER_RECORDS = 16_384;
 /** Extend/work chunk. Adapter HTTP pages may be larger; refresh slices instead of rejecting. */

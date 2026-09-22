@@ -108,6 +108,7 @@ function contentPlatform(session: ContentClient): Pick<Crypto, 'subtle' | 'getRa
   };
 }
 
+/** Promise streams-crdt SDK boundary. ContentCipher unwraps the Effect workflow. */
 function provider(session: ContentClient, resource: string, model: 'loro' | 'flock') {
   if (!session.genesisHex || !session.device) throw new Error('no-space');
   return createStreamsContentProvider({

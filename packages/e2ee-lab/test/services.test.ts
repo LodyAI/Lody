@@ -11,6 +11,9 @@ import {
 } from '../src/services';
 import { cleanupLab, labClient, launchLab } from '../src/fixtures';
 import type { LabBackend } from '../src/backend';
+import { liveEntropy } from '@lody/e2ee-core';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 
 afterEach(() => cleanupLab());
 
@@ -29,6 +32,29 @@ function withDbPath(host: LabBackend, riverrunDbPath: string): LabBackend {
 }
 
 describe('Lab services', () => {
+  it('preserves entropy replay defects without creating a candidate or changing the ledger', async () => {
+    const host = await launchLab();
+    const defect = new Error('entropy-mismatch:synthetic');
+    let fail = false;
+    const client = await labClient({
+      host,
+      account: 'alice',
+      entropy: {
+        fill(label, bytes) {
+          if (fail) throw defect;
+          return liveEntropy.fill(label, bytes);
+        },
+      },
+    });
+    await client.createSpace();
+    fail = true;
+    // Effect span annotations may copy the Error; preserve its diagnostic, not object identity.
+    await expect(client.publishEpoch()).rejects.toThrow('entropy-mismatch:synthetic');
+    expect(existsSync(join(client.clientDir, 'epoch-candidate.json'))).toBe(false);
+    expect((await client.readLedger()).state.epoch.number).toBe(0);
+    expect([...client.epochKeys.keys()]).toEqual([0]);
+  });
+
   it('fails attack-budget-time from LabClock without wall Date.now', async () => {
     const clock = makeTestClock(1_000);
     const memory = MemoryLabFs({ '/tmp/fake-riverrun.sqlite': new Uint8Array([1, 2, 3]) });

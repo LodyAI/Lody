@@ -3,20 +3,28 @@ import { basename, dirname, isAbsolute, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { ControlLogError, invariant } from './wire';
 const MAX_BYTES = 16 * 1024 * 1024;
+export interface SyncTextLease {
+  load(): string | null;
+  save(text: string): void;
+  close(): void;
+}
+
 export interface TextTransaction {
   load(): Promise<string | null>;
   save(text: string): Promise<void>;
 }
 
-function databasePath(path: string): string {
+function databasePath(path: string, createFile: boolean): string {
   invariant(isAbsolute(path), 'journal-path-must-be-absolute');
   const canonical = join(realpathSync(dirname(path)), basename(path));
   // Never open/close an existing SQLite file with ordinary fs IO: on POSIX that
   // could release another connection's locks. Exclusive creation is safe.
-  try {
-    closeSync(openSync(canonical, 'wx', 0o600));
-  } catch (error) {
-    if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error;
+  if (createFile) {
+    try {
+      closeSync(openSync(canonical, 'wx', 0o600));
+    } catch (error) {
+      if (!(error instanceof Error && 'code' in error && error.code === 'EEXIST')) throw error;
+    }
   }
   const stat = lstatSync(canonical);
   invariant(stat.isFile() && stat.nlink === 1, 'unsafe-journal-file');
@@ -28,11 +36,16 @@ export class SqliteTextStore {
   constructor(
     private readonly path: string,
     private readonly applicationId: number,
-    private readonly version: number
+    private readonly version: number,
+    private readonly options: { createFile: boolean; initializeSchema: boolean } = {
+      createFile: true,
+      initializeSchema: true,
+    }
   ) {}
 
-  async exclusive<T>(work: (transaction: TextTransaction) => Promise<T>): Promise<T> {
-    const db = new DatabaseSync(databasePath(this.path));
+  /** Synchronous SQLite lease; callers own release, including interruption paths. */
+  openExclusive(): SyncTextLease {
+    const db = new DatabaseSync(databasePath(this.path, this.options.createFile));
     let active = false;
     try {
       db.exec(`PRAGMA busy_timeout=0;
@@ -55,6 +68,7 @@ export class SqliteTextStore {
       const appId = db.prepare('PRAGMA application_id').get()?.application_id;
       const version = db.prepare('PRAGMA user_version').get()?.user_version;
       if (appId === 0 && version === 0) {
+        invariant(this.options.initializeSchema, 'foreign-journal-database');
         invariant(
           db.prepare('SELECT count(*) AS n FROM sqlite_schema').get()?.n === 0,
           'foreign-journal-database'
@@ -69,8 +83,8 @@ export class SqliteTextStore {
       }
       db.exec('COMMIT');
       active = true;
-      const tx: TextTransaction = {
-        load: async () => {
+      const tx: SyncTextLease = {
+        load: () => {
           invariant(active, 'journal-transaction-ended');
           // Bound the loaded value before returning a potentially corrupt large row to JS.
           const row = db
@@ -82,7 +96,7 @@ export class SqliteTextStore {
           invariant(typeof row.payload === 'string', 'journal-too-large');
           return row.payload;
         },
-        save: async (text) => {
+        save: (text) => {
           invariant(active, 'journal-transaction-ended');
           invariant(
             typeof text === 'string' && Buffer.byteLength(text) <= MAX_BYTES,
@@ -94,15 +108,33 @@ export class SqliteTextStore {
             'INSERT INTO journal(id,payload) VALUES(1,?) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload'
           ).run(text);
         },
+        close: () => {
+          if (!active) return;
+          active = false;
+          db.close();
+        },
       };
-      return await work(tx);
+      return tx;
+    } catch (error) {
+      active = false;
+      db.close();
+      if (error instanceof Error && 'errcode' in error && error.errcode === 5)
+        throw new ControlLogError('journal-busy');
+      throw error;
+    }
+  }
+
+  /** Temporary Promise adapter over the single synchronous SQLite implementation. */
+  async exclusive<T>(work: (transaction: TextTransaction) => Promise<T>): Promise<T> {
+    const lease = this.openExclusive();
+    try {
+      return await work({ load: async () => lease.load(), save: async (text) => lease.save(text) });
     } catch (error) {
       if (error instanceof Error && 'errcode' in error && error.errcode === 5)
         throw new ControlLogError('journal-busy');
       throw error;
     } finally {
-      active = false;
-      db.close();
+      lease.close();
     }
   }
 }

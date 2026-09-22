@@ -6,8 +6,8 @@ import {
   type ContentAuthor,
   type ContentPurpose,
 } from './content';
-import type { OrgState } from './ledger/policy';
 import { invariant } from './wire';
+export { deviceMayWriteDocument } from './pure/content-policy';
 
 export interface StreamsContentOptions {
   readonly cipher: ContentCipher;
@@ -36,16 +36,6 @@ const UPDATE_HEADER = 1;
 const SNAPSHOT_HEADER = 2;
 const encoder = new TextEncoder();
 
-/** Only active personal/machine devices of non-guest members may write content. */
-export function deviceMayWriteDocument(state: OrgState, deviceIdHex: string): boolean {
-  const device = state.devices.get(deviceIdHex);
-  if (!device || (device.kind !== 'personal' && device.kind !== 'machine')) return false;
-  let membershipHex = '';
-  for (const byte of device.membershipId) membershipHex += byte.toString(16).padStart(2, '0');
-  const member = state.members.get(membershipHex);
-  return member !== undefined && member.role !== 'guest';
-}
-
 function continuationOffset(context: PayloadProtectionContext): string {
   const offset = (context as { continuationOffset?: unknown }).continuationOffset;
   invariant(
@@ -58,7 +48,8 @@ function continuationOffset(context: PayloadProtectionContext): string {
   return offset;
 }
 
-/** Incremental transport protection plus authenticated content snapshots. */
+/** Incremental transport protection plus authenticated content snapshots.
+ * Promise streams-crdt SDK boundary; ContentCipher unwraps the Effect workflow. */
 export function createStreamsContentProvider(
   options: StreamsContentOptions
 ): PayloadProtectionProvider {

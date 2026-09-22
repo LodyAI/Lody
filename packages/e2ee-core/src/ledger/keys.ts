@@ -1,42 +1,27 @@
-import { CipherSuite, DhkemX25519HkdfSha256, HkdfSha256 } from '@hpke/core';
-import { Chacha20Poly1305 } from '@hpke/chacha20poly1305';
-import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
+import { createHpkeDriver } from '../platform/hpke';
+import * as history from '../pure/epoch-history';
+import { Either } from 'effect';
+import * as envelope from '../pure/epoch-envelope';
+import type { ValidationError } from '../pure/errors';
 import { liveEntropy, type Entropy } from '../capabilities';
-import { encodeCbor } from './cbor';
 import {
-  HISTORY_AEAD_DOMAIN,
-  HISTORY_PACKET_BYTES,
   assertSignature,
   bytesEqual,
   checkEncryptionPublicKey,
-  checkHash,
   checkSigningPublicKey,
   checkEpoch,
   commitEpochKey,
   concat,
-  keyId,
   type Hash,
   type SigningPointCache,
   type SigningPublicKey,
 } from './crypto';
 import { fail } from './error';
-import { decodeRecord } from './schema';
 import type { OrgState } from './policy';
 
-const NONCE_BYTES = 24;
-const TAG_BYTES = 16;
-const suite = new CipherSuite({
-  kem: new DhkemX25519HkdfSha256(),
-  kdf: new HkdfSha256(),
-  aead: new Chacha20Poly1305(),
-});
-const hpkeInfo = new TextEncoder().encode('lody-e2ee/hpke-epoch/v1\0');
-const envelopeSigDomain = new TextEncoder().encode('lody-e2ee/epoch-env/v1\0');
-
-function historyAad(genesis: Hash, epoch: number): Uint8Array {
-  const epochBytes = new Uint8Array(4);
-  new DataView(epochBytes.buffer).setUint32(0, epoch);
-  return concat([HISTORY_AEAD_DOMAIN, genesis, epochBytes]);
+function unwrap<A>(result: Either.Either<A, ValidationError>): A {
+  if (Either.isLeft(result)) fail(result.left.code, result.left.position);
+  return result.right;
 }
 
 export function sealHistoryPacket(
@@ -48,17 +33,8 @@ export function sealHistoryPacket(
 ): Uint8Array {
   if (currentKey.byteLength !== 32 || previousKey.byteLength !== 32) fail('invalid-operation');
   checkEpoch(epoch, 1);
-  const nonce = entropy.fill('history-packet-nonce', new Uint8Array(NONCE_BYTES));
-  const sealed = xchacha20poly1305(
-    Uint8Array.from(currentKey),
-    nonce,
-    historyAad(genesis, epoch)
-  ).encrypt(Uint8Array.from(previousKey));
-  if (sealed.byteLength !== 32 + TAG_BYTES) fail('invalid-operation');
-  const packet = new Uint8Array(HISTORY_PACKET_BYTES);
-  packet.set(nonce, 0);
-  packet.set(sealed, NONCE_BYTES);
-  return packet;
+  const nonce = entropy.fill('history-packet-nonce', new Uint8Array(24));
+  return unwrap(history.sealHistoryPacket({ currentKey, previousKey, genesis, epoch, nonce }));
 }
 
 export function openHistoryPacket(
@@ -67,19 +43,7 @@ export function openHistoryPacket(
   genesis: Hash,
   epoch: number
 ): Uint8Array {
-  if (currentKey.byteLength !== 32 || packet.byteLength !== HISTORY_PACKET_BYTES) {
-    fail('invalid-operation');
-  }
-  checkEpoch(epoch, 1);
-  try {
-    return xchacha20poly1305(
-      Uint8Array.from(currentKey),
-      packet.subarray(0, NONCE_BYTES),
-      historyAad(genesis, epoch)
-    ).decrypt(packet.subarray(NONCE_BYTES));
-  } catch {
-    return fail('invalid-operation');
-  }
+  return unwrap(history.openHistoryPacket({ currentKey, packet, genesis, epoch }));
 }
 
 export async function recoverHistory(input: {
@@ -88,54 +52,14 @@ export async function recoverHistory(input: {
   latestKey: Uint8Array;
   packets: ReadonlyMap<number, { commitment: Hash; packet: Uint8Array }>;
 }): Promise<Map<number, Uint8Array>> {
-  const keys = new Map<number, Uint8Array>();
-  const expectedLatest = input.packets.get(input.latestEpoch);
-  if (input.latestEpoch === 0) {
-    const row = input.packets.get(0);
-    if (!row) fail('invalid-operation');
-    const commit = await commitEpochKey(input.genesis, 0, input.latestKey);
-    if (!bytesEqual(commit, row.commitment)) fail('invalid-operation');
-    keys.set(0, Uint8Array.from(input.latestKey));
-    return keys;
-  }
-  if (!expectedLatest) fail('invalid-operation');
-  const latestCommit = await commitEpochKey(input.genesis, input.latestEpoch, input.latestKey);
-  if (!bytesEqual(latestCommit, expectedLatest.commitment)) fail('invalid-operation');
-  keys.set(input.latestEpoch, Uint8Array.from(input.latestKey));
-  let current = Uint8Array.from(input.latestKey);
-  for (let epoch = input.latestEpoch; epoch >= 1; epoch--) {
-    const row = input.packets.get(epoch);
-    if (!row) fail('invalid-operation');
-    const previous = openHistoryPacket(current, row.packet, input.genesis, epoch);
-    const commit = await commitEpochKey(input.genesis, epoch - 1, previous);
-    if (epoch - 1 === 0) {
-      const genesisRow = input.packets.get(0);
-      if (!genesisRow || !bytesEqual(commit, genesisRow.commitment)) fail('invalid-operation');
-      keys.set(0, previous);
-      break;
-    }
-    const prevRow = input.packets.get(epoch - 1);
-    if (!prevRow || !bytesEqual(commit, prevRow.commitment)) fail('invalid-operation');
-    keys.set(epoch - 1, previous);
-    current = Uint8Array.from(previous);
-  }
-  return keys;
+  return unwrap(history.recoverHistory(input));
 }
 
 export function collectEpochPackets(
   records: readonly Uint8Array[],
   genesisCommitment: Hash
 ): Map<number, { commitment: Hash; packet: Uint8Array }> {
-  const packets = new Map<number, { commitment: Hash; packet: Uint8Array }>();
-  packets.set(0, { commitment: checkHash(genesisCommitment), packet: new Uint8Array() });
-  for (const record of records) {
-    const decoded = decodeRecord(record);
-    if (decoded.body.type !== 'ordinary') continue;
-    const op = decoded.body.fields.operation;
-    if (op.type !== 'publishEpoch') continue;
-    packets.set(op.epoch, { commitment: op.commitment, packet: op.previousEpochKey });
-  }
-  return packets;
+  return unwrap(history.collectEpochPackets(records, genesisCommitment));
 }
 
 /**
@@ -145,14 +69,7 @@ export function collectEpochPackets(
  * ledger, and the recipient must be an admitted device. Recovery devices only
  * receive keys.
  */
-export function canSendEpoch(state: OrgState, sender: SigningPublicKey): boolean {
-  const device = state.devices.get(keyId(sender));
-  return device !== undefined && device.kind !== 'recovery';
-}
-
-function canReceiveEpoch(state: OrgState, recipient: SigningPublicKey): boolean {
-  return state.devices.has(keyId(recipient));
-}
+export const canSendEpoch = envelope.canSendEpoch;
 
 export function envelopeAad(input: {
   genesis: Hash;
@@ -160,7 +77,7 @@ export function envelopeAad(input: {
   sender: SigningPublicKey;
   recipient: SigningPublicKey;
 }): Uint8Array {
-  return encodeCbor([input.genesis, input.epoch, input.sender, input.recipient]);
+  return unwrap(envelope.envelopeAad(input));
 }
 
 export async function sealEpochEnvelope(input: {
@@ -176,29 +93,25 @@ export async function sealEpochEnvelope(input: {
   entropy?: Entropy;
   cache?: SigningPointCache;
 }): Promise<Uint8Array> {
-  if (!canSendEpoch(input.state, input.sender)) fail('unauthorized');
-  if (!canReceiveEpoch(input.state, input.recipient)) fail('unauthorized');
+  const expectedEnc = unwrap(
+    envelope.recipientEncryptionKey(input.state, input.sender, input.recipient)
+  );
   checkSigningPublicKey(input.sender, input.cache);
   checkSigningPublicKey(input.recipient, input.cache);
   checkEncryptionPublicKey(input.recipientEncryptionKey);
-  const expectedEnc = input.state.devices.get(keyId(input.recipient))?.encryptionPublicKey;
   if (!expectedEnc || !bytesEqual(expectedEnc, input.recipientEncryptionKey)) fail('unauthorized');
   if (input.epochKey.byteLength !== 32) fail('invalid-operation');
   checkEpoch(input.epoch, 0);
   const aad = envelopeAad(input);
-  const recipientPublicKey = await suite.kem.deserializePublicKey(input.recipientEncryptionKey);
-  const sealed = await suite.seal(
-    {
-      recipientPublicKey,
-      info: hpkeInfo,
-      ...(input.entropy ? { ekm: input.entropy.fill('hpke-dhkem-ikm', new Uint8Array(32)) } : {}),
-    },
+  const sealed = await createHpkeDriver().seal(
+    input.recipientEncryptionKey,
     input.epochKey,
-    aad
+    aad,
+    input.entropy
   );
   if (sealed.enc.byteLength !== 32 || sealed.ct.byteLength !== 48) fail('invalid-operation');
   const unsigned = concat([aad, new Uint8Array(sealed.enc), new Uint8Array(sealed.ct)]);
-  const message = concat([envelopeSigDomain, unsigned]);
+  const message = envelope.envelopeSigningBytes(unsigned);
   const signature = await input.sign(message);
   await assertSignature(input.sender, message, signature, 'bad-signature', input.cache);
   return concat([unsigned, signature]);
@@ -214,28 +127,25 @@ export async function openEpochEnvelope(input: {
   frame: Uint8Array;
   cache?: SigningPointCache;
 }): Promise<Uint8Array> {
-  if (!canSendEpoch(input.state, input.sender)) fail('unauthorized');
-  if (!canReceiveEpoch(input.state, input.recipient)) fail('unauthorized');
+  const expected = unwrap(
+    envelope.recipientEncryptionKey(input.state, input.sender, input.recipient)
+  );
   if (input.epoch !== input.state.epoch.number) fail('invalid-operation');
   checkEpoch(input.epoch, 0);
-  const aad = envelopeAad(input);
-  if (input.frame.byteLength !== aad.byteLength + 32 + 48 + 64) fail('canonical');
-  const enc = input.frame.subarray(aad.byteLength, aad.byteLength + 32);
-  const ct = input.frame.subarray(aad.byteLength + 32, aad.byteLength + 80);
-  const signature = input.frame.subarray(aad.byteLength + 80);
-  if (!bytesEqual(input.frame.subarray(0, aad.byteLength), aad)) fail('canonical');
-  const message = concat([envelopeSigDomain, input.frame.subarray(0, -64)]);
+  const {
+    aad,
+    enc,
+    ct,
+    signature,
+    signingBytes: message,
+  } = unwrap(envelope.decodeEnvelopeFrame(input, input.frame));
   await assertSignature(input.sender, message, signature, 'bad-signature', input.cache);
-  const local = new Uint8Array(
-    await suite.kem.serializePublicKey(input.recipientKeyPair.publicKey)
-  );
-  const expected = input.state.devices.get(keyId(input.recipient))?.encryptionPublicKey;
+  const driver = createHpkeDriver();
+  const local = await driver.publicKey(input.recipientKeyPair);
   if (!expected || !bytesEqual(local, expected)) fail('unauthorized');
   let plaintext: Uint8Array;
   try {
-    plaintext = new Uint8Array(
-      await suite.open({ recipientKey: input.recipientKeyPair, enc, info: hpkeInfo }, ct, aad)
-    );
+    plaintext = await driver.open(input.recipientKeyPair, enc, ct, aad);
   } catch {
     fail('invalid-operation');
   }

@@ -1,5 +1,5 @@
 import { Effect } from 'effect';
-import { DeviceSigner } from '../ports/ledger';
+import { DeviceSigner, SignatureVerifier } from '../ports/ledger';
 import type {
   EncryptionPublicKey,
   GenesisHash,
@@ -9,9 +9,11 @@ import type {
 } from '../pure/bytes';
 import type { DeviceGrant, LedgerCommand } from '../pure/commands';
 import { asNullOrUint } from '../pure/cbor';
-import { assertSignature } from '../ledger/crypto';
-import { joinRequestSigningBytes, possessionSigningBytes } from '../ledger/schema';
-import { protocol } from './protocol';
+import { ValidationError } from '../pure/errors';
+import { joinRequestSigningBytes, possessionSigningBytes } from '../pure/ledger-schema';
+
+const proofError = (error: ValidationError): ValidationError =>
+  error.code === 'bad-signature' ? new ValidationError({ code: 'bad-proof' }) : error;
 
 /** Run on the new device. Approval on an existing device still rechecks live membership.
  * A possession proof is not authorization and is never reusable for another membership. */
@@ -25,19 +27,18 @@ export function prepareDeviceAdmission(input: {
   const grant = { ...input.grant };
   return Effect.gen(function* () {
     const signer = yield* DeviceSigner;
-    const message = yield* protocol(() =>
-      possessionSigningBytes({
-        genesis: genesis.toBytes(),
-        targetMembershipId: membershipId.toBytes(),
-        signingPublicKey: signer.publicKey.toBytes(),
-        encryptionPublicKey: encryptionPublicKey.toBytes(),
-        ...grant,
-      })
-    );
+    const verifier = yield* SignatureVerifier;
+    const message = yield* possessionSigningBytes({
+      genesis: genesis.toBytes(),
+      targetMembershipId: membershipId.toBytes(),
+      signingPublicKey: signer.publicKey.toBytes(),
+      encryptionPublicKey: encryptionPublicKey.toBytes(),
+      ...grant,
+    });
     const proof = yield* signer.sign(message);
-    yield* protocol(() =>
-      assertSignature(signer.publicKey.toBytes(), message, proof.toBytes(), 'bad-proof')
-    );
+    yield* verifier
+      .verify({ publicKey: signer.publicKey, message, signature: proof })
+      .pipe(Effect.mapError(proofError));
     return {
       _tag: 'AdmitDevice',
       ...grant,
@@ -61,19 +62,18 @@ export function prepareJoinRequest(input: {
   return Effect.gen(function* () {
     yield* asNullOrUint(expiresAt);
     const signer = yield* DeviceSigner;
-    const message = yield* protocol(() =>
-      joinRequestSigningBytes(genesis.toBytes(), {
-        requestId: requestId.toBytes(),
-        userId: userId.toBytes(),
-        signingPublicKey: signer.publicKey.toBytes(),
-        encryptionPublicKey: encryptionPublicKey.toBytes(),
-        expiresAt,
-      })
-    );
+    const verifier = yield* SignatureVerifier;
+    const message = yield* joinRequestSigningBytes(genesis.toBytes(), {
+      requestId: requestId.toBytes(),
+      userId: userId.toBytes(),
+      signingPublicKey: signer.publicKey.toBytes(),
+      encryptionPublicKey: encryptionPublicKey.toBytes(),
+      expiresAt,
+    });
     const signature = yield* signer.sign(message);
-    yield* protocol(() =>
-      assertSignature(signer.publicKey.toBytes(), message, signature.toBytes(), 'bad-proof')
-    );
+    yield* verifier
+      .verify({ publicKey: signer.publicKey, message, signature })
+      .pipe(Effect.mapError(proofError));
     return {
       requestId,
       userId,

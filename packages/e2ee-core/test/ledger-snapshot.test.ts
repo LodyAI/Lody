@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { Either } from 'effect';
+import * as PureSnapshot from '../src/pure/ledger-snapshot';
 import { Ledger, LedgerError } from '../src/ledger';
 import { decodeSnapshotCbor, encodeSnapshotCbor, encodeCbor } from '../src/ledger/cbor';
 import { encodeSignedRecord } from '../src/ledger/schema';
@@ -38,6 +40,35 @@ async function signSnapshot(ledger: Awaited<ReturnType<typeof Ledger.verify>>, s
     },
   };
 }
+
+it('pure snapshot parsing owns bytes but does not establish signature trust', async () => {
+  const owner = await ed25519();
+  const created = await signGenesis(owner);
+  const { snapshot, trust } = await signSnapshot(created.ledger, owner);
+  const saved = new Uint8Array(snapshot);
+  const parsed = PureSnapshot.parseSignedSnapshot(snapshot);
+  if (Either.isLeft(parsed)) throw new Error('signed fixture must parse');
+  snapshot.fill(0);
+  expect(PureSnapshot.encodeSignedSnapshot(parsed.right.bodyBytes, parsed.right.signature)).toEqual(
+    Either.right(saved)
+  );
+  const state = PureSnapshot.snapshotStateFromParsed(parsed.right);
+  expect(Either.isRight(state)).toBe(true);
+  const forged = new Uint8Array(saved);
+  forged[forged.length - 1] = forged[forged.length - 1]! ^ 1;
+  // Structural validity must never be mistaken for cryptographic acceptance.
+  expect(Either.isRight(PureSnapshot.decodeSignedSnapshot(forged))).toBe(true);
+  await expect(Ledger.verifySnapshot({ snapshot: forged, trust })).rejects.toMatchObject({
+    code: 'bad-signature',
+  });
+  for (const bytes of [
+    new Uint8Array(),
+    Uint8Array.of(0xff),
+    saved.subarray(0, saved.length - 1),
+  ]) {
+    expect(PureSnapshot.parseSignedSnapshot(bytes)).toMatchObject({ _tag: 'Left' });
+  }
+});
 
 async function mixedLedger() {
   const owner = await ed25519();

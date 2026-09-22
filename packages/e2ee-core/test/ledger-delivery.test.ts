@@ -1,7 +1,12 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Effect, Exit } from 'effect';
+import { Cause, Effect, Exit, Either, Layer } from 'effect';
+import { EpochStream } from '../src/ports/epoch-stream';
+import { KeyDeliveryRemote } from '../src/ports/key-delivery';
+import { epochStreamDeliveryLayer } from '../src/workflows/epoch-stream';
+import { parseEpochEnvelopeChunk } from '../src/pure/epoch-envelope-stream';
+import { TransportError } from '../src/pure/errors';
 import { afterEach, describe, expect, it } from 'vitest';
 import { LedgerError } from '../src/ledger';
 import {
@@ -14,6 +19,158 @@ import { SqliteLedgerKeyOutbox } from '../src/ledger/node-store';
 import { admitDeviceOp, append, ed25519, hex, random, signGenesis } from './ledger-fixtures';
 
 const dirs: string[] = [];
+
+describe('Effect raw epoch stream', () => {
+  async function fixture() {
+    const owner = await device();
+    const key = random(32);
+    const created = await signGenesis(owner, key);
+    const frame = await sealEpochEnvelope({
+      state: created.ledger.state,
+      genesis: created.anchor,
+      epoch: 0,
+      sender: owner.publicKey,
+      recipient: owner.publicKey,
+      recipientEncryptionKey: owner.enc,
+      epochKey: key,
+      sign: owner.sign,
+    });
+    const parsed = Either.getOrThrow(parseEpochEnvelopeChunk(new Uint8Array(), frame));
+    const first = parsed.frames[0];
+    if (!first) throw new Error('fixture frame missing');
+    return { frame, id: hex(first.deliveryId.toBytes()) };
+  }
+
+  it('reads split frames, reconciles lost ACK and never appends an observed frame twice', async () => {
+    const { frame, id } = await fixture();
+    let stored: Uint8Array | null = null;
+    let appends = 0;
+    const layer = epochStreamDeliveryLayer.pipe(
+      Layer.provide(
+        Layer.succeed(EpochStream, {
+          read: (offset) =>
+            Effect.sync(() =>
+              stored === null
+                ? {
+                    requestOffset: offset,
+                    nextOffset: 'empty',
+                    upToDate: true,
+                    body: new Uint8Array(),
+                  }
+                : offset === '-1'
+                  ? {
+                      requestOffset: offset,
+                      nextOffset: 'middle',
+                      upToDate: false,
+                      body: stored.slice(0, 37),
+                    }
+                  : {
+                      requestOffset: offset,
+                      nextOffset: 'end',
+                      upToDate: true,
+                      body: stored.slice(37),
+                    }
+            ),
+          append: (offset, bytes) =>
+            Effect.gen(function* () {
+              expect(offset).toBe('empty');
+              appends++;
+              stored = new Uint8Array(bytes);
+              return yield* Effect.fail(new TransportError({ operation: 'append' }));
+            }),
+        })
+      )
+    );
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const remote = yield* KeyDeliveryRemote;
+        expect(yield* Effect.either(remote.put(id, frame))).toMatchObject({
+          _tag: 'Left',
+          left: { _tag: 'TransportError' },
+        });
+        expect(yield* remote.read(id)).toEqual(frame);
+        yield* remote.put(id, frame);
+        expect(appends).toBe(1);
+        expect(stored).toEqual(frame);
+      }).pipe(Effect.provide(layer))
+    );
+  });
+
+  it('rejects a truncated suffix even after finding the requested complete frame', async () => {
+    const { frame, id } = await fixture();
+    const body = new Uint8Array(frame.length + 1);
+    body.set(frame);
+    body[frame.length] = 0x84;
+    const layer = epochStreamDeliveryLayer.pipe(
+      Layer.provide(
+        Layer.succeed(EpochStream, {
+          read: (offset) =>
+            Effect.succeed({ requestOffset: offset, nextOffset: 'end', upToDate: true, body }),
+          append: () => Effect.die('must not append'),
+        })
+      )
+    );
+    const result = await Effect.runPromise(
+      Effect.gen(function* () {
+        const remote = yield* KeyDeliveryRemote;
+        return yield* Effect.either(remote.read(id));
+      }).pipe(Effect.provide(layer))
+    );
+    expect(result).toMatchObject({
+      _tag: 'Left',
+      left: { _tag: 'ValidationError', code: 'truncated' },
+    });
+  });
+
+  it('rejects cursor rewind and reports CAS contention without silently retrying', async () => {
+    const { frame, id } = await fixture();
+    const bad = epochStreamDeliveryLayer.pipe(
+      Layer.provide(
+        Layer.succeed(EpochStream, {
+          read: (offset) =>
+            Effect.succeed(
+              offset === '-1'
+                ? { requestOffset: offset, nextOffset: 'middle', upToDate: false, body: frame }
+                : {
+                    requestOffset: offset,
+                    nextOffset: '-1',
+                    upToDate: true,
+                    body: new Uint8Array(),
+                  }
+            ),
+          append: () => Effect.die('must not append'),
+        })
+      )
+    );
+    const read = Effect.gen(function* () {
+      return yield* (yield* KeyDeliveryRemote).read(id);
+    });
+    expect(await Effect.runPromise(Effect.either(read.pipe(Effect.provide(bad))))).toMatchObject({
+      _tag: 'Left',
+      left: { _tag: 'StreamProtocolError' },
+    });
+    const conflict = epochStreamDeliveryLayer.pipe(
+      Layer.provide(
+        Layer.succeed(EpochStream, {
+          read: (offset) =>
+            Effect.succeed({
+              requestOffset: offset,
+              nextOffset: 'empty',
+              upToDate: true,
+              body: new Uint8Array(),
+            }),
+          append: () => Effect.succeed('conflict'),
+        })
+      )
+    );
+    const put = Effect.gen(function* () {
+      return yield* (yield* KeyDeliveryRemote).put(id, frame);
+    });
+    expect(
+      await Effect.runPromise(Effect.either(put.pipe(Effect.provide(conflict))))
+    ).toMatchObject({ _tag: 'Right', right: 'conflict' });
+  });
+});
 
 afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -36,6 +193,62 @@ function expectCode(error: unknown, code: string): void {
 }
 
 describe('K1 durable epoch-key delivery', () => {
+  it('captures deferred input and isolates authorization from persisted ciphertext', async () => {
+    const outbox = new MemoryLedgerKeyOutbox();
+    const remote = new Map<string, Uint8Array>();
+    const delivery = new LedgerKeyDelivery(outbox, {
+      async put(id, bytes) {
+        remote.set(id, new Uint8Array(bytes));
+      },
+      async read(id) {
+        return remote.get(id) ?? null;
+      },
+    });
+    const input = random(112);
+    const expected = new Uint8Array(input);
+    const id = deliveryId();
+    const pending = delivery.sendEffect(id, input, (bytes) => {
+      bytes.fill(0);
+    });
+    input.fill(0);
+    expect(outbox.frames.size).toBe(0);
+    expect(await Effect.runPromise(pending)).toBe('observed');
+    expect(outbox.frames.get(id)).toEqual(expected);
+    expect(remote.get(id)).toEqual(expected);
+    const invalid = delivery.sendEffect('invalid-id', expected, () => {});
+    expect(await Effect.runPromise(Effect.either(invalid))).toMatchObject({
+      _tag: 'Left',
+      left: { code: 'canonical' },
+    });
+  });
+
+  it.each(['put', 'read'] as const)(
+    'does not hide %s defects or protocol rejection as unknown',
+    async (stage) => {
+      const outbox = new MemoryLedgerKeyOutbox();
+      let failure: Error = new TypeError('adapter-bug');
+      const delivery = new LedgerKeyDelivery(outbox, {
+        async put() {
+          if (stage === 'put') throw failure;
+        },
+        async read() {
+          if (stage === 'read') throw failure;
+          return null;
+        },
+      });
+      const id = deliveryId();
+      const frame = random(112);
+      const exit = await Effect.runPromiseExit(delivery.sendEffect(id, frame, () => {}));
+      expect(Exit.isFailure(exit) && Cause.isDie(exit.cause)).toBe(true);
+      expect(outbox.frames.get(id)).toEqual(frame);
+      failure = new LedgerError('unauthorized');
+      expect(
+        await Effect.runPromise(Effect.either(delivery.sendEffect(id, undefined, () => {})))
+      ).toMatchObject({ _tag: 'Left', left: { code: 'unauthorized' } });
+      expect(outbox.frames.get(id)).toEqual(frame);
+    }
+  );
+
   it('persists exact ciphertext, retries without re-encrypting, and refuses a revoked recipient', async () => {
     const owner = await device();
     const k0 = random(32);

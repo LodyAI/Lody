@@ -41,10 +41,12 @@ export async function minimizeCounterexample<T>(input: {
     input.keep?.(item, index, items) === true;
 
   let progress = true;
-  while (progress && trials < budget && current.length > 1) {
+  while (progress && current.length > 1) {
+    if (trials >= budget) break;
     progress = false;
     const chunk = Math.max(1, Math.floor(current.length / 2));
-    for (let start = 0; start < current.length && trials < budget; start += chunk) {
+    for (let start = 0; start < current.length; start += chunk) {
+      if (trials >= budget) break;
       const removed = current.slice(start, start + chunk);
       if (removed.some((item, offset) => required(item, start + offset, current))) continue;
       const candidate = current.slice(0, start).concat(current.slice(start + chunk));
@@ -56,7 +58,8 @@ export async function minimizeCounterexample<T>(input: {
       }
     }
     if (progress) continue;
-    for (let index = 0; index < current.length && trials < budget; index++) {
+    for (let index = 0; index < current.length; index++) {
+      if (trials >= budget) break;
       if (required(current[index]!, index, current)) continue;
       const candidate = current.slice(0, index).concat(current.slice(index + 1));
       if (await allowed(candidate)) {

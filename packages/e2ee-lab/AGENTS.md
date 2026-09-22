@@ -2,6 +2,31 @@
 
 Local deterministic collaboration plus one attack Agent. Not product E2EE.
 
+## Required source style
+
+- **Effect v3 only**: exact workspace catalog pin (currently `3.18.4`).
+  No v4/prereleases without approval.
+- `pure/`: deterministic values or typed `Either`; no I/O, ambient state,
+  clocks, randomness, logging or input mutation. Only unobservable local scratch
+  mutation is allowed.
+- `workflows/`: `Effect<A, E, R>` descriptions with declared Services for ALL
+  side effects and external/global dependencies (storage, network, crypto handles,
+  entropy, time, environment, process). No eager execution, hidden Live defaults
+  or internal runtime starts.
+- `platform/`: thin Service implementations/Layers; direct external API access
+  belongs here or in composition. Concentrate complexity in pure first, workflows
+  second; keep domain policy/state transitions out of platform.
+- No expected `throw`: pure returns typed `Either`; workflows use typed Effect
+  failures. Only unexpected fatal defects may throw. Never disguise defects or
+  interruption as ordinary failure or Pending.
+- Use Effect logging/tracing and injected Services, never `console` or ambient
+  loggers. Platform/composition configures sinks; pure returns diagnostic data.
+  Never log secrets.
+- Required migration target, not completed purity: existing bridges remain
+  explicit, temporary exceptions, not permission to add more.
+
+## Lab invariants
+
 - Real `@lody/e2ee-core`, streams-crdt, Loro/Flock, and official sqlite Riverrun.
   Do not stub cryptography or invent a second sync protocol.
 - Honest clients, scheduling, and judging are ordinary programs. Only the
@@ -25,6 +50,9 @@ Local deterministic collaboration plus one attack Agent. Not product E2EE.
   the harness; default CLI does not. This is not OS isolation.
   Decision: [host gateway](../../.agents/notes/implemented/architecture/2026-09-18-e2ee-host-gateway.md).
 - Content seal uses the authenticated ledger epoch, not `max(local keys)`.
+- `DemoSession.genesis` is the signed record, NOT the Org hash. Key commitments,
+  history and envelope AAD use `ledger.state.genesis`; only replay/bootstrap uses
+  the record. Never silently recompute commitments in old captured artifacts.
 - Lab I/O goes through Effect `LabClock` / `LabFs` / `LabHttp`
   (`src/services/`): AttackLab, attacks, persist, session, host, content-session,
   and restricted-agent LLM fetch. Promise/Live defaults provide `LiveLabLayer`

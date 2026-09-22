@@ -7,6 +7,7 @@
     ".": "./src/index.ts",
     "./effect": "./src/effect.ts",
     "./effect/platform": "./src/platform/index.ts",
+    "./effect/platform-node": "./src/platform/node-journal.ts",
     "./ledger": "./src/ledger/index.ts",
     "./ledger-node": "./src/ledger/node-store.ts",
     "./node-store": "./src/node-store.ts",

@@ -17,7 +17,7 @@ import { signature, type SigningPublicKey } from '../pure/bytes';
 import { LedgerError } from '../ledger/error';
 import type { LedgerStore, LedgerStream, LedgerTransaction } from '../pure/journal';
 
-function storageError(error: unknown): StorageError | ValidationError {
+export function storageError(error: unknown): StorageError {
   if (error instanceof LedgerError)
     return new StorageError({
       reason:
@@ -26,6 +26,9 @@ function storageError(error: unknown): StorageError | ValidationError {
       position: error.position,
     });
   const code = error instanceof Error && 'code' in error ? String(error.code) : '';
+  const sqliteCode = error instanceof Error && 'errcode' in error ? error.errcode : undefined;
+  if (sqliteCode === 5) return new StorageError({ reason: 'busy', code });
+  if (sqliteCode === 11 || sqliteCode === 26) return new StorageError({ reason: 'corrupt', code });
   if (code === 'ENOENT') return new StorageError({ reason: 'missing' });
   if (code === 'EEXIST') return new StorageError({ reason: 'exists' });
   if (code === 'journal-busy') return new StorageError({ reason: 'busy', code });
@@ -37,8 +40,21 @@ function storageError(error: unknown): StorageError | ValidationError {
   return new StorageError({ reason: 'io' });
 }
 
-function storageCall<A>(work: () => Promise<A>): Effect.Effect<A, StorageError | ValidationError> {
+export function storageCall<A>(
+  work: () => Promise<A>
+): Effect.Effect<A, StorageError | ValidationError> {
   return Effect.tryPromise({ try: work, catch: (error) => error }).pipe(
+    Effect.catchAll((error) =>
+      error instanceof TypeError || error instanceof ReferenceError
+        ? Effect.die(error)
+        : Effect.fail(storageError(error))
+    )
+  );
+}
+
+/** Synchronous foreign boundary. Expected storage failures stay typed; defects stay defects. */
+export function storageSync<A>(work: () => A): Effect.Effect<A, StorageError | ValidationError> {
+  return Effect.try({ try: work, catch: (error) => error }).pipe(
     Effect.catchAll((error) =>
       error instanceof TypeError || error instanceof ReferenceError
         ? Effect.die(error)
@@ -162,9 +178,10 @@ export function deviceSignerLayer(
 ): Layer.Layer<DeviceSigner> {
   return Layer.succeed(DeviceSigner, {
     publicKey,
-    sign: (message) =>
-      Effect.tryPromise({
-        try: () => sign(new Uint8Array(message)),
+    sign: (message) => {
+      const ownedMessage = new Uint8Array(message);
+      return Effect.tryPromise({
+        try: () => sign(new Uint8Array(ownedMessage)),
         catch: (error) => error,
       }).pipe(
         Effect.catchAll((error) =>
@@ -173,6 +190,7 @@ export function deviceSignerLayer(
             : Effect.fail(new CryptoError({ operation: 'sign' }))
         ),
         Effect.flatMap(signature)
-      ),
+      );
+    },
   });
 }

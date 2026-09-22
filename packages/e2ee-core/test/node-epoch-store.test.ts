@@ -27,6 +27,10 @@ import {
   type EpochPublicationStore,
 } from '../src/legacy';
 
+import { Effect, Either } from 'effect';
+import { DeviceIdentityStore, RecoveryError, StorageError, UserIdentityStore } from '../src/effect';
+import { nodeDeviceIdentityLayer } from '../src/platform/node-device-identity';
+import { nodeUserIdentityLayer } from '../src/platform/node-user-identity';
 import { SqliteDeviceIdentityStore } from '../src/node-device-store';
 import { SqliteUserIdentityStore } from '../src/node-user-store';
 import { createRecoveryFile } from '../src/recovery-file';
@@ -77,6 +81,57 @@ it('persists a separately OS-wrapped user identity and recovers only into an emp
   await expect(new SqliteUserIdentityStore(path, '23'.repeat(32), os.user).load()).rejects.toThrow(
     'user-store-binding-mismatch'
   );
+});
+
+it('Effect user identity recovery seals then installs only into empty storage', async () => {
+  const os = protection();
+  const path = location();
+  const binding = '24'.repeat(32);
+  const layer = nodeUserIdentityLayer({ path, binding, protection: os.user });
+  const run = <A, E>(effect: Effect.Effect<A, E, UserIdentityStore>) =>
+    Effect.runPromise(effect.pipe(Effect.provide(layer)));
+  expect(
+    await Effect.runPromise(
+      Effect.either(
+        Effect.flatMap(UserIdentityStore, (store) => store.load).pipe(Effect.provide(layer))
+      )
+    )
+  ).toEqual(Either.left(new StorageError({ reason: 'missing', code: 'user-identity-missing' })));
+  const created = await run(Effect.flatMap(UserIdentityStore, (store) => store.create));
+  const file = createRecoveryFile();
+  const context = { identity: created.fingerprint, revision: 0 };
+  const frame = await run(
+    Effect.flatMap(UserIdentityStore, (store) => store.sealBackup(file, context))
+  );
+  expect(
+    await Effect.runPromise(
+      Effect.either(
+        Effect.flatMap(UserIdentityStore, (store) =>
+          store.sealBackup(file, { ...context, identity: '25'.repeat(32) })
+        ).pipe(Effect.provide(layer))
+      )
+    )
+  ).toEqual(Either.left(new RecoveryError({ code: 'user-identity-mismatch' })));
+  const target = nodeUserIdentityLayer({
+    path: location(),
+    binding,
+    protection: os.user,
+  });
+  const recovered = await Effect.runPromise(
+    Effect.flatMap(UserIdentityStore, (store) => store.recover(file, context, frame)).pipe(
+      Effect.provide(target)
+    )
+  );
+  expect(recovered.fingerprint).toBe(created.fingerprint);
+  expect(
+    await Effect.runPromise(
+      Effect.either(
+        Effect.flatMap(UserIdentityStore, (store) => store.recover(file, context, frame)).pipe(
+          Effect.provide(target)
+        )
+      )
+    )
+  ).toEqual(Either.left(new StorageError({ reason: 'exists', code: 'user-identity-exists' })));
 });
 
 it('does not persist or replace a user identity when its protected roundtrip fails', async () => {
@@ -289,6 +344,32 @@ it('returns no device identity when ciphertext persistence fails', async () => {
   db.close();
   await expect(store.create()).rejects.toThrow('disk-denied');
   await expect(store.load()).rejects.toThrow('device-identity-missing');
+});
+
+it('Effect device identity load never creates a replacement', async () => {
+  const path = location(),
+    p = protection(),
+    binding = 'a5'.repeat(32);
+  const layer = nodeDeviceIdentityLayer({ path, binding, protection: p.device });
+  const load = Effect.flatMap(DeviceIdentityStore, (store) => store.load).pipe(
+    Effect.provide(layer)
+  );
+  expect(await Effect.runPromise(Effect.either(load))).toEqual(
+    Either.left(new StorageError({ reason: 'missing', code: 'device-identity-missing' }))
+  );
+  const created = await Effect.runPromise(
+    Effect.flatMap(DeviceIdentityStore, (store) => store.create).pipe(Effect.provide(layer))
+  );
+  const loaded = await Effect.runPromise(load);
+  expect(loaded.id).toBe(created.id);
+  expect(
+    await Effect.runPromise(
+      Effect.either(
+        Effect.flatMap(DeviceIdentityStore, (store) => store.create).pipe(Effect.provide(layer))
+      )
+    )
+  ).toEqual(Either.left(new StorageError({ reason: 'exists', code: 'device-identity-exists' })));
+  expect((await Effect.runPromise(load)).id).toBe(created.id);
 });
 
 async function historyFixture() {

@@ -198,7 +198,7 @@ function assertBudgetEffect(state: PrivateState): Effect.Effect<void, Error, Lab
   return Effect.gen(function* () {
     const clock = yield* LabClock;
     if (clock.nowMs() - state.startedMs > state.maxMs) {
-      return yield* Effect.fail(new Error('attack-budget-time'));
+      yield* Effect.fail(new Error('attack-budget-time'));
     }
   });
 }

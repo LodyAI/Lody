@@ -1,8 +1,11 @@
-import { Either } from 'effect';
+import { Effect, Either } from 'effect';
+import { verifyRecordSignature } from '../src/workflows/verification';
+import type { PreparedEpochEnvelope } from '@lody/e2ee-core/effect';
 import { describe, expect, it } from 'vitest';
 import { Point } from '@noble/ed25519';
 import * as Bytes from '../src/pure/bytes';
 import * as Cbor from '../src/pure/cbor';
+import { SigningFacts } from '../src/pure/signing-facts';
 import type { DeviceGrant } from '../src/pure/commands';
 import type {
   DecodedRecord,
@@ -61,12 +64,30 @@ describe('total CBOR boundary', () => {
   });
 });
 
+it('reuses immutable point-validity evidence without accepting modified or low-order keys', () => {
+  const bytes = Point.BASE.toBytes();
+  const first = SigningFacts.empty.check(bytes);
+  if (Either.isLeft(first)) throw new Error('base point fixture must be valid');
+  expect(SigningFacts.empty.size).toBe(0);
+  expect(first.right.facts.size).toBe(1);
+  bytes.fill(0);
+  first.right.key.toBytes().fill(0);
+  const second = first.right.facts.check(Point.BASE.toBytes());
+  if (Either.isLeft(second)) throw new Error('previously checked point must remain valid');
+  expect(second.right.facts).toBe(first.right.facts);
+  expect(second.right.key.toBytes()).toEqual(Point.BASE.toBytes());
+  expect(first.right.facts.check(bytes)).toMatchObject({ _tag: 'Left' });
+  expect(first.right.facts.check(Point.ZERO.toBytes())).toMatchObject({ _tag: 'Left' });
+  expect(first.right.facts.size).toBe(1);
+});
+
 // Compiled, never invoked: meaningful negative contracts for ordinary consumers.
 function typeContracts(
   sign: Bytes.SigningPublicKey,
   enc: Bytes.EncryptionPublicKey,
   sig: Bytes.Signature,
-  hash: Bytes.RecordHash
+  hash: Bytes.RecordHash,
+  request: Bytes.RequestId
 ) {
   const acceptsSigning = (_key: Bytes.SigningPublicKey) => {};
   acceptsSigning(sign);
@@ -78,11 +99,21 @@ function typeContracts(
   const wrongHash: Bytes.RecordHash = sig;
   // @ts-expect-error A record hash is not a trusted genesis input.
   const wrongGenesis: Bytes.GenesisHash = hash;
-  return { wrongHash, wrongGenesis };
+  // @ts-expect-error Equal byte length does not make a record hash an epoch commitment.
+  const wrongCommitment: Bytes.EpochCommitment = hash;
+  // @ts-expect-error A public commitment cannot be substituted for an epoch secret.
+  const wrongEpochKey: Bytes.EpochKey = wrongCommitment;
+  // @ts-expect-error Secret key material is not exported by the public key value.
+  wrongEpochKey.toBytes();
+  // @ts-expect-error A join request ID cannot be used as an outbox delivery ID.
+  const wrongDelivery: Bytes.DeliveryId = request;
+  return { wrongHash, wrongGenesis, wrongCommitment, wrongEpochKey, wrongDelivery };
 }
 void typeContracts;
 
 function stageContracts(decoded: DecodedRecord, signed: SignatureCheckedRecord) {
+  // @ts-expect-error Cryptographic execution requires an explicitly supplied verifier Service.
+  void Effect.runPromise(verifyRecordSignature(decoded));
   // @ts-expect-error Decoding is not signature verification.
   const wrongSignature: SignatureCheckedRecord = decoded;
   // @ts-expect-error Signature verification is not authorization at a ledger view.
@@ -95,9 +126,24 @@ function stageContracts(decoded: DecodedRecord, signed: SignatureCheckedRecord) 
 }
 void stageContracts;
 
-function viewContracts() {
+function viewContracts(
+  genesis: Bytes.GenesisHash,
+  epoch: Bytes.EpochNumber,
+  signer: Bytes.SigningPublicKey
+) {
+  // @ts-expect-error Metadata and a byte-export callback cannot forge a prepared envelope.
+  const forgedEnvelope: PreparedEpochEnvelope = {
+    stage: 'Prepared',
+    genesis,
+    epoch,
+    sender: signer,
+    recipient: signer,
+    toBytes: () => new Uint8Array(),
+  };
   // @ts-expect-error A flag and structural fields cannot mint a verified view.
   const forged: LedgerView = { verified: true, length: 1 };
-  return forged;
+  // @ts-expect-error A callback and a size cannot fabricate private key-validity evidence.
+  const forgedFacts: SigningFacts = { size: 1, check: SigningFacts.empty.check };
+  return { forged, forgedFacts, forgedEnvelope };
 }
 void viewContracts;

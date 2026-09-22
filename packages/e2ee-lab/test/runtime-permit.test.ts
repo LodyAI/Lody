@@ -19,6 +19,20 @@ import { choiceKey } from '../src/schedule';
 afterEach(() => cleanupLab());
 
 describe('P2 permit runtime', () => {
+  it('preserves work failures and gives an exhausted scheduler budget explicit priority', async () => {
+    const workError = new Error('work-rejected');
+    const runtime = new LabRuntime({ mode: 'manual' });
+    await expect(
+      new ScheduleDriver(runtime, 'record').drive(Promise.reject(workError))
+    ).rejects.toBe(workError);
+    // An already exhausted logical budget is deterministic, without timer races.
+    const exhausted = new LabRuntime({ mode: 'manual' });
+    await expect(
+      new ScheduleDriver(exhausted, 'record', { maxSteps: -1 }).drive(Promise.reject(workError))
+    ).rejects.toThrow('logical-step-budget');
+    runtime.close();
+    exhausted.close();
+  });
   it('does not send CAS until permitted and can pause one actor', async () => {
     const runtime = new LabRuntime({ mode: 'manual' });
     const host = await launchLab();

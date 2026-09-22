@@ -1,12 +1,22 @@
 import type {
   EncryptionPublicKey,
+  EpochCommitment,
   MembershipId,
   RequestId,
   Signature,
   SigningPublicKey,
   UserId,
 } from './bytes';
-import type { Operation } from '../ledger/schema';
+import type { Operation } from './ledger-schema';
+
+/** Initial key material must already be durably retained by the key lifecycle.
+ * A commitment is public data, not proof of possession or storage durability. */
+export interface CreateLedgerCommand {
+  readonly userId: UserId;
+  readonly membershipId: MembershipId;
+  readonly encryptionPublicKey: EncryptionPublicKey;
+  readonly epochCommitment: EpochCommitment;
+}
 
 export type DeviceGrant =
   | { readonly kind: 'personal'; readonly canManage: boolean }
