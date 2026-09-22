@@ -1,4 +1,6 @@
 {
+  "sessions.cancelSend": "Cancel send",
+  "sessions.sendConfigLocked": "Configuration is locked while sending",
   "sessions.selectionCopyUnavailable": "The selected text is still loading or could not be loaded. Wait and try copying again.",
   "sharing.request.purpose": "Purpose: {{purpose}}",
   "sharing.request.deliveryDisclosure": "Approval publishes the selected conversations, including thinking, tool output and images, but not file attachments. Anyone with the link can read them without signing in. The complete access link will be returned to the requesting agent, which can use or forward it. You can revoke the link in Share management; downloaded copies cannot be recalled.",

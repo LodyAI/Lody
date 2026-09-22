@@ -28,4 +28,6 @@
 
 - Attachment waits share the submission token through acceptance. Recheck its
   lifetime after readiness; resolve routing from the current committed callback.
-  Hidden composers cancel waiting, and acceptance clears only unchanged draft fields.
+  Visibility gates new intents; hiding a mounted composer preserves existing waits.
+  Render upload-wait versus dispatching actions from explicit state, never a mutable ref.
+  Disable composer config controls through acceptance; clear only unchanged draft fields.

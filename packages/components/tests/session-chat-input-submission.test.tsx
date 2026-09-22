@@ -18,10 +18,7 @@ import {
   sendSessionFileToLocalRuntime,
 } from '../src/lib/electron-session-file-sender';
 import { currentWorkspaceIdAtom } from '../src/atoms/workspace-context';
-import {
-  computeSha256Hex,
-  uploadSessionFile,
-} from '../src/lib/session-file-upload';
+import { computeSha256Hex, uploadSessionFile } from '../src/lib/session-file-upload';
 import { uploadSessionImage } from '../src/lib/session-image-upload';
 import { resolveSessionMessageSubmitRoute } from '../src/components/sessions/session-message-submit-route';
 import { createRoot, type Root } from 'react-dom/client';
@@ -655,6 +652,10 @@ describe('SessionChatInputArea submission feedback', () => {
     await submit('keyboard');
     await act(async () => upload.resolve(uploadedImage));
     expect(container!.querySelector('textarea')!.disabled).toBe(true);
+    expect(container!.querySelector('button[aria-label="Cancel send"]')).toBeNull();
+    expect(container!.querySelector<HTMLButtonElement>('button[aria-label="Send"]')?.disabled).toBe(
+      true
+    );
     await act(async () => acceptance.resolve(false));
     expect(container!.querySelector('textarea')!.value).toBe('focus regression draft');
     expect(container!.querySelector('img')).not.toBeNull();
@@ -663,7 +664,43 @@ describe('SessionChatInputArea submission feedback', () => {
     );
   });
 
-  it.each(['failure', 'cancel', 'hidden', 'switch', 'unmount', 'archived'] as const)(
+  it('keeps an existing upload intent across hidden tabs and locks config through acceptance', async () => {
+    const composerRef = createRef<SessionChatInputAreaHandle>();
+    const sessionId = `background-upload-${++nextSession}`;
+    const acceptance = deferredBoolean();
+    const delivered: SessionInputBlock[][] = [];
+    const onSendMessage = (blocks: SessionInputBlock[]) => {
+      delivered.push(blocks);
+      return acceptance.promise;
+    };
+    await renderComposer({ sessionId, composerRef, onSendMessage });
+    const upload = await attachPendingImage(composerRef);
+    await submit('keyboard');
+    const lockedConfig = () =>
+      container!.querySelector<HTMLButtonElement>('button[aria-label="Run configuration"]');
+    expect(lockedConfig()?.disabled).toBe(true);
+    expect(container!.querySelector('[data-testid="desktop-permission-mode-button"]')).toBeNull();
+    await renderComposer({ sessionId, composerRef, onSendMessage, isVisible: false });
+    expect(container!.querySelector('textarea')!.disabled).toBe(true);
+    await act(async () => upload.resolve(uploadedImage));
+    expect(delivered).toEqual([
+      [
+        { type: 'image', ...uploadedImage },
+        { type: 'text', text: 'focus regression draft' },
+      ],
+    ]);
+    expect(container!.querySelector('button[aria-label="Cancel send"]')).toBeNull();
+    expect(lockedConfig()?.disabled).toBe(true);
+    await act(async () => acceptance.resolve(true));
+    await renderComposer({ sessionId, composerRef, onSendMessage });
+    expect(container!.querySelector('textarea')!.value).toBe('');
+    expect(
+      container!.querySelector('[data-testid="desktop-permission-mode-button"]')
+    ).not.toBeNull();
+    expect(delivered).toHaveLength(1);
+  });
+
+  it.each(['failure', 'cancel', 'switch', 'unmount', 'archived'] as const)(
     'preserves the draft and prevents automatic delivery after %s',
     async (reason) => {
       const composerRef = createRef<SessionChatInputAreaHandle>();
@@ -678,10 +715,8 @@ describe('SessionChatInputArea submission feedback', () => {
       await submit('button');
       if (reason === 'cancel')
         await act(async () =>
-          container!.querySelector<HTMLButtonElement>('button[aria-label="Cancel"]')!.click()
+          container!.querySelector<HTMLButtonElement>('button[aria-label="Cancel send"]')!.click()
         );
-      if (reason === 'hidden')
-        await renderComposer({ sessionId, composerRef, onSendMessage, isVisible: false });
       if (reason === 'archived')
         await renderComposer({ sessionId, composerRef, onSendMessage, isArchived: true });
       if (reason === 'switch')
@@ -919,7 +954,7 @@ describe('SessionChatInputArea submission feedback', () => {
       await submit('keyboard');
       if (reason === 'cancel')
         await act(async () =>
-          container!.querySelector<HTMLButtonElement>('button[aria-label="Cancel"]')!.click()
+          container!.querySelector<HTMLButtonElement>('button[aria-label="Cancel send"]')!.click()
         );
       else {
         await renderComposer({ sessionId: `away-${nextSession}`, composerRef, onSendMessage });

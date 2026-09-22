@@ -311,7 +311,7 @@ test.describe('attachment upload submission', () => {
             });
           });
           await page.goto(
-            '/iframe.html?id=sessions-sessionchatinputarea--uploading-attachments&viewMode=story'
+            '/iframe.html?id=sessions-sessionchatinputarea--uploading-attachments-pending-acceptance&viewMode=story'
           );
           const input = page.locator('textarea');
           await input.fill('Inspect this image');
@@ -326,14 +326,16 @@ test.describe('attachment upload submission', () => {
           await uploadStarted;
           await input.press(action === 'Meta+Shift+Enter' ? action : 'Enter');
           await expect(input).toBeDisabled();
-          await expect(page.getByRole('button', { name: 'Cancel', exact: true })).toBeVisible();
+          await expect(
+            page.getByRole('button', { name: 'Cancel send', exact: true })
+          ).toBeVisible();
           const submissions = () =>
             page.evaluate(() => (window as typeof window & { submissions: unknown[] }).submissions);
           expect(await submissions()).toEqual([]);
           if (action === 'cancel')
-            await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+            await page.getByRole('button', { name: 'Cancel send', exact: true }).click();
           release(action === 'failure' ? 500 : 200);
-          await expect(input).toBeEnabled();
+          if (action === 'cancel' || action === 'failure') await expect(input).toBeEnabled();
           if (action === 'cancel')
             await expect(
               page.getByRole('img', { name: 'sample.png', exact: true })
@@ -342,7 +344,15 @@ test.describe('attachment upload submission', () => {
             await expect(input).toHaveValue('Inspect this image');
             expect(await submissions()).toEqual([]);
           } else {
-            await expect(input).toHaveValue('');
+            await expect.poll(submissions).toHaveLength(1);
+            await expect(
+              page.getByRole('button', { name: 'Cancel send', exact: true })
+            ).toHaveCount(0);
+            await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+            await expect(
+              page.getByRole('button', { name: 'Run configuration', exact: true })
+            ).toBeDisabled();
+            await expect(input).toBeDisabled();
             expect(await submissions()).toEqual([
               {
                 blocks: [image, { type: 'text', text: 'Inspect this image' }],
@@ -351,6 +361,14 @@ test.describe('attachment upload submission', () => {
                   : {}),
               },
             ]);
+            await page.evaluate(() =>
+              window.dispatchEvent(new Event('storybook:accept-attachments'))
+            );
+            await expect(input).toBeEnabled();
+            await expect(input).toHaveValue('');
+            await expect(
+              page.getByRole('button', { name: 'Run configuration', exact: true })
+            ).toBeEnabled();
           }
         });
       }

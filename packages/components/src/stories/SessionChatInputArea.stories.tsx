@@ -321,3 +321,18 @@ export const UploadingAttachments: Story = {
     },
   },
 };
+
+export const UploadingAttachmentsPendingAcceptance: Story = {
+  args: {
+    disableImageUpload: false,
+    onSendMessage: (blocks, _role, options) =>
+      new Promise<boolean>((resolve) => {
+        window.addEventListener('storybook:accept-attachments', () => resolve(true), {
+          once: true,
+        });
+        window.dispatchEvent(
+          new CustomEvent('storybook:attachments-submitted', { detail: { blocks, options } })
+        );
+      }),
+  },
+};

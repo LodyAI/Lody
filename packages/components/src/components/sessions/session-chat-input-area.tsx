@@ -1828,6 +1828,9 @@ export const SessionChatInputArea = memo(
       [pastedTextDrafts, session.id, updatePastedTextDraftsForSession]
     );
 
+    const [submissionPhase, setSubmissionPhase] = useState<'waiting_upload' | 'dispatching'>(
+      'dispatching'
+    );
     const uploadWaitRef = useRef<{ settle: (ready: boolean) => void; files: Set<File> } | null>(
       null
     );
@@ -1836,7 +1839,6 @@ export const SessionChatInputArea = memo(
       sendStateRef.current = {
         onSendMessage,
         blocked:
-          !isVisible ||
           isArchived ||
           isMachineRemoved ||
           isExternalHistoryRefreshing ||
@@ -1853,9 +1855,20 @@ export const SessionChatInputArea = memo(
         pendingFiles.some((file) => isSessionFileTransferPhase(file.status));
       if (failed || sendStateRef.current.blocked || !uploading) {
         uploadWaitRef.current = null;
+        setSubmissionPhase('dispatching');
         wait.settle(!failed && !sendStateRef.current.blocked);
       }
-    });
+    }, [
+      onSendMessage,
+      isArchived,
+      isMachineRemoved,
+      isExternalHistoryRefreshing,
+      durableAgentRoleReady,
+      freeTurnLimitNotice,
+      pendingImages,
+      pendingFiles,
+      submissionPending,
+    ]);
     useLayoutEffect(
       () => () => {
         uploadWaitRef.current?.settle(false);
@@ -1984,6 +1997,7 @@ export const SessionChatInputArea = memo(
           const uploading =
             pendingImages.some((image) => image.status === 'uploading') ||
             pendingFiles.some((file) => isSessionFileTransferPhase(file.status));
+          setSubmissionPhase(uploading ? 'waiting_upload' : 'dispatching');
           if (uploading) {
             const ready = await new Promise<boolean>((resolve) => {
               uploadWaitRef.current = {
@@ -2518,7 +2532,19 @@ export const SessionChatInputArea = memo(
               : 'flex min-w-0 flex-1 flex-nowrap items-center gap-1.5 overflow-hidden'
           }
         >
-          {mobileFooterSelectorNode ?? desktopFooterSelectorNode}
+          {submissionPending ? (
+            <button
+              type="button"
+              disabled
+              aria-label={t('chat.runConfig.buttonAriaLabel', 'Run configuration')}
+              title={t('sessions.sendConfigLocked', 'Configuration is locked while sending')}
+              className="h-7 truncate px-2 text-sm text-muted-foreground opacity-70"
+            >
+              {selectedModelLabel ?? t('chat.runConfig.buttonAriaLabel', 'Run configuration')}
+            </button>
+          ) : (
+            (mobileFooterSelectorNode ?? desktopFooterSelectorNode)
+          )}
         </div>
         <SessionUsagePopover
           contextWindowUsage={session.contextWindowUsage}
@@ -2561,7 +2587,7 @@ export const SessionChatInputArea = memo(
     ) : null;
     /* Keep desktop actions compact while preserving the mobile touch target. */
     const primaryActionSizeClassName = isMobile ? 'h-8 w-8' : 'h-7 w-7';
-    const waitingForUploads = submissionPending && uploadWaitRef.current !== null;
+    const waitingForUploads = submissionPending && submissionPhase === 'waiting_upload';
     const primaryActionNode = showStopButton ? (
       <Button
         onClick={() => {
@@ -2590,6 +2616,7 @@ export const SessionChatInputArea = memo(
           if (waitingForUploads) {
             uploadWaitRef.current?.settle(false);
             uploadWaitRef.current = null;
+            setSubmissionPhase('dispatching');
           } else {
             void sendMessage();
           }
@@ -2597,7 +2624,7 @@ export const SessionChatInputArea = memo(
         disabled={!waitingForUploads && (!hasSendableContent || isSendActionDisabled)}
         aria-label={
           waitingForUploads
-            ? t('common.cancel', 'Cancel')
+            ? t('sessions.cancelSend', 'Cancel send')
             : isExternalHistoryRefreshing && externalHistorySyncLabel
               ? externalHistorySyncLabel
               : t('sessions.send')
@@ -2708,7 +2735,7 @@ export const SessionChatInputArea = memo(
             unmount with them the moment it opened. Mounted only while OPEN:
             it reads machine visibility, and the composer must stay renderable
             in hosts that do not provide that context. */}
-        {agentRoleEditor ? (
+        {agentRoleEditor && !submissionPending ? (
           <AgentRoleEditorDialog
             editor={agentRoleEditor}
             accessibleRoles={accessibleAgentRoles}

@@ -9,7 +9,7 @@ Translation: current
 
 In an existing Session, a user presses Enter or Send before attachments finish
 uploading. The composer accepts one local send intent, hides and locks its draft,
-and shows a spinner. Clicking the spinner cancels that intent and restores the
+and shows a spinner. The spinner is labelled “Cancel send”; clicking it cancels that intent and restores the
 draft; uploads themselves continue. The top-level new-chat landing keeps its
 existing upload blocking behavior. There is no durable background outbox.
 
@@ -17,9 +17,10 @@ existing upload blocking behavior. There is no durable background outbox.
 
 The existing submission token owns both upload waiting and downstream acceptance.
 All selected attachments must become available before dispatch. Upload failure,
-loss of visibility, scope change, unmount, or a blocking session condition cancels
-waiting without sending or clearing the draft. A hidden mounted Tab counts as
-leaving the composer. Returning does not resume an old intent. An image converted
+scope change, unmount, or a blocking session condition cancels waiting without
+sending or clearing the draft. Hiding a mounted Tab or entering share selection
+keeps an existing intent alive; visibility only gates new submissions. Closing a
+Tab or otherwise unmounting its composer still cancels waiting. An image converted
 by the existing uploader into a local file remains the same selected attachment.
 
 Prompt text and references are captured at submission. Attachment membership is
@@ -28,7 +29,14 @@ The current committed send handler resolves busy state, unfinished assistant tur
 steer support, and run configuration at dispatch time. The current Role accompanies
 that configuration. The shortcut's invert flag is retained, but the busy-send
 preference itself is read at dispatch time. Run configuration and preferences
-are not frozen at the initial keypress.
+are not frozen at the initial keypress. Configuration controls (including Role)
+are unavailable from submission through acceptance; cancelling or completing the
+submission restores them. This prevents edits through this composer, without
+freezing external configuration updates or the live routing state.
+
+An explicit UI phase distinguishes upload waiting from dispatching. Readiness
+removes the actionable Cancel send button before downstream acceptance, even when
+acceptance remains pending. Once dispatch starts, the Send button is disabled.
 
 Only downstream acceptance retires submitted draft fields that still match their
 captured versions; newer text, attachments, or references from external actions

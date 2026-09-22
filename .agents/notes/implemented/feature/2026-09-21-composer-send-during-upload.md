@@ -27,7 +27,10 @@ actual dispatch; a durable outbox and keypress-time config snapshot remain outsi
 scope. The existing [focus decision](../bug-fix/2026-09-12-composer-click-focus.md)
 continues to own focus interactions.
 
-The parent supplies visibility including share-selection hiding. The implementation
+Configuration controls are unavailable while submission is pending, preventing
+changes through this composer while preserving current routing. The parent supplies
+visibility including share-selection hiding; this gates new intents, while a hidden
+mounted composer continues an existing upload wait. Unmount still cancels it. The implementation
 and behavioral tests now live in their ordinary source and test suites; the isolated
 patch runner has been removed. The top-level new-chat landing retains upload blocking.
 
@@ -36,7 +39,8 @@ patch runner has been removed. The top-level new-chat landing retains upload blo
 | Reproduced failure | Correction |
 | --- | --- |
 | A late acceptance erased text written through the public imperative handle while the input was disabled. This cleanup behavior was inherited from the existing composer. | Clear only draft fields still matching the accepted snapshot. Preserve replacement fields. |
-| A hidden composer still accepted a synthetic Enter without pending uploads. | Guard submission entry as well as upload waiting with visibility. |
+| A hidden composer still accepted a synthetic Enter without pending uploads. | Guard new submission entry with visibility; hiding no longer cancels existing waits. |
+| Upload readiness cleared a mutable ref without rendering, leaving an actionable Cancel during slow acceptance. | Explicit waiting/dispatching state removes Cancel send at readiness; deferred acceptance tests assert the button and config lock. |
 | A previously failed ordinary file immediately cancelled an otherwise valid new image wait. | Failure checks cover this intent's selected files; already failed files stay excluded. |
 
 Adding these boundary tests first produced three assertion failures. After the
@@ -80,9 +84,11 @@ The production suites pass 82 tests (62 composer, 20 route) and component type
 checking. Eight browser cases pass in installed Chrome at 390px and 1280px widths:
 Enter, Cmd+Shift+Enter, cancel, and upload failure. They exercise the real Storybook
 composer and XMLHttpRequest transport with intercepted upload responses and a
-simulated downstream callback. The browser fixtures use synthetic attachments.
+simulated downstream callback with deferred acceptance. A unit regression first
+reproduced the stale Cancel before the explicit phase correction. The browser fixtures use synthetic attachments.
 
-The original experiment detected all 12 ablations. The normal suites retain those
-boundary witnesses. Passing a finite mutation set does not prove absence of other
+The original experiment detected all 12 ablations. The normal suites retain the applicable boundary witnesses. The historical
+visibility-cancellation witness is replaced with hidden-tab continuation coverage
+after the product decision to preserve submitted intents across Tab switches. Passing a finite mutation set does not prove absence of other
 state interleavings. Daemon delivery and physical Electron/mobile focus behavior
 remain unverified. Upload waits are memory-only and have no restart recovery.
