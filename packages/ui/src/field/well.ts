@@ -18,6 +18,15 @@ import { field } from './field.tokens.stylex';
 const RING = `0 0 0 ${field.ringWidth} ${field.ring}`;
 const INVALID_RING = `0 0 0 ${field.ringWidth} ${field.invalidRing}`;
 
+/**
+ * A corner that carries the ring is `corner.round`, not the squircle: Chromium
+ * draws a spread box-shadow on a superellipse as `radius + spread`, which is
+ * not a parallel offset of the original curve, so a squircle ring bulges off
+ * the corner tangents by several px. A circular corner offsets in true
+ * parallel and the ring stays tight. Parts below that never take the ring
+ * keep `corner.shape`.
+ */
+
 export const well = stylex.create({
   base: {
     boxSizing: 'border-box',
@@ -35,7 +44,7 @@ export const well = stylex.create({
     // the size, this sets the weight and tracking for every control here.
     fontWeight: 500,
     letterSpacing: text.controlTracking,
-    cornerShape: corner.shape,
+    cornerShape: corner.round,
     outlineStyle: 'none',
     opacity: { default: 1, ':disabled': field.disabledOpacity },
     cursor: { default: 'auto', ':disabled': 'default' },
@@ -73,7 +82,7 @@ export const well = stylex.create({
     backgroundColor: field.background,
     boxShadow: { default: field.well, ':focus-within': `${field.well}, ${RING}` },
     color: field.value,
-    cornerShape: corner.shape,
+    cornerShape: corner.round,
     outlineStyle: 'none',
     cursor: 'text',
     transitionProperty: 'box-shadow, opacity',
@@ -159,7 +168,7 @@ export const well = stylex.create({
     backgroundColor: field.background,
     boxShadow: { default: field.well, ':focus-visible': `${field.well}, ${RING}` },
     color: field.checkedMark,
-    cornerShape: corner.shape,
+    cornerShape: corner.round,
     outlineStyle: 'none',
     opacity: { default: 1, ':disabled': field.disabledOpacity },
     cursor: { default: 'pointer', ':disabled': 'default' },

@@ -45,7 +45,9 @@ const styles = stylex.create({
     cursor: { default: 'pointer', ':disabled': 'default' },
     userSelect: 'none',
     textDecoration: 'none',
-    cornerShape: corner.shape,
+    // Round rather than the squircle: a spread box-shadow ring does not track
+    // a superellipse corner (see the note in `field/well.ts`).
+    cornerShape: corner.round,
     // Not an `outline`: the product shell resets every outline with
     // `!important`, which no layer order overrides, so the ring rides in the
     // same box-shadow as the variant's own edge. Each variant composes it,

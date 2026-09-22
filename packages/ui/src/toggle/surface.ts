@@ -40,7 +40,9 @@ export const toggleSurface = stylex.create({
     fontWeight: 500,
     letterSpacing: text.controlTracking,
     lineHeight: 1,
-    cornerShape: corner.shape,
+    // Round rather than the squircle: a spread box-shadow ring does not track
+    // a superellipse corner (see the note in `field/well.ts`).
+    cornerShape: corner.round,
     // Not an `outline`; see RING above.
     outlineStyle: 'none',
     cursor: { default: 'pointer', ':disabled': 'default' },

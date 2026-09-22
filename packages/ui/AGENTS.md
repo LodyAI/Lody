@@ -114,8 +114,8 @@ with this package's `stylex-options.ts`.
   `test/gallery.test.tsx` fails when a token has no entry. **A sample that is a
   rung needs a different rung under it**: the panel is the card rung, and in
   dark region and card are one value. No test sees this — open the board.
-- `corner.shape` goes wherever a radius goes, except `radius.full`: a pill or a
-  circle takes `corner.round`, since a squircle there is a superellipse; round
-  corners fall back outside Chromium.
+- `corner.shape` goes with every radius, except `radius.full` and ringed
+  corners — both take `corner.round`: spread shadows can't parallel-offset a
+  superellipse; round is the non-Chromium fallback.
 - A Radix file in `packages/components/src/ui` is deleted when its in-repo
   callers reach zero; private consumers sync on typecheck.

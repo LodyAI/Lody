@@ -123,7 +123,9 @@ export const disclosureSurface = stylex.create({
     borderWidth: 0,
     borderStyle: 'none',
     backgroundColor: 'transparent',
-    cornerShape: corner.shape,
+    // Round rather than the squircle: a spread box-shadow ring does not track
+    // a superellipse corner (see the note in `field/well.ts`).
+    cornerShape: corner.round,
     color: {
       default: disclosure.tabLabel,
       ':hover': disclosure.tabActiveLabel,
@@ -154,7 +156,7 @@ export const disclosureSurface = stylex.create({
   tabPanel: {
     minWidth: 0,
     borderRadius: radius.medium,
-    cornerShape: corner.shape,
+    cornerShape: corner.round,
   },
 
   // ── The stack ────────────────────────────────────────────────────────────
@@ -195,7 +197,7 @@ export const disclosureSurface = stylex.create({
     borderStyle: 'none',
     backgroundColor: 'transparent',
     borderRadius: radius.small,
-    cornerShape: corner.shape,
+    cornerShape: corner.round,
     color: disclosure.label,
     fontFamily: 'inherit',
     fontSize: disclosure.rowText,

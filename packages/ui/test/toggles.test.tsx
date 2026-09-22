@@ -4,6 +4,7 @@ import { describe, expect, test } from 'vitest';
 import { Checkbox } from '../src/field/checkbox';
 import { Field } from '../src/field/field';
 import { Input } from '../src/field/input';
+import { PasswordInput } from '../src/field/password-input';
 import { Radio, RadioGroup } from '../src/field/radio';
 import { Switch } from '../src/field/switch';
 import { corner } from '../src/tokens/scales.stylex';
@@ -121,7 +122,7 @@ const CORNERS = stylex.create({
 const SQUIRCLE = stylex.props(CORNERS.squircle).className ?? '';
 const ROUND = stylex.props(CORNERS.round).className ?? '';
 
-describe('pills are round, not squircles', () => {
+describe('round corners where a ring or a pill is', () => {
   test('the two corner shapes really are different classes', () => {
     expect(SQUIRCLE).not.toBe('');
     expect(ROUND).not.toBe('');
@@ -146,10 +147,19 @@ describe('pills are round, not squircles', () => {
     }
   });
 
-  test('a checkbox keeps the squircle, which is what its radius is for', () => {
-    const cls = classesOf(renderToStaticMarkup(<Checkbox />), 'button');
-    expect(cls).toContain(SQUIRCLE);
-    expect(cls).not.toContain(ROUND);
+  test('a ringed control is round: a squircle ring bulges off its corners', () => {
+    // Chromium draws a spread box-shadow on a superellipse as radius + spread
+    // rather than a parallel offset, so the ring drifts off the corner
+    // tangents. Every control whose edge carries the ring is round instead.
+    for (const [control, tag] of [
+      [<Checkbox key="c" />, 'button'],
+      [<Input key="i" />, 'input'],
+      [<PasswordInput key="p" />, 'div'],
+    ] as const) {
+      const cls = classesOf(renderToStaticMarkup(control), tag);
+      expect(cls).toContain(ROUND);
+      expect(cls).not.toContain(SQUIRCLE);
+    }
   });
 });
 
