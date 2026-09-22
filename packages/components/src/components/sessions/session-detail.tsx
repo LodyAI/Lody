@@ -3407,6 +3407,7 @@ const SessionDetail = ({
           rawPath: filePath,
           pathKind: options.pathKind ?? 'markdown-href',
           workspacePath: activeSessionWorkspacePath,
+          preserveWorktreePath: isElectronRenderer() && isActiveSessionLocalMachine,
           ...(options.startLine === undefined ? {} : { startLine: options.startLine }),
           ...(options.endLine === undefined ? {} : { endLine: options.endLine }),
         });

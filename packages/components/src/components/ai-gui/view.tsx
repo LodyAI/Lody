@@ -6584,7 +6584,9 @@ const ToolCallCard = memo(function ToolCallCard({
   const isFilePathClickable = Boolean(filePath && onFilePathClick);
   const triggerFilePathClick = () => {
     if (filePath && onFilePathClick) {
-      onFilePathClick(normalizeWorktreePath(filePath));
+      // Display shortening must not change the file's identity. The owning
+      // session decides whether a host path needs portable-worktree mapping.
+      onFilePathClick(filePath);
     }
   };
   const handleFilePathClick = (event: ReactMouseEvent<HTMLSpanElement>) => {
