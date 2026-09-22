@@ -29,6 +29,8 @@ export type SidebarFilterLabels = {
   updatedProjectNamesUnavailable: string;
   showMyTasks: string;
   showAllTasks: string;
+  emptyMyTasks: string;
+  showAllTasksAction: string;
 };
 
 const defaultLabels: SidebarFilterLabels = {
@@ -41,6 +43,8 @@ const defaultLabels: SidebarFilterLabels = {
   updatedProjectNamesUnavailable: 'Available in Updated view',
   showMyTasks: 'My Tasks',
   showAllTasks: 'All Tasks',
+  emptyMyTasks: 'No tasks match the current filter',
+  showAllTasksAction: 'Show all tasks',
 };
 
 export type SidebarFilterPopoverProps = {

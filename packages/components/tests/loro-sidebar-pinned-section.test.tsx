@@ -222,9 +222,35 @@ describe('LoroSidebar pinned section', () => {
   });
 
   it('keeps the filter reachable when the workspace scope hides every section', () => {
+    const onChatScopeChange = vi.fn();
     renderSidebar({
       organizeMode: 'workspace',
       chatScope: 'my',
+      pinnedItems: [],
+      topContent: undefined,
+      onChatScopeChange,
+      sessionListProps: {
+        sessions: [],
+        repos: [],
+      },
+    });
+
+    expect(container?.querySelectorAll('button[aria-label="Filter sidebar"]')).toHaveLength(1);
+    expect(container?.querySelector('[data-sidebar-filtered-empty-state]')?.textContent).toContain(
+      'No tasks match the current filter'
+    );
+    const showAllButton = Array.from(container?.querySelectorAll('button') ?? []).find(
+      (button) => button.textContent === 'Show all tasks'
+    );
+    expect(showAllButton).toBeDefined();
+    flushSync(() => showAllButton?.click());
+    expect(onChatScopeChange).toHaveBeenCalledWith('team');
+  });
+
+  it('does not label a genuinely empty All Tasks workspace as filtered', () => {
+    renderSidebar({
+      organizeMode: 'workspace',
+      chatScope: 'team',
       pinnedItems: [],
       topContent: undefined,
       sessionListProps: {
@@ -233,7 +259,7 @@ describe('LoroSidebar pinned section', () => {
       },
     });
 
-    expect(container?.querySelectorAll('button[aria-label="Filter sidebar"]')).toHaveLength(1);
+    expect(container?.querySelector('[data-sidebar-filtered-empty-state]')).toBeNull();
   });
 
   it('mounts one filter when Chats is the only visible Workspace section', () => {

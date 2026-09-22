@@ -2548,6 +2548,8 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       ),
       showMyTasks: t('sessions.sidebar.my', 'My Tasks'),
       showAllTasks: t('sessions.sidebar.team', 'All Tasks'),
+      emptyMyTasks: t('sidebar.filter.emptyMyTasks', 'No tasks match the current filter'),
+      showAllTasksAction: t('sidebar.filter.showAllTasks', 'Show all tasks'),
     }),
     [t]
   );

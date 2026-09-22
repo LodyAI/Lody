@@ -319,6 +319,8 @@ const defaultLabels: LoroSidebarLabels = {
     updatedProjectNamesUnavailable: 'Available in Updated view',
     showMyTasks: 'My Tasks',
     showAllTasks: 'All Tasks',
+    emptyMyTasks: 'No tasks match the current filter',
+    showAllTasksAction: 'Show all tasks',
   },
   updated: {
     heading: 'Chats',
@@ -891,6 +893,33 @@ export const LoroSidebar = memo(function LoroSidebar({
       ))
     : null;
   const hasPinnedItems = Boolean(pinnedItems?.length);
+  const filteredWorkspaceEmptyState =
+    organizeMode === 'workspace' &&
+    chatScope === 'my' &&
+    !topContent &&
+    !hasPinnedItems &&
+    !afterSessionListContent &&
+    !sessionListProps?.isLoading ? (
+      <div
+        className="flex flex-col items-center px-5 pb-4 pt-8 text-center"
+        data-sidebar-filtered-empty-state
+      >
+        <p className="max-w-[220px] text-xs leading-5 text-sidebar-foreground-muted">
+          {mergedLabels.filter.emptyMyTasks}
+        </p>
+        {onChatScopeChange ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="mt-1.5 h-7 px-2.5 text-xs font-medium text-sidebar-foreground hover:bg-sidebar-hover hover:text-sidebar-hover-foreground"
+            onClick={() => onChatScopeChange('team')}
+          >
+            {mergedLabels.filter.showAllTasksAction}
+          </Button>
+        ) : null}
+      </div>
+    ) : undefined;
   const workspaceIdentityStatus: WorkspaceIdentityStatus | null =
     connectionUiState && connectionUiState !== 'online'
       ? connectionUiState
@@ -1330,6 +1359,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                   <SessionList
                     {...sessionListProps}
                     className={sessionListClassName}
+                    emptyState={filteredWorkspaceEmptyState}
                     headerAction={
                       topContent || hasPinnedItems || afterSessionListContent
                         ? sessionListProps.headerAction

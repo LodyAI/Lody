@@ -3034,6 +3034,8 @@
   "sidebar.filter.organizeUpdated": "Updated",
   "sidebar.filter.organizeProject": "Project",
   "sidebar.filter.showHeading": "Tasks",
+  "sidebar.filter.emptyMyTasks": "No tasks match the current filter",
+  "sidebar.filter.showAllTasks": "Show all tasks",
   "sidebar.filter.updatedProjectNames": "Show Project",
   "sidebar.filter.updatedProjectNamesUnavailable": "Available in Updated view",
   "sidebar.filter.trigger": "Filter sidebar",
