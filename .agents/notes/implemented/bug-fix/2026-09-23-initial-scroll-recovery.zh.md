@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-09-23-initial-scroll-recovery.md)
 
+PR: [#896](https://github.com/LodyAI/Lody/pull/896)
+
 ## 摘要
 
 会话行已经挂载并完成测量时，整个消息区仍可能一直不可见。冷启动恢复缓存像素位置时，

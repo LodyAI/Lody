@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-09-23-initial-scroll-recovery.zh.md)
 
+PR: [#896](https://github.com/LodyAI/Lody/pull/896)
+
 ## Abstract
 
 A conversation can remain invisible even after its rows are mounted and measured.
