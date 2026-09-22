@@ -239,7 +239,10 @@ describe('L5 disk save faults', () => {
       )
     ).record;
     a.store.failSave = 'before';
-    await expect(a.client.submit(record)).rejects.toThrow('disk-failure');
+    await expect(a.client.submit(record)).rejects.toMatchObject({
+      _tag: 'StorageError',
+      reason: 'io',
+    });
     expect(stream.records).toEqual([]);
   });
 
@@ -254,7 +257,10 @@ describe('L5 disk save faults', () => {
       )
     ).record;
     a.store.failSave = 'after';
-    await expect(a.client.submit(record)).rejects.toThrow('disk-failure');
+    await expect(a.client.submit(record)).rejects.toMatchObject({
+      _tag: 'StorageError',
+      reason: 'io',
+    });
     expect(stream.records).toEqual([]);
     expect(a.store.journal?.pending).toEqual(record);
     const resumed = await a.client.resume();
@@ -436,7 +442,7 @@ describe('L6 page and cursor catch-up', () => {
       },
     };
     const client = new LedgerClient(created.record, created.anchor, wrapped, stream);
-    await expect(client.read()).rejects.toThrow('disk-failure');
+    await expect(client.read()).rejects.toMatchObject({ _tag: 'StorageError', reason: 'io' });
     expect(inner.journal?.records).toHaveLength(2);
     expect(inner.journal?.offset).toBe('opaque:1/+');
     const resumed = await new LedgerClient(created.record, created.anchor, inner, stream).read();

@@ -38,8 +38,12 @@ in-package tests only; do not re-export it.
   fails closed and must not advance the journal cursor. Unknown prefix must
   not become up-to-date success, including junk followed by an empty final page.
 - Persist exact pending bytes before CAS. Conflicts never re-sign; retry the
-  same bytes. `LedgerClient.submit`/`resume` are Promise wrappers over one
-  Effect implementation; do not add a second simulated submit path.
+  same bytes. `./effect` has the intent client; old `./ledger` submit/resume
+  delegate to the same `workflows/ledger-engine.ts`. No second submit path.
+  Migration is incomplete: see README and the Effect migration note. Guard
+  `pure/ports/workflows` with `check:effect-boundaries`; its 9 listed protocol
+  bridges must disappear before declaring completion. Do not add a runtime
+  inside workflows or turn defects/malformed pages into Pending.
   `openEpochEnvelope` returns plaintext only when the sender is a current
   non-recovery device (`canSendEpoch`, also exported for the host gateway;
   any active personal/machine device may forward, R only receives), the

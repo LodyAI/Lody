@@ -1,5 +1,55 @@
 # @lody/e2ee-core
 
+## Effect API migration (2026-09-22, incomplete)
+
+The new `@lody/e2ee-core/effect` entry provides checked opaque value types,
+`prepareDeviceAdmission` / `prepareJoinRequest`, staged record verification,
+and an intent-based `LedgerClient`. Promise adapters are composed explicitly
+from `@lody/e2ee-core/effect/platform`. The existing `./ledger` client delegates
+to the same submission engine; there is no second CAS algorithm.
+
+```ts
+import { Effect } from 'effect';
+import { Bytes, LedgerClient } from '@lody/e2ee-core/effect';
+
+const revoke = Effect.gen(function* () {
+  const anchor = yield* Bytes.genesisHash(orgGenesisBytes);
+  const target = yield* Bytes.signingPublicKey(deviceToRemoveBytes);
+  const client = yield* LedgerClient.restore(anchor);
+  const result = yield* client.execute({ _tag: 'RevokeDevice', target });
+  switch (result._tag) {
+    case 'Committed':
+      return 'Confirmed by verified read-back';
+    case 'Conflict':
+      return 'Review the new state; do not automatically re-sign';
+    case 'Pending':
+      return 'Exact bytes are stored; call this client.resume()';
+    case 'Unsupported':
+      return 'This backend does not provide the required CAS';
+  }
+});
+// The application supplies JournalStore, LedgerTransport and DeviceSigner Layers.
+// Run the Effect at the application boundary, not inside another workflow.
+```
+
+`create` accepts an already signed genesis and requires empty storage; `restore`
+requires an existing valid journal. `createFromSnapshot` requires independent
+genesis/endorser/head trust. `resume` returns `Idle` if nothing is pending and
+rejects another device's pending record. Byte exports and state inspection return
+copies. A signature-checked record is not yet authorized; an authorized preview
+is not a server commit. Snapshot-origin views do not claim full-history replay.
+
+**Not complete:** protocol validators still use a temporary typed-error bridge;
+key delivery/rotation, content, recovery and existing consumers still need their
+Effect-native migration. Do not remove compatibility exports until those consumers
+move. `check:effect-boundaries` checks the migrated folders only; `--complete`
+deliberately fails while its protocol exceptions remain. Neither this migration
+nor its tests enable production E2EE.
+Track scope, remaining gates and evidence in the
+[migration note](../../.agents/notes/proposed/architecture/2026-09-22-e2ee-effect-api.md).
+
+## Existing protocol and compatibility API
+
 **2026-09-21 protocol revision:** `possessionSigningBytes` now requires
 `targetMembershipId` and uses `possess/v2`. Verification derives the target from
 the actor's preceding verified membership, including worker-assisted replay.

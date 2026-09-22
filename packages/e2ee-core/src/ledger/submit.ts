@@ -2,56 +2,36 @@ import { Effect } from 'effect';
 import { runPromiseThrow } from '../effect-run';
 import { copyBytes, bytesEqual } from './cbor';
 import { hashRecord, type Hash, type SigningPointCache } from './crypto';
-import { fail } from './error';
+import { fail, LedgerError } from './error';
+import { genesisHash } from '../pure/bytes';
+import { rawLedger } from '../pure/records';
+import type { ClientError } from '../pure/errors';
+import { JournalStore, LedgerTransport } from '../ports/ledger';
+import { journalStoreLayer, ledgerTransportLayer } from '../platform/ledger-ports';
+import { LedgerEngine, type ResumeOutcome } from '../workflows/ledger-engine';
 import { Ledger } from './ledger';
-import { decodeRecord } from './schema';
 import type { SnapshotTrust } from './snapshot';
+export {
+  MAX_LEDGER_RECORDS,
+  MAX_LEDGER_READ_PAGE_RECORDS,
+  MAX_LEDGER_READ_PAGES,
+  MAX_LEDGER_READ_RECORDS,
+} from '../pure/journal';
+export type {
+  LedgerJournal,
+  LedgerTransaction,
+  LedgerStore,
+  LedgerReadPage,
+  LedgerStream,
+} from '../pure/journal';
 import {
-  classifyLedgerPresence,
-  classifyUnresolvedSubmit,
-  ordinaryPreviousHash,
-  selectSubmitWire,
-} from './submit-decision';
-
-/** Cumulative verified records a client may retain. 10k from-zero chains must fit. */
-export const MAX_LEDGER_RECORDS = 16_384;
-/** Extend/work chunk. Adapter HTTP pages may be larger; refresh slices instead of rejecting. */
-export const MAX_LEDGER_READ_PAGE_RECORDS = 1_024;
-export const MAX_LEDGER_READ_PAGES = 256;
-/** @deprecated Use MAX_LEDGER_RECORDS. Kept as the cumulative read budget alias. */
-export const MAX_LEDGER_READ_RECORDS = MAX_LEDGER_RECORDS;
-
-export interface LedgerJournal {
-  readonly genesis: Uint8Array;
-  readonly records: readonly Uint8Array[];
-  readonly pending: Uint8Array | null;
-  readonly offset: string;
-  readonly snapshot?: Uint8Array;
-  readonly snapshotTrust?: SnapshotTrust;
-  /** True after the authenticated snapshot head is observed or a suffix extends it. */
-  readonly snapshotBound?: boolean;
-}
-
-export interface LedgerTransaction {
-  load(): Promise<LedgerJournal | null>;
-  save(journal: LedgerJournal): Promise<void>;
-}
-
-export interface LedgerStore {
-  exclusive<T>(work: (transaction: LedgerTransaction) => Promise<T>): Promise<T>;
-}
-
-export interface LedgerReadPage {
-  readonly records: readonly Uint8Array[];
-  readonly nextOffset: string;
-  readonly upToDate: boolean;
-}
-
-export interface LedgerStream {
-  readonly initialOffset: string;
-  readAfter(offset: string): Promise<LedgerReadPage>;
-  appendCas(offset: string, record: Uint8Array): Promise<'accepted' | 'conflict' | 'unsupported'>;
-}
+  MAX_LEDGER_READ_PAGE_RECORDS,
+  type LedgerJournal,
+  type LedgerTransaction,
+  type LedgerStore,
+  type LedgerReadPage,
+  type LedgerStream,
+} from '../pure/journal';
 
 export type LedgerSubmitStatus = 'committed' | 'conflict' | 'unknown' | 'unsupported';
 
@@ -59,8 +39,6 @@ export interface LedgerSubmitResult {
   readonly status: LedgerSubmitStatus;
   readonly ledger: Ledger;
 }
-
-type Session = { journal: LedgerJournal; ledger: Ledger };
 
 function checkOffset(value: unknown): asserts value is string {
   if (typeof value !== 'string' || value.length === 0 || value.length > 1024 || value === 'now') {
@@ -94,10 +72,6 @@ function copyJournal(journal: LedgerJournal): LedgerJournal {
     snapshotTrust: journal.snapshotTrust ? copyTrust(journal.snapshotTrust) : undefined,
     snapshotBound: journal.snapshotBound === true ? true : undefined,
   };
-}
-
-async function containsHash(ledger: Ledger, record: Uint8Array): Promise<boolean> {
-  return ledger.hasRecordHash(await hashRecord(record));
 }
 
 export class LedgerClient {
@@ -215,244 +189,87 @@ export class LedgerClient {
     return client;
   }
 
-  private async save(
-    tx: LedgerTransaction,
-    session: Session,
-    pending: Uint8Array | null,
-    offset = session.journal.offset,
-    records = session.journal.records,
-    snapshotBound = session.journal.snapshotBound
-  ): Promise<void> {
-    const next: LedgerJournal = {
-      genesis: this.anchor,
-      records: copyRecordList(records),
-      pending: pending === null ? null : copyBytes(pending),
-      offset,
-      snapshot: session.journal.snapshot ? copyBytes(session.journal.snapshot) : undefined,
-      snapshotTrust: session.journal.snapshotTrust
-        ? copyTrust(session.journal.snapshotTrust)
-        : undefined,
-      snapshotBound: snapshotBound === true ? true : undefined,
-    };
-    await tx.save(copyJournal(next));
-    session.journal = next;
-  }
+  private engine: LedgerEngine | undefined;
 
-  private async load(tx: LedgerTransaction): Promise<Session> {
-    const loaded = await tx.load();
-    const journal = loaded
-      ? copyJournal(loaded)
-      : this.genesisRecord
-        ? {
-            genesis: copyBytes(this.anchor),
-            records: [copyBytes(this.genesisRecord)],
-            pending: null,
-            offset: this.stream.initialOffset,
-          }
-        : fail('invalid-operation');
-    if (!bytesEqual(journal.genesis, this.anchor)) fail('wrong-anchor');
-    checkOffset(journal.offset);
-    const ledger =
-      journal.snapshot && journal.snapshotTrust
-        ? await Ledger.verifySnapshot({
-            trust: journal.snapshotTrust,
-            snapshot: journal.snapshot,
-            suffix: journal.records,
-            pointCache: this.pointCache,
-          })
-        : journal.records.length === 0
-          ? fail('genesis-mismatch')
-          : await Ledger.verify({
-              anchor: this.anchor,
-              records: journal.records,
-              pointCache: this.pointCache,
-            });
-    return { journal, ledger };
-  }
-
-  private async refresh(tx: LedgerTransaction, session: Session): Promise<void> {
-    const seen = new Set([this.stream.initialOffset, session.journal.offset]);
-    const snapshotMode = session.journal.snapshot !== undefined;
-    const snapshotHead = session.journal.snapshotTrust
-      ? copyBytes(session.journal.snapshotTrust.head)
-      : null;
-    let bound =
-      !snapshotMode || session.journal.records.length > 0 || session.journal.snapshotBound === true;
-    let readOffset = session.journal.offset;
-    let skippedUnknown = false;
-
-    const applyFresh = async (
-      fresh: Uint8Array[]
-    ): Promise<{ ledger: Ledger; records: Uint8Array[] }> => {
-      if (session.journal.records.length + fresh.length > MAX_LEDGER_RECORDS) fail('oversize');
-      let ledger = session.ledger;
-      let records = [...session.journal.records];
-      for (let i = 0; i < fresh.length; i += MAX_LEDGER_READ_PAGE_RECORDS) {
-        const slice = fresh.slice(i, i + MAX_LEDGER_READ_PAGE_RECORDS);
-        ledger = await ledger.extend(slice, this.pointCache);
-        records = [...records, ...slice];
-      }
-      return { ledger, records };
-    };
-
-    for (let pageCount = 0; pageCount < MAX_LEDGER_READ_PAGES; pageCount++) {
-      const page = await this.stream.readAfter(readOffset);
-      checkOffset(page.nextOffset);
-      if (!Array.isArray(page.records)) fail('canonical');
-      if (typeof page.upToDate !== 'boolean') fail('canonical');
-      if (page.records.length === 0) {
-        if (!page.upToDate) fail('canonical');
-        if (page.nextOffset === readOffset) {
-          if (snapshotMode && !bound && skippedUnknown) fail('wrong-parent');
-          return;
-        }
-        if (session.journal.records.length !== 1 && !session.journal.snapshot) fail('canonical');
-      }
-      if (seen.has(page.nextOffset) && page.records.length > 0) fail('replay');
-      if (page.records.length > MAX_LEDGER_RECORDS) fail('oversize');
-      const copied = copyRecordList(page.records);
-      const fresh: Uint8Array[] = [];
-      let expectedParent = session.ledger.head;
-      for (const record of copied) {
-        const digest = await hashRecord(record);
-        const wasBound = bound;
-        if (session.ledger.hasRecordHash(digest)) {
-          if (snapshotHead && bytesEqual(digest, snapshotHead)) bound = true;
-          if (snapshotMode && wasBound) fail('wrong-parent');
-          continue;
-        }
-        if (snapshotMode) {
-          const decoded = decodeRecord(record, this.pointCache);
-          if (decoded.body.type === 'genesis') {
-            if (wasBound) fail('wrong-parent');
-            skippedUnknown = true;
-            continue;
-          }
-          if (decoded.body.type !== 'ordinary') fail('canonical');
-          if (bytesEqual(decoded.body.fields.previousHash, expectedParent)) {
-            bound = true;
-            fresh.push(record);
-            expectedParent = digest;
-            continue;
-          }
-          if (!wasBound) {
-            skippedUnknown = true;
-            continue;
-          }
-          fail('wrong-parent');
-        }
-        fresh.push(record);
-      }
-      if (snapshotMode && !bound && skippedUnknown && page.upToDate) fail('wrong-parent');
-      if (snapshotMode && !bound && skippedUnknown) {
-        readOffset = page.nextOffset;
-        seen.add(page.nextOffset);
-        if (page.upToDate) fail('wrong-parent');
-        continue;
-      }
-      const applied = await applyFresh(fresh);
-      await this.save(
-        tx,
-        session,
-        session.journal.pending,
-        page.nextOffset,
-        applied.records,
-        snapshotMode && bound ? true : undefined
+  private engineEffect(): Effect.Effect<LedgerEngine, ClientError> {
+    return Effect.suspend(() => {
+      if (this.engine) return Effect.succeed(this.engine);
+      const self = this;
+      return Effect.gen(function* () {
+        const anchor = yield* genesisHash(self.anchor);
+        const store = yield* JournalStore;
+        const stream = yield* LedgerTransport;
+        const engine = yield* LedgerEngine.legacy(
+          anchor,
+          self.genesisRecord,
+          store,
+          stream,
+          self.pointCache
+        );
+        self.engine = engine;
+        return engine;
+      }).pipe(
+        Effect.provide(journalStoreLayer(this.store)),
+        Effect.provide(ledgerTransportLayer(this.stream))
       );
-      session.ledger = applied.ledger;
-      readOffset = page.nextOffset;
-      seen.add(page.nextOffset);
-      if (page.upToDate) return;
-    }
-    fail('oversize');
-  }
-
-  async read(): Promise<Ledger> {
-    return this.store.exclusive(async (tx) => {
-      const session = await this.load(tx);
-      await this.refresh(tx, session);
-      return session.ledger;
     });
   }
 
-  async submit(record: Uint8Array): Promise<LedgerSubmitResult> {
-    return runPromiseThrow(this.submitEffect(record));
-  }
-
-  async resume(): Promise<LedgerSubmitResult> {
-    return runPromiseThrow(this.resumeEffect());
-  }
-
-  /** Same implementation as `submit`. Promise methods are thin runPromise wrappers. */
-  submitEffect(record: Uint8Array): Effect.Effect<LedgerSubmitResult, unknown> {
-    if (!(record instanceof Uint8Array)) fail('canonical');
-    decodeRecord(record, this.pointCache);
-    return this.runEffect(copyBytes(record));
-  }
-
-  resumeEffect(): Effect.Effect<LedgerSubmitResult, unknown> {
-    return this.runEffect();
-  }
-
-  private runEffect(requested?: Uint8Array): Effect.Effect<LedgerSubmitResult, unknown> {
-    // Promise LedgerStore is the adapter boundary. One runtime at submit/resume;
-    // the interruption signal is forwarded so the inner fiber is not detached.
-    return tryCall((signal) =>
-      this.store.exclusive((tx) => runPromiseThrow(this.submitSteps(tx, requested), signal))
+  /** Temporary Promise boundary. All state transitions live in LedgerEngine. */
+  read(): Promise<Ledger> {
+    return runPromiseThrow(
+      this.engineEffect().pipe(
+        Effect.flatMap((engine) => engine.refresh()),
+        Effect.map(rawLedger),
+        Effect.mapError(legacyError)
+      )
     );
   }
 
-  private submitSteps(
-    tx: LedgerTransaction,
-    requested?: Uint8Array
-  ): Effect.Effect<LedgerSubmitResult, unknown> {
-    return Effect.gen(this, function* () {
-      const session = yield* tryCall(() => this.load(tx));
-      const retrying = session.journal.pending !== null;
-      const wire = selectSubmitWire(session.journal.pending, requested);
-      const previousHash = ordinaryPreviousHash(wire, this.pointCache);
-      yield* tryCall(() => this.refresh(tx, session));
+  submit(record: Uint8Array): Promise<LedgerSubmitResult> {
+    return runPromiseThrow(this.submitEffect(record));
+  }
 
-      const reconcile = (): Effect.Effect<LedgerSubmitResult | undefined, unknown> =>
-        Effect.gen(this, function* () {
-          const presence = classifyLedgerPresence({
-            containsWire: yield* tryCall(() => containsHash(session.ledger, wire)),
-            previousMatchesHead: bytesEqual(previousHash, session.ledger.head),
-          });
-          if (presence === 'absent') return undefined;
-          yield* tryCall(() => this.save(tx, session, null));
-          return { status: presence, ledger: session.ledger };
-        });
+  resume(): Promise<LedgerSubmitResult> {
+    return runPromiseThrow(this.resumeEffect());
+  }
 
-      const prior = yield* reconcile();
-      if (prior) return prior;
-      yield* tryCall(() => session.ledger.extend([wire], this.pointCache));
-      yield* Effect.uninterruptible(tryCall(() => this.save(tx, session, wire)));
-      const cas = yield* appendCas(this.stream, session.journal.offset, wire);
-      yield* tryCall(() => this.refresh(tx, session));
-      const observed = yield* reconcile();
-      if (observed) return observed;
-      const unresolved = classifyUnresolvedSubmit({ cas, retrying });
-      if (unresolved === 'unsupported') {
-        yield* tryCall(() => this.save(tx, session, null));
-      }
-      return { status: unresolved, ledger: session.ledger };
-    });
+  submitEffect(record: Uint8Array): Effect.Effect<LedgerSubmitResult, ClientError | LedgerError> {
+    const owned = copyBytes(record);
+    return this.engineEffect().pipe(
+      Effect.flatMap((engine) => engine.submitEncoded(owned)),
+      Effect.flatMap(legacyResult),
+      Effect.mapError(legacyError)
+    );
+  }
+
+  resumeEffect(): Effect.Effect<LedgerSubmitResult, ClientError | LedgerError> {
+    return this.engineEffect().pipe(
+      Effect.flatMap((engine) => engine.resume()),
+      Effect.flatMap(legacyResult),
+      Effect.mapError(legacyError)
+    );
   }
 }
 
-function tryCall<A>(fn: (signal: AbortSignal) => Promise<A>): Effect.Effect<A, unknown> {
-  return Effect.tryPromise({ try: fn, catch: (error) => error });
+function legacyError(error: ClientError | LedgerError): ClientError | LedgerError {
+  if (error instanceof LedgerError) return error;
+  if (error._tag === 'ValidationError') return new LedgerError(error.code, error.position);
+  if (error._tag === 'PendingOperationExists') return new LedgerError('replay');
+  return error;
 }
 
-function appendCas(
-  stream: LedgerStream,
-  offset: string,
-  record: Uint8Array
-): Effect.Effect<'accepted' | 'conflict' | 'unsupported' | 'unknown', never> {
-  return tryCall(() => stream.appendCas(offset, record)).pipe(
-    Effect.catchAll(() => Effect.succeed('unknown' as const))
-  );
+function legacyResult(result: ResumeOutcome): Effect.Effect<LedgerSubmitResult, LedgerError> {
+  if (result._tag === 'Idle') return Effect.fail(new LedgerError('invalid-operation'));
+  const status: LedgerSubmitStatus =
+    result._tag === 'Committed'
+      ? 'committed'
+      : result._tag === 'Conflict'
+        ? 'conflict'
+        : result._tag === 'Unsupported'
+          ? 'unsupported'
+          : 'unknown';
+  return Effect.succeed({ status, ledger: rawLedger(result.ledger) });
 }
 
 export class MemoryLedgerStore implements LedgerStore {

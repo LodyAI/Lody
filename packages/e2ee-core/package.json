@@ -5,6 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./effect": "./src/effect.ts",
+    "./effect/platform": "./src/platform/index.ts",
     "./ledger": "./src/ledger/index.ts",
     "./ledger-node": "./src/ledger/node-store.ts",
     "./node-store": "./src/node-store.ts",
@@ -22,7 +24,8 @@
   "scripts": {
     "typecheck": "tsgo --noEmit",
     "test": "vitest run",
-    "check": "pnpm typecheck && pnpm test",
+    "check": "pnpm typecheck && pnpm check:effect-boundaries && pnpm test",
+    "check:effect-boundaries": "node scripts/check-effect-boundaries.mjs",
     "bench:ledger-10k": "tsx bench/ledger-10k.ts",
     "bench:ledger-10k-breakdown": "tsx bench/ledger-10k-breakdown.ts",
     "bench:ledger-10k-browser": "tsx bench/ledger-10k-browser.ts",

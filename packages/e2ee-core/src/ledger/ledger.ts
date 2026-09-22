@@ -359,6 +359,24 @@ export class Ledger {
     return recordBytes;
   }
 
+  /** Validate nested proofs and current policy before asking a device to sign.
+   * The copy is private: rejection cannot change this verified view. */
+  prepareChecked(
+    operation: Operation,
+    signerPublicKey: SigningPublicKey,
+    cache?: SigningPointCache
+  ): Proposal {
+    const proposal = this.prepare(operation, signerPublicKey, cache);
+    verifyOperationProofs(
+      this.internal.genesis,
+      operation,
+      cache,
+      this.internal.devices.get(keyId(proposal.signer))?.membershipId
+    );
+    applyOperation(cloneState(this.internal), proposal.signer, operation, cache);
+    return proposal;
+  }
+
   prepareSnapshot(
     endorserPublicKey: SigningPublicKey,
     cache?: SigningPointCache

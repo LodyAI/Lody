@@ -37,6 +37,20 @@ Translation: current
 
 ## 验收
 
+### 剩余实现（不是等待新的产品决策）
+
+- [ ] 完成 P1：schema、crypto、policy、snapshot 校验改为无预期抛错的函数；
+      保持内部重放更新高效，不在每条记录上复制完整状态。
+- [ ] 完成 P2：原生持久存储显式 create/restore、原生快照启动完整覆盖和操作构造。
+      当前 `create` 接受预先签好的创世记录，还不是最终自包含的 Org 创建 API。
+- [ ] P3：绑定接收者的发钥流程与精确 outbox；将可恢复代次候选从 Lab 移到 core；
+      迁移内容、快照准入和恢复流程。
+- [ ] P4：迁移 Lab 的 `platform/{session,backup,persist,content-session,host}.ts`
+      及 Electron 的 `src/main/services/e2ee-{device,user}-service.ts`；裸攻击输入只留在
+      审计/测试边界。消费者迁移后删除兼容 runtime 和 9 个协议桥接。
+- [ ] 补齐增量提交、快照启动、恢复的性能闸门，而非只测完整重放；修复既有 lint
+      错误后才能宣称全仓检查通过。当前没有等待确认的协议变更或产品启用决策。
+
 - 编译拒绝错钥类型、未验证记录、非法设备管理标记及未穷尽分支。
 - 普通客户端不拼接签名、parent、nonce 或 CAS offset；公共错误不能为 unknown。
 - 验证结果绑定实际视图；不接受同 head 不同认证状态、跨 Org 或失效授权。
@@ -77,3 +91,29 @@ Translation: current
   新流程通过明确的临时错误桥接接入，不能宣称旧 throw 已消失。
 - 同一份 1000 条记录：基线重放中位数 1233.40 ms，首轮 CBOR 迁移后 1260.15 ms
   （+2.2%，预热 3 次、测量 10 次）。尚未满足增量/快照/恢复的性能验收。
+
+### 2026-09-22 — P2 账本纵向切片
+
+- 基础提交 `2ee49a54`；基线/计划提交 `8279a396`。
+- `./effect` 提供绑定 Org、签名器和 journal 的意图客户端，返回明确的
+  Committed/Conflict/Pending/Unsupported/Idle。先检查证明与权限，再请求签名。
+  `resume` 拒绝其它签名设备的 pending。旧 Promise API 委托唯一的
+  `workflows/ledger-engine.ts`，不维护第二套 CAS 状态机。
+- 平台锁适配器接管旧回调事务的生命周期，不在内部启动 Effect runtime。
+  保存与释放锁可承受取消；没有把 SQLite 同步事务改为异步事务。
+- 缓存绑定持久化记录精确前缀与 snapshot/trust 原文；同 head 也不允许替换已经
+  观察到的状态，只验证增量。不透明验证阶段将应用结果绑定到具体视图。
+- core 完整检查：38 文件 / 426 项通过，含真实 10k 持久化、验签、旧格式、快照攻击
+  和跨进程恢复。之后的签名设备绑定/参数捕获改动：类型检查、18 项原生客户端及
+  11 项快照客户端测试通过。完整测试运行早于最后这两项新增。
+- Lab 完整检查：18 文件 / 135 项通过。首轮发现 Streams 错误码丢失，已修适配器，
+  未修改裁判。非法页以 StreamProtocolError 失败，不伪装 Pending；程序缺陷仍是缺陷。
+- 在 pending 保存/清除前后四处确定性注入取消；重开存储后确认只有原记录，不重签。
+- 同机同一份 1000 条记录复测：基线中位数 1214.85 ms，当前 1235.57 ms
+  （+1.7%，各预热 3 次、测量 10 次）。其它性能闸门仍未通过。
+- `pnpm check` 再次通过全仓类型检查，随后仍被既有 9 个 Lab lint 错误阻断，
+  后续阶段未执行。本轮代码定向 lint 无错误；仅格式化本任务文件。
+- `check:effect-boundaries` 使用 TypeScript AST 检查已迁移层的导入、显式 throw、
+  隐式环境调用及 runtime 启动，明确报告 9 个临时协议桥接；`--complete` 会拒绝该状态。
+- **P0–P4 尚未完成**。内容/密钥/恢复的原生 API 和消费者迁移是剩余实现工作，
+  不是等待人工审批的 blocker。产品 E2EE 仍未启用。

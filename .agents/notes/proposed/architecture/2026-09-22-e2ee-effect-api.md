@@ -44,6 +44,23 @@ scenarios or protocol acceptance requirements.
 
 ## Acceptance
 
+### Remaining implementation (not a request for new product decisions)
+
+- [ ] Finish P1: migrate schema, crypto, policy and snapshot validation to total
+      functions; keep owned internal replay updates efficient rather than cloning per record.
+- [ ] Finish P2: explicit native persistent-store create/restore, full native
+      snapshot bootstrap coverage and complete operation construction. `create` currently
+      accepts a pre-signed genesis; this is not the final self-contained Org creation API.
+- [ ] P3: bound recipient/key delivery and exact outbox; move recoverable epoch
+      candidates from Lab into core; migrate content/snapshot admission and recovery.
+- [ ] P4: migrate Lab `platform/{session,backup,persist,content-session,host}.ts`
+      and Electron `src/main/services/e2ee-{device,user}-service.ts`; retain deliberate
+      raw attack inputs only at audit/test boundaries. Remove compatibility runtimes
+      and the 9 protocol bridges once no active consumer needs them.
+- [ ] Complete performance gates for incremental submit, snapshot startup and
+      recovery, not only full replay. Resolve baseline lint failures before claiming
+      the full repository check passes. No protocol or product enablement decision is blocked.
+
 - Reject wrong key types, unverified records, invalid device-management shapes,
   and non-exhaustive outcomes at compile time.
 - Ordinary consumers do not assemble signatures, parents, nonces or CAS offsets;
@@ -99,3 +116,36 @@ scenarios or protocol acceptance requirements.
 - Same 1000-record fixture, baseline replay median 1233.40 ms, first post-CBOR
   replay median 1260.15 ms (+2.2%, 3 warmups/10 measurements). This does not
   satisfy the remaining increment/snapshot/recovery performance gates.
+
+### 2026-09-22 — P2 ledger vertical slice
+
+- Foundation commit: `2ee49a54`; baseline/plan commit: `8279a396`.
+- `./effect` exposes an intent client bound to Org, signer and journal, with typed
+  Committed/Conflict/Pending/Unsupported/Idle outcomes. Proof/policy checks precede
+  signing. `resume` refuses another signer's pending bytes. Old Promise methods
+  delegate to the single `workflows/ledger-engine.ts` implementation.
+- The platform lock adapter leases the existing callback transaction without a
+  nested Effect runtime. Saves and lock release survive interruption. No SQLite
+  synchronous transaction was changed into an async transaction.
+- Cache identity is the exact persisted prefix plus snapshot/trust bytes; an
+  observed prefix cannot be replaced, even at the same head. The cache extends
+  only new records. Opaque verification stages bind application to the exact view.
+- Core full check: 38 files / 426 tests passed, including persisted 10k, real
+  signatures, old formats, snapshot attacks and cross-process recovery. Later
+  signer-binding/input-capture changes: typecheck and 18 native-client + 11
+  snapshot-client tests passed. The full suite preceded those last two additions.
+- Lab full check: 18 files / 135 tests passed. Initial rerun exposed lost Streams
+  error codes; fixed the adapter instead of changing the judge. Malformed pages
+  now fail as StreamProtocolError, not Pending; programming defects remain defects.
+- Four deterministic cancellation cuts surround pending save/clear. Tests reopen
+  storage and confirm exactly one original record, without a new signature.
+- Repeated same-machine 1000-record replay: baseline 1214.85 ms, current 1235.57 ms
+  median (+1.7%, 3 warmups/10 samples each). Other performance gates remain open.
+- `pnpm check` again passed all repository typechecks, then stopped at the same
+  9 pre-existing Lab lint errors. Its remaining stages did not run. Scoped new-code
+  lint has no errors. Formatting is scoped to this task's files.
+- `check:effect-boundaries` uses the TypeScript AST to check the migrated layer
+  imports, explicit throws, implicit environment calls and runtime starts. It
+  reports 9 explicit legacy protocol bridges; `--complete` rejects that state.
+- P0–P4 is **not complete**. Native content/keys/recovery and consumer migration
+  are unimplemented work, not a human-approval blocker. Product E2EE remains off.
