@@ -56,6 +56,10 @@ export type SidebarFilterPopoverProps = {
   triggerClassName?: string;
   /** Render a custom trigger instead of the default IconButton-style filter button. */
   trigger?: ReactNode;
+  /** Controlled open state. Provide both props when the trigger can remount at a
+      different slot, so visibility survives the remount. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   /** Where to anchor the popover. Defaults to top-start since the trigger lives in the footer. */
   side?: 'top' | 'bottom' | 'left' | 'right';
   align?: 'start' | 'center' | 'end';
@@ -112,27 +116,31 @@ export function SidebarFilterPopover({
   className,
   triggerClassName,
   trigger,
+  open: controlledOpen,
+  onOpenChange,
   side = 'top',
   align = 'start',
 }: SidebarFilterPopoverProps) {
   const merged = { ...defaultLabels, ...labels };
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
   const [projectHintOpen, setProjectHintOpen] = useState(false);
   const sourceLabelsSwitchId = useId();
   const projectNamesAvailable = organize === 'updated';
 
   const handleOpenChange = (next: boolean) => {
-    setOpen(next);
+    setUncontrolledOpen(next);
+    onOpenChange?.(next);
     if (!next) setProjectHintOpen(false);
   };
 
   const handleOrganizeSelect = (next: SidebarOrganizeMode) => {
     onOrganizeChange?.(next);
-    setOpen(false);
+    handleOpenChange(false);
   };
   const handleScopeSelect = (next: SidebarChatScope) => {
     onScopeChange?.(next);
-    setOpen(false);
+    handleOpenChange(false);
   };
   return (
     <Popover open={open} onOpenChange={handleOpenChange}>

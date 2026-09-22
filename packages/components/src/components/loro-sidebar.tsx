@@ -178,8 +178,9 @@ export interface LoroSidebarProps {
   activeNav?: LoroSidebarNavKey | null;
 
   topContent?: ReactNode;
-  /** Reserves the filter trigger's space in the first visible section header. */
-  desktopFilterPlaceholder?: ReactNode;
+  /** The filter trigger element rendered in-flow on the first visible section
+      header. Caller-owned so its open state survives remounting between slots. */
+  desktopFilterAction?: ReactNode;
   /**
    * In-flow content rendered after {@link sessionListProps} inside the scroll
    * viewport (workspace mode only). LoroAppSidebar uses this to place the Chats
@@ -710,7 +711,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   maxWidth = 420,
   activeNav = null,
   topContent,
-  desktopFilterPlaceholder,
+  desktopFilterAction,
   afterSessionListContent,
   bottomFloatingContent,
   repoSections = defaultRepoSections,
@@ -866,24 +867,26 @@ export const LoroSidebar = memo(function LoroSidebar({
     return null;
   }
 
-  // This instance never moves between section headers: only its same-sized
-  // placeholder moves. That keeps an open popover open across organize changes.
-  const desktopFilterNode = !isMobile ? (
-    <SidebarFilterPopover
-      organize={organizeMode}
-      scope={chatScope}
-      onOrganizeChange={onOrganizeModeChange}
-      onScopeChange={onChatScopeChange}
-      showUpdatedProjectNames={showUpdatedProjectNames}
-      onShowUpdatedProjectNamesChange={onShowUpdatedProjectNamesChange}
-      labels={mergedLabels.filter}
-      side="bottom"
-      align="end"
-      triggerClassName="h-5 w-5 [&_svg]:h-4 [&_svg]:w-4"
-    />
-  ) : null;
-  const sectionHeaderFilterPlaceholder = !isMobile
-    ? (desktopFilterPlaceholder ?? <span aria-hidden="true" className="block h-6 w-6" />)
+  // The filter trigger is a normal in-flow action on whichever section header
+  // is first — the row's items-center keeps it aligned, so no overlay or
+  // placeholder. The caller supplies the element with lifted open state so
+  // remounting the one instance at a new slot keeps an open popover open; the
+  // local fallback covers direct uses (e.g. stories) that do not pass one.
+  const sectionHeaderFilterAction = !isMobile
+    ? (desktopFilterAction ?? (
+        <SidebarFilterPopover
+          organize={organizeMode}
+          scope={chatScope}
+          onOrganizeChange={onOrganizeModeChange}
+          onScopeChange={onChatScopeChange}
+          showUpdatedProjectNames={showUpdatedProjectNames}
+          onShowUpdatedProjectNamesChange={onShowUpdatedProjectNamesChange}
+          labels={mergedLabels.filter}
+          side="bottom"
+          align="end"
+          triggerClassName="h-5 w-5 [&_svg]:h-4 [&_svg]:w-4"
+        />
+      ))
     : null;
   const hasPinnedItems = Boolean(pinnedItems?.length);
   const workspaceIdentityStatus: WorkspaceIdentityStatus | null =
@@ -1242,14 +1245,6 @@ export const LoroSidebar = memo(function LoroSidebar({
           )}
         >
           <div className="relative">
-            {/* Covers the 24x24 placeholder exactly: every first section header
-              is an h-7 row offset 4px by the pt-1 wrappers below, so its center
-              sits at 18px — top-1.5 + h-6 centers the 20px trigger on it. */}
-            {!isMobile && desktopFilterNode ? (
-              <div className="pointer-events-none absolute right-0 top-1.5 z-10 flex h-6 w-6 items-center justify-center">
-                <div className="pointer-events-auto flex">{desktopFilterNode}</div>
-              </div>
-            ) : null}
             {hasPinnedItems ? (
               <div className={cn('pt-1', pinnedSectionCollapsed ? 'pb-1' : 'pb-3')}>
                 <SidebarUpdatedSessionList
@@ -1276,7 +1271,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                   onShareItemWithTeam={onShareUpdatedItemWithTeam}
                   onOpenPullRequest={onOpenUpdatedItemPullRequest}
                   getItemHref={getUpdatedItemHref}
-                  headerAction={sectionHeaderFilterPlaceholder ?? undefined}
+                  headerAction={sectionHeaderFilterAction ?? undefined}
                 />
               </div>
             ) : null}
@@ -1316,7 +1311,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     onOpenPullRequest={onOpenUpdatedItemPullRequest}
                     getItemHref={getUpdatedItemHref}
                     headerAction={
-                      hasPinnedItems ? undefined : (sectionHeaderFilterPlaceholder ?? undefined)
+                      hasPinnedItems ? undefined : (sectionHeaderFilterAction ?? undefined)
                     }
                   />
                 </div>
@@ -1336,9 +1331,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     headerAction={
                       topContent || hasPinnedItems
                         ? sessionListProps.headerAction
-                        : (sessionListProps.headerAction ??
-                          sectionHeaderFilterPlaceholder ??
-                          undefined)
+                        : (sessionListProps.headerAction ?? sectionHeaderFilterAction ?? undefined)
                     }
                   />
                 ) : null}
@@ -1352,8 +1345,8 @@ export const LoroSidebar = memo(function LoroSidebar({
                     <div className="flex items-center gap-2 px-1 text-[0.9em] font-medium text-sidebar-foreground-muted">
                       <Github className="h-3.5 w-3.5" />
                       <span className="truncate">{section.repoFullName}</span>
-                      {sectionIndex === 0 && sectionHeaderFilterPlaceholder ? (
-                        <span className="ml-auto shrink-0">{sectionHeaderFilterPlaceholder}</span>
+                      {sectionIndex === 0 && sectionHeaderFilterAction ? (
+                        <span className="ml-auto shrink-0">{sectionHeaderFilterAction}</span>
                       ) : null}
                     </div>
 

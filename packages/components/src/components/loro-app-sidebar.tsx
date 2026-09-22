@@ -116,6 +116,7 @@ import {
   type LoroSidebarLabels,
   type LoroSidebarWorkspace,
 } from '@/components/loro-sidebar';
+import { SidebarFilterPopover } from '@/components/sidebar-filter-popover';
 import {
   Dialog,
   DialogContent,
@@ -2545,10 +2546,29 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
     }),
     [t]
   );
-  const sidebarFilterPlaceholder =
-    !isMobile && pinnedItems.length === 0 ? (
-      <span aria-hidden="true" className="block h-6 w-6" />
-    ) : null;
+  // The filter trigger renders in-flow as the action of whichever section
+  // header is first, so alignment comes from the header row itself — no
+  // overlay or placeholder. `open` is owned here, the common ancestor of every
+  // candidate slot, so remounting the one instance at a new slot does not
+  // close an open popover.
+  const [sidebarFilterOpen, setSidebarFilterOpen] = useState(false);
+  const sidebarFilterPopover = !isMobile ? (
+    <SidebarFilterPopover
+      organize={organizeMode}
+      scope={chatScope}
+      onOrganizeChange={handleOrganizeModeChange}
+      onScopeChange={handleChatScopeChanged}
+      showUpdatedProjectNames={showUpdatedProjectNames}
+      onShowUpdatedProjectNamesChange={setShowUpdatedProjectNames}
+      labels={filterLabels}
+      open={sidebarFilterOpen}
+      onOpenChange={setSidebarFilterOpen}
+      side="bottom"
+      align="end"
+      triggerClassName="h-5 w-5 [&_svg]:h-4 [&_svg]:w-4"
+    />
+  ) : null;
+  const firstSectionFilterAction = pinnedItems.length === 0 ? sidebarFilterPopover : null;
   const localProjectsTopContent =
     localProjectSections.length === 0 ? null : (
       // Sections carry their own bottom margin (see sidebarTopContent): 12px
@@ -2560,7 +2580,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
             ? section.projects.map((project) => `${section.machineId}:${project.id}`)
             : [];
           const canReorderProjects = !isMobile && sectionProjectKeys.length > 1;
-          const headerFilter = sectionIndex === 0 ? sidebarFilterPlaceholder : null;
+          const headerFilter = sectionIndex === 0 ? firstSectionFilterAction : null;
           const dividerRight =
             section.canImport && isElectron ? (
               <button
@@ -3007,7 +3027,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
           toggleLabel={toggleLabel}
           onToggleCollapsed={handleToggleGithubWorktreesSection}
           action={
-            localProjectSections.length === 0 ? (sidebarFilterPlaceholder ?? undefined) : undefined
+            localProjectSections.length === 0 ? (firstSectionFilterAction ?? undefined) : undefined
           }
         />
       ) : null}
@@ -3025,7 +3045,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       chatsCollapsed={chatsCollapsed}
       headerAction={
         localProjectSections.length === 0 && !showGithubWorktrees
-          ? (sidebarFilterPlaceholder ?? undefined)
+          ? (firstSectionFilterAction ?? undefined)
           : undefined
       }
       selectedSessionId={selectedSessionId}
@@ -3355,7 +3375,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         isElectronMacOS={isElectronMacOS && !isElectronFullscreen}
         activeNav={activeNav}
         topContent={sidebarTopContent ?? undefined}
-        desktopFilterPlaceholder={sidebarFilterPlaceholder ?? undefined}
+        desktopFilterAction={sidebarFilterPopover ?? undefined}
         afterSessionListContent={sidebarChatsContent ?? undefined}
         bottomFloatingContent={sidebarBottomFloatingContent ?? undefined}
         labels={labels}
