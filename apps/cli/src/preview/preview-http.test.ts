@@ -1,94 +1,16 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { PreviewTarget } from '@lody/shared';
+import { describe, expect, it } from 'vitest';
 import {
   buildInjectedHtmlHeaders,
   buildLocalPreviewRequestHeaders,
   headersToEntries,
   maybeInjectVisualAnnotationRuntime,
-  startPreviewTunnel,
-} from './preview-tunnel-client';
+} from './preview-http';
 import {
   VISUAL_ANNOTATION_RUNTIME_RESPONSE_HEADER,
   VISUAL_ANNOTATION_RUNTIME_RESPONSE_VERSION,
 } from './preview-tunnel-readiness';
 
-const createRequest = {
-  workspaceId: 'workspace-preview',
-  machineId: 'machine-preview',
-  sessionId: 'session-preview',
-  grantId: 'grant-preview',
-  approvedByUserId: 'user-preview',
-  leaseExpiresAt: 1_800_000_000_000,
-  idleTimeoutMs: 45 * 60_000,
-} as const;
-
-const target: PreviewTarget = {
-  protocol: 'http',
-  host: '127.0.0.1',
-  port: 5173,
-};
-
-describe('startPreviewTunnel', () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.unstubAllGlobals();
-  });
-
-  it('includes status, content type, and body snippet when create returns non-JSON', async () => {
-    const fetchMock = vi.fn(async () => {
-      return new Response('<html><body>preview gateway returned a login page</body></html>', {
-        status: 201,
-        headers: { 'content-type': 'text/html; charset=utf-8' },
-      });
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    await expect(
-      startPreviewTunnel({
-        gatewayUrl: 'https://preview.example.com',
-        authToken: 'auth-token',
-        createRequest,
-        target,
-      })
-    ).rejects.toThrow(
-      /Received an invalid preview tunnel create response\. \(HTTP 201, content-type text\/html; charset=utf-8\)\. Response body: <html><body>preview gateway returned a login page<\/body><\/html>/
-    );
-  });
-
-  it('redacts tunnel tokens from invalid create response details', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => {
-        return new Response(
-          JSON.stringify({
-            tunnelId: 'preview-tunnel',
-            publicUrl: 'https://preview.example.com/?__lody_preview_token=preview-secret-token',
-            sessionToken: 'session-secret-token',
-          }),
-          {
-            status: 201,
-            headers: { 'content-type': 'application/json' },
-          }
-        );
-      })
-    );
-
-    const error = await startPreviewTunnel({
-      gatewayUrl: 'https://preview.example.com',
-      authToken: 'auth-token',
-      createRequest,
-      target,
-    }).catch((reason: unknown) => {
-      if (!(reason instanceof Error)) {
-        throw reason;
-      }
-      return reason;
-    });
-
-    expect(error.message).toMatch(/__lody_preview_token=\*\*\*/);
-    expect(error.message).not.toMatch(/preview-secret-token|session-secret-token/);
-  });
-
+describe('preview HTTP forwarding and annotation', () => {
   it('rejects oversized HTML before visual annotation injection', async () => {
     const html = '<html><body>large preview document</body></html>';
 

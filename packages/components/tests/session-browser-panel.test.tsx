@@ -14,6 +14,7 @@ import type {
   SessionMeta,
   SessionPreviewDocState,
   SessionPreviewCreateResponse,
+  SessionPreviewStatusResponse,
   SessionPreviewEndpoint,
   WorkspaceId,
 } from '@lody/shared';
@@ -28,7 +29,11 @@ const publicBrowserSurfaceRender = vi.hoisted(() => vi.fn());
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (_key: string, fallback?: string) => fallback ?? _key,
+    t: (_key: string, fallback?: string, values?: Record<string, string>) =>
+      (fallback ?? _key).replace(
+        /\{\{(\w+)\}\}/g,
+        (placeholder, key: string) => values?.[key] ?? placeholder
+      ),
   }),
 }));
 
@@ -103,7 +108,7 @@ const localTarget: PreviewTarget = {
 const localEndpoint: SessionPreviewEndpoint = {
   endpointId: 'endpoint-local-browser',
   kind: 'local-proxy',
-  viewerUrl: 'http://127.0.0.1:61234/dashboard?mode=dev&__lody_local_preview_token=local-token',
+  viewerUrl: 'http://127.0.0.1:61234/dashboard?mode=dev&__lody_preview_token=local-token',
   target: localTarget,
   capabilities: { visualAnnotation: true, shareable: false },
   createdAt: 1,
@@ -111,9 +116,8 @@ const localEndpoint: SessionPreviewEndpoint = {
 
 const remoteConnection: PreviewConnection = {
   status: 'active',
-  grantId: 'grant-browser',
-  tunnelId: 'tunnel-browser',
-  publicUrl: 'https://browser-preview.mylody.app/?__lody_preview_token=remote-token',
+  endpointId: 'endpoint-browser',
+  publicUrl: 'https://browser-preview.trycloudflare.com/?__lody_preview_token=remote-token',
   target: localTarget,
   updatedAt: 1,
 };
@@ -183,14 +187,18 @@ const createRuntime = (options?: {
   sessionStore?: unknown;
   createPreview?: () => Promise<SessionPreviewCreateResponse | null>;
 }) => {
+  let observedConnection = options?.preview?.connection;
   const requestSessionPreviewCreate = vi.fn(
     options?.createPreview ??
-      (async () => ({
-        type: 'session/preview-create_response' as const,
-        sessionId: session.id,
-        success: true as const,
-        connection: options?.connection ?? remoteConnection,
-      }))
+      (async () => {
+        observedConnection = options?.connection ?? remoteConnection;
+        return {
+          type: 'session/preview-create_response' as const,
+          sessionId: session.id,
+          success: true as const,
+          connection: observedConnection,
+        };
+      })
   );
   const requestSessionPreviewEndpointAcquire = vi.fn(async () => ({
     type: 'session/preview-endpoint-acquire_response' as const,
@@ -206,6 +214,12 @@ const createRuntime = (options?: {
       success: true as const,
     })
   );
+  const requestSessionPreviewStatus = vi.fn(async (): Promise<SessionPreviewStatusResponse> => ({
+    type: 'session/preview-status_response' as const,
+    sessionId: session.id,
+    success: true,
+    connection: observedConnection,
+  }));
   const runtime = {
     workspaceSlug: 'workspace-browser',
     workspaceId: 'workspace-browser-id' as WorkspaceId,
@@ -218,10 +232,15 @@ const createRuntime = (options?: {
     requestSessionPreviewCreate,
     requestSessionPreviewEndpointAcquire,
     requestSessionPreviewEndpointRelease,
+    requestSessionPreviewStatus,
     requestSessionPreviewRevoke: vi.fn(async () => null),
   } as unknown as WorkspaceRuntime;
   return {
     runtime,
+    observeConnection: (connection: PreviewConnection) => {
+      observedConnection = connection;
+    },
+    requestSessionPreviewStatus,
     requestSessionPreviewCreate,
     requestSessionPreviewEndpointAcquire,
     requestSessionPreviewEndpointRelease,
@@ -242,6 +261,7 @@ describe('SessionBrowserPanel controller', () => {
     (
       globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
     ).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
     vi.spyOn(console, 'info').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -256,6 +276,7 @@ describe('SessionBrowserPanel controller', () => {
     clearSessionBrowserResumeState(session.id);
     clearSessionBrowserResumeState(secondSession.id);
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   const renderPanel = async (
@@ -323,16 +344,205 @@ describe('SessionBrowserPanel controller', () => {
     });
   };
 
-  const confirmDialog = async () => {
-    const button = Array.from(document.body.querySelectorAll('button')).find(
-      (candidate) => candidate.textContent === 'Confirm'
+  const clickRestore = async (host: ParentNode) => {
+    const button = [...host.querySelectorAll('button')].find(
+      (node) => node.textContent === 'Restore preview'
     );
-    if (!button) throw new Error('Expected remote preview confirmation');
+    if (!button) throw new Error('Expected restore action');
     await act(async () => {
       button.click();
       await flushMicrotasks();
     });
   };
+
+  const nextStatus = async () => {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+  };
+
+  it('keeps the persisted target but never loads its old URL when status cannot be verified', async () => {
+    const testRuntime = createRuntime({ preview: { connection: remoteConnection } });
+    testRuntime.requestSessionPreviewStatus.mockRejectedValue(
+      new Error('Session machine is unreachable')
+    );
+    const rendered = await renderPanel(testRuntime.runtime);
+    expect(rendered.querySelector('[data-testid="managed-preview"]')).toBeNull();
+    expect(rendered.textContent).toContain('Session machine is unreachable');
+    expect(rendered.textContent).toContain('Restore preview');
+    expect((rendered.querySelector('input') as HTMLInputElement).value).toBe(
+      'http://127.0.0.1:5173/dashboard?mode=dev'
+    );
+    expect(testRuntime.requestSessionPreviewCreate).not.toHaveBeenCalled();
+  });
+
+  it('expires visibly and restores the exact page with a new share capability', async () => {
+    vi.useFakeTimers();
+    const replacement = {
+      ...remoteConnection,
+      endpointId: 'restored',
+      publicUrl: 'https://restored.trycloudflare.com/?__lody_preview_token=new-token',
+    };
+    const testRuntime = createRuntime({
+      preview: { connection: remoteConnection },
+      connection: replacement,
+    });
+    const rendered = await renderPanel(testRuntime.runtime);
+    testRuntime.observeConnection({
+      ...remoteConnection,
+      status: 'closed',
+      closedReason: 'idle_timeout',
+      publicUrl: undefined,
+    });
+    await nextStatus();
+    expect(rendered.querySelector('[data-testid="managed-preview"]')).toBeNull();
+    expect(rendered.textContent).toContain('Preview expired: idle for 1 hour');
+    expect((rendered.querySelector('input') as HTMLInputElement).value).toBe(
+      'http://127.0.0.1:5173/dashboard?mode=dev'
+    );
+    await clickRestore(rendered);
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(testRuntime.requestSessionPreviewCreate).toHaveBeenLastCalledWith(
+      session.machineId,
+      session.id,
+      'user-1',
+      localTarget,
+      expect.objectContaining({ target: localTarget }),
+      { restart: true }
+    );
+    expect(
+      rendered.querySelector('[data-testid="managed-preview"]')?.getAttribute('data-viewer-url')
+    ).toBe('https://restored.trycloudflare.com/dashboard?mode=dev&__lody_preview_token=new-token');
+    expect(rendered.textContent).toContain('Remote preview · Connected');
+  });
+
+  it('renews only the foreground remote endpoint and rechecks without renewal on return', async () => {
+    vi.useFakeTimers();
+    const testRuntime = createRuntime({ preview: { connection: remoteConnection } });
+    const rendered = await renderPanel(testRuntime.runtime);
+    await nextStatus();
+    expect(testRuntime.requestSessionPreviewStatus).toHaveBeenLastCalledWith(
+      session.machineId,
+      session.id,
+      'user-1',
+      { renewEndpointId: remoteConnection.endpointId }
+    );
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(true);
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    testRuntime.requestSessionPreviewStatus.mockClear();
+    testRuntime.observeConnection({
+      ...remoteConnection,
+      status: 'closed',
+      closedReason: 'idle_timeout',
+      publicUrl: undefined,
+    });
+    await nextStatus();
+    expect(testRuntime.requestSessionPreviewStatus).not.toHaveBeenCalled();
+    vi.spyOn(document, 'hidden', 'get').mockReturnValue(false);
+    await act(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+      await flushMicrotasks();
+    });
+    expect(testRuntime.requestSessionPreviewStatus).toHaveBeenLastCalledWith(
+      session.machineId,
+      session.id,
+      'user-1',
+      { renewEndpointId: undefined }
+    );
+    expect(rendered.querySelector('[data-testid="managed-preview"]')).toBeNull();
+    expect(rendered.textContent).toContain('Preview expired');
+    expect(testRuntime.requestSessionPreviewCreate).not.toHaveBeenCalled();
+  });
+
+  it('keeps local viewing intact without renewing expired remote sharing', async () => {
+    vi.useFakeTimers();
+    window.__LODY_ELECTRON__ = true;
+    const testRuntime = createRuntime({
+      plane: 'local',
+      preview: { connection: remoteConnection },
+    });
+    const rendered = await renderPanel(testRuntime.runtime);
+    testRuntime.observeConnection({
+      ...remoteConnection,
+      status: 'closed',
+      closedReason: 'idle_timeout',
+      publicUrl: undefined,
+    });
+    await nextStatus();
+    expect(testRuntime.requestSessionPreviewStatus).toHaveBeenLastCalledWith(
+      session.machineId,
+      session.id,
+      'user-1',
+      { renewEndpointId: undefined }
+    );
+    expect(
+      rendered.querySelector('[data-testid="managed-preview"]')?.getAttribute('data-viewer-url')
+    ).toBe(localEndpoint.viewerUrl);
+    expect(rendered.textContent).toContain('Local direct preview');
+    expect(rendered.textContent).toContain('Preview expired');
+    expect(testRuntime.requestSessionPreviewEndpointRelease).not.toHaveBeenCalled();
+  });
+
+  it('ignores a stale status response after an explicit restore', async () => {
+    vi.useFakeTimers();
+    const expired: PreviewConnection = {
+      ...remoteConnection,
+      status: 'closed',
+      closedReason: 'idle_timeout',
+      publicUrl: undefined,
+    };
+    const testRuntime = createRuntime({ preview: { connection: expired } });
+    const rendered = await renderPanel(testRuntime.runtime);
+    let resolveStatus!: (response: SessionPreviewStatusResponse) => void;
+    testRuntime.requestSessionPreviewStatus.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveStatus = resolve;
+        })
+    );
+    await nextStatus();
+    await clickRestore(rendered);
+    await act(async () => {
+      resolveStatus({
+        type: 'session/preview-status_response',
+        sessionId: session.id,
+        success: true,
+        connection: expired,
+      });
+      await flushMicrotasks();
+    });
+    expect(rendered.textContent).toContain('Remote preview · Connected');
+    expect(rendered.textContent).not.toContain('Preview expired');
+    expect(rendered.querySelector('[data-testid="managed-preview"]')).not.toBeNull();
+  });
+
+  it('shows restore failure without losing the requested page or retrying automatically', async () => {
+    vi.useFakeTimers();
+    const testRuntime = createRuntime({
+      preview: {
+        connection: {
+          ...remoteConnection,
+          status: 'closed',
+          closedReason: 'idle_timeout',
+          publicUrl: undefined,
+        },
+      },
+      createPreview: async () => {
+        throw new Error('Development server is not listening on port 5173');
+      },
+    });
+    const rendered = await renderPanel(testRuntime.runtime);
+    await clickRestore(rendered);
+    expect(rendered.textContent).toContain('Development server is not listening on port 5173');
+    expect(rendered.querySelector('[data-testid="managed-preview"]')).toBeNull();
+    expect((rendered.querySelector('input') as HTMLInputElement).value).toBe(
+      'http://127.0.0.1:5173/dashboard?mode=dev'
+    );
+    await nextStatus();
+    expect(testRuntime.requestSessionPreviewCreate).toHaveBeenCalledTimes(1);
+  });
 
   it('opens public URLs without sending them to the session runtime', async () => {
     const testRuntime = createRuntime();
@@ -513,17 +723,14 @@ describe('SessionBrowserPanel controller', () => {
     );
   });
 
-  it('requires confirmation before a remote private target has any tunnel side effect', async () => {
+  it('treats Enter as exact-target authorization with no confirmation dialog', async () => {
     const testRuntime = createRuntime({ plane: 'cloud' });
     const rendered = await renderPanel(testRuntime.runtime);
 
     await enterAddress(rendered, '127.0.0.1:5173/dashboard?mode=dev');
 
-    expect(testRuntime.requestSessionPreviewCreate).not.toHaveBeenCalled();
     expect(testRuntime.requestSessionPreviewEndpointAcquire).not.toHaveBeenCalled();
-    expect(document.body.textContent).toContain('Open a remote preview?');
-
-    await confirmDialog();
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
 
     expect(testRuntime.requestSessionPreviewCreate).toHaveBeenCalledWith(
       session.machineId,
@@ -536,7 +743,7 @@ describe('SessionBrowserPanel controller', () => {
         target: localTarget,
         confirmedByUserId: 'user-1',
       }),
-      expect.objectContaining({ replaceExisting: false })
+      expect.objectContaining({ restart: undefined })
     );
     expect(rendered.querySelector('[data-testid="managed-preview"]')).not.toBeNull();
   });
@@ -547,7 +754,6 @@ describe('SessionBrowserPanel controller', () => {
     lastManagedNavigationRequest = null;
 
     await enterAddress(rendered, '127.0.0.1:5173');
-    await confirmDialog();
     expect(lastManagedNavigationRequest).not.toBeNull();
     publicBrowserSurfaceRender.mockClear();
 
@@ -609,7 +815,7 @@ describe('SessionBrowserPanel controller', () => {
         target: localTarget,
         confirmedByUserId: 'user-1',
       }),
-      expect.objectContaining({ replaceExisting: false })
+      expect.objectContaining({ restart: undefined })
     );
     expect(testRuntime.requestSessionPreviewCreate).toHaveBeenCalledOnce();
     expect(rendered.querySelector('[data-testid="managed-preview"]')).not.toBeNull();
@@ -721,7 +927,7 @@ describe('SessionBrowserPanel controller', () => {
     expect(
       rendered.querySelector('[data-testid="managed-preview"]')?.getAttribute('data-viewer-url')
     ).toBe(
-      'https://browser-preview.mylody.app/dashboard?mode=dev&__lody_preview_token=remote-token'
+      'https://browser-preview.trycloudflare.com/dashboard?mode=dev&__lody_preview_token=remote-token'
     );
     expect(
       rendered.querySelector('[aria-label="Remote machine: Remote workstation"]')
@@ -741,10 +947,9 @@ describe('SessionBrowserPanel controller', () => {
     const rendered = await renderPanel(testRuntime.runtime);
 
     await enterAddress(rendered, '127.0.0.1:5173/dashboard?mode=dev');
-    await confirmDialog();
 
     expect(rendered.querySelector('[role="status"]')?.textContent).toContain(
-      'Establishing a secure preview connection'
+      'Connecting remote preview'
     );
     expect(
       (rendered.querySelector('input[aria-label="Address"]') as HTMLInputElement).disabled
@@ -763,12 +968,12 @@ describe('SessionBrowserPanel controller', () => {
 
     const surface = rendered.querySelector('[data-testid="managed-preview"]');
     expect(surface?.getAttribute('data-viewer-url')).toBe(
-      'https://browser-preview.mylody.app/dashboard?mode=dev&__lody_preview_token=remote-token'
+      'https://browser-preview.trycloudflare.com/dashboard?mode=dev&__lody_preview_token=remote-token'
     );
     expect(surface?.getAttribute('data-logical-url')).toBe(
       'http://127.0.0.1:5173/dashboard?mode=dev'
     );
-    expect(rendered.querySelector('[role="status"]')).toBeNull();
+    expect(rendered.querySelector('[role="status"]')).not.toBeNull();
   });
 
   it('surfaces an unexpected remote navigation failure instead of rejecting silently', async () => {
@@ -781,12 +986,11 @@ describe('SessionBrowserPanel controller', () => {
     const rendered = await renderPanel(testRuntime.runtime);
 
     await enterAddress(rendered, '127.0.0.1:5173/dashboard?mode=dev');
-    await confirmDialog();
 
     expect(rendered.querySelector('[role="alert"]')?.textContent).toContain(
       'Page could not be opened: preview transport disconnected'
     );
-    expect(rendered.querySelector('[role="status"]')).toBeNull();
+    expect(rendered.querySelector('[role="status"]')).not.toBeNull();
   });
 
   it('uses the exact local endpoint for a local Electron session without creating a tunnel', async () => {
@@ -837,10 +1041,7 @@ describe('SessionBrowserPanel controller', () => {
     await enterAddress(rendered, '127.0.0.1:5173/dashboard?mode=dev');
 
     await clickButton(rendered, 'Share preview');
-    expect(testRuntime.requestSessionPreviewCreate).not.toHaveBeenCalled();
-    expect(document.body.textContent).toContain('Create a shareable preview?');
-
-    await confirmDialog();
+    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
 
     expect(testRuntime.requestSessionPreviewCreate).toHaveBeenCalledWith(
       session.machineId,
@@ -848,7 +1049,7 @@ describe('SessionBrowserPanel controller', () => {
       'user-1',
       localTarget,
       expect.objectContaining({ source: 'share_action', target: localTarget }),
-      expect.objectContaining({ replaceExisting: false })
+      expect.objectContaining({ restart: undefined })
     );
     expect(
       rendered.querySelector('[data-testid="managed-preview"]')?.getAttribute('data-viewer-url')

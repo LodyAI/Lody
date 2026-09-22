@@ -348,7 +348,7 @@ export type WorkspaceRuntime = {
     requestedByUserId: string,
     target: PreviewTarget,
     approval: PreviewTargetApproval,
-    options?: { replaceExisting?: boolean; timeoutMs?: number }
+    options?: { restart?: boolean; timeoutMs?: number }
   ) => Promise<SessionPreviewCreateResponse | null>;
   resolveMachineTargetPlane: (
     machineId: MachineId,
@@ -440,6 +440,12 @@ export type WorkspaceRuntime = {
     },
     options?: { timeoutMs?: number; ownerSessionId?: SessionId | string }
   ) => Promise<CodeCollabV2LspUnsupported | CodeCollabV2Error | null>;
+  requestSessionPreviewStatus: (
+    machineId: MachineId,
+    sessionId: SessionId,
+    requestedByUserId: string,
+    options?: { renewEndpointId?: string; timeoutMs?: number }
+  ) => Promise<import('@lody/shared').SessionPreviewStatusResponse | null>;
   requestSessionPreviewRevoke: (
     machineId: MachineId,
     sessionId: SessionId,

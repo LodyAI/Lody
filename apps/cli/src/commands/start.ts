@@ -561,7 +561,6 @@ async function startAgentService(
       authBaseUrl: LODY_AUTH_URL,
       authSiteUrl: LODY_AUTH_SITE_URL,
       serverBaseUrl: LODY_SERVER_URL,
-      previewGatewayUrl: process.env.LODY_PREVIEW_GATEWAY_URL,
       runtimeArtifactsBaseUrl: process.env.LODY_RUNTIME_BASE_URL,
       logger,
     });

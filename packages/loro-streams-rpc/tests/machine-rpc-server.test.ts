@@ -28,10 +28,17 @@ import {
   getMachineAcpAuthorizationCodeSecretContext,
   LoroStreamsGatewayError,
   LoroStreamsMachineRpcServer,
+  LoroStreamsMachineRpcClient,
   type LoroJsonLiveBatchHandler,
   type LoroJsonStreamBatch,
   type LoroStreamsJsonStreamClient,
 } from '../src/index';
+
+const previewProof = {
+  runtimeNonce: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  requestId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+  requestToken: 'synthetic-preview-proof',
+};
 
 const codexProvider = { cliType: 'builtin', agentType: 'codex' } as const;
 const configId = 'config-1' as AgentConfigId;
@@ -109,6 +116,139 @@ const createFakeStreamClient = () => {
 };
 
 describe('LoroStreamsMachineRpcServer', () => {
+  it('carries preview status and exact endpoint renewal through the client/server contract', async () => {
+    const requests = createFakeStreamClient();
+    const responses = createFakeStreamClient();
+    const forward =
+      (destination: ReturnType<typeof createFakeStreamClient>) =>
+      async (_streamId: string, value: unknown) => {
+        destination.pushBatch({ messages: [value], nextOffset: '1', upToDate: true });
+        return '1';
+      };
+    let renewedEndpoint: string | undefined;
+    const server = new LoroStreamsMachineRpcServer({
+      logger: createSilentLogger(),
+      workspaceId: 'workspace-1' as WorkspaceId,
+      machineId: 'machine-1' as MachineId,
+      streamClient: { ...requests.streamClient, appendJson: forward(responses) },
+      getMachineStatus: vi.fn(),
+      refreshMachineAcpCapabilities: vi.fn(),
+      getSessionPreviewStatus: async (params) => {
+        renewedEndpoint = params.renewEndpointId;
+        return {
+          type: 'session/preview-status_response',
+          sessionId: params.sessionId,
+          success: true,
+          connection: {
+            status: 'closed',
+            endpointId: 'expired-endpoint',
+            closedReason: 'idle_timeout',
+          },
+        };
+      },
+    });
+    const client = new LoroStreamsMachineRpcClient({
+      workspaceId: 'workspace-1',
+      machineId: 'machine-1',
+      streamClient: { ...responses.streamClient, appendJson: forward(requests) },
+    });
+    await server.start();
+    try {
+      const result = await client.requestSessionPreviewStatus({
+        proof: previewProof,
+        sessionId: 'session-1',
+        requestedByUserId: 'user-1',
+        renewEndpointId: 'expired-endpoint',
+      });
+      expect(renewedEndpoint).toBe('expired-endpoint');
+      expect(result).toEqual({
+        type: 'session/preview-status_response',
+        sessionId: 'session-1',
+        success: true,
+        connection: {
+          status: 'closed',
+          endpointId: 'expired-endpoint',
+          closedReason: 'idle_timeout',
+        },
+      });
+    } finally {
+      client.stop();
+      server.stop();
+    }
+  });
+  it.each(['session/preview-create', 'session/preview-status', 'session/preview-revoke'])(
+    'rejects missing or malformed proof without dispatching %s or logging its secret',
+    async (method) => {
+      const fake = createFakeStreamClient();
+      let signalLogged = () => {};
+      const logged = new Promise<void>((resolve) => {
+        signalLogged = resolve;
+      });
+      const warnings: string[] = [];
+      const handler = vi.fn();
+      const server = new LoroStreamsMachineRpcServer({
+        logger: {
+          ...createSilentLogger(),
+          warn: (message) => {
+            warnings.push(message);
+            if (warnings.length === 2) signalLogged();
+          },
+        },
+        workspaceId: 'workspace-1' as WorkspaceId,
+        machineId: 'machine-1' as MachineId,
+        streamClient: fake.streamClient,
+        getMachineStatus: vi.fn(),
+        refreshMachineAcpCapabilities: vi.fn(),
+        createSessionPreview: handler,
+        getSessionPreviewStatus: handler,
+        revokeSessionPreview: handler,
+      });
+      const target = { protocol: 'http', host: '127.0.0.1', port: 5173 };
+      fake.pushBatch({
+        messages: [undefined, { ...previewProof, requestId: 'invalid' }].map((proof) => ({
+          jsonrpc: '2.0',
+          id: 'invalid-preview',
+          method,
+          rpcVersion: '1',
+          workspaceId: 'workspace-1',
+          machineId: 'machine-1',
+          replyTo: 'workspace-1:rpc:res:machine-1',
+          sentAt: Date.now(),
+          expiresAt: Date.now() + 5000,
+          params: {
+            sessionId: 'session-1',
+            requestedByUserId: 'user-1',
+            proof,
+            ...(method === 'session/preview-create'
+              ? {
+                  target,
+                  approval: {
+                    source: 'browser_address',
+                    targetClass: 'loopback',
+                    target,
+                    confirmedByUserId: 'user-1',
+                    confirmedAt: 1000,
+                  },
+                }
+              : {}),
+          },
+        })),
+        nextOffset: '1',
+        upToDate: true,
+      });
+      await server.start();
+      try {
+        await logged;
+        expect(handler).not.toHaveBeenCalled();
+        expect(fake.appended).toEqual([]);
+        expect(warnings.join(' ')).toContain('[REDACTED PREVIEW CONTROL]');
+        expect(warnings.join(' ')).not.toContain(previewProof.requestToken);
+      } finally {
+        server.stop();
+      }
+    }
+  );
+
   it('redacts invalid authorization-code requests from warning logs', async () => {
     const fake = createFakeStreamClient();
     const logger = {
@@ -231,16 +371,14 @@ describe('LoroStreamsMachineRpcServer', () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
     const machineId = 'machine-1' as MachineId;
     const fake = createFakeStreamClient();
-    const forkSession = vi.fn(
-      async (args: SessionForkSpec): Promise<SessionForkResponse> => ({
-        type: 'session/fork_response',
-        sourceSessionId: args.sourceSessionId,
-        targetSessionId: args.targetSessionId,
-        success: true,
-        partial: false,
-        warnings: [],
-      })
-    );
+    const forkSession = vi.fn(async (args: SessionForkSpec): Promise<SessionForkResponse> => ({
+      type: 'session/fork_response',
+      sourceSessionId: args.sourceSessionId,
+      targetSessionId: args.targetSessionId,
+      success: true,
+      partial: false,
+      warnings: [],
+    }));
     const server = new LoroStreamsMachineRpcServer({
       logger: createSilentLogger(),
       workspaceId,
@@ -425,16 +563,14 @@ describe('LoroStreamsMachineRpcServer', () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
     const machineId = 'machine-1' as MachineId;
     const fake = createFakeStreamClient();
-    const authenticateMachineAcp = vi.fn(
-      async (args): Promise<MachineAcpAuthenticateResponse> => ({
-        type: 'machine/acp-authenticate_response',
-        machineId,
-        requestId: args.requestId,
-        agentType: 'antigravity-acp',
-        success: true,
-        disposition: 'authenticated',
-      })
-    );
+    const authenticateMachineAcp = vi.fn(async (args): Promise<MachineAcpAuthenticateResponse> => ({
+      type: 'machine/acp-authenticate_response',
+      machineId,
+      requestId: args.requestId,
+      agentType: 'antigravity-acp',
+      success: true,
+      disposition: 'authenticated',
+    }));
     const server = new LoroStreamsMachineRpcServer({
       logger: createSilentLogger(),
       workspaceId,
@@ -736,20 +872,18 @@ describe('LoroStreamsMachineRpcServer', () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
     const machineId = 'machine-1' as MachineId;
     const fake = createFakeStreamClient();
-    const getMachineStatus = vi.fn(
-      async (): Promise<MachineStatusResponse> => ({
-        type: 'machine/status_response' as const,
-        machineId,
-        success: true,
-        resources: {
-          totalMemoryGB: 16,
-          usedMemoryGB: 8,
-          freeMemoryGB: 8,
-          totalCpus: 8,
-          cpuUsagePercent: 25,
-        },
-      })
-    );
+    const getMachineStatus = vi.fn(async (): Promise<MachineStatusResponse> => ({
+      type: 'machine/status_response' as const,
+      machineId,
+      success: true,
+      resources: {
+        totalMemoryGB: 16,
+        usedMemoryGB: 8,
+        freeMemoryGB: 8,
+        totalCpus: 8,
+        cpuUsagePercent: 25,
+      },
+    }));
 
     const server = new LoroStreamsMachineRpcServer({
       logger: createSilentLogger(),
@@ -867,20 +1001,18 @@ describe('LoroStreamsMachineRpcServer', () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
     const machineId = 'machine-1' as MachineId;
     const fake = createFakeStreamClient();
-    const getMachineStatus = vi.fn(
-      async (): Promise<MachineStatusResponse> => ({
-        type: 'machine/status_response',
-        machineId,
-        success: true,
-        resources: {
-          totalMemoryGB: 16,
-          usedMemoryGB: 8,
-          freeMemoryGB: 8,
-          totalCpus: 8,
-          cpuUsagePercent: 25,
-        },
-      })
-    );
+    const getMachineStatus = vi.fn(async (): Promise<MachineStatusResponse> => ({
+      type: 'machine/status_response',
+      machineId,
+      success: true,
+      resources: {
+        totalMemoryGB: 16,
+        usedMemoryGB: 8,
+        freeMemoryGB: 8,
+        totalCpus: 8,
+        cpuUsagePercent: 25,
+      },
+    }));
 
     const server = new LoroStreamsMachineRpcServer({
       logger: createSilentLogger(),
@@ -1186,18 +1318,16 @@ describe('LoroStreamsMachineRpcServer', () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
     const machineId = 'machine-1' as MachineId;
     const fake = createFakeStreamClient();
-    const openCodeCollabText = vi.fn(
-      async (): Promise<CodeCollabV2OpenTextOk> => ({
-        status: 'ok',
-        path: 'src/app.ts',
-        digest: `sha256:${'1'.repeat(64)}`,
-        text: {
-          encoding: 'plain',
-          text: 'hello',
-          rawBytes: 5,
-        },
-      })
-    );
+    const openCodeCollabText = vi.fn(async (): Promise<CodeCollabV2OpenTextOk> => ({
+      status: 'ok',
+      path: 'src/app.ts',
+      digest: `sha256:${'1'.repeat(64)}`,
+      text: {
+        encoding: 'plain',
+        text: 'hello',
+        rawBytes: 5,
+      },
+    }));
 
     const server = new LoroStreamsMachineRpcServer({
       logger: createSilentLogger(),
@@ -1520,31 +1650,29 @@ describe('LoroStreamsMachineRpcServer', () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
     const machineId = 'machine-1' as MachineId;
     const fake = createFakeStreamClient();
-    const openCodeCollabTurnDiff = vi.fn(
-      async (): Promise<CodeCollabV2OpenTurnDiffResponse> => ({
-        status: 'ok',
-        path: 'src/app.ts',
-        turnId: 'turn-1',
-        oldSnapshot: {
-          kind: 'text',
-          text: {
-            encoding: 'plain',
-            text: 'old\n',
-            rawBytes: 4,
-          },
+    const openCodeCollabTurnDiff = vi.fn(async (): Promise<CodeCollabV2OpenTurnDiffResponse> => ({
+      status: 'ok',
+      path: 'src/app.ts',
+      turnId: 'turn-1',
+      oldSnapshot: {
+        kind: 'text',
+        text: {
+          encoding: 'plain',
+          text: 'old\n',
+          rawBytes: 4,
         },
-        newSnapshot: {
-          kind: 'text',
-          text: {
-            encoding: 'plain',
-            text: 'new\n',
-            rawBytes: 4,
-          },
+      },
+      newSnapshot: {
+        kind: 'text',
+        text: {
+          encoding: 'plain',
+          text: 'new\n',
+          rawBytes: 4,
         },
-        add: 1,
-        del: 1,
-      })
-    );
+      },
+      add: 1,
+      del: 1,
+    }));
 
     const server = new LoroStreamsMachineRpcServer({
       logger: createSilentLogger(),
@@ -1630,18 +1758,16 @@ describe('LoroStreamsMachineRpcServer', () => {
     const workspaceId = 'workspace-1' as WorkspaceId;
     const machineId = 'machine-1' as MachineId;
     const fake = createFakeStreamClient();
-    const openCodeCollabText = vi.fn(
-      async (): Promise<CodeCollabV2OpenTextOk> => ({
-        status: 'ok',
-        path: 'src/app.ts',
-        digest: `sha256:${'1'.repeat(64)}`,
-        text: {
-          encoding: 'plain',
-          text: 'hello',
-          rawBytes: 5,
-        },
-      })
-    );
+    const openCodeCollabText = vi.fn(async (): Promise<CodeCollabV2OpenTextOk> => ({
+      status: 'ok',
+      path: 'src/app.ts',
+      digest: `sha256:${'1'.repeat(64)}`,
+      text: {
+        encoding: 'plain',
+        text: 'hello',
+        rawBytes: 5,
+      },
+    }));
     const resolveCodeCollabOwnerSessionId = vi.fn(
       async (): Promise<SessionId> => 'session-parent' as SessionId
     );
@@ -1802,17 +1928,15 @@ describe('LoroStreamsMachineRpcServer', () => {
     const machineId = 'machine-1' as MachineId;
     const localProjectId = 'local-project-1' as LocalProjectId;
     const fake = createFakeStreamClient();
-    const dispatchLocalProjectControl = vi.fn(
-      async (): Promise<LocalProjectControlResponse> => ({
-        ok: true,
-        type: 'local-project/sync-history',
-        result: {
-          listed: 0,
-          lastListedAt: 1,
-          sessions: [],
-        },
-      })
-    );
+    const dispatchLocalProjectControl = vi.fn(async (): Promise<LocalProjectControlResponse> => ({
+      ok: true,
+      type: 'local-project/sync-history',
+      result: {
+        listed: 0,
+        lastListedAt: 1,
+        sessions: [],
+      },
+    }));
 
     const server = new LoroStreamsMachineRpcServer({
       logger: createSilentLogger(),
@@ -2308,15 +2432,13 @@ describe('LoroStreamsMachineRpcServer', () => {
     const machineId = 'machine-1' as MachineId;
     const sessionId = 'session-1' as SessionId;
     const fake = createFakeStreamClient();
-    const createSessionPreview = vi.fn(
-      async (): Promise<SessionPreviewCreateResponse> => ({
-        type: 'session/preview-create_response',
-        sessionId,
-        success: false,
-        error: 'tunnel_not_configured',
-        message: 'Preview gateway is not configured.',
-      })
-    );
+    const createSessionPreview = vi.fn(async (): Promise<SessionPreviewCreateResponse> => ({
+      type: 'session/preview-create_response',
+      sessionId,
+      success: false,
+      error: 'tunnel_not_configured',
+      message: 'Remote preview is not configured.',
+    }));
 
     const server = new LoroStreamsMachineRpcServer({
       logger: createSilentLogger(),
@@ -2341,6 +2463,7 @@ describe('LoroStreamsMachineRpcServer', () => {
           sentAt: Date.now(),
           expiresAt: Date.now() + 5000,
           params: {
+            proof: previewProof,
             sessionId: 'session-1',
             requestedByUserId: 'user-1',
             target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
@@ -2366,6 +2489,7 @@ describe('LoroStreamsMachineRpcServer', () => {
     });
 
     expect(createSessionPreview).toHaveBeenCalledWith({
+      proof: previewProof,
       sessionId,
       requestedByUserId: 'user-1',
       target: { protocol: 'http', host: '127.0.0.1', port: 5173 },
@@ -2376,7 +2500,7 @@ describe('LoroStreamsMachineRpcServer', () => {
         confirmedByUserId: 'user-1',
         confirmedAt: 1000,
       },
-      replaceExisting: undefined,
+      restart: undefined,
     });
     expect(fake.appended[0]?.value).toEqual(
       expect.objectContaining({
@@ -2520,20 +2644,18 @@ describe('LoroStreamsMachineRpcServer', () => {
       ),
     };
 
-    const getMachineStatus = vi.fn(
-      async (): Promise<MachineStatusResponse> => ({
-        type: 'machine/status_response' as const,
-        machineId,
-        success: true,
-        resources: {
-          totalMemoryGB: 16,
-          usedMemoryGB: 8,
-          freeMemoryGB: 8,
-          totalCpus: 8,
-          cpuUsagePercent: 25,
-        },
-      })
-    );
+    const getMachineStatus = vi.fn(async (): Promise<MachineStatusResponse> => ({
+      type: 'machine/status_response' as const,
+      machineId,
+      success: true,
+      resources: {
+        totalMemoryGB: 16,
+        usedMemoryGB: 8,
+        freeMemoryGB: 8,
+        totalCpus: 8,
+        cpuUsagePercent: 25,
+      },
+    }));
 
     const server = new LoroStreamsMachineRpcServer({
       logger: createSilentLogger(),

@@ -1708,10 +1708,12 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestSessionPreviewEndpointAcquire,
     requestSessionPreviewEndpointRelease,
     requestSessionPreviewRevoke,
+    requestSessionPreviewStatus,
     requestLocalProjectGitState,
     requestLocalProjectControl,
     requestMachineBugReport,
   } = createWorkspaceMachineRpcFacade({
+    getSessionToken: () => authToken,
     getMachineProtocolCapabilities: async (machineId) => {
       const entry = await repo.getDocMeta(getMachineRoomId(machineId));
       return (entry?.meta as Partial<MachineMeta> | undefined)?.protocolCapabilities;
@@ -4605,6 +4607,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestSessionPreviewEndpointAcquire,
     requestSessionPreviewEndpointRelease,
     requestSessionPreviewRevoke,
+    requestSessionPreviewStatus,
     requestLocalProjectGitState,
     requestLocalProjectControl,
     requestMachineBugReport,

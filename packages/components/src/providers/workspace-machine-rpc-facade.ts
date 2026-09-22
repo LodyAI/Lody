@@ -1,3 +1,5 @@
+import type { PreviewControlOperation } from '@lody/shared';
+import { mintPreviewControlProof } from '@/lib/preview-control-api';
 import type { LocalFilePreviewResource } from '@lody/shared/local-file-preview';
 import type {
   LoroStreamsMachineRpcClient,
@@ -49,6 +51,7 @@ import {
   type SessionPreviewEndpointAcquireResponse,
   type SessionPreviewEndpointReleaseResponse,
   type SessionPreviewRevokeResponse,
+  type SessionPreviewStatusResponse,
   type PreviewTarget,
   type PreviewTargetApproval,
   type SessionSteerResponse,
@@ -88,6 +91,7 @@ type LspRequest = {
 };
 
 export type WorkspaceMachineRpcFacadeDeps = {
+  getSessionToken?: () => string | null;
   workspaceId: WorkspaceId;
   targetRouter: Pick<WorkspaceTargetRouter, 'getPlaneForMachine' | 'resolvePlaneForMachine'>;
   getMachineProtocolCapabilities: (
@@ -876,24 +880,67 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     }
   };
 
+  const previewProof = async (
+    machineId: MachineId,
+    sessionId: SessionId,
+    requesterUserId: string,
+    operation: PreviewControlOperation
+  ) => {
+    const status = await (
+      await getMachineRpcClient(machineId)
+    ).requestMachineStatus({ timeoutMs: 15_000 });
+    if (!status?.success || !status.previewControlNonce)
+      throw new Error('The machine did not provide preview control authorization.');
+    return mintPreviewControlProof(
+      {
+        workspaceId,
+        machineId,
+        sessionId,
+        requesterUserId,
+        operation,
+        runtimeNonce: status.previewControlNonce,
+        requestId: crypto.randomUUID(),
+      },
+      deps.getSessionToken?.() ?? null
+    );
+  };
+
   const requestSessionPreviewCreate = async (
     machineId: MachineId,
     sessionId: SessionId,
     requestedByUserId: string,
     target: PreviewTarget,
     approval: PreviewTargetApproval,
-    options?: { replaceExisting?: boolean; timeoutMs?: number }
+    options?: { restart?: boolean; timeoutMs?: number }
   ): Promise<SessionPreviewCreateResponse | null> => {
     try {
+      await waitForMachineRoute(machineId);
+      if (targetRouter.getPlaneForMachine(machineId) === 'local') {
+        const response = await getLocalMachineRpcSender()?.({
+          method: 'session/preview-create',
+          machineId,
+          workspaceId,
+          params: { sessionId, requestedByUserId, target, approval, restart: options?.restart },
+          timeoutMs: options?.timeoutMs ?? 360_000,
+        });
+        if (!response) throw new Error('Local preview control is unavailable.');
+        if (!response.ok) throw new Error(response.error);
+        return response.result as SessionPreviewCreateResponse;
+      }
       return await (
         await getMachineRpcClient(machineId)
       ).requestSessionPreviewCreate({
         sessionId,
         requestedByUserId,
+        proof: await previewProof(machineId, sessionId, requestedByUserId, {
+          action: 'create',
+          target,
+          restart: options?.restart ?? false,
+        }),
         target,
         approval,
-        replaceExisting: options?.replaceExisting,
-        timeoutMs: options?.timeoutMs ?? 30_000,
+        restart: options?.restart,
+        timeoutMs: options?.timeoutMs ?? 360_000,
       });
     } catch (error) {
       return {
@@ -1028,6 +1075,48 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     }
   };
 
+  const requestSessionPreviewStatus = async (
+    machineId: MachineId,
+    sessionId: SessionId,
+    requestedByUserId: string,
+    options?: { renewEndpointId?: string; timeoutMs?: number }
+  ): Promise<SessionPreviewStatusResponse | null> => {
+    try {
+      await waitForMachineRoute(machineId);
+      if (targetRouter.getPlaneForMachine(machineId) === 'local') {
+        const response = await getLocalMachineRpcSender()?.({
+          method: 'session/preview-status',
+          machineId,
+          workspaceId,
+          params: { sessionId, requestedByUserId, renewEndpointId: options?.renewEndpointId },
+          timeoutMs: options?.timeoutMs ?? 15_000,
+        });
+        if (!response) throw new Error('Local preview control is unavailable.');
+        if (!response.ok) throw new Error(response.error);
+        return response.result as SessionPreviewStatusResponse;
+      }
+      return await (
+        await getMachineRpcClient(machineId)
+      ).requestSessionPreviewStatus({
+        sessionId,
+        requestedByUserId,
+        ...options,
+        proof: await previewProof(machineId, sessionId, requestedByUserId, {
+          action: 'status',
+          renewEndpointId: options?.renewEndpointId,
+        }),
+      });
+    } catch (error) {
+      return {
+        type: 'session/preview-status_response',
+        sessionId,
+        success: false,
+        error: 'internal_error',
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+  };
+
   const requestSessionPreviewRevoke = async (
     machineId: MachineId,
     sessionId: SessionId,
@@ -1035,11 +1124,25 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     options?: { reason?: string; timeoutMs?: number }
   ): Promise<SessionPreviewRevokeResponse | null> => {
     try {
+      await waitForMachineRoute(machineId);
+      if (targetRouter.getPlaneForMachine(machineId) === 'local') {
+        const response = await getLocalMachineRpcSender()?.({
+          method: 'session/preview-revoke',
+          machineId,
+          workspaceId,
+          params: { sessionId, requestedByUserId, reason: options?.reason },
+          timeoutMs: options?.timeoutMs ?? 15_000,
+        });
+        if (!response) throw new Error('Local preview control is unavailable.');
+        if (!response.ok) throw new Error(response.error);
+        return response.result as SessionPreviewRevokeResponse;
+      }
       return await (
         await getMachineRpcClient(machineId)
       ).requestSessionPreviewRevoke({
         sessionId,
         requestedByUserId,
+        proof: await previewProof(machineId, sessionId, requestedByUserId, { action: 'revoke' }),
         reason: options?.reason,
         timeoutMs: options?.timeoutMs ?? 30_000,
       });
@@ -1197,6 +1300,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     requestSessionPreviewEndpointAcquire,
     requestSessionPreviewEndpointRelease,
     requestSessionPreviewRevoke,
+    requestSessionPreviewStatus,
     requestLocalProjectGitState,
     requestLocalProjectControl,
     requestMachineBugReport,

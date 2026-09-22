@@ -17,6 +17,49 @@ afterEach(() => {
 });
 
 describe('createWorkspaceMachineRpcFacade', () => {
+  it('controls a local preview without a login token or cloud proof', async () => {
+    vi.stubGlobal('fetch', () => {
+      throw new Error('Unexpected cloud HTTP');
+    });
+    vi.stubGlobal('window', {
+      __LODY_ELECTRON__: true,
+      ipc: {
+        invoke: async (_channel: string, request: { method: string; params: object }) => {
+          expect(request.method).toBe('session/preview-status');
+          expect(request.params).toEqual({
+            sessionId,
+            requestedByUserId: 'local-owner',
+            renewEndpointId: undefined,
+          });
+          return {
+            ok: true,
+            result: {
+              type: 'session/preview-status_response',
+              sessionId,
+              success: true,
+              connection: { status: 'closed', closedReason: 'idle_timeout' },
+            },
+          };
+        },
+      },
+    });
+    const facade = createWorkspaceMachineRpcFacade({
+      workspaceId,
+      targetRouter: {
+        getPlaneForMachine: () => 'local',
+        resolvePlaneForMachine: async () => 'local',
+      },
+      getMachineRpcClient: async () => {
+        throw new Error('Unexpected cloud RPC');
+      },
+    });
+    await expect(
+      facade.requestSessionPreviewStatus(localMachineId, sessionId, 'local-owner')
+    ).resolves.toMatchObject({
+      success: true,
+      connection: { status: 'closed', closedReason: 'idle_timeout' },
+    });
+  });
   it('never sends a scoped cancel to a daemon without the scoped-cancel protocol', async () => {
     const facade = createWorkspaceMachineRpcFacade({
       workspaceId,

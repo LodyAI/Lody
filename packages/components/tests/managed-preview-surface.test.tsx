@@ -7,6 +7,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { MachineId, SessionId, SessionMeta } from '@lody/shared';
 import {
   MANAGED_BROWSER_STATE_MESSAGE_TYPE,
+  MANAGED_BROWSER_NAVIGATION_REQUEST_MESSAGE_TYPE,
   MANAGED_BROWSER_READY_MESSAGE_TYPE,
   SET_ANNOTATION_MODE_MESSAGE_TYPE,
   RESOLVE_VISUAL_ANNOTATION_ANCHORS_MESSAGE_TYPE,
@@ -231,6 +232,87 @@ describe('ManagedPreviewSurface', () => {
       root?.render(<Provider store={store}>{null}</Provider>);
     });
     expect(iframe.isConnected).toBe(false);
+  });
+
+  it('accepts runtime data only from the current exact Quick origin and frame, including after restore', async () => {
+    const store = createStore();
+    store.set(userAtom, { id: 'user-1', name: 'Test User', email: 'test@example.com' });
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    const firstOrigin = 'https://first-preview.trycloudflare.com';
+    const restoredOrigin = 'https://restored-preview.trycloudflare.com';
+    const ignore = () => {};
+    function Harness({ origin }: { origin: string }) {
+      const [title, setTitle] = useState('untouched');
+      const [navigation, setNavigation] = useState('untouched');
+      return (
+        <Provider store={store}>
+          <output data-testid="state">{title}</output>
+          <output data-testid="navigation">{navigation}</output>
+          <ManagedPreviewSurface
+            session={session}
+            viewerUrl={`${origin}/docs?__lody_preview_token=synthetic`}
+            logicalUrl="http://localhost:5173/docs"
+            annotationEnabled
+            onAnnotationAvailabilityChange={ignore}
+            onRuntimeError={ignore}
+            onLoadingChange={ignore}
+            onBrowserStateChange={(state) => setTitle(state.title)}
+            onNavigationRequest={setNavigation}
+          />
+        </Provider>
+      );
+    }
+    await act(async () => root?.render(<Harness origin={firstOrigin} />));
+    const iframe = container.querySelector('iframe');
+    if (!iframe?.contentWindow) throw new Error('Expected managed preview iframe');
+    const messages = [
+      targetMessage,
+      {
+        type: MANAGED_BROWSER_STATE_MESSAGE_TYPE,
+        payload: {
+          url: '/docs',
+          title: 'accepted',
+          loading: false,
+          canGoBack: false,
+          canGoForward: false,
+        },
+      },
+      { type: MANAGED_BROWSER_NAVIGATION_REQUEST_MESSAGE_TYPE, payload: { url: '/next' } },
+    ];
+    const dispatch = async (origin: string, source: Window | null) => {
+      await act(async () => {
+        for (const data of messages) {
+          window.dispatchEvent(new MessageEvent('message', { origin, source, data }));
+        }
+      });
+    };
+    for (const origin of [restoredOrigin, 'http://first-preview.trycloudflare.com', 'null']) {
+      await dispatch(origin, iframe.contentWindow);
+    }
+    await dispatch(firstOrigin, window);
+    await dispatch(firstOrigin, null);
+    expect(container.querySelector('textarea')).toBeNull();
+    expect(container.querySelector('[data-testid="state"]')?.textContent).toBe('untouched');
+    expect(container.querySelector('[data-testid="navigation"]')?.textContent).toBe('untouched');
+
+    await dispatch(firstOrigin, iframe.contentWindow);
+    expect(container.querySelector('textarea')).not.toBeNull();
+    expect(container.querySelector('[data-testid="state"]')?.textContent).toBe('accepted');
+    expect(container.querySelector('[data-testid="navigation"]')?.textContent).toBe('/next');
+
+    await act(async () => root?.render(<Harness origin={restoredOrigin} />));
+    const restoredFrame = container.querySelector('iframe');
+    if (!restoredFrame?.contentWindow) throw new Error('Expected restored frame');
+    // Cached iframe/window identity may survive restore; origin must still change.
+    expect(container.querySelector('textarea')).toBeNull();
+    await dispatch(firstOrigin, restoredFrame.contentWindow);
+    await dispatch(restoredOrigin, window);
+    expect(container.querySelector('textarea')).toBeNull();
+    await dispatch(restoredOrigin, restoredFrame.contentWindow);
+    expect(container.querySelector('textarea')).not.toBeNull();
+    expect(container.querySelector('iframe')?.src).toContain(restoredOrigin);
   });
 
   it('stages a newly created annotation reference in the matching chat input', async () => {

@@ -1,13 +1,8 @@
-import { fileURLToPath } from 'node:url';
 import type { StorybookConfig } from '@storybook/react-vite';
 import tailwindcss from '@tailwindcss/vite';
-import { loadEnv } from 'vite';
 import wasm from 'vite-plugin-wasm';
-import { requirePreviewPublicBaseDomain } from '../../../scripts/preview-public-base-domain.mjs';
 import topLevelAwait from '../vite-top-level-await-fixed.cjs';
 import { loroCrdtWasmUrlWorkaround } from '../vite-wasm-workarounds.ts';
-
-const packageRoot = fileURLToPath(new URL('..', import.meta.url));
 
 const config: StorybookConfig = {
   stories: ['../src/stories/**/*.mdx', '../src/stories/**/*.stories.@(js|jsx|ts|tsx)'],
@@ -16,15 +11,6 @@ const config: StorybookConfig = {
     options: {},
   },
   async viteFinal(viteConfig) {
-    const mode = viteConfig.mode ?? 'development';
-    const previewPublicBaseDomain = requirePreviewPublicBaseDomain(
-      { ...loadEnv(mode, packageRoot, ''), ...process.env },
-      `@lody/components Storybook (${mode})`
-    );
-    viteConfig.define = {
-      ...viteConfig.define,
-      'import.meta.env.VITE_PREVIEW_PUBLIC_BASE_DOMAIN': JSON.stringify(previewPublicBaseDomain),
-    };
     viteConfig.plugins = (viteConfig.plugins ?? []).filter((plugin) => {
       if (!plugin) return false;
       const name = 'name' in plugin ? String(plugin.name) : '';

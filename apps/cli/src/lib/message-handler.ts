@@ -3100,8 +3100,8 @@ export class MessageHandler {
       machineId: this.machineId,
       workspaceId: this.workspaceId,
       userId: this.userId,
-      authToken: () => this.token,
-      remoteGatewayUrl: this.cloudPort.remotePreview?.gatewayBaseUrl ?? null,
+      runtimeBaseUrl: this.cloudPort.runtimeArtifacts.baseUrl,
+      remotePreview: this.cloudPort.remotePreview,
     });
     const streamsTokens = this.cloudPort.streamsTokens;
     if (streamsTokens) {
@@ -3132,12 +3132,14 @@ export class MessageHandler {
         rpcVersion: LORO_STREAMS_RPC_VERSION,
         retentionSeconds: LORO_STREAMS_RPC_RETENTION_SECONDS,
         now: getServerNow,
-        getMachineStatus: async () =>
-          await this.executionService.getMachineStatus({
+        getMachineStatus: async () => ({
+          ...(await this.executionService.getMachineStatus({
             type: 'machine/status',
             machineId: this.machineId,
             workspaceId: this.workspaceId,
-          }),
+          })),
+          previewControlNonce: this.previewService.controlAuthority.runtimeNonce,
+        }),
         pingMachine: async ({ requestId }) =>
           await this.executionService.pingMachine({
             type: 'machine/ping',
@@ -3325,32 +3327,48 @@ export class MessageHandler {
           await this.codeCollabV2Service.initDirectory(request),
         getCodeCollabLspDefinition: async () => await this.codeCollabV2Service.lspDefinition(),
         getCodeCollabLspReferences: async () => await this.codeCollabV2Service.lspReferences(),
-        createSessionPreview: async ({
-          sessionId,
-          requestedByUserId,
-          target,
-          approval,
-          replaceExisting,
-        }) =>
-          await this.previewService.createPreview({
+        getSessionPreviewStatus: async ({ proof, ...request }) => {
+          await this.previewService.authorizeRemoteControl(
+            request.sessionId,
+            request.requestedByUserId,
+            { action: 'status', renewEndpointId: request.renewEndpointId },
+            proof
+          );
+          return this.previewService.getStatus({
+            ...request,
+            type: 'session/preview-status',
+            machineId: this.machineId,
+            workspaceId: this.workspaceId,
+          });
+        },
+        createSessionPreview: async ({ proof, ...request }) => {
+          await this.previewService.authorizeRemoteControl(
+            request.sessionId,
+            request.requestedByUserId,
+            { action: 'create', target: request.target, restart: request.restart ?? false },
+            proof
+          );
+          return this.previewService.createPreview({
+            ...request,
             type: 'session/preview-create',
             machineId: this.machineId,
             workspaceId: this.workspaceId,
-            sessionId,
-            requestedByUserId,
-            target,
-            approval,
-            replaceExisting,
-          }),
-        revokeSessionPreview: async ({ sessionId, requestedByUserId, reason }) =>
-          await this.previewService.revokePreview({
+          });
+        },
+        revokeSessionPreview: async ({ proof, ...request }) => {
+          await this.previewService.authorizeRemoteControl(
+            request.sessionId,
+            request.requestedByUserId,
+            { action: 'revoke' },
+            proof
+          );
+          return this.previewService.revokePreview({
+            ...request,
             type: 'session/preview-revoke',
             machineId: this.machineId,
             workspaceId: this.workspaceId,
-            sessionId,
-            requestedByUserId,
-            reason,
-          }),
+          });
+        },
         getLocalProjectGitState: async ({ localProjectId, requestedByUserId }) =>
           await this.getLocalProjectGitStateForRpc({
             localProjectId,
@@ -6313,6 +6331,27 @@ export class MessageHandler {
           requestedByUserId: request.params.requestedByUserId,
           target: request.params.target,
         });
+      case 'session/preview-create':
+        return this.previewService.createPreview({
+          ...request.params,
+          type: request.method,
+          machineId: request.machineId as MachineId,
+          workspaceId: request.workspaceId as WorkspaceId,
+        });
+      case 'session/preview-revoke':
+        return this.previewService.revokePreview({
+          ...request.params,
+          type: request.method,
+          machineId: request.machineId as MachineId,
+          workspaceId: request.workspaceId as WorkspaceId,
+        });
+      case 'session/preview-status':
+        return this.previewService.getStatus({
+          ...request.params,
+          type: request.method,
+          machineId: request.machineId as MachineId,
+          workspaceId: request.workspaceId as WorkspaceId,
+        });
       case 'session/preview-endpoint-release':
         return await this.previewService.releaseEndpoint({
           machineId: request.machineId as MachineId,
@@ -6459,6 +6498,9 @@ export class MessageHandler {
         break;
       case 'session/preview-revoke':
         await this.handlePreviewRevoke(message, context);
+        break;
+      case 'session/preview-status':
+        context.send(await this.previewService.getStatus(message));
         break;
     }
   }
