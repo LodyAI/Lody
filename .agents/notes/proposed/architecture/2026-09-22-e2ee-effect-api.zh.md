@@ -33,7 +33,7 @@ Translation: current
 | P1 纯计算层   | 完成     | schema、权限、证明、快照、content-frame、recovery-file 与重放 apply 均为 Either |
 | P2 账本流程   | 完成     | 原生 verify/extend/snapshot/submit。本地 `create` 签署创世；远端发布与密钥备份仍由应用组合 |
 | P3 其它模块   | 完成     | Lab 发钥/接收、快照准入、身份、内容 workflow、用户恢复 Effect。Promise SDK 已列出 |
-| P4 迁移收尾   | 完成     | 协议桥已消除。剩余 Promise 面是列出的 SDK/IPC 解包，不是第二套算法 |
+| P4 迁移收尾   | 部分完成 | 协议桥已消除。Content Effect 重复执行已修。四类性能证据仍不完整 |
 
 ## 验收
 
@@ -50,10 +50,9 @@ Translation: current
 - [x] P4：Lab host/content-session/backup 与 Electron device/user 服务在
       Promise SDK/IPC 边界组合这些流程。协议桥已消除（`--complete` 为 0）。
       裸攻击输入留在审计/测试边界。
-- [x] 四类 1000 条闸门（3 次预热 / 10 次测量，Node v24.21.0）：完整重放中位
-      1140 ms（低于此前约 1215–1268 ms 基线），增量 extend(+1) 1.76 ms，
-      快照加入 156 ms，journal 恢复+验证 1148 ms。重放无超过 20% 回退。
-      10k/100ms 仍撤销。根目录 `pnpm check` 现已通过。没有协议或产品启用。
+- [ ] 四类 1000 条闸门仍缺增量、快照、恢复的旧版对照（不能只报当前实现中位），
+      且增量必须测完整提交而非仅 `Ledger.extend`。重放中位 1140 ms vs 约
+      1215–1268 ms 已记录。10k/100ms 仍撤销。
 
 - 编译拒绝错钥类型、未验证记录、非法设备管理标记及未穷尽分支。
 - 普通客户端不拼接签名、parent、nonce 或 CAS offset；公共错误不能为 unknown。
@@ -627,3 +626,11 @@ Translation: current
   抛错的 `decodeRecord` 解包请求体。
 - 证据：Lab 类型检查；host-lifecycle / design-probes / collab-baseline。
   产品 E2EE 仍关闭。不 push。
+
+### 2026-09-23 — Content Effect 不得清零快照
+
+- `sealContent` / `openContent` 把工作副本放在 Effect 闭包里，第一次执行后清零。
+  再跑同一 Effect 会用全零密钥做 HKDF。现在构造时快照调用方字节；每次执行
+  另分配工作副本并只清这些副本。`ContentCrypto.derive` 复制输入，不改调用方缓冲。
+- 测试：调用方清零后再跑、并发 `Effect.all`、deriveBits 失败后重试。内容套件
+  16/16。P0–P4 未验收：四类性能仍缺旧版对照。

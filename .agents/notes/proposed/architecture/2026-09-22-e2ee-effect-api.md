@@ -40,7 +40,7 @@ scenarios or protocol acceptance requirements.
 | P1 Pure computation       | Done        | Schema, policy, proofs, snapshot, content-frame, recovery-file, and replay apply are Either |
 | P2 Ledger workflows       | Done        | Native verify/extend/snapshot/submit. Local `create` signs genesis; remote publish+key backup stay app-composed |
 | P3 Other active modules   | Done        | Lab send/receive, snapshot admit, identity, content workflows, user recovery Effect. Promise SDKs listed |
-| P4 Migration and closure  | Done        | Protocol bridges gone. Remaining Promise surfaces are listed SDK/IPC unwraps, not second algorithms |
+| P4 Migration and closure  | Partial     | Protocol bridges gone. Content Effect re-execution fixed. Four-class performance evidence still incomplete |
 
 ## Acceptance
 
@@ -58,11 +58,10 @@ scenarios or protocol acceptance requirements.
 - [x] P4: Lab host/content-session/backup and Electron device/user services compose
       those workflows at Promise SDK/IPC boundaries. Protocol bridges are gone
       (`--complete` is 0). Deliberate raw attack inputs stay at audit/test edges.
-- [x] Four-class 1000-record gates (3 warmup / 10 runs, Node v24.21.0): replay
-      median 1140 ms (below the earlier ~1215–1268 ms baseline), incremental
-      extend(+1) 1.76 ms, snapshot join 156 ms, journal recovery+verify 1148 ms.
-      No >20% replay regression. 10k/100ms stays withdrawn. Root `pnpm check`
-      now passes. No protocol or product enablement.
+- [ ] Four-class 1000-record gates still need old-vs-new baselines for increment,
+      snapshot and recovery (not only current-implementation medians), and
+      increment must time full submit rather than only `Ledger.extend`. Replay
+      median 1140 ms vs ~1215–1268 ms is recorded. 10k/100ms stays withdrawn.
 
 - Reject wrong key types, unverified records, invalid device-management shapes,
   and non-exhaustive outcomes at compile time.
@@ -788,3 +787,14 @@ scenarios or protocol acceptance requirements.
   still uses the throwing `decodeRecord` unwrap for request bodies.
 - Evidence: Lab typecheck; host-lifecycle / design-probes / collab-baseline.
   Product E2EE remains off. No push.
+
+### 2026-09-23 — Content Effects must not wipe snapshots
+
+- `sealContent` / `openContent` kept working copies in the Effect closure and
+  zeroed them after the first run. Re-executing the same Effect derived HKDF
+  from all-zero epoch material. Construction now snapshots caller bytes;
+  each run allocates working copies and wipes only those. `ContentCrypto.derive`
+  copies its input and does not mutate the caller's buffer.
+- Tests: re-run after caller wipe, concurrent `Effect.all`, retry after a failed
+  `deriveBits`. Content suite 16/16. P0–P4 is not accepted: four-class
+  performance still lacks old-version baselines for increment/snapshot/recovery.

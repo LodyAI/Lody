@@ -3,14 +3,16 @@ import { xchacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { LoroDoc } from 'loro-crdt';
 import { Flock } from '@loro-dev/flock-wasm';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { Either } from 'effect';
+import { Effect, Either } from 'effect';
 import {
   ContentCipher,
   inspectContent,
   MAX_CONTENT_BYTES,
   type ContentScope,
 } from '../src/content';
+import { contentRuntimeLayer } from '../src/platform/content';
 import { inspectContentFrame } from '../src/pure/content-frame';
+import { openContent, sealContent } from '../src/workflows/content';
 import { fromHex, toHex } from '../src/wire';
 import { deferred } from './control-fixtures';
 
@@ -424,5 +426,86 @@ describe('signed content envelope', () => {
     const wire = await seal(a.exportFile(), context);
     b.importFile((await cipher().open(context, epochKey, wire)).plaintext);
     expect(b.get(['private', 'one'])).toEqual({ value: 'secret' });
+  });
+
+  it('re-runs the same seal and open Effects without consuming captured secrets', async () => {
+    const layer = contentRuntimeLayer(
+      {
+        authorize(header) {
+          if (header.actor !== 'A' || header.memberInstance !== 'A1' || header.device !== 'desktop')
+            throw new Error('unauthorized-author');
+          return alicePublic;
+        },
+      },
+      globalThis.crypto
+    );
+    const key = epochKey.slice();
+    const data = encoder.encode('hello');
+    const sealing = sealContent({
+      scope,
+      author,
+      epochKey: key,
+      signingKey: alice.privateKey,
+      plaintext: data,
+    }).pipe(Effect.provide(layer));
+    key.fill(0);
+    data.fill(0);
+    const first = await Effect.runPromise(sealing);
+    const second = await Effect.runPromise(sealing);
+    expect(first).not.toEqual(second);
+    const opening = openContent(scope, epochKey, first).pipe(Effect.provide(layer));
+    expect(decoder.decode((await Effect.runPromise(opening)).plaintext)).toBe('hello');
+    expect(decoder.decode((await Effect.runPromise(opening)).plaintext)).toBe('hello');
+    expect(decoder.decode((await cipher().open(scope, epochKey, second)).plaintext)).toBe('hello');
+  });
+
+  it('seals the same Effect concurrently without sharing wiped working buffers', async () => {
+    const layer = contentRuntimeLayer({ authorize: () => alicePublic }, globalThis.crypto);
+    const sealing = sealContent({
+      scope,
+      author,
+      epochKey,
+      signingKey: alice.privateKey,
+      plaintext: encoder.encode('hello'),
+    }).pipe(Effect.provide(layer));
+    const [left, right] = await Effect.runPromise(
+      Effect.all([sealing, sealing], { concurrency: 'unbounded' })
+    );
+    expect(left).not.toEqual(right);
+    expect(decoder.decode((await cipher().open(scope, epochKey, left)).plaintext)).toBe('hello');
+    expect(decoder.decode((await cipher().open(scope, epochKey, right)).plaintext)).toBe('hello');
+  });
+
+  it('retries the same seal Effect after a failed key derivation', async () => {
+    let remainingFailures = 1;
+    const platform = {
+      getRandomValues: crypto.getRandomValues.bind(crypto),
+      subtle: new Proxy(crypto.subtle, {
+        get(target, prop) {
+          if (prop === 'deriveBits')
+            return async (...args: Parameters<SubtleCrypto['deriveBits']>) => {
+              if (remainingFailures > 0) {
+                remainingFailures -= 1;
+                throw new DOMException('temporary-derive-failure', 'OperationError');
+              }
+              return target.deriveBits(...args);
+            };
+          const value: unknown = Reflect.get(target, prop);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      }),
+    };
+    const layer = contentRuntimeLayer({ authorize: () => alicePublic }, platform);
+    const sealing = sealContent({
+      scope,
+      author,
+      epochKey,
+      signingKey: alice.privateKey,
+      plaintext: encoder.encode('hello'),
+    }).pipe(Effect.provide(layer));
+    const first = await Effect.runPromise(Effect.either(sealing));
+    expect(Either.isLeft(first) && first.left._tag).toBe('CryptoError');
+    const wire = await Effect.runPromise(sealing);
+    expect(decoder.decode((await cipher().open(scope, epochKey, wire)).plaintext)).toBe('hello');
   });
 });

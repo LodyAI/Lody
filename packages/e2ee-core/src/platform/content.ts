@@ -68,17 +68,17 @@ export function contentCryptoLayer(
         catch: (error) => error,
       }).pipe(Effect.catchAll(contentFailure)),
     derive: (epochKey, header: ContentHeader) => {
-      const key = epochKey;
+      const owned = new Uint8Array(epochKey);
       const info = contentKeyInfo(header);
       if (Either.isLeft(info)) {
-        key.fill(0);
+        owned.fill(0);
         return Effect.fail(info.left);
       }
       const infoBytes = info.right;
       return Effect.tryPromise({
         try: async () => {
           try {
-            const material = await platform.subtle.importKey('raw', key, 'HKDF', false, [
+            const material = await platform.subtle.importKey('raw', owned, 'HKDF', false, [
               'deriveBits',
             ]);
             return new Uint8Array(
@@ -89,7 +89,7 @@ export function contentCryptoLayer(
               )
             );
           } finally {
-            key.fill(0);
+            owned.fill(0);
           }
         },
         catch: (error) => error,
