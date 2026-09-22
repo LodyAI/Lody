@@ -28,6 +28,7 @@ export {
   decodeRecord,
   verifyRecordSignature,
   verifyLedger,
+  extendLedger,
   authorizeRecord,
 } from './workflows/verification';
 export { LedgerClient } from './workflows/ledger-client';

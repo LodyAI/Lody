@@ -779,3 +779,12 @@ scenarios or protocol acceptance requirements.
   `possessionSigningBytes`. Attack probes may still assemble those bytes.
 - Evidence: Lab `pnpm check` 18 files / 142 tests. Product E2EE remains off.
   No push.
+
+### 2026-09-22 — Lab host verifies with native workflows
+
+- Host `loadLedger`, space create, and control-CAS authorization use
+  `verifyLedger` / `extendLedger` plus `LedgerView.inspectState()`. Promise
+  `Ledger.verify` is gone from Lab `src/platform/host.ts`. Incoming HTTP
+  still uses the throwing `decodeRecord` unwrap for request bodies.
+- Evidence: Lab typecheck; host-lifecycle / design-probes / collab-baseline.
+  Product E2EE remains off. No push.

@@ -618,3 +618,12 @@ Translation: current
   不再导入 `joinRequestSigningBytes` 或 `possessionSigningBytes`。攻击探针
   仍可拼装这些字节。
 - 证据：Lab `pnpm check` 18 文件 / 142 测试。产品 E2EE 仍关闭。不 push。
+
+### 2026-09-22 — Lab host 用原生 workflow 验账本
+
+- Host 的 `loadLedger`、创建 space、以及 control-CAS 授权使用
+  `verifyLedger` / `extendLedger` 和 `LedgerView.inspectState()`。Lab
+  `src/platform/host.ts` 不再调用 Promise `Ledger.verify`。入站 HTTP 仍用
+  抛错的 `decodeRecord` 解包请求体。
+- 证据：Lab 类型检查；host-lifecycle / design-probes / collab-baseline。
+  产品 E2EE 仍关闭。不 push。

@@ -3,8 +3,17 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import type { AddressInfo } from 'node:net';
 import { isAbsolute, join, resolve } from 'node:path';
 import { startDevServer, type RunningDevServer } from '@loro-dev/sqlite-riverrun';
-import { ContentCipher, Ledger } from '@lody/e2ee-core';
+import { ContentCipher } from '@lody/e2ee-core';
 import { decodeRecord, hashRecord, SigningPointCache } from '@lody/e2ee-core/ledger';
+import {
+  Bytes,
+  ValidationError,
+  extendLedger,
+  verifyLedger,
+  type LedgerView,
+} from '@lody/e2ee-core/effect';
+import { signatureVerifierLayer } from '@lody/e2ee-core/effect/platform';
+import { Effect } from 'effect';
 import { SqliteSnapshotPublicationStore } from '@lody/e2ee-core/node-snapshot-publication-store';
 import {
   CONTENT_SNAPSHOT_ADMISSION_WINDOW_MS,
@@ -150,17 +159,24 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
 
   // Host-scoped verification cache: no mutable cache state shared across runs.
   const pointCache = new SigningPointCache();
-  const snapshotWriteLedger = new AsyncLocalStorage<Ledger>();
+  const snapshotWriteLedger = new AsyncLocalStorage<LedgerView>();
 
-  /** Promise Ledger SDK boundary; host HTTP cannot own an Effect runtime per request. */
-  async function loadLedger(genesisHex: string): Promise<Ledger> {
+  async function runHostLedger<A>(effect: Effect.Effect<A, ValidationError, never>): Promise<A> {
+    try {
+      return await Effect.runPromise(effect);
+    } catch (error) {
+      if (error instanceof ValidationError) throw new Error(error.code, { cause: error });
+      throw error;
+    }
+  }
+
+  /** Re-read control from Riverrun and verify with the native workflow. */
+  async function loadLedger(genesisHex: string): Promise<LedgerView> {
     // Always re-read from Riverrun. A sticky cache would authorize content
     // writes against stale membership after a malicious-server control append.
     const space = meta.space(genesisHex);
     if (!space) throw new Error('unknown-space');
-    const genesis = space.genesis;
-    const anchor = await hashRecord(genesis);
-    let ledger = await Ledger.verify({ anchor, records: [genesis], pointCache });
+    const records: Uint8Array[] = [space.genesis];
     const client = new StreamsClient({
       url: `${riverrun.baseUrl}/ds/${encodeURIComponent(genesisHex)}/${CONTROL_STREAM}`,
       retry: { maxAttempts: 0 },
@@ -171,14 +187,19 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
       if (!response.ok) throw new Error('control-read-failed');
       const body = response.result.payload.body;
       if (body.byteLength > 0) {
-        for (const record of unframe(new Uint8Array(body))) {
-          ledger = await ledger.extend([record], pointCache);
-        }
+        for (const record of unframe(new Uint8Array(body))) records.push(record);
       }
       offset = response.result.nextOffset;
       if (response.result.upToDate) break;
     }
-    return ledger;
+    return runHostLedger(
+      Effect.gen(function* () {
+        const anchor = yield* Bytes.genesisHash(fromHex(genesisHex));
+        return yield* verifyLedger({ anchor, records }).pipe(
+          Effect.provide(signatureVerifierLayer)
+        );
+      })
+    );
   }
 
   function requireCredential(req: IncomingMessage, now: number): IssuedCredential {
@@ -204,7 +225,7 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
     mayWriteDocument(author) {
       const ledger = snapshotWriteLedger.getStore();
       if (!ledger) return false;
-      return deviceMayWriteDocument(ledger.state, author.device);
+      return deviceMayWriteDocument(ledger.inspectState(), author.device);
     },
   });
 
@@ -309,7 +330,7 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
               return;
             }
             const ledger = await loadLedger(genesisHex);
-            if (!authorizeMembership(ledger.state, payload.deviceHex)) {
+            if (!authorizeMembership(ledger.inspectState(), payload.deviceHex)) {
               json(res, 403, { error: 'unauthorized' });
               return;
             }
@@ -345,7 +366,14 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
             return;
           }
           const genesisHex = toHex(await hashRecord(genesis));
-          await Ledger.verify({ anchor: fromHex(genesisHex), records: [genesis], pointCache });
+          await runHostLedger(
+            Effect.gen(function* () {
+              const anchor = yield* Bytes.genesisHash(fromHex(genesisHex));
+              return yield* verifyLedger({ anchor, records: [genesis] }).pipe(
+                Effect.provide(signatureVerifierLayer)
+              );
+            })
+          );
           const bucket = await httpFetch(
             `${riverrun.baseUrl}/ds/${encodeURIComponent(genesisHex)}`,
             {
@@ -382,7 +410,7 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
             const ledger = await loadLedger(genesisHex);
             if (
               !authorizeCurrentMember({
-                state: ledger.state,
+                state: ledger.inspectState(),
                 deviceHex: credential.deviceHex,
                 credentialGenesisHex: credential.genesisHex,
                 requestGenesisHex: genesisHex,
@@ -399,7 +427,7 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
             const ledger = await loadLedger(genesisHex);
             if (
               !authorizeCurrentMember({
-                state: ledger.state,
+                state: ledger.inspectState(),
                 deviceHex: credential.deviceHex,
                 credentialGenesisHex: credential.genesisHex,
                 requestGenesisHex: genesisHex,
@@ -455,7 +483,7 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
           const ledger = await loadLedger(genesisHex);
           if (
             !authorizeCurrentMember({
-              state: ledger.state,
+              state: ledger.inspectState(),
               deviceHex: credential.deviceHex,
               credentialGenesisHex: credential.genesisHex,
               requestGenesisHex: genesisHex,
@@ -480,7 +508,7 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
           }
           const ledger = await loadLedger(genesisHex);
           const decision = authorizeStreamRequest({
-            state: ledger.state,
+            state: ledger.inspectState(),
             deviceHex: credential.deviceHex,
             credentialGenesisHex: credential.genesisHex,
             requestGenesisHex: genesisHex,
@@ -530,7 +558,9 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
                 return;
               }
             }
-            await current.extend([record], pointCache);
+            await runHostLedger(
+              extendLedger(current, [record]).pipe(Effect.provide(signatureVerifierLayer))
+            );
             const dest = `${riverrun.baseUrl}${url.pathname}${url.search}`;
             const headers = new Headers();
             for (const [name, value] of Object.entries(req.headers)) {
@@ -583,7 +613,7 @@ export async function startDemoHost(options: DemoHostOptions): Promise<RunningDe
               return;
             }
             const fresh = await loadLedger(genesisHex);
-            if (!deviceMayWriteDocument(fresh.state, credential.deviceHex)) {
+            if (!deviceMayWriteDocument(fresh.inspectState(), credential.deviceHex)) {
               json(res, 403, { error: 'unauthorized' });
               return;
             }
