@@ -19,3 +19,6 @@
 [submodule "packages/acp-extension-pi"]
 	path = packages/acp-extension-pi
 	url = https://github.com/LodyAI/acp-extension-pi.git
+[submodule "packages/sorbet"]
+	path = packages/sorbet
+	url = https://github.com/LodyAI/Sorbet.git

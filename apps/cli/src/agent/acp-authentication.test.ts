@@ -335,10 +335,15 @@ describe('AcpAuthenticationManager', () => {
     const elicitationReply = createDeferred<acp.CreateElicitationResponse>();
     const agent = acp
       .agent({ name: 'test-auth-agent' })
-      .onRequest(acp.methods.agent.initialize, async ({ params }) => ({
-        protocolVersion: params.protocolVersion,
-        authMethods: [{ id: 'oauth', name: 'OAuth' }],
-      }))
+      .onRequest(acp.methods.agent.initialize, async ({ params }) => {
+        expect(params.clientCapabilities.auth?._meta).toEqual({
+          lody: { credentialForm: { version: 1 } },
+        });
+        return {
+          protocolVersion: params.protocolVersion,
+          authMethods: [{ id: 'oauth', name: 'OAuth' }],
+        };
+      })
       .onRequest(acp.methods.agent.authenticate, async ({ client, requestId }) => {
         const reply = await client.request(acp.methods.client.elicitation.create, {
           mode: 'form',
@@ -749,6 +754,7 @@ describe('AcpAuthenticationManager', () => {
       );
       expect(initialize.mock.calls[0]?.[0].params.clientCapabilities.auth).toEqual({
         terminal: false,
+        _meta: { lody: { credentialForm: { version: 1 } } },
       });
     }
   );

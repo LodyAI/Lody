@@ -62,6 +62,7 @@ describe('MachineDocument ACP capabilities', () => {
         [{ id: 'agent', name: 'Agent' }],
         [{ modelId: 'gpt-5', name: 'GPT-5' }],
         undefined,
+        undefined,
         [{ name: '/help', description: 'Help' }],
         false,
         'builtin:codex:test',
@@ -104,6 +105,7 @@ describe('MachineDocument ACP capabilities', () => {
         [{ modelId: 'kimi-k3', name: 'Kimi K3' }],
         undefined,
         undefined,
+        undefined,
         false,
         'registry:deepseek:test',
         { 'kimi-k3': efforts }
@@ -117,6 +119,49 @@ describe('MachineDocument ACP capabilities', () => {
     expect(markDirty).toHaveBeenCalledTimes(2);
     expect(updated.modelReasoningEfforts).toEqual({
       'kimi-k3': ['low', 'high', 'max'],
+    });
+  });
+
+  it('persists model-dependent config descriptors', async () => {
+    const flock = new FakeMachineFlock();
+    const repo = {
+      openFlockDoc: vi.fn(async () => ({
+        flock,
+        syncOnce: vi.fn(async () => undefined),
+      })),
+      flush: vi.fn(async () => undefined),
+    } as unknown as LoroRepo;
+    const document = new MachineDocument(
+      repo,
+      'workspace-1' as WorkspaceId,
+      'machine-1' as MachineId,
+      vi.fn()
+    );
+    const option = {
+      id: 'thought_level',
+      name: 'Thinking level',
+      category: 'thought_level',
+      type: 'select' as const,
+      currentValue: 'max',
+      options: [{ value: 'max', name: 'Max' }],
+    };
+
+    const updated = await document.updateAcpCapabilities(
+      'config-1' as AgentConfigId,
+      'registry',
+      'sorbet',
+      [],
+      [{ modelId: 'sorbet/astra', name: 'Astra' }],
+      undefined,
+      { 'sorbet/astra': [option], 'sorbet/plain': [] },
+      undefined,
+      false,
+      'registry:sorbet:test'
+    );
+
+    expect(updated.modelConfigOptions).toEqual({
+      'sorbet/astra': [option],
+      'sorbet/plain': [],
     });
   });
 
@@ -153,6 +198,7 @@ describe('MachineDocument ACP capabilities', () => {
       'codex',
       [{ id: 'agent', name: 'Agent' }],
       [{ modelId: 'gpt-5', name: 'GPT-5' }],
+      undefined,
       undefined,
       undefined,
       false,

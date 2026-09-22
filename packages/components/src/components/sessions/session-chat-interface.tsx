@@ -2193,6 +2193,7 @@ export const SessionChatInterface = memo(
       defaultModelId,
       machineFlockRows,
       modeOptions,
+      modelConfigOptionSelectors,
       modelOptions,
       modelReasoningEfforts,
       sessionMachine,
@@ -2219,6 +2220,7 @@ export const SessionChatInterface = memo(
         defaultModeId,
         defaultModelId,
         modeOptions,
+        modelConfigOptionSelectors,
         modelOptions,
         modelReasoningEfforts,
       }),
@@ -2228,6 +2230,7 @@ export const SessionChatInterface = memo(
         defaultModeId,
         defaultModelId,
         modeOptions,
+        modelConfigOptionSelectors,
         modelOptions,
         modelReasoningEfforts,
       ]

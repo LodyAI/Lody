@@ -77,6 +77,15 @@ export default defineConfig({
         'claude-acp': path.resolve(__dirname, 'src/claude-acp-entry.ts'),
         'deepseek-acp': path.resolve(__dirname, 'src/deepseek-acp-entry.ts'),
         'grok-acp': path.resolve(__dirname, 'src/grok-acp-entry.ts'),
+        'sorbet/dist/stdio-cli': path.resolve(__dirname, 'src/sorbet-acp-entry.ts'),
+        'sorbet/dist/filesystem-worker': path.resolve(
+          __dirname,
+          'src/sorbet-filesystem-worker-entry.ts'
+        ),
+        'sorbet/dist/provider-control': path.resolve(
+          __dirname,
+          'src/sorbet-provider-control-entry.ts'
+        ),
         'diff-worker': path.resolve(__dirname, 'src/lib/code-collab/diff-worker.ts'),
         'file-index-scan-worker': path.resolve(
           __dirname,

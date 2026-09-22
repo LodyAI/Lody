@@ -16,6 +16,7 @@ import {
   LORO_STREAMS_RPC_VERSION,
   type LocalProjectGitStateRpcResponse,
 } from '@lody/loro-streams-rpc';
+import { runSorbetProviderCenterOperation } from '@/agent/sorbet-provider-center';
 import {
   HistoryWriteError,
   MachineId,
@@ -6188,6 +6189,27 @@ export class MessageHandler {
     };
 
     switch (request.method) {
+      case 'machine/sorbet-provider-center': {
+        try {
+          const result = await runSorbetProviderCenterOperation(request.params);
+          return {
+            type: 'machine/sorbet-provider-center_response' as const,
+            machineId: this.machineId,
+            success: true,
+            snapshot: result.snapshot,
+            ...(result.affectedProviderId === undefined
+              ? {}
+              : { affectedProviderId: result.affectedProviderId }),
+          };
+        } catch (error) {
+          return {
+            type: 'machine/sorbet-provider-center_response' as const,
+            machineId: this.machineId,
+            success: false,
+            error: formatErrorMessage(error),
+          };
+        }
+      }
       case 'code-collab/get-file-index':
         await assertOwner(request.params.sessionId as SessionId);
         return await this.codeCollabV2Service.getFileIndex(request.params);
@@ -8034,6 +8056,7 @@ export class MessageHandler {
     modes: NonNullable<MachineAcpCapabilitiesRefreshResponse['modes']>;
     models: NonNullable<MachineAcpCapabilitiesRefreshResponse['models']>;
     configOptions?: AcpConfigOptionSummary[];
+    modelConfigOptions?: Record<string, AcpConfigOptionSummary[]>;
     availableCommands?: NonNullable<MachineAcpCapabilitiesRefreshResponse['availableCommands']>;
     sessionFork: boolean;
     acknowledgedSteer: boolean;

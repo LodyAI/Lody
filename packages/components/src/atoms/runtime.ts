@@ -68,6 +68,8 @@ import type {
   CodeCollabV2SaveTextResponse,
   FilePreviewV3Request,
   FilePreviewV3Response,
+  SorbetProviderCenterOperation,
+  SorbetProviderCenterResponse,
 } from '@lody/shared';
 import type { LocalProjectGitStateRpcResponse } from '@lody/loro-streams-rpc';
 import type { WorkspaceWriter } from '../providers/workspace-writer';
@@ -461,6 +463,17 @@ export type WorkspaceRuntime = {
     args: { description: string; reporterUserId: string; requestToken: string },
     options?: { timeoutMs?: number }
   ) => Promise<MachineBugReportResponse | null>;
+  requestSorbetProviderCenter: (
+    machineId: MachineId,
+    operation: SorbetProviderCenterOperation,
+    options?: { timeoutMs?: number }
+  ) => Promise<SorbetProviderCenterResponse | null>;
+  setSorbetProviderApiKey: (
+    machineId: MachineId,
+    providerId: string,
+    apiKey: string,
+    options?: { timeoutMs?: number }
+  ) => Promise<SorbetProviderCenterResponse | null>;
   dispose: () => Promise<void>;
 };
 

@@ -280,6 +280,7 @@ export const DraftSessionChatInterface = memo(
         defaultModelId,
         machineFlockRows,
         modeOptions,
+        modelConfigOptionSelectors,
         modelOptions,
         modelReasoningEfforts,
         sessionMachine,
@@ -299,6 +300,7 @@ export const DraftSessionChatInterface = memo(
           defaultModeId,
           defaultModelId,
           modeOptions,
+          modelConfigOptionSelectors,
           modelOptions,
           modelReasoningEfforts,
         }),
@@ -308,6 +310,7 @@ export const DraftSessionChatInterface = memo(
           defaultModeId,
           defaultModelId,
           modeOptions,
+          modelConfigOptionSelectors,
           modelOptions,
           modelReasoningEfforts,
         ]

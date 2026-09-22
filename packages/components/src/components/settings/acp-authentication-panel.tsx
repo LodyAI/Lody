@@ -96,6 +96,7 @@ export function AcpAuthenticationPanel({
   compact = false,
   reauthentication = false,
   providerName,
+  preferredMethodId,
   onBeforeStart,
   onAuthenticated,
 }: {
@@ -114,6 +115,8 @@ export function AcpAuthenticationPanel({
    * the config.
    */
   providerName?: string;
+  /** Select one advertised agent auth method without showing the generic method picker. */
+  preferredMethodId?: string;
   /** Persist the exact Provider config that the daemon will resolve before launch. */
   onBeforeStart?: () => void | Promise<void>;
   onAuthenticated?: () => void | Promise<void>;
@@ -305,6 +308,49 @@ export function AcpAuthenticationPanel({
         ) {
           setSubmittingInteraction(false);
           interactionIdRef.current = progress.interactionId;
+          if (preferredMethodId) {
+            const selected = progress.authMethods.find(
+              (method) => method.type === 'agent' && method.id === preferredMethodId
+            );
+            if (!selected || !machineId || !startedRequestId) {
+              closePendingAuthorizationWindow();
+              if (machineId && startedRequestId) {
+                cancelAuthentication({
+                  machineId,
+                  authenticationRequestId: startedRequestId,
+                });
+              }
+              setError(
+                t(
+                  'agents.authentication.methodUnavailable',
+                  'This sign-in method is not available on the target Machine.'
+                )
+              );
+              setPhase('error');
+              return;
+            }
+            setSubmittingInteraction(true);
+            setInteraction(null);
+            setAuthorization(null);
+            void submitAuthenticationInput({
+              machineId,
+              authenticationRequestId: startedRequestId,
+              interactionId: progress.interactionId,
+              input: { action: 'accept', methodId: preferredMethodId },
+            })
+              .then(() => {
+                if (interactionIdRef.current === progress.interactionId) {
+                  interactionIdRef.current = null;
+                }
+              })
+              .catch((nextError: unknown) => {
+                closePendingAuthorizationWindow();
+                setError(nextError instanceof Error ? nextError.message : String(nextError));
+                setPhase('error');
+              })
+              .finally(() => setSubmittingInteraction(false));
+            return;
+          }
           setInteraction({
             type: 'methods',
             interactionId: progress.interactionId,
@@ -333,7 +379,6 @@ export function AcpAuthenticationPanel({
               )
             )
           );
-          setAuthorization(null);
         } else if (progress.status === 'cancelled') {
           closePendingAuthorizationWindow();
           interactionIdRef.current = null;
@@ -477,14 +522,16 @@ export function AcpAuthenticationPanel({
         }
         return;
       }
-      if (
-        activeAuthenticationRef.current?.requestId !== active.requestId ||
-        interactionIdRef.current !== authorization.interactionId
-      ) {
+      if (activeAuthenticationRef.current?.requestId !== active.requestId) {
         closePendingAuthorizationWindow();
         return;
       }
-      interactionIdRef.current = null;
+      // The agent may request its fallback manual-code form as soon as URL
+      // consent is accepted. Preserve that newer interaction instead of
+      // clearing it while this handler finishes opening the browser.
+      if (interactionIdRef.current === authorization.interactionId) {
+        interactionIdRef.current = null;
+      }
       setSubmittingInteraction(false);
       setAuthorization((current) => {
         if (!current || current.interactionId !== authorization.interactionId) return current;

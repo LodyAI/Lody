@@ -396,6 +396,7 @@ function isACPSessionConfig(value) {
     agentType === 'codex' ||
     agentType === 'kimi' ||
     agentType === 'deepseek' ||
+    agentType === 'sorbet' ||
     agentType === 'bub';
   if (
     typeof value.prompt !== 'string' ||

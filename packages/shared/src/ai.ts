@@ -35,6 +35,7 @@ export type CliType = BuiltinCliType;
 
 export const BUILTIN_AGENTS = [
   ...MANAGED_BUILTIN_RUNTIMES.map(({ agentType, displayName }) => ({ agentType, displayName })),
+  { agentType: 'sorbet', displayName: 'Sorbet' },
   { agentType: 'deepseek', displayName: 'DeepSeek Harness' },
   { agentType: 'bub', displayName: 'Bub' },
 ] as const;
@@ -64,6 +65,7 @@ export type AgentType = string;
  */
 const BUILTIN_ACP_TITLE_OWNERSHIP: Record<BuiltinAgentType, 'none' | 'untagged' | 'tagged'> = {
   pi: 'none',
+  sorbet: 'none',
   claude: 'untagged',
   codex: 'tagged',
   grok: 'untagged',
@@ -350,7 +352,9 @@ export type AcpCommandSummary = {
 // Codex-only carry a bogus ladder for every agent that spells other variants
 // with the same brackets — a Claude probe stored `{ opus: ['1m'] }` — and the
 // per-model effort picker would rebuild that model's ladder from it.
-export const ACP_CAPABILITY_CACHE_VERSION = 8;
+// 9: cache model-dependent config descriptors so switching models does not
+// reuse the probe model's controls or guess an agent-specific config id.
+export const ACP_CAPABILITY_CACHE_VERSION = 9;
 
 export type AcpCapabilityAuthority = 'unavailable' | 'provisional' | 'authoritative';
 
@@ -367,6 +371,8 @@ export type AcpCapabilityCacheEntry = {
   models: ModelInfo[];
   /** Session config options returned by the agent (supersedes modes/models when present). */
   configOptions?: AcpConfigOptionSummary[];
+  /** Model-dependent config options, keyed by the exact model selector value. */
+  modelConfigOptions?: Record<string, AcpConfigOptionSummary[]>;
   /**
    * Reasoning-effort values accepted per model id.
    *
@@ -499,11 +505,11 @@ export const isManagedBuiltinAgentType = (
 
 /**
  * Builtins that may be created through the durable provider-setup queue.
- * Managed runtimes use it for download + verification; Bub uses the same queue
- * only to keep its user-installed command unpublished until a live probe passes.
+ * Managed runtimes use it for download + verification; bundled Sorbet and Bub
+ * skip download and remain unpublished until a live probe passes.
  */
 export const supportsBuiltinProviderSetup = (agentType: string): agentType is BuiltinAgentType =>
-  isManagedBuiltinAgentType(agentType) || agentType === 'bub';
+  isManagedBuiltinAgentType(agentType) || agentType === 'bub' || agentType === 'sorbet';
 
 export const getManagedBuiltinRuntimeByAgentType = (
   agentType: string
@@ -519,6 +525,8 @@ export type StaticBuiltinAcpCapabilities = {
   modes: Array<{ id: string; name: string; description?: string }>;
   models: Array<{ modelId: string; name: string; description?: string }>;
   configOptions: AcpConfigOptionSummary[];
+  /** Model-dependent config options, keyed by the exact model selector value. */
+  modelConfigOptions?: Record<string, AcpConfigOptionSummary[]>;
   /** Per-model reasoning-effort ladders, mirroring the cached runtime map. */
   modelReasoningEfforts?: Record<string, string[]>;
 };
@@ -1035,6 +1043,16 @@ const cloneStaticCapabilities = (
   modes: capabilities.modes.map((mode) => ({ ...mode })),
   models: capabilities.models.map((model) => ({ ...model })),
   configOptions: capabilities.configOptions.map(cloneConfigOption),
+  ...(capabilities.modelConfigOptions
+    ? {
+        modelConfigOptions: Object.fromEntries(
+          Object.entries(capabilities.modelConfigOptions).map(([modelId, options]) => [
+            modelId,
+            options.map(cloneConfigOption),
+          ])
+        ),
+      }
+    : {}),
   ...(capabilities.modelReasoningEfforts
     ? {
         modelReasoningEfforts: Object.fromEntries(

@@ -45,6 +45,10 @@ describe('supportsBuiltinAuthentication', () => {
     }
   });
 
+  it('offers Sorbet sign-in through its protocol-driven Provider methods', () => {
+    expect(supportsBuiltinAuthentication({ cliType: 'builtin', agentType: 'sorbet' })).toBe(true);
+  });
+
   it('keeps sign-in available when env only carries unrelated variables', () => {
     expect(
       supportsBuiltinAuthentication({
@@ -106,10 +110,12 @@ describe('supportsBuiltinAuthentication', () => {
 });
 
 describe('usesAcpProtocolAuthentication', () => {
-  it('covers exactly the third-party ACP providers', () => {
+  it('covers third-party ACP providers and bundled Sorbet', () => {
     expect(usesAcpProtocolAuthentication('registry')).toBe(true);
     expect(usesAcpProtocolAuthentication('custom')).toBe(true);
+    expect(usesAcpProtocolAuthentication('builtin', 'sorbet')).toBe(true);
     expect(usesAcpProtocolAuthentication('builtin')).toBe(false);
+    expect(usesAcpProtocolAuthentication('builtin', 'codex')).toBe(false);
     expect(usesAcpProtocolAuthentication(undefined)).toBe(false);
   });
 });
@@ -128,6 +134,9 @@ describe('supportsAuthenticationWhenRequired', () => {
 
   it('keeps the managed builtin login flow and excludes providers with neither', () => {
     expect(supportsAuthenticationWhenRequired({ cliType: 'builtin', agentType: 'codex' })).toBe(
+      true
+    );
+    expect(supportsAuthenticationWhenRequired({ cliType: 'builtin', agentType: 'sorbet' })).toBe(
       true
     );
     // DeepSeek Harness authenticates purely through env vars.

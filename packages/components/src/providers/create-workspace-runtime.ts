@@ -1711,6 +1711,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestLocalProjectGitState,
     requestLocalProjectControl,
     requestMachineBugReport,
+    requestSorbetProviderCenter,
+    setSorbetProviderApiKey,
   } = createWorkspaceMachineRpcFacade({
     getMachineProtocolCapabilities: async (machineId) => {
       const entry = await repo.getDocMeta(getMachineRoomId(machineId));
@@ -2453,16 +2455,21 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   };
 
   let workspaceMetaFirstSynced = false;
+  let startupLocalMachineId: MachineId | null = null;
   let startupAcpCapabilitiesRefreshCompleted = false;
   let startupAcpCapabilitiesRefreshAbortController: AbortController | null = null;
   let cancelDelayedStartupAcpCapabilitiesRefresh: (() => void) | null = null;
+  const isStartupAcpCapabilitiesRefreshReady = (): boolean =>
+    (startupLocalMachineId !== null &&
+      targetRouter.getPlaneForMachine(startupLocalMachineId) === 'local') ||
+    presenceTransport.getSyncState() === 'synced';
   const startStartupAcpCapabilitiesRefresh = (): void => {
     if (
       startupAcpCapabilitiesRefreshCompleted ||
       startupAcpCapabilitiesRefreshAbortController ||
       disposePromise ||
       !workspaceMetaFirstSynced ||
-      presenceTransport.getSyncState() !== 'synced'
+      !isStartupAcpCapabilitiesRefreshReady()
     ) {
       return;
     }
@@ -2473,17 +2480,29 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       {
         listMachineIds: async () => {
           const authorizedMachineIds = deps.getAuthorizedMachineIds?.() ?? null;
-          if (!authorizedMachineIds) return [];
           const entries = await listDocMetaEntries(repo);
           return entries
             .filter((entry) => isMachineDocRoomId(entry.docId) && !isLoroRepoDocDeleted(entry))
             .map((entry) => entry.docId.slice(MACHINE_DOC_PREFIX.length).trim() as MachineId)
-            .filter((machineId) => machineId.length > 0 && authorizedMachineIds.has(machineId));
+            .filter(
+              (machineId) =>
+                machineId.length > 0 &&
+                (machineId === startupLocalMachineId || authorizedMachineIds?.has(machineId))
+            );
         },
-        isMachineOnline: (machineId) =>
-          !abortController.signal.aborted &&
-          presenceTransport.getSyncState() === 'synced' &&
-          collectOnlineMachineIdsFromPresence(latestPresenceStates, getServerNow()).has(machineId),
+        isMachineOnline: (machineId) => {
+          if (abortController.signal.aborted) return false;
+          if (
+            machineId === startupLocalMachineId &&
+            targetRouter.getPlaneForMachine(machineId) === 'local'
+          ) {
+            return true;
+          }
+          return (
+            presenceTransport.getSyncState() === 'synced' &&
+            collectOnlineMachineIdsFromPresence(latestPresenceStates, getServerNow()).has(machineId)
+          );
+        },
         listAgentConfigs: async (machineId) => {
           const handle = await repo.openFlockDoc(getMachineFlockDocId(workspaceId, machineId));
           await handle.syncOnce().catch((error: unknown) => {
@@ -2521,7 +2540,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
           }
           if (signal.aborted) return;
           await resyncMachineFlockRows({ repo, workspaceId }, machineId, {
-            requireRemoteSync: true,
+            requireRemoteSync: targetRouter.getPlaneForMachine(machineId) === 'cloud',
             refreshedCapability: response.capability
               ? { configId: response.configId, value: response.capability }
               : undefined,
@@ -2561,7 +2580,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
         if (
           abortController.signal.aborted &&
           !disposePromise &&
-          presenceTransport.getSyncState() === 'synced'
+          isStartupAcpCapabilitiesRefreshReady()
         ) {
           scheduleStartupAcpCapabilitiesRefresh();
         }
@@ -2574,7 +2593,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       cancelDelayedStartupAcpCapabilitiesRefresh ||
       disposePromise ||
       !workspaceMetaFirstSynced ||
-      presenceTransport.getSyncState() !== 'synced'
+      !isStartupAcpCapabilitiesRefreshReady()
     ) {
       return;
     }
@@ -2591,7 +2610,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     (state) => {
       if (state === 'synced') {
         scheduleStartupAcpCapabilitiesRefresh();
-      } else {
+      } else if (!isStartupAcpCapabilitiesRefreshReady()) {
         startupAcpCapabilitiesRefreshAbortController?.abort();
         cancelDelayedStartupAcpCapabilitiesRefresh?.();
         cancelDelayedStartupAcpCapabilitiesRefresh = null;
@@ -3363,7 +3382,15 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   };
 
   const setLocalMachineId = (machineId: MachineId | null) => {
+    startupLocalMachineId = machineId;
     targetRouter.setLocalMachineId(machineId);
+    if (machineId !== null) {
+      scheduleStartupAcpCapabilitiesRefresh();
+    } else if (presenceTransport.getSyncState() !== 'synced') {
+      startupAcpCapabilitiesRefreshAbortController?.abort();
+      cancelDelayedStartupAcpCapabilitiesRefresh?.();
+      cancelDelayedStartupAcpCapabilitiesRefresh = null;
+    }
   };
 
   // Presence (Ephemeral Stream) health lives in the same registry as durable
@@ -4608,6 +4635,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestLocalProjectGitState,
     requestLocalProjectControl,
     requestMachineBugReport,
+    requestSorbetProviderCenter,
+    setSorbetProviderApiKey,
     dispose,
   };
 }

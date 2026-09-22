@@ -133,7 +133,8 @@ const redactRpcRequestForLog = (raw: unknown): unknown => {
   const request = raw as { method?: unknown; params?: unknown };
   if (
     (request.method !== 'machine/acp-authenticate' &&
-      request.method !== 'machine/acp-capabilities-refresh') ||
+      request.method !== 'machine/acp-capabilities-refresh' &&
+      request.method !== 'machine/sorbet-provider-center') ||
     typeof request.params !== 'object' ||
     request.params === null
   ) {
@@ -155,6 +156,7 @@ const redactRpcRequestForLog = (raw: unknown): unknown => {
       ...(Object.hasOwn(params, 'authenticationInputEnvelope')
         ? { authenticationInputEnvelope: '[REDACTED]' }
         : {}),
+      ...(Object.hasOwn(params, 'apiKeyEnvelope') ? { apiKeyEnvelope: '[REDACTED]' } : {}),
     },
   };
 };
@@ -995,6 +997,17 @@ export class LoroStreamsMachineRpcServer {
               this.acpAuthorizationCodeRecipients.delete(request.params.authenticationRequestId);
             }
           }
+        }
+        case 'machine/sorbet-provider-center': {
+          // Workspace Streams cannot authenticate the claimed requester. Provider
+          // mutations can redirect an existing credential to a hostile endpoint,
+          // so this surface stays on the process-local Electron bridge until a
+          // source-minted, payload-bound authorization token is available.
+          await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+            code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
+            message: 'Sorbet Provider settings are only available on the local Machine.',
+          });
+          return;
         }
         case 'machine/acp-binary-status': {
           if (!this.deps.getMachineAcpBinaryStatus) {

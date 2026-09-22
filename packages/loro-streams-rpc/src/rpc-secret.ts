@@ -104,6 +104,14 @@ export const getMachineAcpAuthenticationInputSecretContext = (options: {
 }): string =>
   `machine/acp-authenticate-input\0${options.workspaceId}\0${options.machineId}\0${options.authenticationRequestId}\0${options.interactionId}`;
 
+export const getSorbetProviderApiKeySecretContext = (options: {
+  workspaceId: string;
+  machineId: string;
+  operationId: string;
+  providerId: string;
+}): string =>
+  `machine/sorbet-provider-api-key\0${options.workspaceId}\0${options.machineId}\0${options.operationId}\0${options.providerId}`;
+
 export type RpcSecretRecipient = {
   readonly publicKey: RpcSecretPublicKey;
   decrypt(envelope: RpcSecretEnvelope, context: string): Promise<string>;

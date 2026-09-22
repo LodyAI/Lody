@@ -686,6 +686,39 @@ describe('createWorkspaceRuntime meta recovery lifecycle', () => {
     await runtime.dispose();
   });
 
+  it('refreshes ACP capabilities over the Electron local plane without cloud presence', async () => {
+    mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
+    mocks.listDoc.mockResolvedValueOnce([
+      { docId: 'machine-local-machine', meta: {}, exists: true },
+    ]);
+    enableElectronLocalDataPlane();
+
+    const runtime = await createWorkspaceRuntime({
+      workspaceSlug: 'workspace',
+      workspaceId: 'workspace-1' as WorkspaceId,
+      apiBaseUrl: 'https://api.example.test',
+      token: 'auth-token',
+      getAuthorizedMachineIds: () => null,
+    });
+
+    await flushPromises();
+    expect(mocks.startupAcpCapabilitiesRefresh).not.toHaveBeenCalled();
+
+    runtime.setLocalMachineId('local-machine' as MachineId);
+    await flushPromises();
+
+    expect(mocks.startupCapabilityCooldowns).toHaveLength(1);
+    mocks.startupCapabilityCooldowns[0]?.run();
+    await flushPromises();
+
+    expect(mocks.startupAcpCapabilitiesRefresh).toHaveBeenCalledTimes(1);
+    const ports = mocks.startupAcpCapabilitiesRefresh.mock.calls[0]?.[0];
+    expect(ports?.isMachineOnline('local-machine' as MachineId)).toBe(true);
+    await expect(ports?.listMachineIds()).resolves.toEqual(['local-machine']);
+
+    await runtime.dispose();
+  });
+
   it('retries the startup capability pass after an in-flight presence disconnect', async () => {
     mocks.joinMetaRoom.mockResolvedValueOnce(createMetaSub(Promise.resolve()));
     let markFirstStarted!: () => void;

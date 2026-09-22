@@ -23,6 +23,10 @@ import {
 } from './code-collab';
 import { FilePreviewV3RequestSchema, FilePreviewV3ResponseSchema } from './file-preview';
 import {
+  SorbetProviderCenterLocalOperationSchema,
+  SorbetProviderCenterResponseSchema,
+} from './sorbet-provider-center';
+import {
   SessionCancelResponseSchema,
   SessionDispatchTurnResponseSchema,
   SessionEditAndResendResponseSchema,
@@ -77,6 +81,10 @@ export type SessionActiveInvocationContextResult = z.infer<
 >;
 
 export const LocalMachineRpcRequestSchema = z.discriminatedUnion('method', [
+  BaseLocalMachineRpcRequestSchema.extend({
+    method: z.literal('machine/sorbet-provider-center'),
+    params: SorbetProviderCenterLocalOperationSchema,
+  }).strict(),
   BaseLocalMachineRpcRequestSchema.extend({
     method: z.literal('session/get-active-invocation-context'),
     params: z
@@ -250,6 +258,7 @@ export type LocalMachineRpcRequest = z.infer<typeof LocalMachineRpcRequestSchema
 export type LocalMachineRpcRequestValidated = LocalMachineRpcRequest;
 
 export const LocalMachineRpcResultSchema = z.union([
+  SorbetProviderCenterResponseSchema,
   SessionActiveInvocationContextResultSchema,
   CodeCollabV2FileIndexSnapshotSchema,
   CodeCollabV2OpenTextOkSchema,

@@ -61,6 +61,8 @@ import {
   type SessionEditAndResendSpec,
   type SessionTurnInputConfig,
   type WorkspaceId,
+  type SorbetProviderCenterOperation,
+  type SorbetProviderCenterResponse,
   sessionForkFailure,
   sessionEditAndResendFailure,
 } from '@lody/shared';
@@ -1171,6 +1173,69 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     }
   };
 
+  const requestSorbetProviderCenter = async (
+    machineId: MachineId,
+    operation: SorbetProviderCenterOperation,
+    options?: { timeoutMs?: number }
+  ): Promise<SorbetProviderCenterResponse | null> => {
+    try {
+      if (await canUseLocalMachineRpc(machineId)) {
+        return (await sendLocalMachineRpcRequest({
+          machineId,
+          workspaceId,
+          method: 'machine/sorbet-provider-center',
+          params: operation,
+          timeoutMs: options?.timeoutMs ?? 30_000,
+        })) as SorbetProviderCenterResponse | null;
+      }
+      return {
+        type: 'machine/sorbet-provider-center_response',
+        machineId,
+        success: false,
+        error: 'Sorbet Provider settings are only available on the local Machine.',
+      };
+    } catch (error) {
+      return {
+        type: 'machine/sorbet-provider-center_response',
+        machineId,
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  };
+
+  const setSorbetProviderApiKey = async (
+    machineId: MachineId,
+    providerId: string,
+    apiKey: string,
+    options?: { timeoutMs?: number }
+  ): Promise<SorbetProviderCenterResponse | null> => {
+    try {
+      if (await canUseLocalMachineRpc(machineId)) {
+        return (await sendLocalMachineRpcRequest({
+          machineId,
+          workspaceId,
+          method: 'machine/sorbet-provider-center',
+          params: { action: 'set-api-key', providerId, apiKey },
+          timeoutMs: options?.timeoutMs ?? 30_000,
+        })) as SorbetProviderCenterResponse | null;
+      }
+      return {
+        type: 'machine/sorbet-provider-center_response',
+        machineId,
+        success: false,
+        error: 'Sorbet Provider settings are only available on the local Machine.',
+      };
+    } catch (error) {
+      return {
+        type: 'machine/sorbet-provider-center_response',
+        machineId,
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  };
+
   return {
     requestSessionCancel,
     requestSessionSteer,
@@ -1200,5 +1265,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     requestLocalProjectGitState,
     requestLocalProjectControl,
     requestMachineBugReport,
+    requestSorbetProviderCenter,
+    setSorbetProviderApiKey,
   };
 }

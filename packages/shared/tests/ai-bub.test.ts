@@ -20,3 +20,13 @@ describe('builtin Bub shared contract', () => {
     expect(getBuiltinDefaultModeId('builtin', 'bub')).toBeUndefined();
   });
 });
+
+describe('builtin Sorbet shared contract', () => {
+  it('is bundled and live-probed without entering managed runtime download', () => {
+    expect(isBuiltinAgentType('sorbet')).toBe(true);
+    expect(isManagedBuiltinAgentType('sorbet')).toBe(false);
+    expect(supportsBuiltinProviderSetup('sorbet')).toBe(true);
+    expect(getStaticBuiltinAcpCapabilities('builtin', 'sorbet')).toBeUndefined();
+    expect(getBuiltinDefaultModeId('builtin', 'sorbet')).toBeUndefined();
+  });
+});
