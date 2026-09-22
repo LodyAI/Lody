@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Spinner } from '@lody/ui/spinner';
+import { Button } from '@lody/ui/button';
 import { useCloudAction } from '@lody/platform/react';
 import { ConvexError } from 'convex/values';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -641,18 +642,17 @@ function CloudBillingSettings() {
             <AlertDialog.Cancel disabled={switchIntervalPending}>
               {t('common.cancel')}
             </AlertDialog.Cancel>
-            <AlertDialog.Action
+            <Button
               disabled={switchIntervalPending || intervalPreview === undefined}
-              onClick={(event) => {
+              onClick={() => {
                 // Keep the dialog open until the switch resolves (it closes in
                 // the handler on success) so the pending state is visible.
-                event.preventDefault();
                 void handleSwitchInterval();
               }}
             >
               {switchIntervalPending ? <Spinner className="mr-2 h-4 w-4" /> : null}
               {t('billing.switchIntervalConfirm')}
-            </AlertDialog.Action>
+            </Button>
           </AlertDialog.Footer>
         </AlertDialog.Content>
       </AlertDialog.Root>

@@ -56,8 +56,10 @@ strings on i18n rather than the registry's inline English.
   `data-open` rather than `data-state`, and maps `asChild` to `render`, `onSelect`
   to `onClick`, and `onOpenAutoFocus`/`onCloseAutoFocus` to `initialFocus`/`finalFocus`.
   `ui/menu.tsx` also owns the composer-focus policy, the menu search input and a
-  standalone `Menu.Label`; `ui/dialog.tsx` owns `data-lody-dialog-content`, the
-  WindowDragStrip backdrop and the AlertDialog Action/Cancel button semantics.
+  standalone `Menu.Label`; `ui/dialog.tsx` owns `data-lody-dialog-content` and
+  the WindowDragStrip backdrop. An `AlertDialog` answer that must stay open
+  while work is in flight is a plain `Button`, never `Action`/`Cancel` —
+  those are `Close`, and `Close` always closes.
 - Tooltips come from `@lody/ui/tooltip` (Base UI): `Tooltip.Provider/Root/
   Trigger/Content`, `render` instead of `asChild`, `delay` on the trigger or
   provider. The chip is visual-only — no `role="tooltip"`, no

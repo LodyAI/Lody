@@ -14,8 +14,7 @@ tabs、kbd、progress、spinner，约 400 处调用、横跨约 200 个文件—
 Radix 包装层。`src/ui` 保留三个兼容适配层（`menu.tsx`、`dialog.tsx`、`card.tsx`），
 承载基元不该知道的产品语义；本地 `spinner.tsx` 则作为有意不同的组件存活——它是
 图标动画器，而 `@lody/ui` 的 Spinner 接管纯加载标记。迁移的代价是 `@lody/ui`
-新增一个属性（`Dialog` 的 `noAnimation`）、一处属性改道（`Popover.Content` 的
-`role`）以及一个 `data-slot="spinner"` 测试锚点。
+新增一个属性（`Dialog` 的 `noAnimation`）以及一个 `data-slot="spinner"` 测试锚点。
 
 ## 问题
 
@@ -50,12 +49,12 @@ progress 与 spinner。只要调用方不迁移，每个 Radix 文件就继续�
 
 `src/ui/dialog.tsx` 持有 `data-lody-dialog-content`（mention 与编辑器代码通过它
 找最近的 dialog）、作为 backdrop 内容的 `WindowDragStrip`、命令面板用的
-`DialogContentWithoutClose`，以及——唯一需要机制介入的语义——
-`AlertDialog.Action`/`Cancel` 保留 Radix 契约：`onClick` 调 `preventDefault()` 时
-保持 dialog 打开。Base UI 的 `Close` 无条件关闭，因此适配层给每个 action 包了一个
-内部关闭动作，仅当 handler 未 preventDefault 时才触发。12 处调用方依赖它做异步
-确认流（吊销凭据、清缓存、删 provider……），`machine-detail-pane.test.tsx` 是
-钉死的证据。
+`DialogContentWithoutClose`。`AlertDialog.Action`/`Cancel` 是渲染成 Button 的
+`Close`——答案跑完 `onClick` 就关闭。12 处使用 Radix `preventDefault` 保开惯用法
+的异步确认调用方（吊销凭据、清缓存、删 provider……）被迁移到了 Base UI 模型：
+需要保持打开的答案就是普通 `Button`，dialog 由调用方在异步完成后经受控
+`onOpenChange` 关闭——它们本来就有受控 `open`。`machine-detail-pane.test.tsx`
+钉死了「吊销失败保持打开」的证据。
 
 `src/ui/card.tsx` 补了包导出没有的 `Card.Content` div。
 
@@ -66,9 +65,10 @@ progress 与 spinner。只要调用方不迁移，每个 Radix 文件就继续�
   `contextmenu`。十几个测试文件用 `pointerdown` 开菜单并同步读结果，全部改为
   `mousedown` 加真实定时器的一帧冲刷。jsdom 的 rAF 是真定时器，所以冲刷用
   `setTimeout` 一拍，而非调度运气。
-- **Base UI `Popover.Popup` 默认 `role="dialog"`，且原包装层里 `role` 是
-  Positioner 的属性。** 一个调用方把内容当菜单用；`Popover.Content` 现在把
-  `role` 提升到 popup 本体。
+- **菜单行的浮层就是 `Menu`。** fork-destination 原本给 `Popover.Content` 标
+  `role="menu"` 并手写 `role="menuitem"` 按钮；现在是
+  `SessionForkDestinationMenu`，用真正的 `Menu.Item`，顺带补上了手写行没有的
+  方向键导航。Base UI 的 `Popover.Popup` 保持 `role="dialog"`。
 - **composition 状态在文档级跟踪。** bug-report dialog 的 IME 测试需要在取消
   输入的 Escape 与关闭的 Escape 之间补一个 `compositionend`——真实的 IME 时序，
   不是变通。

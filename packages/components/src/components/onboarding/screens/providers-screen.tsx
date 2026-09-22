@@ -1296,17 +1296,16 @@ export function ProvidersScreen({
             <AlertDialog.Cancel disabled={deleting}>
               {t('common.cancel', 'Cancel')}
             </AlertDialog.Cancel>
-            <AlertDialog.Action
+            <Button
               disabled={deleting}
-              onClick={(event) => {
-                event.preventDefault();
+              onClick={() => {
                 void handleConfirmDelete();
               }}
               variant="destructive"
             >
               {deleting && <Spinner className="mr-2 h-4 w-4" />}
               {t('common.delete', 'Delete')}
-            </AlertDialog.Action>
+            </Button>
           </AlertDialog.Footer>
         </AlertDialog.Content>
       </AlertDialog.Root>

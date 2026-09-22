@@ -14,8 +14,11 @@ import { WindowDragStrip } from '@/ui/window-drag-region';
  * - `WindowDragStrip` on the backdrop, so an Electron window stays draggable
  *   beside the dialog the same way it is beside the page.
  *
- * `AlertDialog.Action`/`AlertDialog.Cancel` stay styled buttons: the old
- * wrappers rendered one, and every footer in the app is written against them.
+ * `AlertDialog.Action`/`AlertDialog.Cancel` are `Close` rendered as styled
+ * buttons: an answer runs its `onClick` and then closes. An answer that must
+ * hold the dialog open while work is in flight is not a `Close` at all — it is
+ * a plain `Button`, and the caller closes through the root's `onOpenChange`
+ * when the work resolves.
  */
 
 type DialogContentProps = React.ComponentProps<typeof UiDialog.Content>;
@@ -59,32 +62,17 @@ type AlertDialogAnswerProps = Omit<React.ComponentProps<typeof UiAlertDialog.Clo
   className?: string;
 };
 
-/**
- * An answer that runs its `onClick` and then closes — unless the click was
- * prevented, which is how every destructive confirm in the app holds the
- * dialog open while its async work is in flight. Base UI's `Close` does not
- * check `defaultPrevented`, so the close rides on a hidden button the visible
- * one clicks only when the handler allowed it.
- */
+/** The confirming answer: a `Close` rendered as a `Button` with a variant. */
 const AlertDialogAction = React.forwardRef<HTMLButtonElement, AlertDialogAnswerProps>(
-  function AlertDialogAction({ variant, className, children, onClick, ...props }, ref) {
-    const closeRef = React.useRef<HTMLButtonElement>(null);
+  function AlertDialogAction({ variant, className, children, ...props }, ref) {
     return (
-      <>
-        <UiAlertDialog.Close ref={closeRef} hidden />
-        <Button
-          ref={ref}
-          variant={variant}
-          className={className}
-          onClick={(event) => {
-            onClick?.(event);
-            if (!event.defaultPrevented) closeRef.current?.click();
-          }}
-          {...props}
-        >
-          {children}
-        </Button>
-      </>
+      <UiAlertDialog.Close
+        ref={ref}
+        render={<Button variant={variant} className={className} />}
+        {...props}
+      >
+        {children}
+      </UiAlertDialog.Close>
     );
   }
 );

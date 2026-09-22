@@ -187,16 +187,15 @@ export function AgentRolesSetting() {
           </AlertDialog.Header>
           <AlertDialog.Footer>
             <AlertDialog.Cancel disabled={removing}>{t('common.cancel')}</AlertDialog.Cancel>
-            <AlertDialog.Action
+            <Button
               disabled={removing} variant="destructive"
-              onClick={(event) => {
-                event.preventDefault();
+              onClick={() => {
                 void confirmRemoval();
               }}
             >
               {removing ? <Spinner className="mr-2 h-4 w-4" /> : null}
               {t('common.remove')}
-            </AlertDialog.Action>
+            </Button>
           </AlertDialog.Footer>
         </AlertDialog.Content>
       </AlertDialog.Root>

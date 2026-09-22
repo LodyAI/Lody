@@ -879,17 +879,16 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
             <AlertDialog.Cancel disabled={deleting}>
               {t('common.cancel', 'Cancel')}
             </AlertDialog.Cancel>
-            <AlertDialog.Action
+            <Button
               disabled={deleting}
-              onClick={(event) => {
-                event.preventDefault();
+              onClick={() => {
                 void handleDelete();
               }}
               variant="destructive"
             >
               {deleting && <Spinner className="mr-2 h-4 w-4" />}
               {t('workspace.machines.removeAction', 'Remove')}
-            </AlertDialog.Action>
+            </Button>
           </AlertDialog.Footer>
         </AlertDialog.Content>
       </AlertDialog.Root>
@@ -912,10 +911,9 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
             <AlertDialog.Cancel disabled={revoking}>
               {t('common.cancel', 'Cancel')}
             </AlertDialog.Cancel>
-            <AlertDialog.Action
+            <Button
               disabled={revoking}
-              onClick={(event) => {
-                event.preventDefault();
+              onClick={() => {
                 setRevoking(true);
                 void onRevokeCredentials?.()
                   .then(() => setRevokeOpen(false))
@@ -929,7 +927,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
             >
               {revoking ? <Spinner className="mr-2 h-4 w-4" /> : null}
               {t('settings.devices.credentials.disconnect', 'Revoke machine access')}
-            </AlertDialog.Action>
+            </Button>
           </AlertDialog.Footer>
         </AlertDialog.Content>
       </AlertDialog.Root>

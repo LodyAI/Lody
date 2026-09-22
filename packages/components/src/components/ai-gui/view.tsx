@@ -147,7 +147,7 @@ import { OpenAIIcon } from '@/components/icons/openai-icon';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { AssistantEditedFiles, type AssistantEditedFileEntry } from './assistant-edited-files';
 import {
-  SessionForkDestinationPopover,
+  SessionForkDestinationMenu,
   type SessionForkDestination,
   type SessionForkWorktreeAvailability,
 } from '@/components/sessions/session-fork-destination-menu';
@@ -4254,7 +4254,7 @@ const AssistantForkButton = ({
   );
 
   return (
-    <SessionForkDestinationPopover
+    <SessionForkDestinationMenu
       open={menuOpen}
       onOpenChange={(open) => {
         setMenuOpen(open);
@@ -4266,7 +4266,7 @@ const AssistantForkButton = ({
       onSelect={(destination) => onFork?.(turnId, destination)}
     >
       {button}
-    </SessionForkDestinationPopover>
+    </SessionForkDestinationMenu>
   );
 };
 

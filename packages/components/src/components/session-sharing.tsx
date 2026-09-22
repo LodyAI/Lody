@@ -9,6 +9,7 @@ import {
 } from '@/lib/session-sharing';
 import { Tooltip } from '@lody/ui/tooltip';
 import { Menu } from '@/ui/menu';
+import { Button } from '@lody/ui/button';
 import { AlertDialog } from '@/ui/dialog';
 
 export type SessionSharingTranslator = (
@@ -405,16 +406,15 @@ function ShareConfirmationDialog({
         </AlertDialog.Header>
         <AlertDialog.Footer>
           <AlertDialog.Cancel disabled={isSharing}>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
-          <AlertDialog.Action
+          <Button
             disabled={isSharing}
-            onClick={(event) => {
-              event.preventDefault();
+            onClick={() => {
               onConfirm();
             }}
           >
             {isSharing ? <Spinner className="mr-1.5 h-4 w-4" /> : null}
             {actionLabel}
-          </AlertDialog.Action>
+          </Button>
         </AlertDialog.Footer>
       </AlertDialog.Content>
     </AlertDialog.Root>

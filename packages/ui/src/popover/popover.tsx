@@ -17,7 +17,7 @@ type DescriptionBaseProps = ComponentProps<typeof BasePopover.Description>;
 
 export interface PopoverContentProps extends Omit<
   PositionerBaseProps,
-  'className' | 'children' | 'render' | 'role'
+  'className' | 'children' | 'render'
 > {
   children?: ReactNode;
   /** Where the popover mounts. Defaults to the nearest `PopupContainerProvider`. */
@@ -26,11 +26,6 @@ export interface PopoverContentProps extends Omit<
   initialFocus?: PopupBaseProps['initialFocus'];
   /** Where focus goes when it closes; the product's policy, not this package's. */
   finalFocus?: PopupBaseProps['finalFocus'];
-  /**
-   * The popup's role — `Positioner` is a layout wrapper, so `role` stated here
-   * reaches the panel, overriding Base UI's `dialog` default.
-   */
-  role?: PopupBaseProps['role'];
   className?: string;
 }
 
@@ -67,16 +62,7 @@ const styles = stylex.create({
  */
 export const PopoverContent = forwardRef<HTMLDivElement, PopoverContentProps>(
   function PopoverContent(
-    {
-      className,
-      children,
-      container,
-      initialFocus,
-      finalFocus,
-      role,
-      sideOffset = POPUP_GAP,
-      ...rest
-    },
+    { className, children, container, initialFocus, finalFocus, sideOffset = POPUP_GAP, ...rest },
     ref
   ) {
     const inheritedContainer = usePopupContainer();
@@ -106,7 +92,6 @@ export const PopoverContent = forwardRef<HTMLDivElement, PopoverContentProps>(
           <BasePopover.Popup
             initialFocus={initialFocus}
             finalFocus={finalFocus}
-            {...(role != null ? { role } : {})}
             className={(state) => {
               // StyleX cannot express `[data-starting-style]`, so the two ends
               // of the rise are read off Base UI's transition status here, and

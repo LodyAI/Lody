@@ -237,11 +237,10 @@ function PromptShortcutsSettingContent({
           </AlertDialog.Header>
           <AlertDialog.Footer>
             <AlertDialog.Cancel disabled={busy}>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
-            <AlertDialog.Action
+            <Button
               disabled={busy}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={(event) => {
-                event.preventDefault();
+              onClick={() => {
                 if (!runtime || !removal) return;
                 setBusy(true);
                 void runtime
@@ -253,7 +252,7 @@ function PromptShortcutsSettingContent({
             >
               {busy ? <Spinner className="mr-2 h-4 w-4" aria-hidden="true" /> : null}
               {t('common.delete', 'Delete')}
-            </AlertDialog.Action>
+            </Button>
           </AlertDialog.Footer>
         </AlertDialog.Content>
       </AlertDialog.Root>

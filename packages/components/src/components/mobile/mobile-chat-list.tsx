@@ -29,6 +29,7 @@ import {
 } from '@/atoms/focus-layer';
 import { buildSessionRowOpenedByTreeSlot } from '@/components/sidebar-row-shared';
 import { cn } from '@/lib/utils';
+import { Button } from '@lody/ui/button';
 import { Checkbox } from '@lody/ui/checkbox';
 import { AlertDialog } from '@/ui/dialog';
 import {
@@ -1363,21 +1364,20 @@ export function MobileChatList({
             <AlertDialog.Cancel disabled={isDeleting}>
               {selectionLabels?.cancel ?? '取消'}
             </AlertDialog.Cancel>
-            <AlertDialog.Action
-              onClick={(event) => {
+            <Button
+              onClick={() => {
                 /* Don't auto-close — `handleDelete` does it after the
                    delete promise resolves. Without this, Radix closes
                    synchronously and the user sees the destructive
                    action complete with no feedback that anything is
                    happening on slow networks. */
-                event.preventDefault();
                 void handleDelete();
               }}
               disabled={isDeleting}
               variant="destructive"
             >
               {selectionLabels?.confirmDelete ?? '删除'}
-            </AlertDialog.Action>
+            </Button>
           </AlertDialog.Footer>
         </AlertDialog.Content>
       </AlertDialog.Root>

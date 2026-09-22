@@ -3,6 +3,7 @@ import { useNavigate, useParams } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { Trash2 } from 'lucide-react';
 import { Spinner } from '@lody/ui/spinner';
+import { Button } from '@lody/ui/button';
 import { AlertDialog } from '@/ui/dialog';
 import { markCacheClearPending, reloadApp } from '@/lib/clear-local-cache';
 
@@ -62,11 +63,10 @@ export function ClearCacheConfirmDialog({
         </AlertDialog.Header>
         <AlertDialog.Footer>
           <AlertDialog.Cancel disabled={isClearing}>{t('common.cancel')}</AlertDialog.Cancel>
-          <AlertDialog.Action
-            onClick={(event) => {
+          <Button
+            onClick={() => {
               // Keep the dialog open while we navigate + reload so the button can
               // show its in-progress state instead of flashing closed.
-              event.preventDefault();
               onConfirm();
             }}
             disabled={isClearing}
@@ -78,7 +78,7 @@ export function ClearCacheConfirmDialog({
               <Trash2 className="mr-1.5 h-3.5 w-3.5" />
             )}
             {t('settings.cache.clearCache.confirmButton')}
-          </AlertDialog.Action>
+          </Button>
         </AlertDialog.Footer>
       </AlertDialog.Content>
     </AlertDialog.Root>

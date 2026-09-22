@@ -339,11 +339,10 @@ export function HardResetConfirmDialog({
           <AlertDialog.Cancel disabled={isResetting}>
             {t('common.cancel', 'Cancel')}
           </AlertDialog.Cancel>
-          <AlertDialog.Action
-            onClick={(event) => {
+          <Button
+            onClick={() => {
               // Keep the dialog mounted while the wipe + reload runs so the
               // button can show progress instead of flashing closed.
-              event.preventDefault();
               onConfirm();
             }}
             disabled={isResetting}
@@ -353,7 +352,7 @@ export function HardResetConfirmDialog({
             {isResetting
               ? t('errorBoundary.hardResetConfirmRunning', 'Clearing…')
               : t('errorBoundary.hardResetConfirmButton', 'Clear and sign out')}
-          </AlertDialog.Action>
+          </Button>
         </AlertDialog.Footer>
       </AlertDialog.Content>
     </AlertDialog.Root>

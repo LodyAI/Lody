@@ -3,7 +3,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { GitFork } from 'lucide-react';
 
 import {
-  SessionForkDestinationPopover,
+  SessionForkDestinationMenu,
   type SessionForkWorktreeAvailability,
 } from '@/components/sessions/session-fork-destination-menu';
 import { Button } from '@lody/ui/button';
@@ -20,7 +20,7 @@ function ForkTrigger({
   return (
     <div className="flex min-h-[220px] flex-col items-start justify-end gap-3 bg-background p-6 text-foreground">
       <div className="text-xs text-muted-foreground">Last choice: {lastChoice}</div>
-      <SessionForkDestinationPopover
+      <SessionForkDestinationMenu
         open={open}
         onOpenChange={setOpen}
         worktreeAvailability={worktreeAvailability}
@@ -31,13 +31,13 @@ function ForkTrigger({
         <Button type="button" variant="ghost" aria-label="Fork session" size="small" icon>
           <GitFork className="h-3.5 w-3.5" />
         </Button>
-      </SessionForkDestinationPopover>
+      </SessionForkDestinationMenu>
     </div>
   );
 }
 
 const meta = {
-  title: 'Sessions/SessionForkDestinationPopover',
+  title: 'Sessions/SessionForkDestinationMenu',
   component: ForkTrigger,
   parameters: { layout: 'centered' },
   tags: ['autodocs'],
