@@ -79,6 +79,16 @@ reading window. A new underlying source, even with the same session id, must pas
 initial loading again. Range acquisition still uses the current projection so its
 turn positions and content remain current.
 
+The rendered body set belongs to the reading window, the retained 40-turn tail,
+and native text selection. Other consumers may hydrate the same cache for facts,
+search or outline previews, but those bodies remain placeholders in the stream.
+Keeping the entry tail leased prevents the first narrower viewport report from
+making already displayed rows evictable. Selection publishes retained turn IDs
+before a scroll-driven window change; releasing selection removes that exception.
+A loaded user predecessor still supplies assistant configuration even when its
+own rendered row is a placeholder. See the
+[background hydration decision](../../../../.agents/notes/implemented/bug-fix/2026-09-22-background-hydration-render-window.md).
+
 The composer one-shot ref preserves the reader's position while typing without
 changing keyboard, terminal, or window-resize follow behavior, which is why it is
 consumed for exactly one height resize and is not merged into programmatic-jump

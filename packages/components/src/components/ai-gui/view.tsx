@@ -497,6 +497,7 @@ export interface SessionChatStreamViewProps {
    * this into the hydrated window.
    */
   onVisibleTurnRangeChange?: (range: VisibleTurnRange) => void;
+  onRetainedTurnIdsChange?: (ids: ReadonlySet<string>) => void;
   /** The outline hovered a round with no preview yet; hydrate it so one appears. */
   onOutlinePreviewRound?: (turnIndex: number) => void;
   className?: string;
@@ -1373,6 +1374,7 @@ export const SessionChatStreamView = forwardRef<
       suppressStickyAutoScrollRef,
       outlineOverlayRoot,
       onVisibleTurnRangeChange,
+      onRetainedTurnIdsChange,
       onOutlinePreviewRound,
     },
     ref
@@ -1627,11 +1629,13 @@ export const SessionChatStreamView = forwardRef<
         selectionLayoutsRef.current = new Map(selectionLayoutsRef.current).set(id, layout);
         return layout;
       },
-      onChange: () => {
+      onChange: (ids) => {
+        onRetainedTurnIdsChange?.(ids);
         if (nativeTextSelectionActiveRef.current) pendingOutlineJumpRef.current = null;
         setSelectionVersion((version) => version + 1);
       },
       onRelease: () => {
+        onRetainedTurnIdsChange?.(new Set());
         selectionLayoutsRef.current = new Map();
       },
       onCopyUnavailable: () =>

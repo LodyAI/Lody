@@ -4,6 +4,7 @@ import { createProjectedConversationView } from '../src/lib/conversation-view/pr
 import { act, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { useConversationStreamItems } from '../src/hooks/use-conversation-stream-items';
 import type { ConversationView } from '../src/lib/conversation-view';
 import {
   NativeTextSelectionHoldContext,
@@ -243,4 +244,86 @@ it('pins an optimistic turn when it becomes authoritative without replacing its 
   });
   expect(base.isHydrated(base.indexOf(entry.id))).toBe(false);
   distant.release();
+});
+
+it('keeps selected stream bodies rendered after the reading window moves, then releases them', async () => {
+  const doc = reimport(buildSessionDoc(buildFixtureHistory(100)));
+  const idle = createManualIdle();
+  const view = await openReaderView(doc, {
+    sessionId: FIXTURE_SESSION_ID,
+    maxHydrated: 8,
+    tailKeep: 2,
+    scheduleIdle: idle.scheduleIdle,
+    yieldToEventLoop: () => Promise.resolve(),
+  });
+  dispose = () => view.dispose();
+  let stream!: ReturnType<typeof useConversationStreamItems>;
+  function StreamProbe() {
+    stream = useConversationStreamItems(view, FIXTURE_SESSION_ID);
+    const activeRef = useRef(false);
+    const virtualizer = useRef(null);
+    const rows = stream.items.flatMap((item) =>
+      item.type === 'empty'
+        ? []
+        : [
+            {
+              key: item.type === 'message' ? item.message.id : item.row.id,
+              turnId: item.type === 'message' ? item.message.id : item.row.id,
+              turnIndex: item.turnIndex,
+              ready: item.type === 'message',
+            },
+          ]
+    );
+    useConversationTextSelection({
+      sessionId: FIXTURE_SESSION_ID,
+      view,
+      rows,
+      viewport,
+      virtualizer,
+      activeRef,
+      leadingRowCount: 0,
+      captureTurn: (id) => id,
+      onChange: stream.onRetainedTurnIdsChange,
+      onRelease: noop,
+      onCopyUnavailable: noop,
+    });
+    return (
+      <>
+        {rows.map((itemRow) => (
+          <div key={itemRow.key} data-conversation-row-key={itemRow.key}>
+            <span>{itemRow.ready ? `body:${itemRow.turnId}` : 'placeholder'}</span>
+          </div>
+        ))}
+      </>
+    );
+  }
+  await act(async () => root.render(<StreamProbe />));
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
+  await act(async () => stream.onVisibleTurnRangeChange({ from: 20, to: 28 }));
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
+  await act(async () => select(21));
+  const before = viewport.querySelector('[data-conversation-row-key="a-10"] span')!.firstChild;
+  expect(document.getSelection()!.toString()).toBe('body:a-10');
+  await act(async () => stream.onVisibleTurnRangeChange({ from: 100, to: 108 }));
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
+  expect(document.getSelection()!.toString()).toBe('body:a-10');
+  expect(viewport.querySelector('[data-conversation-row-key="a-10"] span')!.firstChild).toBe(
+    before
+  );
+  await act(async () => {
+    document.getSelection()!.removeAllRanges();
+    document.dispatchEvent(new Event('selectionchange'));
+  });
+  await act(async () => {
+    await vi.runAllTimersAsync();
+  });
+  expect(viewport.querySelector('[data-conversation-row-key="a-10"]')!.textContent).toBe(
+    'placeholder'
+  );
 });

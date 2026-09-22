@@ -8,12 +8,12 @@ the reasoning behind those rules.
 
 ## Ownership
 
-| Area      | Owner                                            | Contract                                                                          |
-| --------- | ------------------------------------------------ | --------------------------------------------------------------------------------- |
-| Stream    | `view.tsx`, `build-chat-stream-items.ts`         | Stable Virtua rows and scroll.                                                    |
-| User rows | `view.tsx`                                       | Multi-member sender metadata and desktop profile.                                 |
-| Turns     | `assistant-turn-render-blocks.ts`                | Activity groups and foldable segments.                                            |
-| Outline   | `conversation-outline-*`                         | Round ticks and navigation.                                                       |
+| Area                    | Owner                                            | Contract                                                                          |
+| ----------------------- | ------------------------------------------------ | --------------------------------------------------------------------------------- |
+| Stream                  | `view.tsx`, `build-chat-stream-items.ts`         | Stable Virtua rows and scroll.                                                    |
+| User rows               | `view.tsx`                                       | Multi-member sender metadata and desktop profile.                                 |
+| Turns                   | `assistant-turn-render-blocks.ts`                | Activity groups and foldable segments.                                            |
+| Outline                 | `conversation-outline-*`                         | Round ticks and navigation.                                                       |
 | Image sharing selection | [`message-selection.tsx`](message-selection.tsx) | Temporary message selection, drag rectangle, range modifiers, and edge scrolling. |
 
 - `conversation-outline-rail.tsx` renders one tick per round (a user turn plus its
@@ -44,7 +44,8 @@ the reasoning behind those rules.
 
 `tests/build-chat-stream-items.test.ts`, `tests/conversation-outline*.test.ts`,
 `tests/user-message-sender-identity.test.tsx`, the `ExtremeConversation` story,
-`AssistantTurnAlignment.stories`, and the multiple-sender states in
+`AssistantTurnAlignment.stories`, `ConversationViewStream.OpenWithBackgroundFacts`
+(open, then release fact batches to check the visible tail), and the multiple-sender states in
 `SessionConversationPage.stories.tsx`.
 
 The assistant footer's duration — live and finished on desktop, and the leading

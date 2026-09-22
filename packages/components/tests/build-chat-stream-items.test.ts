@@ -13,7 +13,11 @@ const buildChatStreamItems = (
   previousCache?: Parameters<typeof buildChatStreamItemsFromView>[2]
 ) =>
   buildChatStreamItemsFromView(
-    createConversationViewFromHistory({ sessionId: id, getHistory: () => history, subscribe: () => () => {} }),
+    createConversationViewFromHistory({
+      sessionId: id,
+      getHistory: () => history,
+      subscribe: () => () => {},
+    }),
     id,
     previousCache
   );
@@ -37,6 +41,36 @@ const renderedIds = (items: ReturnType<typeof buildChatStreamItems>['items']): s
   items.map((item) => (item.type === 'message' ? item.message.id : 'empty'));
 
 describe('buildChatStreamItems', () => {
+  it('keeps offscreen bodies as placeholders while inheriting their user configuration', () => {
+    const question = {
+      ...entry({ id: 'question', role: 'user', items: [text('question')] }),
+      inputConfig: { cliType: 'builtin', agentType: 'claude', modelId: 'test-model' },
+    } as SessionHistory;
+    const answer = entry({ id: 'answer', role: 'assistant', items: [text('answer')] });
+    const view = createConversationViewFromHistory({
+      sessionId,
+      getHistory: () => [question, answer],
+      subscribe: () => () => {},
+    });
+    const cached = buildChatStreamItemsFromView(view, sessionId);
+    const result = buildChatStreamItemsFromView(
+      view,
+      sessionId,
+      cached.cache,
+      (index) => index === 1
+    );
+    expect(result.items[0]).toMatchObject({ type: 'placeholder', row: { id: 'question' } });
+    expect(result.items[1]).toMatchObject({
+      type: 'message',
+      message: {
+        id: 'answer',
+        inputConfig: { modelId: 'test-model' },
+      },
+    });
+    expect(result.cache.has('question')).toBe(false);
+    view.dispose();
+  });
+
   it('preserves the ACP turn id on rendered assistant messages', () => {
     const { items } = buildChatStreamItems(
       [
@@ -296,7 +330,9 @@ describe('live create progress in the stream', () => {
 
     const itemTypes = (items: ReturnType<typeof buildChatStreamItems>['items'], id: string) =>
       items
-        .flatMap((item) => (item.type === 'message' && item.message.id === id ? [item.message] : []))
+        .flatMap((item) =>
+          item.type === 'message' && item.message.id === id ? [item.message] : []
+        )
         .flatMap((message) => message.items.map((entryItem) => entryItem.type));
 
     it('merges a warning into the preceding assistant turn instead of trailing it', () => {
