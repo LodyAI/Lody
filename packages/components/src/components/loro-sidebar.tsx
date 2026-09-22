@@ -50,9 +50,11 @@ import {
   BookOpen,
   Bug,
   CircleHelp,
+  ClipboardList,
   Github,
   SquarePen,
   Link2,
+  ListFilter,
   MessageSquareMore,
   ChevronLeft,
   ChevronRight,
@@ -319,7 +321,10 @@ const defaultLabels: LoroSidebarLabels = {
     updatedProjectNamesUnavailable: 'Available in Updated view',
     showMyTasks: 'My Tasks',
     showAllTasks: 'All Tasks',
-    emptyMyTasks: 'No tasks match the current filter',
+    emptyMyTasks: 'No tasks match this view',
+    emptyMyTasksHint: 'Try showing every task in this workspace.',
+    emptyAllTasks: 'No tasks yet',
+    emptyAllTasksHint: 'Tasks in this workspace will appear here.',
     showAllTasksAction: 'Show all tasks',
   },
   updated: {
@@ -893,33 +898,46 @@ export const LoroSidebar = memo(function LoroSidebar({
       ))
     : null;
   const hasPinnedItems = Boolean(pinnedItems?.length);
-  const filteredWorkspaceEmptyState =
+  const isWorkspaceEmpty =
     organizeMode === 'workspace' &&
-    chatScope === 'my' &&
     !topContent &&
     !hasPinnedItems &&
     !afterSessionListContent &&
-    !sessionListProps?.isLoading ? (
-      <div
-        className="flex flex-col items-center px-5 pb-4 pt-8 text-center"
-        data-sidebar-filtered-empty-state
-      >
-        <p className="max-w-[220px] text-xs leading-5 text-sidebar-foreground-muted">
-          {mergedLabels.filter.emptyMyTasks}
-        </p>
-        {onChatScopeChange ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="mt-1.5 h-7 px-2.5 text-xs font-medium text-sidebar-foreground hover:bg-sidebar-hover hover:text-sidebar-hover-foreground"
-            onClick={() => onChatScopeChange('team')}
-          >
-            {mergedLabels.filter.showAllTasksAction}
-          </Button>
-        ) : null}
+    !sessionListProps?.isLoading;
+  const workspaceEmptyState = isWorkspaceEmpty ? (
+    <div
+      className="flex flex-col items-center px-6 pb-5 pt-7 text-center"
+      data-sidebar-empty-state={chatScope}
+    >
+      <div className="flex size-9 items-center justify-center rounded-xl bg-sidebar-accent text-sidebar-foreground-muted ring-1 ring-inset ring-sidebar-border/60">
+        {chatScope === 'my' ? (
+          <ListFilter className="size-4" strokeWidth={1.8} aria-hidden="true" />
+        ) : (
+          <ClipboardList className="size-4" strokeWidth={1.8} aria-hidden="true" />
+        )}
       </div>
-    ) : undefined;
+      <p className="mt-3 max-w-[220px] text-[13px] font-medium leading-5 text-sidebar-foreground">
+        {chatScope === 'my' ? mergedLabels.filter.emptyMyTasks : mergedLabels.filter.emptyAllTasks}
+      </p>
+      <p className="mt-0.5 max-w-[220px] text-xs leading-[18px] text-sidebar-foreground-muted">
+        {chatScope === 'my'
+          ? mergedLabels.filter.emptyMyTasksHint
+          : mergedLabels.filter.emptyAllTasksHint}
+      </p>
+      {chatScope === 'my' && onChatScopeChange ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="mt-3 h-7 rounded-full border-sidebar-border bg-sidebar px-3 text-xs font-medium text-sidebar-foreground shadow-none hover:bg-sidebar-hover hover:text-sidebar-hover-foreground"
+          onClick={() => onChatScopeChange('team')}
+        >
+          <Users className="mr-1.5 size-3.5" strokeWidth={1.8} aria-hidden="true" />
+          {mergedLabels.filter.showAllTasksAction}
+        </Button>
+      ) : null}
+    </div>
+  ) : undefined;
   const workspaceIdentityStatus: WorkspaceIdentityStatus | null =
     connectionUiState && connectionUiState !== 'online'
       ? connectionUiState
@@ -1359,7 +1377,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                   <SessionList
                     {...sessionListProps}
                     className={sessionListClassName}
-                    emptyState={filteredWorkspaceEmptyState}
+                    emptyState={workspaceEmptyState}
                     headerAction={
                       topContent || hasPinnedItems || afterSessionListContent
                         ? sessionListProps.headerAction

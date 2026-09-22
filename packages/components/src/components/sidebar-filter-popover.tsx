@@ -30,6 +30,9 @@ export type SidebarFilterLabels = {
   showMyTasks: string;
   showAllTasks: string;
   emptyMyTasks: string;
+  emptyMyTasksHint: string;
+  emptyAllTasks: string;
+  emptyAllTasksHint: string;
   showAllTasksAction: string;
 };
 
@@ -43,7 +46,10 @@ const defaultLabels: SidebarFilterLabels = {
   updatedProjectNamesUnavailable: 'Available in Updated view',
   showMyTasks: 'My Tasks',
   showAllTasks: 'All Tasks',
-  emptyMyTasks: 'No tasks match the current filter',
+  emptyMyTasks: 'No tasks match this view',
+  emptyMyTasksHint: 'Try showing every task in this workspace.',
+  emptyAllTasks: 'No tasks yet',
+  emptyAllTasksHint: 'Tasks in this workspace will appear here.',
   showAllTasksAction: 'Show all tasks',
 };
 

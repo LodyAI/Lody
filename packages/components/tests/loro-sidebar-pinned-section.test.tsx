@@ -236,8 +236,8 @@ describe('LoroSidebar pinned section', () => {
     });
 
     expect(container?.querySelectorAll('button[aria-label="Filter sidebar"]')).toHaveLength(1);
-    expect(container?.querySelector('[data-sidebar-filtered-empty-state]')?.textContent).toContain(
-      'No tasks match the current filter'
+    expect(container?.querySelector('[data-sidebar-empty-state="my"]')?.textContent).toContain(
+      'No tasks match this view'
     );
     const showAllButton = Array.from(container?.querySelectorAll('button') ?? []).find(
       (button) => button.textContent === 'Show all tasks'
@@ -247,7 +247,7 @@ describe('LoroSidebar pinned section', () => {
     expect(onChatScopeChange).toHaveBeenCalledWith('team');
   });
 
-  it('does not label a genuinely empty All Tasks workspace as filtered', () => {
+  it('gives a genuinely empty All Tasks workspace its own neutral state', () => {
     renderSidebar({
       organizeMode: 'workspace',
       chatScope: 'team',
@@ -259,7 +259,9 @@ describe('LoroSidebar pinned section', () => {
       },
     });
 
-    expect(container?.querySelector('[data-sidebar-filtered-empty-state]')).toBeNull();
+    const emptyState = container?.querySelector('[data-sidebar-empty-state="team"]');
+    expect(emptyState?.textContent).toContain('No tasks yet');
+    expect(emptyState?.textContent).not.toContain('Show all tasks');
   });
 
   it('mounts one filter when Chats is the only visible Workspace section', () => {

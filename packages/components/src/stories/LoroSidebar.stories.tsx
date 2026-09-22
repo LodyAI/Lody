@@ -609,6 +609,16 @@ export const FilteredWorkspaceEmpty: Story = {
   },
 };
 
+/** All Tasks is selected, but the workspace genuinely has no tasks yet. */
+export const WorkspaceEmpty: Story = {
+  name: 'Workspace · empty',
+  render: (args) => <StoryLayout {...args} />,
+  args: {
+    ...FilteredWorkspaceEmpty.args!,
+    chatScope: 'team',
+  },
+};
+
 export const ElectronAlwaysVisibleCollapseToggle: Story = {
   render: (args) => <WithProjectsLayout {...args} />,
   args: {

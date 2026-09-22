@@ -20,7 +20,13 @@ Translation: current
 
 `loro-app-sidebar` 创建一个受控 `open`/`onOpenChange` 的
 `SidebarFilterPopover` 元素，渲染进第一个本地项目分区 header（没有本地
-分区时则为 GitHub Worktrees / Chats header），门控逻辑与原占位完全镜像。
+分区时则为 GitHub Worktrees / Chats header）。如果过滤条件隐藏了全部
+Workspace 分区，空的主 `SessionList` 会承载同一个行内触发器，让用户仍可切回
+All Tasks。此时空状态会说明当前视图没有任务，并提供“显示全部任务”的直接
+恢复动作；切换后若 All Tasks 本身也为空，则显示独立的中性“还没有任务”状态，
+不再重复过滤提示，也不显示恢复按钮。两个状态都采用适合侧栏尺寸的紧凑图标、
+标题和辅助说明。若 Chats 是唯一剩余分区，则由它独占触发器，`LoroSidebar`
+抑制主列表的空态兜底，确保仍只有一个挂载点。
 同一个元素以 `desktopFilterAction`（由 `desktopFilterPlaceholder` 改名）
 传给 `LoroSidebar`，用于它内部拥有的槽位——Pinned 和 Updated 列表 header。
 各处门控保持互斥，每次渲染只存在一个挂载点。`LoroSidebar` 保留一个本地
@@ -54,7 +60,10 @@ Local Projects header 内的文字、导入按钮、过滤触发器实测中线�
 改动的文件通过 `tsgo --noEmit` 和 `oxlint`。"弹窗打开期间第一个分区发生变化"（例如同步
 带来一个置顶会话）这一情形由受控状态覆盖，但仅经推理验证，未在运行的
 应用中实测。
+`Workspace · filtered empty` 与 `Workspace · empty` 两个 story 验证两种空状态；
+前者的恢复按钮会切换到后者。
 
 ## 集成
 
 - [Lody PR #884](https://github.com/LodyAI/Lody/pull/884)
+- [Lody PR #887](https://github.com/LodyAI/Lody/pull/887)
