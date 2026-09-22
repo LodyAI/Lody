@@ -61,8 +61,8 @@ function MixedMark() {
 }
 
 /**
- * A checkbox in the field family: the well as a 16px box, ink once it holds a
- * value. It renders a real `<button>` so the family's `:disabled` and
+ * A checkbox in the field family: the well as a 16px box, the accent fill once
+ * it holds a value. It renders a real `<button>` so the family's `:disabled` and
  * `:focus-visible` rules reach it and a `<label>` can point at it, with Base
  * UI's hidden input beside it carrying the value into a form.
  */

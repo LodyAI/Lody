@@ -3,6 +3,10 @@
 Status: implemented
 Translation: pending
 
+> Updated 2026-09-22: the stored-state fill moved from ink to the palette's
+> accent colour; see the
+> [stored-state fill note](2026-09-22-stored-state-accent-fill.md).
+
 ## Abstract
 
 The `@lody/ui` field family covered the controls a person types into, while every

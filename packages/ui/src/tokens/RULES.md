@@ -32,10 +32,9 @@ One rung per component. The rung fixes background and shadow together.
 
 - `label` is the thing, `secondaryLabel` is about the thing, `tertiaryLabel`
   is a hint: placeholder, help text, chevron, icon at rest.
-- Ink for stored state: primary button, checked, on. `label` fill,
-  `background` text.
-- `accent` for live state only: focus ring, link, live switch, running
-  indicator. Never a button fill.
+- Ink for the primary button: `label` fill, `background` text.
+- `accent` for the states the eye should find: focus ring, link, stored
+  state (checked, on), live switch, running indicator. Never a button fill.
 - `success` and `warning` report an outcome rather than an action, so they mark
   and tint a message and never fill a control a person presses. `destructive`
   is the third: an action that destroys, and an outcome that failed.
@@ -58,7 +57,7 @@ triggers open are on the floating rung and read `popup` instead; see below.
 | focus       | 2px `field.ring` (accent), tight to the control, no offset                     |
 | invalid     | 2px `field.invalidRing` (destructive), at rest and while focused               |
 | disabled    | 45% opacity on the control; the label and help dim with it                     |
-| checked, on | ink: `field.checkedFill` under `field.checkedMark`, `field.checkedEdge` on top |
+| checked, on | accent: `field.checkedFill` under `field.checkedMark`, `field.checkedEdge` on top |
 | mixed       | the checked appearance with the dash, and it announces `mixed`                 |
 | selected    | the tick, and a quiet fill on the row that is current, not on the control      |
 
@@ -66,8 +65,8 @@ A checkbox and a radio are the "16px things" the corner rule names: a
 `field.boxSize` box at `radius.mini`, round for a radio. A switch is a
 `field.switchWidth` by `field.switchHeight` track at `radius.full` holding a
 `field.thumb` thumb raised with `field.thumbShadow`, the same height as the box
-so a settings row carrying both lines up. Off is the well; on is the ink, which
-is where the well's shadow gives way to `field.checkedEdge`. Because CSS cannot
+so a settings row carrying both lines up. Off is the well; on is the accent
+fill, which is where the well's shadow gives way to `field.checkedEdge`. Because CSS cannot
 append to a box-shadow list, a control that changes its edge restates the ring
 with it, the way each Button variant does.
 
@@ -340,14 +339,15 @@ lines, this filter — so it has no name, no validity and no message under it.
 | focus    | 2px `toggle.ring`, composed onto the pressed edge rather than replacing it |
 | disabled | `toggle.disabledOpacity` on the whole control, and the native attribute    |
 
-**On is the well, not ink**, and that is this family's one real decision. The
-rules give a stored state ink, and a toggle does store one — but ink is what a
-control that _already sits in a well_ becomes when it is on. A Switch's off
-state occupies the well, so on has to leave it; a Checkbox's empty box is the
-same. A toggle rests on nothing at all, so the well is still free, and sinking
-into it is the plainest thing this system can say about a button that went down
-and stayed there. It also keeps a bar of eight from reading as eight primary
-buttons, which is what ink would have made of it.
+**On is the well, not the accent**, and that is this family's one real
+decision. The rules give a stored state the accent fill, and a toggle does
+store one — but the accent is what a control that _already sits in a well_
+becomes when it is on. A Switch's off state occupies the well, so on has to
+leave it; a Checkbox's empty box is the same. A toggle rests on nothing at
+all, so the well is still free, and sinking into it is the plainest thing this
+system can say about a button that went down and stayed there. It also keeps a
+bar of eight from reading as eight accent buttons, which is what the fill
+would have made of it.
 
 A toggle does not bob either. The motion rules give a press `translateY(1px)`
 and a dropped highlight, and that is a raised thing going down and coming back;

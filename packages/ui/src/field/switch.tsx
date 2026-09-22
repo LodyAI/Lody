@@ -45,8 +45,8 @@ const styles = stylex.create({
 });
 
 /**
- * A switch in the field family: the well as a track, ink once it is on, with a
- * raised thumb that reads against both. It renders a real `<button>` for the
+ * A switch in the field family: the well as a track, the accent fill once it
+ * is on, with a raised thumb that reads against both. It renders a real `<button>` for the
  * same reasons a Checkbox does.
  */
 export const Switch = forwardRef<HTMLButtonElement, SwitchProps>(function Switch(

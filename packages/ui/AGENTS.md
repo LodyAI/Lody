@@ -79,8 +79,8 @@ with this package's `stylex-options.ts`.
   table draws no surface: `border-collapse: separate` lets its line, head and
   row ring be box-shadows.
 - Toggle, ToggleGroup and Toolbar are one `toggle` family; a Toggle is not a
-  Switch (no name, no `Field.Root`, no validity). **On is the well, not ink**:
-  ink is what a control already in a well becomes; this rests on nothing. A
+  Switch (no name, no `Field.Root`, no validity). **On is the well, not the
+  accent**: a well holds a stored value as accent; this rests on nothing. A
   set is no `Tabs` strip — two can be on at once, so no track — and a bar draws
   nothing, existing to be one tab stop.
 - Card, Badge and Separator answer "what is an edge?": a card's is its shadow

@@ -45,7 +45,8 @@ const styles = stylex.create({
 });
 
 /**
- * A radio in the field family: the same well and ink as a Checkbox, round, with
+ * A radio in the field family: the same well and accent fill as a Checkbox,
+ * round, with
  * one option of a group selected at a time. It renders a real `<button>` for the
  * same reasons a Checkbox does.
  */

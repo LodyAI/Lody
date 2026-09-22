@@ -161,9 +161,10 @@ is a button in every other way, so the keyboard reaches it and a person who
 cannot see it is told both what kind of control it is and whether it is on.
 
 What it looks like when it is on follows from where it rests. The system fills a
-control with ink when what it holds is stored, and that is right for the ones
-whose resting appearance already occupies the sunken place this system gives to
-anything you may put something into: on has to be somewhere else, so it is ink.
+control with the accent colour when what it holds is stored, and that is right
+for the ones whose resting appearance already occupies the sunken place this
+system gives to anything you may put something into: on has to be somewhere
+else, so it is the accent fill.
 A control that rests on nothing has that place free, so it goes down into it and
 stays there — which is also what keeps a row of eight of them from reading as
 eight of the most important thing on the screen. It goes down and stays rather
@@ -260,8 +261,9 @@ defined once for the family, so a control added later inherits them rather than
 choosing its own.
 
 A control that stores a value — a ticked checkbox, the selected radio option, a
-switch that is on — shows that as ink, because the accent colour marks live
-state rather than a stored one. A checkbox can also stand for a partial
+switch that is on — shows that as the accent fill, the one hue this system
+reserves for state the eye should find, live or stored. A checkbox can also
+stand for a partial
 selection, which it announces as mixed rather than as ticked. Each of these
 controls is a button to the platform: the keyboard reaches it, a screen reader
 is told which kind of control it is and whether it holds a value, and a form
@@ -395,9 +397,11 @@ The gallery and the subtree palette behavior are recorded in the
 The field composition, the state mapping it settles, and the outstanding focus
 ring suppression in the desktop shell are recorded in the
 [UI field primitives note](../.agents/notes/implemented/feature/2026-09-09-ui-field-primitives.md).
-The checkbox, radio and switch that join that family, and the ink they use for a
-stored value, are recorded in the
-[UI choice controls note](../.agents/notes/implemented/feature/2026-09-10-ui-choice-controls.md).
+The checkbox, radio and switch that join that family are recorded in the
+[UI choice controls note](../.agents/notes/implemented/feature/2026-09-10-ui-choice-controls.md),
+and the stored-value fill moving from ink to the accent colour is recorded in
+the
+[stored-state fill note](../.agents/notes/implemented/feature/2026-09-22-stored-state-accent-fill.md).
 The select and the combobox, the separate token group their lists take, and the
 container a modal names for them are recorded in the
 [UI select and combobox note](../.agents/notes/implemented/feature/2026-09-10-ui-select-combobox.md).
@@ -421,7 +425,8 @@ The avatar whose rung picks its own letters, the key cap, and the component
 token group that carries a surface's inversion into what is standing on it are
 recorded in the
 [UI avatar and kbd note](../.agents/notes/implemented/feature/2026-09-13-ui-avatar-kbd.md).
-The sunken place a pressed control goes into rather than filling with ink, the
+The sunken place a pressed control goes into rather than filling with the
+accent, the
 set of them that is not the strip of choices, and the row that draws nothing and
 exists for the keyboard are recorded in the
 [UI toggle and toolbar note](../.agents/notes/implemented/feature/2026-09-15-ui-toggle-toolbar.md).

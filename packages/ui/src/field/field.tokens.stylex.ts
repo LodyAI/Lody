@@ -56,15 +56,15 @@ export const field = stylex.defineVars({
   error: colors.destructive,
   ring: colors.accent,
   invalidRing: colors.destructive,
-  // Stored state is ink: the rules give a checked box and a switch that is on
-  // the `label` fill with `background` on top of it, the same pair the primary
-  // button uses, and the same ink edge as its top highlight. `accent` stays on
-  // live state and is not a fill.
-  checkedFill: colors.label,
+  // Stored state is the accent fill: a checked box and a switch that is on take
+  // the `accent` fill with `background` on top of it, and the raised ink edge
+  // as the top highlight. In the dark palette `accent` is the warm tone, so
+  // stored state follows the palette rather than staying blue.
+  checkedFill: colors.accent,
   checkedMark: colors.background,
   checkedEdge: shadow.inkEdge,
   // The switch thumb is raised on both tracks: it reads against the well when
-  // the switch is off and against the ink when it is on.
+  // the switch is off and against the accent fill when it is on.
   thumb: colors.raisedBackground,
   thumbShadow: shadow.raised,
 });
@@ -85,7 +85,7 @@ export const fieldPaletteTheme = stylex.createTheme(field, {
   error: colors.destructive,
   ring: colors.accent,
   invalidRing: colors.destructive,
-  checkedFill: colors.label,
+  checkedFill: colors.accent,
   checkedMark: colors.background,
   checkedEdge: shadow.inkEdge,
   thumb: colors.raisedBackground,
