@@ -2,6 +2,7 @@
 
 Status: implemented
 Translation: current
+PR: https://github.com/LodyAI/Lody/pull/888
 
 [English](2026-09-22-background-hydration-render-window.md)
 
