@@ -4005,7 +4005,7 @@
   "sharing.header.shared": "已共享",
   "sharing.header.sharedDescription": "拿到链接的人都可以阅读这份已发布的对话副本。",
   "sharing.header.shareDescription": "把这个对话发布成一个只读的分享链接。",
-  "sharing.manager.title": "分享对话",
+  "sharing.manager.title": "分享",
   "sharing.renderError": "无法显示此对话",
   "sharing.renderErrorDetail": "分享文档可能包含暂不支持的内容，请尝试重新加载页面。",
   "sharing.reloadPage": "重新加载页面",

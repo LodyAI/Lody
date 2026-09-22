@@ -1275,7 +1275,7 @@ export function SessionHeaderMenu({
           {onOpenPublicShare && (
             <DropdownMenuItem onClick={onOpenPublicShare}>
               <Share2 className="h-3.5 w-3.5 shrink-0" />
-              {t('sharing.manager.title', 'Share conversation')}
+              {t('sharing.manager.title', 'Share')}
             </DropdownMenuItem>
           )}
 

@@ -4004,7 +4004,7 @@
   "sharing.header.shared": "Shared",
   "sharing.header.sharedDescription": "Anyone with the link can read a published copy of this conversation.",
   "sharing.header.shareDescription": "Publish a read-only copy of this conversation as a link.",
-  "sharing.manager.title": "Share conversation",
+  "sharing.manager.title": "Share",
   "sharing.manager.failed": "Could not update sharing. Check the current settings and try again.",
   "sharing.renderError": "This conversation could not be displayed",
   "sharing.renderErrorDetail": "The shared document may contain unsupported content. Try reloading the page.",
