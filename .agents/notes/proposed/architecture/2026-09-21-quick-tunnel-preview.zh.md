@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-09-21-quick-tunnel-preview.md)
 
+PR: [#890](https://github.com/LodyAI/Lody/pull/890)
+
 ## 摘要
 
 现有预览网关通过产品自建 WebSocket 协议复用 HTTP 与 HMR，本机代理也依赖该

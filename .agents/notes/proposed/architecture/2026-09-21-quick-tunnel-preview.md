@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-09-21-quick-tunnel-preview.zh.md)
 
+PR: [#890](https://github.com/LodyAI/Lody/pull/890)
+
 ## Abstract
 
 The custom preview gateway multiplexes HTTP and HMR through a product-owned
