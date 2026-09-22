@@ -34,13 +34,13 @@ scenarios or protocol acceptance requirements.
 
 ## Stage tracker
 
-| Stage                     | Status      | Deliverable and gate                                                      |
-| ------------------------- | ----------- | ------------------------------------------------------------------------- |
-| P0 Contracts and baseline | In progress | Exports/consumers, old data, acceptance; unchanged protocol               |
-| P1 Pure computation       | Not started | Opaque types, Either, negative type tests, unchanged vectors              |
-| P2 Ledger workflows       | Not started | execute/refresh/resume, typed outcomes, cancel/crash/concurrency recovery |
-| P3 Other active modules   | Not started | Delivery, rotation, content, snapshots, backup and persistence lifecycle  |
-| P4 Migration and closure  | Not started | Consumers, docs, remove bridges, full checks and performance comparison   |
+| Stage                     | Status      | Deliverable and gate                                                                       |
+| ------------------------- | ----------- | ------------------------------------------------------------------------------------------ |
+| P0 Contracts and baseline | In progress | Exports/consumers, old data, acceptance; unchanged protocol                                |
+| P1 Pure computation       | Partial     | Opaque types and Either CBOR landed; schema/policy/snapshot still use the legacy validator |
+| P2 Ledger workflows       | Partial     | One intent/compatibility engine; remaining API and storage lifecycle gates are open        |
+| P3 Other active modules   | Not started | Delivery, rotation, content, snapshots, backup and persistence lifecycle                   |
+| P4 Migration and closure  | Not started | Consumers, docs, remove bridges, full checks and performance comparison                    |
 
 ## Acceptance
 
@@ -82,3 +82,20 @@ scenarios or protocol acceptance requirements.
   in that command did not run.
 - P1 opaque bytes, specific errors and Either CBOR started; active entrypoints
   remain unchanged and P1 is not accepted yet.
+
+### 2026-09-22 — P1 foundation slice
+
+- Private constructors and defensive byte copies distinguish signing/encryption keys,
+  signatures, genesis/record hashes, member/request/user IDs and epoch numbers.
+  A brand does not skip parsing. Verified records/views have private state.
+- Moved CBOR to one Either implementation. `ledger/cbor.ts` temporarily unwraps
+  it for existing protocol callers; it is not a second codec. Shared compatibility
+  errors no longer require platform code to import the JSON/hex protocol.
+- Type-negative cases reject swapped keys, raw bytes, fabricated verification,
+  and machine/recovery management flags. State inspection is a defensive copy.
+- The foundation is not the complete P1: schema, crypto, policy and snapshot
+  validators still need their total-function migration. New workflows use an
+  explicitly temporary typed-error bridge, not a claim that old throws vanished.
+- Same 1000-record fixture, baseline replay median 1233.40 ms, first post-CBOR
+  replay median 1260.15 ms (+2.2%, 3 warmups/10 measurements). This does not
+  satisfy the remaining increment/snapshot/recovery performance gates.

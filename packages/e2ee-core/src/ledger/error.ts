@@ -1,21 +1,5 @@
-export type LedgerErrorCode =
-  | 'canonical'
-  | 'truncated'
-  | 'trailing'
-  | 'oversize'
-  | 'nesting'
-  | 'unknown-version'
-  | 'unknown-operation'
-  | 'bad-signature'
-  | 'bad-proof'
-  | 'invalid-key'
-  | 'unauthorized'
-  | 'replay'
-  | 'wrong-parent'
-  | 'wrong-anchor'
-  | 'genesis-mismatch'
-  | 'owner-transfer-unconfirmed'
-  | 'invalid-operation';
+import type { LedgerErrorCode } from '../pure/errors';
+export type { LedgerErrorCode } from '../pure/errors';
 
 export class LedgerError extends Error {
   override readonly name = 'LedgerError';

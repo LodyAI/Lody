@@ -1,4 +1,6 @@
 import { Point, verifyAsync } from '@noble/ed25519';
+import { ControlLogError } from './pure/legacy-error';
+export { ControlLogError } from './pure/legacy-error';
 
 /** Experimental wire format. All strings are ASCII; payload bytes are opaque to the core. */
 export interface ControlEvent {
@@ -28,13 +30,6 @@ export const MAX_PAYLOAD_BYTES = 64 * 1024;
 export const MAX_WIRE_BYTES = 140 * 1024;
 const MAX_SIGNERS = 8;
 const encoder = new TextEncoder();
-
-export class ControlLogError extends Error {
-  constructor(readonly code: string) {
-    super(code);
-    this.name = 'ControlLogError';
-  }
-}
 
 export function invariant(condition: boolean, code: string): asserts condition {
   if (!condition) throw new ControlLogError(code);
