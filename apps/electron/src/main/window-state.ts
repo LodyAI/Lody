@@ -18,6 +18,10 @@ export function markWarmWindow(window: BrowserWindow): void {
   warmWindows.add(window)
 }
 
+export function unmarkWarmWindow(window: BrowserWindow): void {
+  warmWindows.delete(window)
+}
+
 export function isWarmWindow(window: BrowserWindow): boolean {
   return warmWindows.has(window)
 }
@@ -54,4 +58,34 @@ export function setWindowsTrayAvailable(available: boolean): void {
 
 export function isWindowsTrayAvailable(): boolean {
   return windowsTrayAvailable
+}
+
+export function registerProductWindow(window: BrowserWindow, warm: boolean): void {
+  productWindows.add(window)
+  if (warm) markWarmWindow(window)
+  window.once('closed', () => {
+    productWindows.delete(window)
+    if (getMainWindow() === window) {
+      setMainWindow(
+        [...productWindows].find(
+          (candidate) => !candidate.isDestroyed() && !isWarmWindow(candidate)
+        ) ?? null
+      )
+    }
+    // A hidden spare must not keep the process alive once the last real window
+    // closes, and holding it while the app idles would only waste memory. A
+    // later auxiliary request can prime a replacement when the option remains on.
+    if (!isAppQuitting()) {
+      const hasRealWindow = [...productWindows].some(
+        (candidate) => !candidate.isDestroyed() && !isWarmWindow(candidate)
+      )
+      if (!hasRealWindow) {
+        for (const candidate of [...productWindows]) {
+          if (!candidate.isDestroyed() && isWarmWindow(candidate)) {
+            candidate.destroy()
+          }
+        }
+      }
+    }
+  })
 }

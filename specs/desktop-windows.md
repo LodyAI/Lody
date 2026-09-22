@@ -8,11 +8,11 @@ English | [中文](desktop-windows.zh.md)
 Users can view conversations and workspaces side by side; opening a window leaves
 its source window unchanged.
 
-| Action | Result |
-| --- | --- |
-| Ordinary Session click or workspace switch | Navigate in the current window |
-| Command-click on macOS, Control-click on other desktops | Open the target in a new window |
-| Session more/context menu: Open conversation in new window | Open a conversation window |
+| Action                                                     | Result                          |
+| ---------------------------------------------------------- | ------------------------------- |
+| Ordinary Session click or workspace switch                 | Navigate in the current window  |
+| Command-click on macOS, Control-click on other desktops    | Open the target in a new window |
+| Session more/context menu: Open conversation in new window | Open a conversation window      |
 
 Dragging out to create windows is unsupported; Session dragging retains mention
 insertion. The workspace selector shows the modifier-click hint at its bottom.
@@ -26,6 +26,16 @@ Conversation windows initially collapse the left sidebar, open the requested
 conversation, and focus its composer once. The sidebar can be expanded.
 Workspace windows retain full navigation. Navigation, draft tabs, and panel state
 are independent per window.
+
+The optional developer window warm-up prepares the shell, not target Session data.
+Keep its neutral cover until the target conversation has loaded and synced, the
+workspace landing is mounted, or absence is confirmed after the target Session’s
+metadata projection settles. Unrelated metadata failures must not block that decision. Loading text and sidebar content are not readiness signals. The cover
+expires after five seconds so slow/offline/error states retain their recovery UI;
+this fallback is not a promise of completed loading or instant opening.
+Once claimed, the window follows ordinary product-window lifetime rules and remains
+open when other windows close. Crash recovery reloads its bound target, never the
+neutral warm route. Closing it must not cancel a replacement spare's timeout.
 
 Composer drafts persist per workspace, isolated from other workspaces, regardless
 of which window opened them. All Chat Landing entries in a workspace reuse its

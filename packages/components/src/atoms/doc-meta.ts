@@ -4,6 +4,7 @@ import { atomEffect } from 'jotai-effect';
 import type { LoroRepo } from 'loro-repo';
 import {
   isLoroRepoDocDeleted,
+  getSessionRoomId,
   isAgentConfigDocRoomId,
   isMachineDocRoomId,
   isSessionDocRoomId,
@@ -207,6 +208,15 @@ export const sessionMetaCacheAtom = atom<Record<string, SessionMeta>>({});
 export const machineMetaCacheAtom = atom<Record<string, MachineMeta>>({});
 export const agentConfigMetaCacheAtom = atom<Record<string, AgentConfigMeta>>({});
 export const docMetaCacheReadyAtom = atom(false);
+const docMetaProjectionPendingAtomFamily = atomFamily((_docId: string) => atom(false));
+// Absence waits only for this session's projection, never unrelated metadata reads.
+export const sessionMetaCacheSettledAtomFamily = atomFamily((sessionId: SessionId) =>
+  atom((get) => {
+    const roomId = getSessionRoomId(sessionId);
+    if (get(sessionMetaCacheAtom)[roomId]) return true;
+    return get(docMetaCacheReadyAtom) && !get(docMetaProjectionPendingAtomFamily(roomId));
+  })
+);
 
 export type DocMetaCacheScope = {
   runtime: WorkspaceRuntime;
@@ -515,6 +525,16 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
   }
 
   let cancelled = false;
+  const pendingReadEpochByDocId = new Map<string, number>();
+  const pendingExistenceCounts = new Map<string, number>();
+  const markedPendingDocIds = new Set<string>();
+
+  function setProjectionPending(docId: string, pending: boolean) {
+    if (!isSessionDocRoomId(docId) || markedPendingDocIds.has(docId) === pending) return;
+    if (pending) markedPendingDocIds.add(docId);
+    else markedPendingDocIds.delete(docId);
+    set(docMetaProjectionPendingAtomFamily(docId), pending);
+  }
   set(docMetaCacheReadyAtom, false);
   set(docMetaCacheScopeAtom, {
     runtime,
@@ -603,25 +623,45 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
     const fetchEpoch = (fullMetaFetchEpochByDocId.get(docId) ?? 0) + 1;
     fullMetaFetchEpochByDocId.set(docId, fetchEpoch);
 
-    void fetchDocMeta(runtime.repo, docId).then((meta) => {
-      if (cancelled) return;
-      if (fullMetaFetchEpochByDocId.get(docId) !== fetchEpoch) return;
-      if (existenceStateByDocId.get(docId) === 'deleted') return;
-      if (expectedExistence) {
-        if (existenceStateByDocId.get(docId) !== expectedExistence.state) return;
-        if ((existenceEpochByDocId.get(docId) ?? 0) !== expectedExistence.epoch) return;
-      }
-      if (!meta) {
-        if (expectedExistence?.state === 'missing') {
-          clearCachedDocMeta(docId);
-        } else {
+    pendingReadEpochByDocId.set(docId, fetchEpoch);
+    setProjectionPending(docId, true);
+    void fetchDocMeta(runtime.repo, docId)
+      .then((meta) => {
+        if (cancelled) return;
+        if (fullMetaFetchEpochByDocId.get(docId) !== fetchEpoch) return;
+        if (existenceStateByDocId.get(docId) === 'deleted') return;
+        if (expectedExistence) {
+          if (existenceStateByDocId.get(docId) !== expectedExistence.state) return;
+          if ((existenceEpochByDocId.get(docId) ?? 0) !== expectedExistence.epoch) return;
+        }
+        if (!meta) {
+          if (expectedExistence?.state === 'missing') {
+            pendingMetaDocIds.delete(docId);
+            clearCachedDocMeta(docId);
+          } else {
+            pendingMetaDocIds.add(docId);
+          }
+          return;
+        }
+        pendingMetaDocIds.delete(docId);
+        setCachedDocMeta(docId, meta);
+      })
+      .catch((error) => {
+        if (
+          !cancelled &&
+          fullMetaFetchEpochByDocId.get(docId) === fetchEpoch &&
+          existenceStateByDocId.get(docId) !== 'deleted'
+        ) {
           pendingMetaDocIds.add(docId);
         }
-        return;
-      }
-      pendingMetaDocIds.delete(docId);
-      setCachedDocMeta(docId, meta);
-    });
+        console.warn('[doc-meta] Failed to refresh metadata', error);
+      })
+      .finally(() => {
+        if (pendingReadEpochByDocId.get(docId) === fetchEpoch) {
+          pendingReadEpochByDocId.delete(docId);
+        }
+        if (!cancelled) updateProjectionPending(docId);
+      });
   };
 
   const handleDocumentExistence = (docId: string, state: DocExistenceState) => {
@@ -634,6 +674,8 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
     existenceStateByDocId.set(docId, state);
 
     if (state === 'deleted') {
+      pendingReadEpochByDocId.delete(docId);
+      pendingMetaDocIds.delete(docId);
       clearCachedDocMeta(docId);
       return;
     }
@@ -712,6 +754,16 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
     return entries;
   };
 
+  function updateProjectionPending(docId: string) {
+    setProjectionPending(
+      docId,
+      pendingReadEpochByDocId.has(docId) ||
+        pendingMetaDocIds.has(docId) ||
+        (pendingExistenceCounts.get(docId) ?? 0) > 0 ||
+        pendingPatches.has(docId)
+    );
+  }
+
   const flushPending = () => {
     flushTimer = null;
     if (cancelled) {
@@ -724,6 +776,9 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
     // purge batches where flock emits both ['e', docId] and ['m', docId, ...].
     const existenceBatch = pendingExistenceUpdates.splice(0, DOC_META_EVENT_FLUSH_BATCH_SIZE);
     for (const { docId, state } of existenceBatch) {
+      const remaining = (pendingExistenceCounts.get(docId) ?? 1) - 1;
+      if (remaining === 0) pendingExistenceCounts.delete(docId);
+      else pendingExistenceCounts.set(docId, remaining);
       handleDocumentExistence(docId, state);
       // Drop accumulated metadata patches for docs that are no longer active
       if (state !== 'active') {
@@ -753,6 +808,8 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
       patchesToApply.push([docId, patch]);
     }
     applyPatchBatchToCache(patchesToApply);
+    for (const { docId } of existenceBatch) updateProjectionPending(docId);
+    for (const [docId] of patchBatch) updateProjectionPending(docId);
 
     if (pendingExistenceUpdates.length > 0 || pendingPatches.size > 0) {
       scheduleFlush();
@@ -778,6 +835,7 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
           applyPatchBatchToCache([
             [event.docId, pendingPatch ? { ...pendingPatch, ...patch } : patch],
           ]);
+          updateProjectionPending(event.docId);
           return;
         }
 
@@ -788,9 +846,13 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
         } else {
           pendingPatches.set(event.docId, { ...patch });
         }
+        setProjectionPending(event.docId, true);
         scheduleFlush();
       } else if ((event as { kind: string }).kind === 'doc-existence-changed') {
         const e = event as unknown as { kind: string; docId: string; from: string; to: string };
+        if (e.to !== 'deleted' && e.to !== 'active' && e.to !== 'missing') return;
+        pendingExistenceCounts.set(e.docId, (pendingExistenceCounts.get(e.docId) ?? 0) + 1);
+        setProjectionPending(e.docId, true);
         if (e.to === 'deleted') {
           pendingExistenceUpdates.push({ docId: e.docId, state: 'deleted' });
         } else if (e.to === 'active') {
@@ -831,6 +893,7 @@ export const docMetaSubscriptionAtom = atomEffect((get, set) => {
 
   return () => {
     cancelled = true;
+    for (const docId of markedPendingDocIds) set(docMetaProjectionPendingAtomFamily(docId), false);
     if (flushTimer) {
       clearTimeout(flushTimer);
       flushTimer = null;

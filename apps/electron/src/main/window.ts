@@ -1,3 +1,4 @@
+import { getWindowTargetPath, presentWindowTarget } from './window-target'
 import { app, BrowserWindow, dialog, nativeTheme, shell } from 'electron'
 import { is } from '@electron-toolkit/utils'
 import { installContextMenu } from './context-menu'
@@ -7,11 +8,9 @@ import {
   consumePendingDeepLink,
   getMainWindow,
   isAppQuitting,
-  isWarmWindow,
   isWindowsTrayAvailable,
-  markWarmWindow,
   setMainWindow,
-  productWindows
+  registerProductWindow
 } from './window-state'
 import {
   getMainWindowConstructorOptions,
@@ -30,7 +29,7 @@ import { createRendererProcessGoneHandling } from './renderer-process-gone'
 import { createRendererHangWatchdog } from './renderer-hang-watchdog'
 import { recordRendererHang, registerRendererHangDocument } from './renderer-hang-diagnostics'
 import { resolveMainWindowRuntimePolicy } from './window-runtime-policy'
-import { IPC_PUSH_CHANNELS, type ElectronWindowTarget } from '@lody/shared/electron-ipc'
+import { type ElectronWindowTarget } from '@lody/shared/electron-ipc'
 import { serializePreferredSystemLanguagesArgument } from '../system-language-argument'
 import { isDevbarRendererEnabled } from './services/devbar/service'
 import { devbarRendererEntry } from './services/devbar/control'
@@ -409,33 +408,7 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
   if (options.hideWindowOnAutoLaunch && shouldMaximizeOnLaunch) {
     pendingInitialMaximize.add(window)
   }
-  productWindows.add(window)
-  if (options.warm) markWarmWindow(window)
-  window.once('closed', () => {
-    productWindows.delete(window)
-    if (getMainWindow() === window) {
-      setMainWindow(
-        [...productWindows].find(
-          (candidate) => !candidate.isDestroyed() && !isWarmWindow(candidate)
-        ) ?? null
-      )
-    }
-    // A hidden spare must not keep the process alive once the last real window
-    // closes, and holding it while the app idles would only waste memory. A
-    // later auxiliary request can prime a replacement when the option remains on.
-    if (!isAppQuitting()) {
-      const hasRealWindow = [...productWindows].some(
-        (candidate) => !candidate.isDestroyed() && !isWarmWindow(candidate)
-      )
-      if (!hasRealWindow) {
-        for (const candidate of [...productWindows]) {
-          if (!candidate.isDestroyed() && isWarmWindow(candidate)) {
-            candidate.destroy()
-          }
-        }
-      }
-    }
-  })
+  registerProductWindow(window, options.warm ?? false)
   if (!options.auxiliary) trackMainWindowState(window)
   const initialDevbarEnabled = isDevbarRendererEnabled()
   const mainTarget = resolveMainRendererTarget(
@@ -640,14 +613,9 @@ export function createWarmWindow(options: { icon?: string } = {}): BrowserWindow
  * shown immediately without a blank frame.
  */
 export function bindMainWindowTarget(window: BrowserWindow, target: ElectronWindowTarget): void {
-  if (window.isDestroyed()) return
-  window.webContents.send(IPC_PUSH_CHANNELS.appWindowTarget, target)
-  if (window.isMinimized()) {
-    window.restore()
-  }
-  if (!window.isVisible()) {
-    window.show()
-  }
-  app.focus({ steal: true })
-  window.focus()
+  presentWindowTarget(
+    window,
+    target,
+    resolveMainRendererTarget(getWindowTargetPath(target), isDevbarRendererEnabled(), true)
+  )
 }

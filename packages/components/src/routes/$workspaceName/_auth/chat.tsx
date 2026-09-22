@@ -53,13 +53,15 @@ function ChatRoute() {
   }
 
   return (
-    <ChatLanding
-      workspaceSlug={workspaceName}
-      preSelectedContext={search.context}
-      preSelectedMachine={search.machine}
-      preSelectedProject={search.project}
-      preSelectedRepo={search.repo}
-      onSelectionUrlSync={handleSelectionUrlSync}
-    />
+    <div className="h-full" data-window-workspace-ready={workspaceName}>
+      <ChatLanding
+        workspaceSlug={workspaceName}
+        preSelectedContext={search.context}
+        preSelectedMachine={search.machine}
+        preSelectedProject={search.project}
+        preSelectedRepo={search.repo}
+        onSelectionUrlSync={handleSelectionUrlSync}
+      />
+    </div>
   );
 }

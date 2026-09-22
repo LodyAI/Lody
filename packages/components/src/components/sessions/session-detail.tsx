@@ -128,6 +128,7 @@ import {
   archivedChildSessionsAtomFamily,
   sideSessionsAtomFamily,
   docMetaCacheReadyAtom,
+  sessionMetaCacheSettledAtomFamily,
 } from '@/atoms/doc-meta';
 import { sessionLiveStatusAtomFamily } from '@/atoms/presence';
 import { SessionTabBar, type ViewerTabItem } from './session-tab-bar';
@@ -897,6 +898,7 @@ const SessionDetail = ({
   );
   const session = useAtomValue(sessionMetaAtom);
   const docMetaCacheReady = useAtomValue(docMetaCacheReadyAtom);
+  const docMetaCacheSettled = useAtomValue(sessionMetaCacheSettledAtomFamily(sessionId));
   const activeSession = session ?? null;
   const activeSessionSharing = useMemo(
     () => (showSessionSharing && activeSession ? resolveSessionSharing(activeSession) : null),
@@ -4683,7 +4685,7 @@ const SessionDetail = ({
   const sessionPresenceState = useMemo(() => {
     const base = resolveSessionDetailPresenceState({
       hasActiveSession: activeSession !== null,
-      docMetaCacheReady,
+      docMetaCacheReady: docMetaCacheSettled,
       runtimeInitializing,
       runtimeWorkspaceId: runtime?.workspaceId ?? null,
       currentWorkspaceId,
@@ -4702,9 +4704,9 @@ const SessionDetail = ({
     activeSession,
     controlConnectionState,
     currentWorkspaceId,
-    docMetaCacheReady,
     localProjectVisibilityLoading,
     machineVisibilityLoading,
+    docMetaCacheSettled,
     runtime?.workspaceId,
     runtimeInitializing,
     user?.id,
@@ -4768,7 +4770,11 @@ const SessionDetail = ({
   }
 
   if (sessionPresenceState === 'not-found') {
-    return <SessionNotFound onBack={handleBackToList} />;
+    return (
+      <div className="h-full" data-window-session-ready={sessionId}>
+        <SessionNotFound onBack={handleBackToList} />
+      </div>
+    );
   }
 
   if (!activeSession) {
