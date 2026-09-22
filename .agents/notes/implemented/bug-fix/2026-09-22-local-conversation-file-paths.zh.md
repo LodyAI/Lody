@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: https://github.com/LodyAI/Lody/pull/892
+
 [English](2026-09-22-local-conversation-file-paths.md)
 
 ## 摘要
