@@ -770,3 +770,12 @@ scenarios or protocol acceptance requirements.
   calls `encodeGenesisBody` / `encodeSignedRecord` on the ordinary path.
 - Evidence: Lab typecheck; host-lifecycle 34, design-probes 25, collab-baseline 1.
   Product E2EE remains off. No push.
+
+### 2026-09-22 — Lab join and device admission use enrollment workflows
+
+- Honest `requestJoin` uses `prepareJoinRequest`; `admitDevice` uses
+  `prepareDeviceAdmission` on the target device, then owner `executeEffect`.
+  Lab `src/` no longer imports `joinRequestSigningBytes` or
+  `possessionSigningBytes`. Attack probes may still assemble those bytes.
+- Evidence: Lab `pnpm check` 18 files / 142 tests. Product E2EE remains off.
+  No push.

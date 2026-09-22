@@ -10,6 +10,8 @@ import {
   LedgerTransport,
   TransportError,
   ValidationError,
+  prepareDeviceAdmission,
+  prepareJoinRequest,
 } from '@lody/e2ee-core/effect';
 import { deviceSignerLayer, signatureVerifierLayer } from '@lody/e2ee-core/effect/platform';
 import { EpochKeyringStorage, nodeJournalStoreLayer } from '@lody/e2ee-core/effect/platform-node';
@@ -20,9 +22,7 @@ import {
   commitEpochKey,
   decodeRecord,
   hashRecord,
-  joinRequestSigningBytes,
   LedgerClient,
-  possessionSigningBytes,
   recoverHistory,
   SigningPointCache,
   type ComparisonNote,
@@ -90,6 +90,10 @@ function signerLayer(device: DemoDevice) {
   return Effect.map(Bytes.signingPublicKey(device.publicKey), (key) =>
     deviceSignerLayer(key, (bytes) => device.sign(bytes))
   );
+}
+
+function enrollmentLayer(device: DemoDevice) {
+  return Effect.map(signerLayer(device), (signing) => Layer.merge(signing, signatureVerifierLayer));
 }
 
 /** Matches StreamsLedgerStream. Create only needs the offset, not network. */
@@ -475,22 +479,31 @@ export class DemoSession {
   async requestJoin(genesisHex: string): Promise<JoinRequestWire> {
     if (!this.device) throw new Error('not-started');
     await this.adoptGenesis(genesisHex);
-    this.userId = this.random('join-user-id', 32);
-    const request: Omit<JoinRequest, 'signature'> = {
-      requestId: this.random('join-request-id', 16),
-      userId: this.userId,
-      signingPublicKey: this.device.publicKey,
-      encryptionPublicKey: this.device.enc,
-      expiresAt: null,
-    };
-    const signature = await this.device.sign(joinRequestSigningBytes(fromHex(genesisHex), request));
+    const userId = this.random('join-user-id', 32);
+    const requestId = this.random('join-request-id', 16);
+    this.userId = userId;
+    const encryptionKey = this.device.enc;
+    const device = this.device;
+    const prepared = await runLabPromise(
+      Effect.gen(function* () {
+        const layer = yield* enrollmentLayer(device);
+        return yield* prepareJoinRequest({
+          genesis: yield* Bytes.genesisHash(fromHex(genesisHex)),
+          requestId: yield* Bytes.requestId(requestId),
+          userId: yield* Bytes.userId(userId),
+          encryptionPublicKey: yield* Bytes.encryptionPublicKey(encryptionKey),
+          expiresAt: null,
+        }).pipe(Effect.provide(layer));
+      }),
+      Layer.empty
+    );
     const wire: JoinRequestWire = {
-      requestId: toHex(request.requestId),
-      userId: toHex(request.userId),
-      signingPublicKey: toHex(request.signingPublicKey),
-      encryptionPublicKey: toHex(request.encryptionPublicKey),
-      expiresAt: request.expiresAt,
-      signature: toHex(signature),
+      requestId: toHex(prepared.requestId.toBytes()),
+      userId: toHex(prepared.userId.toBytes()),
+      signingPublicKey: toHex(prepared.signingPublicKey.toBytes()),
+      encryptionPublicKey: toHex(prepared.encryptionPublicKey.toBytes()),
+      expiresAt: prepared.expiresAt,
+      signature: toHex(prepared.signature.toBytes()),
     };
     const response = await this.fetch(`/v1/spaces/${genesisHex}/joins`, {
       method: 'POST',
@@ -668,28 +681,39 @@ export class DemoSession {
     kind: 'personal' | 'machine' | 'recovery',
     canManage: boolean
   ): Promise<{ status: string }> {
-    if (!this.genesis || !this.genesisHex) throw new Error('no-space');
+    if (!this.genesis || !this.genesisHex || !this.device) throw new Error('no-space');
     const ledger = await this.readLedger();
     const actor = ledger.state.devices.get(deviceHex(this.device));
     if (!actor) throw new Error('unauthorized');
-    const possessionSignature = await target.sign(
-      possessionSigningBytes({
-        genesis: fromHex(this.genesisHex),
-        targetMembershipId: actor.membershipId,
-        signingPublicKey: target.publicKey,
-        encryptionPublicKey: target.enc,
-        kind,
-        canManage,
-      })
+    if (kind !== 'personal' && canManage) throw new LedgerError('unauthorized');
+    const grant =
+      kind === 'personal'
+        ? { kind: 'personal' as const, canManage }
+        : { kind, canManage: false as const };
+    const genesisHex = this.genesisHex;
+    const membership = actor.membershipId;
+    const encryptionKey = target.enc;
+    const command = await runLabPromise(
+      Effect.gen(function* () {
+        const layer = yield* enrollmentLayer(target);
+        return yield* prepareDeviceAdmission({
+          genesis: yield* Bytes.genesisHash(fromHex(genesisHex)),
+          membershipId: yield* Bytes.membershipId(membership),
+          encryptionPublicKey: yield* Bytes.encryptionPublicKey(encryptionKey),
+          grant,
+        }).pipe(Effect.provide(layer));
+      }),
+      Layer.empty
     );
-    return this.submit({
-      type: 'admitDevice',
-      kind,
-      signingPublicKey: target.publicKey,
-      encryptionPublicKey: target.enc,
-      canManage,
-      possessionSignature,
-    });
+    const client = await this.openLedger();
+    const ownerLayer = await Effect.runPromise(signerLayer(this.device));
+    try {
+      const result = await runLabPromise(client.executeEffect(command), ownerLayer);
+      return { status: result.status };
+    } catch (error) {
+      if (error instanceof ValidationError) throw new LedgerError(error.code, error.position);
+      throw error;
+    }
   }
 
   async revokeDevice(target: Uint8Array): Promise<{ status: string }> {

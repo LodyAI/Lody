@@ -610,3 +610,11 @@ Translation: current
   `encodeSignedRecord`。
 - 证据：Lab 类型检查；host-lifecycle 34、design-probes 25、collab-baseline 1。
   产品 E2EE 仍关闭。不 push。
+
+### 2026-09-22 — Lab 加入与设备准入走 enrollment workflow
+
+- 诚实 `requestJoin` 使用 `prepareJoinRequest`；`admitDevice` 在目标设备上
+  使用 `prepareDeviceAdmission`，再由 owner `executeEffect`。Lab `src/`
+  不再导入 `joinRequestSigningBytes` 或 `possessionSigningBytes`。攻击探针
+  仍可拼装这些字节。
+- 证据：Lab `pnpm check` 18 文件 / 142 测试。产品 E2EE 仍关闭。不 push。
