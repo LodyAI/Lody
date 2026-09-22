@@ -6,13 +6,8 @@ import type { OpenSourceAttributionEntry } from '@/lib/open-source-attributions'
 import {
   Badge,
   Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
   ScrollArea,
+  Dialog,
 } from '@/ui';
 import { Accordion } from '@lody/ui/accordion';
 import { Select } from '@lody/ui/select';
@@ -149,44 +144,46 @@ export function OpenSourceAttributionsDialog({
   useEffect(() => clearOpenTimer, []);
 
   return (
-    <Dialog
+    <Dialog.Root
       open={open}
       onOpenChange={(nextOpen) => {
         if (!nextOpen) clearOpenTimer();
         setOpen(nextOpen);
       }}
     >
-      <DialogTrigger asChild>
-        <Button
-          variant="secondary"
-          size="small"
-          onClick={(event) => {
-            event.preventDefault();
-            clearOpenTimer();
-            openTimerRef.current = setTimeout(() => {
-              openTimerRef.current = null;
-              setOpen(true);
-            }, 400);
-          }}
-          onDoubleClick={(event) => {
-            event.preventDefault();
-            clearOpenTimer();
-            onTriggerDoubleClick?.();
-          }}
-        >
-          <ScrollText className="mr-1 h-3.5 w-3.5" />
-          {t('settings.about.viewAttributions', 'View notices')}
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="max-w-5xl gap-0 overflow-hidden p-0">
-        <DialogHeader className="border-b border-border/70 px-4 py-4 sm:px-6">
-          <DialogTitle>
+      <Dialog.Trigger
+        render={
+          <Button
+            variant="secondary"
+            size="small"
+            onClick={(event) => {
+              event.preventDefault();
+              clearOpenTimer();
+              openTimerRef.current = setTimeout(() => {
+                openTimerRef.current = null;
+                setOpen(true);
+              }, 400);
+            }}
+            onDoubleClick={(event) => {
+              event.preventDefault();
+              clearOpenTimer();
+              onTriggerDoubleClick?.();
+            }}
+          />
+        }
+      >
+        <ScrollText className="mr-1 h-3.5 w-3.5" />
+        {t('settings.about.viewAttributions', 'View notices')}
+      </Dialog.Trigger>
+      <Dialog.Content className="max-w-5xl gap-0 overflow-hidden p-0">
+        <Dialog.Header className="border-b border-border/70 px-4 py-4 sm:px-6">
+          <Dialog.Title>
             {t('settings.about.openSourceAttributions', 'Open Source Licenses')}
-          </DialogTitle>
-          <DialogDescription>
+          </Dialog.Title>
+          <Dialog.Description>
             {t('settings.about.generatedAt', 'Generated at')}: {generatedAtLabel}
-          </DialogDescription>
-        </DialogHeader>
+          </Dialog.Description>
+        </Dialog.Header>
 
         <div className="grid gap-3 border-b border-border/70 px-4 py-4 sm:grid-cols-3 sm:px-6">
           <SummaryCard
@@ -276,7 +273,7 @@ export function OpenSourceAttributionsDialog({
             </Accordion.Root>
           </div>
         </ScrollArea>
-      </DialogContent>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

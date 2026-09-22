@@ -1,19 +1,14 @@
-import { type ReactNode, useId, useState } from 'react';
+import { type ReactElement, type ReactNode, useId, useState } from 'react';
 import { Check, Clock, Eye, Folder, UserRound, Users } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 import { CarbonSettingsAdjust } from '@/components/icons/carbon-settings-adjust';
 import { cn } from '@/lib/utils';
-import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
+import { Popover } from '@lody/ui/popover';
 import { Button } from '@lody/ui/button';
-import {
-  menuGroupLabelClassName,
-  menuSeparatorClassName,
-  menuSurfaceClassName,
-  menuSurfaceStyle,
-} from '@/ui/menu-styles';
+import { menuGroupLabelClassName, menuSeparatorClassName } from '@/ui/menu-styles';
 import { Switch } from '@lody/ui/switch';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import type { SidebarOrganizeMode } from '@/atoms/sidebar-state';
 import type { SidebarChatScope } from '@/atoms/sidebar-state';
 
@@ -55,7 +50,7 @@ export type SidebarFilterPopoverProps = {
   className?: string;
   triggerClassName?: string;
   /** Render a custom trigger instead of the default IconButton-style filter button. */
-  trigger?: ReactNode;
+  trigger?: ReactElement;
   /** Where to anchor the popover. Defaults to top-start since the trigger lives in the footer. */
   side?: 'top' | 'bottom' | 'left' | 'right';
   align?: 'start' | 'center' | 'end';
@@ -135,9 +130,8 @@ export function SidebarFilterPopover({
     setOpen(false);
   };
   return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
-      <PopoverTrigger asChild>
-        {trigger ?? (
+    <Popover.Root open={open} onOpenChange={handleOpenChange}>
+      <Popover.Trigger render={trigger ?? (
           <Button
             type="button"
             variant="ghost"
@@ -156,18 +150,12 @@ export function SidebarFilterPopover({
           >
             <CarbonSettingsAdjust className="h-4 w-4" />
           </Button>
-        )}
-      </PopoverTrigger>
-      <PopoverContent
+        )}/>
+      <Popover.Content
         side={side}
         align={align}
         sideOffset={6}
-        style={{ ...menuSurfaceStyle, animation: 'none' }}
-        className={cn(
-          'w-max min-w-[200px] border-0 bg-transparent p-1 shadow-none',
-          menuSurfaceClassName,
-          className
-        )}
+        className={cn('w-max min-w-[200px] p-1', className)}
       >
         <div data-sidebar-filter-section="view">
           <SectionHeading>{merged.organizeHeading}</SectionHeading>
@@ -201,13 +189,12 @@ export function SidebarFilterPopover({
           />
         </div>
         <div className={menuSeparatorClassName} aria-hidden="true" />
-        <TooltipProvider delayDuration={300}>
-          <Tooltip
+        <Tooltip.Provider delay={300}>
+          <Tooltip.Root
             open={projectNamesAvailable ? false : projectHintOpen}
             onOpenChange={setProjectHintOpen}
           >
-            <TooltipTrigger asChild>
-              <div
+            <Tooltip.Trigger render={<div
                 data-sidebar-filter-section="display"
                 data-disabled={projectNamesAvailable ? undefined : ''}
                 aria-disabled={projectNamesAvailable ? undefined : true}
@@ -250,17 +237,16 @@ export function SidebarFilterPopover({
                   }
                   data-sidebar-filter-project-names=""
                 />
-              </div>
-            </TooltipTrigger>
+              </div>}/>
             {!projectNamesAvailable ? (
-              <TooltipContent side="right" sideOffset={8} className="max-w-48">
+              <Tooltip.Content side="right" sideOffset={8} className="max-w-48">
                 {merged.updatedProjectNamesUnavailable}
-              </TooltipContent>
+              </Tooltip.Content>
             ) : null}
-          </Tooltip>
-        </TooltipProvider>
-      </PopoverContent>
-    </Popover>
+          </Tooltip.Root>
+        </Tooltip.Provider>
+      </Popover.Content>
+    </Popover.Root>
   );
 }
 

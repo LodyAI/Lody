@@ -10,7 +10,7 @@ import { MobileAppearanceSettings } from '../src/components/mobile/mobile-appear
 import { AppearanceSettingsView } from '../src/components/settings/appearance-setting';
 import type { Theme } from '../src/theme-provider';
 import { initI18n } from '../src/i18n';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '../src/ui/dialog';
+import { Dialog } from '../src/ui/dialog';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -238,13 +238,13 @@ describe('AppearanceSettingsView', () => {
   it('keeps the font menu inside a settings dialog so the list can scroll', async () => {
     await act(async () =>
       root?.render(
-        <Dialog open>
-          <DialogContent>
-            <DialogTitle>Appearance</DialogTitle>
-            <DialogDescription>Electron appearance settings</DialogDescription>
+        <Dialog.Root open>
+          <Dialog.Content>
+            <Dialog.Title>Appearance</Dialog.Title>
+            <Dialog.Description>Electron appearance settings</Dialog.Description>
             <AppearanceHarness isElectron />
-          </DialogContent>
-        </Dialog>
+          </Dialog.Content>
+        </Dialog.Root>
       )
     );
 

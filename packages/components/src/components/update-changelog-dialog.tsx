@@ -3,11 +3,6 @@ import { ExternalLink } from 'lucide-react';
 import {
   Button,
   Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
 } from '@/ui';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 
@@ -54,18 +49,18 @@ export function UpdateChangelogDialog({
   const formattedDate = releaseDate ? formatReleaseDate(releaseDate, i18n.resolvedLanguage) : null;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle>
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Content className="sm:max-w-xl">
+        <Dialog.Header>
+          <Dialog.Title>
             {t('updates.changelog.title', "What's new in {{version}}", { version })}
-          </DialogTitle>
-          <DialogDescription>
+          </Dialog.Title>
+          <Dialog.Description>
             {formattedDate
               ? t('updates.changelog.releasedOn', 'Released {{date}}', { date: formattedDate })
               : t('updates.changelog.subtitle', 'Changes included in this update.')}
-          </DialogDescription>
-        </DialogHeader>
+          </Dialog.Description>
+        </Dialog.Header>
         {notes ? (
           <div className="max-h-[50vh] overflow-y-auto pr-1">
             <MarkdownRenderer text={notes} size="sm" allowHtml={false} />
@@ -78,7 +73,7 @@ export function UpdateChangelogDialog({
             )}
           </p>
         )}
-        <DialogFooter>
+        <Dialog.Footer>
           {!notes ? (
             <Button variant="secondary" size="small" onClick={onOpenChangelogSite}>
               <ExternalLink className="mr-1 h-3.5 w-3.5" />
@@ -88,8 +83,8 @@ export function UpdateChangelogDialog({
           <Button size="small" onClick={() => onOpenChange(false)}>
             {t('common.close', 'Close')}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </Dialog.Footer>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

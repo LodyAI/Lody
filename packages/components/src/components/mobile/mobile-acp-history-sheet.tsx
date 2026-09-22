@@ -5,21 +5,12 @@ import { enUS } from 'date-fns/locale/en-US';
 import { zhCN } from 'date-fns/locale/zh-CN';
 import { formatDistanceToNow } from 'date-fns';
 import { AlertCircle, Check, Download, RefreshCw, X } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import type { LocalProjectHistoryCatalogItem, LocalProjectHistoryProvider } from '@lody/shared';
 
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { Button } from '@lody/ui/button';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
+import { AlertDialog } from '@/ui/dialog';
 import { cn } from '@/lib/utils';
 import { toIntlLocale } from '@/lib/intl-locale';
 import { getVisibleLocalProjectHistoryFailures } from '@/lib/local-project-history-catalog';
@@ -452,37 +443,37 @@ export function MobileAcpHistorySheet({
           </div>
         </DrawerContent>
       </Drawer>
-      <AlertDialog
+      <AlertDialog.Root
         open={conflictSessionToResolve !== null}
         onOpenChange={(nextOpen) => {
           if (!nextOpen) setConflictSessionToResolve(null);
         }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
               {t('workspace.projects.resolveHistoryConflictTitle', {
                 defaultValue: 'Re-import conversation?',
               })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
+            </AlertDialog.Title>
+            <AlertDialog.Description>
               {t('workspace.projects.resolveHistoryConflictConfirm', {
                 defaultValue:
                   'Re-import this conversation from {{provider}}? This replaces the current imported history with the latest source history and may discard local-only turns.',
                 provider: providerLabel,
               })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
+            <AlertDialog.Action
               onClick={confirmConflictReplace} variant="destructive"
             >
               {t('workspace.projects.resolveHistoryConflict', 'Re-import')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </>
   );
 }

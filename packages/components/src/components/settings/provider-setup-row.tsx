@@ -8,7 +8,7 @@ import {
   type ProviderSetupTask,
 } from '@lody/shared';
 import { RotateCcw, Trash2 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 
 import { AgentReadinessMark, type AgentReadiness } from '@/components/shared/agent-readiness-mark';
 import { Button } from '@lody/ui/button';

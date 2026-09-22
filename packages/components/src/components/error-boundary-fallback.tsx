@@ -11,16 +11,7 @@ import {
 } from 'lucide-react';
 
 import { Button } from '@lody/ui/button';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
+import { AlertDialog } from '@/ui/dialog';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { openExternalUrl } from '@/lib/native-browser';
 import { LODY_DISCORD_URL } from '@/lib/lody-urls';
@@ -331,24 +322,24 @@ export function HardResetConfirmDialog({
 }) {
   const { t } = useTranslation();
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>
+    <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
+      <AlertDialog.Content>
+        <AlertDialog.Header>
+          <AlertDialog.Title>
             {t('errorBoundary.hardResetConfirmTitle', 'Clear all local data and sign out?')}
-          </AlertDialogTitle>
-          <AlertDialogDescription>
+          </AlertDialog.Title>
+          <AlertDialog.Description>
             {t(
               'errorBoundary.hardResetConfirmDescription',
               'This signs you out and deletes everything Lody stored on this device — local caches, offline copies, and preferences — then restarts the app. Work already synced to your account stays safe and downloads again after you sign in. Unsynced local drafts on this device are lost.'
             )}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={isResetting}>
+          </AlertDialog.Description>
+        </AlertDialog.Header>
+        <AlertDialog.Footer>
+          <AlertDialog.Cancel disabled={isResetting}>
             {t('common.cancel', 'Cancel')}
-          </AlertDialogCancel>
-          <AlertDialogAction
+          </AlertDialog.Cancel>
+          <AlertDialog.Action
             onClick={(event) => {
               // Keep the dialog mounted while the wipe + reload runs so the
               // button can show progress instead of flashing closed.
@@ -362,9 +353,9 @@ export function HardResetConfirmDialog({
             {isResetting
               ? t('errorBoundary.hardResetConfirmRunning', 'Clearing…')
               : t('errorBoundary.hardResetConfirmButton', 'Clear and sign out')}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+          </AlertDialog.Action>
+        </AlertDialog.Footer>
+      </AlertDialog.Content>
+    </AlertDialog.Root>
   );
 }

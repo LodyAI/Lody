@@ -1,4 +1,4 @@
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import { Textarea } from '@lody/ui/textarea';

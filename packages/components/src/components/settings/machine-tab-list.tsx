@@ -5,16 +5,9 @@ import { type MachineId, type MachineViewMeta } from '@lody/shared';
 import type { MachineSettingsFilter } from '@/atoms/settings-machine-tab';
 import type { MachineVisibilityAccess } from '@/hooks/use-visible-machine-metas';
 import { Button } from '@lody/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
+import { Menu } from '@/ui/menu';
 import { cn } from '@/lib/utils';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import { UserAvatar } from '@/components/user-avatar';
 import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 
@@ -73,7 +66,7 @@ export function MachineTabList({
   const hiddenByFilter = Math.max(0, totalBeforeFilter - items.length);
 
   return (
-    <TooltipProvider delayDuration={250}>
+    <Tooltip.Provider delay={250}>
       <FocusScope id={scopeId} className="flex h-full min-h-0 w-full min-w-0 flex-col">
         <div className="flex items-center justify-between gap-2 px-2 pb-2">
           <p className="min-w-0 truncate text-xs font-normal text-muted-foreground">
@@ -131,7 +124,7 @@ export function MachineTabList({
           )}
         </div>
       </FocusScope>
-    </TooltipProvider>
+    </Tooltip.Provider>
   );
 }
 
@@ -146,8 +139,16 @@ export function MachineListFilterButton({
   const isFilterActive = filter.onlineOnly || filter.mineOnly;
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+    <Menu.Root>
+      <Menu.Trigger render={<Button
+          variant={isFilterActive ? 'secondary' : 'ghost'}
+          size="small"
+          icon
+          className="shrink-0"
+          aria-label={t('settings.agent.machineTabs.filter.label', 'Filter machines')}
+        >
+          <ListFilter className="h-3.5 w-3.5" />
+        </Button>}>
         <Button
           variant={isFilterActive ? 'secondary' : 'ghost'}
           size="small"
@@ -157,12 +158,12 @@ export function MachineListFilterButton({
         >
           <ListFilter className="h-3.5 w-3.5" />
         </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-44">
-        <DropdownMenuLabel className="font-normal text-muted-foreground">
+      </Menu.Trigger>
+      <Menu.Content align="end" className="w-44">
+        <Menu.GroupLabel className="font-normal text-muted-foreground">
           {t('settings.agent.machineTabs.filter.label', 'Filter machines')}
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator />
+        </Menu.GroupLabel>
+        <Menu.Separator />
         <FilterItem
           label={t('settings.agent.machineTabs.filter.online', 'Online')}
           checked={filter.onlineOnly}
@@ -173,8 +174,8 @@ export function MachineListFilterButton({
           checked={filter.mineOnly}
           onSelect={() => onFilterChange({ ...filter, mineOnly: !filter.mineOnly })}
         />
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </Menu.Content>
+    </Menu.Root>
   );
 }
 
@@ -330,9 +331,8 @@ function MachineOwnerAvatar({
   const ownerName = owner?.name || owner?.email || ownerUserId || t('common.unknown', 'Unknown');
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
+    <Tooltip.Root>
+      <Tooltip.Trigger render={<span
           className="inline-flex shrink-0 cursor-default rounded-full"
           aria-label={t('workspace.machines.ownerTooltip', {
             owner: ownerName,
@@ -344,15 +344,14 @@ function MachineOwnerAvatar({
             size="small"
             showIcon={!ownerUserId}
           />
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="right">
+        </span>}/>
+      <Tooltip.Content side="right">
         {t('workspace.machines.ownerTooltip', {
           owner: ownerName,
           defaultValue: 'Machine owner: {{owner}}',
         })}
-      </TooltipContent>
-    </Tooltip>
+      </Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -373,21 +372,19 @@ function MachineAccessStatus({ sharedWithTeam }: { sharedWithTeam: boolean }) {
       );
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
+    <Tooltip.Root>
+      <Tooltip.Trigger render={<span
           className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground"
           aria-label={`${label}. ${description}`}
         >
           <Icon className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
           <span>{label}</span>
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="right" className="max-w-64 leading-relaxed">
+        </span>}/>
+      <Tooltip.Content side="right" className="max-w-64 leading-relaxed">
         <p className="font-normal">{label}</p>
         <p className="mt-0.5 text-muted-foreground">{description}</p>
-      </TooltipContent>
-    </Tooltip>
+      </Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -401,15 +398,13 @@ function FilterItem({
   onSelect: () => void;
 }) {
   return (
-    <DropdownMenuCheckboxItem
+    <Menu.CheckboxItem
       checked={checked}
-      onSelect={(event) => {
-        event.preventDefault();
-        onSelect();
-      }}
+      closeOnClick={false}
+      onCheckedChange={() => onSelect()}
     >
       <span className="min-w-0 truncate">{label}</span>
-    </DropdownMenuCheckboxItem>
+    </Menu.CheckboxItem>
   );
 }
 

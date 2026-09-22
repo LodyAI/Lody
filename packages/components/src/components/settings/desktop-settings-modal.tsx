@@ -11,13 +11,7 @@ import {
 } from '@/atoms';
 import { cn } from '@/lib/utils';
 import { ScrollArea } from '@/ui';
-import {
-  Dialog,
-  DialogClose,
-  DialogContentWithoutClose,
-  DialogDescription,
-  DialogTitle,
-} from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { useAppCapability } from '@/lib/app-platform';
@@ -62,19 +56,19 @@ export function DesktopSettingsModal() {
   }
 
   return (
-    <Dialog
+    <Dialog.Root
       open={open}
       onOpenChange={(next) => {
         if (!next) setOpen(false);
       }}
     >
-      <DialogContentWithoutClose
+      <Dialog.Content
         noAnimation
         className="flex h-[min(90vh,950px)] w-[84vw] max-w-[1100px] flex-col gap-0 overflow-hidden p-0 sm:p-0"
       >
         <SettingsModalBody />
-      </DialogContentWithoutClose>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }
 
@@ -141,7 +135,7 @@ function SettingsModalBody() {
 
   return (
     <SettingsDataCacheProvider>
-      <DialogDescription className="sr-only">{t('settings.title')}</DialogDescription>
+      <Dialog.Description className="sr-only">{t('settings.title')}</Dialog.Description>
       <div className="flex min-h-0 flex-1 overflow-hidden [&_button]:font-normal">
         <FocusScope
           id={navigationScopeId}
@@ -228,23 +222,23 @@ function SettingsModalBody() {
           role="main"
           className="relative flex min-h-0 min-w-0 flex-1 flex-col"
         >
-          <DialogClose
+          <Dialog.Close
             className="absolute top-2.5 right-2.5 z-10 flex h-5 w-5 items-center justify-center rounded-full bg-foreground/[0.06] text-muted-foreground transition-colors hover:bg-foreground/[0.12] hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
             aria-label={t('common.close', 'Close')}
           >
             <X className="h-3 w-3" strokeWidth={2} aria-hidden="true" />
-          </DialogClose>
+          </Dialog.Close>
           {/* `pr-10` keeps every right-pane control off the close button's
               vertical column (10px inset + 20px control). It sits inside the
               scroll area so the scrollbar stays flush with the pane edge. */}
           <div className="flex min-h-0 min-w-0 flex-1 flex-col pt-5" data-settings-surface="">
             {selfTitledTab ? (
-              <DialogTitle className="sr-only">{t(activeTabConfig.labelKey)}</DialogTitle>
+              <Dialog.Title className="sr-only">{t(activeTabConfig.labelKey)}</Dialog.Title>
             ) : (
               <header className="flex h-10 shrink-0 items-center pr-10 pl-8">
-                <DialogTitle className="text-xl font-normal leading-none">
+                <Dialog.Title className="text-xl font-normal leading-none">
                   {t(activeTabConfig.labelKey)}
-                </DialogTitle>
+                </Dialog.Title>
               </header>
             )}
             <div className="min-h-0 flex-1">

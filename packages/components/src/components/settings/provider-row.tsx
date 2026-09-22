@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
 import { RefreshCw, Trash2 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import {
   REGISTRY_ACP_AGENTS,
   type AgentConfigCliType,
@@ -11,19 +11,10 @@ import {
   type MachineViewMeta,
   parseRateLimitEntryKey,
 } from '@lody/shared';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
+import { AlertDialog } from '@/ui/dialog';
 import { cn } from '@/lib/utils';
 import { SETTINGS_ROW_CARD_CLASS } from './compact-layout';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
@@ -256,25 +247,25 @@ export function ProviderRow({
           ))}
         </div>
       )}
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
+      <AlertDialog.Root open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
               {t('agents.deleteConfigConfirm', 'Delete Configuration')}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
+            </AlertDialog.Title>
+            <AlertDialog.Description>
               {t('agents.deleteConfigConfirmDescription', {
                 name: config.name,
                 defaultValue:
                   'Are you sure you want to delete "{{name}}"? This action cannot be undone.',
               })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={deleting}>
               {t('common.cancel', 'Cancel')}
-            </AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Cancel>
+            <AlertDialog.Action
               disabled={deleting}
               onClick={(event) => {
                 event.preventDefault();
@@ -284,10 +275,10 @@ export function ProviderRow({
             >
               {deleting && <Spinner className="mr-2 h-4 w-4" />}
               {t('common.delete', 'Delete')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </div>
   );
 }

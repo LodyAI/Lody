@@ -88,6 +88,8 @@ describe('SessionForkDestinationPopover', () => {
           createElement('button', { type: 'button' }, 'Fork')
         )
       );
+      // Base UI defers the portal mount to a frame; jsdom's rAF is a real timer.
+      await new Promise((resolve) => setTimeout(resolve, 40));
     });
   };
 

@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
-import { Progress } from '@/ui/progress';
+import { Progress } from '@lody/ui/progress';
 import { cn } from '@/lib/utils';
 import type { UpdateBannerState } from '@/lib/electron-update-banner';
 

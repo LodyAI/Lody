@@ -5,7 +5,7 @@ import {
   EmojiPicker as EmojiPickerPrimitive,
 } from 'frimousse';
 import { SearchIcon } from 'lucide-react';
-import { Spinner } from './spinner';
+import { Spinner } from '@lody/ui/spinner';
 import type * as React from 'react';
 import { useTranslation } from 'react-i18next';
 

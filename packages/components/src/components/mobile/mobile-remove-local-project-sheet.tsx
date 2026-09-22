@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { LocalProjectWorktreeCleanupPreflightResult } from '@lody/shared';
 import { useTranslation } from 'react-i18next';
 import { X } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { Button } from '@lody/ui/button';

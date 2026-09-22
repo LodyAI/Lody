@@ -1,8 +1,8 @@
 import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Pencil } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
-import { toast } from 'sonner';
+import { Spinner } from '@lody/ui/spinner';
+import { toast } from '@/lib/toast';
 import type { AvatarKind } from '@lody/shared';
 import { cn } from '@/lib/utils';
 import { AVATAR_ACCEPT, validateAvatarFile } from '@/lib/avatar-upload';

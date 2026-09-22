@@ -12,7 +12,7 @@ import {
 } from 'react';
 import { useAtomValue } from 'jotai';
 import { ArrowUp } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
 import { useSessionAgentRole, type SessionAgentRoleControl } from '@/hooks/use-session-agent-role';
@@ -108,7 +108,7 @@ import {
 import { resolveEffectiveCodeCollabWorkspaceId } from '@/lib/code-collab-workspace-id';
 import { getDroppedFileLocalPath, toPathMentionInsertion } from '@/lib/dropped-local-path';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { uploadSessionImage, validateSessionImageFile } from '@/lib/session-image-upload';
 import {
   computeSha256Hex,

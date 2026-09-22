@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/ui/card';
+import { Card } from '@/ui/card';
 import { ScrollArea } from '@/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import {
@@ -215,7 +215,7 @@ export function PermissionRequestCard({
   const primaryOptionId = options[0]?.optionId ?? null;
 
   return (
-    <Card
+    <Card.Root
       className={cn(
         /* Same panel as the command block, tool output, and the proposed plan:
            the header carries the lighter fill, the body sits on the frame. */
@@ -224,7 +224,7 @@ export function PermissionRequestCard({
         className
       )}
     >
-      <CardHeader
+      <Card.Header
         className={cn(
           CONVERSATION_PANEL_HEADER_CLASS,
           showDetails && CONVERSATION_PANEL_HEADER_RULE_CLASS,
@@ -232,7 +232,7 @@ export function PermissionRequestCard({
         )}
       >
         {defaultCollapsed ? (
-          <CardTitle className="min-w-0 text-[13px] font-medium text-muted-foreground">
+          <Card.Title className="min-w-0 text-[13px] font-medium text-muted-foreground">
             <button
               type="button"
               className="flex w-full min-w-0 items-center gap-1.5 rounded-sm text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1"
@@ -248,15 +248,15 @@ export function PermissionRequestCard({
               />
               <span className="min-w-0">{headerLabel}</span>
             </button>
-          </CardTitle>
+          </Card.Title>
         ) : (
-          <CardTitle className="text-[13px] font-medium text-muted-foreground">
+          <Card.Title className="text-[13px] font-medium text-muted-foreground">
             {headerLabel}
-          </CardTitle>
+          </Card.Title>
         )}
         {title && <CollapsibleCommand title={title} />}
-      </CardHeader>
-      <CardContent
+      </Card.Header>
+      <Card.Content
         hidden={!showDetails}
         className={cn('px-3 pt-2', showFooter ? 'pb-1.5' : 'pb-2.5')}
       >
@@ -305,18 +305,18 @@ export function PermissionRequestCard({
             );
           })}
         </div>
-      </CardContent>
+      </Card.Content>
       {showFooter && showDetails && (
-        <CardFooter className="px-3 pb-2.5 pt-1">
+        <Card.Footer className="px-3 pb-2.5 pt-1">
           <div className="text-xs text-muted-foreground">
             {t(
               'sessions.permissionActionsDisabled',
               'Permission actions are disabled in this environment.'
             )}
           </div>
-        </CardFooter>
+        </Card.Footer>
       )}
-    </Card>
+    </Card.Root>
   );
 }
 

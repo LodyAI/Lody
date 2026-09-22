@@ -9,7 +9,7 @@ import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import { Switch } from '@lody/ui/switch';
 import { Select } from '@lody/ui/select';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   electronSessionCompletionNotificationsEnabledAtom,
   mobileKeyboardActionAtom,

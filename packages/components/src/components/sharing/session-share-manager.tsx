@@ -6,17 +6,8 @@ import type { useSessionShareManagement } from '@/hooks/use-session-share-manage
 import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
 import { Checkbox } from '@lody/ui/checkbox';
-import { Progress } from '@/ui/progress';
-import {
-  AlertDialog,
-  AlertDialogContent,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogCancel,
-  AlertDialogAction,
-} from '@/ui/alert-dialog';
+import { Progress } from '@lody/ui/progress';
+import { AlertDialog } from '@/ui/dialog';
 
 export type ShareCandidate = { sessionId: string; title: string };
 export type SessionShareManagerProps = ReturnType<typeof useSessionShareManagement> & {
@@ -171,8 +162,7 @@ export function SessionShareManager(props: SessionShareManagerProps) {
           </p>
           <Progress
             className="h-1 bg-muted"
-            indeterminate={phase !== 'uploading'}
-            value={props.progress}
+            value={phase === 'uploading' ? props.progress : null}
           />
           <Note>{t('sharing.static.phaseHint', 'Keep this dialog open until it finishes.')}</Note>
         </div>
@@ -414,29 +404,29 @@ export function SessionShareManager(props: SessionShareManagerProps) {
           {footer}
         </div>
       )}
-      <AlertDialog
+      <AlertDialog.Root
         open={confirming !== null}
         onOpenChange={(open) => {
           if (!open) setConfirming(null);
         }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
               {confirming?.kind === 'reset'
                 ? t('sharing.static.reset', 'Reset link')
                 : t('sharing.static.revoke', 'Revoke share')}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
+            </AlertDialog.Title>
+            <AlertDialog.Description>
               {t(
                 'sharing.static.invalidateNotice',
                 'The previous link will stop working. Downloaded copies cannot be recalled.'
               )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
+            <AlertDialog.Action
               disabled={busy || confirming?.revision !== entry?.revision}
               onClick={() => {
                 if (!confirming || confirming.revision !== entry?.revision) return;
@@ -446,10 +436,10 @@ export function SessionShareManager(props: SessionShareManagerProps) {
               }}
             >
               {t('common.confirm', 'Confirm')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import type { FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 
 import { Alert } from '@lody/ui/alert';
 import { Button } from '@lody/ui/button';

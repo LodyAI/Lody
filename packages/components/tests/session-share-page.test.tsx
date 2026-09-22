@@ -36,7 +36,7 @@ const theme = vi.hoisted(() => ({ value: 'system' as string, setTheme: vi.fn() }
 vi.mock('../src/theme-provider', () => ({
   useTheme: () => ({ theme: theme.value, setTheme: theme.setTheme }),
 }));
-vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock('@/lib/toast', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 // Exercise the real share shell and copy builder without a virtualized viewport.
 vi.mock('../src/components/ai-gui/view', () => ({
   SessionChatStreamView: ({ sessionId }: { sessionId: string }) => (

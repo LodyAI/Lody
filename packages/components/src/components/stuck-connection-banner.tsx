@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { usePlatform } from '@lody/platform/react';
 import { motion } from 'framer-motion';
 import { X } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import { useStuckConnectionHint } from '@/hooks/use-stuck-connection';
 import { ClearCacheConfirmDialog, useClearCache } from './settings/clear-cache';

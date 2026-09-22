@@ -78,9 +78,15 @@ function render(node: React.ReactElement) {
   flushSync(() => root?.render(node));
 }
 
-/** The single animated element in the tree, checked against both invariants. */
+/**
+ * The single animated element in the tree, checked against both invariants.
+ * `ui/spinner.tsx` animates an `.animate-spin` wrapper; `@lody/ui`'s Spinner
+ * animates a `[data-slot="spinner"]` one — both are the same contract.
+ */
 function expectCompositableSpinner(): Element {
-  const animated = [...container.querySelectorAll('.animate-spin')];
+  const animated = [
+    ...container.querySelectorAll('.animate-spin, [data-slot="spinner"]'),
+  ];
   expect(animated.length).toBe(1);
   const wrapper = animated[0]!;
 
@@ -89,14 +95,19 @@ function expectCompositableSpinner(): Element {
   expect(wrapper.tagName).toBe('SPAN');
   expect(container.querySelector('svg.animate-spin')).toBeNull();
 
-  // Invariant 2: square, explicitly sized, unsquishable, icon-only, and the
-  // glyph itself must not also spin or the two rotations compound.
-  expect(hasExplicitSquareSize(wrapper)).toBe(true);
-  expect(wrapper.classList.contains('shrink-0')).toBe(true);
+  // Invariant 2: icon-only — the animated box holds exactly the glyph, so it
+  // turns in place rather than orbiting or sweeping an ellipse.
   expect(wrapper.childElementCount).toBe(1);
   expect(wrapper.firstElementChild?.tagName).toBe('svg');
   expect(wrapper.textContent).toBe('');
-  expect(wrapper.querySelector('.animate-spin')).toBeNull();
+  expect(wrapper.querySelector('.animate-spin, [data-slot="spinner"]')).toBeNull();
+
+  // The local spinner's square, unsquishable box is Tailwind; `@lody/ui`'s is
+  // StyleX on the same wrapper (pinned in `packages/ui`'s own tests).
+  if (wrapper.classList.contains('animate-spin')) {
+    expect(hasExplicitSquareSize(wrapper)).toBe(true);
+    expect(wrapper.classList.contains('shrink-0')).toBe(true);
+  }
 
   return wrapper;
 }
@@ -109,7 +120,7 @@ describe('spinners animate on a compositable wrapper and rotate in place', () =>
     render(React.createElement(SidebarRowEndSlot, { isWorking: true }));
 
     const wrapper = expectCompositableSpinner();
-    expect(wrapper.hasAttribute('data-session-working-spinner')).toBe(true);
+    expect(wrapper.querySelector('[data-session-working-spinner]')).not.toBeNull();
 
     const indicator = wrapper.closest('[data-session-row-indicator]');
     expect(indicator).not.toBeNull();

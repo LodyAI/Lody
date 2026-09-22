@@ -3,7 +3,7 @@ import NumberFlow from '@number-flow/react';
 import { useTranslation } from 'react-i18next';
 import { Coins, DollarSign, Share2 } from 'lucide-react';
 import { Button } from '@lody/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import { formatCompactNumber, formatUsdAmount } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { cn } from '@/lib/utils';
@@ -229,19 +229,17 @@ export function StatsSettingsView({
         <div className="flex items-center gap-1.5">
           <RangeSelector range={range} onRangeChange={onRangeChange} />
           {shareCard && usageCalendar ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
+            <Tooltip.Root>
+              <Tooltip.Trigger render={<Button
                   icon
                   variant="ghost"
                   aria-label={t('workspace.usage.shareImage.action')}
                   onClick={() => setShareOpen(true)}
                 >
                   <Share2 />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{t('workspace.usage.shareImage.action')}</TooltipContent>
-            </Tooltip>
+                </Button>}/>
+              <Tooltip.Content>{t('workspace.usage.shareImage.action')}</Tooltip.Content>
+            </Tooltip.Root>
           ) : null}
         </div>
       </div>

@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   getMachineFlockLocalProjects,
   type CodeCollabContentUnavailableReason,
@@ -82,7 +82,7 @@ import {
   type SessionFileSaveStatus,
 } from '@/hooks/use-code-collab-save-text';
 import { Button } from '@lody/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import { useCodeCollabLsp, type CodeCollabLspState } from '@/hooks/use-code-collab-lsp';
 import { useLatestRef } from '@/hooks/use-latest-ref';
 import {
@@ -1705,9 +1705,8 @@ function FilePreviewToggle({
   const Icon = active ? EyeClosed : Eye;
   const label = active ? hideLabel : showLabel;
   return (
-    <Tooltip delayDuration={300}>
-      <TooltipTrigger asChild>
-        <button
+    <Tooltip.Root>
+      <Tooltip.Trigger delay={300} render={<button
           type="button"
           aria-pressed={active}
           onClick={onToggle}
@@ -1724,12 +1723,11 @@ function FilePreviewToggle({
               iris (already lighter) and is shown alone in the active color, so it
               keeps the default weight. */}
           <Icon className="h-3.5 w-3.5" strokeWidth={active ? 2 : 1.5} aria-hidden="true" />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="bottom" className="text-xs">
+        </button>}/>
+      <Tooltip.Content side="bottom" className="text-xs">
         {label}
-      </TooltipContent>
-    </Tooltip>
+      </Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 

@@ -35,6 +35,8 @@ export interface ModalContentProps extends Omit<PopupBaseProps, 'className' | 'r
   backdropContent?: ReactNode;
   /** Classes for the backdrop, for a host that has to restack it. */
   backdropClassName?: string;
+  /** Skip the enter/exit fade so the surface appears instantly. */
+  noAnimation?: boolean;
   className?: string;
 }
 
@@ -108,6 +110,7 @@ export const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(func
     container,
     backdropContent,
     backdropClassName,
+    noAnimation,
     closeButton = true,
     closeLabel = 'Close',
     ...rest
@@ -119,19 +122,25 @@ export const DialogContent = forwardRef<HTMLDivElement, DialogContentProps>(func
   // the classes that declare that palette travel with it and land on the
   // portal, where they cascade into the backdrop and the panel alike.
   const palette = useForcedThemeClassNames();
+  const noTransition = noAnimation ? stylex.props(modal.noTransition).className : undefined;
   return (
     <BaseDialog.Portal
       container={container}
       className={[stylex.props(styles.portal).className, ...palette].filter(Boolean).join(' ')}
     >
-      <DialogBackdrop className={backdropClassName}>{backdropContent}</DialogBackdrop>
+      <DialogBackdrop className={appendClassName(backdropClassName, noTransition)}>
+        {backdropContent}
+      </DialogBackdrop>
       <BaseDialog.Popup
         ref={panelRef}
         {...rest}
         className={(state) =>
           appendClassName(
-            stylex.props(modal.popup, isHidden(state.transitionStatus) && modal.popupHidden)
-              .className,
+            stylex.props(
+              modal.popup,
+              isHidden(state.transitionStatus) && modal.popupHidden,
+              noAnimation && modal.noTransition
+            ).className,
             className
           )
         }

@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { Check, Copy, Download, FileWarning, X } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import type { SessionFilePayload } from '@lody/shared';
-import { Dialog, DialogClose, DialogContentWithoutClose, DialogTitle } from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import { Button } from '@lody/ui/button';
 import { Tabs } from '@lody/ui/tabs';
 import { formatFileSize } from '@/lib/session-file-presentation';
@@ -66,7 +66,7 @@ export function SessionFilePreviewPanel({
   const renderMarkdown = markdown && !showRaw;
 
   return (
-    // `min-w-0` is load-bearing: this panel is a grid child of DialogContent
+    // `min-w-0` is load-bearing: this panel is a grid child of Dialog.Content
     // (`display: grid`). Grid/flex items default to `min-width: auto`, so wide
     // content (long code lines, tables, unbreakable tokens) would stretch the
     // panel past the dialog's `max-w-3xl` and bleed out of the modal. Capping
@@ -74,9 +74,9 @@ export function SessionFilePreviewPanel({
     <div className="flex min-h-0 min-w-0 flex-col">
       <div className="flex items-center justify-between gap-3 border-b border-border/50 pb-3">
         <div className="flex min-w-0 flex-col gap-0.5">
-          <DialogTitle className="truncate text-sm font-semibold leading-tight">
+          <Dialog.Title className="truncate text-sm font-semibold leading-tight">
             {file.fileName}
-          </DialogTitle>
+          </Dialog.Title>
           <span className="text-xs text-muted-foreground tabular-nums">
             {formatFileSize(file.sizeBytes)}
           </span>
@@ -122,17 +122,19 @@ export function SessionFilePreviewPanel({
               action (close), and the close sits inline in the same row instead
               of floating in the corner over the buttons. */}
           <span className="mx-0.5 h-4 w-px bg-border" aria-hidden="true" />
-          <DialogClose asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              aria-label={t('common.close', 'Close')}
-              size="small"
-              icon
-            >
-              <X className="size-4" />
-            </Button>
-          </DialogClose>
+          <Dialog.Close
+            render={
+              <Button
+                type="button"
+                variant="ghost"
+                aria-label={t('common.close', 'Close')}
+                size="small"
+                icon
+              />
+            }
+          >
+            <X className="size-4" />
+          </Dialog.Close>
         </div>
       </div>
 
@@ -204,10 +206,10 @@ export function SessionFilePreviewDialog({
   // Re-key the panel per file so the rendered/raw toggle resets between files.
   const panelKey = useMemo(() => panelProps.file.fileId, [panelProps.file.fileId]);
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContentWithoutClose className="w-[calc(100vw-2rem)] max-w-3xl">
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Content className="w-[calc(100vw-2rem)] max-w-3xl">
         <SessionFilePreviewPanel key={panelKey} {...panelProps} />
-      </DialogContentWithoutClose>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

@@ -1,11 +1,11 @@
 import type { FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Mail } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 
 import { Alert } from '@lody/ui/alert';
 import { Button } from '@lody/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/ui/card';
+import { Card } from '@/ui/card';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
 
@@ -32,30 +32,30 @@ export function ForgotPasswordPage({
 
   return (
     <div className="flex min-h-screen w-full items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="space-y-4 text-center">
+      <Card.Root className="w-full max-w-md">
+        <Card.Header className="space-y-4 text-center">
           <div className="flex justify-center">
             <div className="rounded-full bg-primary/10 p-3">
               <Mail className="h-6 w-6 text-primary" aria-hidden="true" />
             </div>
           </div>
           <div className="space-y-1">
-            <CardTitle
+            <Card.Title
               id="forgot-password-title"
               as="h1"
               className="text-2xl font-semibold tracking-tight"
             >
               {t('forgotPassword.title', 'Reset your password')}
-            </CardTitle>
-            <CardDescription>
+            </Card.Title>
+            <Card.Description>
               {t(
                 'forgotPassword.description',
                 'Enter your account email and we will send you a password reset link.'
               )}
-            </CardDescription>
+            </Card.Description>
           </div>
-        </CardHeader>
-        <CardContent>
+        </Card.Header>
+        <Card.Content>
           <form
             onSubmit={onSubmit}
             className="grid gap-4"
@@ -111,8 +111,8 @@ export function ForgotPasswordPage({
               {t('forgotPassword.backToLogin', 'Back to login')}
             </Button>
           </form>
-        </CardContent>
-      </Card>
+        </Card.Content>
+      </Card.Root>
     </div>
   );
 }

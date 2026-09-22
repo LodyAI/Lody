@@ -1,8 +1,8 @@
 import { lazy, Suspense, useRef, useState } from 'react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
-import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
+import { Popover } from '@lody/ui/popover';
 
 const EmojiPickerPanel = lazy(() => import('./emoji-picker-panel'));
 
@@ -39,24 +39,22 @@ export function EmojiField({
     : null;
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <button
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger render={<button
           ref={triggerRef}
           type="button"
           aria-label={t('settings.emoji.label', 'Emoji')}
           className="flex h-9 w-11 shrink-0 items-center justify-center rounded-md border border-input-border bg-input-field text-lg leading-none transition-colors hover:bg-hover/60 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
         >
           <span aria-hidden="true">{value || defaultEmoji}</span>
-        </button>
-      </PopoverTrigger>
-      <PopoverContent
+        </button>}/>
+      <Popover.Content
         align="start"
         className="w-fit p-0"
-        portalContainer={portalContainer}
+        container={portalContainer}
         // The list is long and the search field wants the caret; taking focus to
         // the popover root would fight the picker's own keyboard handling.
-        onOpenAutoFocus={(event) => event.preventDefault()}
+        initialFocus={false}
       >
         <Suspense
           fallback={
@@ -91,7 +89,7 @@ export function EmojiField({
             </Button>
           </div>
         ) : null}
-      </PopoverContent>
-    </Popover>
+      </Popover.Content>
+    </Popover.Root>
   );
 }

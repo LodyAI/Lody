@@ -28,7 +28,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Skeleton } from '@lody/ui/skeleton';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import {
   describeBrowseError,
@@ -627,7 +627,7 @@ export interface AddLocalProjectDialogProps {
   onOpenChange: (open: boolean) => void;
   isMobile?: boolean;
   /** Nested inside another dialog (desktop settings). Matches MCP's overlay. */
-  overlayClassName?: string;
+  backdropClassName?: string;
   machines: RemoteDirectoryPickerMachine[];
   machinesLoading?: boolean;
   initialMachineId?: RemoteDirectoryPickerArgs['initialMachineId'];
@@ -637,7 +637,7 @@ export interface AddLocalProjectDialogProps {
 }
 
 /**
- * Shell that renders the directory picker as a centered Dialog on desktop and a
+ * Shell that renders the directory picker as a centered Dialog.Root on desktop and a
  * full-height mobile flow inside a bottom Drawer on mobile.
  */
 export function AddLocalProjectDialog({
@@ -650,7 +650,7 @@ export function AddLocalProjectDialog({
   ops,
   onAdded,
   onLocateRegistered,
-  overlayClassName,
+  backdropClassName,
 }: AddLocalProjectDialogProps) {
   const { t } = useTranslation();
   const close = useCallback(() => onOpenChange(false), [onOpenChange]);
@@ -688,13 +688,13 @@ export function AddLocalProjectDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        overlayClassName={overlayClassName}
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Content
+        backdropClassName={backdropClassName}
         className="gap-0 overflow-hidden p-0 sm:max-w-lg"
       >
-        <DialogTitle className="sr-only">{a11yTitle}</DialogTitle>
-        <DialogDescription className="sr-only">{a11yDescription}</DialogDescription>
+        <Dialog.Title className="sr-only">{a11yTitle}</Dialog.Title>
+        <Dialog.Description className="sr-only">{a11yDescription}</Dialog.Description>
         <RemoteDirectoryPicker
           machines={machines}
           machinesLoading={machinesLoading}
@@ -704,7 +704,7 @@ export function AddLocalProjectDialog({
           onLocateRegistered={onLocateRegistered}
           onClose={close}
         />
-      </DialogContent>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

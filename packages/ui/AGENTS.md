@@ -40,7 +40,7 @@ with this package's `stylex-options.ts`.
 - Every floating part's `Content` assembles Base UI's portal, positioner and
   popup, taking the positioning props outside. They mount into the nearest
   `PopupContainerProvider` on the absolute strategy: a container centred with
-  `translate` is the containing block for `fixed` descendants.
+  `translate` contains `fixed` descendants.
 - `Menu` is the dropdown; `ContextMenu` and `Menubar` restate only the way in
   and re-export its rows. A menu reads `popup` and replaces one declaration,
   `--anchor-width`; surface and rows come from `src/popup/surface.ts`.
@@ -69,13 +69,13 @@ with this package's `stylex-options.ts`.
   size once for every tab; a revealed panel's padding rides on a child: Base UI
   animates a `scrollHeight`, which counts it.
 - Alert, Toast, Progress, Skeleton and Spinner are one `feedback` family. A tone
-  is a tint and a mark, never a fill: the mark is the part's (`tone.ts`), the
-  tint mixed from its rung (`surface.ts`). `disabled` from Base UI state, not
-  `:disabled`.
+  is a tint and a mark, never a fill — mark in `tone.ts`, tint in `surface.ts`;
+  `disabled` is Base UI state. A Spinner's turn rides an HTML wrapper, not
+  svg: svg animations can't composite at DPR≠1 (crbug 1186312).
 - `Table` and `Pagination` are one `table` family. **A column is stated once**:
-  `Table` takes `columns` and owns width, ordering (one column, on the root),
-  selection (a `Checkbox`, never `aria-selected`), the empty row's span, the
-  sticky head and the narrow stack. `table/parts.tsx` is the element layer. A
+  `Table` takes `columns` and owns width, ordering, selection (a `Checkbox`,
+  never `aria-selected`), the empty row's span, the sticky head and the narrow
+  stack. `table/parts.tsx` is the element layer. A
   table draws no surface: `border-collapse: separate` lets its line, head and
   row ring be box-shadows.
 - Toggle, ToggleGroup and Toolbar are one `toggle` family; a Toggle is not a
@@ -114,8 +114,8 @@ with this package's `stylex-options.ts`.
   `test/gallery.test.tsx` fails when a token has no entry. **A sample that is a
   rung needs a different rung under it**: the panel is the card rung, and in
   dark region and card are one value. No test sees this — open the board.
-- `corner.shape` goes with every radius, except `radius.full` and ringed
-  corners — both take `corner.round`: spread shadows can't parallel-offset a
+- `corner.shape` goes with every radius except `radius.full` and ringed
+  corners — both `corner.round`: spread shadows can't parallel-offset a
   superellipse; round is the non-Chromium fallback.
 - A Radix file in `packages/components/src/ui` is deleted when its in-repo
   callers reach zero; private consumers sync on typecheck.

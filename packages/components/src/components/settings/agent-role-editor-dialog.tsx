@@ -22,7 +22,7 @@ import {
 } from '@/lib/agent-role-form';
 import { cn } from '@/lib/utils';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import { AgentRoleForm } from './agent-role-form';
 
 /**
@@ -204,14 +204,14 @@ export function AgentRoleEditorDialog({
   };
 
   return (
-    <Dialog
+    <Dialog.Root
       open={editor !== null}
       onOpenChange={(open) => {
         if (!open) close();
       }}
     >
-      <DialogContent
-        overlayClassName={
+      <Dialog.Content
+        backdropClassName={
           // Desktop settings is itself a dialog; match its z-index so this
           // later overlay covers it without stacking a second /80 veil.
           isMobile ? undefined : 'z-[var(--z-dialog)] bg-black/20'
@@ -222,14 +222,14 @@ export function AgentRoleEditorDialog({
         )}
       >
         <header className="shrink-0 border-b border-border/60 px-5 py-3 pr-12">
-          <DialogTitle className="text-sm font-normal">
+          <Dialog.Title className="text-sm font-normal">
             {editor?.mode === 'edit'
               ? t('settings.agentRoles.editTitle')
               : t('settings.agentRoles.addTitle')}
-          </DialogTitle>
-          <DialogDescription className="mt-0.5 text-xs leading-snug text-muted-foreground">
+          </Dialog.Title>
+          <Dialog.Description className="mt-0.5 text-xs leading-snug text-muted-foreground">
             {t('settings.agentRoles.dialogDescription')}
-          </DialogDescription>
+          </Dialog.Description>
         </header>
         {editor && editorValue ? (
           <AgentRoleForm
@@ -251,7 +251,7 @@ export function AgentRoleEditorDialog({
             onCancel={close}
           />
         ) : null}
-      </DialogContent>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

@@ -10,7 +10,7 @@ import { Input } from '@lody/ui/input';
 import { Separator } from '@lody/ui/separator';
 import { Drawer } from '@lody/ui/drawer';
 import { Skeleton } from '@lody/ui/skeleton';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 
 const SIDEBAR_COOKIE_NAME = 'sidebar_state';
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
@@ -105,7 +105,7 @@ function SidebarProvider({
 
   return (
     <SidebarContext.Provider value={contextValue}>
-      <TooltipProvider delayDuration={500}>
+      <Tooltip.Provider delay={500}>
         <div
           data-slot="sidebar-wrapper"
           style={
@@ -123,7 +123,7 @@ function SidebarProvider({
         >
           {children}
         </div>
-      </TooltipProvider>
+      </Tooltip.Provider>
     </SidebarContext.Provider>
   );
 }
@@ -480,7 +480,7 @@ function SidebarMenuButton({
 }: React.ComponentProps<'button'> & {
   asChild?: boolean;
   isActive?: boolean;
-  tooltip?: string | React.ComponentProps<typeof TooltipContent>;
+  tooltip?: string | React.ComponentProps<typeof Tooltip.Content>;
 } & VariantProps<typeof sidebarMenuButtonVariants>) {
   const Comp = asChild ? Slot : 'button';
   const { isMobile, state } = useSidebar();
@@ -507,15 +507,15 @@ function SidebarMenuButton({
   }
 
   return (
-    <Tooltip delayDuration={500}>
-      <TooltipTrigger asChild>{button}</TooltipTrigger>
-      <TooltipContent
+    <Tooltip.Root>
+      <Tooltip.Trigger delay={500} render={button}/>
+      <Tooltip.Content
         side="right"
         align="center"
         hidden={state !== 'collapsed' || isMobile}
         {...tooltip}
       />
-    </Tooltip>
+    </Tooltip.Root>
   );
 }
 

@@ -2,20 +2,13 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ArrowLeft } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
-import { toast } from 'sonner';
+import { Spinner } from '@lody/ui/spinner';
+import { toast } from '@/lib/toast';
 import { validateNewPassword } from '@lody/shared';
 import { Button } from '@lody/ui/button';
 import { Field as UiField } from '@lody/ui/field';
 import { PasswordInput } from '@lody/ui/password-input';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import { formatPasswordValidationFailure } from '@/lib/password-validation';
 
 interface ChangePasswordButtonProps {
@@ -167,18 +160,18 @@ export function ChangePasswordButton({
           : t('settings.profile.password.setupButton')}
       </Button>
 
-      <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent>
+      <Dialog.Root open={open} onOpenChange={handleOpenChange}>
+        <Dialog.Content>
           {hasPassword ? (
             <>
-              <DialogHeader>
-                <DialogTitle>{t('settings.profile.password.dialogTitle')}</DialogTitle>
-                <DialogDescription>
+              <Dialog.Header>
+                <Dialog.Title>{t('settings.profile.password.dialogTitle')}</Dialog.Title>
+                <Dialog.Description>
                   {step === 0
                     ? t('settings.profile.password.currentStepHint')
                     : t('settings.profile.password.newStepHint')}
-                </DialogDescription>
-              </DialogHeader>
+                </Dialog.Description>
+              </Dialog.Header>
               <div className="relative overflow-hidden py-2">
                 <AnimatePresence mode="wait" custom={direction} initial={false}>
                   {step === 0 ? (
@@ -263,7 +256,7 @@ export function ChangePasswordButton({
                   )}
                 </AnimatePresence>
               </div>
-              <DialogFooter>
+              <Dialog.Footer>
                 {step === 0 ? (
                   <>
                     <Button
@@ -308,17 +301,17 @@ export function ChangePasswordButton({
                     </Button>
                   </>
                 )}
-              </DialogFooter>
+              </Dialog.Footer>
             </>
           ) : (
             <>
-              <DialogHeader>
-                <DialogTitle>{t('settings.profile.password.setupDialogTitle')}</DialogTitle>
-                <DialogDescription>
+              <Dialog.Header>
+                <Dialog.Title>{t('settings.profile.password.setupDialogTitle')}</Dialog.Title>
+                <Dialog.Description>
                   {t('settings.profile.password.setupDialogDescription')}
-                </DialogDescription>
-              </DialogHeader>
-              <DialogFooter>
+                </Dialog.Description>
+              </Dialog.Header>
+              <Dialog.Footer>
                 <Button
                   variant="secondary"
                   size="small"
@@ -337,11 +330,11 @@ export function ChangePasswordButton({
                   {isSubmitting ? <Spinner className="mr-1.5 h-3.5 w-3.5" /> : null}
                   {t('settings.profile.password.setupSubmitButton')}
                 </Button>
-              </DialogFooter>
+              </Dialog.Footer>
             </>
           )}
-        </DialogContent>
-      </Dialog>
+        </Dialog.Content>
+      </Dialog.Root>
     </>
   );
 }

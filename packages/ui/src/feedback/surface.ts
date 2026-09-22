@@ -288,17 +288,29 @@ export const feedbackSurface = stylex.create({
    * belongs to them. The ring behind the arc is the same colour at a quarter,
    * which is one declaration rather than a token per context.
    */
-  spinner: {
-    display: 'block',
+  /**
+   * The turn rides on an HTML wrapper, never on the `<svg>` itself: Chromium
+   * cannot composite a transform animation whose target is an SVG element at
+   * DPR≠1 (crbug.com/1186312), so an animated svg re-runs style, pre-paint and
+   * layerize on the main thread every vsync — two idle sidebar spinners
+   * measured 40–50% renderer CPU on a Retina Mac. The same animation on an
+   * HTML element composites.
+   */
+  spinnerSpin: {
+    display: 'inline-flex',
     flexShrink: 0,
-    color: 'inherit',
-    // A presentation attribute cannot hold a `var()`, so the one measurement
-    // both the ring and the arc take is declared here instead.
-    strokeWidth: feedback.spinnerWidth,
     animationName: spin,
     animationDuration: '900ms',
     animationTimingFunction: 'linear',
     animationIterationCount: 'infinite',
+    willChange: 'transform',
+  },
+  spinner: {
+    display: 'block',
+    color: 'inherit',
+    // A presentation attribute cannot hold a `var()`, so the one measurement
+    // both the ring and the arc take is declared here instead.
+    strokeWidth: feedback.spinnerWidth,
   },
   spinnerSmall: { width: feedback.spinnerSmall, height: feedback.spinnerSmall },
   spinnerMedium: { width: feedback.spinnerMedium, height: feedback.spinnerMedium },

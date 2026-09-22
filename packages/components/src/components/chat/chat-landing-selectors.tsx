@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import type { ReactNode } from 'react';
 import { ShieldCheck, Compass, GitBranch, PenLine, ShieldOff, Eye, Monitor } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { AcpSessionSelect, OptionSelector, type AcpSessionSelectOption } from '@/components/shared';
 import type { OptionSelectorOption } from '@/components/shared/option-selector';
 import type {

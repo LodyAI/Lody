@@ -1,20 +1,13 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Spinner } from '@/ui/spinner';
-import { toast } from 'sonner';
+import { Spinner } from '@lody/ui/spinner';
+import { toast } from '@/lib/toast';
 import type { IconType } from 'react-icons';
 import { SiApple, SiDiscord, SiGithub } from 'react-icons/si';
 import { FcGoogle } from 'react-icons/fc';
 import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 
 export interface LinkedAccountInfo {
   id: string;
@@ -185,23 +178,23 @@ export function LinkedAccountsList({
         })}
       </div>
 
-      <Dialog
+      <Dialog.Root
         open={pendingProviderId !== null}
         onOpenChange={(open) => {
           if (isConnecting) return;
           if (!open) setPendingProviderId(null);
         }}
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
+        <Dialog.Content>
+          <Dialog.Header>
+            <Dialog.Title>
               {t('settings.profile.bindings.connectTitle', { provider: pendingLabel })}
-            </DialogTitle>
-            <DialogDescription>
+            </Dialog.Title>
+            <Dialog.Description>
               {t('settings.profile.bindings.connectDescription', { provider: pendingLabel })}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
+            </Dialog.Description>
+          </Dialog.Header>
+          <Dialog.Footer>
             <Button
               variant="secondary"
               size="small"
@@ -220,9 +213,9 @@ export function LinkedAccountsList({
               {isConnecting ? <Spinner className="mr-1.5 h-3.5 w-3.5" /> : null}
               {t('settings.profile.bindings.connectConfirm')}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </Dialog.Footer>
+        </Dialog.Content>
+      </Dialog.Root>
     </>
   );
 }

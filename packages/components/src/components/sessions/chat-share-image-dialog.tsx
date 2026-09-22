@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, Copy, Download, Slash, X } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { estimateTokenCount, type SessionMeta, type ConversationMessage } from '@lody/shared';
 import { formatCompactNumber } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useResolvedTheme } from '@/theme-provider';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { Button } from '@lody/ui/button';
 import { Slider } from '@/ui/slider';
@@ -663,14 +663,14 @@ export function ChatShareImageDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={requestOpenChange}>
-      <DialogContent className="flex max-h-[88vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-[720px] sm:p-0">
-        <DialogHeader className="border-b border-border/70 px-5 py-3.5 pr-12 text-left">
-          <DialogTitle className="text-base">{dialogTitle}</DialogTitle>
-          <DialogDescription className="leading-5">
+    <Dialog.Root open={open} onOpenChange={requestOpenChange}>
+      <Dialog.Content className="flex max-h-[88vh] flex-col gap-0 overflow-hidden p-0 sm:max-w-[720px] sm:p-0">
+        <Dialog.Header className="border-b border-border/70 px-5 py-3.5 pr-12 text-left">
+          <Dialog.Title className="text-base">{dialogTitle}</Dialog.Title>
+          <Dialog.Description className="leading-5">
             {t('sessions.shareImage.dialogDescription', 'PNG image')}
-          </DialogDescription>
-        </DialogHeader>
+          </Dialog.Description>
+        </Dialog.Header>
 
         <div className="flex min-h-0 flex-1 flex-col bg-muted/40 p-6">{preview}</div>
 
@@ -692,7 +692,7 @@ export function ChatShareImageDialog({
             </div>
           </div>
         </div>
-      </DialogContent>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

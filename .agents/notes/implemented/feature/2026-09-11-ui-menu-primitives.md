@@ -177,3 +177,6 @@ the tests run in jsdom, where StyleX's compiled CSS is never applied, so no test
 here can see a layout or a colour. Every visual assertion in `test/menu.test.tsx`
 is therefore made against the classes a style compiles to rather than against
 `getComputedStyle`, which returns the empty string for all of them.
+
+The call-site migration this note deferred landed in
+[2026-09-22-ui-radix-callsite-migration](2026-09-22-ui-radix-callsite-migration.md).

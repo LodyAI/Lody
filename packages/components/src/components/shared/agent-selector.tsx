@@ -11,8 +11,8 @@ import { getAllAgentConfigAtom } from '@/atoms';
 import { cn } from '@/lib/utils';
 import { useOnlineMachines } from '@/hooks/use-online-machines';
 import { Bot } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui';
+import { Spinner } from '@lody/ui/spinner';
+import { Tooltip } from '@lody/ui/tooltip';
 import { OptionSelector, type OptionSelectorOption } from './option-selector';
 
 export type AgentSelection = {
@@ -170,12 +170,10 @@ export function AgentSelector({
   // reason ("Select a machine first") would be misleading in that window.
   if (disabledReason && !loading) {
     return (
-      <Tooltip delayDuration={500}>
-        <TooltipTrigger asChild>
-          <div className="w-full">{selectorNode}</div>
-        </TooltipTrigger>
-        <TooltipContent>{disabledReason}</TooltipContent>
-      </Tooltip>
+      <Tooltip.Root>
+        <Tooltip.Trigger delay={500} render={<div className="w-full">{selectorNode}</div>}/>
+        <Tooltip.Content>{disabledReason}</Tooltip.Content>
+      </Tooltip.Root>
     );
   }
 

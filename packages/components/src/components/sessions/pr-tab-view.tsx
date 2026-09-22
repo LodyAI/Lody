@@ -46,16 +46,7 @@ import { Textarea } from '@lody/ui/textarea';
 import { SessionCommentMarkdown } from '@/ui/diff-viewer/session-comment-markdown';
 import { GitHubCommentThread } from '@/ui/diff-viewer/github-comment-thread';
 import { PullRequestBadge } from '@/components/sessions/pull-request-badge';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
+import { Menu } from '@/ui/menu';
 
 export type PrTabViewState = 'loading' | 'ready' | 'error';
 
@@ -678,13 +669,13 @@ function PrHeaderActionButton({
   const canReopen = Boolean(onSetState) && pr.state === 'closed' && !pr.merged;
 
   const closeItem = canClose ? (
-    <DropdownMenuItem
+    <Menu.Item
       onClick={() => void onSetState?.('closed')}
       className="gap-2 text-status-danger focus:text-status-danger"
     >
       <GitPullRequestClosed className="h-3.5 w-3.5" />
       {t('sessions.prTab.closeAction', 'Close pull request')}
-    </DropdownMenuItem>
+    </Menu.Item>
   ) : null;
 
   // Ready to merge — green split button with a method switch + Close.
@@ -701,8 +692,16 @@ function PrHeaderActionButton({
           {isMerging ? <Spinner className="h-3.5 w-3.5" /> : <GitMerge className="h-3.5 w-3.5" />}
           {mergeMethodShortLabel(mergeMethod, t)}
         </Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
+        <Menu.Root>
+          <Menu.Trigger render={<Button
+              type="button"
+              size="small"
+              disabled={busy}
+              aria-label={t('sessions.prTab.moreActions', 'More actions')}
+              className={cn('h-7 rounded-l-none px-1.5', PR_MERGE_BTN_GREEN, PR_SPLIT_DIVIDER)}
+            >
+              <ChevronDown className="h-3.5 w-3.5" />
+            </Button>}>
             <Button
               type="button"
               size="small"
@@ -712,29 +711,29 @@ function PrHeaderActionButton({
             >
               <ChevronDown className="h-3.5 w-3.5" />
             </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className={menuContentClassName}>
-            <DropdownMenuLabel>
+          </Menu.Trigger>
+          <Menu.Content align="end" className={menuContentClassName}>
+            <Menu.GroupLabel>
               {t('sessions.prTab.chooseMergeMethod', 'Choose merge method')}
-            </DropdownMenuLabel>
-            <DropdownMenuRadioGroup
+            </Menu.GroupLabel>
+            <Menu.RadioGroup
               value={mergeMethod}
               onValueChange={(value) => onSelectMergeMethod?.(value as GitHubMergeMethod)}
             >
               {HEADER_MERGE_METHODS.map((method) => (
-                <DropdownMenuRadioItem key={method.value} value={method.value}>
+                <Menu.RadioItem key={method.value} value={method.value}>
                   {t(method.labelKey, method.labelFallback)}
-                </DropdownMenuRadioItem>
+                </Menu.RadioItem>
               ))}
-            </DropdownMenuRadioGroup>
+            </Menu.RadioGroup>
             {closeItem && (
               <>
-                <DropdownMenuSeparator />
+                <Menu.Separator />
                 {closeItem}
               </>
             )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+          </Menu.Content>
+        </Menu.Root>
       </div>
     );
   }
@@ -768,8 +767,17 @@ function PrHeaderActionButton({
           {t('sessions.prTab.resolveConflicts', 'Resolve conflicts')}
         </Button>
         {closeItem && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
+          <Menu.Root>
+            <Menu.Trigger render={<Button
+                type="button"
+                size="small"
+                variant="secondary"
+                disabled={busy}
+                aria-label={t('sessions.prTab.moreActions', 'More actions')}
+                className="h-7 rounded-l-none border-l px-1.5"
+              >
+                <ChevronDown className="h-3.5 w-3.5" />
+              </Button>}>
               <Button
                 type="button"
                 size="small"
@@ -780,11 +788,11 @@ function PrHeaderActionButton({
               >
                 <ChevronDown className="h-3.5 w-3.5" />
               </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className={menuContentClassName}>
+            </Menu.Trigger>
+            <Menu.Content align="end" className={menuContentClassName}>
               {closeItem}
-            </DropdownMenuContent>
-          </DropdownMenu>
+            </Menu.Content>
+          </Menu.Root>
         )}
       </div>
     );
@@ -817,8 +825,17 @@ function PrHeaderActionButton({
           {mergeMethodShortLabel(mergeMethod, t)}
         </Button>
         {closeItem && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
+          <Menu.Root>
+            <Menu.Trigger render={<Button
+                type="button"
+                size="small"
+                variant="secondary"
+                disabled={busy}
+                aria-label={t('sessions.prTab.moreActions', 'More actions')}
+                className="h-7 rounded-l-none border-l px-1.5"
+              >
+                <ChevronDown className="h-3.5 w-3.5" />
+              </Button>}>
               <Button
                 type="button"
                 size="small"
@@ -829,11 +846,11 @@ function PrHeaderActionButton({
               >
                 <ChevronDown className="h-3.5 w-3.5" />
               </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className={menuContentClassName}>
+            </Menu.Trigger>
+            <Menu.Content align="end" className={menuContentClassName}>
               {closeItem}
-            </DropdownMenuContent>
-          </DropdownMenu>
+            </Menu.Content>
+          </Menu.Root>
         )}
       </div>
     );
@@ -858,8 +875,16 @@ function PrHeaderActionButton({
           {t('sessions.prTab.readyForReview', 'Ready for review')}
         </Button>
         {closeItem && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
+          <Menu.Root>
+            <Menu.Trigger render={<Button
+                type="button"
+                size="small"
+                disabled={busy}
+                aria-label={t('sessions.prTab.moreActions', 'More actions')}
+                className={cn('h-7 rounded-l-none px-1.5', PR_SPLIT_DIVIDER)}
+              >
+                <ChevronDown className="h-3.5 w-3.5" />
+              </Button>}>
               <Button
                 type="button"
                 size="small"
@@ -869,11 +894,11 @@ function PrHeaderActionButton({
               >
                 <ChevronDown className="h-3.5 w-3.5" />
               </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className={menuContentClassName}>
+            </Menu.Trigger>
+            <Menu.Content align="end" className={menuContentClassName}>
               {closeItem}
-            </DropdownMenuContent>
-          </DropdownMenu>
+            </Menu.Content>
+          </Menu.Root>
         )}
       </div>
     );

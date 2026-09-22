@@ -1,7 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react';
 
 import { filterFuzzyOptions, shouldOfferOptionSearch } from '@/lib/fuzzy-option-filter';
-import { DropdownMenuSearchInput } from '@/ui/dropdown-menu';
+import { MenuSearchInput } from '@/ui/menu';
 
 export type MenuSearchableOption = {
   value: string;
@@ -62,7 +62,7 @@ export function MenuOptionSearchList<TOption extends MenuSearchableOption>({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {searchable ? (
-        <DropdownMenuSearchInput
+        <MenuSearchInput
           value={query}
           onValueChange={setQuery}
           placeholder={searchPlaceholder}

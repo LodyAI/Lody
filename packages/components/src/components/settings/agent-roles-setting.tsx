@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { Plus, Trash2, UserRoundCog } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import {
   canManageAgentRole,
@@ -25,19 +25,10 @@ import { buildAgentRoleRunConfigSummary, EMPTY_AGENT_ROLE_FORM_VALUE } from '@/l
 import { AGENT_ROLE_UNAVAILABLE_REASON_KEYS } from '@/lib/composer-agent-roles';
 import { cn } from '@/lib/utils';
 import { SETTINGS_ROW_CARD_CLASS } from './compact-layout';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
+import { AlertDialog } from '@/ui/dialog';
 import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import { settingContainerClass } from '.';
 import {
   AgentRoleEditorDialog,
@@ -126,14 +117,12 @@ export function AgentRolesSetting() {
               </span>
             ) : null}
           </div>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" aria-label={addLabel} size="small" icon onClick={openAdd}>
+          <Tooltip.Root>
+            <Tooltip.Trigger render={<Button variant="ghost" aria-label={addLabel} size="small" icon onClick={openAdd}>
                 <Plus className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{addLabel}</TooltipContent>
-          </Tooltip>
+              </Button>}/>
+            <Tooltip.Content>{addLabel}</Tooltip.Content>
+          </Tooltip.Root>
         </div>
 
         {roles.length === 0 ? (
@@ -183,22 +172,22 @@ export function AgentRolesSetting() {
         source="settings"
       />
 
-      <AlertDialog
+      <AlertDialog.Root
         open={pendingRemoval !== null}
         onOpenChange={(open) => {
           if (!open && !removing) setPendingRemoval(null);
         }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('settings.agentRoles.removeTitle')}</AlertDialogTitle>
-            <AlertDialogDescription>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>{t('settings.agentRoles.removeTitle')}</AlertDialog.Title>
+            <AlertDialog.Description>
               {t('settings.agentRoles.confirmRemove', { name: pendingRemoval?.name ?? '' })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={removing}>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={removing}>{t('common.cancel')}</AlertDialog.Cancel>
+            <AlertDialog.Action
               disabled={removing} variant="destructive"
               onClick={(event) => {
                 event.preventDefault();
@@ -207,10 +196,10 @@ export function AgentRolesSetting() {
             >
               {removing ? <Spinner className="mr-2 h-4 w-4" /> : null}
               {t('common.remove')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </div>
   );
 }

@@ -1,11 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { isElectronRenderer, isMacOSElectronRenderer } from '@/lib/electron';
-import {
-  ContextMenu,
-  ContextMenuTrigger,
-  ContextMenuContent,
-  ContextMenuItem,
-} from '@/ui/context-menu';
+import { ContextMenu } from '@lody/ui/context-menu';
 import { isNewWindowClick, openDesktopWindow } from '@/lib/desktop-window';
 import {
   type ComponentPropsWithoutRef,
@@ -29,20 +24,11 @@ import {
 import { useElectronFullscreen } from '@/lib/electron';
 import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
-import { Kbd } from '@/ui/kbd';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
+import { Kbd } from '@lody/ui/kbd';
+import { Tooltip } from '@lody/ui/tooltip';
 import { commands, formatKeyBinding, type ShortcutCommandId } from '@/lib/commands';
 import { setCommandPaletteOpen } from '@/lib/commands/palette-state';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
+import { Menu } from '@/ui/menu';
 import { ScrollArea } from '@/ui/scroll-area';
 import {
   AppWindow,
@@ -62,7 +48,7 @@ import {
   Settings,
   Users,
 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import {
   SessionList,
   type SessionListProps,
@@ -610,13 +596,13 @@ function SidebarHeaderIconButton({
   );
   if (disabled) return button;
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>{button}</TooltipTrigger>
-      <TooltipContent side="bottom" className="flex items-center gap-1.5">
+    <Tooltip.Root>
+      <Tooltip.Trigger render={button}/>
+      <Tooltip.Content side="bottom" className="flex items-center gap-1.5">
         <span>{label}</span>
         {shortcut ? <Kbd>{shortcut}</Kbd> : null}
-      </TooltipContent>
-    </Tooltip>
+      </Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -929,9 +915,17 @@ export const LoroSidebar = memo(function LoroSidebar({
   });
   const renderWorkspaceControl = (menuSide: 'top' | 'bottom') =>
     workspaceSwitcherEnabled ? (
-      <DropdownMenu modal={!isMobile}>
+      <Menu.Root modal={!isMobile}>
         <div className="min-w-0 flex-1">
-          <DropdownMenuTrigger asChild>
+          <Menu.Trigger render={<button
+              type="button"
+              className={cn(workspaceIdentityClassName, windowDrag && WINDOW_DRAG_EXEMPT_CLASS)}
+              data-workspace-switcher-trigger
+              data-workspace-syncing={workspaceSyncing ? 'true' : 'false'}
+              aria-busy={workspaceSyncing || undefined}
+            >
+              {workspaceIdentity}
+            </button>}>
             <button
               type="button"
               className={cn(workspaceIdentityClassName, windowDrag && WINDOW_DRAG_EXEMPT_CLASS)}
@@ -941,13 +935,13 @@ export const LoroSidebar = memo(function LoroSidebar({
             >
               {workspaceIdentity}
             </button>
-          </DropdownMenuTrigger>
+          </Menu.Trigger>
         </div>
-        <DropdownMenuContent align="start" side={menuSide} className="w-64">
-          <DropdownMenuLabel className="normal-case text-xs font-normal tracking-normal">
+        <Menu.Content align="start" side={menuSide} className="w-64">
+          <Menu.GroupLabel className="normal-case text-xs font-normal tracking-normal">
             {userEmail}
-          </DropdownMenuLabel>
-          <DropdownMenuSeparator />
+          </Menu.GroupLabel>
+          <Menu.Separator />
           {currentWorkspace ? (
             <>
               <div className="flex min-w-0 items-center gap-2.5 px-2 py-2" data-current-workspace>
@@ -972,28 +966,27 @@ export const LoroSidebar = memo(function LoroSidebar({
                   </span>
                 </div>
               </div>
-              <DropdownMenuSeparator />
+              <Menu.Separator />
             </>
           ) : null}
 
           {workspaces.length > 0 ? (
             <>
-              <DropdownMenuLabel className="text-xs font-medium">
+              <Menu.GroupLabel className="text-xs font-medium">
                 {mergedLabels.switchWorkspace}
-              </DropdownMenuLabel>
-              <DropdownMenuRadioGroup
+              </Menu.GroupLabel>
+              <Menu.RadioGroup
                 value={currentWorkspaceId}
                 onValueChange={(value) => onWorkspaceSelected?.(value)}
               >
                 {/* Local provider: hosts may render the sidebar without a root one. */}
-                <TooltipProvider delayDuration={400}>
+                <Tooltip.Provider delay={400}>
                   {workspaces.map((ws) => {
                     const workspaceSlug = ws.slug;
                     const row = (
-                      <DropdownMenuRadioItem
+                      <Menu.RadioItem
                         key={ws.id}
                         value={ws.id}
-                        indicator="check"
                         className="gap-2"
                         onClickCapture={(event) => {
                           if (!workspaceSlug || !isNewWindowClick(event)) return;
@@ -1015,60 +1008,60 @@ export const LoroSidebar = memo(function LoroSidebar({
                               : mergedLabels.planPlus}
                           </Badge>
                         ) : null}
-                      </DropdownMenuRadioItem>
+                      </Menu.RadioItem>
                     );
 
                     if (!isElectronRenderer() || !workspaceSlug) return row;
 
-                    const contextTrigger = <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>;
+                    const contextTrigger = <ContextMenu.Trigger >{row}</ContextMenu.Trigger>;
                     return (
-                      <ContextMenu key={ws.id}>
+                      <ContextMenu.Root key={ws.id}>
                         {ws.id === currentWorkspaceId ? (
                           contextTrigger
                         ) : (
                           // Other workspaces explain the modifier-click on hover,
                           // beside the row. Tooltip and ContextMenu roots render no
                           // DOM, so both triggers' props land on the row element.
-                          <Tooltip>
-                            <TooltipTrigger asChild>{contextTrigger}</TooltipTrigger>
-                            <TooltipContent side="right" sideOffset={8}>
+                          <Tooltip.Root>
+                            <Tooltip.Trigger render={contextTrigger}/>
+                            <Tooltip.Content side="right" sideOffset={8}>
                               {newWindowHint}
-                            </TooltipContent>
-                          </Tooltip>
+                            </Tooltip.Content>
+                          </Tooltip.Root>
                         )}
-                        <ContextMenuContent>
-                          <ContextMenuItem
-                            onSelect={() => {
+                        <ContextMenu.Content>
+                          <ContextMenu.Item
+                            onClick={() => {
                               openDesktopWindow(undefined, workspaceSlug);
                             }}
                           >
                             <AppWindow />
                             {t('workspace.openInNewWindow')}
-                          </ContextMenuItem>
-                        </ContextMenuContent>
-                      </ContextMenu>
+                          </ContextMenu.Item>
+                        </ContextMenu.Content>
+                      </ContextMenu.Root>
                     );
                   })}
-                </TooltipProvider>
-              </DropdownMenuRadioGroup>
-              <DropdownMenuSeparator />
+                </Tooltip.Provider>
+              </Menu.RadioGroup>
+              <Menu.Separator />
             </>
           ) : null}
 
-          <DropdownMenuItem onSelect={() => onCreateWorkspaceClicked?.()}>
+          <Menu.Item onClick={() => onCreateWorkspaceClicked?.()}>
             <Plus className="h-4 w-4" />
             {mergedLabels.createWorkspace}
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => onInviteClicked?.()}>
+          </Menu.Item>
+          <Menu.Item onClick={() => onInviteClicked?.()}>
             <Users className="h-4 w-4" />
             {mergedLabels.inviteMembers}
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => onLinkRepoClicked?.()}>
+          </Menu.Item>
+          <Menu.Item onClick={() => onLinkRepoClicked?.()}>
             <Link2 className="h-4 w-4" />
             {mergedLabels.connectGithubRepo}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+          </Menu.Item>
+        </Menu.Content>
+      </Menu.Root>
     ) : (
       <div className="min-w-0 flex-1">
         <div className={workspaceIdentityClassName} data-workspace-identity>
@@ -1135,7 +1128,7 @@ export const LoroSidebar = memo(function LoroSidebar({
             </span>
           )}
           {!isMobile ? (
-            <TooltipProvider delayDuration={400}>
+            <Tooltip.Provider delay={400}>
               <div
                 className={cn(
                   'ml-auto flex shrink-0 items-center',
@@ -1181,7 +1174,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                   <ChevronRight className="h-3.5 w-3.5" />
                 </SidebarHeaderIconButton>
               </div>
-            </TooltipProvider>
+            </Tooltip.Provider>
           ) : null}
         </div>
 
@@ -1410,31 +1403,33 @@ export const LoroSidebar = memo(function LoroSidebar({
               <Settings strokeWidth={1.5} />
             </IconButton>
 
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+            <Menu.Root>
+              <Menu.Trigger render={<IconButton label="Help">
+                  <CircleHelp strokeWidth={1.5} />
+                </IconButton>}>
                 <IconButton label="Help">
                   <CircleHelp strokeWidth={1.5} />
                 </IconButton>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent side="top" align="start" className="min-w-[140px]">
-                <DropdownMenuItem onSelect={() => onDocsClicked?.()}>
+              </Menu.Trigger>
+              <Menu.Content side="top" align="start" className="min-w-[140px]">
+                <Menu.Item onClick={() => onDocsClicked?.()}>
                   <BookOpen className="h-4 w-4" />
                   {mergedLabels.docs}
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onJoinCommunityClicked?.()}>
+                </Menu.Item>
+                <Menu.Item onClick={() => onJoinCommunityClicked?.()}>
                   <Users className="h-4 w-4" />
                   {mergedLabels.joinCommunity}
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onFeedbackClicked?.()}>
+                </Menu.Item>
+                <Menu.Item onClick={() => onFeedbackClicked?.()}>
                   <MessageSquareMore className="h-4 w-4" />
                   {mergedLabels.feedback}
-                </DropdownMenuItem>
-                <DropdownMenuItem onSelect={() => onBugReportClicked?.()}>
+                </Menu.Item>
+                <Menu.Item onClick={() => onBugReportClicked?.()}>
                   <Bug className="h-4 w-4" />
                   {mergedLabels.bugReport}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                </Menu.Item>
+              </Menu.Content>
+            </Menu.Root>
 
             <IconButton label="Archive" active={activeNav === 'archive'} onClick={onArchiveClicked}>
               <Archive strokeWidth={1.5} />

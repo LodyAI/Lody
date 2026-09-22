@@ -15,7 +15,7 @@ import {
   type ComposerAgentRoleItem,
 } from '@/lib/composer-agent-roles';
 import { cn } from '@/lib/utils';
-import { DropdownMenuItem, DropdownMenuSeparator } from '@/ui/dropdown-menu';
+import { Menu } from '@/ui/menu';
 
 /** List `13.5rem` + detail pane `16rem`. Below this, the pane cannot fit. */
 const TWO_PANE_MIN_PX = 29.5 * 16;
@@ -129,20 +129,20 @@ export function ComposerAgentRolePanel({
         {/* Leaving a Role is its own row rather than a second click on the
             selected one: it clears the NAME, not the configuration, and that is
             not the same gesture as picking. */}
-        <DropdownMenuItem
+        <Menu.Item
           role="menuitemradio"
           aria-checked={selectedRoleId === null}
           onPointerEnter={() => {
             if (!compact) setPreviewRoleId(null);
           }}
-          onSelect={() => onSelect(null)}
+          onClick={() => onSelect(null)}
         >
           <Ban className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <span className="min-w-0 flex-1 truncate">{t('chat.runConfig.roles.none', 'None')}</span>
           {selectedRoleId === null ? (
             <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           ) : null}
-        </DropdownMenuItem>
+        </Menu.Item>
         {items.map((item) => {
           const { role, availability } = item;
           return (
@@ -155,7 +155,7 @@ export function ComposerAgentRolePanel({
                 if (!compact) setPreviewRoleId(role.id);
               }}
             >
-              <DropdownMenuItem
+              <Menu.Item
                 disabled={availability.kind !== 'available'}
                 role="menuitemradio"
                 aria-checked={role.id === selectedRoleId}
@@ -163,7 +163,7 @@ export function ComposerAgentRolePanel({
                 onFocus={() => {
                   if (!compact) setPreviewRoleId(role.id);
                 }}
-                onSelect={() => onSelect(role.id)}
+                onClick={() => onSelect(role.id)}
               >
                 <span
                   className={cn(
@@ -184,15 +184,15 @@ export function ComposerAgentRolePanel({
                     aria-hidden="true"
                   />
                 ) : null}
-              </DropdownMenuItem>
+              </Menu.Item>
             </div>
           );
         })}
         {onCreate ? (
           <>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onSelect={onCreate}
+            <Menu.Separator />
+            <Menu.Item
+              onClick={onCreate}
               className="h-7 min-h-0 justify-center"
               aria-label={t(
                 'chat.runConfig.roles.createFromSettings',
@@ -204,7 +204,7 @@ export function ComposerAgentRolePanel({
               )}
             >
               <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-            </DropdownMenuItem>
+            </Menu.Item>
           </>
         ) : null}
       </div>

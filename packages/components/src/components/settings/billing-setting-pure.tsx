@@ -2,9 +2,9 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { FREE_SESSION_LIMIT_PER_WORKSPACE, FREE_WORKSPACE_MEMBER_LIMIT } from '@lody/shared';
 import { ArrowLeftRight, Check } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { Badge, Button, Card, Input } from '@/ui';
-import { Progress } from '@/ui/progress';
+import { Progress } from '@lody/ui/progress';
 import { Skeleton } from '@lody/ui/skeleton';
 import { cn } from '@/lib/utils';
 import { PricingPageLink } from '../shared/pricing-page-link';
@@ -186,7 +186,7 @@ export function BillingSettingsView({
   if (overview === null) {
     return (
       <div className={settingContainerClass}>
-        <Card className="p-6 text-sm text-muted-foreground">{t('billing.unavailable')}</Card>
+        <Card.Root className="p-6 text-sm text-muted-foreground">{t('billing.unavailable')}</Card.Root>
       </div>
     );
   }
@@ -285,7 +285,7 @@ export function BillingSettingsView({
     <div className={settingContainerClass}>
       {/* Desktop: checkout opened in the system browser, awaiting payment */}
       {externalCheckoutPending ? (
-        <Card className="flex items-start gap-3 border-primary/30 bg-primary/5 p-4">
+        <Card.Root className="flex items-start gap-3 border-primary/30 bg-primary/5 p-4">
           <Spinner className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
           <div className="min-w-0 flex-1">
             <p className="text-sm font-normal text-foreground">
@@ -304,12 +304,12 @@ export function BillingSettingsView({
               {t('billing.externalCheckoutDismiss')}
             </Button>
           ) : null}
-        </Card>
+        </Card.Root>
       ) : null}
 
       {/* Payment received, activation in flight */}
       {paymentProcessing && !externalCheckoutPending ? (
-        <Card className="flex items-start gap-3 border-primary/30 bg-primary/5 p-4">
+        <Card.Root className="flex items-start gap-3 border-primary/30 bg-primary/5 p-4">
           <Spinner className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
           <div className="min-w-0">
             <p className="text-sm font-normal text-foreground">
@@ -323,11 +323,11 @@ export function BillingSettingsView({
                 : t('billing.paymentProcessingDescription')}
             </p>
           </div>
-        </Card>
+        </Card.Root>
       ) : null}
 
       {/* Plan status */}
-      <Card className="p-5">
+      <Card.Root className="p-5">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-lg font-normal leading-tight text-foreground">{planName}</span>
           {/* A gift always ends at its schedule boundary; its status line says
@@ -377,11 +377,11 @@ export function BillingSettingsView({
             </span>
           ) : null}
         </div>
-      </Card>
+      </Card.Root>
 
       {/* Session usage */}
       {!paidCheckoutPending ? (
-        <Card className="p-5">
+        <Card.Root className="p-5">
           <div className="flex items-baseline justify-between gap-2">
             <span className="text-sm font-normal text-foreground">{t('billing.sessions')}</span>
             <div className="text-sm tabular-nums text-muted-foreground">
@@ -411,7 +411,8 @@ export function BillingSettingsView({
             <Progress
               value={sessionCount}
               max={sessionLimit}
-              className={cn('mt-3', nearLimit && '[&>div]:bg-destructive')}
+              tone={nearLimit ? 'danger' : 'running'}
+              className="mt-3"
             />
           ) : null}
           {sessionLimit !== null ? (
@@ -424,12 +425,12 @@ export function BillingSettingsView({
               {!isPaid ? ` / ${FREE_WORKSPACE_MEMBER_LIMIT}` : null}
             </span>
           </div>
-        </Card>
+        </Card.Root>
       ) : null}
 
       {/* Upgrade */}
       {showSubscriptionOffer ? (
-        <Card className="overflow-hidden">
+        <Card.Root className="overflow-hidden">
           <div className="border-b border-border/70 dark:bg-muted/30 px-5 py-3">
             <p className="text-sm font-normal text-foreground">
               {checkoutInProgress
@@ -579,7 +580,7 @@ export function BillingSettingsView({
               <FounderCallLink />
             </div>
           </div>
-        </Card>
+        </Card.Root>
       ) : null}
 
       {/* Gift codes extend both free and paid Plus timelines. Keep redemption
@@ -587,7 +588,7 @@ export function BillingSettingsView({
       {canManage &&
       overview.effectivePlanTier !== 'enterprise' &&
       (!isPaid || overview.giftStackingSupported) ? (
-        <Card className="p-5">
+        <Card.Root className="p-5">
           <p className="text-sm font-normal text-foreground">{t('billing.redeemTitle')}</p>
           <p className="mt-0.5 text-xs text-muted-foreground">{t('billing.redeemSubtitle')}</p>
           <label htmlFor="billing-redemption-code" className="sr-only">
@@ -618,14 +619,14 @@ export function BillingSettingsView({
               {t('billing.redeemApply')}
             </Button>
           </div>
-        </Card>
+        </Card.Root>
       ) : null}
 
       {/* Next charge preview: renewal + net seat proration, as its own card
           above the history so admins see the exact next amount right after
           inviting members. */}
       {canManage && overview.entitlementSource === 'stripe' && upcomingInvoice ? (
-        <Card className="overflow-hidden">
+        <Card.Root className="overflow-hidden">
           <div className="border-b border-border/70 dark:bg-muted/30 px-5 py-3">
             <p className="text-sm font-normal text-foreground">{t('billing.upcomingTitle')}</p>
           </div>
@@ -698,12 +699,12 @@ export function BillingSettingsView({
               </ul>
             ) : null}
           </div>
-        </Card>
+        </Card.Root>
       ) : null}
 
       {/* Billing history */}
       {canManage && overview.billingAccountId ? (
-        <Card className="overflow-hidden">
+        <Card.Root className="overflow-hidden">
           <div className="border-b border-border/70 dark:bg-muted/30 px-5 py-3">
             <p className="text-sm font-normal text-foreground">{t('billing.historyTitle')}</p>
           </div>
@@ -769,14 +770,14 @@ export function BillingSettingsView({
               </ul>
             )}
           </div>
-        </Card>
+        </Card.Root>
       ) : null}
 
       {canManage &&
       overview.billingAccountId &&
       ['stripe', 'stripe_gift'].includes(overview.entitlementSource) &&
       onPaymentMethod ? (
-        <Card className="flex flex-wrap items-center justify-between gap-3 p-5">
+        <Card.Root className="flex flex-wrap items-center justify-between gap-3 p-5">
           <div>
             <p className="text-sm font-normal">{t('billing.paymentMethod')}</p>
             <p className="mt-1 text-xs text-muted-foreground">
@@ -802,7 +803,7 @@ export function BillingSettingsView({
                 : 'billing.changePaymentMethod'
             )}
           </Button>
-        </Card>
+        </Card.Root>
       ) : null}
 
       {/* Cancel / resume subscription: deliberately low-emphasis, tucked at the

@@ -6,7 +6,7 @@ import { createRoot, type Root } from 'react-dom/client';
 
 import { DesktopPermissionModeButton } from '../src/components/sessions/desktop-run-config-menu';
 import { initI18n } from '../src/i18n';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 
 (
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
@@ -57,7 +57,7 @@ describe('DesktopPermissionModeButton menu', () => {
     await act(async () => {
       root?.render(
         createElement(
-          TooltipProvider,
+          Tooltip.Provider,
           null,
           createElement(DesktopPermissionModeButton, {
             modeOptions,
@@ -70,7 +70,8 @@ describe('DesktopPermissionModeButton menu', () => {
     await act(async () => {
       container
         ?.querySelector('button[aria-label="Permission"]')
-        ?.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0 }));
+        ?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+      await new Promise((resolve) => setTimeout(resolve, 40));
     });
     return document.querySelector('[role="menu"]') as HTMLElement;
   };

@@ -54,18 +54,8 @@ import { cn } from '@/lib/utils';
 import { useOnlineMachines } from '@/hooks/use-online-machines';
 import { Badge } from '@lody/ui/badge';
 import { Switch } from '@lody/ui/switch';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
+import { Tooltip } from '@lody/ui/tooltip';
+import { Menu } from '@/ui/menu';
 
 /**
  * Desktop composer run-config controls. Two buttons on the composer footer:
@@ -102,14 +92,12 @@ function OptionItem({
   onSelect: () => void;
 }) {
   return (
-    <DropdownMenuItem
+    <Menu.Item
       disabled={disabled}
       role="menuitemradio"
       aria-checked={selected}
-      onSelect={(event) => {
-        event.preventDefault();
-        onSelect();
-      }}
+      closeOnClick={false}
+      onClick={onSelect}
       className="h-7 min-h-0 items-center gap-2 py-0"
     >
       {icon}
@@ -118,7 +106,7 @@ function OptionItem({
         {label}
       </span>
       {selected ? <Check className="h-3 w-3 shrink-0" aria-hidden="true" /> : null}
-    </DropdownMenuItem>
+    </Menu.Item>
   );
 }
 
@@ -136,13 +124,13 @@ function ValueSubTrigger({
   disabled?: boolean;
 }) {
   return (
-    <DropdownMenuSubTrigger className="pr-1.5" disabled={disabled}>
+    <Menu.SubmenuTrigger className="pr-1.5" disabled={disabled}>
       <span className="min-w-0 flex-1 truncate">{label}</span>
       <span className="ml-4 flex min-w-0 max-w-40 items-center gap-1.5 text-[0.9em] text-muted-foreground">
         {icon}
         <span className="min-w-0 truncate">{value}</span>
       </span>
-    </DropdownMenuSubTrigger>
+    </Menu.SubmenuTrigger>
   );
 }
 
@@ -160,13 +148,11 @@ function ToggleItem({
   onToggle: () => void;
 }) {
   return (
-    <DropdownMenuItem
+    <Menu.Item
       role="menuitemcheckbox"
       aria-checked={checked}
-      onSelect={(event) => {
-        event.preventDefault();
-        onToggle();
-      }}
+      closeOnClick={false}
+      onClick={onToggle}
       className="h-7 min-h-0 py-0"
     >
       <span
@@ -184,7 +170,7 @@ function ToggleItem({
         tabIndex={-1}
         className="pointer-events-none ml-2 h-3.5 w-6 shrink-0 [&>span]:h-3 [&>span]:w-3 [&>span]:data-[state=checked]:translate-x-2.5"
       />
-    </DropdownMenuItem>
+    </Menu.Item>
   );
 }
 
@@ -235,8 +221,34 @@ export function DesktopMachineMenu({
   const isDisabled = disabled || (options.length === 0 && !onAddMachine);
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+    <Menu.Root>
+      <Menu.Trigger render={<button
+          type="button"
+          className={cn(
+            'inline-flex h-6 min-w-0 select-none items-center gap-1.5 rounded-md px-2',
+            CONTEXT_PILL_SURFACE_CLASS,
+            'text-[0.9em] font-normal leading-tight text-foreground/80 transition-colors [&_svg]:text-current [&_svg]:opacity-100',
+            CONTEXT_PILL_HOVER_CLASS,
+            'disabled:cursor-default disabled:opacity-70'
+          )}
+          disabled={isDisabled}
+          title={disabledReason}
+          aria-label={t('chat.machineSelector.placeholder', 'Machine')}
+        >
+          <Monitor className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span className="max-w-32 truncate">{label}</span>
+          {selectedIsLocal ? (
+            <Badge className="shrink-0 border-transparent bg-foreground/[0.06] px-1.5 py-0 text-[10px] font-normal text-muted-foreground">
+              {t('chat.machineSelector.local', 'Local')}
+            </Badge>
+          ) : null}
+          {selectedOption?.isPrivate ? (
+            <LockKeyhole
+              className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+              aria-hidden="true"
+            />
+          ) : null}
+        </button>}>
         <button
           type="button"
           className={cn(
@@ -264,21 +276,21 @@ export function DesktopMachineMenu({
             />
           ) : null}
         </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
+      </Menu.Trigger>
+      <Menu.Content
         side="top"
         align="start"
-        avoidCollisions={false}
+        collisionAvoidance={{ side: 'none', align: 'none', fallbackAxisSide: 'none' }}
         className="min-w-52 max-w-72"
       >
-        <DropdownMenuLabel className="px-2.5 pb-1 pt-1.5 text-[0.68rem] font-medium tracking-wide text-muted-foreground/70">
+        <Menu.GroupLabel className="px-2.5 pb-1 pt-1.5 text-[0.68rem] font-medium tracking-wide text-muted-foreground/70">
           {t('chat.machineSelector.placeholder', 'Machine')}
-        </DropdownMenuLabel>
+        </Menu.GroupLabel>
         {options.map((option) => (
-          <DropdownMenuItem
+          <Menu.Item
             key={option.value}
             disabled={option.disabled}
-            onSelect={() => onChange(option.value)}
+            onClick={() => onChange(option.value)}
           >
             <Monitor className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
             <span
@@ -292,39 +304,37 @@ export function DesktopMachineMenu({
               </Badge>
             ) : null}
             {option.isPrivate ? (
-              <Tooltip delayDuration={250}>
-                <TooltipTrigger asChild>
-                  <span className="inline-flex shrink-0 items-center gap-1 rounded border border-border/70 px-1.5 py-0.5 text-[0.64rem] font-medium text-muted-foreground">
+              <Tooltip.Root>
+                <Tooltip.Trigger delay={250} render={<span className="inline-flex shrink-0 items-center gap-1 rounded border border-border/70 px-1.5 py-0.5 text-[0.64rem] font-medium text-muted-foreground">
                     <LockKeyhole className="h-3 w-3" aria-hidden="true" />
                     {t('sharing.private', 'Private')}
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="right" className="max-w-64 text-[0.8em]">
+                  </span>}/>
+                <Tooltip.Content side="right" className="max-w-64 text-[0.8em]">
                   {t(
                     'sharing.machinePrivateHelp',
                     'Only you can use this machine. Share it from machine settings so teammates can see its shared projects and conversations.'
                   )}
-                </TooltipContent>
-              </Tooltip>
+                </Tooltip.Content>
+              </Tooltip.Root>
             ) : null}
             {option.value === value ? (
               <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             ) : null}
-          </DropdownMenuItem>
+          </Menu.Item>
         ))}
         {onAddMachine ? (
           <>
-            {options.length > 0 ? <DropdownMenuSeparator /> : null}
-            <DropdownMenuItem onSelect={onAddMachine}>
+            {options.length > 0 ? <Menu.Separator /> : null}
+            <Menu.Item onClick={onAddMachine}>
               <Plus className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
               <span className="min-w-0 flex-1 truncate">
                 {t('machinePairing.addMachine', 'Add machine')}
               </span>
-            </DropdownMenuItem>
+            </Menu.Item>
           </>
         ) : null}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </Menu.Content>
+    </Menu.Root>
   );
 }
 
@@ -703,18 +713,18 @@ export function DesktopRunConfigMenu({
   );
 
   const menu = (
-    <DropdownMenu>
+    <Menu.Root>
       {disabledReason ? (
-        <Tooltip delayDuration={300}>
+        <Tooltip.Root>
           {/* A native disabled button cannot reliably trigger hover/focus events.
               Keep this focusable but outside DropdownMenuTrigger so it stays inert. */}
-          <TooltipTrigger asChild>{triggerButton}</TooltipTrigger>
-          <TooltipContent side="top">{disabledReason}</TooltipContent>
-        </Tooltip>
+          <Tooltip.Trigger delay={300} render={triggerButton}/>
+          <Tooltip.Content side="top">{disabledReason}</Tooltip.Content>
+        </Tooltip.Root>
       ) : (
-        <DropdownMenuTrigger asChild>{triggerButton}</DropdownMenuTrigger>
+        <Menu.Trigger render={triggerButton}>{triggerButton}</Menu.Trigger>
       )}
-      <DropdownMenuContent align="start" className="min-w-48">
+      <Menu.Content align="start" className="min-w-48">
         {onRecentRunConfigSelect ? (
           <RecentRunConfigMenuGroup
             items={recentRunConfigs ?? []}
@@ -726,15 +736,14 @@ export function DesktopRunConfigMenu({
             with whatever those rows are set to right now. */}
         {agentRoles ? (
           agentRoles.items.length === 0 ? (
-            <DropdownMenuItem
+            <Menu.Item
               disabled={!agentRoles.onCreate}
-              onSelect={() => agentRoles.onCreate?.()}
+              onClick={() => agentRoles.onCreate?.()}
               className="h-7 min-h-0"
             >
               <span className="min-w-0 flex-1 truncate">{roleLabel}</span>
-              <Tooltip delayDuration={300}>
-                <TooltipTrigger asChild>
-                  <span
+              <Tooltip.Root>
+                <Tooltip.Trigger delay={300} render={<span
                     className="ml-2 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground"
                     aria-label={t(
                       'chat.runConfig.roles.createFromSettings',
@@ -742,18 +751,17 @@ export function DesktopRunConfigMenu({
                     )}
                   >
                     <Plus className="h-3.5 w-3.5" aria-hidden="true" />
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="right">
+                  </span>}/>
+                <Tooltip.Content side="right">
                   {t(
                     'chat.runConfig.roles.createFromSettings',
                     'Create role from current settings'
                   )}
-                </TooltipContent>
-              </Tooltip>
-            </DropdownMenuItem>
+                </Tooltip.Content>
+              </Tooltip.Root>
+            </Menu.Item>
           ) : (
-            <DropdownMenuSub>
+            <Menu.Submenu>
               <ValueSubTrigger
                 label={roleLabel}
                 value={selectedRole?.name ?? t('chat.runConfig.roles.none', 'None')}
@@ -765,7 +773,7 @@ export function DesktopRunConfigMenu({
                   ) : null
                 }
               />
-              <DropdownMenuSubContent className="max-w-[min(29.5rem,var(--radix-popper-available-width,29.5rem))] overflow-x-hidden p-0">
+              <Menu.Content className="max-w-[min(29.5rem,var(--radix-popper-available-width,29.5rem))] overflow-x-hidden p-0">
                 <ComposerAgentRolePanel
                   items={agentRoles.items}
                   machine={agentRoles.machine}
@@ -774,13 +782,13 @@ export function DesktopRunConfigMenu({
                   onCreate={agentRoles.onCreate}
                   onEdit={agentRoles.onEdit}
                 />
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
+              </Menu.Content>
+            </Menu.Submenu>
           )
         ) : null}
         {agentOptions.length > 0 || selectedAgentConfig ? (
           isAgentLocked ? (
-            <DropdownMenuItem disabled>
+            <Menu.Item disabled>
               <span className="min-w-0 flex-1 truncate">{agentLabel}</span>
               <span className="ml-4 flex max-w-36 items-center gap-1.5 text-[0.9em] text-muted-foreground">
                 {selectedAgentConfig ? (
@@ -794,11 +802,11 @@ export function DesktopRunConfigMenu({
                 ) : null}
                 <span className="truncate">{selectedAgentConfig?.name}</span>
               </span>
-            </DropdownMenuItem>
+            </Menu.Item>
           ) : (
-            <DropdownMenuSub>
+            <Menu.Submenu>
               <ValueSubTrigger label={agentLabel} value={selectedAgentConfig?.name ?? null} />
-              <DropdownMenuSubContent className={COMPACT_OPTION_SUBMENU_CLASS}>
+              <Menu.Content className={COMPACT_OPTION_SUBMENU_CLASS}>
                 {agentOptions.map(({ config }) => (
                   <OptionItem
                     key={`${config.id}:${config.machineId}`}
@@ -824,8 +832,8 @@ export function DesktopRunConfigMenu({
                     }
                   />
                 ))}
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
+              </Menu.Content>
+            </Menu.Submenu>
           )
         ) : null}
 
@@ -840,9 +848,9 @@ export function DesktopRunConfigMenu({
             selectedValue;
           const locked = selector.configId === 'agent_preset' && agentLocked;
           return (
-            <DropdownMenuSub key={selector.configId}>
+            <Menu.Submenu key={selector.configId}>
               <ValueSubTrigger label={selector.label} value={selectedLabel} disabled={locked} />
-              <DropdownMenuSubContent className={COMPACT_OPTION_SUBMENU_CLASS}>
+              <Menu.Content className={COMPACT_OPTION_SUBMENU_CLASS}>
                 {selector.options.map((option) => (
                   <OptionItem
                     key={option.value}
@@ -857,15 +865,15 @@ export function DesktopRunConfigMenu({
                     }
                   />
                 ))}
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
+              </Menu.Content>
+            </Menu.Submenu>
           );
         })}
 
         {modelPickerOptions.length > 0 ? (
-          <DropdownMenuSub>
+          <Menu.Submenu>
             <ValueSubTrigger label={modelRowLabel} value={modelLabel} />
-            <DropdownMenuSubContent
+            <Menu.Content
               // `p-0` + column layout so the search row stays put while only the
               // options scroll; the padding it drops moves onto the list itself.
               className={cn(COMPACT_OPTION_SUBMENU_CLASS, 'flex flex-col overflow-y-hidden p-0')}
@@ -874,7 +882,7 @@ export function DesktopRunConfigMenu({
               // class) so it reliably wins over the base content's max-h, and clamps
               // to the available height so it never overflows off-screen.
               style={{
-                maxHeight: 'min(20rem, var(--radix-dropdown-menu-content-available-height, 20rem))',
+                maxHeight: 'min(20rem, var(--available-height, 20rem))',
               }}
             >
               {/* A provider can publish dozens of models; past
@@ -894,33 +902,33 @@ export function DesktopRunConfigMenu({
                   />
                 )}
               />
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
+            </Menu.Content>
+          </Menu.Submenu>
         ) : null}
 
         {showDeepSeekDelegationWarning ? (
-          <DropdownMenuItem
-            asChild
+          <Menu.Item
             className="mx-1 my-1 max-w-72 items-start gap-2 whitespace-normal border border-status-warning/30 bg-status-warning/[0.08] px-2.5 py-2 focus:bg-status-warning/[0.14]"
-          >
-            <a
-              href={DEEPSEEK_DELEGATION_DISCUSSION_URL}
-              target="_blank"
-              rel="noreferrer"
-              onClick={(event) => {
-                event.preventDefault();
-                void openExternalUrl(DEEPSEEK_DELEGATION_DISCUSSION_URL);
-              }}
-            >
-              <DeepSeekDelegationWarningContent />
-            </a>
-          </DropdownMenuItem>
+            render={
+              <a
+                href={DEEPSEEK_DELEGATION_DISCUSSION_URL}
+                target="_blank"
+                rel="noreferrer"
+                onClick={(event) => {
+                  event.preventDefault();
+                  void openExternalUrl(DEEPSEEK_DELEGATION_DISCUSSION_URL);
+                }}
+              >
+                <DeepSeekDelegationWarningContent />
+              </a>
+            }
+          />
         ) : null}
 
         {interactionSelector ? (
-          <DropdownMenuSub>
+          <Menu.Submenu>
             <ValueSubTrigger label={interactionSelector.label} value={interactionLabel} />
-            <DropdownMenuSubContent className={COMPACT_OPTION_SUBMENU_CLASS}>
+            <Menu.Content className={COMPACT_OPTION_SUBMENU_CLASS}>
               {interactionSelector.options.map((opt) => (
                 <OptionItem
                   key={opt.value}
@@ -935,14 +943,14 @@ export function DesktopRunConfigMenu({
                   }
                 />
               ))}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
+            </Menu.Content>
+          </Menu.Submenu>
         ) : null}
 
         {thinkingSelector ? (
-          <DropdownMenuSub>
+          <Menu.Submenu>
             <ValueSubTrigger label={reasoningLabel} value={thinkingLabel} />
-            <DropdownMenuSubContent className={COMPACT_OPTION_SUBMENU_CLASS}>
+            <Menu.Content className={COMPACT_OPTION_SUBMENU_CLASS}>
               {thinkingSelector.options.map((opt) => (
                 <OptionItem
                   key={opt.value}
@@ -957,11 +965,11 @@ export function DesktopRunConfigMenu({
                   }
                 />
               ))}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
+            </Menu.Content>
+          </Menu.Submenu>
         ) : null}
 
-        {planSelector || fastSelector ? <DropdownMenuSeparator /> : null}
+        {planSelector || fastSelector ? <Menu.Separator /> : null}
         {planSelector ? (
           <ToggleItem
             icon={<ListChecks className="h-3.5 w-3.5" strokeWidth={1.8} aria-hidden="true" />}
@@ -994,8 +1002,8 @@ export function DesktopRunConfigMenu({
             }
           />
         ) : null}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </Menu.Content>
+    </Menu.Root>
   );
 
   /* The values a Role pins, stated but INERT: only the Role itself is a control,
@@ -1047,9 +1055,9 @@ function PermissionModeItem({
   onSelect: () => void;
 }) {
   const item = (
-    <DropdownMenuItem
+    <Menu.Item
       disabled={option.disabled}
-      onSelect={onSelect}
+      onClick={onSelect}
       className="h-7 min-h-0 items-center gap-1.5 py-0"
     >
       <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center [&_svg]:h-3.5 [&_svg]:w-3.5">
@@ -1057,20 +1065,20 @@ function PermissionModeItem({
       </span>
       <span className="min-w-0 flex-1 truncate font-normal">{option.label}</span>
       {selected ? <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> : null}
-    </DropdownMenuItem>
+    </Menu.Item>
   );
   if (!option.description) return item;
   return (
-    <Tooltip delayDuration={300}>
-      <TooltipTrigger asChild>{item}</TooltipTrigger>
-      <TooltipContent
+    <Tooltip.Root>
+      <Tooltip.Trigger delay={300} render={item}/>
+      <Tooltip.Content
         side="right"
         align="start"
         className="max-w-72 whitespace-pre-wrap text-left text-[0.8em] font-normal leading-snug"
       >
         {option.description}
-      </TooltipContent>
-    </Tooltip>
+      </Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -1125,21 +1133,23 @@ export function DesktopPermissionModeButton({
   };
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button type="button" className={TRIGGER_CLASS} aria-label={permissionLabel}>
-          <span className="flex h-4 w-4 shrink-0 items-center justify-center [&_svg]:h-4 [&_svg]:w-4 [&_svg]:stroke-[1.5]">
-            {permissionModeIcon(value ?? null)}
-          </span>
-          <span className={cn('min-w-0 max-w-36 truncate', COMPOSER_FACE_LABEL_CLASS)}>
-            {label ?? permissionLabel}
-          </span>
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-max min-w-44 max-w-64">
-        <DropdownMenuLabel className="normal-case px-2.5 pb-1 pt-1.5 text-[0.68rem] font-medium tracking-normal text-muted-foreground/70">
+    <Menu.Root>
+      <Menu.Trigger
+        render={
+          <button type="button" className={TRIGGER_CLASS} aria-label={permissionLabel}>
+            <span className="flex h-4 w-4 shrink-0 items-center justify-center [&_svg]:h-4 [&_svg]:w-4 [&_svg]:stroke-[1.5]">
+              {permissionModeIcon(value ?? null)}
+            </span>
+            <span className={cn('min-w-0 max-w-36 truncate', COMPOSER_FACE_LABEL_CLASS)}>
+              {label ?? permissionLabel}
+            </span>
+          </button>
+        }
+      />
+      <Menu.Content align="start" className="w-max min-w-44 max-w-64">
+        <Menu.GroupLabel className="normal-case px-2.5 pb-1 pt-1.5 text-[0.68rem] font-medium tracking-normal text-muted-foreground/70">
           {permissionLabel}
-        </DropdownMenuLabel>
+        </Menu.GroupLabel>
         {options.map((opt) => (
           <PermissionModeItem
             key={opt.value}
@@ -1148,7 +1158,7 @@ export function DesktopPermissionModeButton({
             onSelect={() => handleSelect(opt.value)}
           />
         ))}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </Menu.Content>
+    </Menu.Root>
   );
 }

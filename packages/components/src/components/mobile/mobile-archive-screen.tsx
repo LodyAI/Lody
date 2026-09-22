@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Archive, PanelLeft, Trash2, Undo2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
-import { TooltipProvider } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 
 export type MobileArchiveScreenProps = {
   isMultiSelectMode: boolean;
@@ -39,7 +39,7 @@ export function MobileArchiveScreen({
   const { t } = useTranslation();
 
   return (
-    <TooltipProvider>
+    <Tooltip.Provider>
       <div className="flex h-full w-full min-w-0 flex-col overflow-hidden bg-background">
         <header className="flex h-[calc(56px+var(--safe-area-top))] w-full shrink-0 items-center gap-3 border-b border-border bg-background pl-[calc(16px+var(--safe-area-left))] pr-[calc(16px+var(--safe-area-right))] pt-[var(--safe-area-top)]">
           {isMultiSelectMode ? (
@@ -93,6 +93,6 @@ export function MobileArchiveScreen({
         </div>
         {dialogs}
       </div>
-    </TooltipProvider>
+    </Tooltip.Provider>
   );
 }

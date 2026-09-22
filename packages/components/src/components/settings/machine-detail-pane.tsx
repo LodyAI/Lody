@@ -24,29 +24,14 @@ import {
   UserRound,
   Users,
 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Switch } from '@lody/ui/switch';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { Menu } from '@/ui/menu';
+import { AlertDialog } from '@/ui/dialog';
+import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
@@ -96,9 +81,8 @@ export function MachineProvidersSection({
 }: MachineProvidersSectionProps) {
   const { t } = useTranslation();
   const addButton = (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
+    <Tooltip.Root>
+      <Tooltip.Trigger render={<Button
           variant="ghost"
           size="small"
           icon
@@ -106,10 +90,9 @@ export function MachineProvidersSection({
           aria-label={t('settings.agent.provider.addProvider', 'Add provider')}
         >
           <Plus className="h-3.5 w-3.5" />
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{t('settings.agent.provider.addProvider', 'Add provider')}</TooltipContent>
-    </Tooltip>
+        </Button>}/>
+      <Tooltip.Content>{t('settings.agent.provider.addProvider', 'Add provider')}</Tooltip.Content>
+    </Tooltip.Root>
   );
 
   if (variant === 'mobile-list') {
@@ -528,9 +511,8 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                 </div>
               )}
               {restartVisible && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
+                <Tooltip.Root>
+                  <Tooltip.Trigger render={<Button
                       variant="ghost"
                       size="small"
                       icon
@@ -547,20 +529,18 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                       ) : (
                         <RotateCcw className="h-3.5 w-3.5" />
                       )}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
+                    </Button>}/>
+                  <Tooltip.Content>
                     {t('settings.agent.machineLifecycle.restartButton', 'Restart daemon')}
-                  </TooltipContent>
-                </Tooltip>
+                  </Tooltip.Content>
+                </Tooltip.Root>
               )}
               {managementGroupVisible && destructiveGroupVisible && (
                 <div aria-hidden className="mx-0.5 h-4 w-px shrink-0 bg-border" />
               )}
               {revokeVisible && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
+                <Tooltip.Root>
+                  <Tooltip.Trigger render={<Button
                       variant="ghost"
                       size="small"
                       icon
@@ -573,17 +553,15 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                       onClick={() => setRevokeOpen(true)}
                     >
                       <Unplug className="h-3.5 w-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
+                    </Button>}/>
+                  <Tooltip.Content>
                     {t('settings.devices.credentials.disconnect', 'Revoke machine access')}
-                  </TooltipContent>
-                </Tooltip>
+                  </Tooltip.Content>
+                </Tooltip.Root>
               )}
               {removeVisible ? (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="inline-flex shrink-0">
+                <Tooltip.Root>
+                  <Tooltip.Trigger render={<span className="inline-flex shrink-0">
                       <Button
                         variant="ghost"
                         size="small"
@@ -599,21 +577,32 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                         <LogOut className="h-3.5 w-3.5" />
                         {t('workspace.machines.removeFromWorkspace', 'Remove from workspace')}
                       </Button>
-                    </span>
-                  </TooltipTrigger>
+                    </span>}/>
                   {!canDelete ? (
-                    <TooltipContent>
+                    <Tooltip.Content>
                       {t(
                         'workspace.machines.removeUnavailableOnline',
                         'Stop Lody on this machine before removing it from this workspace.'
                       )}
-                    </TooltipContent>
+                    </Tooltip.Content>
                   ) : null}
-                </Tooltip>
+                </Tooltip.Root>
               ) : null}
               {actionsMenuVisible && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
+                <Menu.Root>
+                  <Menu.Trigger render={<Button
+                      variant="ghost"
+                      size="small"
+                      icon
+                      className="shrink-0"
+                      aria-label={t('workspace.machines.moreActions', 'Machine options')}
+                    >
+                      {sharing ? (
+                        <Spinner className="h-4 w-4" />
+                      ) : (
+                        <MoreHorizontal className="h-4 w-4" />
+                      )}
+                    </Button>}>
                     <Button
                       variant="ghost"
                       size="small"
@@ -627,36 +616,35 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                         <MoreHorizontal className="h-4 w-4" />
                       )}
                     </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent
+                  </Menu.Trigger>
+                  <Menu.Content
                     align="end"
                     className="w-60"
-                    onCloseAutoFocus={(event) => {
-                      if (pendingRenameRef.current) {
-                        event.preventDefault();
-                        pendingRenameRef.current = false;
-                        requestAnimationFrame(() => {
-                          inputRef.current?.focus();
-                          inputRef.current?.select();
-                        });
-                      }
+                    finalFocus={() => {
+                      if (!pendingRenameRef.current) return undefined;
+                      pendingRenameRef.current = false;
+                      requestAnimationFrame(() => {
+                        inputRef.current?.focus();
+                        inputRef.current?.select();
+                      });
+                      return false;
                     }}
                   >
                     {isMobile && manageableOwnMachine && (
-                      <DropdownMenuItem
-                        onSelect={() => {
+                      <Menu.Item
+                        onClick={() => {
                           pendingRenameRef.current = true;
                           setRenaming(true);
                         }}
                       >
                         <Pencil className="h-3.5 w-3.5" />
                         <span>{t('workspace.machines.editName', 'Edit machine name')}</span>
-                      </DropdownMenuItem>
+                      </Menu.Item>
                     )}
                     {isMobile && manageableOwnMachine && onSharedWithTeamChange && (
-                      <DropdownMenuItem
-                        onSelect={(event) => {
-                          event.preventDefault();
+                      <Menu.Item
+                        closeOnClick={false}
+                        onClick={() => {
                           if (sharing) return;
                           void handleSharedToggle(!effectiveShared);
                         }}
@@ -673,17 +661,17 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                           tabIndex={-1}
                           className="pointer-events-none"
                         />
-                      </DropdownMenuItem>
+                      </Menu.Item>
                     )}
                     {isMobile &&
                       isOwn &&
                       (onPing || (updateVisible && daemonUpdate) || onRestartDaemon) && (
-                        <DropdownMenuSeparator />
+                        <Menu.Separator />
                       )}
                     {isMobile && onPing && (
-                      <DropdownMenuItem
-                        onSelect={(event) => {
-                          event.preventDefault();
+                      <Menu.Item
+                        closeOnClick={false}
+                        onClick={() => {
                           void handlePing();
                         }}
                         disabled={pinging}
@@ -703,11 +691,11 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                             })}
                           </span>
                         )}
-                      </DropdownMenuItem>
+                      </Menu.Item>
                     )}
                     {isMobile && updateVisible && daemonUpdate && (
-                      <DropdownMenuItem
-                        onSelect={() => void handleUpgradeDaemon()}
+                      <Menu.Item
+                        onClick={() => void handleUpgradeDaemon()}
                         disabled={restartingDaemon || upgradingDaemon}
                       >
                         {upgradingDaemon ? (
@@ -721,11 +709,11 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                             'Update and restart'
                           )}
                         </span>
-                      </DropdownMenuItem>
+                      </Menu.Item>
                     )}
                     {onRestartDaemon && (
-                      <DropdownMenuItem
-                        onSelect={() => void handleRestartDaemon()}
+                      <Menu.Item
+                        onClick={() => void handleRestartDaemon()}
                         disabled={restartingDaemon || upgradingDaemon}
                       >
                         {restartingDaemon ? (
@@ -736,14 +724,14 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                         <span>
                           {t('settings.agent.machineLifecycle.restartButton', 'Restart daemon')}
                         </span>
-                      </DropdownMenuItem>
+                      </Menu.Item>
                     )}
                     {isMobile && isOwn && (
                       <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          onSelect={(event) => {
-                            event.preventDefault();
+                        <Menu.Separator />
+                        <Menu.Item
+                          closeOnClick={false}
+                          onClick={() => {
                             setDeleteOpen(true);
                           }}
                           disabled={!canDelete}
@@ -758,11 +746,11 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                                   'Stop machine before removing'
                                 )}
                           </span>
-                        </DropdownMenuItem>
+                        </Menu.Item>
                       </>
                     )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                  </Menu.Content>
+                </Menu.Root>
               )}
               {accordion && !externalAccordionHeader ? (
                 <Button
@@ -873,25 +861,25 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
         )}
       </div>
 
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
+      <AlertDialog.Root open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
               {t('workspace.machines.removeConfirmTitle', 'Remove machine from workspace?')}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
+            </AlertDialog.Title>
+            <AlertDialog.Description>
               {t('workspace.machines.removeConfirmDescription', {
                 machineName: machine.name,
                 defaultValue:
                   'Remove {{machineName}} from this workspace. It can appear again if it reconnects to this workspace later.',
               })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={deleting}>
               {t('common.cancel', 'Cancel')}
-            </AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Cancel>
+            <AlertDialog.Action
               disabled={deleting}
               onClick={(event) => {
                 event.preventDefault();
@@ -901,30 +889,30 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
             >
               {deleting && <Spinner className="mr-2 h-4 w-4" />}
               {t('workspace.machines.removeAction', 'Remove')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
 
-      <AlertDialog open={revokeOpen} onOpenChange={setRevokeOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
+      <AlertDialog.Root open={revokeOpen} onOpenChange={setRevokeOpen}>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
               {t('settings.devices.credentials.confirmTitle', 'Revoke machine access?')}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
+            </AlertDialog.Title>
+            <AlertDialog.Description>
               {t(
                 'settings.devices.credentials.confirmDescription',
                 '{{machine}} will be signed out of every workspace. To reconnect it, create a new machine connection request.',
                 { machine: machine.name }
               )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={revoking}>
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={revoking}>
               {t('common.cancel', 'Cancel')}
-            </AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Cancel>
+            <AlertDialog.Action
               disabled={revoking}
               onClick={(event) => {
                 event.preventDefault();
@@ -941,10 +929,10 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
             >
               {revoking ? <Spinner className="mr-2 h-4 w-4" /> : null}
               {t('settings.devices.credentials.disconnect', 'Revoke machine access')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </div>
   );
 }

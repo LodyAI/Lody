@@ -12,14 +12,8 @@ import {
 } from '@/ui/window-drag-region';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { Button } from '@lody/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
-import { TooltipProvider } from '@/ui/tooltip';
+import { Menu } from '@/ui/menu';
+import { Tooltip } from '@lody/ui/tooltip';
 
 type ArchiveScope = 'my' | 'team';
 
@@ -65,7 +59,7 @@ export function WebArchiveScreen({
     !isNativeAppShell() && isMacOSElectronRenderer() && !isElectronFullscreen;
 
   return (
-    <TooltipProvider>
+    <Tooltip.Provider>
       <div className="flex h-full w-full min-w-0 flex-col overflow-hidden bg-background">
         {/* h-11 row: matches the session tab-bar header height so the collapse /
             expand affordance sits at the same spot across views. */}
@@ -132,8 +126,21 @@ export function WebArchiveScreen({
                 <h1 className="text-sm font-semibold">{t('archive.title', 'Archive')}</h1>
               </div>
               <div className="ml-2">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
+                <Menu.Root>
+                  <Menu.Trigger render={<button
+                      type="button"
+                      className={cn(
+                        'inline-flex min-w-0 max-w-full select-none items-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] font-medium',
+                        'text-muted-foreground hover:bg-hover/50 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring/30'
+                      )}
+                    >
+                      <span className="min-w-0 truncate">
+                        {archiveScope === 'my'
+                          ? t('sessions.sidebar.my', 'My Tasks')
+                          : t('sessions.sidebar.team', 'All Tasks')}
+                      </span>
+                      <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                    </button>}>
                     <button
                       type="button"
                       className={cn(
@@ -148,9 +155,9 @@ export function WebArchiveScreen({
                       </span>
                       <ChevronDown className="h-4 w-4 text-muted-foreground" />
                     </button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="w-44">
-                    <DropdownMenuRadioGroup
+                  </Menu.Trigger>
+                  <Menu.Content align="start" className="w-44">
+                    <Menu.RadioGroup
                       value={archiveScope}
                       onValueChange={(value) => {
                         if (value === 'my' || value === 'team') {
@@ -158,15 +165,15 @@ export function WebArchiveScreen({
                         }
                       }}
                     >
-                      <DropdownMenuRadioItem value="my">
+                      <Menu.RadioItem value="my">
                         {t('sessions.sidebar.my', 'My Tasks')}
-                      </DropdownMenuRadioItem>
-                      <DropdownMenuRadioItem value="team">
+                      </Menu.RadioItem>
+                      <Menu.RadioItem value="team">
                         {t('sessions.sidebar.team', 'All Tasks')}
-                      </DropdownMenuRadioItem>
-                    </DropdownMenuRadioGroup>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                      </Menu.RadioItem>
+                    </Menu.RadioGroup>
+                  </Menu.Content>
+                </Menu.Root>
               </div>
             </>
           )}
@@ -179,6 +186,6 @@ export function WebArchiveScreen({
         </div>
         {dialogs}
       </div>
-    </TooltipProvider>
+    </Tooltip.Provider>
   );
 }

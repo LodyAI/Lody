@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   type LocalProjectControlResponse,
   type LocalProjectId,
@@ -197,7 +197,7 @@ export interface AddLocalProjectDialogContainerProps {
   initialMachineId?: MachineId | null;
   onAdded?: AddLocalProjectDialogProps['onAdded'];
   onLocated?: (info: { machineId: MachineId; localProjectId: LocalProjectId }) => void;
-  overlayClassName?: string;
+  backdropClassName?: string;
 }
 
 export function AddLocalProjectDialogContainer({
@@ -206,7 +206,7 @@ export function AddLocalProjectDialogContainer({
   initialMachineId,
   onAdded,
   onLocated,
-  overlayClassName,
+  backdropClassName,
 }: AddLocalProjectDialogContainerProps) {
   const isMobile = useIsMobile();
   const controller = useAddLocalProjectController(onAdded, onLocated);
@@ -222,7 +222,7 @@ export function AddLocalProjectDialogContainer({
       ops={controller.ops}
       onAdded={controller.onAdded}
       onLocateRegistered={controller.onLocateRegistered}
-      overlayClassName={overlayClassName}
+      backdropClassName={backdropClassName}
     />
   );
 }

@@ -11,7 +11,7 @@ import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { PlatformContext } from '@lody/platform/react';
 import { ArrowLeft, Check } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Button } from '@lody/ui/button';
 import { TourStill, type TourStillDebugOptions } from './tour/tour-still';

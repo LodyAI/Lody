@@ -227,3 +227,6 @@ the topmost painted element at its own centre; the bars measured a 6px well-rung
 track with the accent in it; the skeleton and the three spinner sizes were read
 for fill and measurement. Both close crosses measured 16×16 inside their 28px
 buttons after the Button fix, where each had been 28×28 before it.
+
+The toast and spinner call sites this note deferred landed in
+[2026-09-22-ui-radix-callsite-migration](2026-09-22-ui-radix-callsite-migration.md).

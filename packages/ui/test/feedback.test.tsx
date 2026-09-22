@@ -118,6 +118,18 @@ describe('Skeleton', () => {
 });
 
 describe('Spinner', () => {
+  test('the turn rides on an HTML wrapper, never the svg', async () => {
+    mounted = await mount(<Spinner />);
+    const wrapper = mounted.container.querySelector('[data-slot="spinner"]');
+    // Chromium cannot composite a transform animation whose target is an SVG
+    // at DPR≠1 (crbug.com/1186312): the animated element must be this span.
+    expect(wrapper?.tagName).toBe('SPAN');
+    expect(wrapper?.namespaceURI).toBe('http://www.w3.org/1999/xhtml');
+    expect(wrapper?.childElementCount).toBe(1);
+    expect(wrapper?.firstElementChild?.tagName).toBe('svg');
+    expect(wrapper?.classList.length).toBeGreaterThan(0);
+  });
+
   test('it is drawn in the ink of whatever holds it', () => {
     const html = renderToStaticMarkup(<Spinner />);
     // Two strokes, one colour: the arc and the ring it turns inside, which is

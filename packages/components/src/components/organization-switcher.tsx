@@ -5,27 +5,13 @@ import { useCloudQuery } from '@lody/platform/react';
 import { useOrganization } from '../hooks/useOrganization';
 import { useWorkspaceSlugField } from '../hooks/useWorkspaceSlugField';
 import { useTranslation } from 'react-i18next';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
+import { Menu } from '@/ui/menu';
 import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui';
+import { Tooltip } from '@lody/ui/tooltip';
 import { useNavigate } from '@tanstack/react-router';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useAuthSignOut } from '../providers/convex-provider';
@@ -146,8 +132,38 @@ function CloudOrganizationSwitcher() {
   return (
     <>
       <div className="flex items-center gap-1 w-full">
-        <DropdownMenu modal={!isMobile} open={open} onOpenChange={setOpen}>
-          <DropdownMenuTrigger asChild>
+        <Menu.Root modal={!isMobile} open={open} onOpenChange={setOpen}>
+          <Menu.Trigger render={<Button variant="ghost" className="flex-1 justify-between" disabled={loading}>
+              <div className="flex items-center gap-3">
+                <WorkspaceAvatar
+                  workspace={{
+                    name: activeOrganization.name,
+                    logo: activeOrganization.logo,
+                  }}
+                  size="large"
+                />
+                <div className="flex flex-col items-start">
+                  <span className="text-lg font-semibold truncate max-w-[120px]">
+                    {activeOrganization.name}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1 pl-2">
+                  {/* {loroConnect ? (
+                    <Tooltip.Root>
+                      <Tooltip.Trigger delay={500} render={<div className="h-2 w-2 rounded-full bg-status-success" />}/>
+                      <Tooltip.Content>{t('common.connected')}</Tooltip.Content>
+                    </Tooltip.Root>
+                  ) :  */}
+                  {/*  TODO:  ws state */}
+                  <Tooltip.Root>
+                    <Tooltip.Trigger delay={500} render={<div className="h-2 w-2 rounded-full bg-status-danger" />}/>
+                    <Tooltip.Content>{t('common.disconnected')}</Tooltip.Content>
+                  </Tooltip.Root>
+                </div>
+              </div>
+
+              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+            </Button>}>
             <Button variant="ghost" className="flex-1 justify-between" disabled={loading}>
               <div className="flex items-center gap-3">
                 <WorkspaceAvatar
@@ -164,31 +180,27 @@ function CloudOrganizationSwitcher() {
                 </div>
                 <div className="flex items-center gap-1 pl-2">
                   {/* {loroConnect ? (
-                    <Tooltip delayDuration={500}>
-                      <TooltipTrigger asChild>
-                        <div className="h-2 w-2 rounded-full bg-status-success" />
-                      </TooltipTrigger>
-                      <TooltipContent>{t('common.connected')}</TooltipContent>
-                    </Tooltip>
+                    <Tooltip.Root>
+                      <Tooltip.Trigger delay={500} render={<div className="h-2 w-2 rounded-full bg-status-success" />}/>
+                      <Tooltip.Content>{t('common.connected')}</Tooltip.Content>
+                    </Tooltip.Root>
                   ) :  */}
                   {/*  TODO:  ws state */}
-                  <Tooltip delayDuration={500}>
-                    <TooltipTrigger asChild>
-                      <div className="h-2 w-2 rounded-full bg-status-danger" />
-                    </TooltipTrigger>
-                    <TooltipContent>{t('common.disconnected')}</TooltipContent>
-                  </Tooltip>
+                  <Tooltip.Root>
+                    <Tooltip.Trigger delay={500} render={<div className="h-2 w-2 rounded-full bg-status-danger" />}/>
+                    <Tooltip.Content>{t('common.disconnected')}</Tooltip.Content>
+                  </Tooltip.Root>
                 </div>
               </div>
 
               <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
             </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="w-[250px]">
-            <DropdownMenuLabel>{t('organization.workspaces')}</DropdownMenuLabel>
-            <DropdownMenuSeparator />
+          </Menu.Trigger>
+          <Menu.Content align="start" className="w-[250px]">
+            <Menu.GroupLabel>{t('organization.workspaces')}</Menu.GroupLabel>
+            <Menu.Separator />
             {organizations.map((org) => (
-              <DropdownMenuItem
+              <Menu.Item
                 key={org.id}
                 onClick={() => {
                   void switchOrganization(org.id);
@@ -219,9 +231,9 @@ function CloudOrganizationSwitcher() {
                   </div>
                   {org.id === activeOrganization.id && <Check className="h-4 w-4 shrink-0" />}
                 </div>
-              </DropdownMenuItem>
+              </Menu.Item>
             ))}
-            <DropdownMenuItem
+            <Menu.Item
               onClick={() => {
                 setDialogOpen(true);
                 setOpen(false);
@@ -229,9 +241,9 @@ function CloudOrganizationSwitcher() {
             >
               <Plus className="mr-2 h-4 w-4" />
               {t('organization.createNew')}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
+            </Menu.Item>
+            <Menu.Separator />
+            <Menu.Item
               onClick={() => {
                 void signOut();
               }}
@@ -239,12 +251,12 @@ function CloudOrganizationSwitcher() {
             >
               <LogOut className="mr-2 h-4 w-4" />
               {t('organization.signOut')}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            </Menu.Item>
+          </Menu.Content>
+        </Menu.Root>
       </div>
 
-      <Dialog
+      <Dialog.Root
         open={dialogOpen}
         onOpenChange={(nextOpen) => {
           setDialogOpen(nextOpen);
@@ -254,11 +266,11 @@ function CloudOrganizationSwitcher() {
           }
         }}
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('organization.createNewWorkspace')}</DialogTitle>
-            <DialogDescription>{t('organization.createNewWorkspaceDescription')}</DialogDescription>
-          </DialogHeader>
+        <Dialog.Content>
+          <Dialog.Header>
+            <Dialog.Title>{t('organization.createNewWorkspace')}</Dialog.Title>
+            <Dialog.Description>{t('organization.createNewWorkspaceDescription')}</Dialog.Description>
+          </Dialog.Header>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <UiField.Label htmlFor="name">{t('organization.workspaceName')}</UiField.Label>
@@ -312,7 +324,7 @@ function CloudOrganizationSwitcher() {
               )}
             </div>
           </div>
-          <DialogFooter>
+          <Dialog.Footer>
             <Button variant="secondary" onClick={() => setDialogOpen(false)} disabled={creating}>
               {t('common.cancel')}
             </Button>
@@ -330,9 +342,9 @@ function CloudOrganizationSwitcher() {
             >
               {creating ? t('common.creating') : t('common.create')}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </Dialog.Footer>
+        </Dialog.Content>
+      </Dialog.Root>
     </>
   );
 }

@@ -4,14 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import { Select } from '@lody/ui/select';
 import type { AccountMember } from './account-setting-pure';
 
@@ -108,12 +101,12 @@ export function WorkspaceOwnershipTransfer({
       >
         {t('workspace.transfer.button')}
       </Button>
-      <Dialog open={open} onOpenChange={changeOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('workspace.transfer.title')}</DialogTitle>
-            <DialogDescription>{t('workspace.transfer.warning')}</DialogDescription>
-          </DialogHeader>
+      <Dialog.Root open={open} onOpenChange={changeOpen}>
+        <Dialog.Content>
+          <Dialog.Header>
+            <Dialog.Title>{t('workspace.transfer.title')}</Dialog.Title>
+            <Dialog.Description>{t('workspace.transfer.warning')}</Dialog.Description>
+          </Dialog.Header>
           <div className="space-y-4">
             <div className="space-y-2">
               <UiField.Label htmlFor={`${id}-member`}>
@@ -159,16 +152,16 @@ export function WorkspaceOwnershipTransfer({
               </p>
             ) : null}
           </div>
-          <DialogFooter className="gap-2">
+          <Dialog.Footer className="gap-2">
             <Button variant="secondary" disabled={busy} onClick={() => changeOpen(false)}>
               {t('common.cancel')}
             </Button>
             <Button variant="destructive" disabled={!canConfirm} onClick={() => void submit()}>
               {t(busy ? 'workspace.transfer.transferring' : 'workspace.transfer.confirm')}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </Dialog.Footer>
+        </Dialog.Content>
+      </Dialog.Root>
     </div>
   );
 }

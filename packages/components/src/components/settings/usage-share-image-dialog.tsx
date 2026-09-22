@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, Copy, Download } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { cn } from '@/lib/utils';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import { Field as UiField } from '@lody/ui/field';
 import { Button } from '@lody/ui/button';
 import { Switch } from '@lody/ui/switch';
@@ -193,21 +193,21 @@ export function UsageShareImageDialog({
   };
 
   return (
-    <Dialog
+    <Dialog.Root
       open={open}
       onOpenChange={(next) => {
         if (!exportingRef.current) onOpenChange(next);
       }}
     >
-      <DialogContent className="flex max-h-[85vh] max-w-4xl flex-col gap-0 overflow-hidden p-0 sm:p-0">
-        <DialogHeader className="border-b border-border/70 px-4 py-3.5 pr-12 text-left sm:px-5 sm:pr-12">
-          <DialogTitle className="text-base">
+      <Dialog.Content className="flex max-h-[85vh] max-w-4xl flex-col gap-0 overflow-hidden p-0 sm:p-0">
+        <Dialog.Header className="border-b border-border/70 px-4 py-3.5 pr-12 text-left sm:px-5 sm:pr-12">
+          <Dialog.Title className="text-base">
             {t('workspace.usage.shareImage.dialogTitle')}
-          </DialogTitle>
-          <DialogDescription className="leading-5">
+          </Dialog.Title>
+          <Dialog.Description className="leading-5">
             {t('workspace.usage.shareImage.dialogDescription')}
-          </DialogDescription>
-        </DialogHeader>
+          </Dialog.Description>
+        </Dialog.Header>
 
         <div className="grid min-h-0 flex-1 grid-cols-1 sm:grid-cols-[280px_minmax(0,1fr)]">
           <fieldset
@@ -482,7 +482,7 @@ export function UsageShareImageDialog({
             {t('workspace.usage.shareImage.exportPng')}
           </Button>
         </div>
-      </DialogContent>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

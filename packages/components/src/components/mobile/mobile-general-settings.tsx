@@ -7,7 +7,7 @@ import type {
 import { useAtom, useAtomValue } from 'jotai';
 import { Spinner } from '@lody/ui/spinner';
 import { Switch } from '@lody/ui/switch';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   autoArchiveOnPrClosedAtom,
   autoArchiveOnPrMergedAtom,

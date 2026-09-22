@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, Clock3, Minus, RotateCcw, XCircle } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import type { ProviderSetupFailureCode } from '@lody/shared';
 import { Table } from '@lody/ui/table';
 import { Button } from '@lody/ui/button';

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { usePostHog } from '@posthog/react';
 import { Plug, Plus, Trash2 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import {
   describeMcpConnection,
@@ -20,21 +20,12 @@ import { cn } from '@/lib/utils';
 import { SETTINGS_ROW_CARD_CLASS } from './compact-layout';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { MCP_TRANSPORT_LABELS, McpTransportIcon } from '@/components/shared/mcp-transport';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
+import { AlertDialog } from '@/ui/dialog';
 import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import { Switch } from '@lody/ui/switch';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import { settingContainerClass } from '.';
 import { McpConnectionForm, type McpConnectionFormValue } from './mcp-connection-form';
 
@@ -149,9 +140,8 @@ export function McpSetting() {
               </span>
             ) : null}
           </div>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
+          <Tooltip.Root>
+            <Tooltip.Trigger render={<Button
                 variant="ghost"
                 aria-label={addLabel}
                 size="small"
@@ -159,10 +149,9 @@ export function McpSetting() {
                 onClick={() => openEditor({ mode: 'add' })}
               >
                 <Plus className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{addLabel}</TooltipContent>
-          </Tooltip>
+              </Button>}/>
+            <Tooltip.Content>{addLabel}</Tooltip.Content>
+          </Tooltip.Root>
         </div>
 
         {servers.length === 0 ? (
@@ -189,7 +178,7 @@ export function McpSetting() {
         )}
       </section>
 
-      <Dialog
+      <Dialog.Root
         open={editor !== null}
         onOpenChange={(open) => {
           if (open) return;
@@ -197,8 +186,8 @@ export function McpSetting() {
           setEditor(null);
         }}
       >
-        <DialogContent
-          overlayClassName={
+        <Dialog.Content
+          backdropClassName={
             // Desktop settings is itself a dialog; match its z-index so this
             // later overlay covers it without stacking a second /80 veil.
             isMobile ? undefined : 'z-[var(--z-dialog)] bg-black/20'
@@ -209,12 +198,12 @@ export function McpSetting() {
           )}
         >
           <header className="shrink-0 border-b border-border/60 px-5 py-3 pr-12">
-            <DialogTitle className="text-sm font-normal">
+            <Dialog.Title className="text-sm font-normal">
               {editor?.mode === 'edit' ? t('settings.mcp.editTitle') : t('settings.mcp.addTitle')}
-            </DialogTitle>
-            <DialogDescription className="mt-0.5 text-xs leading-snug text-muted-foreground">
+            </Dialog.Title>
+            <Dialog.Description className="mt-0.5 text-xs leading-snug text-muted-foreground">
               {t('settings.mcp.dialogDescription')}
-            </DialogDescription>
+            </Dialog.Description>
           </header>
           {editor ? (
             <McpConnectionForm
@@ -230,25 +219,25 @@ export function McpSetting() {
               }}
             />
           ) : null}
-        </DialogContent>
-      </Dialog>
+        </Dialog.Content>
+      </Dialog.Root>
 
-      <AlertDialog
+      <AlertDialog.Root
         open={pendingRemoval !== null}
         onOpenChange={(open) => {
           if (!open && !removing) setPendingRemoval(null);
         }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('settings.mcp.removeTitle')}</AlertDialogTitle>
-            <AlertDialogDescription>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>{t('settings.mcp.removeTitle')}</AlertDialog.Title>
+            <AlertDialog.Description>
               {t('settings.mcp.confirmRemove', { name: pendingRemoval?.name ?? '' })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={removing}>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={removing}>{t('common.cancel')}</AlertDialog.Cancel>
+            <AlertDialog.Action
               disabled={removing} variant="destructive"
               onClick={(event) => {
                 event.preventDefault();
@@ -257,10 +246,10 @@ export function McpSetting() {
             >
               {removing ? <Spinner className="mr-2 h-4 w-4" /> : null}
               {t('common.remove')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </div>
   );
 }

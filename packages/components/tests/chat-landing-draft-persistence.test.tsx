@@ -44,7 +44,7 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
-vi.mock('sonner', () => ({ toast: { error: vi.fn() } }));
+vi.mock('@/lib/toast', () => ({ toast: { error: vi.fn() } }));
 
 vi.mock('@posthog/react', () => ({ usePostHog: () => null }));
 

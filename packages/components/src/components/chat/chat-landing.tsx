@@ -59,7 +59,7 @@ import {
   RefreshCw,
   X,
 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import { PiProviderMigrationCard } from './pi-provider-migration-card';
 
@@ -93,7 +93,7 @@ import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { useNavigate } from '@tanstack/react-router';
 import { activeWorkspaceRuntimeAtom, authTokenAtom, runtimeAtom } from '@/atoms/runtime';
 
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { useOpenSettings } from '@/hooks/use-open-settings';
 import {
@@ -280,7 +280,7 @@ import {
   NO_PROJECT_BUCKET_ID,
   PINNED_BUCKET_ID,
 } from '@/components/mobile/mobile-chat-list';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import {
   MobileHomeScreen,
   type MobileChatGroupBy,
@@ -3447,9 +3447,8 @@ function WorkspaceChatLanding({
     selectedLocalProject &&
     localGitStateError &&
     !loadingLocalGitState ? (
-      <Tooltip delayDuration={300}>
-        <TooltipTrigger asChild>
-          <Button
+      <Tooltip.Root>
+        <Tooltip.Trigger delay={300} render={<Button
             type="button"
             variant="ghost"
             icon
@@ -3458,12 +3457,11 @@ function WorkspaceChatLanding({
             aria-label={t('chat.localGitStateRetry', 'Retry loading branches')}
           >
             <RefreshCw aria-hidden="true" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="bottom">
+          </Button>}/>
+        <Tooltip.Content side="bottom">
           {t('chat.localGitStateRetry', 'Retry loading branches')}
-        </TooltipContent>
-      </Tooltip>
+        </Tooltip.Content>
+      </Tooltip.Root>
     ) : null;
 
   const worktreeUnavailableReason = loadingLocalGitState

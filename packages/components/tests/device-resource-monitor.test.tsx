@@ -13,7 +13,7 @@ import type {
 } from '@lody/shared';
 import { DeviceResourceMonitor } from '../src/components/settings/device-resource-monitor';
 import { initI18n } from '../src/i18n';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 
 const machineId = 'machine-test' as MachineId;
 
@@ -117,7 +117,7 @@ describe('DeviceResourceMonitor session status presentation', () => {
     root = createRoot(container);
     await act(async () => {
       root?.render(
-        <TooltipProvider delayDuration={0}>
+        <Tooltip.Provider delay={0}>
           <DeviceResourceMonitor
             snapshot={snapshot}
             state="active"
@@ -126,7 +126,7 @@ describe('DeviceResourceMonitor session status presentation', () => {
             onOpenSession={vi.fn()}
             onTerminateSession={vi.fn(async () => {})}
           />
-        </TooltipProvider>
+        </Tooltip.Provider>
       );
     });
   });
@@ -172,7 +172,7 @@ describe('DeviceResourceMonitor session status presentation', () => {
       trigger!.focus();
     });
     await vi.waitFor(() => {
-      const tooltip = document.body.querySelector('[role="tooltip"]');
+      const tooltip = document.body.querySelector('[data-base-ui-portal] [data-side]');
       expect(tooltip?.textContent).toContain('Waiting for permission');
     });
   });
@@ -180,13 +180,13 @@ describe('DeviceResourceMonitor session status presentation', () => {
   it('keeps the resource cards and omits the empty ACP session message', async () => {
     await act(async () => {
       root?.render(
-        <TooltipProvider delayDuration={0}>
+        <Tooltip.Provider delay={0}>
           <DeviceResourceMonitor
             snapshot={{ ...snapshot, sessions: [] }}
             state="active"
             agentConfigs={agentConfigs}
           />
-        </TooltipProvider>
+        </Tooltip.Provider>
       );
     });
 

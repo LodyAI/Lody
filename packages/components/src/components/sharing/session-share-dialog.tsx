@@ -5,7 +5,7 @@ import type { SessionMeta, WorkspaceId } from '@lody/shared';
 import { userAtom } from '@/atoms';
 import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
 import { cn } from '@/lib/utils';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import { getSessionShareCandidates } from '@/lib/session-share-candidates';
 import { useSessionShareManagement } from '@/hooks/use-session-share-management';
 import { SessionShareManager } from './session-share-manager';
@@ -35,21 +35,18 @@ export function SessionShareDialogFrame({
   const panel = useRef<HTMLDivElement>(null);
   useKeyboardAwareScrollIntoView(body);
   return (
-    <Dialog
+    <Dialog.Root
       open
       onOpenChange={(open) => {
         if (!open) onClose?.();
       }}
     >
-      <DialogContent
+      <Dialog.Content
         ref={panel}
         tabIndex={-1}
         // Opening must not pre-select the link field or arm the sub-conversation
         // checkbox; focus the panel and let the first Tab reach the controls.
-        onOpenAutoFocus={(event) => {
-          event.preventDefault();
-          panel.current?.focus();
-        }}
+        initialFocus={() => panel.current}
         className={cn(
           'flex w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden p-0 sm:p-0',
           'max-w-md'
@@ -62,22 +59,22 @@ export function SessionShareDialogFrame({
       >
         {/* The conversation being shared is the subject, so it carries the header:
             the action reads as a small label above it, not as the larger line. */}
-        <DialogHeader className="shrink-0 gap-0.5 px-5 pb-3 pr-11 pt-4 text-left">
-          <DialogDescription className="text-xs font-medium text-muted-foreground">
+        <Dialog.Header className="shrink-0 gap-0.5 px-5 pb-3 pr-11 pt-4 text-left">
+          <Dialog.Description className="text-xs font-medium text-muted-foreground">
             {t('sharing.manager.title', 'Share conversation')}
-          </DialogDescription>
-          <DialogTitle className="truncate text-base font-semibold leading-6 text-foreground">
+          </Dialog.Description>
+          <Dialog.Title className="truncate text-base font-semibold leading-6 text-foreground">
             {title}
-          </DialogTitle>
-        </DialogHeader>
+          </Dialog.Title>
+        </Dialog.Header>
         <div
           ref={body}
           className="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
           {children}
         </div>
-      </DialogContent>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }
 

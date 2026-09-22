@@ -1,15 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import type { SessionId } from '@lody/shared';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import { Button } from '@lody/ui/button';
 import { Textarea } from '@lody/ui/textarea';
 import { useSessionActions } from '@/hooks/use-session-actions';
@@ -128,16 +121,16 @@ export function RenameSessionDialogView({
   };
 
   return (
-    <Dialog open={target != null} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-sm gap-0 overflow-hidden p-0 sm:p-0">
-        <DialogHeader className="border-b border-border/70 px-4 py-4 pr-12 text-left sm:px-5 sm:pr-12">
-          <DialogTitle className="text-base">
+    <Dialog.Root open={target != null} onOpenChange={handleOpenChange}>
+      <Dialog.Content className="max-w-sm gap-0 overflow-hidden p-0 sm:p-0">
+        <Dialog.Header className="border-b border-border/70 px-4 py-4 pr-12 text-left sm:px-5 sm:pr-12">
+          <Dialog.Title className="text-base">
             {t('sidebar.renameChat.title', 'Rename Chat')}
-          </DialogTitle>
-          <DialogDescription className="leading-5">
+          </Dialog.Title>
+          <Dialog.Description className="leading-5">
             {t('sidebar.renameChat.description', 'Enter a new name for this chat.')}
-          </DialogDescription>
-        </DialogHeader>
+          </Dialog.Description>
+        </Dialog.Header>
 
         <div className="px-4 py-4 sm:px-5">
           <Textarea
@@ -158,7 +151,7 @@ export function RenameSessionDialogView({
           />
         </div>
 
-        <DialogFooter className="border-t border-border/70 bg-muted/30 px-4 py-3 sm:px-5">
+        <Dialog.Footer className="border-t border-border/70 bg-muted/30 px-4 py-3 sm:px-5">
           <Button variant="secondary" size="small" onClick={onClose} disabled={saving}>
             {t('common.cancel', 'Cancel')}
           </Button>
@@ -171,9 +164,9 @@ export function RenameSessionDialogView({
           >
             {t('common.save', 'Save')}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </Dialog.Footer>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }
 

@@ -1,19 +1,12 @@
 import { useEffect, useState, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CreditCard, Shield, User } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
 import { Select } from '@lody/ui/select';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import { formatDate, formatUsd } from './billing-setting-pure';
 
 export type InviteMemberRole = 'member' | 'admin';
@@ -97,10 +90,10 @@ export function InviteMemberDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md gap-0 overflow-hidden p-0 sm:p-0">
-        <DialogHeader className="px-5 pb-4 pt-5">
-          <DialogTitle className="pr-6 text-base">
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Content className="max-w-md gap-0 overflow-hidden p-0 sm:p-0">
+        <Dialog.Header className="px-5 pb-4 pt-5">
+          <Dialog.Title className="pr-6 text-base">
             {memberLimitReached
               ? t(
                   billingUiAvailable
@@ -108,13 +101,13 @@ export function InviteMemberDialog({
                     : 'workspace.invite.mobileLimitTitle'
                 )
               : t('workspace.invite.titleWithWorkspace', { workspace: workspaceName })}
-          </DialogTitle>
-          <DialogDescription>
+          </Dialog.Title>
+          <Dialog.Description>
             {memberLimitReached
               ? t('workspace.invite.limitDescription', { limit: memberLimit ?? 3 })
               : t('workspace.invite.description')}
-          </DialogDescription>
-        </DialogHeader>
+          </Dialog.Description>
+        </Dialog.Header>
 
         {memberLimitReached ? (
           <div className="px-5 pb-5">
@@ -189,7 +182,7 @@ export function InviteMemberDialog({
           </div>
         )}
 
-        <DialogFooter className="gap-2 border-t border-border/60 bg-muted/20 px-5 py-3.5">
+        <Dialog.Footer className="gap-2 border-t border-border/60 bg-muted/20 px-5 py-3.5">
           <Button
             variant="secondary"
             size="small"
@@ -219,9 +212,9 @@ export function InviteMemberDialog({
               {inviting ? t('common.inviting') : t('common.invite')}
             </Button>
           )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </Dialog.Footer>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }
 

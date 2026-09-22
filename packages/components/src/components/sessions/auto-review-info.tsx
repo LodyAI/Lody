@@ -1,13 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import type { ReviewBudget } from '@lody/shared';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import { Button } from '@lody/ui/button';
 
 /**
@@ -112,23 +105,23 @@ export function AutoReviewConfirmDialog({
   const { t } = useTranslation();
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle>
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Content className="max-w-md">
+        <Dialog.Header>
+          <Dialog.Title>
             {t('sessions.autoReview.confirmTitle', 'Auto review and merge')}
-          </DialogTitle>
-          <DialogDescription>
+          </Dialog.Title>
+          <Dialog.Description>
             {t(
               'sessions.autoReview.confirmDescription',
               'Lody will take this branch to the end, including merging it.'
             )}
-          </DialogDescription>
-        </DialogHeader>
+          </Dialog.Description>
+        </Dialog.Header>
 
         <AutoReviewContract budget={budget} />
 
-        <DialogFooter>
+        <Dialog.Footer>
           <Button variant="secondary" size="small" onClick={() => onOpenChange(false)}>
             {t('common.cancel', 'Cancel')}
           </Button>
@@ -141,9 +134,9 @@ export function AutoReviewConfirmDialog({
           >
             {t('sessions.autoReview.confirmAction', 'Turn on')}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </Dialog.Footer>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }
 
@@ -164,21 +157,21 @@ export function ReviewAgentSetupDialog({
   const { t } = useTranslation();
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm">
-        <DialogHeader>
-          <DialogTitle>
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Content className="max-w-sm">
+        <Dialog.Header>
+          <Dialog.Title>
             {t('sessions.autoReview.setupTitle', 'Configure a review agent')}
-          </DialogTitle>
-          <DialogDescription>
+          </Dialog.Title>
+          <Dialog.Description>
             {t('sessions.autoReview.setupDescription', {
               defaultValue:
                 'Choose an agent, model, reasoning, and mode for {{machine}} before sessions on it can start a review.',
               machine: machineName ?? t('sessions.autoReview.thisMachine', 'this machine'),
             })}
-          </DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
+          </Dialog.Description>
+        </Dialog.Header>
+        <Dialog.Footer>
           <Button variant="secondary" size="small" onClick={() => onOpenChange(false)}>
             {t('common.cancel', 'Cancel')}
           </Button>
@@ -191,8 +184,8 @@ export function ReviewAgentSetupDialog({
           >
             {t('sessions.autoReview.openSettings', 'Open review settings')}
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </Dialog.Footer>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

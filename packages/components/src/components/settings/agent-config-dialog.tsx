@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useTranslation } from 'react-i18next';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   computeTitleGenerationDefaults,
   DEEPSEEK_HARNESS_API_KEY_ENV,
@@ -60,22 +60,22 @@ import {
   SquareTerminal,
   X,
 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { cn } from '@/lib/utils';
 import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scroll-into-view';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { Button } from '@lody/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import { Collapsible } from '@lody/ui/collapsible';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
 import { Textarea } from '@lody/ui/textarea';
 import { Select } from '@lody/ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/tabs';
+import { Tabs } from '@lody/ui/tabs';
 import { EnvVarsTextarea, envVarsToText } from './env-vars-textarea';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import { AcpAuthenticationPanel } from './acp-authentication-panel';
 import { BubInstallGuide } from './bub-install-guide';
 import { ProviderSetupRow } from './provider-setup-row';
@@ -596,7 +596,7 @@ export type AgentConfigFormData = {
   presetCredentialModeId?: string;
   presetBaseUrlOptionId?: string;
   presetBaseUrl?: string;
-  /** Dialog-only DeepSeek Harness endpoint tab; never persisted on AgentConfigMeta. */
+  /** Dialog.Root-only DeepSeek Harness endpoint tab; never persisted on AgentConfigMeta. */
   deepseekEndpointMode?: DeepSeekEndpointMode;
   /** Draft custom DEEPSEEK_BASE_URL while the official tab is selected. */
   deepseekCustomBaseUrl?: string;
@@ -2572,9 +2572,8 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           >
             {t('common.cancel', 'Cancel')}
           </Button>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span>
+          <Tooltip.Root>
+            <Tooltip.Trigger render={<span>
                 <Button
                   size="small"
                   onClick={() => void submit()}
@@ -2592,19 +2591,18 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                     ? t('common.save', 'Save')
                     : t('common.create', 'Create')}
                 </Button>
-              </span>
-            </TooltipTrigger>
-            {disableReason && <TooltipContent>{disableReason}</TooltipContent>}
-          </Tooltip>
+              </span>}/>
+            {disableReason && <Tooltip.Content>{disableReason}</Tooltip.Content>}
+          </Tooltip.Root>
         </div>
       </footer>
     </section>
   );
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        overlayClassName={
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Content
+        backdropClassName={
           nestedInDialog
             ? // Radix portals are siblings under body. Matching the parent content's
               // z-index lets this later overlay cover it without stacking another /80 veil.
@@ -2617,7 +2615,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           isNarrowLayout
             ? cn(
                 // True full-screen sheet on mobile: override the safe-area-aware
-                // centering/max-height that DialogContent applies by default.
+                // centering/max-height that Dialog.Content applies by default.
                 // Keep keyboard height changes synchronous: the form scroll hook
                 // measures the container on the keyboard event.
                 'h-[calc(100dvh-var(--native-keyboard-height,0px))] max-h-none w-screen rounded-none border-none top-0 translate-y-0 transition-none',
@@ -2635,20 +2633,20 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
             : 'h-[min(680px,92dvh)] w-[min(1040px,96dvw)]'
         )}
       >
-        <DialogTitle className="sr-only">{dialogTitle}</DialogTitle>
-        <DialogDescription className="sr-only">
+        <Dialog.Title className="sr-only">{dialogTitle}</Dialog.Title>
+        <Dialog.Description className="sr-only">
           {t(
             'settings.agent.dialog.a11yDescription',
             'Choose an agent type on the left and fill in the configuration on the right.'
           )}
-        </DialogDescription>
+        </Dialog.Description>
 
         <div className="flex h-full min-h-0 flex-1">
           {showPicker && pickerPane}
           {showForm && formPane}
         </div>
-      </DialogContent>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }
 
@@ -2860,9 +2858,8 @@ function ProbeStatus({
   if (ready) {
     return (
       <div className="inline-flex shrink-0 items-center gap-2">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
+        <Tooltip.Root>
+          <Tooltip.Trigger render={<button
               type="button"
               onClick={onRetry}
               disabled={disabled}
@@ -2873,15 +2870,14 @@ function ProbeStatus({
               className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-hover/60 hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
             >
               <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent>
+            </button>}/>
+          <Tooltip.Content>
             {t(
               'settings.agent.dialog.refreshCapabilitiesHint',
               'Re-probe modes, models, and config options'
             )}
-          </TooltipContent>
-        </Tooltip>
+          </Tooltip.Content>
+        </Tooltip.Root>
         <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-status-success/30 bg-status-success/10 px-2.5 py-1 text-[11px] font-normal text-status-success">
           <Check className="h-3 w-3" aria-hidden="true" />
           {t('settings.agent.dialog.ready', 'Ready')}
@@ -2959,7 +2955,7 @@ function DeepSeekHarnessPanel({
   const { t } = useTranslation();
   return (
     <div className="space-y-3 rounded-xl border border-primary/20 bg-primary/[0.04] p-4">
-      <Tabs
+      <Tabs.Root
         value={endpointMode}
         onValueChange={(value) => {
           if (value === 'official' || value === 'custom') {
@@ -2967,18 +2963,18 @@ function DeepSeekHarnessPanel({
           }
         }}
       >
-        <TabsList className="grid h-8 w-full grid-cols-2">
-          <TabsTrigger value="official" className="px-2.5 text-xs">
+        <Tabs.List className="grid h-8 w-full grid-cols-2">
+          <Tabs.Tab value="official" className="px-2.5 text-xs">
             {t('settings.agent.dialog.deepseek.officialTab', 'DeepSeek official')}
-          </TabsTrigger>
-          <TabsTrigger value="custom" className="px-2.5 text-xs">
+          </Tabs.Tab>
+          <Tabs.Tab value="custom" className="px-2.5 text-xs">
             {t('settings.agent.dialog.deepseek.customTab', 'Custom Endpoint')}
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="official" className="mt-3">
+          </Tabs.Tab>
+        </Tabs.List>
+        <Tabs.Panel value="official" className="mt-3">
           <DeepSeekApiKeyField value={apiKey} onChange={onApiKeyChange} />
-        </TabsContent>
-        <TabsContent value="custom" className="mt-3 space-y-3">
+        </Tabs.Panel>
+        <Tabs.Panel value="custom" className="mt-3 space-y-3">
           <Field
             htmlFor="deepseek-endpoint"
             label={t('settings.agent.dialog.deepseek.endpointLabel', 'API Endpoint')}
@@ -3012,8 +3008,8 @@ function DeepSeekHarnessPanel({
             onChange={onApiKeyChange}
             label={t('settings.agent.dialog.deepseek.customApiKeyLabel', 'API Key')}
           />
-        </TabsContent>
-      </Tabs>
+        </Tabs.Panel>
+      </Tabs.Root>
     </div>
   );
 }

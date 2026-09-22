@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { Archive, Bot, FolderPlus, Search, SlidersHorizontal } from 'lucide-react';
 import type { LocalProjectId, MachineId, SessionId, SessionMeta } from '@lody/shared';
 import { SessionStatusFactory } from '@lody/shared';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 
 import {
   ArchivedSessionGroupSection,
@@ -21,7 +21,8 @@ import { MobileRemoveLocalProjectSheet } from '@/components/mobile/mobile-remove
 import { SidebarSectionHeader } from '@/components/sidebar-row-shared';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
-import { Toaster } from '@/ui/sonner';
+import { Toast } from '@lody/ui';
+import { toastManager } from '@/lib/toast';
 
 const now = Date.now();
 const machineId = 'machine-mac-studio' as MachineId;
@@ -466,7 +467,7 @@ function CleanupResult() {
   return (
     <>
       <RemovedProjectArchive />
-      <Toaster />
+      <Toast.Provider manager={toastManager} />
     </>
   );
 }

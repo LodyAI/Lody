@@ -15,37 +15,16 @@ import {
   Pencil,
   X,
 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
 import { Badge } from '@lody/ui/badge';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
+import { Menu } from '@/ui/menu';
 import { UserAvatar } from '../user-avatar';
 import { isNativeIOSAppShell } from '@/lib/native-platform';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/ui/dialog';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
+import { Dialog } from '@/ui/dialog';
+import { AlertDialog } from '@/ui/dialog';
 import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
 import { MobileDeleteWorkspaceSheet } from '@/components/mobile/mobile-delete-workspace-sheet';
 import { AvatarEditor } from '../settings/avatar-editor';
@@ -571,15 +550,18 @@ export function MobileAccountSettings({
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   {isEditable ? (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
+                    <Menu.Root>
+                      <Menu.Trigger render={<button className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-transparent px-2 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground">
+                          {t(`organization.role.${member.role}`)}
+                          <ChevronDown className="h-3 w-3 opacity-50" />
+                        </button>}>
                         <button className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-transparent px-2 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground">
                           {t(`organization.role.${member.role}`)}
                           <ChevronDown className="h-3 w-3 opacity-50" />
                         </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
+                      </Menu.Trigger>
+                      <Menu.Content align="end">
+                        <Menu.Item
                           onClick={() => {
                             void onUpdateRole(member, 'member');
                           }}
@@ -591,8 +573,8 @@ export function MobileAccountSettings({
                             )}
                           />
                           {t('organization.role.member')}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
+                        </Menu.Item>
+                        <Menu.Item
                           onClick={() => {
                             void onUpdateRole(member, 'admin');
                           }}
@@ -604,9 +586,9 @@ export function MobileAccountSettings({
                             )}
                           />
                           {t('organization.role.admin')}
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                        </Menu.Item>
+                      </Menu.Content>
+                    </Menu.Root>
                   ) : (
                     <span className="px-2 py-0.5 text-xs font-medium text-muted-foreground">
                       {t(`organization.role.${member.role}`)}
@@ -890,20 +872,20 @@ export function MobileAccountSettings({
       ) : null}
 
       {surface === 'account' ? (
-        <Dialog open={cliApiKeyDialogOpen} onOpenChange={handleCliApiKeyDialogOpenChange}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>
+        <Dialog.Root open={cliApiKeyDialogOpen} onOpenChange={handleCliApiKeyDialogOpenChange}>
+          <Dialog.Content>
+            <Dialog.Header>
+              <Dialog.Title>
                 {hasGeneratedCliApiKey
                   ? t('settings.account.cliAuth.createdDialogTitle')
                   : t('settings.account.cliAuth.createDialogTitle')}
-              </DialogTitle>
-              <DialogDescription>
+              </Dialog.Title>
+              <Dialog.Description>
                 {hasGeneratedCliApiKey
                   ? t('settings.account.cliAuth.createdDialogDescription')
                   : t('settings.account.cliAuth.createDialogDescription')}
-              </DialogDescription>
-            </DialogHeader>
+              </Dialog.Description>
+            </Dialog.Header>
             {hasGeneratedCliApiKey ? (
               <div className="space-y-3 py-4 text-sm">
                 <p className="text-muted-foreground">{t('settings.account.cliAuth.usageHint')}</p>
@@ -936,7 +918,7 @@ export function MobileAccountSettings({
                 </p>
               </div>
             )}
-            <DialogFooter>
+            <Dialog.Footer>
               <Button
                 variant="secondary"
                 size="small"
@@ -957,32 +939,32 @@ export function MobileAccountSettings({
                   {t('settings.account.cliAuth.createConfirmButton')}
                 </Button>
               )}
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+            </Dialog.Footer>
+          </Dialog.Content>
+        </Dialog.Root>
       ) : null}
 
       {surface === 'account' ? (
-        <AlertDialog
+        <AlertDialog.Root
           open={Boolean(cliApiKeyToRevoke)}
           onOpenChange={(open) => {
             if (!open) setCliApiKeyToRevoke(null);
           }}
         >
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>{t('settings.account.cliAuth.revokeDialogTitle')}</AlertDialogTitle>
-              <AlertDialogDescription>
+          <AlertDialog.Content>
+            <AlertDialog.Header>
+              <AlertDialog.Title>{t('settings.account.cliAuth.revokeDialogTitle')}</AlertDialog.Title>
+              <AlertDialog.Description>
                 {t('settings.account.cliAuth.revokeDialogDescription', {
                   note: cliApiKeyToRevoke?.note ?? t('settings.account.cliAuth.recordNoteFallback'),
                 })}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel disabled={Boolean(revokingCliApiKeyId)}>
+              </AlertDialog.Description>
+            </AlertDialog.Header>
+            <AlertDialog.Footer>
+              <AlertDialog.Cancel disabled={Boolean(revokingCliApiKeyId)}>
                 {t('common.cancel')}
-              </AlertDialogCancel>
-              <AlertDialogAction
+              </AlertDialog.Cancel>
+              <AlertDialog.Action
                 onClick={() => {
                   void (async () => {
                     if (!cliApiKeyToRevoke) return;
@@ -999,13 +981,13 @@ export function MobileAccountSettings({
                   <Trash2 className="mr-1.5 h-3.5 w-3.5" />
                 )}
                 {t('settings.account.cliAuth.revokeConfirmButton')}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+              </AlertDialog.Action>
+            </AlertDialog.Footer>
+          </AlertDialog.Content>
+        </AlertDialog.Root>
       ) : null}
 
-      {/* Invite Dialog */}
+      {/* Invite Dialog.Root */}
       <InviteMemberDialog
         open={inviteDialogOpen}
         onOpenChange={setInviteDialogOpen}
@@ -1021,43 +1003,43 @@ export function MobileAccountSettings({
         }}
       />
 
-      {/* Remove Member Dialog */}
-      <AlertDialog open={deleteUserDialogOpen} onOpenChange={setDeleteUserDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('workspace.removeMember.title')}</AlertDialogTitle>
-            <AlertDialogDescription>
+      {/* Remove Member Dialog.Root */}
+      <AlertDialog.Root open={deleteUserDialogOpen} onOpenChange={setDeleteUserDialogOpen}>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>{t('workspace.removeMember.title')}</AlertDialog.Title>
+            <AlertDialog.Description>
               {t('workspace.removeMember.description')}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel>{t('common.cancel')}</AlertDialog.Cancel>
+            <AlertDialog.Action
               onClick={() => {
                 void handleRemoveMember();
               }}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {t('common.remove')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
 
-      {/* Leave Workspace Dialog */}
-      <AlertDialog open={leaveDialogOpen} onOpenChange={setLeaveDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('workspace.danger.leaveWorkspace.confirmTitle')}</AlertDialogTitle>
-            <AlertDialogDescription>
+      {/* Leave Workspace Dialog.Root */}
+      <AlertDialog.Root open={leaveDialogOpen} onOpenChange={setLeaveDialogOpen}>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>{t('workspace.danger.leaveWorkspace.confirmTitle')}</AlertDialog.Title>
+            <AlertDialog.Description>
               {t('workspace.danger.leaveWorkspace.confirmDescription', {
                 workspace: organization.name,
               })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isLeaving}>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={isLeaving}>{t('common.cancel')}</AlertDialog.Cancel>
+            <AlertDialog.Action
               onClick={() => {
                 void (async () => {
                   setIsLeaving(true);
@@ -1080,13 +1062,13 @@ export function MobileAccountSettings({
               ) : (
                 t('workspace.danger.leaveWorkspace.confirmButton')
               )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
 
       {/* Delete Workspace — mobile-native bottom sheet replaces the
-          centered Dialog so the destructive flow stays in the same
+          centered Dialog.Root so the destructive flow stays in the same
           visual family as the rest of the mobile chrome. The sheet
           owns its own type-to-confirm state and `isDeleting` spinner
           state; we just pass through the workspace name + the
@@ -1099,22 +1081,22 @@ export function MobileAccountSettings({
       />
 
       {/* Workspaces with active billing must be managed outside the mobile app. */}
-      <AlertDialog open={deleteBlockedDialogOpen} onOpenChange={setDeleteBlockedDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('workspace.deleteBlockedMobileTitle')}</AlertDialogTitle>
-            <AlertDialogDescription>
+      <AlertDialog.Root open={deleteBlockedDialogOpen} onOpenChange={setDeleteBlockedDialogOpen}>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>{t('workspace.deleteBlockedMobileTitle')}</AlertDialog.Title>
+            <AlertDialog.Description>
               {t('workspace.deleteBlockedMobileDescription')}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.close')}</AlertDialogCancel>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel>{t('common.close')}</AlertDialog.Cancel>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
 
-      {/* Delete Account Dialog */}
-      <Dialog
+      {/* Delete Account Dialog.Root */}
+      <Dialog.Root
         open={deleteAccountDialogOpen}
         onOpenChange={(open) => {
           if (isDeletingAccount) {
@@ -1126,15 +1108,15 @@ export function MobileAccountSettings({
           }
         }}
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="text-destructive">
+        <Dialog.Content>
+          <Dialog.Header>
+            <Dialog.Title className="text-destructive">
               {t('settings.account.accountDeletion.confirmTitle')}
-            </DialogTitle>
-            <DialogDescription>
+            </Dialog.Title>
+            <Dialog.Description>
               {t('settings.account.accountDeletion.confirmDescription')}
-            </DialogDescription>
-          </DialogHeader>
+            </Dialog.Description>
+          </Dialog.Header>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <UiField.Label htmlFor="mobileDeleteAccountConfirmText">
@@ -1155,7 +1137,7 @@ export function MobileAccountSettings({
               />
             </div>
           </div>
-          <DialogFooter>
+          <Dialog.Footer>
             <Button
               variant="secondary"
               onClick={() => {
@@ -1196,9 +1178,9 @@ export function MobileAccountSettings({
                 t('settings.account.accountDeletion.confirmButton')
               )}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </Dialog.Footer>
+        </Dialog.Content>
+      </Dialog.Root>
     </>
   );
 }

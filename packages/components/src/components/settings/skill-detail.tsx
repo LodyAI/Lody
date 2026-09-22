@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { User } from 'lucide-react';
 import type { ProjectSkill, ProjectSkillScope } from '@lody/shared';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import { MarkdownRenderer } from '@/components/ai-gui/markdown-renderer';
 import { ErrorBoundary } from '@/components/error-boundary';
 import { SkillMarkdownFallback } from '@/components/settings/skill-markdown';
@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils';
 /**
  * Shared skill detail body: badges + metadata + the rendered SKILL.md markdown
  * (`skill.content`, frontmatter already stripped by the scanner). The skill
- * name is the surrounding title (DialogTitle on desktop, the sheet header on
+ * name is the surrounding title (Dialog.Title on desktop, the sheet header on
  * mobile), so it is intentionally not repeated here.
  */
 export function SkillDetailContent({
@@ -91,15 +91,15 @@ export function SkillDetailDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[85vh] w-[calc(100vw-2rem)] max-w-3xl flex-col gap-0 overflow-hidden">
-        <DialogHeader className="shrink-0 pb-3 pr-8 text-left">
-          <DialogTitle className="truncate">{skill?.name}</DialogTitle>
-        </DialogHeader>
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Content className="flex max-h-[85vh] w-[calc(100vw-2rem)] max-w-3xl flex-col gap-0 overflow-hidden">
+        <Dialog.Header className="shrink-0 pb-3 pr-8 text-left">
+          <Dialog.Title className="truncate">{skill?.name}</Dialog.Title>
+        </Dialog.Header>
         {skill ? (
           <SkillDetailContent skill={skill} scope={scope} className="min-h-0 flex-1" />
         ) : null}
-      </DialogContent>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

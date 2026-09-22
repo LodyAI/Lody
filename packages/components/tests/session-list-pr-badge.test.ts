@@ -358,13 +358,15 @@ describe('SessionList PR badge', () => {
       );
     });
 
-    const spinner = container.querySelector('[data-session-working-spinner]');
-    expect(spinner?.tagName).toBe('SPAN');
-    expect(spinner?.classList.contains('h-3')).toBe(true);
-    expect(spinner?.classList.contains('w-3')).toBe(true);
-    expect(spinner?.classList.contains('shrink-0')).toBe(true);
-    expect(spinner?.classList.contains('animate-spin')).toBe(true);
-    expect(spinner?.classList.contains('will-change-transform')).toBe(true);
+    // `@lody/ui`'s Spinner animates the `[data-slot="spinner"]` wrapper; the
+    // marker lands on the glyph inside it.
+    const mark = container.querySelector('[data-session-working-spinner]');
+    expect(mark?.tagName).toBe('svg');
+    const wrapper = mark?.closest('[data-slot="spinner"]');
+    expect(wrapper?.tagName).toBe('SPAN');
+    expect(mark?.classList.contains('h-3')).toBe(true);
+    expect(mark?.classList.contains('w-3')).toBe(true);
+    expect(mark?.classList.contains('shrink-0')).toBe(true);
 
     flushSync(() => {
       root?.render(
@@ -376,6 +378,6 @@ describe('SessionList PR badge', () => {
     });
 
     expect(container.querySelector('[data-session-working-spinner]')).toBeNull();
-    expect(container.querySelector('.will-change-transform')).toBeNull();
+    expect(container.querySelector('[data-slot="spinner"]')).toBeNull();
   });
 });

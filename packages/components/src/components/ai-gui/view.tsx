@@ -198,16 +198,7 @@ import { toIntlLocale } from '@/lib/intl-locale';
 import { useStableCallback } from '@/hooks/use-stable-callback';
 import { normalizeWorktreePath, normalizeWorktreeTitle } from '@/lib/worktree-path';
 import { Badge, type BadgeTone } from '@lody/ui/badge';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
+import { AlertDialog } from '@/ui/dialog';
 import { Button } from '@lody/ui/button';
 import { stripRecommended } from '@/components/shared/acp-selector-options';
 import { DiffViewer } from '@/ui/diff-viewer/diff-viewer';
@@ -224,11 +215,11 @@ import { isHtmlSessionFile } from '@/lib/session-file-presentation';
 import type { MachineId, MessageTextSpan, SessionFilePayload } from '@lody/shared';
 import { MessageTextWithChips } from '@/components/mentions/message-text-chips';
 import { isNativeIOSAppShell } from '@/lib/native-platform';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
-import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
+import { Tooltip } from '@lody/ui/tooltip';
+import { Popover } from '@lody/ui/popover';
 import { UserAvatar } from '../user-avatar';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { SessionPlanBar } from '@/components/sessions/session-plan-bar';
 import { ContainerQueryProvider } from './container-query-provider';
 import { usePermissionResponse } from '@/hooks/use-permission-response';
@@ -2697,12 +2688,10 @@ const SystemNoticeView = ({
 
       {/* Center content */}
       <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-muted/50 border border-border/60">
-        <TooltipProvider>
-          <Tooltip delayDuration={500}>
-            <TooltipTrigger asChild>
-              <Info className="h-4 w-4 text-muted-foreground cursor-help" />
-            </TooltipTrigger>
-            <TooltipContent side="top" className="max-w-xs text-center">
+        <Tooltip.Provider>
+          <Tooltip.Root>
+            <Tooltip.Trigger delay={500} render={<Info className="h-4 w-4 text-muted-foreground cursor-help" />}/>
+            <Tooltip.Content side="top" className="max-w-xs text-center">
               <p>{tooltipContent}</p>
               {meta?.terminalOmitted && (
                 <p className="mt-1 text-xs opacity-80">
@@ -2720,9 +2709,9 @@ const SystemNoticeView = ({
                   )}
                 </p>
               )}
-            </TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+            </Tooltip.Content>
+          </Tooltip.Root>
+        </Tooltip.Provider>
         <span className="text-xs text-muted-foreground">{mainMessage}</span>
       </div>
 
@@ -3407,10 +3396,9 @@ const UserMessageRowView = ({
               />
             )}
             {onEdit ? (
-              <TooltipProvider>
-                <Tooltip delayDuration={500}>
-                  <TooltipTrigger asChild>
-                    <Button
+              <Tooltip.Provider>
+                <Tooltip.Root>
+                  <Tooltip.Trigger delay={500} render={<Button
                       type="button"
                       variant="ghost"
                       icon
@@ -3426,17 +3414,15 @@ const UserMessageRowView = ({
                       aria-label={t('sessions.editMessage', 'Edit message')}
                     >
                       <PencilLine className="h-3.5 w-3.5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{t('sessions.editMessage', 'Edit message')}</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+                    </Button>}/>
+                  <Tooltip.Content>{t('sessions.editMessage', 'Edit message')}</Tooltip.Content>
+                </Tooltip.Root>
+              </Tooltip.Provider>
             ) : null}
             {pinCtx ? (
-              <TooltipProvider>
-                <Tooltip delayDuration={500}>
-                  <TooltipTrigger asChild>
-                    <Button
+              <Tooltip.Provider>
+                <Tooltip.Root>
+                  <Tooltip.Trigger delay={500} render={<Button
                       type="button"
                       variant="ghost"
                       icon
@@ -3457,20 +3443,18 @@ const UserMessageRowView = ({
                       ) : (
                         <Pin className="h-3.5 w-3.5" />
                       )}
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>
+                    </Button>}/>
+                  <Tooltip.Content>
                     {isPinned
                       ? t('sessions.pin.unpin', 'Unpin message')
                       : t('sessions.pin.pin', 'Pin this message')}
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
+                  </Tooltip.Content>
+                </Tooltip.Root>
+              </Tooltip.Provider>
             ) : null}
-            <TooltipProvider>
-              <Tooltip delayDuration={500}>
-                <TooltipTrigger asChild>
-                  <Button
+            <Tooltip.Provider>
+              <Tooltip.Root>
+                <Tooltip.Trigger delay={500} render={<Button
                     type="button"
                     variant="ghost"
                     icon
@@ -3485,11 +3469,10 @@ const UserMessageRowView = ({
                     aria-label="Copy message"
                   >
                     {didCopy ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>{didCopy ? 'Copied' : 'Copy message'}</TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
+                  </Button>}/>
+                <Tooltip.Content>{didCopy ? 'Copied' : 'Copy message'}</Tooltip.Content>
+              </Tooltip.Root>
+            </Tooltip.Provider>
           </div>
         ) : null}
       </div>
@@ -3528,9 +3511,8 @@ function UserMessageAuthorAvatar({
   }
 
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
+    <Popover.Root>
+      <Popover.Trigger render={<button
           type="button"
           className="block rounded-full outline-hidden ring-offset-background transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           aria-label={t('sessions.openSenderProfile', 'View profile for {{name}}', {
@@ -3538,9 +3520,8 @@ function UserMessageAuthorAvatar({
           })}
         >
           {avatar}
-        </button>
-      </PopoverTrigger>
-      <PopoverContent
+        </button>}/>
+      <Popover.Content
         side="left"
         align="start"
         sideOffset={10}
@@ -3560,8 +3541,8 @@ function UserMessageAuthorAvatar({
             ) : null}
           </div>
         </div>
-      </PopoverContent>
-    </Popover>
+      </Popover.Content>
+    </Popover.Root>
   );
 }
 
@@ -3585,15 +3566,15 @@ const ResendUndeliveredDialog = ({
 }) => {
   const { t } = useTranslation();
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>
+    <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
+      <AlertDialog.Content>
+        <AlertDialog.Header>
+          <AlertDialog.Title>
             {deliveryUnknown
               ? t('sessions.messageStatus.deliveryUnknown', 'Application unknown')
               : t('sessions.resendUndelivered.title', 'Message not delivered')}
-          </AlertDialogTitle>
-          <AlertDialogDescription>
+          </AlertDialog.Title>
+          <AlertDialog.Description>
             {deliveryUnknown
               ? t(
                   'sessions.resendUndelivered.unknownDescription',
@@ -3603,19 +3584,19 @@ const ResendUndeliveredDialog = ({
                   'sessions.resendUndelivered.description',
                   'This message never reached the agent, so it did not run. Resend the same content as a new message?'
                 )}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={isResending}>
+          </AlertDialog.Description>
+        </AlertDialog.Header>
+        <AlertDialog.Footer>
+          <AlertDialog.Cancel disabled={isResending}>
             {t('common.cancel', 'Cancel')}
-          </AlertDialogCancel>
-          <AlertDialogAction disabled={isResending} onClick={onConfirm}>
+          </AlertDialog.Cancel>
+          <AlertDialog.Action disabled={isResending} onClick={onConfirm}>
             {isResending ? <Spinner className="h-3.5 w-3.5" strokeWidth={2} /> : null}
             {t('sessions.resendUndelivered.action', 'Resend message')}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+          </AlertDialog.Action>
+        </AlertDialog.Footer>
+      </AlertDialog.Content>
+    </AlertDialog.Root>
   );
 };
 
@@ -3669,12 +3650,10 @@ const AssistantTurnConfigInfoButton = ({
   })();
 
   return (
-    <Popover open={configOpen} onOpenChange={setConfigOpen}>
-      <TooltipProvider delayDuration={300}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <PopoverTrigger asChild>
-              <button
+    <Popover.Root open={configOpen} onOpenChange={setConfigOpen}>
+      <Tooltip.Provider>
+        <Tooltip.Root>
+          <Tooltip.Trigger render={<Popover.Trigger render={<button
                 type="button"
                 className={cn(
                   'inline-flex shrink-0 items-center justify-center rounded-sm',
@@ -3689,17 +3668,15 @@ const AssistantTurnConfigInfoButton = ({
                 aria-expanded={configOpen}
               >
                 <Info className={cn('h-3.5 w-3.5', iconClassName)} strokeWidth={2} />
-              </button>
-            </PopoverTrigger>
-          </TooltipTrigger>
+              </button>}/>}/>
           {!configOpen ? (
-            <TooltipContent side="top" className="max-w-xs">
+            <Tooltip.Content side="top" className="max-w-xs">
               {tooltipPreview}
-            </TooltipContent>
+            </Tooltip.Content>
           ) : null}
-        </Tooltip>
-      </TooltipProvider>
-      <PopoverContent align="start" side="bottom" sideOffset={6} className="w-64 gap-0 p-0">
+        </Tooltip.Root>
+      </Tooltip.Provider>
+      <Popover.Content align="start" side="bottom" sideOffset={6} className="w-64 gap-0 p-0">
         <div className="border-b border-border/60 px-3 py-2">
           <div className="text-[11px] font-medium text-foreground">
             {t('sessions.turnConfig.title', 'Turn configuration')}
@@ -3729,8 +3706,8 @@ const AssistantTurnConfigInfoButton = ({
             </p>
           ) : null}
         </dl>
-      </PopoverContent>
-    </Popover>
+      </Popover.Content>
+    </Popover.Root>
   );
 };
 
@@ -4437,10 +4414,9 @@ export const AssistantTurnFooter = ({
           {hasCopyableText || hasTurnConfigInfo || onFork || copyContext ? (
             <div className="flex items-center gap-0.5 -mr-[7px]">
               {showStreamingContextCopy ? (
-                <TooltipProvider>
-                  <Tooltip delayDuration={500}>
-                    <TooltipTrigger asChild>
-                      <Button
+                <Tooltip.Provider>
+                  <Tooltip.Root>
+                    <Tooltip.Trigger delay={500} render={<Button
                         type="button"
                         variant="ghost"
                         icon
@@ -4449,18 +4425,16 @@ export const AssistantTurnFooter = ({
                         aria-label={t('sessions.copyContextMarkdown', 'Copy context as Markdown')}
                       >
                         <Copy className="h-3.5 w-3.5" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
+                      </Button>}/>
+                    <Tooltip.Content>
                       {t('sessions.copyContextMarkdown', 'Copy context as Markdown')}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                    </Tooltip.Content>
+                  </Tooltip.Root>
+                </Tooltip.Provider>
               ) : showFinishedMetadata && hasCopyableText ? (
-                <TooltipProvider>
-                  <Tooltip delayDuration={500}>
-                    <TooltipTrigger asChild>
-                      <Button
+                <Tooltip.Provider>
+                  <Tooltip.Root>
+                    <Tooltip.Trigger delay={500} render={<Button
                         type="button"
                         variant="ghost"
                         icon
@@ -4475,15 +4449,14 @@ export const AssistantTurnFooter = ({
                         ) : (
                           <Copy className="h-3.5 w-3.5" />
                         )}
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
+                      </Button>}/>
+                    <Tooltip.Content>
                       {didCopy
                         ? t('common.copied', 'Copied')
                         : t('sessions.copyResponse', 'Copy response')}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+                    </Tooltip.Content>
+                  </Tooltip.Root>
+                </Tooltip.Provider>
               ) : null}
               {/* The turn config lives below the output on every layout, and is
                   known from the moment the turn opens: no need to wait for it to end. */}
@@ -6316,10 +6289,9 @@ const PlanPanel = ({
           )}
           <span className={CONVERSATION_PANEL_TITLE_CLASS}>Proposed Plan</span>
         </button>
-        <TooltipProvider>
-          <Tooltip delayDuration={500}>
-            <TooltipTrigger asChild>
-              <Button
+        <Tooltip.Provider>
+          <Tooltip.Root>
+            <Tooltip.Trigger delay={500} render={<Button
                 type="button"
                 variant="ghost"
                 icon
@@ -6330,11 +6302,10 @@ const PlanPanel = ({
                 aria-label="Copy plan"
               >
                 {didCopy ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{didCopy ? 'Copied' : 'Copy plan'}</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
+              </Button>}/>
+            <Tooltip.Content>{didCopy ? 'Copied' : 'Copy plan'}</Tooltip.Content>
+          </Tooltip.Root>
+        </Tooltip.Provider>
       </div>
       <div className="relative">
         <div
@@ -6778,10 +6749,9 @@ const ToolCallCard = memo(function ToolCallCard({
               >
                 {kindMeta?.label ?? title}
               </span>
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span
+              <Tooltip.Provider>
+                <Tooltip.Root>
+                  <Tooltip.Trigger render={<span
                       role={isFilePathClickable ? 'button' : undefined}
                       tabIndex={isFilePathClickable ? 0 : undefined}
                       onClick={isFilePathClickable ? handleFilePathClick : undefined}
@@ -6810,13 +6780,12 @@ const ToolCallCard = memo(function ToolCallCard({
                       >
                         {fileName}
                       </span>
-                    </span>
-                  </TooltipTrigger>
+                    </span>}/>
                   {normalizedFilePath ? (
-                    <TooltipContent>{normalizedFilePath}</TooltipContent>
+                    <Tooltip.Content>{normalizedFilePath}</Tooltip.Content>
                   ) : null}
-                </Tooltip>
-              </TooltipProvider>
+                </Tooltip.Root>
+              </Tooltip.Provider>
             </div>
           ) : (
             <ToolTitleWithHighlight

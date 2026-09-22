@@ -7,7 +7,7 @@ import { Spinner } from '@/ui/spinner';
 import type { WorkspaceId } from '@lody/shared';
 import { setWorkspaceContextAtom } from '@/atoms/workspace-context';
 import { cloudOperations } from '@/lib/cloud-api-operations';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { useCloudQuery, usePlatform, usePlatformWorkspaces } from '@lody/platform/react';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';

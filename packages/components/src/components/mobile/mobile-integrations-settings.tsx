@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import { Badge } from '@lody/ui/badge';
 import { ArrowUpRight, Book, Github, Search } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { useCloudAction, useCloudMutation } from '@lody/platform/react';
 import { useAtomValue } from 'jotai';
 import { currentWorkspaceSlugAtom } from '@/atoms';
@@ -12,7 +12,7 @@ import { useAppCapability } from '@/lib/app-platform';
 import { Switch } from '@lody/ui/switch';
 import { Input } from '@lody/ui/input';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   MobileSettingsRow,
   MobileSettingsRowGroup,

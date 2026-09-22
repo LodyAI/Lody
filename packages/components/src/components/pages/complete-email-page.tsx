@@ -1,11 +1,11 @@
 import type { FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Mail } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 
 import { Alert } from '@lody/ui/alert';
 import { Button } from '@lody/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/ui/card';
+import { Card } from '@/ui/card';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
 
@@ -34,8 +34,8 @@ export function CompleteEmailPage({
 
   return (
     <div className="flex min-h-screen w-full items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="space-y-4">
+      <Card.Root className="w-full max-w-md">
+        <Card.Header className="space-y-4">
           <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground">
             <div className="min-w-0 truncate">
               {t('completeEmail.signedInAs', 'Signed in as')}: {userLabel}
@@ -63,18 +63,18 @@ export function CompleteEmailPage({
                 <Mail className="h-6 w-6 text-primary" aria-hidden="true" />
               </div>
             </div>
-            <CardTitle id="complete-email-title" as="h1" className="text-2xl font-bold">
+            <Card.Title id="complete-email-title" as="h1" className="text-2xl font-bold">
               {t('completeEmail.title', 'Add your email')}
-            </CardTitle>
-            <CardDescription>
+            </Card.Title>
+            <Card.Description>
               {t(
                 'completeEmail.description',
                 'Your OAuth provider did not share an email. Add one so we can finish setting up your account.'
               )}
-            </CardDescription>
+            </Card.Description>
           </div>
-        </CardHeader>
-        <CardContent>
+        </Card.Header>
+        <Card.Content>
           <form
             onSubmit={onSubmit}
             className="space-y-4"
@@ -115,8 +115,8 @@ export function CompleteEmailPage({
               )}
             </Button>
           </form>
-        </CardContent>
-      </Card>
+        </Card.Content>
+      </Card.Root>
     </div>
   );
 }

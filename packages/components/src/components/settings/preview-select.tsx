@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Check, ChevronDown } from 'lucide-react';
-import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
+import { Popover } from '@lody/ui/popover';
 import { cn } from '@/lib/utils';
 
 export interface PreviewSelectOption<T extends string> {
@@ -47,7 +47,7 @@ export function PreviewSelect<T extends string>({
     setHighlightedIndex(idx >= 0 ? idx : 0);
     // Freeze the panel to the trigger width at open time. Hovering an option
     // live-previews a theme, whose reflow can nudge the trigger width; pinning
-    // the panel to `--radix-popover-trigger-width` (re-measured live) would make
+    // the panel to `--anchor-width` (re-measured live) would make
     // it jump. A snapshot keeps the width stable for the popover's lifetime.
     setFrozenWidth(triggerRef.current?.getBoundingClientRect().width ?? null);
     setOpen(true);
@@ -130,9 +130,8 @@ export function PreviewSelect<T extends string>({
   }, [open, highlightedIndex]);
 
   return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
-      <PopoverTrigger asChild>
-        <button
+    <Popover.Root open={open} onOpenChange={handleOpenChange}>
+      <Popover.Trigger render={<button
           ref={triggerRef}
           type="button"
           className={cn(
@@ -144,18 +143,14 @@ export function PreviewSelect<T extends string>({
             {renderValue ? renderValue(selectedOption) : selectedOption?.label}
           </span>
           <ChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent
-        className="w-[var(--radix-popover-trigger-width)] p-1"
+        </button>}/>
+      <Popover.Content
+        className="w-[var(--anchor-width)] p-1"
         style={frozenWidth != null ? { width: frozenWidth } : undefined}
         align="start"
         onKeyDown={handleKeyDown}
-        onOpenAutoFocus={(e) => {
-          // Prevent auto-focus on first item; we manage focus ourselves
-          e.preventDefault();
-          listRef.current?.focus();
-        }}
+        // The list takes focus itself rather than an option inside it.
+        initialFocus={listRef}
       >
         <div ref={listRef} tabIndex={-1} className="outline-hidden">
           {options.map((option, index) => (
@@ -181,7 +176,7 @@ export function PreviewSelect<T extends string>({
             </div>
           ))}
         </div>
-      </PopoverContent>
-    </Popover>
+      </Popover.Content>
+    </Popover.Root>
   );
 }

@@ -11,7 +11,7 @@ import type {
   AcpConfigOptionValue,
 } from '../src/components/shared/acp-selector-options';
 import { initI18n } from '../src/i18n';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 
 const selectors: AcpConfigOptionSelector[] = [
   {
@@ -72,7 +72,7 @@ describe('AcpBottomBarModeSelector UI', () => {
     flushSync(() => {
       root?.render(
         createElement(
-          TooltipProvider,
+          Tooltip.Provider,
           null,
           createElement(AcpBottomBarModeSelector, {
             tone: 'light',

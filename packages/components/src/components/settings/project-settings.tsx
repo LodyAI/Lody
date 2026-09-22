@@ -24,8 +24,8 @@ import {
   TerminalSquare,
   Wrench,
 } from 'lucide-react';
-import { toast } from 'sonner';
-import { Spinner } from '@/ui/spinner';
+import { toast } from '@/lib/toast';
+import { Spinner } from '@lody/ui/spinner';
 import {
   getLocalProjectHistoryProviderKey,
   type LocalProjectHistoryCatalogItem,
@@ -65,31 +65,17 @@ import {
 import { getIpcServices } from '@/lib/electron-ipc-client';
 import { CompactRow, CompactSection } from './compact-layout';
 import { Button, type ButtonProps } from '@lody/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import { Checkbox } from '@lody/ui/checkbox';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
+import { Menu } from '@/ui/menu';
 import { Switch } from '@lody/ui/switch';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/tabs';
+import { Tabs } from '@lody/ui/tabs';
 import { CachedAvatarImg } from '@/components/cached-avatar-img';
 import { getGitHubOwnerAvatarUrl } from '@/lib/github-avatar';
 import { Textarea } from '@lody/ui/textarea';
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
+import { AlertDialog } from '@/ui/dialog';
+import { Tooltip } from '@lody/ui/tooltip';
 import { toIntlLocale } from '@/lib/intl-locale';
 import { openExternalUrl } from '@/lib/native-browser';
 import { cn } from '@/lib/utils';
@@ -547,7 +533,7 @@ export function ProjectSettingsComponent({
         open={addLocalProjectDialogOpen}
         onOpenChange={setAddLocalProjectDialogOpen}
         initialMachineId={addLocalProjectMachineId}
-        overlayClassName={NESTED_SETTINGS_DIALOG_OVERLAY}
+        backdropClassName={NESTED_SETTINGS_DIALOG_OVERLAY}
       />
       <RemoveLocalProjectDialog
         open={pendingRemoval != null}
@@ -563,7 +549,7 @@ export function ProjectSettingsComponent({
           machineSupportsLocalProjectRemovalProtocol(machineMetaMap.get(pendingRemoval.machineId))
         }
         isRemoving={isRemovingLocalProject}
-        overlayClassName={NESTED_SETTINGS_DIALOG_OVERLAY}
+        backdropClassName={NESTED_SETTINGS_DIALOG_OVERLAY}
         onOpenChange={(open) => {
           if (!open && !isRemovingLocalProject) setPendingRemoval(null);
         }}
@@ -918,36 +904,36 @@ function ProjectSettingsDesktop({
           </div>
         )}
       </div>
-      <Dialog
+      <Dialog.Root
         open={editingProject != null}
         onOpenChange={(open) => {
           if (!open) setEditingProjectKey(null);
         }}
       >
-        <DialogContent
-          overlayClassName={NESTED_SETTINGS_DIALOG_OVERLAY}
+        <Dialog.Content
+          backdropClassName={NESTED_SETTINGS_DIALOG_OVERLAY}
           className="flex max-h-[min(88dvh,820px)] w-[min(640px,96vw)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none"
         >
-          <DialogTitle className="sr-only">
+          <Dialog.Title className="sr-only">
             {editingProject?.kind === 'local'
               ? editingProject.row.project.name
               : editingProject?.kind === 'github'
                 ? editingProject.row.name
                 : t('settings.tabs.projects', 'Projects')}
-          </DialogTitle>
-          <DialogDescription className="sr-only">
+          </Dialog.Title>
+          <Dialog.Description className="sr-only">
             {t(
               'workspace.projects.settingsSubtitle',
               'Local folders and GitHub repositories available in this workspace.'
             )}
-          </DialogDescription>
+          </Dialog.Description>
           <div className="scrollbar-pro min-h-0 flex-1 overflow-y-auto">
             {editingProject ? (
               <ProjectDetailPane selection={editingProject} {...detailHandlers} />
             ) : null}
           </div>
-        </DialogContent>
-      </Dialog>
+        </Dialog.Content>
+      </Dialog.Root>
     </>
   );
 }
@@ -1100,8 +1086,18 @@ function ProjectMasterRow({
           )}
         </span>
       ) : canRemove && onRemove ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
+        <Menu.Root>
+          <Menu.Trigger render={<Button
+              type="button"
+              variant="ghost"
+              size="small"
+              icon
+              className="h-6 w-6 shrink-0"
+              aria-label={t('sessions.moreActions', 'More actions')}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <Ellipsis className="h-3.5 w-3.5" />
+            </Button>}>
             <Button
               type="button"
               variant="ghost"
@@ -1113,9 +1109,9 @@ function ProjectMasterRow({
             >
               <Ellipsis className="h-3.5 w-3.5" />
             </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-[10rem]">
-            <DropdownMenuItem
+          </Menu.Trigger>
+          <Menu.Content align="end" className="min-w-[10rem]">
+            <Menu.Item
               className="text-destructive focus:text-destructive"
               onClick={(event) => {
                 event.stopPropagation();
@@ -1123,9 +1119,9 @@ function ProjectMasterRow({
               }}
             >
               {t('workspace.projects.delete', 'Delete project')}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            </Menu.Item>
+          </Menu.Content>
+        </Menu.Root>
       ) : null}
     </div>
   );
@@ -1169,8 +1165,18 @@ function ProjectAddMenu({
 }) {
   const { t } = useTranslation();
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+    <Menu.Root>
+      <Menu.Trigger render={<Button
+          type="button"
+          variant={variant ?? 'ghost'}
+          size={size ?? 'small'}
+          icon
+          className={className}
+          aria-label={t('workspace.projects.addProjectMenu', 'Add project')}
+          title={t('workspace.projects.addProjectMenu', 'Add project')}
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </Button>}>
         <Button
           type="button"
           variant={variant ?? 'ghost'}
@@ -1182,10 +1188,10 @@ function ProjectAddMenu({
         >
           <Plus className="h-3.5 w-3.5" />
         </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-[220px]">
+      </Menu.Trigger>
+      <Menu.Content align="end" className="min-w-[220px]">
         {onAddLocalProject ? (
-          <DropdownMenuItem onSelect={() => onAddLocalProject()}>
+          <Menu.Item onClick={() => onAddLocalProject()}>
             <FolderPlus className="h-4 w-4" />
             <span className="flex min-w-0 flex-col">
               <span>{t('chat.contextSwitch.addProject', 'Add a folder')}</span>
@@ -1196,10 +1202,10 @@ function ProjectAddMenu({
                 )}
               </span>
             </span>
-          </DropdownMenuItem>
+          </Menu.Item>
         ) : null}
         {onAddGitHubProject ? (
-          <DropdownMenuItem onSelect={() => onAddGitHubProject()}>
+          <Menu.Item onClick={() => onAddGitHubProject()}>
             <Github className="h-4 w-4" />
             <span className="flex min-w-0 flex-col">
               <span>{t('chat.contextSwitch.addGitHubRepo', 'Add a GitHub repository')}</span>
@@ -1207,10 +1213,10 @@ function ProjectAddMenu({
                 {t('chat.contextSwitch.addGitHubRepoHint', 'Connect a GitHub repository')}
               </span>
             </span>
-          </DropdownMenuItem>
+          </Menu.Item>
         ) : null}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </Menu.Content>
+    </Menu.Root>
   );
 }
 
@@ -1356,7 +1362,7 @@ function LocalProjectDetail({
       : null;
 
   return (
-    <TooltipProvider delayDuration={200}>
+    <Tooltip.Provider delay={200}>
       <div className="flex flex-col gap-3 p-4 pt-3">
         <div className="flex min-w-0 items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
@@ -1486,7 +1492,7 @@ function LocalProjectDetail({
           </CompactSection>
         ) : null}
       </div>
-    </TooltipProvider>
+    </Tooltip.Provider>
   );
 }
 
@@ -1944,24 +1950,24 @@ export function WorktreeSetupEditor({
           {renderShellTextarea(shell)}
         </div>
       ) : (
-        <Tabs defaultValue="bash" className="flex flex-col gap-2">
-          <TabsList className="h-8 self-start">
-            <TabsTrigger value="bash" className="gap-1.5 px-2.5 text-xs">
+        <Tabs.Root defaultValue="bash" className="flex flex-col gap-2">
+          <Tabs.List className="h-8 self-start">
+            <Tabs.Tab value="bash" className="gap-1.5 px-2.5 text-xs">
               <TerminalSquare className="h-3.5 w-3.5" />
               Bash
-            </TabsTrigger>
-            <TabsTrigger value="powershell" className="gap-1.5 px-2.5 text-xs">
+            </Tabs.Tab>
+            <Tabs.Tab value="powershell" className="gap-1.5 px-2.5 text-xs">
               <TerminalSquare className="h-3.5 w-3.5" />
               PowerShell
-            </TabsTrigger>
-          </TabsList>
-          <TabsContent value="bash" className="mt-0">
+            </Tabs.Tab>
+          </Tabs.List>
+          <Tabs.Panel value="bash" className="mt-0">
             {renderShellTextarea('bash')}
-          </TabsContent>
-          <TabsContent value="powershell" className="mt-0">
+          </Tabs.Panel>
+          <Tabs.Panel value="powershell" className="mt-0">
             {renderShellTextarea('powershell')}
-          </TabsContent>
-        </Tabs>
+          </Tabs.Panel>
+        </Tabs.Root>
       )}
 
       {isSaving ? (
@@ -2086,9 +2092,8 @@ export function ProjectHistoryImportPanel({
             <span className="truncate text-muted-foreground">{statusLabel}</span>
             <div className="flex shrink-0 items-center gap-2">
               {state.canSync && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
+                <Tooltip.Root>
+                  <Tooltip.Trigger render={<Button
                       type="button"
                       variant="ghost"
                       size="small"
@@ -2104,15 +2109,14 @@ export function ProjectHistoryImportPanel({
                         <RefreshCw className="h-3.5 w-3.5" />
                       )}
                       <span>{t('workspace.projects.syncHistory', 'Sync')}</span>
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="left">
+                    </Button>}/>
+                  <Tooltip.Content side="left">
                     {t('workspace.projects.syncHistoryTooltip', {
                       defaultValue: 'Sync {{provider}} history',
                       provider: providerLabel,
                     })}
-                  </TooltipContent>
-                </Tooltip>
+                  </Tooltip.Content>
+                </Tooltip.Root>
               )}
               <Button
                 type="button"
@@ -2340,38 +2344,38 @@ export function ProjectHistoryImportPanel({
           </div>
         )}
       </div>
-      <AlertDialog
+      <AlertDialog.Root
         open={conflictSessionToResolve !== null}
         onOpenChange={(open) => {
           if (!open) setConflictSessionToResolve(null);
         }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
               {t('workspace.projects.resolveHistoryConflictTitle', {
                 defaultValue: 'Re-import conversation?',
               })}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
+            </AlertDialog.Title>
+            <AlertDialog.Description>
               {t('workspace.projects.resolveHistoryConflictConfirm', {
                 defaultValue:
                   'Re-import this conversation from {{provider}}? This replaces the current imported history with the latest source history and may discard local-only turns.',
                 provider: providerLabel,
               })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
+            <AlertDialog.Action
               onClick={confirmConflictReplace}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {t('workspace.projects.resolveHistoryConflict', 'Re-import')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </>
   );
 }

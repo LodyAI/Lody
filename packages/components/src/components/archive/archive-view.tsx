@@ -2,7 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useAtom, useAtomValue, useSetAtom } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import { useRouter } from '@tanstack/react-router';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   Archive,
   ArrowDownAZ,
@@ -27,23 +27,10 @@ import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
 import { Checkbox } from '@lody/ui/checkbox';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/ui/dialog';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
+import { Dialog } from '@/ui/dialog';
+import { Menu } from '@/ui/menu';
 import { Input } from '@lody/ui/input';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import { currentWorkspaceSlugAtom, setMobileDrawerOpenAtom, userAtom } from '@/atoms';
 import { getAgentMetaByIdAtomFamily } from '@/atoms/agents';
 import { archiveScopeAtom } from '@/atoms/sidebar-state';
@@ -472,9 +459,8 @@ function DesktopArchivedSessionItem({
       </div>
 
       <div className="min-w-0 flex-1">
-        <Tooltip delayDuration={300}>
-          <TooltipTrigger asChild>
-            <span
+        <Tooltip.Root>
+          <Tooltip.Trigger delay={300} render={<span
               role="button"
               tabIndex={0}
               aria-pressed={isMultiSelectMode ? isSelected : undefined}
@@ -488,17 +474,15 @@ function DesktopArchivedSessionItem({
               }}
             >
               {title}
-            </span>
-          </TooltipTrigger>
-          <TooltipContent side="top">{title}</TooltipContent>
-        </Tooltip>
+            </span>}/>
+          <Tooltip.Content side="top">{title}</Tooltip.Content>
+        </Tooltip.Root>
       </div>
 
       <div className="flex w-5 shrink-0 items-center justify-center">
         {prUrl && PrIcon && prStatusMeta && (
-          <Tooltip delayDuration={300}>
-            <TooltipTrigger asChild>
-              <button
+          <Tooltip.Root>
+            <Tooltip.Trigger delay={300} render={<button
                 type="button"
                 className={cn(
                   'inline-flex h-5 w-5 items-center justify-center rounded-sm',
@@ -512,21 +496,18 @@ function DesktopArchivedSessionItem({
                 }}
               >
                 <PrIcon className="h-3.5 w-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent side="top">{prTooltipLabel}</TooltipContent>
-          </Tooltip>
+              </button>}/>
+            <Tooltip.Content side="top">{prTooltipLabel}</Tooltip.Content>
+          </Tooltip.Root>
         )}
       </div>
 
       <div className="hidden min-w-0 max-w-[12rem] shrink basis-40 sm:block">
         {branchName ? (
-          <Tooltip delayDuration={300}>
-            <TooltipTrigger asChild>
-              <span className="block truncate text-xs text-muted-foreground">{branchName}</span>
-            </TooltipTrigger>
-            <TooltipContent side="top">{branchName}</TooltipContent>
-          </Tooltip>
+          <Tooltip.Root>
+            <Tooltip.Trigger delay={300} render={<span className="block truncate text-xs text-muted-foreground">{branchName}</span>}/>
+            <Tooltip.Content side="top">{branchName}</Tooltip.Content>
+          </Tooltip.Root>
         ) : null}
       </div>
 
@@ -545,14 +526,12 @@ function DesktopArchivedSessionItem({
 
       <div className="w-5 shrink-0 flex items-center justify-center">
         {owner && (
-          <Tooltip delayDuration={500}>
-            <TooltipTrigger asChild>
-              <span className="inline-flex shrink-0">
+          <Tooltip.Root>
+            <Tooltip.Trigger delay={500} render={<span className="inline-flex shrink-0">
                 <UserAvatar user={owner} size="mini" />
-              </span>
-            </TooltipTrigger>
-            <TooltipContent side="top">{owner.name ?? 'Unknown'}</TooltipContent>
-          </Tooltip>
+              </span>}/>
+            <Tooltip.Content side="top">{owner.name ?? 'Unknown'}</Tooltip.Content>
+          </Tooltip.Root>
         )}
       </div>
 
@@ -564,9 +543,8 @@ function DesktopArchivedSessionItem({
           'transition-opacity duration-100'
         )}
       >
-        <Tooltip delayDuration={300}>
-          <TooltipTrigger asChild>
-            <button
+        <Tooltip.Root>
+          <Tooltip.Trigger delay={300} render={<button
               type="button"
               className={cn(
                 'inline-flex h-6 w-6 items-center justify-center rounded-sm',
@@ -584,16 +562,14 @@ function DesktopArchivedSessionItem({
               }}
             >
               <Undo2 className="h-3.5 w-3.5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top">
+            </button>}/>
+          <Tooltip.Content side="top">
             {restoreAvailable ? restoreLabel : restoreUnavailableLabel}
-          </TooltipContent>
-        </Tooltip>
+          </Tooltip.Content>
+        </Tooltip.Root>
 
-        <Tooltip delayDuration={300}>
-          <TooltipTrigger asChild>
-            <button
+        <Tooltip.Root>
+          <Tooltip.Trigger delay={300} render={<button
               type="button"
               className={cn(
                 'inline-flex h-6 w-6 items-center justify-center rounded-sm',
@@ -609,10 +585,9 @@ function DesktopArchivedSessionItem({
               }}
             >
               <Trash2 className="h-3.5 w-3.5" />
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top">{deleteLabel}</TooltipContent>
-        </Tooltip>
+            </button>}/>
+          <Tooltip.Content side="top">{deleteLabel}</Tooltip.Content>
+        </Tooltip.Root>
       </div>
     </div>
   );
@@ -743,14 +718,12 @@ function MobileArchivedSessionItem({
               {relativeTime}
             </span>
             {owner && (
-              <Tooltip delayDuration={500}>
-                <TooltipTrigger asChild>
-                  <span className="inline-flex shrink-0">
+              <Tooltip.Root>
+                <Tooltip.Trigger delay={500} render={<span className="inline-flex shrink-0">
                     <UserAvatar user={owner} size="mini" />
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="top">{owner.name ?? 'Unknown'}</TooltipContent>
-              </Tooltip>
+                  </span>}/>
+                <Tooltip.Content side="top">{owner.name ?? 'Unknown'}</Tooltip.Content>
+              </Tooltip.Root>
             )}
           </div>
 
@@ -762,9 +735,8 @@ function MobileArchivedSessionItem({
               </span>
             ) : null}
             {prUrl && PrIcon && prStatusMeta && (
-              <Tooltip delayDuration={300}>
-                <TooltipTrigger asChild>
-                  <button
+              <Tooltip.Root>
+                <Tooltip.Trigger delay={300} render={<button
                     type="button"
                     className={cn(
                       'inline-flex h-4 w-4 items-center justify-center rounded-sm shrink-0',
@@ -777,18 +749,15 @@ function MobileArchivedSessionItem({
                     }}
                   >
                     <PrIcon className="h-3 w-3" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top">{prTooltipLabel}</TooltipContent>
-              </Tooltip>
+                  </button>}/>
+                <Tooltip.Content side="top">{prTooltipLabel}</Tooltip.Content>
+              </Tooltip.Root>
             )}
             {branchName && (
-              <Tooltip delayDuration={300}>
-                <TooltipTrigger asChild>
-                  <span className="truncate max-w-[120px]">{branchName}</span>
-                </TooltipTrigger>
-                <TooltipContent side="top">{branchName}</TooltipContent>
-              </Tooltip>
+              <Tooltip.Root>
+                <Tooltip.Trigger delay={300} render={<span className="truncate max-w-[120px]">{branchName}</span>}/>
+                <Tooltip.Content side="top">{branchName}</Tooltip.Content>
+              </Tooltip.Root>
             )}
           </div>
         </div>
@@ -1715,34 +1684,45 @@ export function ArchiveView() {
           />
         </div>
         {isMobile ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
+          <Menu.Root>
+            <Menu.Trigger render={<Button type="button" variant="secondary" size="small" className="shrink-0">
+                <span className="max-w-[6.5rem] truncate">{scopeLabel}</span>
+                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+              </Button>}>
               <Button type="button" variant="secondary" size="small" className="shrink-0">
                 <span className="max-w-[6.5rem] truncate">{scopeLabel}</span>
                 <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
               </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-44">
-              <DropdownMenuRadioGroup
+            </Menu.Trigger>
+            <Menu.Content align="end" className="w-44">
+              <Menu.RadioGroup
                 value={archiveScope}
                 onValueChange={(value) => {
                   if (value === 'my' || value === 'team') setArchiveScope(value);
                 }}
               >
-                <DropdownMenuRadioItem value="my">
+                <Menu.RadioItem value="my">
                   {t('sessions.sidebar.my', 'My Tasks')}
-                </DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="team">
+                </Menu.RadioItem>
+                <Menu.RadioItem value="team">
                   {t('sessions.sidebar.team', 'All Tasks')}
-                </DropdownMenuRadioItem>
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                </Menu.RadioItem>
+              </Menu.RadioGroup>
+            </Menu.Content>
+          </Menu.Root>
         ) : null}
       </div>
       <div className="flex shrink-0 items-center gap-1.5">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
+        <Menu.Root>
+          <Menu.Trigger render={<Button type="button" variant="secondary" size="small">
+              {groupMode === 'flat' ? (
+                <List className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+              ) : (
+                <Layers className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+              )}
+              <span className="max-w-[7rem] truncate">{groupLabel}</span>
+              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+            </Button>}>
             <Button type="button" variant="secondary" size="small">
               {groupMode === 'flat' ? (
                 <List className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
@@ -1752,26 +1732,36 @@ export function ArchiveView() {
               <span className="max-w-[7rem] truncate">{groupLabel}</span>
               <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
             </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44">
-            <DropdownMenuRadioGroup
+          </Menu.Trigger>
+          <Menu.Content align="end" className="w-44">
+            <Menu.RadioGroup
               value={groupMode}
               onValueChange={(value) => {
                 if (value === 'project' || value === 'flat') setGroupMode(value);
               }}
             >
-              <DropdownMenuRadioItem value="project">
+              <Menu.RadioItem value="project">
                 {t('archive.group.project', 'By project')}
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="flat">
+              </Menu.RadioItem>
+              <Menu.RadioItem value="flat">
                 {t('archive.group.flat', 'One list')}
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              </Menu.RadioItem>
+            </Menu.RadioGroup>
+          </Menu.Content>
+        </Menu.Root>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
+        <Menu.Root>
+          <Menu.Trigger render={<Button type="button" variant="secondary" size="small">
+              {sortMode === 'title' ? (
+                <ArrowDownAZ className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+              ) : sortMode === 'oldest' ? (
+                <Clock className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+              ) : (
+                <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+              )}
+              <span className="max-w-[7.5rem] truncate">{sortLabel}</span>
+              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+            </Button>}>
             <Button type="button" variant="secondary" size="small">
               {sortMode === 'title' ? (
                 <ArrowDownAZ className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
@@ -1783,9 +1773,9 @@ export function ArchiveView() {
               <span className="max-w-[7.5rem] truncate">{sortLabel}</span>
               <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
             </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44">
-            <DropdownMenuRadioGroup
+          </Menu.Trigger>
+          <Menu.Content align="end" className="w-44">
+            <Menu.RadioGroup
               value={sortMode}
               onValueChange={(value) => {
                 if (value === 'newest' || value === 'oldest' || value === 'title') {
@@ -1793,18 +1783,18 @@ export function ArchiveView() {
                 }
               }}
             >
-              <DropdownMenuRadioItem value="newest">
+              <Menu.RadioItem value="newest">
                 {t('archive.sort.newest', 'Newest first')}
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="oldest">
+              </Menu.RadioItem>
+              <Menu.RadioItem value="oldest">
                 {t('archive.sort.oldest', 'Oldest first')}
-              </DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="title">
+              </Menu.RadioItem>
+              <Menu.RadioItem value="title">
                 {t('archive.sort.title', 'Title A–Z')}
-              </DropdownMenuRadioItem>
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              </Menu.RadioItem>
+            </Menu.RadioGroup>
+          </Menu.Content>
+        </Menu.Root>
       </div>
     </div>
   );
@@ -1851,14 +1841,14 @@ export function ArchiveView() {
   const archiveDialogs = (
     <>
       {/* Single-item delete confirm dialog */}
-      <Dialog
+      <Dialog.Root
         open={deleteConfirmSession != null}
         onOpenChange={(open) => setDeleteConfirmSession(open ? deleteConfirmSession : null)}
       >
-        <DialogContent className={cn(isMobile ? '' : 'max-w-sm')}>
-          <DialogHeader>
-            <DialogTitle>{t('archive.deleteConfirm.title', 'Delete permanently?')}</DialogTitle>
-            <DialogDescription>
+        <Dialog.Content className={cn(isMobile ? '' : 'max-w-sm')}>
+          <Dialog.Header>
+            <Dialog.Title>{t('archive.deleteConfirm.title', 'Delete permanently?')}</Dialog.Title>
+            <Dialog.Description>
               {deleteConfirmSession?.repoFullName
                 ? t(
                     'archive.deleteConfirm.description.codeSession',
@@ -1868,9 +1858,9 @@ export function ArchiveView() {
                     'archive.deleteConfirm.description.chatSession',
                     'This will permanently delete the chat session.'
                   )}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
+            </Dialog.Description>
+          </Dialog.Header>
+          <Dialog.Footer>
             <Button variant="secondary" onClick={() => setDeleteConfirmSession(null)}>
               {t('common.cancel', 'Cancel')}
             </Button>
@@ -1882,26 +1872,26 @@ export function ArchiveView() {
             >
               {deleteButtonLabel}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </Dialog.Footer>
+        </Dialog.Content>
+      </Dialog.Root>
 
       {/* Bulk delete confirm dialog */}
-      <Dialog
+      <Dialog.Root
         open={bulkDeleteConfirmOpen}
         onOpenChange={(open) => {
           if (bulkActionInFlight === 'delete') return;
           setBulkDeleteConfirmOpen(open);
         }}
       >
-        <DialogContent className={cn(isMobile ? '' : 'max-w-sm')}>
-          <DialogHeader>
-            <DialogTitle>
+        <Dialog.Content className={cn(isMobile ? '' : 'max-w-sm')}>
+          <Dialog.Header>
+            <Dialog.Title>
               {t('archive.bulkDeleteConfirm.title', 'Delete {{count}} sessions permanently?', {
                 count: selectedCount,
               })}
-            </DialogTitle>
-            <DialogDescription>
+            </Dialog.Title>
+            <Dialog.Description>
               {hasCodeSessionInSelection
                 ? t(
                     'archive.bulkDeleteConfirm.description.mixed',
@@ -1911,9 +1901,9 @@ export function ArchiveView() {
                     'archive.bulkDeleteConfirm.description.chatOnly',
                     'This will permanently delete the selected sessions.'
                   )}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
+            </Dialog.Description>
+          </Dialog.Header>
+          <Dialog.Footer>
             <Button
               variant="secondary"
               disabled={bulkActionInFlight === 'delete'}
@@ -1930,9 +1920,9 @@ export function ArchiveView() {
             >
               {deleteButtonLabel}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </Dialog.Footer>
+        </Dialog.Content>
+      </Dialog.Root>
     </>
   );
 

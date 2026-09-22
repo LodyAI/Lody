@@ -4,11 +4,11 @@ import { formatDistance, type Locale } from 'date-fns';
 import { enUS } from 'date-fns/locale/en-US';
 import { zhCN } from 'date-fns/locale/zh-CN';
 import { ExternalLink, TimerReset } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 
 import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import { openExternalUrl } from '@/lib/native-browser';
 import { cn } from '@/lib/utils';
 import {
@@ -77,17 +77,17 @@ export function CodexResetForecastDialog({
   const hasNothingToShow = hasLoadError && state.data === null;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        overlayClassName={nestedInDialog ? 'z-[var(--z-dialog)] bg-black/20' : undefined}
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Content
+        backdropClassName={nestedInDialog ? 'z-[var(--z-dialog)] bg-black/20' : undefined}
         className="gap-4 sm:max-w-md"
       >
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-base">
+        <Dialog.Header>
+          <Dialog.Title className="flex items-center gap-2 text-base">
             <TimerReset className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
             {t('codexReset.title', 'Codex reset forecast')}
-          </DialogTitle>
-        </DialogHeader>
+          </Dialog.Title>
+        </Dialog.Header>
 
         <div className="flex flex-col gap-4">
           {isInitialLoading ? (
@@ -118,7 +118,7 @@ export function CodexResetForecastDialog({
           ) : null}
         </div>
 
-        <DialogDescription className="-mt-1 border-t border-border/60 pt-3 text-xs leading-relaxed text-muted-foreground">
+        <Dialog.Description className="-mt-1 border-t border-border/60 pt-3 text-xs leading-relaxed text-muted-foreground">
           <Trans
             i18nKey="codexReset.disclaimer"
             defaults="Third-party forecast from <website>codex-resets.com</website>. For reference only."
@@ -131,9 +131,9 @@ export function CodexResetForecastDialog({
               ),
             }}
           />
-        </DialogDescription>
-      </DialogContent>
-    </Dialog>
+        </Dialog.Description>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }
 

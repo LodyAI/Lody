@@ -4,7 +4,7 @@ import { useRouter } from '@tanstack/react-router';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useCloudMutation, useCloudQuery } from '@lody/platform/react';
 import { Invitation } from 'better-auth/plugins';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import type { AvatarKind, CliApiKeyRecord, WorkspaceId } from '@lody/shared';
 import { uploadAvatarImage } from '@/lib/avatar-upload';
 import { verifyCurrentPassword } from '@/lib/verify-password';

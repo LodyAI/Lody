@@ -49,14 +49,7 @@ import type { PersistedMentionRange } from '@/components/mentions/mention-persis
 import { toIntlLocale } from '@/lib/intl-locale';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { Button, type ButtonProps } from '@lody/ui/button';
-import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogContentWithoutClose,
-  DialogDescription,
-  DialogTitle,
-} from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import { Drawer } from '@lody/ui/drawer';
 import { Textarea, type TextareaProps } from '@lody/ui/textarea';
 import { hasFileTransfer, readDroppedTransfer } from '@/lib/file-drop';
@@ -1109,7 +1102,7 @@ export function ChatComposer({
           </>
         )}
       </div>
-      <Dialog
+      <Dialog.Root
         open={previewImageUrl !== null}
         onOpenChange={(open) => {
           if (!open) {
@@ -1117,7 +1110,7 @@ export function ChatComposer({
           }
         }}
       >
-        <DialogContent className="max-w-3xl border-none bg-transparent p-2 shadow-none">
+        <Dialog.Content className="max-w-3xl border-none bg-transparent p-2 shadow-none">
           {previewImageUrl ? (
             <img
               src={previewImageUrl}
@@ -1125,8 +1118,8 @@ export function ChatComposer({
               className="max-h-[80vh] w-full rounded-lg object-contain"
             />
           ) : null}
-        </DialogContent>
-      </Dialog>
+        </Dialog.Content>
+      </Dialog.Root>
       {(() => {
         const handlePastedTextOpenChange = (open: boolean) => {
           if (!open) {
@@ -1187,25 +1180,25 @@ export function ChatComposer({
         }
 
         return (
-          <Dialog open={previewPastedTextDraft !== null} onOpenChange={handlePastedTextOpenChange}>
-            <DialogContentWithoutClose className="flex h-[85vh] max-h-[85vh] max-w-3xl flex-col gap-0 overflow-hidden p-0">
+          <Dialog.Root open={previewPastedTextDraft !== null} onOpenChange={handlePastedTextOpenChange}>
+            <Dialog.Content className="flex h-[85vh] max-h-[85vh] max-w-3xl flex-col gap-0 overflow-hidden p-0">
               {previewPastedTextDraft ? (
                 <>
                   <div className="flex items-center justify-between gap-3 border-b border-border/60 px-5 py-3">
-                    <DialogTitle className="flex items-center gap-2 text-sm font-medium">
+                    <Dialog.Title className="flex items-center gap-2 text-sm font-medium">
                       <ClipboardPaste className="h-3.5 w-3.5 text-muted-foreground" />
                       {pastedTextDialogTitle}
-                    </DialogTitle>
+                    </Dialog.Title>
                     <div className="flex items-center gap-3">
-                      <DialogDescription className="text-xs text-muted-foreground tabular-nums">
+                      <Dialog.Description className="text-xs text-muted-foreground tabular-nums">
                         {summaryText}
-                      </DialogDescription>
-                      <DialogClose
+                      </Dialog.Description>
+                      <Dialog.Close
                         className="rounded-xs opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2"
                         aria-label={t('common.close', 'Close')}
                       >
                         <X className="h-4 w-4" />
-                      </DialogClose>
+                      </Dialog.Close>
                     </div>
                   </div>
                   <div className="flex min-h-0 flex-1 px-5 py-4">
@@ -1220,8 +1213,8 @@ export function ChatComposer({
                   </div>
                 </>
               ) : null}
-            </DialogContentWithoutClose>
-          </Dialog>
+            </Dialog.Content>
+          </Dialog.Root>
         );
       })()}
     </>

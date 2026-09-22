@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, ChevronRight, CircleDashed, Copy, X } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import type { MessageContent } from '@lody/shared';
 import { formatDurationCompact } from '@/lib/format-duration';
 import { writeTextToClipboard } from '@/lib/clipboard';
@@ -238,15 +238,15 @@ const SubagentTaskDetailsDialog = ({
   ].filter(Boolean);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[80vh] max-w-2xl flex-col gap-0 p-0 sm:p-0">
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Content className="flex max-h-[80vh] max-w-2xl flex-col gap-0 p-0 sm:p-0">
         <div className="flex min-w-0 items-center gap-2 border-b border-border/60 py-3 pl-5 pr-12">
           <StatusIcon task={task} />
           <div className="min-w-0 flex-1">
-            <DialogTitle className="truncate text-base font-medium">{actor}</DialogTitle>
-            <DialogDescription className="text-xs tabular-nums">
+            <Dialog.Title className="truncate text-base font-medium">{actor}</Dialog.Title>
+            <Dialog.Description className="text-xs tabular-nums">
               {meta.join(' · ')}
-            </DialogDescription>
+            </Dialog.Description>
           </div>
         </div>
         <div className="flex min-h-0 flex-col gap-4 overflow-y-auto px-5 py-4 text-sm">
@@ -300,8 +300,8 @@ const SubagentTaskDetailsDialog = ({
             </section>
           ) : null}
         </div>
-      </DialogContent>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 };
 

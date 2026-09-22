@@ -17,10 +17,10 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Box, Copy, Download, FileText, MousePointerClick, X } from 'lucide-react';
 import i18next from 'i18next';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { Avatar } from '@lody/ui/avatar';
 import { Button } from '@lody/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import { formatCompactNumber, formatUsdAmount } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { cn } from '@/lib/utils';
@@ -2332,19 +2332,17 @@ export function UsageCalendarVisualization({
                 <span>{t('workspace.usage.skyline.asciiPreview')}</span>
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
+                <Tooltip.Root>
+                  <Tooltip.Trigger render={<Button
                       icon
                       variant="ghost"
                       onClick={() => void copyAscii()}
                       aria-label={t('workspace.usage.skyline.copyAscii')}
                     >
                       <Copy />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent>{t('workspace.usage.skyline.copyAscii')}</TooltipContent>
-                </Tooltip>
+                    </Button>}/>
+                  <Tooltip.Content>{t('workspace.usage.skyline.copyAscii')}</Tooltip.Content>
+                </Tooltip.Root>
                 <Button size="small" variant="secondary" onClick={exportAscii}>
                   <Download className="h-4 w-4" />
                   {t('workspace.usage.skyline.downloadAscii')}

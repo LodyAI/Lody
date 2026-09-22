@@ -37,11 +37,12 @@ const styles = stylex.create({
  */
 export const AlertDialogContent = forwardRef<HTMLDivElement, AlertDialogContentProps>(
   function AlertDialogContent(
-    { className, children, container, backdropContent, backdropClassName, ...rest },
+    { className, children, container, backdropContent, backdropClassName, noAnimation, ...rest },
     ref
   ) {
     const { ref: panelRef, container: panel } = usePanelContainer<HTMLDivElement>(ref);
     const palette = useForcedThemeClassNames();
+    const noTransition = noAnimation ? stylex.props(modal.noTransition).className : undefined;
     return (
       <BaseAlertDialog.Portal
         container={container}
@@ -52,7 +53,7 @@ export const AlertDialogContent = forwardRef<HTMLDivElement, AlertDialogContentP
             appendClassName(
               stylex.props(modal.backdrop, isHidden(state.transitionStatus) && modal.backdropHidden)
                 .className,
-              backdropClassName
+              appendClassName(backdropClassName, noTransition)
             )
           }
         >
@@ -63,8 +64,11 @@ export const AlertDialogContent = forwardRef<HTMLDivElement, AlertDialogContentP
           {...rest}
           className={(state) =>
             appendClassName(
-              stylex.props(modal.popup, isHidden(state.transitionStatus) && modal.popupHidden)
-                .className,
+              stylex.props(
+                modal.popup,
+                isHidden(state.transitionStatus) && modal.popupHidden,
+                noAnimation && modal.noTransition
+              ).className,
               className
             )
           }

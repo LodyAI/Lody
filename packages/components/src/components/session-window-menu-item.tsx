@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { AppWindow } from 'lucide-react';
-import { ContextMenuItem } from '@/ui/context-menu';
-import { DropdownMenuItem } from '@/ui/dropdown-menu';
+import { ContextMenu } from '@lody/ui/context-menu';
+import { Menu } from '@/ui/menu';
 import { isElectronRenderer } from '@/lib/electron';
 import { openDesktopWindow } from '@/lib/desktop-window';
 
@@ -14,14 +14,9 @@ export function SessionWindowMenuItem({
 }) {
   const { t } = useTranslation();
   if (!isElectronRenderer()) return null;
-  const Item = dropdown ? DropdownMenuItem : ContextMenuItem;
+  const Item = dropdown ? Menu.Item : ContextMenu.Item;
   return (
-    <Item
-      onSelect={() => {
-        openDesktopWindow(sessionId);
-      }}
-    >
-      <AppWindow />
+    <Item icon={<AppWindow />} onClick={() => openDesktopWindow(sessionId)}>
       {t('session.openInNewWindow')}
     </Item>
   );

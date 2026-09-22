@@ -20,7 +20,7 @@ import { AcpSessionSelect, type AcpSessionSelectOption } from './acp-session-sel
 import { getModeIcon, getSelectorTagClassName } from '@/components/chat/chat-landing-selectors';
 import { orderAcpConfigOptionSelectors } from '@/lib/acp-selector-order';
 import { cn } from '@/lib/utils';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui';
+import { Tooltip } from '@lody/ui/tooltip';
 
 type RenderConfigSelectorOptions = {
   icon?: ReactNode;
@@ -119,9 +119,8 @@ const renderFastModeToggle = (
   const Icon = value ? Zap : ZapOff;
 
   return (
-    <Tooltip key={selector.configId} delayDuration={300}>
-      <TooltipTrigger asChild>
-        <span className="inline-flex shrink-0">
+    <Tooltip.Root key={selector.configId}>
+      <Tooltip.Trigger delay={300} render={<span className="inline-flex shrink-0">
           <button
             type="button"
             aria-pressed={value}
@@ -143,10 +142,9 @@ const renderFastModeToggle = (
           >
             <Icon className="h-3.5 w-3.5 shrink-0" />
           </button>
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="top">{tooltip}</TooltipContent>
-    </Tooltip>
+        </span>}/>
+      <Tooltip.Content side="top">{tooltip}</Tooltip.Content>
+    </Tooltip.Root>
   );
 };
 
@@ -165,9 +163,8 @@ const renderPlanModeToggle = (
   const displayLabel = 'Plan';
 
   return (
-    <Tooltip key={selector.configId} delayDuration={300}>
-      <TooltipTrigger asChild>
-        <span className="inline-flex shrink-0">
+    <Tooltip.Root key={selector.configId}>
+      <Tooltip.Trigger delay={300} render={<span className="inline-flex shrink-0">
           <button
             type="button"
             aria-pressed={value}
@@ -190,10 +187,9 @@ const renderPlanModeToggle = (
             <ListChecks className="h-3.5 w-3.5 shrink-0" />
             <span>{displayLabel}</span>
           </button>
-        </span>
-      </TooltipTrigger>
-      <TooltipContent side="top">{selector.description ?? selector.label}</TooltipContent>
-    </Tooltip>
+        </span>}/>
+      <Tooltip.Content side="top">{selector.description ?? selector.label}</Tooltip.Content>
+    </Tooltip.Root>
   );
 };
 

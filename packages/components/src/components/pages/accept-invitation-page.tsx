@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 
 import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';

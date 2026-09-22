@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import type { MachineViewMeta } from '@lody/shared';
 import { Bot, ChevronDown, Folder, Laptop, LockKeyhole } from 'lucide-react';
 import { Badge } from '@lody/ui/badge';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import { UserAvatar } from '@/components/user-avatar';
 import { cn } from '@/lib/utils';
 import type { MachineTabOwner } from './machine-tab-list';
@@ -82,17 +82,15 @@ export function WorkspaceMachineOwnerAvatar({ owner }: { owner: MachineTabOwner 
   if (!owner) return null;
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
+    <Tooltip.Root>
+      <Tooltip.Trigger render={<span
           className="inline-flex shrink-0 cursor-default rounded-full"
           aria-label={t('workspace.machines.ownerTooltip', { owner: owner.name })}
         >
           <UserAvatar user={owner} size="small" />
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>{t('workspace.machines.ownerTooltip', { owner: owner.name })}</TooltipContent>
-    </Tooltip>
+        </span>}/>
+      <Tooltip.Content>{t('workspace.machines.ownerTooltip', { owner: owner.name })}</Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 

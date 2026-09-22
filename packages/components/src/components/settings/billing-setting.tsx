@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { useCloudAction } from '@lody/platform/react';
 import { ConvexError } from 'convex/values';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms';
 import { sessionMetaCountAtom } from '@/atoms/doc-meta';
 import { useAuthenticatedConvex } from '@/hooks/use-authenticated-convex';
@@ -13,16 +13,7 @@ import { useCloudQuery } from '@lody/platform/react';
 import { isElectronRenderer } from '@/lib/electron';
 import { useAppCapability } from '@/lib/app-platform';
 import { openExternalUrl } from '@/lib/native-browser';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
+import { AlertDialog } from '@/ui/dialog';
 // Relative: the consuming apps only alias a curated set of `@/` prefixes
 // (ui, components, lib, hooks, atoms), and `providers` is not one of them.
 import { useAuthClient } from '../../providers/convex-provider';
@@ -549,19 +540,19 @@ function CloudBillingSettings() {
         onRetryInvoices={() => setInvoicesReloadKey((key) => key + 1)}
         onCancelExternalCheckout={() => setExternalCheckoutPending(false)}
       />
-      <AlertDialog open={switchIntervalDialogOpen} onOpenChange={setSwitchIntervalDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('billing.switchIntervalDialogTitle')}</AlertDialogTitle>
-            <AlertDialogDescription>
+      <AlertDialog.Root open={switchIntervalDialogOpen} onOpenChange={setSwitchIntervalDialogOpen}>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>{t('billing.switchIntervalDialogTitle')}</AlertDialog.Title>
+            <AlertDialog.Description>
               {t(
                 targetInterval === 'year'
                   ? 'billing.switchIntervalDialogDescriptionYearly'
                   : 'billing.switchIntervalDialogDescriptionMonthly',
                 { date: formatDate(intervalPreview?.nextRenewalAt ?? undefined) }
               )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+            </AlertDialog.Description>
+          </AlertDialog.Header>
           {intervalPreview === undefined ? (
             <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
               <Spinner className="h-4 w-4" />
@@ -646,11 +637,11 @@ function CloudBillingSettings() {
               ) : null}
             </div>
           )}
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={switchIntervalPending}>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={switchIntervalPending}>
               {t('common.cancel')}
-            </AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Cancel>
+            <AlertDialog.Action
               disabled={switchIntervalPending || intervalPreview === undefined}
               onClick={(event) => {
                 // Keep the dialog open until the switch resolves (it closes in
@@ -661,15 +652,15 @@ function CloudBillingSettings() {
             >
               {switchIntervalPending ? <Spinner className="mr-2 h-4 w-4" /> : null}
               {t('billing.switchIntervalConfirm')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-      <AlertDialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('billing.cancelDialogTitle')}</AlertDialogTitle>
-            <AlertDialogDescription>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
+      <AlertDialog.Root open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>{t('billing.cancelDialogTitle')}</AlertDialog.Title>
+            <AlertDialog.Description>
               {t('billing.cancelDialogDescription', {
                 date: formatDate(
                   overview?.giftEndsAt && overview.giftEndsAt > Date.now()
@@ -677,18 +668,18 @@ function CloudBillingSettings() {
                     : overview?.currentPeriodEnd
                 ),
               })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('billing.cancelDialogKeep')}</AlertDialogCancel>
-            <AlertDialogAction variant="destructive"
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel>{t('billing.cancelDialogKeep')}</AlertDialog.Cancel>
+            <AlertDialog.Action variant="destructive"
               onClick={() => void handleSetCancelAtPeriodEnd(true)}
             >
               {t('billing.cancelDialogConfirm')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </>
   );
 }

@@ -9,7 +9,7 @@ import {
 } from '@/components/chat/chat-composer';
 import type { OptionSelectorOption } from '@/components/shared/option-selector';
 import { OptionSelector } from '@/components/shared/option-selector';
-import { Card, CardContent } from '@/ui/card';
+import { Card } from '@/ui/card';
 import { Button } from '@lody/ui/button';
 import { cn } from '@/lib/utils';
 import { getPastedTextCharacterCount, type PastedTextDraft } from '@/lib/pasted-text-draft';
@@ -327,11 +327,11 @@ export const LandingDark: Story = {
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#050b1d] via-[#081327] to-[#0b1a35]" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_0%,rgba(88,166,255,0.2),transparent_55%),radial-gradient(circle_at_80%_10%,rgba(35,82,150,0.3),transparent_60%),radial-gradient(circle_at_50%_100%,rgba(8,30,58,0.9),transparent_60%)]" />
       <div className="relative mx-auto flex min-h-screen w-full max-w-3xl items-center px-4 py-12">
-        <Card className="w-full rounded-[32px] border-white/10 bg-white/5 shadow-[0_32px_100px_-48px_rgba(4,12,30,0.95)] ring-1 ring-white/10 backdrop-blur-2xl supports-[backdrop-filter]:bg-white/[0.06]">
-          <CardContent className="p-8">
+        <Card.Root className="w-full rounded-[32px] border-white/10 bg-white/5 shadow-[0_32px_100px_-48px_rgba(4,12,30,0.95)] ring-1 ring-white/10 backdrop-blur-2xl supports-[backdrop-filter]:bg-white/[0.06]">
+          <Card.Content>
             <DemoComposer tone="dark" variant="landing" title="Let's ship something" />
-          </CardContent>
-        </Card>
+          </Card.Content>
+        </Card.Root>
       </div>
     </div>
   ),
@@ -409,8 +409,8 @@ export const AttachmentUploadStatesDark: Story = {
     <div className="relative min-h-screen bg-[#050b1d] text-white">
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#050b1d] via-[#081327] to-[#0b1a35]" />
       <div className="relative mx-auto flex min-h-screen w-full max-w-3xl items-center px-4 py-12">
-        <Card className="w-full rounded-[32px] border-white/10 bg-white/5 ring-1 ring-white/10 backdrop-blur-2xl">
-          <CardContent className="p-8">
+        <Card.Root className="w-full rounded-[32px] border-white/10 bg-white/5 ring-1 ring-white/10 backdrop-blur-2xl">
+          <Card.Content>
             <DemoComposer
               tone="dark"
               variant="landing"
@@ -418,8 +418,8 @@ export const AttachmentUploadStatesDark: Story = {
               imageItems={sampleImageItems}
               fileItems={sampleFileItems}
             />
-          </CardContent>
-        </Card>
+          </Card.Content>
+        </Card.Root>
       </div>
     </div>
   ),
@@ -431,16 +431,16 @@ export const LandingWithPastedText: Story = {
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#050b1d] via-[#081327] to-[#0b1a35]" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_0%,rgba(88,166,255,0.2),transparent_55%),radial-gradient(circle_at_80%_10%,rgba(35,82,150,0.3),transparent_60%),radial-gradient(circle_at_50%_100%,rgba(8,30,58,0.9),transparent_60%)]" />
       <div className="relative mx-auto flex min-h-screen w-full max-w-3xl items-center px-4 py-12">
-        <Card className="w-full rounded-[32px] border-white/10 bg-white/5 shadow-[0_32px_100px_-48px_rgba(4,12,30,0.95)] ring-1 ring-white/10 backdrop-blur-2xl supports-[backdrop-filter]:bg-white/[0.06]">
-          <CardContent className="p-8">
+        <Card.Root className="w-full rounded-[32px] border-white/10 bg-white/5 shadow-[0_32px_100px_-48px_rgba(4,12,30,0.95)] ring-1 ring-white/10 backdrop-blur-2xl supports-[backdrop-filter]:bg-white/[0.06]">
+          <Card.Content>
             <DemoComposer
               tone="dark"
               variant="landing"
               title="Let's ship something"
               showPastedText
             />
-          </CardContent>
-        </Card>
+          </Card.Content>
+        </Card.Root>
       </div>
     </div>
   ),

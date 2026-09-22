@@ -16,11 +16,11 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import type { PrStatus, SessionPullRequestCiState } from '@lody/shared';
 import { cn } from '@/lib/utils';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
-import { ContextMenuItem } from '@/ui/context-menu';
+import { Tooltip } from '@lody/ui/tooltip';
+import { ContextMenu } from '@lody/ui/context-menu';
 import { Skeleton } from '@lody/ui/skeleton';
 import { PR_STATUS_META } from '@/components/sessions/pull-request-badge';
 import { SidebarConfirmArchiveButton } from '@/components/sidebar-confirm-archive-button';
@@ -290,14 +290,12 @@ export function SessionRowWorktreeIndicator({ isWorktree }: { isWorktree?: boole
   if (!isWorktree) return null;
   const label = t('sessions.infoCard.worktree', 'Worktree');
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span className="inline-flex shrink-0 items-center text-sidebar-foreground-muted/45">
+    <Tooltip.Root>
+      <Tooltip.Trigger render={<span className="inline-flex shrink-0 items-center text-sidebar-foreground-muted/45">
           <WorktreeIcon className="h-3.5 w-3.5" aria-label={label} />
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
+        </span>}/>
+      <Tooltip.Content>{label}</Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -323,18 +321,18 @@ export function SessionRowOpenedByMenuItems({
   return (
     <>
       {goToOpener ? (
-        <ContextMenuItem onSelect={goToOpener}>
+        <ContextMenu.Item onClick={goToOpener}>
           <CornerLeftUp />
           {goToOpenerLabel}
-        </ContextMenuItem>
+        </ContextMenu.Item>
       ) : null}
       {opener ? (
-        <ContextMenuItem onSelect={opener.onToggle}>
+        <ContextMenu.Item onClick={opener.onToggle}>
           <ChevronDown
             className={cn('transition-transform', opener.expanded ? 'rotate-0' : '-rotate-90')}
           />
           {opener.label}
-        </ContextMenuItem>
+        </ContextMenu.Item>
       ) : null}
     </>
   );
@@ -387,9 +385,8 @@ export function SidebarRowArchiveButton({
   revealClassName?: string;
 }) {
   return (
-    <Tooltip delayDuration={500}>
-      <TooltipTrigger asChild>
-        <SidebarConfirmArchiveButton
+    <Tooltip.Root>
+      <Tooltip.Trigger delay={500} render={<SidebarConfirmArchiveButton
           label={label}
           confirmLabel={confirmLabel}
           className={cn(
@@ -397,10 +394,9 @@ export function SidebarRowArchiveButton({
             revealClassName
           )}
           onConfirm={onConfirm}
-        />
-      </TooltipTrigger>
-      <TooltipContent side="top">{label}</TooltipContent>
-    </Tooltip>
+        />}/>
+      <Tooltip.Content side="top">{label}</Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 

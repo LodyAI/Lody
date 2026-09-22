@@ -17,21 +17,12 @@ import {
   Hand,
   TerminalSquare,
 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import { Card } from '@/ui/card';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
-import { toast } from 'sonner';
+import { AlertDialog } from '@/ui/dialog';
+import { Tooltip } from '@lody/ui/tooltip';
+import { toast } from '@/lib/toast';
 import type { MachineMonitorViewState } from '@/hooks/use-machine-monitor';
 import { cn } from '@/lib/utils';
 import { AgentIcon, getAgentDisplayName } from '@/components/icons/agent-icon';
@@ -115,7 +106,7 @@ export function DeviceResourceMonitor({
             mobileLabel="ACP"
             resource={snapshot.sessionsAggregate}
           />
-          <Card className="min-w-0 bg-card/40 p-2 shadow-none sm:p-3">
+          <Card.Root className="min-w-0 bg-card/40 p-2 shadow-none sm:p-3">
             <div className="flex items-center gap-1 text-[11px] text-muted-foreground sm:gap-1.5 sm:text-xs">
               <Gauge className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
               <span className="truncate">
@@ -149,7 +140,7 @@ export function DeviceResourceMonitor({
                 </>
               }
             />
-          </Card>
+          </Card.Root>
         </div>
       </section>
 
@@ -191,7 +182,7 @@ function ResourceMetric({
 }) {
   const { t } = useTranslation();
   return (
-    <Card className="min-w-0 bg-card/40 p-2 shadow-none sm:p-3">
+    <Card.Root className="min-w-0 bg-card/40 p-2 shadow-none sm:p-3">
       <div className="flex items-center gap-1 text-[11px] text-muted-foreground sm:gap-1.5 sm:text-xs">
         <Icon className="h-3 w-3 shrink-0 sm:h-3.5 sm:w-3.5" />
         {mobileLabel && <span className="truncate sm:hidden">{mobileLabel}</span>}
@@ -205,7 +196,7 @@ function ResourceMetric({
         label={t('settings.devices.sessions.memoryShort', 'Mem')}
         value={formatBytes(resource.memoryBytes)}
       />
-    </Card>
+    </Card.Root>
   );
 }
 
@@ -327,12 +318,10 @@ function SessionTable({
                   )}
                 </div>
                 <div className="min-w-0">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <div className="truncate text-sm font-normal md:text-xs">{title}</div>
-                    </TooltipTrigger>
-                    <TooltipContent className="max-w-sm break-words">{title}</TooltipContent>
-                  </Tooltip>
+                  <Tooltip.Root>
+                    <Tooltip.Trigger render={<div className="truncate text-sm font-normal md:text-xs">{title}</div>}/>
+                    <Tooltip.Content className="max-w-sm break-words">{title}</Tooltip.Content>
+                  </Tooltip.Root>
                   {/* Mobile devices view shows only the ACP logo + conversation
                       title; the agent-type line stays on the wider desktop table. */}
                   <div className="hidden truncate text-[11px] text-muted-foreground md:block">
@@ -413,28 +402,28 @@ function SessionTable({
           );
         })}
       </div>
-      <AlertDialog
+      <AlertDialog.Root
         open={confirmSession !== null}
         onOpenChange={(open) => !open && setConfirmSession(null)}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
               {t(
                 'settings.devices.sessions.terminateConfirmTitle',
                 'Terminate running ACP process?'
               )}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
+            </AlertDialog.Title>
+            <AlertDialog.Description>
               {t(
                 'settings.devices.sessions.terminateConfirmDescription',
                 'The active agent turn will stop immediately. The session and its files will remain available.'
               )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
+            <AlertDialog.Action
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               disabled={!confirmSession}
               onClick={() => {
@@ -444,10 +433,10 @@ function SessionTable({
               }}
             >
               {t('settings.devices.sessions.terminateAction', 'Terminate')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </>
   );
 }
@@ -466,9 +455,8 @@ function SessionActionButton({
   children: ReactNode;
 }) {
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
+    <Tooltip.Root>
+      <Tooltip.Trigger render={<Button
           type="button"
           icon
           variant="ghost"
@@ -481,10 +469,9 @@ function SessionActionButton({
           aria-label={label}
         >
           {children}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
+        </Button>}/>
+      <Tooltip.Content>{label}</Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -537,19 +524,17 @@ function StatusIcon({
     );
   }
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
+    <Tooltip.Root>
+      <Tooltip.Trigger render={<span
           role="img"
           aria-label={label}
           tabIndex={0}
           className="flex h-5 w-5 items-center justify-center rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           {icon}
-        </span>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
+        </span>}/>
+      <Tooltip.Content>{label}</Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 

@@ -1,16 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { CircleCheck } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import type { MachineId } from '@lody/shared';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import { Button } from '@lody/ui/button';
 import { Field as UiField } from '@lody/ui/field';
 import { Textarea } from '@lody/ui/textarea';
@@ -109,16 +102,16 @@ export function BugReportDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-md">
+    <Dialog.Root open={open} onOpenChange={handleOpenChange}>
+      <Dialog.Content className="sm:max-w-md">
         {state.status === 'success' ? (
           <>
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
+            <Dialog.Header>
+              <Dialog.Title className="flex items-center gap-2">
                 <CircleCheck className="h-5 w-5 text-green-500" />
                 {t('bugReport.successTitle', 'Bug report uploaded')}
-              </DialogTitle>
-              <DialogDescription>
+              </Dialog.Title>
+              <Dialog.Description>
                 {state.withLogs
                   ? t(
                       'bugReport.successDescription',
@@ -128,27 +121,27 @@ export function BugReportDialog({
                       'bugReport.successDescriptionNoLogs',
                       'Your description was uploaded. Share this bug report ID with the Lody team:'
                     )}
-              </DialogDescription>
-            </DialogHeader>
+              </Dialog.Description>
+            </Dialog.Header>
             <div className="flex items-center gap-2 rounded-md border bg-muted/50 py-1 pl-3 pr-1">
               <code className="min-w-0 flex-1 truncate text-sm">{state.bugReportId}</code>
               <CopyButton value={state.bugReportId} />
             </div>
-            <DialogFooter>
+            <Dialog.Footer>
               <Button onClick={onClose}>{t('bugReport.close', 'Close')}</Button>
-            </DialogFooter>
+            </Dialog.Footer>
           </>
         ) : (
           <>
-            <DialogHeader>
-              <DialogTitle>{t('bugReport.title', 'Report a bug')}</DialogTitle>
-              <DialogDescription>
+            <Dialog.Header>
+              <Dialog.Title>{t('bugReport.title', 'Report a bug')}</Dialog.Title>
+              <Dialog.Description>
                 {t(
                   'bugReport.dialogDescription',
                   "Describe the bug and pick the machine where it happened. Lody uploads that machine's logs from today and yesterday along with your description."
                 )}
-              </DialogDescription>
-            </DialogHeader>
+              </Dialog.Description>
+            </Dialog.Header>
             <div className="grid gap-4">
               <div className="grid gap-2">
                 <UiField.Label htmlFor="bug-report-description">
@@ -217,7 +210,7 @@ export function BugReportDialog({
                 <p className="text-sm text-destructive">{state.message}</p>
               ) : null}
             </div>
-            <DialogFooter>
+            <Dialog.Footer>
               <Button variant="secondary" disabled={submitting} onClick={onClose}>
                 {t('common.cancel', 'Cancel')}
               </Button>
@@ -242,10 +235,10 @@ export function BugReportDialog({
                   t('bugReport.submitNoLogs', 'Submit report')
                 )}
               </Button>
-            </DialogFooter>
+            </Dialog.Footer>
           </>
         )}
-      </DialogContent>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

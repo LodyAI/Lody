@@ -11,7 +11,7 @@ import {
   MonitorCog,
   Users,
 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import type { AgentConfigMeta, MachineId } from '@lody/shared';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { localMachineIdAtom } from '@/atoms/local-probe';
@@ -26,7 +26,7 @@ import { isElectronRenderer } from '@/lib/electron';
 import { cn } from '@/lib/utils';
 import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 
 export type AccountMachineDirectory = {
   key: string;
@@ -158,7 +158,7 @@ export function AccountMachinesOverviewView({
   };
 
   return (
-    <TooltipProvider delayDuration={250}>
+    <Tooltip.Provider delay={250}>
       <section className="mx-3 overflow-hidden rounded-xl border border-border/60 bg-card/60 md:mx-0 md:rounded-lg">
         <header className="flex items-start justify-between gap-3 border-b border-border/60 dark:bg-muted/30 px-3 py-2.5">
           <div className="min-w-0">
@@ -172,9 +172,8 @@ export function AccountMachinesOverviewView({
               )}
             </p>
           </div>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
+          <Tooltip.Root>
+            <Tooltip.Trigger render={<Button
                 type="button"
                 variant="ghost"
                 icon
@@ -182,15 +181,14 @@ export function AccountMachinesOverviewView({
                 aria-label={t('settings.account.machines.privacyHelpLabel', 'About private access')}
               >
                 <CircleHelp className="h-3.5 w-3.5" strokeWidth={1.75} />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="left" className="max-w-72 leading-relaxed">
+              </Button>}/>
+            <Tooltip.Content side="left" className="max-w-72 leading-relaxed">
               {t(
                 'settings.account.machines.privacyHelp',
                 'Conversations on a private machine, and conversations in private directories on a shared machine, are not visible to other workspace members.'
               )}
-            </TooltipContent>
-          </Tooltip>
+            </Tooltip.Content>
+          </Tooltip.Root>
         </header>
 
         <div className="hidden cursor-default select-none grid-cols-[minmax(180px,1fr)_100px_180px_140px_32px] items-center gap-3 border-b border-border/50 px-3 py-1.5 text-[10px] font-normal text-muted-foreground/70 md:grid">
@@ -287,9 +285,8 @@ export function AccountMachinesOverviewView({
                     />
                   </Button>
 
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
+                  <Tooltip.Root>
+                    <Tooltip.Trigger render={<Button
                         type="button"
                         variant="ghost"
                         icon
@@ -301,12 +298,11 @@ export function AccountMachinesOverviewView({
                         })}
                       >
                         <MonitorCog className="h-4 w-4" strokeWidth={1.75} />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>
+                      </Button>}/>
+                    <Tooltip.Content>
                       {t('settings.account.machines.manageMachineShort', 'Machine settings')}
-                    </TooltipContent>
-                  </Tooltip>
+                    </Tooltip.Content>
+                  </Tooltip.Root>
                 </div>
 
                 {expanded ? (
@@ -368,7 +364,7 @@ export function AccountMachinesOverviewView({
           })
         )}
       </section>
-    </TooltipProvider>
+    </Tooltip.Provider>
   );
 }
 
@@ -379,9 +375,8 @@ function AgentStackButton({ agents, onClick }: { agents: AgentConfigMeta[]; onCl
   const names = agents.map((agent) => agent.name).join(', ');
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
+    <Tooltip.Root>
+      <Tooltip.Trigger render={<Button
           type="button"
           variant="ghost"
           size="small"
@@ -419,9 +414,8 @@ function AgentStackButton({ agents, onClick }: { agents: AgentConfigMeta[]; onCl
           <span className="ms-auto shrink-0 text-xs">
             {t('settings.account.machines.configureAgentsShort', 'Configure')}
           </span>
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent className="max-w-64">
+        </Button>}/>
+      <Tooltip.Content className="max-w-64">
         <p className="font-normal">
           {t('settings.account.machines.configureAgents', 'Configure Agents')}
         </p>
@@ -433,8 +427,8 @@ function AgentStackButton({ agents, onClick }: { agents: AgentConfigMeta[]; onCl
                 'No Agents are configured on this machine yet.'
               )}
         </p>
-      </TooltipContent>
-    </Tooltip>
+      </Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -471,17 +465,15 @@ function AccessStatus({
         );
 
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <span
+    <Tooltip.Root>
+      <Tooltip.Trigger render={<span
           className="inline-flex shrink-0 cursor-default select-none items-center gap-1 rounded-md bg-foreground/[0.04] px-1.5 py-0.5 text-[10px] text-muted-foreground"
           aria-label={`${label}. ${description}`}
         >
           <Icon className="h-3 w-3" strokeWidth={1.75} aria-hidden="true" />
           {label}
-        </span>
-      </TooltipTrigger>
-      <TooltipContent className="max-w-64 leading-relaxed">{description}</TooltipContent>
-    </Tooltip>
+        </span>}/>
+      <Tooltip.Content className="max-w-64 leading-relaxed">{description}</Tooltip.Content>
+    </Tooltip.Root>
   );
 }

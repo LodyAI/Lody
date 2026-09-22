@@ -15,19 +15,10 @@ import { useSessionShareLinkActions } from '@/hooks/use-session-share-management
 import { openExternalUrl } from '@/lib/native-browser';
 import { SessionShareDialog } from '@/components/sharing/session-share-dialog';
 import { UserAvatar } from '@/components/user-avatar';
-import {
-  AlertDialog,
-  AlertDialogContent,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogCancel,
-  AlertDialogAction,
-} from '@/ui/alert-dialog';
+import { AlertDialog } from '@/ui/dialog';
 import { Button } from '@lody/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/ui/dialog';
-import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
+import { Dialog } from '@/ui/dialog';
+import { Popover } from '@lody/ui/popover';
 import { Skeleton } from '@lody/ui/skeleton';
 import { Switch } from '@lody/ui/switch';
 import { cn } from '@/lib/utils';
@@ -106,9 +97,8 @@ function SharePublisherAvatar({
   const avatar = <UserAvatar user={user} size="large" className="shrink-0" />;
   if (!displayName) return <div className="shrink-0">{avatar}</div>;
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
+    <Popover.Root>
+      <Popover.Trigger render={<button
           type="button"
           // The card behind this avatar is itself one big click target, so the
           // profile must not also open the detail dialog.
@@ -120,9 +110,8 @@ function SharePublisherAvatar({
           className="relative z-10 block shrink-0 rounded-full outline-hidden ring-offset-background transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         >
           {avatar}
-        </button>
-      </PopoverTrigger>
-      <PopoverContent side="right" align="start" sideOffset={10} className="w-64 p-0">
+        </button>}/>
+      <Popover.Content side="right" align="start" sideOffset={10} className="w-64 p-0">
         <div className="flex items-center gap-3 p-3.5">
           <UserAvatar user={user} size="xlarge" className="shrink-0" />
           <div className="min-w-0">
@@ -134,8 +123,8 @@ function SharePublisherAvatar({
             ) : null}
           </div>
         </div>
-      </PopoverContent>
-    </Popover>
+      </Popover.Content>
+    </Popover.Root>
   );
 }
 
@@ -366,29 +355,29 @@ function ShareManagementList({
           onClose={() => setEditor(null)}
         />
       )}
-      <AlertDialog
+      <AlertDialog.Root
         open={confirmation !== null}
         onOpenChange={(open) => {
           if (!open) setConfirmation(null);
         }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
               {confirmation?.kind === 'reset'
                 ? t('sharing.static.reset', 'Reset link')
                 : t('sharing.static.revoke', 'Revoke')}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
+            </AlertDialog.Title>
+            <AlertDialog.Description>
               {t(
                 'sharing.static.invalidateNotice',
                 'The previous link will stop working. Downloaded copies cannot be recalled.'
               )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
+            <AlertDialog.Action
               disabled={
                 actions.busy ||
                 !confirmation ||
@@ -405,10 +394,10 @@ function ShareManagementList({
               }}
             >
               {t('common.confirm', 'Confirm')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </div>
   );
 }
@@ -470,13 +459,13 @@ function ShareDetailDialog({
             'Only the member who published this share holds its link.'
           );
   return (
-    <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle className="pr-6 text-left text-base leading-snug">
+    <Dialog.Root open onOpenChange={(open) => !open && onClose()}>
+      <Dialog.Content className="max-w-md">
+        <Dialog.Header>
+          <Dialog.Title className="pr-6 text-left text-base leading-snug">
             {entry.title || t('sessions.untitled', 'Untitled session')}
-          </DialogTitle>
-        </DialogHeader>
+          </Dialog.Title>
+        </Dialog.Header>
         <div className="divide-y divide-border/60">
           <DetailRow label={t('settings.shares.publishedAt', 'Published')}>
             {/* Y-M-D reads the same in every locale; the exact clock time stays
@@ -562,7 +551,7 @@ function ShareDetailDialog({
             )}
           </div>
         )}
-      </DialogContent>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

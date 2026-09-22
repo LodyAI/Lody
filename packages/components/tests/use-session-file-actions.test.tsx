@@ -66,7 +66,7 @@ vi.mock('../src/lib/electron-ipc-client', () => ({
 
 const toastError = vi.fn();
 const toastSuccess = vi.fn();
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: {
     error: (...args: unknown[]) => toastError(...args),
     success: (...args: unknown[]) => toastSuccess(...args),

@@ -6,14 +6,7 @@ import { Check, Pencil, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/ui/dialog';
+import { Dialog } from '@/ui/dialog';
 import { Select } from '@lody/ui/select';
 import { getPathLauncherIcon } from '@/components/icons/path-launcher-icon';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
@@ -299,10 +292,10 @@ function LauncherFormDialog({
     ? command.replaceAll(PATH_LAUNCHER_PATH_PLACEHOLDER, PREVIEW_SAMPLE_PATH)
     : '';
   const showPreview = validation.ok === true && previewCommand.length > 0;
-  const FormHeader = isMobile ? Drawer.Header : DialogHeader;
-  const FormTitle = isMobile ? Drawer.Title : DialogTitle;
-  const FormDescription = isMobile ? Drawer.Description : DialogDescription;
-  const FormFooter = isMobile ? Drawer.Footer : DialogFooter;
+  const FormHeader = isMobile ? Drawer.Header : Dialog.Header;
+  const FormTitle = isMobile ? Drawer.Title : Dialog.Title;
+  const FormDescription = isMobile ? Drawer.Description : Dialog.Description;
+  const FormFooter = isMobile ? Drawer.Footer : Dialog.Footer;
 
   const handleOpenChange = (open: boolean) => {
     if (!open) onClose();
@@ -416,9 +409,9 @@ function LauncherFormDialog({
   }
 
   return (
-    <Dialog open={draft !== null} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-md">{form}</DialogContent>
-    </Dialog>
+    <Dialog.Root open={draft !== null} onOpenChange={handleOpenChange}>
+      <Dialog.Content className="sm:max-w-md">{form}</Dialog.Content>
+    </Dialog.Root>
   );
 }
 

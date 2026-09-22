@@ -8,7 +8,7 @@ import {
   useState,
 } from 'react';
 import { Send, X } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
 import { type SessionMeta, type VisualAnnotationReferencePayload } from '@lody/shared';
@@ -44,7 +44,7 @@ import {
 import { userAtom } from '@/atoms';
 import { Button } from '@lody/ui/button';
 import { Textarea } from '@lody/ui/textarea';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { VisualAnnotationCommentsOverlay } from '@/components/preview/visual-annotation-comments-overlay';
 import { getVisiblePreviewVisualComments } from '@/components/preview/preview-visual-comments';
 import {

@@ -303,3 +303,6 @@ is closed and unmounted — nothing inside a `Dialog.Content`, `Popover.Content`
 `Tooltip.Content` is in that markup, which is why the board carries stand-ins for
 all three. A defect in what a person actually sees can still survive a green
 suite; the board has to be opened in Chromium under both palettes.
+
+The Popover, Dialog, AlertDialog and Tooltip call sites this note left on Radix
+landed in [2026-09-22-ui-radix-callsite-migration](2026-09-22-ui-radix-callsite-migration.md).

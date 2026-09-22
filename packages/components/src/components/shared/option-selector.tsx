@@ -11,7 +11,7 @@ import type { LucideIcon } from 'lucide-react';
 import { ChevronDown, Check } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { Button } from '@lody/ui/button';
-import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
+import { Popover } from '@lody/ui/popover';
 import {
   Command,
   CommandEmpty,
@@ -21,7 +21,7 @@ import {
   CommandList,
 } from '@/ui/command';
 import { fuzzyMatch } from '@/components/commands/fuzzy-match';
-import { handleMenuCloseAutoFocus } from '@/lib/menu-focus';
+import { restoreComposerFocusAfterMenu } from '@/lib/menu-focus';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { cn } from '@/lib/utils';
 
@@ -305,9 +305,8 @@ export function OptionSelector<TValue extends string | number = string>({
   };
 
   return (
-    <Popover open={isOpen} onOpenChange={handleOpenChange}>
-      <PopoverTrigger asChild>
-        <Button
+    <Popover.Root open={isOpen} onOpenChange={handleOpenChange}>
+      <Popover.Trigger render={<Button
           type="button"
           variant="ghost"
           className={cn(
@@ -321,24 +320,27 @@ export function OptionSelector<TValue extends string | number = string>({
         >
           <span className="flex min-w-0 flex-1 items-center gap-2">{triggerContent}</span>
           {showChevron ? <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-60" /> : null}
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
+        </Button>}/>
+      <Popover.Content
         className={cn('max-w-[calc(100vw-1rem)] p-0', contentClassName)}
-        portalContainer={portalContainer}
+        container={portalContainer}
         align={align}
         side={side}
-        avoidCollisions={avoidCollisions}
+        collisionAvoidance={
+          avoidCollisions === false
+            ? { side: 'none', align: 'none', fallbackAxisSide: 'none' }
+            : undefined
+        }
         sideOffset={8}
         style={{ minWidth: contentWidth ? `${contentWidth}px` : undefined }}
-        onOpenAutoFocus={!autoFocusOnOpen ? (e) => e.preventDefault() : undefined}
-        onCloseAutoFocus={(event) => {
+        initialFocus={!autoFocusOnOpen ? false : undefined}
+        finalFocus={() => {
           const didSelectItem = didSelectItemRef.current;
           didSelectItemRef.current = false;
-          handleMenuCloseAutoFocus(event, {
-            didSelectItem,
-            menuContent: event.currentTarget,
-          });
+          if (!didSelectItem) return undefined;
+          // A selection answers to the composer, never back to the trigger.
+          restoreComposerFocusAfterMenu();
+          return false;
         }}
       >
         <Command ref={commandRef} className="bg-transparent" shouldFilter={!virtualize}>
@@ -355,8 +357,8 @@ export function OptionSelector<TValue extends string | number = string>({
           )}
           <CommandList
             viewportRef={listViewportRef}
-            containerClassName="max-h-[min(60vh,320px,calc(var(--radix-popover-content-available-height)-3rem))]"
-            viewportClassName="max-h-[min(60vh,320px,calc(var(--radix-popover-content-available-height)-3rem))] text-sm"
+            containerClassName="max-h-[min(60vh,320px,calc(var(--available-height)-3rem))]"
+            viewportClassName="max-h-[min(60vh,320px,calc(var(--available-height)-3rem))] text-sm"
             viewportStyle={{ WebkitOverflowScrolling: 'touch' }}
           >
             <CommandEmpty
@@ -389,7 +391,7 @@ export function OptionSelector<TValue extends string | number = string>({
             </CommandGroup>
           </CommandList>
         </Command>
-      </PopoverContent>
-    </Popover>
+      </Popover.Content>
+    </Popover.Root>
   );
 }

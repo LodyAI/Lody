@@ -1,9 +1,9 @@
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, ArrowRight, Building2, CreditCard } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 
 import { Button } from '@lody/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/ui/card';
+import { Card } from '@/ui/card';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
 import { PricingPageLink } from '../shared/pricing-page-link';
@@ -77,17 +77,17 @@ export function CreateWorkspacePage({
           </Button>
         ) : null}
 
-        <Card>
-          <CardHeader className="text-center">
+        <Card.Root>
+          <Card.Header className="text-center">
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
               <Building2 className="h-6 w-6 text-primary" />
             </div>
-            <CardTitle className="text-2xl">
+            <Card.Title className="text-2xl">
               {paidRequired
                 ? t('organization.createPlusWorkspaceTitle', 'Create a Plus workspace')
                 : t('organization.welcomeTitle', 'Welcome to Lody Agent')}
-            </CardTitle>
-            <CardDescription className="mt-2 whitespace-pre-line">
+            </Card.Title>
+            <Card.Description className="mt-2 whitespace-pre-line">
               {paidRequired
                 ? t(
                     'organization.createPlusWorkspaceDescription',
@@ -97,9 +97,9 @@ export function CreateWorkspacePage({
                     'organization.welcomeDescription',
                     "Let's create your first workspace to get started"
                   )}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
+            </Card.Description>
+          </Card.Header>
+          <Card.Content>
             <div className="space-y-4">
               <div className="space-y-2">
                 <UiField.Label htmlFor="workspace-name">
@@ -262,8 +262,8 @@ export function CreateWorkspacePage({
 
               {paidRequired ? <SubscribeConsentNotice className="text-center" /> : null}
             </div>
-          </CardContent>
-        </Card>
+          </Card.Content>
+        </Card.Root>
       </div>
     </div>
   );

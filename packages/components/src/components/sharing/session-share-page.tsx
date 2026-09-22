@@ -5,7 +5,7 @@ import {
   SessionRowLeadingSlot,
   buildSessionRowOpenedByTreeSlot,
 } from '../session-row-leading-slot';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { buildConversationMarkdown, type SessionId } from '@lody/shared';
 import {
   openStaticShare,

@@ -33,7 +33,7 @@ import {
 } from '../src/components/settings/agent-config-dialog';
 import * as machineAuthenticationHook from '../src/hooks/use-machine-acp-authentication';
 import { initI18n } from '../src/i18n';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 
 const machineId = 'machine-test' as MachineId;
 const claudeConfigId = 'claude-config' as AgentConfigId;
@@ -220,7 +220,7 @@ describe('AgentConfigDialog', () => {
     await act(async () => {
       root?.render(
         <Provider store={store}>
-          <TooltipProvider>
+          <Tooltip.Provider>
             <AgentConfigDialog
               open
               onOpenChange={vi.fn()}
@@ -231,7 +231,7 @@ describe('AgentConfigDialog', () => {
               onCheckBinaryStatus={onCheckBinaryStatus}
               onManagedRuntimeSelected={onManagedRuntimeSelected}
             />
-          </TooltipProvider>
+          </Tooltip.Provider>
         </Provider>
       );
     });

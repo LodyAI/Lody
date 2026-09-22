@@ -16,37 +16,16 @@ import {
   Pencil,
   X,
 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Field as UiField } from '@lody/ui/field';
 import { Badge } from '@lody/ui/badge';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
+import { Menu } from '@/ui/menu';
 import { UserAvatar } from '../user-avatar';
 import type { OrganizationMemberRef, OrganizationMemberRole } from '@/lib/organization-member-role';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/ui/dialog';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
+import { Dialog } from '@/ui/dialog';
+import { AlertDialog } from '@/ui/dialog';
 import { CompactRow, CompactSection } from './compact-layout';
 import {
   InviteMemberDialog,
@@ -676,20 +655,20 @@ export function AccountSettingsPure({
       ) : null}
 
       {surface === 'account' ? (
-        <Dialog open={cliApiKeyDialogOpen} onOpenChange={handleCliApiKeyDialogOpenChange}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>
+        <Dialog.Root open={cliApiKeyDialogOpen} onOpenChange={handleCliApiKeyDialogOpenChange}>
+          <Dialog.Content>
+            <Dialog.Header>
+              <Dialog.Title>
                 {hasGeneratedCliApiKey
                   ? t('settings.account.cliAuth.createdDialogTitle')
                   : t('settings.account.cliAuth.createDialogTitle')}
-              </DialogTitle>
-              <DialogDescription>
+              </Dialog.Title>
+              <Dialog.Description>
                 {hasGeneratedCliApiKey
                   ? t('settings.account.cliAuth.createdDialogDescription')
                   : t('settings.account.cliAuth.createDialogDescription')}
-              </DialogDescription>
-            </DialogHeader>
+              </Dialog.Description>
+            </Dialog.Header>
             {hasGeneratedCliApiKey ? (
               <div className="space-y-3 py-4 text-sm">
                 <p className="text-muted-foreground">{t('settings.account.cliAuth.usageHint')}</p>
@@ -722,7 +701,7 @@ export function AccountSettingsPure({
                 </p>
               </div>
             )}
-            <DialogFooter>
+            <Dialog.Footer>
               <Button
                 variant="secondary"
                 size="small"
@@ -743,32 +722,32 @@ export function AccountSettingsPure({
                   {t('settings.account.cliAuth.createConfirmButton')}
                 </Button>
               )}
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+            </Dialog.Footer>
+          </Dialog.Content>
+        </Dialog.Root>
       ) : null}
 
       {surface === 'account' ? (
-        <AlertDialog
+        <AlertDialog.Root
           open={Boolean(cliApiKeyToRevoke)}
           onOpenChange={(open) => {
             if (!open) setCliApiKeyToRevoke(null);
           }}
         >
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>{t('settings.account.cliAuth.revokeDialogTitle')}</AlertDialogTitle>
-              <AlertDialogDescription>
+          <AlertDialog.Content>
+            <AlertDialog.Header>
+              <AlertDialog.Title>{t('settings.account.cliAuth.revokeDialogTitle')}</AlertDialog.Title>
+              <AlertDialog.Description>
                 {t('settings.account.cliAuth.revokeDialogDescription', {
                   note: cliApiKeyToRevoke?.note ?? t('settings.account.cliAuth.recordNoteFallback'),
                 })}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel disabled={Boolean(revokingCliApiKeyId)}>
+              </AlertDialog.Description>
+            </AlertDialog.Header>
+            <AlertDialog.Footer>
+              <AlertDialog.Cancel disabled={Boolean(revokingCliApiKeyId)}>
                 {t('common.cancel')}
-              </AlertDialogCancel>
-              <AlertDialogAction
+              </AlertDialog.Cancel>
+              <AlertDialog.Action
                 onClick={() => {
                   void (async () => {
                     if (!cliApiKeyToRevoke) return;
@@ -785,10 +764,10 @@ export function AccountSettingsPure({
                   <Trash2 className="mr-1.5 h-3.5 w-3.5" />
                 )}
                 {t('settings.account.cliAuth.revokeConfirmButton')}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+              </AlertDialog.Action>
+            </AlertDialog.Footer>
+          </AlertDialog.Content>
+        </AlertDialog.Root>
       ) : null}
 
       {/* Members */}
@@ -830,15 +809,18 @@ export function AccountSettingsPure({
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
                   {isEditable ? (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
+                    <Menu.Root>
+                      <Menu.Trigger render={<button className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-0.5 text-xs font-normal text-muted-foreground transition-colors hover:bg-hover hover:text-foreground">
+                          {t(`organization.role.${member.role}`)}
+                          <ChevronDown className="h-3 w-3 opacity-50" />
+                        </button>}>
                         <button className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-0.5 text-xs font-normal text-muted-foreground transition-colors hover:bg-hover hover:text-foreground">
                           {t(`organization.role.${member.role}`)}
                           <ChevronDown className="h-3 w-3 opacity-50" />
                         </button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem
+                      </Menu.Trigger>
+                      <Menu.Content align="end">
+                        <Menu.Item
                           onClick={() => {
                             void onUpdateRole(member, 'member');
                           }}
@@ -850,8 +832,8 @@ export function AccountSettingsPure({
                             )}
                           />
                           {t('organization.role.member')}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
+                        </Menu.Item>
+                        <Menu.Item
                           onClick={() => {
                             void onUpdateRole(member, 'admin');
                           }}
@@ -863,9 +845,9 @@ export function AccountSettingsPure({
                             )}
                           />
                           {t('organization.role.admin')}
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                        </Menu.Item>
+                      </Menu.Content>
+                    </Menu.Root>
                   ) : (
                     <span className="px-2 py-0.5 text-xs font-normal text-muted-foreground">
                       {t(`organization.role.${member.role}`)}
@@ -1110,7 +1092,7 @@ export function AccountSettingsPure({
         </CompactSection>
       ) : null}
 
-      {/* Invite Dialog */}
+      {/* Invite Dialog.Root */}
       <InviteMemberDialog
         open={inviteDialogOpen}
         onOpenChange={setInviteDialogOpen}
@@ -1127,43 +1109,43 @@ export function AccountSettingsPure({
         {...(onOpenBilling ? { onOpenBilling } : {})}
       />
 
-      {/* Remove Member Dialog */}
-      <AlertDialog open={deleteUserDialogOpen} onOpenChange={setDeleteUserDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('workspace.removeMember.title')}</AlertDialogTitle>
-            <AlertDialogDescription>
+      {/* Remove Member Dialog.Root */}
+      <AlertDialog.Root open={deleteUserDialogOpen} onOpenChange={setDeleteUserDialogOpen}>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>{t('workspace.removeMember.title')}</AlertDialog.Title>
+            <AlertDialog.Description>
               {t('workspace.removeMember.description')}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel>{t('common.cancel')}</AlertDialog.Cancel>
+            <AlertDialog.Action
               onClick={() => {
                 void handleRemoveMember();
               }}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {t('common.remove')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
 
-      {/* Leave Workspace Dialog */}
-      <AlertDialog open={leaveDialogOpen} onOpenChange={setLeaveDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('workspace.danger.leaveWorkspace.confirmTitle')}</AlertDialogTitle>
-            <AlertDialogDescription>
+      {/* Leave Workspace Dialog.Root */}
+      <AlertDialog.Root open={leaveDialogOpen} onOpenChange={setLeaveDialogOpen}>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>{t('workspace.danger.leaveWorkspace.confirmTitle')}</AlertDialog.Title>
+            <AlertDialog.Description>
               {t('workspace.danger.leaveWorkspace.confirmDescription', {
                 workspace: organization.name,
               })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isLeaving}>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={isLeaving}>{t('common.cancel')}</AlertDialog.Cancel>
+            <AlertDialog.Action
               onClick={() => {
                 void (async () => {
                   setIsLeaving(true);
@@ -1186,59 +1168,59 @@ export function AccountSettingsPure({
               ) : (
                 t('workspace.danger.leaveWorkspace.confirmButton')
               )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
 
       {/* Paid workspace: deletion blocked until the subscription is canceled */}
-      <AlertDialog open={deleteBlockedDialogOpen} onOpenChange={setDeleteBlockedDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
+      <AlertDialog.Root open={deleteBlockedDialogOpen} onOpenChange={setDeleteBlockedDialogOpen}>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
               {t(
                 billingUiAvailable
                   ? 'workspace.deletePaidBlockedTitle'
                   : 'workspace.deleteBlockedMobileTitle'
               )}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
+            </AlertDialog.Title>
+            <AlertDialog.Description>
               {t(
                 billingUiAvailable
                   ? 'workspace.deletePaidBlockedDescription'
                   : 'workspace.deleteBlockedMobileDescription'
               )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel>{t('common.cancel')}</AlertDialog.Cancel>
             {billingUiAvailable && onOpenBilling ? (
-              <AlertDialogAction
+              <AlertDialog.Action
                 onClick={() => {
                   setDeleteBlockedDialogOpen(false);
                   onOpenBilling();
                 }}
               >
                 {t('workspace.deletePaidBlockedGoToBilling')}
-              </AlertDialogAction>
+              </AlertDialog.Action>
             ) : null}
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
 
-      {/* Delete Workspace Dialog */}
-      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="text-destructive">
+      {/* Delete Workspace Dialog.Root */}
+      <Dialog.Root open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <Dialog.Content>
+          <Dialog.Header>
+            <Dialog.Title className="text-destructive">
               {t('workspace.danger.deleteWorkspace.confirmTitle')}
-            </DialogTitle>
-            <DialogDescription>
+            </Dialog.Title>
+            <Dialog.Description>
               {t('workspace.danger.deleteWorkspace.confirmDescription', {
                 workspace: organization.name,
               })}
-            </DialogDescription>
-          </DialogHeader>
+            </Dialog.Description>
+          </Dialog.Header>
           <div className="space-y-4 py-4">
             {billingUiAvailable && deleteBillingGuard?.kind === 'cancel-scheduled' ? (
               <p className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-normal text-amber-950 dark:text-amber-100">
@@ -1261,7 +1243,7 @@ export function AccountSettingsPure({
               />
             </div>
           </div>
-          <DialogFooter>
+          <Dialog.Footer>
             <Button
               variant="secondary"
               onClick={() => {
@@ -1300,12 +1282,12 @@ export function AccountSettingsPure({
                 t('workspace.danger.deleteWorkspace.confirmButton')
               )}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </Dialog.Footer>
+        </Dialog.Content>
+      </Dialog.Root>
 
-      {/* Delete Account Dialog */}
-      <Dialog
+      {/* Delete Account Dialog.Root */}
+      <Dialog.Root
         open={deleteAccountDialogOpen}
         onOpenChange={(open) => {
           if (isDeletingAccount) {
@@ -1317,15 +1299,15 @@ export function AccountSettingsPure({
           }
         }}
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle className="text-destructive">
+        <Dialog.Content>
+          <Dialog.Header>
+            <Dialog.Title className="text-destructive">
               {t('settings.account.accountDeletion.confirmTitle')}
-            </DialogTitle>
-            <DialogDescription>
+            </Dialog.Title>
+            <Dialog.Description>
               {t('settings.account.accountDeletion.confirmDescription')}
-            </DialogDescription>
-          </DialogHeader>
+            </Dialog.Description>
+          </Dialog.Header>
           <div className="space-y-4 py-4">
             <div className="space-y-2">
               <UiField.Label htmlFor="deleteAccountConfirmText">
@@ -1346,7 +1328,7 @@ export function AccountSettingsPure({
               />
             </div>
           </div>
-          <DialogFooter>
+          <Dialog.Footer>
             <Button
               variant="secondary"
               onClick={() => {
@@ -1390,9 +1372,9 @@ export function AccountSettingsPure({
                 t('settings.account.accountDeletion.confirmButton')
               )}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </Dialog.Footer>
+        </Dialog.Content>
+      </Dialog.Root>
     </div>
   );
 }

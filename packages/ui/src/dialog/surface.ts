@@ -36,6 +36,12 @@ export const modal = stylex.create({
   /** Both ends of the backdrop's fade. */
   backdropHidden: { opacity: 0 },
   /**
+   * A surface that has to appear instantly — the command palette pops in with
+   * no fade — states it here rather than overriding the transition with a
+   * caller class, which would have to outlast the StyleX sheet to win.
+   */
+  noTransition: { transitionDuration: '0ms' },
+  /**
    * A drawer's backdrop lifts as the panel is dragged away.
    *
    * Base UI publishes the gesture's progress and the host decides what it

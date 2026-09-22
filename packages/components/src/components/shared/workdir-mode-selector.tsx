@@ -3,13 +3,8 @@ import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
 import { Button } from '@lody/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/ui/dropdown-menu';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { Menu } from '@/ui/menu';
+import { Tooltip } from '@lody/ui/tooltip';
 import { Checkbox } from '@lody/ui/checkbox';
 
 export type WorkdirMode = 'local' | 'worktree';
@@ -65,14 +60,12 @@ export function WorktreeCheckboxPill({
   if (!disabledReason) return control;
 
   return (
-    <Tooltip delayDuration={400}>
-      <TooltipTrigger asChild>
-        <span className="inline-flex">{control}</span>
-      </TooltipTrigger>
-      <TooltipContent side="top" className="max-w-72">
+    <Tooltip.Root>
+      <Tooltip.Trigger delay={400} render={<span className="inline-flex">{control}</span>}/>
+      <Tooltip.Content side="top" className="max-w-72">
         {disabledReason}
-      </TooltipContent>
-    </Tooltip>
+      </Tooltip.Content>
+    </Tooltip.Root>
   );
 }
 
@@ -135,28 +128,26 @@ export function WorkdirModeSelector({
 
   if (readOnly) {
     return (
-      <Tooltip delayDuration={500}>
-        <TooltipTrigger asChild>
-          <span className="inline-flex">{trigger}</span>
-        </TooltipTrigger>
-        <TooltipContent side="top">
+      <Tooltip.Root>
+        <Tooltip.Trigger delay={500} render={<span className="inline-flex">{trigger}</span>}/>
+        <Tooltip.Content side="top">
           {t('chat.workdir.readOnly', 'Working directory mode cannot be changed after creation.')}
-        </TooltipContent>
-      </Tooltip>
+        </Tooltip.Content>
+      </Tooltip.Root>
     );
   }
 
   return (
-    <DropdownMenu modal={modal}>
-      <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-[180px]">
+    <Menu.Root modal={modal}>
+      <Menu.Trigger render={trigger}>{trigger}</Menu.Trigger>
+      <Menu.Content align="end" className="min-w-[180px]">
         {options.map((option) => {
           const Icon = modeIcon[option.value];
           const item = (
-            <DropdownMenuItem
+            <Menu.Item
               key={option.value}
               disabled={option.disabled}
-              onSelect={() => onModeChange(option.value)}
+              onClick={() => onModeChange(option.value)}
               className="justify-between"
             >
               <span className="flex min-w-0 items-center gap-2">
@@ -164,20 +155,20 @@ export function WorkdirModeSelector({
                 <span className="truncate">{option.label}</span>
               </span>
               {option.value === selectedMode ? <Check className="h-3 w-3 opacity-70" /> : null}
-            </DropdownMenuItem>
+            </Menu.Item>
           );
 
           if (option.description) {
             return (
-              <Tooltip key={option.value} delayDuration={500}>
-                <TooltipTrigger asChild>{item}</TooltipTrigger>
-                <TooltipContent side="left">{option.description}</TooltipContent>
-              </Tooltip>
+              <Tooltip.Root key={option.value}>
+                <Tooltip.Trigger delay={500} render={item}/>
+                <Tooltip.Content side="left">{option.description}</Tooltip.Content>
+              </Tooltip.Root>
             );
           }
           return item;
         })}
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </Menu.Content>
+    </Menu.Root>
   );
 }

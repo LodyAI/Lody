@@ -11,7 +11,7 @@ import {
   type PromptShortcutIndexEntry,
 } from '@lody/shared/prompt-shortcuts';
 import { Plus, SquareSlash, Trash2 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { promptShortcutsFeatureEnabledAtom } from '@/atoms/settings';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { cloudOperations } from '@/lib/cloud-api-operations';
@@ -27,18 +27,9 @@ import { toPersistedMentionRanges } from '@/components/mentions/mention-persiste
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
 import { Badge } from '@lody/ui/badge';
 import { Button } from '@lody/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/ui/dialog';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
+import { Dialog } from '@/ui/dialog';
+import { Tooltip } from '@lody/ui/tooltip';
+import { AlertDialog } from '@/ui/dialog';
 import { settingContainerClass } from '.';
 import { Section } from './form-primitives';
 import {
@@ -148,14 +139,14 @@ function PromptShortcutsSettingContent({
         onDelete={setRemoval}
       />
 
-      <Dialog
+      <Dialog.Root
         open={!!editor && !!runtime}
         onOpenChange={(open) => {
           if (!open && !busy) setEditor(null);
         }}
       >
-        <DialogContent
-          overlayClassName={
+        <Dialog.Content
+          backdropClassName={
             // Desktop settings is itself a dialog; match its z-index so this
             // later overlay covers it without stacking a second /80 veil.
             isMobile ? undefined : 'z-[var(--z-dialog)] bg-black/20'
@@ -166,14 +157,14 @@ function PromptShortcutsSettingContent({
           )}
         >
           <header className="shrink-0 border-b border-border/60 px-5 py-3 pr-12">
-            <DialogTitle className="text-sm font-normal">
+            <Dialog.Title className="text-sm font-normal">
               {!editor?.base
                 ? t('settings.promptShortcuts.new', 'New Prompt Shortcut')
                 : owned
                   ? t('settings.promptShortcuts.edit', 'Edit Prompt Shortcut')
                   : t('settings.promptShortcuts.view', 'Prompt Shortcut')}
-            </DialogTitle>
-            <DialogDescription className="mt-0.5 text-xs leading-snug text-muted-foreground">
+            </Dialog.Title>
+            <Dialog.Description className="mt-0.5 text-xs leading-snug text-muted-foreground">
               {owned
                 ? t(
                     'settings.promptShortcuts.editorHelp',
@@ -183,7 +174,7 @@ function PromptShortcutsSettingContent({
                     'settings.promptShortcuts.readOnlyHelp',
                     'Shared by another member. Only its author can change it.'
                   )}
-            </DialogDescription>
+            </Dialog.Description>
           </header>
           {editor && runtime ? (
             owned ? (
@@ -222,31 +213,31 @@ function PromptShortcutsSettingContent({
               />
             )
           ) : null}
-        </DialogContent>
-      </Dialog>
+        </Dialog.Content>
+      </Dialog.Root>
 
-      <AlertDialog
+      <AlertDialog.Root
         open={!!removal}
         onOpenChange={(open) => {
           if (!open && !busy) setRemoval(null);
         }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
               {t('settings.promptShortcuts.deleteTitle', 'Delete Prompt Shortcut')}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
+            </AlertDialog.Title>
+            <AlertDialog.Description>
               {t('settings.promptShortcuts.deleteHelp', {
                 defaultValue:
                   'Delete “{{name}}”? Prompts already inserted into drafts or sent messages are unchanged.',
                 name: removal?.name ?? '',
               })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={busy}>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={busy}>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
+            <AlertDialog.Action
               disabled={busy}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={(event) => {
@@ -262,10 +253,10 @@ function PromptShortcutsSettingContent({
             >
               {busy ? <Spinner className="mr-2 h-4 w-4" aria-hidden="true" /> : null}
               {t('common.delete', 'Delete')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </div>
   );
 }
@@ -320,9 +311,8 @@ export function PromptShortcutsList({
             </span>
           ) : null}
         </div>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
+        <Tooltip.Root>
+          <Tooltip.Trigger render={<Button
               variant="ghost"
               icon
               className="h-7 w-7 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
@@ -331,10 +321,9 @@ export function PromptShortcutsList({
               onClick={onCreate}
             >
               <Plus className="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{addLabel}</TooltipContent>
-        </Tooltip>
+            </Button>}/>
+          <Tooltip.Content>{addLabel}</Tooltip.Content>
+        </Tooltip.Root>
       </div>
 
       {entries.length === 0 ? (

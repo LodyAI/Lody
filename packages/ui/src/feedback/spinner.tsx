@@ -39,21 +39,24 @@ export const Spinner = forwardRef<SVGSVGElement, SpinnerProps>(function Spinner(
   { size = 'medium', label = 'Loading', className, ...rest },
   ref
 ) {
+  const spin = stylex.props(surface.spinnerSpin);
   const sx = stylex.props(surface.spinner, SIZES[size]);
   return (
-    <svg
-      ref={ref}
-      viewBox="0 0 16 16"
-      fill="none"
-      role={label == null ? 'presentation' : 'status'}
-      aria-label={label ?? undefined}
-      aria-hidden={label == null ? 'true' : undefined}
-      {...rest}
-      className={appendClassName(sx.className, className)}
-      style={sx.style}
-    >
-      <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeOpacity="0.25" />
-      <path d="M14.5 8A6.5 6.5 0 0 0 8 1.5" stroke="currentColor" strokeLinecap="round" />
-    </svg>
+    <span data-slot="spinner" className={spin.className} style={spin.style}>
+      <svg
+        ref={ref}
+        viewBox="0 0 16 16"
+        fill="none"
+        role={label == null ? 'presentation' : 'status'}
+        aria-label={label ?? undefined}
+        aria-hidden={label == null ? 'true' : undefined}
+        {...rest}
+        className={appendClassName(sx.className, className)}
+        style={sx.style}
+      >
+        <circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeOpacity="0.25" />
+        <path d="M14.5 8A6.5 6.5 0 0 0 8 1.5" stroke="currentColor" strokeLinecap="round" />
+      </svg>
+    </span>
   );
 });

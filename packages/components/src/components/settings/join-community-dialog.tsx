@@ -2,7 +2,10 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Users } from 'lucide-react';
 import { SiDiscord } from 'react-icons/si';
-import { Button, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui';
+import {
+  Button,
+  Dialog,
+} from '@/ui';
 import { LODY_DISCORD_URL } from '@/lib/lody-urls';
 import { openExternalUrl } from '@/lib/native-browser';
 // The Feishu group QR ships with the app rather than being fetched from the
@@ -34,19 +37,19 @@ export function JoinCommunityDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl">
-        <DialogHeader>
-          <DialogTitle>
+    <Dialog.Root open={open} onOpenChange={onOpenChange}>
+      <Dialog.Content className="sm:max-w-xl">
+        <Dialog.Header>
+          <Dialog.Title>
             {t('settings.about.communityDialogTitle', 'Join the Lody community')}
-          </DialogTitle>
-          <DialogDescription>
+          </Dialog.Title>
+          <Dialog.Description>
             {t(
               'settings.about.communityDialogDescription',
               'Chat with the team and other users, get help, and share feedback.'
             )}
-          </DialogDescription>
-        </DialogHeader>
+          </Dialog.Description>
+        </Dialog.Header>
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="flex flex-col items-center gap-3 rounded-lg border border-border/70 bg-card/70 p-4">
             {/* The white plate is not decoration: a QR inverted by a dark theme
@@ -84,8 +87,8 @@ export function JoinCommunityDialog({
             </span>
           </button>
         </div>
-      </DialogContent>
-    </Dialog>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }
 

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtom } from 'jotai';
 import { CheckCircle2, AlertCircle, Download, ExternalLink } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import type { ElectronUpdaterPhase } from '@lody/shared';
 import { Button } from '@lody/ui/button';
 import { Switch } from '@lody/ui/switch';

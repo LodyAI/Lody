@@ -17,7 +17,7 @@ import {
 } from '@lody/shared';
 import { useAtomValue } from 'jotai';
 import { usePostHog } from '@posthog/react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { currentWorkspaceIdAtom, userAtom } from '@/atoms';
 import { getDurationSinceMs, getPerformanceNowMs } from '@/lib/posthog-analytics';
 import {

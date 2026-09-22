@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
 import { Copy, MessageSquare } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { Button } from '@lody/ui/button';
 

@@ -10,7 +10,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { ArrowUp, Check, ChevronLeft, ChevronRight, Clock3, Info, X } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import {
   getAskUserQuestionAnswerKey,
@@ -25,8 +25,8 @@ import {
 import { Button } from '@lody/ui/button';
 import { Input } from '@lody/ui/input';
 import { Textarea } from '@lody/ui/textarea';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/ui/dialog';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
+import { Dialog } from '@/ui/dialog';
+import { Tooltip } from '@lody/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 type DraftAnswer = {
@@ -611,16 +611,16 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
                       // beyond the button's aria-label; otherwise rendering
                       // "Show details" twice (label + tooltip) is noise.
                       option.description ? (
-                        <Tooltip>
-                          <TooltipTrigger asChild>{infoButton}</TooltipTrigger>
-                          <TooltipContent
+                        <Tooltip.Root>
+                          <Tooltip.Trigger render={infoButton}/>
+                          <Tooltip.Content
                             side="top"
                             align="start"
                             className="max-w-[260px] whitespace-pre-wrap"
                           >
                             {option.description}
-                          </TooltipContent>
-                        </Tooltip>
+                          </Tooltip.Content>
+                        </Tooltip.Root>
                       ) : (
                         infoButton
                       )
@@ -769,28 +769,28 @@ export function AskUserQuestionCard({ meta, mode, className }: AskUserQuestionCa
         </div>
       ) : null}
 
-      <Dialog
+      <Dialog.Root
         open={infoModalOption !== null}
         onOpenChange={(open) => {
           if (!open) setInfoModalOption(null);
         }}
       >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="break-words text-left">{infoModalOption?.label}</DialogTitle>
+        <Dialog.Content className="max-w-md">
+          <Dialog.Header>
+            <Dialog.Title className="break-words text-left">{infoModalOption?.label}</Dialog.Title>
             {infoModalOption?.description ? (
-              <DialogDescription className="whitespace-pre-wrap break-words text-left">
+              <Dialog.Description className="whitespace-pre-wrap break-words text-left">
                 {infoModalOption.description}
-              </DialogDescription>
+              </Dialog.Description>
             ) : null}
-          </DialogHeader>
+          </Dialog.Header>
           {infoModalOption?.preview ? (
             <pre className="max-h-[60vh] overflow-auto whitespace-pre rounded-md border border-border bg-muted/40 px-3 py-2 font-mono text-xs leading-relaxed text-foreground">
               {infoModalOption.preview}
             </pre>
           ) : null}
-        </DialogContent>
-      </Dialog>
+        </Dialog.Content>
+      </Dialog.Root>
     </div>
   );
 }

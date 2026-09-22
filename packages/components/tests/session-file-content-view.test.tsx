@@ -33,7 +33,7 @@ import { machineMetaCacheAtom } from '../src/atoms/doc-meta';
 import { lodyPresenceStatesAtom, lodyPresenceSyncStateAtom } from '../src/atoms/presence';
 import { localProbeResultAtom } from '../src/atoms/local-probe';
 import { SaveTextConflictError } from '../src/hooks/use-code-collab-save-text';
-import { TooltipProvider } from '../src/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import { writeTextToClipboard } from '../src/lib/clipboard';
 
 vi.mock('react-i18next', () => ({
@@ -206,7 +206,7 @@ async function render(node: ReactNode, options: RenderOptions = {}): Promise<HTM
     });
   }
   await act(async () => {
-    root?.render(createElement(Provider, { store }, createElement(TooltipProvider, null, node)));
+    root?.render(createElement(Provider, { store }, createElement(Tooltip.Provider, null, node)));
   });
   return container;
 }
@@ -217,7 +217,7 @@ async function rerender(node: ReactNode): Promise<void> {
   }
   await act(async () => {
     root?.render(
-      createElement(Provider, { store: currentStore }, createElement(TooltipProvider, null, node))
+      createElement(Provider, { store: currentStore }, createElement(Tooltip.Provider, null, node))
     );
   });
 }

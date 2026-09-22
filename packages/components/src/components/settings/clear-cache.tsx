@@ -2,17 +2,8 @@ import { useCallback, useState } from 'react';
 import { useNavigate, useParams } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { Trash2 } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
+import { Spinner } from '@lody/ui/spinner';
+import { AlertDialog } from '@/ui/dialog';
 import { markCacheClearPending, reloadApp } from '@/lib/clear-local-cache';
 
 /**
@@ -61,17 +52,17 @@ export function ClearCacheConfirmDialog({
 }) {
   const { t } = useTranslation();
   return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{t('settings.cache.clearCache.confirmTitle')}</AlertDialogTitle>
-          <AlertDialogDescription>
+    <AlertDialog.Root open={open} onOpenChange={onOpenChange}>
+      <AlertDialog.Content>
+        <AlertDialog.Header>
+          <AlertDialog.Title>{t('settings.cache.clearCache.confirmTitle')}</AlertDialog.Title>
+          <AlertDialog.Description>
             {t('settings.cache.clearCache.confirmDescription')}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel disabled={isClearing}>{t('common.cancel')}</AlertDialogCancel>
-          <AlertDialogAction
+          </AlertDialog.Description>
+        </AlertDialog.Header>
+        <AlertDialog.Footer>
+          <AlertDialog.Cancel disabled={isClearing}>{t('common.cancel')}</AlertDialog.Cancel>
+          <AlertDialog.Action
             onClick={(event) => {
               // Keep the dialog open while we navigate + reload so the button can
               // show its in-progress state instead of flashing closed.
@@ -87,9 +78,9 @@ export function ClearCacheConfirmDialog({
               <Trash2 className="mr-1.5 h-3.5 w-3.5" />
             )}
             {t('settings.cache.clearCache.confirmButton')}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+          </AlertDialog.Action>
+        </AlertDialog.Footer>
+      </AlertDialog.Content>
+    </AlertDialog.Root>
   );
 }

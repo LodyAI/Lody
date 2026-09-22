@@ -30,16 +30,7 @@ import {
 import { buildSessionRowOpenedByTreeSlot } from '@/components/sidebar-row-shared';
 import { cn } from '@/lib/utils';
 import { Checkbox } from '@lody/ui/checkbox';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
+import { AlertDialog } from '@/ui/dialog';
 import {
   ConversationRow,
   conversationRowHasActivity,
@@ -1352,27 +1343,27 @@ export function MobileChatList({
     <MobileSwipeableRowGroup>
       {headingNode}
       {cards}
-      <AlertDialog
+      <AlertDialog.Root
         open={pendingDelete != null}
         onOpenChange={(open) => !isDeleting && !open && setPendingDelete(null)}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
               {selectionLabels?.confirmTitle ?? '彻底删除归档对话'}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
+            </AlertDialog.Title>
+            <AlertDialog.Description>
               {(selectionLabels?.confirmDescription ?? '将永久删除选中的 {count} 个对话，此操作不可恢复。').replace(
                 '{count}',
                 String(pendingDeleteCount)
               )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={isDeleting}>
               {selectionLabels?.cancel ?? '取消'}
-            </AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Cancel>
+            <AlertDialog.Action
               onClick={(event) => {
                 /* Don't auto-close — `handleDelete` does it after the
                    delete promise resolves. Without this, Radix closes
@@ -1386,10 +1377,10 @@ export function MobileChatList({
               variant="destructive"
             >
               {selectionLabels?.confirmDelete ?? '删除'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </MobileSwipeableRowGroup>
   );
 }

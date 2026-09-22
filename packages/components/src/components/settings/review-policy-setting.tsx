@@ -2,7 +2,7 @@ import { useAtomValue } from 'jotai';
 import { Check, Monitor, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   ACP_PLAN_PERMISSION_MODE_ID,
   DEFAULT_REVIEW_POLICY,

@@ -1,11 +1,11 @@
-import { type ReactNode, useState } from 'react';
+import { type ReactElement, type ReactNode, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Copy, Folder } from 'lucide-react';
 
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
 import { cn } from '@/lib/utils';
-import { Popover, PopoverContent, PopoverTrigger } from '@/ui/popover';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
+import { Popover } from '@lody/ui/popover';
+import { Tooltip } from '@lody/ui/tooltip';
 import {
   menuItemClassName,
   menuSeparatorClassName,
@@ -75,17 +75,17 @@ export function SessionForkOptionTooltip({
 }: {
   description: string;
   side?: 'top' | 'bottom' | 'left' | 'right';
-  children: ReactNode;
+  children: ReactElement;
 }) {
   return (
-    <TooltipProvider>
-      <Tooltip delayDuration={400}>
-        <TooltipTrigger asChild>{children}</TooltipTrigger>
-        <TooltipContent side={side} sideOffset={8} className="max-w-64 text-xs leading-snug">
+    <Tooltip.Provider>
+      <Tooltip.Root>
+        <Tooltip.Trigger delay={400} render={children}/>
+        <Tooltip.Content side={side} sideOffset={8} className="max-w-64 text-xs leading-snug">
           {description}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+        </Tooltip.Content>
+      </Tooltip.Root>
+    </Tooltip.Provider>
   );
 }
 
@@ -197,7 +197,7 @@ export function SessionForkDestinationPopover({
   side = 'top',
   align = 'start',
 }: {
-  children: ReactNode;
+  children: ReactElement;
   onCopyContext?: () => void;
   nativeForkAvailable?: boolean;
   open?: boolean;
@@ -222,18 +222,14 @@ export function SessionForkDestinationPopover({
   };
 
   return (
-    <Popover open={resolvedOpen} onOpenChange={handleOpenChange}>
-      <TooltipProvider>
-        <Tooltip delayDuration={500} open={resolvedOpen ? false : undefined}>
-          <TooltipTrigger asChild>
-            <PopoverTrigger asChild disabled={disabled}>
-              {children}
-            </PopoverTrigger>
-          </TooltipTrigger>
-          <TooltipContent>{tooltipLabel}</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-      <PopoverContent
+    <Popover.Root open={resolvedOpen} onOpenChange={handleOpenChange}>
+      <Tooltip.Provider>
+        <Tooltip.Root open={resolvedOpen ? false : undefined}>
+          <Tooltip.Trigger delay={500} render={<Popover.Trigger render={children} disabled={disabled}/>}/>
+          <Tooltip.Content>{tooltipLabel}</Tooltip.Content>
+        </Tooltip.Root>
+      </Tooltip.Provider>
+      <Popover.Content
         align={align}
         side={side}
         sideOffset={6}
@@ -245,7 +241,7 @@ export function SessionForkDestinationPopover({
         // row sits the same distance from the edge or the divider next to it.
         className={cn(menuSurfaceClassName, 'w-max min-w-0 border-0 p-1')}
         style={menuSurfaceStyle}
-        onOpenAutoFocus={(event) => event.preventDefault()}
+        initialFocus={false}
       >
         <SessionForkDestinationList
           worktreeAvailability={worktreeAvailability}
@@ -263,7 +259,7 @@ export function SessionForkDestinationPopover({
             onSelect(destination);
           }}
         />
-      </PopoverContent>
-    </Popover>
+      </Popover.Content>
+    </Popover.Root>
   );
 }

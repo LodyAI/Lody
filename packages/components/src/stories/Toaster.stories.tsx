@@ -1,21 +1,22 @@
 import type { Meta, StoryObj } from '@storybook/react';
-import { toast } from 'sonner';
-import { Toaster } from '@/ui/sonner';
+import { toast } from '@/lib/toast';
+import { Toast } from '@lody/ui';
+import { toastManager } from '@/lib/toast';
 import { Button } from '@lody/ui/button';
 
 /**
  * The global toast surface. Close is always on the far right. Title stays
  * left; an action chip sits with the close on the right.
  */
-const meta: Meta<typeof Toaster> = {
+const meta: Meta<typeof Toast.Provider> = {
   title: 'UI/Toaster',
-  component: Toaster,
+  component: Toast.Provider,
   parameters: {
     layout: 'fullscreen',
   },
   render: (args) => (
     <div className="flex min-h-[60vh] flex-col items-start gap-3 p-8">
-      <Toaster {...args} />
+      <Toast.Provider manager={toastManager} {...args} />
       <Button
         variant="secondary"
         onClick={() => toast.success('Base branch name copied to clipboard')}
@@ -58,6 +59,6 @@ const meta: Meta<typeof Toaster> = {
 };
 
 export default meta;
-type Story = StoryObj<typeof Toaster>;
+type Story = StoryObj<typeof Toast.Provider>;
 
 export const Default: Story = {};

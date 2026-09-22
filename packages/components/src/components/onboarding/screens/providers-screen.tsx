@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CheckCircle2, ChevronDown, ChevronUp, Copy, Plus, Trash2, XCircle } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
+import { Spinner } from '@lody/ui/spinner';
 import {
   REGISTRY_ACP_AGENTS,
   getBuiltinAgentByAgentType,
@@ -18,20 +18,11 @@ import {
   type MachineViewMeta,
   type ProviderSetupTask,
 } from '@lody/shared';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { Button } from '@lody/ui/button';
 import { Badge } from '@lody/ui/badge';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/ui/alert-dialog';
+import { Tooltip } from '@lody/ui/tooltip';
+import { AlertDialog } from '@/ui/dialog';
 import { cn } from '@/lib/utils';
 import {
   cmdCreateAgentConfigAtom,
@@ -1284,28 +1275,28 @@ export function ProvidersScreen({
         />
       ) : null}
 
-      <AlertDialog
+      <AlertDialog.Root
         open={pendingDelete !== null}
         onOpenChange={(open) => !open && setPendingDelete(null)}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
               {t('agents.deleteConfigConfirm', 'Delete Configuration')}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
+            </AlertDialog.Title>
+            <AlertDialog.Description>
               {t('agents.deleteConfigConfirmDescription', {
                 name: pendingDelete?.name ?? '',
                 defaultValue:
                   'Are you sure you want to delete "{{name}}"? This action cannot be undone.',
               })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel disabled={deleting}>
               {t('common.cancel', 'Cancel')}
-            </AlertDialogCancel>
-            <AlertDialogAction
+            </AlertDialog.Cancel>
+            <AlertDialog.Action
               disabled={deleting}
               onClick={(event) => {
                 event.preventDefault();
@@ -1315,10 +1306,10 @@ export function ProvidersScreen({
             >
               {deleting && <Spinner className="mr-2 h-4 w-4" />}
               {t('common.delete', 'Delete')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
     </>
   );
 }
@@ -1523,17 +1514,17 @@ function ProviderStatusBadge({
     );
     if (!exceptional) return badge;
     return (
-      <TooltipProvider delayDuration={200}>
-        <Tooltip>
-          <TooltipTrigger asChild>{badge}</TooltipTrigger>
-          <TooltipContent side="top" className="max-w-80 px-3 py-2">
+      <Tooltip.Provider delay={200}>
+        <Tooltip.Root>
+          <Tooltip.Trigger render={badge}/>
+          <Tooltip.Content side="top" className="max-w-80 px-3 py-2">
             <div className="font-medium">
               {t('onboarding.providers.slowWaitTitle', 'This is taking longer than usual')}
             </div>
             <div className="mt-1 break-words text-xs text-muted-foreground">{slowDetail}</div>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+          </Tooltip.Content>
+        </Tooltip.Root>
+      </Tooltip.Provider>
     );
   }
   if (status === 'passed') {
@@ -1561,17 +1552,17 @@ function ProviderStatusBadge({
     );
     if (!failureReason) return badge;
     return (
-      <TooltipProvider delayDuration={200}>
-        <Tooltip>
-          <TooltipTrigger asChild>{badge}</TooltipTrigger>
-          <TooltipContent side="top" className="max-w-80 px-3 py-2">
+      <Tooltip.Provider delay={200}>
+        <Tooltip.Root>
+          <Tooltip.Trigger render={badge}/>
+          <Tooltip.Content side="top" className="max-w-80 px-3 py-2">
             <div className="font-medium">
               {t('onboarding.providers.failureReasonTitle', 'Why it failed')}
             </div>
             <div className="mt-1 break-words text-xs text-muted-foreground">{failureReason}</div>
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
+          </Tooltip.Content>
+        </Tooltip.Root>
+      </Tooltip.Provider>
     );
   }
   if (status === 'needs-auth') {
