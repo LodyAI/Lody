@@ -68,3 +68,7 @@ native FFI execution. Windows acceptance should exercise cold startup, capabilit
 refresh, repeated commands and cancellation in the packaged desktop.
 
 `pnpm check`, `pnpm format`, and `pnpm run docs check` passed on macOS.
+
+## Integration
+
+- [Lody PR #891](https://github.com/LodyAI/Lody/pull/891)

@@ -58,3 +58,7 @@ stderr／非零退出码传递；保留缺失 npm、npm 失败、配置及压缩
 Windows 打包应用验收应覆盖冷启动、能力刷新、重复执行命令及取消操作。
 
 `pnpm check`、`pnpm format` 和 `pnpm run docs check` 均已在 macOS 上通过。
+
+## 集成
+
+- [Lody PR #891](https://github.com/LodyAI/Lody/pull/891)
