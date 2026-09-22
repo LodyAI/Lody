@@ -17,7 +17,7 @@ The gateway (`packages/e2ee-lab/src/platform/gateway.ts`) is the honest-host aut
 
 1. Issue an org-bound credential only when the device is on that Org’s current ledger. Possession proof alone yields an unbound login token.
 2. For `/ds/` and member-only metadata, load the control stream through Riverrun, `Ledger.verify`/`extend`, then decide. Do not cache sticky membership for authorization.
-3. Reads require current device membership. Content writes use `deviceMayWriteDocument`. Keys writes use exported `canSendEpoch`. Control CAS still checks the record signer equals the credential device and that `extend` succeeds.
+3. Reads require current device membership. Content writes use `deviceMayWriteDocument`. Keys writes use exported `canSendEpoch` (since 2026-09-22: any current non-recovery device; the client-side commitment check, not sender role, authenticates the key). Control CAS still checks the record signer equals the credential device and that `extend` succeeds.
 4. Snapshot PUT keeps `createContentSnapshotPublication`. `mayWriteDocument` reads the request’s ledger from `AsyncLocalStorage`, not a process-global genesis.
 5. Attack helpers keep writing `riverrunUrl` with no host ACL. A host 403 is not a client-integrity pass.
 
@@ -29,6 +29,6 @@ Putting role and membership columns into sqlite Riverrun. That would make storag
 
 ## Limits
 
-Not a production JWT issuer. The 15-minute lease is still the worst residual window. Snapshot admission can still race a revoke during async signature verify. `open` still does not re-check current write, so guest/revoked ciphertext under a malicious Riverrun remains `outside-model`. Production gateway should reuse the same core predicates rather than a second role table.
+Not a production JWT issuer or account directory. The 15-minute lease is still the worst residual window. Snapshot admission can still race a revoke during async signature verify. `open` still does not re-check current write, so guest/revoked ciphertext under a malicious Riverrun remains `outside-model`. Production gateway should reuse the same core predicates rather than a second role table, and must obtain account identity from its authenticated session before admitting a join request.
 
 Related lab work: [adversarial lab note](../../proposed/testing/2026-09-16-e2ee-adversarial-lab.md).

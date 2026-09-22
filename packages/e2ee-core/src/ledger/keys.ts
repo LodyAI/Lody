@@ -138,11 +138,16 @@ export function collectEpochPackets(
   return packets;
 }
 
+/**
+ * Any currently active device except a recovery device may distribute the
+ * current epoch key (decision 2026-09-22). Key authenticity does not come from
+ * the sender's role: `openEpochEnvelope` recomputes the commitment against the
+ * ledger, and the recipient must be an admitted device. Recovery devices only
+ * receive keys.
+ */
 export function canSendEpoch(state: OrgState, sender: SigningPublicKey): boolean {
   const device = state.devices.get(keyId(sender));
-  if (!device || device.kind !== 'personal' || !device.canManage) return false;
-  const member = state.members.get(keyId(device.membershipId));
-  return member?.role === 'owner' || member?.role === 'admin';
+  return device !== undefined && device.kind !== 'recovery';
 }
 
 function canReceiveEpoch(state: OrgState, recipient: SigningPublicKey): boolean {

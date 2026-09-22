@@ -17,77 +17,77 @@ Translation: current
 
 当前状态：HEAD `e30cbe66`。本轮增量：换代恢复必须绑定精确候选记录。不重做 D1–D8 或 S1/S2/S4/S5。不接入 Lody，不 push/PR/merge。
 
-| 完成 | 阶段 | 门槛 |
-| ---- | ---- | ---- |
-| [x] | S1 compareNotes 同 head 冲突 | 同 genesis+head 但 length/digest 不同为 conflict；追平仍 pending-sync；真实签名快照 |
-| [x] | S2 independent 证据 | independent 需要外带确认的签名者；不能只凭不同公钥或快照成员列表 |
-| [x] | S3 换代候选先落盘 | CAS 前保存候选+精确记录；重启/丢 ACK 不重新生成；落败候选不是当前密钥 |
-| [x] | S3b 换代恢复绑定记录 | 其他 pending 的 `resume()` 不能当换代成功；仅当候选记录已在已验证账本上才安装；真实子进程 CAS 后挂起 |
-| [x] | S3c 损坏候选不是缺失 | 截断/不可读候选失败闭合；文件缺失但 journal 有换代 pending 时不生成新候选 |
-| [x] | S4 持钥证明绑定 | 复现错误归属；只交方案；不改 v1 wire |
-| [x] | S5 epoch u32 / 快照资源 / 先验签 | 拒绝会截断的 epoch；限制宣称 length；昂贵导入前验签 |
-| [x] | S6 其余归类 | 恶意历史包、canManage、openJournal、Convex、HKDF/X25519/legacy、Lean/产品 |
+| 完成 | 阶段                             | 门槛                                                                                                 |
+| ---- | -------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| [x]  | S1 compareNotes 同 head 冲突     | 同 genesis+head 但 length/digest 不同为 conflict；追平仍 pending-sync；真实签名快照                  |
+| [x]  | S2 independent 证据              | independent 需要外带确认的签名者；不能只凭不同公钥或快照成员列表                                     |
+| [x]  | S3 换代候选先落盘                | CAS 前保存候选+精确记录；重启/丢 ACK 不重新生成；落败候选不是当前密钥                                |
+| [x]  | S3b 换代恢复绑定记录             | 其他 pending 的 `resume()` 不能当换代成功；仅当候选记录已在已验证账本上才安装；真实子进程 CAS 后挂起 |
+| [x]  | S3c 损坏候选不是缺失             | 截断/不可读候选失败闭合；文件缺失但 journal 有换代 pending 时不生成新候选                            |
+| [x]  | S4 持钥证明绑定                  | 复现错误归属；只交方案；不改 v1 wire                                                                 |
+| [x]  | S5 epoch u32 / 快照资源 / 先验签 | 拒绝会截断的 epoch；限制宣称 length；昂贵导入前验签                                                  |
+| [x]  | S6 其余归类                      | 恶意历史包、canManage、openJournal、Convex、HKDF/X25519/legacy、Lean/产品                            |
 
 下表 D1–D8 为上一轮，勾选保留为历史证据。
 
 当前状态：HEAD `04b90b58` 加上本轮 helper/过期/裁判补测。定向修复 design-probe 第 1–6、8 项。原子 Guest 准入（第 2 项协议）和旧代上传（第 7 项）只交方案、不改 wire。不接入 Lody，不 push/PR/merge。
 
-| 完成 | 阶段 | 门槛 |
-| ---- | ---- | ---- |
-| [x] | D1 普通面与 harness | `/readyz` 不含 Riverrun/路径；NOW_HEADER 与未登录 failpoint 不能改宿主；harness token/DI 仍能 |
-| [x] | D2 approveJoin 部分成功 | 第二步失败不得报 Guest/Admin 已完成；保留 pending；不是原子 Guest 准入 |
-| [x] | D3 宿主加入过期 | 非空 `expiresAt` 在可信准入拒绝；过期前已提交的丢 ACK 重试仍能识别；纯校验不含时钟 |
-| [x] | D4/D5 历史裁判 | 降级作者的历史仍合法；Loro+Flock；看导入事实不是后端能解开；未知为未测 |
-| [x] | D6 未鉴权存在性 | 未登录访问已知/未知空间不再 401/404 分流 |
-| [x] | D8 Admin ∩ canManage | helper 不暗示加入设备可管理；显式管理设备可以；机器不能 |
-| [x] | D2/D7 待决策 | 只写方案，不改 wire |
+| 完成 | 阶段                    | 门槛                                                                                          |
+| ---- | ----------------------- | --------------------------------------------------------------------------------------------- |
+| [x]  | D1 普通面与 harness     | `/readyz` 不含 Riverrun/路径；NOW_HEADER 与未登录 failpoint 不能改宿主；harness token/DI 仍能 |
+| [x]  | D2 approveJoin 部分成功 | 第二步失败不得报 Guest/Admin 已完成；保留 pending；不是原子 Guest 准入                        |
+| [x]  | D3 宿主加入过期         | 非空 `expiresAt` 在可信准入拒绝；过期前已提交的丢 ACK 重试仍能识别；纯校验不含时钟            |
+| [x]  | D4/D5 历史裁判          | 降级作者的历史仍合法；Loro+Flock；看导入事实不是后端能解开；未知为未测                        |
+| [x]  | D6 未鉴权存在性         | 未登录访问已知/未知空间不再 401/404 分流                                                      |
+| [x]  | D8 Admin ∩ canManage    | helper 不暗示加入设备可管理；显式管理设备可以；机器不能                                       |
+| [x]  | D2/D7 待决策            | 只写方案，不改 wire                                                                           |
 
 下表为上一轮 R0–R7，勾选保留为历史证据。
 
 当前状态：HEAD `4989fad8` 加上保留的脏工作树（宿主网关、裁判、设计探针）。上一轮唯一目标：独立复现包。不接入 Lody 产品，不改协议，不 push/PR/merge。实验室 Spec 仍为 draft。
 
-| 完成 | 阶段 | 门槛 |
-| ---- | ---- | ---- |
-| [x] | R0 基线 | 记录 HEAD/脏树；保留已有网关与裁判改动；本表为唯一任务表 |
-| [x] | R1 事件驱动执行 | 每次许可写入 schedule；自动推进规则是最早可运行 FIFO；显式并发用身份 `ScheduleDriver`；剩余 requested 报 `schedule.extra` |
-| [x] | R2 独立复现包 | `e2ee-lab-repro/v1` 绑定脏树哈希、vendor/lock 哈希、private 0700；新进程 CLI 重放；缺私有材料/不支持的格式失败闭合；随机记录必须 `remaining()` 为空 |
-| [x] | R3 精确比较 | multipart 只规范化分隔符；失败指纹含规则 ID；分别改顺序/载荷/随机尾项/判定都能定位字段 |
-| [x] | R4 真实后端 | 保留 SIGKILL 崩溃矩阵；未刷盘 SQLite 页的断电丢失不建模 |
-| [x] | R5 独立裁判 | 实验室参考模型不导入被测权限函数；跳过验签、cursor 先于文档、错误上下文 journal 走真实路径 |
-| [x] | R6 缩减 | 有界 ddmin 去掉噪音，保持同一安全指纹，拒绝缩成 harness-error |
-| [x] | R7 真实模型命中 | 破坏性命中只计 intercept 或 mutateBackend；observe/readBackend/submitClaim/finish 不算 |
+| 完成 | 阶段            | 门槛                                                                                                                                                |
+| ---- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [x]  | R0 基线         | 记录 HEAD/脏树；保留已有网关与裁判改动；本表为唯一任务表                                                                                            |
+| [x]  | R1 事件驱动执行 | 每次许可写入 schedule；自动推进规则是最早可运行 FIFO；显式并发用身份 `ScheduleDriver`；剩余 requested 报 `schedule.extra`                           |
+| [x]  | R2 独立复现包   | `e2ee-lab-repro/v1` 绑定脏树哈希、vendor/lock 哈希、private 0700；新进程 CLI 重放；缺私有材料/不支持的格式失败闭合；随机记录必须 `remaining()` 为空 |
+| [x]  | R3 精确比较     | multipart 只规范化分隔符；失败指纹含规则 ID；分别改顺序/载荷/随机尾项/判定都能定位字段                                                              |
+| [x]  | R4 真实后端     | 保留 SIGKILL 崩溃矩阵；未刷盘 SQLite 页的断电丢失不建模                                                                                             |
+| [x]  | R5 独立裁判     | 实验室参考模型不导入被测权限函数；跳过验签、cursor 先于文档、错误上下文 journal 走真实路径                                                          |
+| [x]  | R6 缩减         | 有界 ddmin 去掉噪音，保持同一安全指纹，拒绝缩成 harness-error                                                                                       |
+| [x]  | R7 真实模型命中 | 破坏性命中只计 intercept 或 mutateBackend；observe/readBackend/submitClaim/finish 不算                                                              |
 
 下表为上一轮 S1–S4，勾选保留为历史证据。
 
-| 完成 | 阶段 | 门槛 |
-| ---- | ---- | ---- |
-| [x] | S1 持续协作对照 | 建空间/邀请/分钥/双方持续编辑 Loro+Flock/Bob 离线编辑重连/Carol 中途加入读历史/撤权+换代/快照 bootstrap/丢响应恢复/进程崩溃重启/宿主重启收敛，全部固定脚本、无攻击通过 |
-| [x] | S2 边界介入固定攻击 | 攻击者在协作进行中的已登记事件边界 intercept/readBackend/mutateBackend/submitClaim；命中证据可查（帧状态、回执、受影响结果） |
-| [x] | S3 三目录无模型重放 | 同一攻击记录在三个全新 dataDir/clientDir 中按相同私有材料重放；事件、帧、客户端摘要、判定首分歧可定位 |
-| [x] | S4 真实模型介入 | 至少一轮真实模型在协作进行中发起实际攻击（非仅 observe/finish）且命中；同一记录无模型重放一致 |
+| 完成 | 阶段                | 门槛                                                                                                                                                                   |
+| ---- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [x]  | S1 持续协作对照     | 建空间/邀请/分钥/双方持续编辑 Loro+Flock/Bob 离线编辑重连/Carol 中途加入读历史/撤权+换代/快照 bootstrap/丢响应恢复/进程崩溃重启/宿主重启收敛，全部固定脚本、无攻击通过 |
+| [x]  | S2 边界介入固定攻击 | 攻击者在协作进行中的已登记事件边界 intercept/readBackend/mutateBackend/submitClaim；命中证据可查（帧状态、回执、受影响结果）                                           |
+| [x]  | S3 三目录无模型重放 | 同一攻击记录在三个全新 dataDir/clientDir 中按相同私有材料重放；事件、帧、客户端摘要、判定首分歧可定位                                                                  |
+| [x]  | S4 真实模型介入     | 至少一轮真实模型在协作进行中发起实际攻击（非仅 observe/finish）且命中；同一记录无模型重放一致                                                                          |
 
 下表为此前阶段记录，勾选项见各阶段日志证据。
 
-| 完成 | 阶段 | 门槛 |
-| ---- | ---- | ---- |
-| [x] | A 裁判观测 | 合法 admitDevice 不是 violation；后端多写且客户端拒绝不是客户端完整性失守；缺观测 → harness-error；恶意 Riverrun 下 guest 内容 → outside-model |
-| [ ] | B 真实落盘 | document-persisted 写出文档字节；cursor-persisted 在文档之后写游标；崩溃重启不跳过未读数据 |
-| [ ] | C 同一攻击重放 | 成功 xor 的 needle 在恢复的私有材料下仍命中；改回执/字节会报首次分歧 |
-| [ ] | Effect 组合 | 一套 submit/delivery Effect；Promise 仅包装；取消不丢 pending |
-| [ ] | 调度交付 | 读/写/落盘/结果交付等待许可；暂停/取消清理 waiter |
-| [ ] | 缓存/环境 | 按实例 SigningPointCache；未注入的时钟/Wasm 列为重放限制 |
+| 完成 | 阶段           | 门槛                                                                                                                                           |
+| ---- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| [x]  | A 裁判观测     | 合法 admitDevice 不是 violation；后端多写且客户端拒绝不是客户端完整性失守；缺观测 → harness-error；恶意 Riverrun 下 guest 内容 → outside-model |
+| [ ]  | B 真实落盘     | document-persisted 写出文档字节；cursor-persisted 在文档之后写游标；崩溃重启不跳过未读数据                                                     |
+| [ ]  | C 同一攻击重放 | 成功 xor 的 needle 在恢复的私有材料下仍命中；改回执/字节会报首次分歧                                                                           |
+| [ ]  | Effect 组合    | 一套 submit/delivery Effect；Promise 仅包装；取消不丢 pending                                                                                  |
+| [ ]  | 调度交付       | 读/写/落盘/结果交付等待许可；暂停/取消清理 waiter                                                                                              |
+| [ ]  | 缓存/环境      | 按实例 SigningPointCache；未注入的时钟/Wasm 列为重放限制                                                                                       |
 
-| 完成 | 阶段           | 交付物                         | 必须通过的门槛                              |
-| ---- | -------------- | ------------------------------ | ------------------------------------------- |
-| [x]  | P0 基线        | 版本、备份、迁移清单、现状结果 | 用户未提交工作可恢复，回归覆盖有去向        |
-| [ ]  | C1 显式依赖    | 纯计算边界、能力接口、兼容草图 | E1–E3，真实验签一致，随机/时钟来源完整      |
-| [ ]  | C2 Effect 试点 | 唯一 submit/resume 实现        | E4–E7，CAS/丢 ACK/中断/重启正确             |
-| [x]  | C3 其余流程    | 分钥、恢复、准入与资源管理     | E3–E6，权限重查与原始截止不回退             |
-| [ ]  | P1 常驻协作    | lab 包、真实后端、三副本       | 离线重连与耐久恢复，不是一次性读写          |
-| [ ]  | P2 确定性      | 调度器、记录、重放             | 三次新目录重放一致，首分歧可定位            |
+| 完成 | 阶段           | 交付物                         | 必须通过的门槛                                                     |
+| ---- | -------------- | ------------------------------ | ------------------------------------------------------------------ |
+| [x]  | P0 基线        | 版本、备份、迁移清单、现状结果 | 用户未提交工作可恢复，回归覆盖有去向                               |
+| [ ]  | C1 显式依赖    | 纯计算边界、能力接口、兼容草图 | E1–E3，真实验签一致，随机/时钟来源完整                             |
+| [ ]  | C2 Effect 试点 | 唯一 submit/resume 实现        | E4–E7，CAS/丢 ACK/中断/重启正确                                    |
+| [x]  | C3 其余流程    | 分钥、恢复、准入与资源管理     | E3–E6，权限重查与原始截止不回退                                    |
+| [ ]  | P1 常驻协作    | lab 包、真实后端、三副本       | 离线重连与耐久恢复，不是一次性读写                                 |
+| [ ]  | P2 确定性      | 调度器、记录、重放             | 三次新目录重放一致，首分歧可定位                                   |
 | [x]  | P3 固定攻击    | Spec 场景矩阵、有效裁判        | 真实改库被检验，注入已知缺陷时裁判失败；guest 内容 → outside-model |
-| [x]  | P4 Agent       | 受限 API、自由攻击记录         | 隔离自测通过，至少一轮真实 Agent 运行可重放 |
-| [ ]  | P5 交接        | 干净检出验收、旧 demo 删除     | 下述完成定义逐项通过，未通过项显式保留      |
+| [x]  | P4 Agent       | 受限 API、自由攻击记录         | 隔离自测通过，至少一轮真实 Agent 运行可重放                        |
+| [ ]  | P5 交接        | 干净检出验收、旧 demo 删除     | 下述完成定义逐项通过，未通过项显式保留                             |
 
 ### P0：冻结基线，不先删掉证据
 
@@ -557,3 +557,12 @@ v1 `possessionSigningBytes` 为 `[genesis, signPub, encPub, kind, canManage]`。
 - 对 `5ea0fb5a` 的审查：`loadEpochCandidate` 在解析/读取失败时返回 `null`。`publishEpoch` 会生成新候选并覆盖文件，journal 仍留着旧换代 pending。复现：截断候选 → 重试 unknown 且文件被替换 → resume 旧 pending committed → 再次换代 `missing-epoch-key`。
 - **修复：** 文件不存在为 `absent`；存在但不可读/截断/字段非法为 `corrupt`，抛 `epoch-candidate-corrupt`，不生成、不提交。文件缺失且 journal pending 是 `publishEpoch` 时抛 `epoch-candidate-missing`。原文件和 pending 保留。测试：截断 JSON、读取失败、pending 仍在时删除文件。
 - 证据：`test/host-lifecycle.test.ts` 29 + `test/design-probes.test.ts` 25 = 54 通过。未启用产品 E2EE。不 push/merge。
+
+### 2026-09-22 — 分钥发送者规则：任何当前有效的非恢复设备（决定 B）
+
+- **复查** 2026-09-18 探针“成员伪造 admin 状态封出真实信封”。用真实账本时，`openEpochEnvelope` 已经要求收件人是账本上的有效设备且 X25519 公钥匹配、`epoch` 等于当前代次、AAD 绑定 genesis、明文重算出 Owner/Admin 签过的 `keyCommitment`。成员把真钥匙转发给合格设备不破坏任何机密性或真实性目标；该探针发现的是与白皮书措辞不一致，不是可利用漏洞。
+- **旧规则的代价：** Member 的第二台设备、机器、恢复设备 R 都要等 Owner/Admin 的管理设备来送钥，和白皮书 §6“恢复无需管理员在线”冲突。
+- **决定（Zixuan，2026-09-22）：** 方案 B。`canSendEpoch` 改为“发送者是本 Org 当前有效设备且不是恢复设备”。个人、机器、Guest 设备都可以把当前代密钥转发给任何有效设备；R 只收不发。方案 A（仅同成员转发）因网关要解析收件人、收益小而否决；维持原状因可用性否决。
+- **改动：** `packages/e2ee-core/src/ledger/keys.ts` `canSendEpoch`；lab `reference-model.ts` `refMaySendEpoch`；账本规范 §8.3/§8.5；白皮书 §4“加入后……任何持有当前密钥的有效设备可发信封”；e2ee-core README/AGENTS/HANDOFF；宿主网关笔记第 3 条。无线格式或操作码变化。
+- **不变的限制：** 已持有 `K_n` 的被撤者仍持有 `K_n`；15 分钟窗口与撤权后换代策略不变。网关仍看不到收件人、只拦发送者；客户端 `open` 检查才是真实边界。
+- 证据：核心 `test/ledger-keys.test.ts` 新用例（member→laptop、machine→R 转发通过；错钥 `invalid-operation`；R 发送与伪造成 personal 的 R `unauthorized`；已撤机器发送 `unauthorized`）；lab `test/gateway.test.ts`（owner/member/guest 密钥流写入放行，recovery 403）、`test/reference-model.test.ts`、`test/design-probes.test.ts`（guest 经网关转发；成员转发通过、错钥被拒）。核心 Vitest 405/405，lab Vitest 133/133（不含外部模型的 `restricted-agent.test.ts`），两包 typecheck 通过，docs check errors `[]`。不是产品 E2EE。未 push/merge。

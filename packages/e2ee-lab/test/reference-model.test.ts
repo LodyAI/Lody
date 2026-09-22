@@ -68,8 +68,21 @@ describe('independent reference model', () => {
     expect(refMayWriteDocument(world, 'guest', 'org-a', 1)).toBe(false);
     expect(refMayWriteDocument(world, 'owner', 'org-b', 1)).toBe(false);
     expect(refMayWriteDocument(world, 'owner', 'org-a', 0)).toBe(false);
-    expect(refMaySendEpoch(world, 'machine', 'org-a')).toBe(false);
+    expect(refMaySendEpoch(world, 'machine', 'org-a')).toBe(true);
+    expect(refMaySendEpoch(world, 'guest', 'org-a')).toBe(true);
     expect(refMaySendEpoch(world, 'owner', 'org-a')).toBe(true);
+    expect(refMaySendEpoch(world, 'owner', 'org-b')).toBe(false);
+    expect(refMaySendEpoch(world, 'stranger', 'org-a')).toBe(false);
+    const recovery = device({ id: 'r', kind: 'recovery', role: 'member', canManage: false });
+    expect(refMaySendEpoch(state([device({ id: 'owner' }), recovery]), 'r', 'org-a')).toBe(false);
+    const revokedMachine = state(
+      [
+        device({ id: 'owner' }),
+        device({ id: 'machine', kind: 'machine', role: 'member', canManage: false }),
+      ],
+      { revoked: new Set(['machine']) }
+    );
+    expect(refMaySendEpoch(revokedMachine, 'machine', 'org-a')).toBe(false);
   });
 
   it('keeps recovery and revoke inside current membership', () => {

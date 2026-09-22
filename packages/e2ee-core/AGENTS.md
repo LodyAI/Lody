@@ -40,10 +40,11 @@ in-package tests only; do not re-export it.
 - Persist exact pending bytes before CAS. Conflicts never re-sign; retry the
   same bytes. `LedgerClient.submit`/`resume` are Promise wrappers over one
   Effect implementation; do not add a second simulated submit path.
-  `openEpochEnvelope` returns plaintext only when the sender currently
-  may distribute keys (`canSendEpoch`, also exported for the host gateway),
-  the recipient is admitted, the epoch matches, and `commitEpochKey`
-  equals the ledger commitment.
+  `openEpochEnvelope` returns plaintext only when the sender is a current
+  non-recovery device (`canSendEpoch`, also exported for the host gateway;
+  any active personal/machine device may forward, R only receives), the
+  recipient is admitted, the epoch matches, and `commitEpochKey` equals
+  the ledger commitment. Sender role is not key-authenticity evidence.
 - Device possession uses `possess/v2` and binds the target membership inferred
   from the actor's preceding verified state. Check during replay even with a
   worker verifier. v1 proofs are rejected, not silently migrated or re-signed.

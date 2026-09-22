@@ -4,6 +4,7 @@ import {
   canSendEpoch,
   encodeSignedRecord,
   joinRequestSigningBytes,
+  openEpochEnvelope,
   sealEpochEnvelope,
   signingBytesForBody,
 } from '@lody/e2ee-core/ledger';
@@ -215,15 +216,26 @@ describe('design probes: binding, host cache, guest content', () => {
       body: Buffer.from([0, 0, 0, 1, 1]),
     });
     expect(write.status).toBe(403);
-    const keysWrite = await bob.fetch(`/ds/${alice.genesisHex}/${KEYS_STREAM}/append-cas`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/octet-stream' },
-      body: Buffer.from([0, 0, 0, 1, 1]),
-    });
-    expect(keysWrite.status).toBe(403);
+    // A guest holding the current key may forward it (2026-09-22): the gateway
+    // admits the keys write and the recipient still checks the commitment.
+    await alice.deliverEpochKey(bob.device, 0);
+    const frames = await bob.readKeyFrames();
+    await bob.receiveEpochKey(alice.device, 0, frames[0]!);
+    const forwarded = await bob.deliverEpochKey(alice.device, 0);
+    expect(
+      await openEpochEnvelope({
+        state: (await alice.readLedger()).state,
+        genesis: alice.genesis!,
+        epoch: 0,
+        sender: bob.device.publicKey,
+        recipient: alice.device.publicKey,
+        recipientKeyPair: alice.device.encryption,
+        frame: forwarded,
+      })
+    ).toEqual(bob.epochKeys.get(0));
   });
 
-  it('rejects an epoch envelope signed by a member who cannot distribute keys', async () => {
+  it('lets a member forward the current key; the recipient still rejects a wrong key', async () => {
     const host = await launchLab();
     const alice = await labClient({ host, account: 'alice' });
     const bob = await labClient({ host, account: 'bob' });
@@ -240,28 +252,29 @@ describe('design probes: binding, host cache, guest content', () => {
     await bob.receiveEpochKey(alice.device, 0, bobFrames[0]!);
     const key = bob.epochKeys.get(0);
     if (!key) throw new Error('missing-bob-epoch');
+
+    // Bob is a plain member with canManage=false. A forwarded key that is not
+    // the committed key fails the commitment check and leaves Carol without a key.
     const ledger = await bob.readLedger();
-    const bobHex = toHex(bob.device.publicKey);
-    const deviceRow = ledger.state.devices.get(bobHex);
-    if (!deviceRow) throw new Error('missing-bob-device');
-    const fakeDevices = new Map(ledger.state.devices);
-    fakeDevices.set(bobHex, { ...deviceRow, canManage: true });
-    const fakeMembers = new Map(ledger.state.members);
-    const memberRow = fakeMembers.get(toHex(deviceRow.membershipId));
-    if (!memberRow) throw new Error('missing-bob-member');
-    fakeMembers.set(toHex(deviceRow.membershipId), { ...memberRow, role: 'admin' });
-    const forged = await sealEpochEnvelope({
-      state: { ...ledger.state, devices: fakeDevices, members: fakeMembers },
+    const wrongKey = await sealEpochEnvelope({
+      state: ledger.state,
       genesis: bob.genesis!,
       epoch: 0,
       sender: bob.device.publicKey,
       recipient: carol.device.publicKey,
       recipientEncryptionKey: carol.device.enc,
-      epochKey: key,
+      epochKey: bob.random('wrong-epoch-key', 32),
       sign: (bytes) => bob.device.sign(bytes),
     });
-    await expect(carol.receiveEpochKey(bob.device, 0, forged)).rejects.toThrow('unauthorized');
+    await expect(carol.receiveEpochKey(bob.device, 0, wrongKey)).rejects.toThrow(
+      'invalid-operation'
+    );
     expect(carol.epochKeys.has(0)).toBe(false);
+
+    // The real key, forwarded by Bob through the gateway, is accepted.
+    const forwarded = await bob.deliverEpochKey(carol.device, 0);
+    await carol.receiveEpochKey(bob.device, 0, forwarded);
+    expect(carol.epochKeys.get(0)).toEqual(key);
   });
 
   it('refuses to seal new content under a stale epoch after rotation', async () => {
@@ -438,8 +451,9 @@ describe('design probes: ordinary plane vs harness', () => {
     const ledger = await bob.readLedger();
     const member = [...ledger.state.members.values()].find((row) => row.role === 'admin');
     expect(member?.role).toBe('admin');
-    expect(canSendEpoch(ledger.state, bob.device.publicKey)).toBe(false);
-    await expect(bob.deliverEpochKey(alice.device, 0)).rejects.toThrow();
+    // The join device may forward keys once it holds one; here it has none yet.
+    expect(canSendEpoch(ledger.state, bob.device.publicKey)).toBe(true);
+    await expect(bob.deliverEpochKey(alice.device, 0)).rejects.toThrow('missing-epoch-key');
     const manager = await generateDevice();
     expect((await bob.admitDevice(manager, 'personal', true)).status).toBe('committed');
     const after = await bob.readLedger();

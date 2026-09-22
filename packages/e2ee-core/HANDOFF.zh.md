@@ -57,7 +57,7 @@ import {
 JSON/hex 原型不在公开入口（`src/legacy.ts` 仅包内测试）。
 
 Owner 转让（D1 A）是单方的：`[6, successorMembershipId]`，前任变 Admin。  
-`openEpochEnvelope` 只在发送者当前有权分钥、epoch 匹配且 `commitEpochKey` 等于账本承诺时返回明文。
+`openEpochEnvelope` 只在发送者是当前有效的非恢复设备（任何个人/机器设备都可转发，R 只收不发）、收件人在账本上、epoch 匹配且 `commitEpochKey` 等于账本承诺时返回明文。
 冲突不重签：`prepare` → 落盘精确 pending → CAS → 读回原文。
 
 ## 试接

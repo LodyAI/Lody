@@ -17,7 +17,7 @@ E2EE 实验室的云端 ACL 放在官方 sqlite Riverrun 前面的薄 HTTP 网�
 
 1. 只有设备已在该 Org 当前账本上，才签发绑定该 Org 的凭证。仅持钥证明只发未绑定登录令牌。
 2. `/ds/` 与仅成员元数据：经 Riverrun 读控制流，`Ledger.verify`/`extend` 后再判定。授权不用粘性成员缓存。
-3. 读取要求当前设备在账本上。内容写用 `deviceMayWriteDocument`。密钥流写用导出的 `canSendEpoch`。控制流 CAS 仍检查记录签名者等于凭证设备，且 `extend` 成功。
+3. 读取要求当前设备在账本上。内容写用 `deviceMayWriteDocument`。密钥流写用导出的 `canSendEpoch`（2026-09-22 起：任何当前有效的非恢复设备；钥匙真伪由客户端承诺核对保证，不靠发送者角色）。控制流 CAS 仍检查记录签名者等于凭证设备，且 `extend` 成功。
 4. 快照 PUT 仍走 `createContentSnapshotPublication`。`mayWriteDocument` 从 `AsyncLocalStorage` 读本请求账本，不用进程全局 genesis。
 5. 攻击辅助继续无 ACL 写 `riverrunUrl`。宿主 403 不能当成客户端完整性通过。
 
@@ -29,6 +29,6 @@ Host-meta SQLite（凭证、空间、申请/对账信箱）是网关自己的状
 
 ## 限制
 
-不是生产 JWT 签发。15 分钟租约仍是最坏残留窗口。快照准入在异步验签期间仍可能与撤权竞态。`open` 仍不复查当前写权，所以恶意 Riverrun 下 guest/已撤密文仍是 `outside-model`。生产网关应复用同一套核心判定，而不是再建角色表。
+不是生产 JWT 签发或账户目录。15 分钟租约仍是最坏残留窗口。快照准入在异步验签期间仍可能与撤权竞态。`open` 仍不复查当前写权，所以恶意 Riverrun 下 guest/已撤密文仍是 `outside-model`。生产网关应复用同一套核心判定，而不是再建角色表，并且必须在接纳加入申请前从已认证会话取得账户身份。
 
 相关实验室工作：[攻防实验室笔记](../../proposed/testing/2026-09-16-e2ee-adversarial-lab.zh.md)。

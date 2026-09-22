@@ -17,77 +17,77 @@ The [specification](../../../../specs/e2ee-adversarial-lab.md) owns contracts; t
 
 Current state: HEAD `e30cbe66`. This increment: bind epoch recovery to the exact candidate record. Do not re-implement D1–D8 or S1/S2/S4/S5. No Lody product integration, no push/PR/merge.
 
-| Done | Stage | Gate |
-| ---- | ----- | ---- |
-| [x] | S1 compareNotes same-head conflict | Same genesis+head with different length/digest is conflict; catch-up stays pending-sync; real signed snapshots |
-| [x] | S2 independent evidence | independent requires out-of-band confirmed signers; not a different key or snapshot member list |
-| [x] | S3 epoch candidate before CAS | Persist candidate+exact record before CAS; resume/restart without regenerating; losing candidate is not current |
-| [x] | S3b epoch recover binds record | `resume()` of another pending is not epoch success; install only if candidate record is on the verified ledger; real subprocess hang-after-CAS |
-| [x] | S3c corrupt candidate is not absent | Truncated/unreadable candidate fails closed; missing file with epoch pending does not mint a new candidate |
-| [x] | S4 possession binding | Reproduce mis-binding; proposal only; no v1 wire change |
-| [x] | S5 epoch u32 / snapshot resources / verify-before-import | Reject truncating epochs; bound snapshot length; signature before expensive import |
-| [x] | S6 classify remaining | Admin history-packet, canManage, openJournal, Convex, HKDF/X25519/legacy, Lean/product |
+| Done | Stage                                                    | Gate                                                                                                                                           |
+| ---- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| [x]  | S1 compareNotes same-head conflict                       | Same genesis+head with different length/digest is conflict; catch-up stays pending-sync; real signed snapshots                                 |
+| [x]  | S2 independent evidence                                  | independent requires out-of-band confirmed signers; not a different key or snapshot member list                                                |
+| [x]  | S3 epoch candidate before CAS                            | Persist candidate+exact record before CAS; resume/restart without regenerating; losing candidate is not current                                |
+| [x]  | S3b epoch recover binds record                           | `resume()` of another pending is not epoch success; install only if candidate record is on the verified ledger; real subprocess hang-after-CAS |
+| [x]  | S3c corrupt candidate is not absent                      | Truncated/unreadable candidate fails closed; missing file with epoch pending does not mint a new candidate                                     |
+| [x]  | S4 possession binding                                    | Reproduce mis-binding; proposal only; no v1 wire change                                                                                        |
+| [x]  | S5 epoch u32 / snapshot resources / verify-before-import | Reject truncating epochs; bound snapshot length; signature before expensive import                                                             |
+| [x]  | S6 classify remaining                                    | Admin history-packet, canManage, openJournal, Convex, HKDF/X25519/legacy, Lean/product                                                         |
 
 The D1–D8 table below is the previous round; checkmarks stay as historical evidence.
 
 Current state: HEAD `04b90b58` plus this round's helper/expiry/judge-test follow-up. Targeted fixes for design-probe defects 1–6 and 8. Atomic guest admission (item 2 protocol) and stale-epoch upload (item 7) stay pending decisions; do not change wire. No Lody product integration, no push/PR/merge.
 
-| Done | Stage | Gate |
-| ---- | ----- | ---- |
-| [x] | D1 Ordinary vs harness plane | `/readyz` has no Riverrun/path; NOW_HEADER and unauthenticated failpoints cannot move the host; harness token/DI still can |
-| [x] | D2 approveJoin partial success | Second-step failure is not reported as Guest/Admin complete; pending preserved; not atomic guest admission |
-| [x] | D3 Join expiry at host admit | Non-null `expiresAt` rejected at trusted admit; lost-ACK retry of a pre-expiry commit still identifies; verify stays timeless |
-| [x] | D4/D5 Historical judge | Demoted authors keep legal history; Loro+Flock; imported facts not backend-decrypt; unknown is unmeasured |
-| [x] | D6 Unauth existence | Unauthenticated known vs unknown space do not 401/404-split |
-| [x] | D8 Admin ∩ canManage | Helper does not imply join device can manage; explicit manage device can; machines cannot |
-| [x] | D2/D7 decisions | Written proposals only; no wire change |
+| Done | Stage                          | Gate                                                                                                                          |
+| ---- | ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| [x]  | D1 Ordinary vs harness plane   | `/readyz` has no Riverrun/path; NOW_HEADER and unauthenticated failpoints cannot move the host; harness token/DI still can    |
+| [x]  | D2 approveJoin partial success | Second-step failure is not reported as Guest/Admin complete; pending preserved; not atomic guest admission                    |
+| [x]  | D3 Join expiry at host admit   | Non-null `expiresAt` rejected at trusted admit; lost-ACK retry of a pre-expiry commit still identifies; verify stays timeless |
+| [x]  | D4/D5 Historical judge         | Demoted authors keep legal history; Loro+Flock; imported facts not backend-decrypt; unknown is unmeasured                     |
+| [x]  | D6 Unauth existence            | Unauthenticated known vs unknown space do not 401/404-split                                                                   |
+| [x]  | D8 Admin ∩ canManage           | Helper does not imply join device can manage; explicit manage device can; machines cannot                                     |
+| [x]  | D2/D7 decisions                | Written proposals only; no wire change                                                                                        |
 
 The R0–R7 table below is the previous round; checkmarks stay as historical evidence.
 
 Current state: HEAD `4989fad8` plus preserved dirty tree (host gateway, judge, design probes). Previous unique goal: independent reproduction packs. No Lody product integration, no protocol redesign, no push/PR/merge. The lab spec stays draft.
 
-| Done | Stage | Gate |
-| ---- | ----- | ---- |
-| [x] | R0 Baseline | HEAD/dirty tree recorded; existing gateway/judge work kept; this unique table |
-| [x] | R1 Event-driven execution | Every permit is logged; auto-advance is oldest-runnable FIFO; identity `ScheduleDriver` controls explicit concurrent choice; leftover requested events report `schedule.extra` |
-| [x] | R2 Independent pack | `e2ee-lab-repro/v1` binds dirty-tree hash, vendor/lock hashes, private 0700 bundle; new-process CLI replay; missing private/unsupported format fail closed; entropy `remaining()` must be empty |
-| [x] | R3 Precise compare | Multipart normalizes delimiter tokens only; fingerprints include rule ids; mutating order/payload/entropy tail/verdict each locates a field |
-| [x] | R4 Real backend | SIGKILL crash matrix retained; power-loss of unflushed SQLite pages is not modeled |
-| [x] | R5 Independent judge | Lab reference model does not import SUT policy functions; skip-verify, cursor-before-document, and wrong-context journal are real-path defects |
-| [x] | R6 Minimize | Bounded ddmin drops noise, keeps the same security fingerprint, rejects harness-error shrinks |
-| [x] | R7 Real-model hit | Destructive hit is intercept or mutateBackend only; observe/readBackend/submitClaim/finish do not count |
+| Done | Stage                     | Gate                                                                                                                                                                                            |
+| ---- | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [x]  | R0 Baseline               | HEAD/dirty tree recorded; existing gateway/judge work kept; this unique table                                                                                                                   |
+| [x]  | R1 Event-driven execution | Every permit is logged; auto-advance is oldest-runnable FIFO; identity `ScheduleDriver` controls explicit concurrent choice; leftover requested events report `schedule.extra`                  |
+| [x]  | R2 Independent pack       | `e2ee-lab-repro/v1` binds dirty-tree hash, vendor/lock hashes, private 0700 bundle; new-process CLI replay; missing private/unsupported format fail closed; entropy `remaining()` must be empty |
+| [x]  | R3 Precise compare        | Multipart normalizes delimiter tokens only; fingerprints include rule ids; mutating order/payload/entropy tail/verdict each locates a field                                                     |
+| [x]  | R4 Real backend           | SIGKILL crash matrix retained; power-loss of unflushed SQLite pages is not modeled                                                                                                              |
+| [x]  | R5 Independent judge      | Lab reference model does not import SUT policy functions; skip-verify, cursor-before-document, and wrong-context journal are real-path defects                                                  |
+| [x]  | R6 Minimize               | Bounded ddmin drops noise, keeps the same security fingerprint, rejects harness-error shrinks                                                                                                   |
+| [x]  | R7 Real-model hit         | Destructive hit is intercept or mutateBackend only; observe/readBackend/submitClaim/finish do not count                                                                                         |
 
 The S1–S4 table below is the previous round; checkmarks stay as historical evidence.
 
-| Done | Stage | Gate |
-| ---- | ----- | ---- |
-| [x] | S1 Ongoing-collab control | Create/invite/key-delivery/alternating Loro+Flock edits/Bob offline-edit reconnect/Carol mid-join reads history/revoke+epoch rotation/snapshot bootstrap/lost-response recovery/process crash+restart/host restart convergence — all fixed-script, no attack |
-| [x] | S2 Boundary fixed attacks | Attacker intercepts/reads/mutates/claims at recorded event boundaries while collaboration is in flight; checkable hit evidence (frame status, receipts, affected outcomes) |
-| [x] | S3 Three-directory replay | The same attack record replays model-free in three fresh dataDir/clientDir sets under identical private material; first divergence across events/frames/client digests/verdicts is located |
-| [x] | S4 Real-model intervention | At least one real model run launches an actual attack during collaboration (not only observe/finish) that lands; the same record replays model-free consistently |
+| Done | Stage                      | Gate                                                                                                                                                                                                                                                         |
+| ---- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [x]  | S1 Ongoing-collab control  | Create/invite/key-delivery/alternating Loro+Flock edits/Bob offline-edit reconnect/Carol mid-join reads history/revoke+epoch rotation/snapshot bootstrap/lost-response recovery/process crash+restart/host restart convergence — all fixed-script, no attack |
+| [x]  | S2 Boundary fixed attacks  | Attacker intercepts/reads/mutates/claims at recorded event boundaries while collaboration is in flight; checkable hit evidence (frame status, receipts, affected outcomes)                                                                                   |
+| [x]  | S3 Three-directory replay  | The same attack record replays model-free in three fresh dataDir/clientDir sets under identical private material; first divergence across events/frames/client digests/verdicts is located                                                                   |
+| [x]  | S4 Real-model intervention | At least one real model run launches an actual attack during collaboration (not only observe/finish) that lands; the same record replays model-free consistently                                                                                             |
 
 The tables below are earlier stage records; checkmarks are backed by per-stage log evidence.
 
-| Done | Stage | Gate |
-| ---- | ----- | ---- |
-| [x] | A Judge observations | Legal admitDevice is not a violation; backend extra + client reject is not client integrity loss; missing client facts → harness-error; guest content under malicious Riverrun → outside-model |
-| [ ] | B Real persist | document-persisted writes doc bytes; cursor-persisted writes cursor after doc; crash/restart does not skip unread data |
-| [ ] | C Same-attack replay | Successful xor needle hits again under restored private material; mutated receipt/bytes report first divergence |
-| [ ] | Effect compose | One submit/delivery Effect; Promise wrap only; cancel does not drop pending |
-| [ ] | Schedule delivery | Reads/writes/persist/result delivery wait for permits; waiters cleared on pause/cancel |
-| [ ] | Cache/env | Per-instance SigningPointCache; undocumented clocks/Wasm listed as replay limits |
+| Done | Stage                | Gate                                                                                                                                                                                           |
+| ---- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [x]  | A Judge observations | Legal admitDevice is not a violation; backend extra + client reject is not client integrity loss; missing client facts → harness-error; guest content under malicious Riverrun → outside-model |
+| [ ]  | B Real persist       | document-persisted writes doc bytes; cursor-persisted writes cursor after doc; crash/restart does not skip unread data                                                                         |
+| [ ]  | C Same-attack replay | Successful xor needle hits again under restored private material; mutated receipt/bytes report first divergence                                                                                |
+| [ ]  | Effect compose       | One submit/delivery Effect; Promise wrap only; cancel does not drop pending                                                                                                                    |
+| [ ]  | Schedule delivery    | Reads/writes/persist/result delivery wait for permits; waiters cleared on pause/cancel                                                                                                         |
+| [ ]  | Cache/env            | Per-instance SigningPointCache; undocumented clocks/Wasm listed as replay limits                                                                                                               |
 
-| Done | Stage                       | Deliverable                                             | Required gate                                                    |
-| ---- | --------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------- |
-| [x]  | P0 Baseline                 | Versions, backup, migration inventory, baseline results | Recoverable user work and regression migration map               |
-| [ ]  | C1 Explicit dependencies    | Pure boundary, ports, compatibility sketch              | E1–E3; real verification parity; complete entropy/time inventory |
-| [ ]  | C2 Effect pilot             | Single submit/resume implementation                     | E4–E7; CAS/lost ACK/interruption/restart                         |
-| [x]  | C3 Remaining workflows      | Delivery, recovery, admission, resources                | E3–E6; live authority and original expiry preserved              |
-| [ ]  | P1 Persistent collaboration | Lab package, real backend, three replicas               | Offline/restart durability, not one-shot read/write              |
-| [ ]  | P2 Determinism              | Scheduler, recording, replay                            | Three fresh-directory replays; first-divergence detection        |
+| Done | Stage                       | Deliverable                                             | Required gate                                                                              |
+| ---- | --------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| [x]  | P0 Baseline                 | Versions, backup, migration inventory, baseline results | Recoverable user work and regression migration map                                         |
+| [ ]  | C1 Explicit dependencies    | Pure boundary, ports, compatibility sketch              | E1–E3; real verification parity; complete entropy/time inventory                           |
+| [ ]  | C2 Effect pilot             | Single submit/resume implementation                     | E4–E7; CAS/lost ACK/interruption/restart                                                   |
+| [x]  | C3 Remaining workflows      | Delivery, recovery, admission, resources                | E3–E6; live authority and original expiry preserved                                        |
+| [ ]  | P1 Persistent collaboration | Lab package, real backend, three replicas               | Offline/restart durability, not one-shot read/write                                        |
+| [ ]  | P2 Determinism              | Scheduler, recording, replay                            | Three fresh-directory replays; first-divergence detection                                  |
 | [x]  | P3 Fixed attacks            | Scenario matrix and effective judge                     | Real database mutation; known injected defects fail judging; guest content → outside-model |
-| [x]  | P4 Agent                    | Restricted API and exploration trace                    | Isolation checks; at least one real replayable Agent run         |
-| [ ]  | P5 Handoff                  | Clean-checkout acceptance and old-demo removal          | Complete done criteria below; explicit unpassed items            |
+| [x]  | P4 Agent                    | Restricted API and exploration trace                    | Isolation checks; at least one real replayable Agent run                                   |
+| [ ]  | P5 Handoff                  | Clean-checkout acceptance and old-demo removal          | Complete done criteria below; explicit unpassed items                                      |
 
 ### P0: Freeze the baseline without destroying evidence
 
@@ -553,3 +553,12 @@ Current spec §8.3 and `policy.ts` allow an Owner/Admin personal device with `ca
 - **X25519:** `checkEncryptionPublicKey` rejects all-zero and wrong length only. Do not apply Ed25519 subgroup rules. Low-order/aliases not currently rejected; no suite change this round.
 - **Legacy exports:** `./legacy` stays for in-package tests. Not deleted.
 - **Lean / product:** no Lean files in this repo (same-role `setRole` is `invalid-operation` in TS; Lean not re-run). QR/Passkey/JWT/machines remain out of scope. Finite traces are not a full correspondence proof.
+
+### 2026-09-22 — Key-envelope sender rule: any current non-recovery device (decision B)
+
+- **Re-examined** the 2026-09-18 probe “member forges admin state and seals a real envelope”. With the true ledger, `openEpochEnvelope` already requires the recipient to be an admitted device with the registered X25519 key, `epoch` equal to the current epoch, AAD bound to genesis, and the plaintext to recompute the committed `keyCommitment` signed by Owner/Admin. A member forwarding the real key to an eligible device therefore breaks no confidentiality or authenticity goal; the probe found a wording mismatch with the whitepaper, not an exploit.
+- **Cost of the old rule:** a Member’s second device, machine, or recovery device R had to wait for an Owner/Admin managing device to deliver the key, which conflicts with whitepaper §6 “recovery does not need an administrator online”.
+- **Decision (Zixuan, 2026-09-22):** option B. `canSendEpoch` is now “sender is a current device of this Org and not a recovery device”. Personal, machine, and Guest devices may forward the current epoch key to any current device; R only receives. Option A (same-membership forwarding only) was rejected as extra gateway complexity for little gain; keeping the old rule was rejected for availability.
+- **Changed:** `packages/e2ee-core/src/ledger/keys.ts` `canSendEpoch`; lab `reference-model.ts` `refMaySendEpoch`; ledger spec §8.3/§8.5; whitepaper §4 line “after admission … any active device that holds the current key may send envelopes”; e2ee-core README/AGENTS/HANDOFF; host-gateway note item 3. No wire or opcode change.
+- **Unchanged limits:** a revoked holder of `K_n` keeps `K_n`; the 15-minute window and the rotate-after-revoke policy are as before. The gateway still cannot see the recipient and only gates the sender; the client `open` check remains the real boundary.
+- Evidence: core `test/ledger-keys.test.ts` new case (member→laptop and machine→R forward accepted; wrong key `invalid-operation`; R sender and forged-personal R `unauthorized`; revoked machine sender `unauthorized`); lab `test/gateway.test.ts` (owner/member/guest keys-cas admitted, recovery 403), `test/reference-model.test.ts`, `test/design-probes.test.ts` (guest forwards through gateway; member forward accepted, wrong key rejected). Core Vitest 405/405, lab Vitest 133/133 excluding external-model `restricted-agent.test.ts`, both typechecks pass, docs check errors `[]`. Not product E2EE. No push/merge.

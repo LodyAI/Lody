@@ -86,7 +86,8 @@ is a protocol peer for tests. Hosted `streams-api.loro.dev` still returns 501 fo
 Experimental local journal (not frozen): `@lody/e2ee-core/ledger-node`. Epoch history
 unwrap and HPKE device envelopes: `sealHistoryPacket` / `recoverHistory` /
 `sealEpochEnvelope` from `@lody/e2ee-core/ledger`. `openEpochEnvelope` returns
-plaintext only when the sender currently may distribute keys, the recipient is
+plaintext only when the sender is a current non-recovery device (any active
+personal or machine device may forward the key; R only receives), the recipient is
 admitted, `epoch` matches the current ledger epoch, and `commitEpochKey` equals
 that epoch's commitment. Exact-byte key outbox:
 `LedgerKeyDelivery` / `MemoryLedgerKeyOutbox`; experimental sqlite

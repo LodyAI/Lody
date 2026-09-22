@@ -98,9 +98,11 @@ export function refMayWriteDocument(
   return device.kind === 'personal' || device.kind === 'machine';
 }
 
+/** Any current non-recovery device may forward the epoch key (2026-09-22). */
 export function refMaySendEpoch(state: RefState, deviceId: string, org: string): boolean {
   if (org !== state.org) return false;
-  return isPersonalManager(state, deviceId);
+  const device = deviceOf(state, deviceId);
+  return device !== undefined && device.kind !== 'recovery';
 }
 
 export function refMayRecover(

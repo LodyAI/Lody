@@ -142,22 +142,41 @@ describe('thin host gateway ACL', () => {
     ).toMatchObject({ ok: false, status: 403, error: 'unauthorized' });
   });
 
-  it('uses canSendEpoch for the keys stream, not mere membership', () => {
+  it('uses canSendEpoch for the keys stream: any current device except recovery', () => {
+    const recoveryHex = 'ab'.repeat(32);
+    const base = org();
+    const state: OrgState = {
+      ...base,
+      devices: new Map([
+        ...base.devices,
+        [
+          recoveryHex,
+          {
+            membershipId: fromHex(memberMem),
+            kind: 'recovery' as const,
+            encryptionPublicKey: fromHex('04'.repeat(32)),
+            canManage: false,
+          },
+        ],
+      ]),
+    };
+    for (const deviceHex of [ownerHex, memberHex, guestHex]) {
+      expect(
+        authorizeStreamRequest({
+          state,
+          deviceHex,
+          credentialGenesisHex: null,
+          requestGenesisHex: genesisHex,
+          stream: KEYS_STREAM,
+          method: 'POST',
+          sub: 'append-cas',
+        })
+      ).toEqual({ ok: true, action: 'keys-cas' });
+    }
     expect(
       authorizeStreamRequest({
-        state: org(),
-        deviceHex: ownerHex,
-        credentialGenesisHex: null,
-        requestGenesisHex: genesisHex,
-        stream: KEYS_STREAM,
-        method: 'POST',
-        sub: 'append-cas',
-      })
-    ).toEqual({ ok: true, action: 'keys-cas' });
-    expect(
-      authorizeStreamRequest({
-        state: org(),
-        deviceHex: memberHex,
+        state,
+        deviceHex: recoveryHex,
         credentialGenesisHex: null,
         requestGenesisHex: genesisHex,
         stream: KEYS_STREAM,

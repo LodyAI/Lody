@@ -528,7 +528,7 @@ epoch = 0:    commitment = SHA-256("lody-e2ee/epoch-key/v1\0" || K)
 2. 提交者签名：`signer` 对 `signingBytes` 的 Ed25519 有效。签名有效 ≠ 有权。
 3. 创世只能在位置 0；其 `recordHash` 必须等于外带 `anchor`。不能用空前驱的普通记录冒充创世。
 4. 位置 ≥ 1：`previousHash` 必须等于当前已验证链头，否则 `wrong-parent`。
-5. 未知操作 tag 拒绝。操作内嵌套证明（加入申请、持钥证明）在策略前验签，失败为 `bad-proof`。
+5. 未知操作 tag 拒绝。加入申请可在策略重放前批量验签；持钥证明必须在策略重放时，结合前置已验证状态中的 signer membership 重建并验证，失败为 `bad-proof`。并行验签不得绕过这一步。
 6. 不读系统时钟。`expiresAt`、申请表取消位只在宿主提交前检查，重放不得用「现在」否定当时已入账的记录。
 
 ### 8.2.2 各操作的前置状态（`policy.ts`）
@@ -566,7 +566,7 @@ epoch = 0:    commitment = SHA-256("lody-e2ee/epoch-key/v1\0" || K)
 - 提交者：本人当前有效的 personal，**或** 本人的 R（`requireOwnPersonalOrRecovery`）。不要求提交者 `canManage`。
 - R 只能接纳 `kind=personal`。Guest 不能接纳 machine。
 - `machine` / `recovery` 的 `canManage` 必须 false。`canManage=true` 仅当新设备是 personal **且** 该成员当前为 Owner/Admin。
-- `newSign` / `newEnc` 从未在本 Org 出现。持钥证明由 **新设备** `newSign` 签署，绑定 genesis、新公钥、kind、`canManage`。
+- `newSign` / `newEnc` 从未在本 Org 出现。持钥证明由 **新设备** `newSign` 签署，绑定 genesis、前置状态推导出的目标 `membershipId`、新公钥、kind、`canManage`。
 - 效果：设备挂到提交者的当前 `membershipId`。不沿批准关系形成授权树。
 
 **`revokeDevice`**
@@ -614,6 +614,7 @@ epoch = 0:    commitment = SHA-256("lody-e2ee/epoch-key/v1\0" || K)
 `canManage=true` 仅当目标是 personal **且** 当前角色为 Owner/Admin（含 R 恢复管理设备）。
 Guest 可接纳/撤销本人 personal 与登记 R，不可登记 machine、不可换代/邀请/改角色。
 Admin 可接纳 Member 并换代，不可改角色、移除成员或转让。机器无管理权。
+分发当前代密钥信封不属于管理操作：任何当前有效的非恢复设备都可以转发，见 §8.5。
 
 ### 8.4 域分隔常量
 
@@ -645,7 +646,9 @@ lody-e2ee/r-wrap/v1\0
 AAD 为规范 DAG-CBOR `encode([genesis32, epoch, senderSign32, recipientSign32])`，签名覆盖
 `"lody-e2ee/epoch-env/v1\0" || AAD || enc32 || ciphertext48`。
 HPKE info 为 `"lody-e2ee/hpke-epoch/v1\0"`，明文是 32 字节当前代密钥。
-接收方核对当前发送权限、接收设备资格、epoch、精确长度和 AAD，验证签名后才解密；本地加密公钥必须匹配账本接收设备，解密结果必须匹配当前承诺。
+接收方核对发送者资格、接收设备资格、epoch、精确长度和 AAD，验证签名后才解密；本地加密公钥必须匹配账本接收设备，解密结果必须匹配当前承诺。
+发送者资格（`canSendEpoch`，2026-09-22 确认）：发送者是本 Org 当前有效设备且不是恢复设备。个人、机器、Guest 的设备都可以把当前代密钥转发给任何当前有效设备；R 只收不发。
+分钥不是管理操作，不要求角色或 `canManage`：钥匙真伪由承诺核对保证，收件人资格由账本保证，发送者角色不提供额外证据。宿主网关对密钥流写入复用同一判定。
 
 历史包为 `nonce24 || ciphertext32 || tag16`，直接以 K*n 作 XChaCha20-Poly1305 密钥；
 AAD 为 `"lody-e2ee/epoch-history/v1\0" || genesis32 || uint32be(n)`，明文固定 K*(n−1)。
@@ -717,6 +720,7 @@ next.hashAt(0);
 ## 10. 宿主契约（恢复、发钥、申请、新鲜度）
 
 - 申请表（Convex 等）只存待处理/取消；不能把表状态当作授权。CAS 先成功者生效。无跨系统事务。
+- `userId` 是账本内的申请者身份绑定，不等于真实账户认证。宿主必须在接收加入申请前，用可信登录会话/账户目录或配对信道确认 `authenticatedAccount ↔ userId ↔ firstSign` 的关系；只验证 `firstSign` 对 `userId` 的签名不够。客户端自报的 account 字符串不能作为生产认证依据。实验室的确定性 account→userId 映射只是这个契约的测试替身。
 - 生产准入必须在 **原子提交点** 再查 `expiresAt` 与取消位；核心重放不读时钟。
 - 各 Org 独立登记 R；备份包装绑定预期 R 公钥、userId 与调用方提供的创世锚列表，服务端定位不能换锚。
 - 新鲜度：已知撤权立即失效；原始截止不因转发/重启延长；15 分钟 JWT/网关/长连接是宿主前提，本包不宣称已验证。

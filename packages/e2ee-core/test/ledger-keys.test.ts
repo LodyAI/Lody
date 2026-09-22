@@ -20,6 +20,7 @@ import {
   admitDeviceOp,
   append,
   ed25519,
+  findMembership,
   hex,
   random,
   signGenesis,
@@ -435,6 +436,7 @@ describe('P3 key delivery and history unwrap', () => {
         frame,
       })
     ).rejects.toMatchObject({ code: 'canonical' });
+    // phone is an eligible sender, but the frame's AAD and signature name owner.
     await expect(
       openEpochEnvelope({
         state: admitted.ledger.state,
@@ -445,7 +447,7 @@ describe('P3 key delivery and history unwrap', () => {
         recipientKeyPair: phone.dh,
         frame,
       })
-    ).rejects.toMatchObject({ code: 'unauthorized' });
+    ).rejects.toMatchObject({ code: 'canonical' });
     await expect(
       openEpochEnvelope({
         state: admitted.ledger.state,
@@ -525,47 +527,46 @@ describe('P3 key delivery and history unwrap', () => {
     ).rejects.toMatchObject({ code: 'unauthorized' });
   });
 
-  it('rejects a current-epoch envelope whose sender cannot distribute keys', async () => {
+  it('lets any active non-recovery device forward the current key; recovery and revoked senders cannot', async () => {
     const owner = await device();
     const k0 = random(32);
     const created = await signGenesis(owner, k0);
     const member = await device();
+    const request = await signJoin(created.anchor, member);
     const joined = await append(created.ledger, owner, {
       type: 'admitMember',
       membershipId: random(16),
-      request: await signJoin(created.anchor, member),
+      request,
     });
+    const memberMembership = findMembership(joined.ledger, request.userId);
     const laptop = await device();
-    const admitted = await append(
+    const withLaptop = await append(
       joined.ledger,
       owner,
       await admitDeviceOp(created.anchor, created.membershipId, laptop, 'personal', false)
     );
-    expect(canSendEpoch(admitted.ledger.state, owner.publicKey)).toBe(true);
-    expect(canSendEpoch(admitted.ledger.state, member.publicKey)).toBe(false);
-    await expect(
-      sealEpochEnvelope({
-        state: admitted.ledger.state,
-        genesis: created.anchor,
-        epoch: 0,
-        sender: member.publicKey,
-        recipient: laptop.publicKey,
-        recipientEncryptionKey: laptop.enc,
-        epochKey: k0,
-        sign: (bytes) => member.sign(bytes),
-      })
-    ).rejects.toMatchObject({ code: 'unauthorized' });
+    const machine = await device();
+    const withMachine = await append(
+      withLaptop.ledger,
+      member,
+      await admitDeviceOp(created.anchor, memberMembership, machine, 'machine', false)
+    );
+    const recovery = await device();
+    const admitted = await append(
+      withMachine.ledger,
+      member,
+      await admitDeviceOp(created.anchor, memberMembership, recovery, 'recovery', false)
+    );
+    const state = admitted.ledger.state;
+    expect(canSendEpoch(state, owner.publicKey)).toBe(true);
+    expect(canSendEpoch(state, member.publicKey)).toBe(true);
+    expect(canSendEpoch(state, machine.publicKey)).toBe(true);
+    expect(canSendEpoch(state, recovery.publicKey)).toBe(false);
+    expect(canSendEpoch(state, (await device()).publicKey)).toBe(false);
 
-    const memberDevice = admitted.ledger.state.devices.get(hex(member.publicKey));
-    if (!memberDevice) throw new Error('missing-member-device');
-    const fakeDevices = new Map(admitted.ledger.state.devices);
-    fakeDevices.set(hex(member.publicKey), { ...memberDevice, canManage: true });
-    const fakeMembers = new Map(admitted.ledger.state.members);
-    const memberRow = fakeMembers.get(hex(memberDevice.membershipId));
-    if (!memberRow) throw new Error('missing-member-row');
-    fakeMembers.set(hex(memberDevice.membershipId), { ...memberRow, role: 'admin' });
-    const forged = await sealEpochEnvelope({
-      state: { ...admitted.ledger.state, devices: fakeDevices, members: fakeMembers },
+    // A plain member forwards the real key to another member's device.
+    const fromMember = await sealEpochEnvelope({
+      state,
       genesis: created.anchor,
       epoch: 0,
       sender: member.publicKey,
@@ -574,15 +575,117 @@ describe('P3 key delivery and history unwrap', () => {
       epochKey: k0,
       sign: (bytes) => member.sign(bytes),
     });
-    await expect(
-      openEpochEnvelope({
-        state: admitted.ledger.state,
+    expect(
+      await openEpochEnvelope({
+        state,
         genesis: created.anchor,
         epoch: 0,
         sender: member.publicKey,
         recipient: laptop.publicKey,
         recipientKeyPair: laptop.dh,
+        frame: fromMember,
+      })
+    ).toEqual(k0);
+
+    // A machine may forward to its owner's recovery device.
+    const fromMachine = await sealEpochEnvelope({
+      state,
+      genesis: created.anchor,
+      epoch: 0,
+      sender: machine.publicKey,
+      recipient: recovery.publicKey,
+      recipientEncryptionKey: recovery.enc,
+      epochKey: k0,
+      sign: (bytes) => machine.sign(bytes),
+    });
+    expect(
+      await openEpochEnvelope({
+        state,
+        genesis: created.anchor,
+        epoch: 0,
+        sender: machine.publicKey,
+        recipient: recovery.publicKey,
+        recipientKeyPair: recovery.dh,
+        frame: fromMachine,
+      })
+    ).toEqual(k0);
+
+    // A forwarded key that is not the committed key still fails the commitment check.
+    await expect(
+      openEpochEnvelope({
+        state,
+        genesis: created.anchor,
+        epoch: 0,
+        sender: member.publicKey,
+        recipient: laptop.publicKey,
+        recipientKeyPair: laptop.dh,
+        frame: await sealEpochEnvelope({
+          state,
+          genesis: created.anchor,
+          epoch: 0,
+          sender: member.publicKey,
+          recipient: laptop.publicKey,
+          recipientEncryptionKey: laptop.enc,
+          epochKey: random(32),
+          sign: (bytes) => member.sign(bytes),
+        }),
+      })
+    ).rejects.toMatchObject({ code: 'invalid-operation' });
+
+    // Recovery devices only receive keys, even if the sender forges a personal entry.
+    await expect(
+      sealEpochEnvelope({
+        state,
+        genesis: created.anchor,
+        epoch: 0,
+        sender: recovery.publicKey,
+        recipient: laptop.publicKey,
+        recipientEncryptionKey: laptop.enc,
+        epochKey: k0,
+        sign: (bytes) => recovery.sign(bytes),
+      })
+    ).rejects.toMatchObject({ code: 'unauthorized' });
+    const recoveryRow = state.devices.get(hex(recovery.publicKey));
+    if (!recoveryRow) throw new Error('missing-recovery-device');
+    const fakeDevices = new Map(state.devices);
+    fakeDevices.set(hex(recovery.publicKey), { ...recoveryRow, kind: 'personal' });
+    const forged = await sealEpochEnvelope({
+      state: { ...state, devices: fakeDevices },
+      genesis: created.anchor,
+      epoch: 0,
+      sender: recovery.publicKey,
+      recipient: laptop.publicKey,
+      recipientEncryptionKey: laptop.enc,
+      epochKey: k0,
+      sign: (bytes) => recovery.sign(bytes),
+    });
+    await expect(
+      openEpochEnvelope({
+        state,
+        genesis: created.anchor,
+        epoch: 0,
+        sender: recovery.publicKey,
+        recipient: laptop.publicKey,
+        recipientKeyPair: laptop.dh,
         frame: forged,
+      })
+    ).rejects.toMatchObject({ code: 'unauthorized' });
+
+    // A sender revoked before the recipient opens is rejected against the current ledger.
+    const revoked = await append(admitted.ledger, member, {
+      type: 'revokeDevice',
+      target: machine.publicKey,
+    });
+    expect(canSendEpoch(revoked.ledger.state, machine.publicKey)).toBe(false);
+    await expect(
+      openEpochEnvelope({
+        state: revoked.ledger.state,
+        genesis: created.anchor,
+        epoch: 0,
+        sender: machine.publicKey,
+        recipient: recovery.publicKey,
+        recipientKeyPair: recovery.dh,
+        frame: fromMachine,
       })
     ).rejects.toMatchObject({ code: 'unauthorized' });
   });
