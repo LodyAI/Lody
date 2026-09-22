@@ -36,7 +36,9 @@ context/message-flow.md "Upstream".
 - `deepseek-harness-runtime.ts` — Harness-home (`DSH_HOME`, then `~/.dsh`), atomic-config,
   and npx launch wrapper around the `packages/acp-extension-dsh` submodule. It converts
   the adapter entry to a file URL for Cordis ESM imports, including Windows drive paths,
-  while preset and session directories remain filesystem paths.
+  while preset and session directories remain filesystem paths. Its Windows bootstrap
+  suppresses child consoles inside npm and DSH, including the pinned native Job
+  runner; [compatibility scope and verification](../../../../.agents/notes/implemented/bug-fix/2026-09-22-dsh-windows-console-popups.md).
 - `managed-agent-runtime.ts` — pinned Codex/Claude Code/Grok native and Kimi Node-package
   `.tar.zst` artifacts, checksums, resumable downloads, the active installation profile's
   `agent-binaries` layout, and best-effort `bin` symlinks for complete native CLIs.
