@@ -601,3 +601,12 @@ Translation: current
 - 证据：core/Lab 类型检查；`--complete` 0 桥；Lab host-lifecycle 34、
   design-probes 25、collab-baseline 1；core execute/submit/node-store 65。
   产品 E2EE 仍关闭。不 push。
+
+### 2026-09-22 — Lab createSpace 走意图 create
+
+- 诚实 `DemoSession.createSpace` 先持久化 epoch-0 密钥，再由
+  `LedgerClient.create` 把创世签入本地 journal。宿主 POST 仍由应用拥有，
+  发生在本地耐久之后。普通路径不再调用 `encodeGenesisBody` /
+  `encodeSignedRecord`。
+- 证据：Lab 类型检查；host-lifecycle 34、design-probes 25、collab-baseline 1。
+  产品 E2EE 仍关闭。不 push。

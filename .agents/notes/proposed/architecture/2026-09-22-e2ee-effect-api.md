@@ -761,3 +761,12 @@ scenarios or protocol acceptance requirements.
 - Evidence: core/Lab typecheck; `--complete` 0 bridges; Lab host-lifecycle 34,
   design-probes 25, collab-baseline 1; core execute/submit/node-store 65.
   Product E2EE remains off. No push.
+
+### 2026-09-22 — Lab createSpace uses intent create
+
+- Honest `DemoSession.createSpace` persists the epoch-0 secret first, then
+  `LedgerClient.create` signs genesis into the local journal. The host POST is
+  still application-owned and happens after local durability. Lab no longer
+  calls `encodeGenesisBody` / `encodeSignedRecord` on the ordinary path.
+- Evidence: Lab typecheck; host-lifecycle 34, design-probes 25, collab-baseline 1.
+  Product E2EE remains off. No push.

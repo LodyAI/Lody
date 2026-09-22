@@ -3,23 +3,27 @@ import { LoroDoc } from 'loro-crdt';
 import type { Flock } from '@loro-dev/flock-wasm';
 import { StreamsClient } from '@loro-dev/streams-client';
 import { Ledger, LedgerError } from '@lody/e2ee-core';
-import { Bytes, ContextMismatch, ValidationError } from '@lody/e2ee-core/effect';
-import { deviceSignerLayer } from '@lody/e2ee-core/effect/platform';
-import { EpochKeyringStorage } from '@lody/e2ee-core/effect/platform-node';
+import {
+  Bytes,
+  ContextMismatch,
+  LedgerClient as IntentLedgerClient,
+  LedgerTransport,
+  TransportError,
+  ValidationError,
+} from '@lody/e2ee-core/effect';
+import { deviceSignerLayer, signatureVerifierLayer } from '@lody/e2ee-core/effect/platform';
+import { EpochKeyringStorage, nodeJournalStoreLayer } from '@lody/e2ee-core/effect/platform-node';
 import { Effect, Either, Layer } from 'effect';
 import type { LedgerCommand } from '@lody/e2ee-core/effect';
 import {
   collectEpochPackets,
   commitEpochKey,
   decodeRecord,
-  encodeGenesisBody,
-  encodeSignedRecord,
   hashRecord,
   joinRequestSigningBytes,
   LedgerClient,
   possessionSigningBytes,
   recoverHistory,
-  signingBytesForBody,
   SigningPointCache,
   type ComparisonNote,
   type JoinRequest,
@@ -87,6 +91,13 @@ function signerLayer(device: DemoDevice) {
     deviceSignerLayer(key, (bytes) => device.sign(bytes))
   );
 }
+
+/** Matches StreamsLedgerStream. Create only needs the offset, not network. */
+const genesisTransportLayer = Layer.succeed(LedgerTransport, {
+  initialOffset: '-1',
+  readAfter: () => Effect.fail(new TransportError({ operation: 'read' })),
+  appendCas: () => Effect.succeed('accepted' as const),
+});
 
 function ledgerCommand(operation: Operation): Effect.Effect<LedgerCommand, ValidationError> {
   return Effect.gen(function* () {
@@ -362,26 +373,52 @@ export class DemoSession {
     return ledger;
   }
 
+  /** Persist the epoch-0 secret, then let LedgerClient.create sign genesis into the journal.
+   * Remote space creation stays application-owned and happens after local durability. */
   async createSpace(): Promise<{ genesisHex: string }> {
     if (!this.device || !this.credential) throw new Error('not-started');
     const secret = this.random('epoch-secret', 32);
-    this.userId = this.random('user-id', 32);
-    this.membershipId = this.random('membership-id', 16);
-    const body = encodeGenesisBody(
-      {
-        signer: this.device.publicKey,
-        userId: this.userId,
-        membershipId: this.membershipId,
-        encryptionPublicKey: this.device.enc,
-        epochCommitment: await commitEpochKey(new Uint8Array(32), 0, secret),
-      },
-      this.pointCache
-    );
-    this.genesis = encodeSignedRecord(body, await this.device.sign(signingBytesForBody(body)));
-    this.genesisHex = toHex(await hashRecord(this.genesis));
+    const userId = this.random('user-id', 32);
+    const membershipId = this.random('membership-id', 16);
+    this.userId = userId;
+    this.membershipId = membershipId;
     const keys = new Map<number, Uint8Array>([[0, secret]]);
     this.persistEpochs(keys);
     this.epochKeys = keys;
+    const commitment = await commitEpochKey(new Uint8Array(32), 0, secret);
+    const journalPath = join(this.clientDir, 'ledger.sqlite');
+    const encryptionKey = this.device.enc;
+    const device = this.device;
+    await runLabPromise(
+      Effect.gen(function* () {
+        const signing = yield* signerLayer(device);
+        yield* IntentLedgerClient.create({
+          userId: yield* Bytes.userId(userId),
+          membershipId: yield* Bytes.membershipId(membershipId),
+          encryptionPublicKey: yield* Bytes.encryptionPublicKey(encryptionKey),
+          epochCommitment: yield* Bytes.epochCommitment(commitment),
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              signing,
+              signatureVerifierLayer,
+              nodeJournalStoreLayer({ path: journalPath, mode: 'create' }),
+              genesisTransportLayer
+            )
+          )
+        );
+      }),
+      Layer.empty
+    );
+    const store = new SqliteLedgerStore(journalPath, {
+      createFile: false,
+      initializeSchema: false,
+    });
+    const journal = await store.exclusive((tx) => tx.load());
+    const genesisRecord = journal?.records[0];
+    if (!journal || !genesisRecord) throw new Error('missing-genesis');
+    this.genesis = new Uint8Array(genesisRecord);
+    this.genesisHex = toHex(journal.genesis);
     const response = await this.fetch('/v1/spaces', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
