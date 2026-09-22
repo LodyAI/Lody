@@ -883,7 +883,7 @@ export const LoroSidebar = memo(function LoroSidebar({
     />
   ) : null;
   const sectionHeaderFilterPlaceholder = !isMobile
-    ? (desktopFilterPlaceholder ?? <span aria-hidden="true" className="block h-5 w-5" />)
+    ? (desktopFilterPlaceholder ?? <span aria-hidden="true" className="block h-6 w-6" />)
     : null;
   const hasPinnedItems = Boolean(pinnedItems?.length);
   const workspaceIdentityStatus: WorkspaceIdentityStatus | null =
@@ -1242,8 +1242,11 @@ export const LoroSidebar = memo(function LoroSidebar({
           )}
         >
           <div className="relative">
+            {/* Covers the 24x24 placeholder exactly: every first section header
+              is an h-7 row offset 4px by the pt-1 wrappers below, so its center
+              sits at 18px — top-1.5 + h-6 centers the 20px trigger on it. */}
             {!isMobile && desktopFilterNode ? (
-              <div className="pointer-events-none absolute right-2 top-1 z-10 flex h-5 items-center">
+              <div className="pointer-events-none absolute right-0 top-1.5 z-10 flex h-6 w-6 items-center justify-center">
                 <div className="pointer-events-auto flex">{desktopFilterNode}</div>
               </div>
             ) : null}
