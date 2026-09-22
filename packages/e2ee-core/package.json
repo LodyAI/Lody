@@ -26,7 +26,7 @@
     "typecheck": "tsgo --noEmit",
     "test": "vitest run",
     "check": "pnpm typecheck && pnpm check:effect-boundaries && pnpm test",
-    "check:effect-boundaries": "node scripts/check-effect-boundaries.mjs",
+    "check:effect-boundaries": "node scripts/check-effect-boundaries.mjs --complete",
     "bench:ledger-10k": "tsx bench/ledger-10k.ts",
     "bench:ledger-10k-breakdown": "tsx bench/ledger-10k-breakdown.ts",
     "bench:ledger-10k-browser": "tsx bench/ledger-10k-browser.ts",

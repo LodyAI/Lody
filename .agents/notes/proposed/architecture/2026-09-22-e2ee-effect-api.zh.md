@@ -587,3 +587,17 @@ Translation: current
   `test:ci`（含 CLI `worktree-gc.test.ts` 11/11 与 Electron）、i18n、code-collab、
   platform-boundary、public-boundary。产品 E2EE 仍关闭。随后本地提交此路径修复；
   不 push。
+
+### 2026-09-22 — Lab submit 只表达意图
+
+- 诚实 Lab `DemoSession.submit` 不再调用 `prepare` / `encodeSignedRecord`。
+  它把操作映射为 `LedgerCommand` 并运行 `executeEffect`，由后者拥有 parent
+  选择、签名和 CAS。攻击/矩阵探针仍在审计边界拼装原始记录。`createSpace`
+  仍组合本地创世编码、密钥持久化和远端 POST；那是应用层 Org 开通，不是
+  第二条提交路径。
+- `LedgerEngine.legacy` 不再接收未使用的 point-cache 参数，workflow 不再
+  导入 `../ledger/` 类型。core `pnpm check` 现在跑
+  `check:effect-boundaries --complete`。
+- 证据：core/Lab 类型检查；`--complete` 0 桥；Lab host-lifecycle 34、
+  design-probes 25、collab-baseline 1；core execute/submit/node-store 65。
+  产品 E2EE 仍关闭。不 push。

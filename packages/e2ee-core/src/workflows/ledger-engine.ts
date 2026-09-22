@@ -25,7 +25,6 @@ import {
 } from '../pure/bytes';
 import type { LedgerView } from '../pure/records';
 import { bytesEqual, copyBytes } from '../pure/cbor';
-import type { SigningPointCache } from '../ledger/crypto';
 import { hashRecordBytes } from '../pure/wire-crypto';
 import { decodeRecord, type Operation } from '../pure/ledger-schema';
 import {
@@ -196,8 +195,7 @@ export class LedgerEngine {
     record: Uint8Array | null,
     store: JournalStore['Type'],
     stream: LedgerTransport['Type'],
-    verifier: SignatureVerifier['Type'],
-    _pointCache?: SigningPointCache
+    verifier: SignatureVerifier['Type']
   ): Effect.Effect<LedgerEngine, ValidationError> {
     return Effect.gen(function* () {
       yield* offset(stream.initialOffset);

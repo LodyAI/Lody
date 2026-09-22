@@ -746,3 +746,18 @@ scenarios or protocol acceptance requirements.
   warnings), `test:ci` (including CLI `worktree-gc.test.ts` 11/11 and Electron),
   i18n, code-collab, platform-boundary, and public-boundary. Product E2EE
   remains off. Local commit of this path fix follows; no push.
+
+### 2026-09-22 — Lab submit is intent-only
+
+- Honest Lab `DemoSession.submit` no longer calls `prepare` / `encodeSignedRecord`.
+  It maps the operation to a `LedgerCommand` and runs `executeEffect`, which owns
+  parent selection, signing and CAS. Attack/matrix probes still assemble raw
+  records at the audit boundary. `createSpace` still composes local genesis
+  encoding with key persistence and remote POST; that is application Org
+  onboarding, not a second submit path.
+- `LedgerEngine.legacy` no longer takes a unused point-cache argument, so
+  workflows import no `../ledger/` types. Core `pnpm check` now runs
+  `check:effect-boundaries --complete`.
+- Evidence: core/Lab typecheck; `--complete` 0 bridges; Lab host-lifecycle 34,
+  design-probes 25, collab-baseline 1; core execute/submit/node-store 65.
+  Product E2EE remains off. No push.

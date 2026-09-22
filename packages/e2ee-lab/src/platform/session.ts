@@ -3,9 +3,11 @@ import { LoroDoc } from 'loro-crdt';
 import type { Flock } from '@loro-dev/flock-wasm';
 import { StreamsClient } from '@loro-dev/streams-client';
 import { Ledger, LedgerError } from '@lody/e2ee-core';
-import { Bytes, ContextMismatch } from '@lody/e2ee-core/effect';
+import { Bytes, ContextMismatch, ValidationError } from '@lody/e2ee-core/effect';
+import { deviceSignerLayer } from '@lody/e2ee-core/effect/platform';
 import { EpochKeyringStorage } from '@lody/e2ee-core/effect/platform-node';
 import { Effect, Either, Layer } from 'effect';
+import type { LedgerCommand } from '@lody/e2ee-core/effect';
 import {
   collectEpochPackets,
   commitEpochKey,
@@ -78,6 +80,83 @@ function parseNote(wire: ComparisonWire): ComparisonNote {
     stateDigest: fromHex(wire.stateDigest),
     noteSigner: fromHex(wire.noteSigner),
   };
+}
+
+function signerLayer(device: DemoDevice) {
+  return Effect.map(Bytes.signingPublicKey(device.publicKey), (key) =>
+    deviceSignerLayer(key, (bytes) => device.sign(bytes))
+  );
+}
+
+function ledgerCommand(operation: Operation): Effect.Effect<LedgerCommand, ValidationError> {
+  return Effect.gen(function* () {
+    switch (operation.type) {
+      case 'admitMember':
+        return {
+          _tag: 'AdmitMember' as const,
+          membershipId: yield* Bytes.membershipId(operation.membershipId),
+          request: {
+            requestId: yield* Bytes.requestId(operation.request.requestId),
+            userId: yield* Bytes.userId(operation.request.userId),
+            signingPublicKey: yield* Bytes.signingPublicKey(operation.request.signingPublicKey),
+            encryptionPublicKey: yield* Bytes.encryptionPublicKey(
+              operation.request.encryptionPublicKey
+            ),
+            expiresAt: operation.request.expiresAt,
+            signature: yield* Bytes.signature(operation.request.signature),
+          },
+        };
+      case 'removeMember':
+        return {
+          _tag: 'RemoveMember' as const,
+          membershipId: yield* Bytes.membershipId(operation.membershipId),
+        };
+      case 'setRole':
+        return {
+          _tag: 'SetRole' as const,
+          membershipId: yield* Bytes.membershipId(operation.membershipId),
+          role: operation.role,
+        };
+      case 'admitDevice': {
+        const signingPublicKey = yield* Bytes.signingPublicKey(operation.signingPublicKey);
+        const encryptionPublicKey = yield* Bytes.encryptionPublicKey(operation.encryptionPublicKey);
+        const possessionSignature = yield* Bytes.signature(operation.possessionSignature);
+        if (operation.kind === 'personal')
+          return {
+            _tag: 'AdmitDevice' as const,
+            kind: 'personal' as const,
+            canManage: operation.canManage,
+            signingPublicKey,
+            encryptionPublicKey,
+            possessionSignature,
+          };
+        if (operation.canManage)
+          return yield* Effect.fail(new ValidationError({ code: 'unauthorized' }));
+        return {
+          _tag: 'AdmitDevice' as const,
+          kind: operation.kind,
+          canManage: false as const,
+          signingPublicKey,
+          encryptionPublicKey,
+          possessionSignature,
+        };
+      }
+      case 'revokeDevice':
+        return {
+          _tag: 'RevokeDevice' as const,
+          target: yield* Bytes.signingPublicKey(operation.target),
+        };
+      case 'transferOwner':
+        return {
+          _tag: 'TransferOwner' as const,
+          successorMembershipId: yield* Bytes.membershipId(operation.successorMembershipId),
+        };
+      case 'publishEpoch':
+        return yield* Effect.fail(new ValidationError({ code: 'invalid-operation' }));
+    }
+    const exhaustive: never = operation;
+    return exhaustive;
+  });
 }
 
 function joinHelperStatus(error: unknown): string {
@@ -331,17 +410,24 @@ export class DemoSession {
     this.loadEpochs();
   }
 
+  /** Promise SDK boundary. Intent execute owns parent, signing and CAS. */
   async submit(operation: Operation): Promise<{ status: string; ledger: Ledger }> {
     if (!this.device) throw new Error('not-started');
     const client = await this.openLedger();
-    const ledger = await client.read();
-    const proposal = ledger.prepare(operation, this.device.publicKey, this.pointCache);
-    const record = encodeSignedRecord(
-      proposal.bodyBytes,
-      await this.device.sign(proposal.signingBytes)
-    );
-    const result = await client.submit(record);
-    return { status: result.status, ledger: result.ledger };
+    const layer = await Effect.runPromise(signerLayer(this.device));
+    try {
+      const result = await runLabPromise(
+        Effect.gen(function* () {
+          const command = yield* ledgerCommand(operation);
+          return yield* client.executeEffect(command);
+        }),
+        layer
+      );
+      return { status: result.status, ledger: result.ledger };
+    } catch (error) {
+      if (error instanceof ValidationError) throw new LedgerError(error.code, error.position);
+      throw error;
+    }
   }
 
   async resume(): Promise<{ status: string; ledger: Ledger }> {

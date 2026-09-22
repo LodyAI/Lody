@@ -8,6 +8,7 @@ import { viewState, type LedgerView } from '../pure/records';
 import { makeSignatureVerifier } from '../platform/signature-verifier';
 import type { ClientError } from '../pure/errors';
 import { DeviceSigner, JournalStore, LedgerTransport, SignatureVerifier } from '../ports/ledger';
+import type { LedgerCommand } from '../pure/commands';
 import { rotateEpoch } from '../workflows/epoch-rotation';
 import { LedgerClient as EffectLedgerClient } from '../workflows/ledger-client';
 import { journalStoreLayer, ledgerTransportLayer } from '../platform/ledger-ports';
@@ -216,8 +217,7 @@ export class LedgerClient {
           self.genesisRecord,
           store,
           stream,
-          self.signatures,
-          self.pointCache
+          self.signatures
         );
         self.engine = engine;
         return engine;
@@ -240,6 +240,21 @@ export class LedgerClient {
 
   submit(record: Uint8Array): Promise<LedgerSubmitResult> {
     return runPromiseThrow(this.submitEffect(record));
+  }
+
+  /** Intent submit. Callers do not assemble parent, nonce or signature bytes. */
+  executeEffect(command: LedgerCommand) {
+    const captured =
+      command._tag === 'AdmitMember'
+        ? { ...command, request: { ...command.request } }
+        : { ...command };
+    return this.provide(
+      Effect.gen(this, function* () {
+        const engine = yield* this.engineEffect();
+        const signer = yield* DeviceSigner;
+        return yield* EffectLedgerClient.fromEngine(engine, signer).execute(captured);
+      }).pipe(Effect.flatMap(legacyResult), Effect.mapError(legacyError))
+    );
   }
 
   /** Transitional consumer bridge; rotation behavior lives only in the native workflow. */
