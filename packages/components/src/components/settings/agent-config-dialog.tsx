@@ -522,6 +522,16 @@ const BUILTIN_OPTIONS: AgentTypeOption[] = [
   },
   {
     kind: 'builtin',
+    value: 'builtin:dimcode',
+    label: 'Dimcode',
+    descriptionKey: 'settings.agent.dialog.option.dimcode.description',
+    descriptionDefault: 'Dimcode coding agent over ACP',
+    cliType: 'builtin',
+    agentType: 'dimcode',
+    searchKeys: 'dimcode dim dimagent acp',
+  },
+  {
+    kind: 'builtin',
     value: 'builtin:bub',
     label: 'Bub',
     descriptionKey: 'settings.agent.dialog.option.bub.description',
@@ -944,14 +954,16 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const deleteSetup = useSetAtom(deleteProviderSetupAtom);
   // Creation observes the daemon-owned setup instead of launching a competing
   // capability probe. Once published, this draft edits the same provider id.
-  const [testingBubSetup, setTestingBubSetup] = useState(false);
-  const publishedBub =
-    testingBubSetup &&
+  const [testingBuiltinSetup, setTestingBuiltinSetup] = useState(false);
+  const publishedSetupConfig =
+    testingBuiltinSetup &&
     publishedConfig?.machineId === machine.id &&
     publishedConfig.cliType === 'builtin' &&
-    publishedConfig.agentType === 'bub';
-  const bubSetup = testingBubSetup ? setups.find((setup) => setup.id === agentConfigId) : undefined;
-  const waitingForBubSetup = testingBubSetup && !publishedBub;
+    (publishedConfig.agentType === 'bub' || publishedConfig.agentType === 'dimcode');
+  const builtinSetup = testingBuiltinSetup
+    ? setups.find((setup) => setup.id === agentConfigId)
+    : undefined;
+  const waitingForBuiltinSetup = testingBuiltinSetup && !publishedSetupConfig;
 
   const initialForm = useMemo<AgentConfigFormData>(() => {
     if (mode.kind === 'edit') {
@@ -1034,7 +1046,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
 
   useEffect(() => {
     if (open) {
-      setTestingBubSetup(false);
+      setTestingBuiltinSetup(false);
       setFormData(initialForm);
       setManuallyTested(false);
       setAuthRequired(false);
@@ -1080,15 +1092,17 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   // `bub acp` becomes an actionable "install Bub" prompt instead of a
   // provider that fails later on its first turn.
   const isBubBuiltin = formData.cliType === 'builtin' && formData.agentType === 'bub';
+  const isQueuedBuiltin =
+    isBubBuiltin || (formData.cliType === 'builtin' && formData.agentType === 'dimcode');
   const deepseekEndpointMode = getDeepSeekEndpointMode(formData);
   const isManagedBuiltin =
     formData.cliType === 'builtin' && isManagedBuiltinAgentType(formData.agentType);
   const builtinVerificationContext = `${machine.id}:${builtinVerificationRevision}`;
   const requiresBuiltinCreationVerification =
     mode.kind === 'create' &&
-    !publishedBub &&
+    !publishedSetupConfig &&
     !isPreset &&
-    (isManagedBuiltin || isDeepSeekBuiltin || isBubBuiltin);
+    (isManagedBuiltin || isDeepSeekBuiltin || isQueuedBuiltin);
   const builtinCreationVerified =
     !requiresBuiltinCreationVerification || verifiedBuiltinContext === builtinVerificationContext;
   const builtinCreationPending =
@@ -1193,7 +1207,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const backgroundBuiltinSetup =
     supportsProviderSetup &&
     requiresBuiltinCreationVerification &&
-    (usesDefaultManagedRuntime || isBubBuiltin);
+    (usesDefaultManagedRuntime || isQueuedBuiltin);
   const lastPersistedPayloadKeyRef = useRef<string | null>(null);
   const buildSubmitPayload = useCallback((): AgentConfigSubmitPayload => {
     let env = { ...formData.env };
@@ -1270,7 +1284,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const rawCapabilitiesReady = isCustom
     ? customReady
     : manuallyTested ||
-      publishedBub ||
+      publishedSetupConfig ||
       hasCachedCaps ||
       (hasStaticBuiltinCaps && !(formData.cliType === 'builtin' && formData.agentType === 'kimi'));
   const capabilitiesReady = rawCapabilitiesReady && !binaryStatusBlocksReady;
@@ -1609,7 +1623,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   };
 
   const selectOption = (opt: AgentTypeOption) => {
-    if (testingBubSetup) return;
+    if (testingBuiltinSetup) return;
     titleDefaultsAppliedRef.current = false;
     setManuallyTested(false);
     setAuthRequired(false);
@@ -1738,7 +1752,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     if (!formData.agentType.trim())
       return t('agents.disableReason.missingAgentType', 'Please select an agent type');
     if (incompatibleHostMessage) return incompatibleHostMessage;
-    if (mode.kind === 'create' && isBubBuiltin && !supportsProviderSetup) {
+    if (mode.kind === 'create' && isQueuedBuiltin && !supportsProviderSetup) {
       return t(
         'settings.agent.setup.unsupportedTarget',
         'Update Lody on the target machine to finish this provider setup.'
@@ -1827,7 +1841,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   }, [onOpenChange, persistConfigBeforeMachineLaunch]);
 
   const submit = async () => {
-    if (disableReason || submitting || waitingForBubSetup) return;
+    if (disableReason || submitting || waitingForBuiltinSetup) return;
     if (
       requiresBuiltinCreationVerification &&
       !backgroundBuiltinSetup &&
@@ -1968,7 +1982,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
               key={opt.value}
               option={opt}
               selected={selectedOption?.value === opt.value}
-              disabled={mode.kind === 'edit' || testingBubSetup}
+              disabled={mode.kind === 'edit' || testingBuiltinSetup}
               chevron={isNarrowLayout}
               onSelect={() => selectOption(opt)}
             />
@@ -1981,7 +1995,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 key={opt.value}
                 option={opt}
                 selected={selectedOption?.value === opt.value}
-                disabled={mode.kind === 'edit' || testingBubSetup}
+                disabled={mode.kind === 'edit' || testingBuiltinSetup}
                 chevron={isNarrowLayout}
                 onSelect={() => selectOption(opt)}
               />
@@ -1995,7 +2009,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 key={opt.value}
                 option={opt}
                 selected={selectedOption?.value === opt.value}
-                disabled={mode.kind === 'edit' || testingBubSetup}
+                disabled={mode.kind === 'edit' || testingBuiltinSetup}
                 chevron={isNarrowLayout}
                 onSelect={() => selectOption(opt)}
               />
@@ -2009,7 +2023,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 key={opt.value}
                 option={opt}
                 selected={selectedOption?.value === opt.value}
-                disabled={mode.kind === 'edit' || testingBubSetup}
+                disabled={mode.kind === 'edit' || testingBuiltinSetup}
                 chevron={isNarrowLayout}
                 onSelect={() => selectOption(opt)}
               />
@@ -2064,21 +2078,21 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
             )}
           </div>
         </div>
-        {!waitingForBubSetup && (
+        {!waitingForBuiltinSetup && (
           <ProbeStatus
             isPreset={isPreset}
             probing={probing}
             probeError={probeError}
             ready={capabilitiesReady && !builtinNeedsCredentialCheck && !authRequired}
             showIdleAction={!isCustom}
-            disabled={isBubBuiltin && (!!disableReason || submitting)}
+            disabled={isQueuedBuiltin && (!!disableReason || submitting)}
             onRetry={() => {
               setProbeError(null);
-              if (isBubBuiltin && backgroundBuiltinSetup) {
+              if (isQueuedBuiltin && backgroundBuiltinSetup) {
                 if (disableReason || submitting) return;
-                setTestingBubSetup(true);
+                setTestingBuiltinSetup(true);
                 void persistConfigBeforeMachineLaunch().catch((error) => {
-                  setTestingBubSetup(false);
+                  setTestingBuiltinSetup(false);
                   setProbeError(error instanceof Error ? error.message : String(error));
                 });
                 return;
@@ -2096,10 +2110,10 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
       </header>
 
       <div ref={formScrollRef} className="scrollbar-pro min-h-0 flex-1 overflow-y-auto px-5 py-5">
-        {waitingForBubSetup &&
-          (bubSetup ? (
+        {waitingForBuiltinSetup &&
+          (builtinSetup ? (
             <ProviderSetupRow
-              setup={bubSetup}
+              setup={builtinSetup}
               machine={machine}
               onRetry={async (setup) => {
                 try {
@@ -2118,7 +2132,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   // new setup, or the daemon would cancel it again.
                   draftConfigIdRef.current = uuidv4() as AgentConfigId;
                   lastPersistedPayloadKeyRef.current = null;
-                  setTestingBubSetup(false);
+                  setTestingBuiltinSetup(false);
                 } catch (error) {
                   toast.error(
                     t('settings.agent.setup.deleteFailed', 'Could not delete provider setup')
@@ -2130,7 +2144,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           ) : (
             <Spinner className="h-4 w-4" />
           ))}
-        <div className="space-y-5" hidden={waitingForBubSetup}>
+        <div className="space-y-5" hidden={waitingForBuiltinSetup}>
           <Field
             htmlFor="agent-config-name"
             label={t('agents.configName', 'Name')}
@@ -2580,7 +2594,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   disabled={
                     !!disableReason ||
                     submitting ||
-                    waitingForBubSetup ||
+                    waitingForBuiltinSetup ||
                     (builtinCreationPending && !probeError)
                   }
                   size="sm"
@@ -2588,7 +2602,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   {(submitting || (builtinCreationPending && !authRequired && !probeError)) && (
                     <Spinner className="mr-2 h-4 w-4" />
                   )}
-                  {mode.kind === 'edit' || publishedBub
+                  {mode.kind === 'edit' || publishedSetupConfig
                     ? t('common.save', 'Save')
                     : t('common.create', 'Create')}
                 </Button>

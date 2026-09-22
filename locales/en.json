@@ -2585,6 +2585,7 @@
   "settings.agent.dialog.option.custom.label": "Custom command",
   "settings.agent.dialog.option.codex.description": "OpenAI Codex runtime",
   "settings.agent.dialog.option.deepseek.description": "DeepSeek coding agent over ACP (developer preview)",
+  "settings.agent.dialog.option.dimcode.description": "Dimcode coding agent over ACP",
   "settings.agent.dialog.option.bub.description": "Bub agent runtime over ACP (install the bub-acp-server plugin)",
   "settings.agent.dialog.bubInstallDocs": "Open install guide",
   "settings.agent.dialog.option.kimi.description": "Moonshot AI Kimi Code runtime",

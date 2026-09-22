@@ -2585,6 +2585,7 @@
   "settings.agent.dialog.option.custom.label": "自定义命令",
   "settings.agent.dialog.option.codex.description": "OpenAI Codex 运行时",
   "settings.agent.dialog.option.deepseek.description": "通过 ACP 运行 DeepSeek coding agent（开发者预览）",
+  "settings.agent.dialog.option.dimcode.description": "通过 ACP 使用 Dimcode 编程智能体",
   "settings.agent.dialog.option.bub.description": "通过 ACP 运行 Bub Agent 运行时（需安装 bub-acp-server 插件）",
   "settings.agent.dialog.bubInstallDocs": "打开安装指南",
   "settings.agent.dialog.option.kimi.description": "Moonshot AI Kimi Code 运行时",
