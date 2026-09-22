@@ -1,3 +1,4 @@
+import { listMcpTools } from '@/mcp/list-mcp-tools';
 import { readSessionHistory } from '@lody/shared/session-data';
 import { readLatestTurn } from '@lody/shared/session-data';
 import os from 'os';
@@ -6188,6 +6189,8 @@ export class MessageHandler {
     };
 
     switch (request.method) {
+      case 'mcp/list-tools':
+        return await listMcpTools(request.params.server);
       case 'code-collab/get-file-index':
         await assertOwner(request.params.sessionId as SessionId);
         return await this.codeCollabV2Service.getFileIndex(request.params);

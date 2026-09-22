@@ -4,6 +4,11 @@ import type {
   LocalProjectGitStateRpcResponse,
 } from '@lody/loro-streams-rpc';
 import {
+  McpToolListResultSchema,
+  MACHINE_PROTOCOL_CAPABILITIES,
+  MCP_TOOL_DISCOVERY_PROTOCOL_VERSION,
+  machineSupportsProtocolCapability,
+  type WorkspaceMcpServerMeta,
   getServerNow,
   machineSupportsLocalFileResourcesProtocol,
   machineSupportsSubagentCancellation,
@@ -1171,7 +1176,30 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     }
   };
 
+  const requestLocalMcpTools = async (machineId: MachineId, server: WorkspaceMcpServerMeta) => {
+    const protocolCapabilities = await deps.getMachineProtocolCapabilities(machineId);
+    if (
+      !machineSupportsProtocolCapability(
+        { protocolCapabilities },
+        MACHINE_PROTOCOL_CAPABILITIES.mcpToolDiscovery,
+        MCP_TOOL_DISCOVERY_PROTOCOL_VERSION
+      ) ||
+      !(await canUseLocalMachineRpc(machineId))
+    ) {
+      throw new Error('MCP tool discovery requires a supported local daemon.');
+    }
+    const result = await sendLocalMachineRpcRequest({
+      machineId,
+      workspaceId,
+      method: 'mcp/list-tools',
+      params: { server },
+      timeoutMs: 35_000,
+    });
+    return McpToolListResultSchema.parse(result);
+  };
+
   return {
+    requestLocalMcpTools,
     requestSessionCancel,
     requestSessionSteer,
     requestSessionGoal,

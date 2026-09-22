@@ -290,6 +290,9 @@ importers:
       '@loro-dev/streams-crdt':
         specifier: 'catalog:'
         version: 0.15.1(@loro-dev/flock-wasm@0.4.3)(loro-crdt@1.15.1)
+      '@modelcontextprotocol/client':
+        specifier: 2.0.0
+        version: 2.0.0
       '@modelcontextprotocol/sdk':
         specifier: 1.29.0
         version: 1.29.0(zod@4.3.6)

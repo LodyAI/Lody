@@ -8,6 +8,7 @@
 export type MachineProtocolCapabilities = Record<string, number>;
 
 export const MACHINE_PROTOCOL_CAPABILITIES = {
+  mcpToolDiscovery: 'mcpToolDiscovery',
   builtinPi: 'builtinPi',
   subagentCancellation: 'subagentCancellation',
   acpAuthenticationInteractions: 'acpAuthenticationInteractions',
@@ -16,6 +17,8 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   localFileResources: 'localFileResources',
   acpProtocolAuthentication: 'acpProtocolAuthentication',
 } as const;
+
+export const MCP_TOOL_DISCOVERY_PROTOCOL_VERSION = 1;
 
 export const ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION = 2;
 export const SUBAGENT_CANCELLATION_PROTOCOL_VERSION = 1;
@@ -62,6 +65,7 @@ export function machineSupportsSubagentCancellation(
  * in the "supported" direction and there is no version fallback to catch it.
  */
 export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities = {
+  [MACHINE_PROTOCOL_CAPABILITIES.mcpToolDiscovery]: MCP_TOOL_DISCOVERY_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.subagentCancellation]: SUBAGENT_CANCELLATION_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.acpAuthenticationInteractions]:
     ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION,
