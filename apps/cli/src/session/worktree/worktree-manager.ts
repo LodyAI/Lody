@@ -44,7 +44,8 @@ function toGitPath(value: string): string {
   return value.replace(/\\/g, '/');
 }
 
-function realpathIfExists(value: string): string {
+/** Resolve an existing path; leave missing paths unchanged. */
+export function realpathIfExists(value: string): string {
   try {
     if (typeof fs.realpathSync.native === 'function') {
       return fs.realpathSync.native(value);

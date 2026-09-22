@@ -53,7 +53,7 @@ Translation: current
 - [x] 四类 1000 条闸门（3 次预热 / 10 次测量，Node v24.21.0）：完整重放中位
       1140 ms（低于此前约 1215–1268 ms 基线），增量 extend(+1) 1.76 ms，
       快照加入 156 ms，journal 恢复+验证 1148 ms。重放无超过 20% 回退。
-      10k/100ms 仍撤销。随后跑根目录 `pnpm check`。没有协议或产品启用。
+      10k/100ms 仍撤销。根目录 `pnpm check` 现已通过。没有协议或产品启用。
 
 - 编译拒绝错钥类型、未验证记录、非法设备管理标记及未穷尽分支。
 - 普通客户端不拼接签名、parent、nonce 或 CAS offset；公共错误不能为 unknown。
@@ -576,3 +576,14 @@ Translation: current
   no-shadow/consistent-return）。`pnpm test:ci` 仅 CLI `worktree-gc.test.ts`
   因 `/var` 与 `/private/var` 失败；该测试不在本迁移范围内，未改。
   其后的 i18n、code-collab、platform-boundary、public-boundary 检查均通过。
+
+### 2026-09-22 — 根检查：规范化 worktree-gc 路径
+
+- WorktreeManager 的 `hostPath` 本就使用 `realpathIfExists`。GC 扫描
+  `path.join(reposDir, …)`，把未解析的 macOS `/var/folders` 拼写传给清理脚本。
+  现在清理收到的路径与 `hostPath` 相同。资格判定、备份提交和保留分支规则未改。
+  测试仍断言 `worktree.hostPath`，没有删除或放宽。
+- 根目录 `pnpm check` 现已通过：类型检查、类型感知 lint（0 错误 / 11741 警告）、
+  `test:ci`（含 CLI `worktree-gc.test.ts` 11/11 与 Electron）、i18n、code-collab、
+  platform-boundary、public-boundary。产品 E2EE 仍关闭。随后本地提交此路径修复；
+  不 push。

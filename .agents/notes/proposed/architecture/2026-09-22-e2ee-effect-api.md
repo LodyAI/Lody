@@ -62,7 +62,7 @@ scenarios or protocol acceptance requirements.
       median 1140 ms (below the earlier ~1215–1268 ms baseline), incremental
       extend(+1) 1.76 ms, snapshot join 156 ms, journal recovery+verify 1148 ms.
       No >20% replay regression. 10k/100ms stays withdrawn. Root `pnpm check`
-      follows; no protocol or product enablement.
+      now passes. No protocol or product enablement.
 
 - Reject wrong key types, unverified records, invalid device-management shapes,
   and non-exhaustive outcomes at compile time.
@@ -733,3 +733,16 @@ scenarios or protocol acceptance requirements.
   test:ci` then failed only CLI `worktree-gc.test.ts` (`/var` vs `/private/var`
   for the same tmpdir). That is outside this migration and was not repaired.
   Remaining chained checks after test:ci are recorded below if they run.
+
+### 2026-09-22 — Root check: canonicalize worktree-gc paths
+
+- WorktreeManager `hostPath` already uses `realpathIfExists`. GC scanned
+  `path.join(reposDir, …)` and passed the unresolved macOS `/var/folders`
+  spelling to cleanup scripts. Cleanup now receives the same canonical path
+  as `hostPath`. Eligibility, backup-commit, and branch-preserve rules are
+  unchanged. The test still asserts `worktree.hostPath`; it was not deleted
+  or relaxed.
+- Root `pnpm check` now passes: typecheck, type-aware lint (0 errors / 11741
+  warnings), `test:ci` (including CLI `worktree-gc.test.ts` 11/11 and Electron),
+  i18n, code-collab, platform-boundary, and public-boundary. Product E2EE
+  remains off. Local commit of this path fix follows; no push.

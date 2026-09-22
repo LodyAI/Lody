@@ -8,7 +8,7 @@ import type { RepoId, SessionId, SessionMeta } from '@lody/shared';
 import { formatErrorMessage } from '@/utils/format-error';
 import type { Logger } from '@/utils/logger';
 
-import { getWorktreeManager } from './worktree-manager';
+import { getWorktreeManager, realpathIfExists } from './worktree-manager';
 
 const execFileAsync = promisify(execFile);
 const GIT_PROBE_TIMEOUT_MS = 30_000;
@@ -130,7 +130,7 @@ export class WorktreeGarbageCollector {
     for (const { repoId, worktreesDir } of this.listRepoWorktreeDirs()) {
       for (const sessionId of this.listSessionDirs(worktreesDir)) {
         result.scanned += 1;
-        const worktreePath = path.join(worktreesDir, sessionId);
+        const worktreePath = realpathIfExists(path.join(worktreesDir, sessionId));
         if (this.inFlight.has(sessionId) || !this.isRetryDue(sessionId)) continue;
 
         const state = await this.deps.readOwnerState(sessionId);
@@ -269,7 +269,7 @@ export class WorktreeGarbageCollector {
     const dirs: Array<{ repoId: RepoId; worktreesDir: string }> = [];
     for (const entry of repoEntries) {
       if (!entry.isDirectory()) continue;
-      const worktreesDir = path.join(this.deps.reposDir, entry.name, 'worktrees');
+      const worktreesDir = realpathIfExists(path.join(this.deps.reposDir, entry.name, 'worktrees'));
       if (!fs.existsSync(worktreesDir)) continue;
       dirs.push({ repoId: entry.name as RepoId, worktreesDir });
     }
