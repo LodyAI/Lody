@@ -3,6 +3,8 @@
 Status: implemented
 Translation: current
 
+PR: https://github.com/LodyAI/Lody/pull/920
+
 [English](2026-09-23-copy-relative-and-absolute-file-path.md)
 
 ## 摘要
