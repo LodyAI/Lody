@@ -10,7 +10,8 @@ import {
   isAppQuitting,
   isWindowsTrayAvailable,
   setMainWindow,
-  registerProductWindow
+  registerProductWindow,
+  unmarkWarmWindow
 } from './window-state'
 import {
   getMainWindowConstructorOptions,
@@ -615,6 +616,15 @@ export function bindMainWindowTarget(window: BrowserWindow, target: ElectronWind
   presentWindowTarget(
     window,
     target,
+    resolveMainRendererTarget(getWindowTargetPath(target), isDevbarRendererEnabled(), true)
+  )
+}
+
+/** Adopt a prepared view without navigating or replacing its renderer. */
+export function adoptPreparedMainWindow(window: BrowserWindow, target: ElectronWindowTarget): void {
+  unmarkWarmWindow(window)
+  setReloadTarget(
+    window,
     resolveMainRendererTarget(getWindowTargetPath(target), isDevbarRendererEnabled(), true)
   )
 }

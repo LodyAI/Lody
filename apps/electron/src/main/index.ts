@@ -62,7 +62,7 @@ import { mainPlatformKind } from './platform'
 import { getLocalLoroDataPlaneSocketPath } from '@lody/shared/node/local-ipc'
 import { getLocalTerminalSocketPath } from '@lody/shared/node/local-terminal'
 import { getInitialDesktopPath, markOnboardingCompleted } from './onboarding-state'
-import { handleWindowWarmReady } from './window-warm-service'
+import { handlePreparedWindowState, handleWindowWarmReady } from './window-warm-service'
 import { extractDeepLinkFromArgv } from './deep-link-url'
 import { shouldHideMainWindowOnAutoLaunch } from './auto-launch-policy'
 import {
@@ -347,6 +347,10 @@ if (hasSingleInstanceLock) {
     // enabled, session-windows primes the spare after an auxiliary request so
     // ordinary single-window sessions never pay an idle renderer cost.
     ipcMain.on(IPC_SEND_CHANNELS.appWindowReady, (event) => handleWindowWarmReady(event.sender.id))
+    ipcMain.on(IPC_SEND_CHANNELS.appPreparedWindowState, (event, state) => {
+      if (event.senderFrame === event.sender.mainFrame)
+        handlePreparedWindowState(event.sender.id, state)
+    })
     ipcMain.on(IPC_SEND_CHANNELS.appWindowContentReady, (event, target) => {
       if (event.senderFrame === event.sender.mainFrame)
         handleWindowContentReady(event.sender.id, target)

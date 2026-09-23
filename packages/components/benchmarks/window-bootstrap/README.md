@@ -175,12 +175,49 @@ token and next-frame check avoids the repeated-token ambiguity without retrying
 insertion. A five-sample exploratory 22.43 ms show median was not sustained in the
 ten-sample repeat and is not the headline result.
 
-Production adoption still needs bounded target selection/eviction, side-effect
-suppression (read state, focus, notifications), invalidation, cancellation and
-failure ownership. The probe uses the ordinary Session UI with synthetic data, so
-it intentionally does not establish that speculative production mounting is safe.
-The [architecture proposal](../../../../.agents/notes/proposed/architecture/2026-09-23-prepared-session-surfaces.md)
-owns those outstanding decisions.
+## macOS production preparation
+
+The existing opt-in warmup setting now supports one target-specific hidden window
+on macOS local mode. The product probe dispatches hover to a real Session row,
+then Command-clicks that row. It uses production preparation and claim IPC, with
+no held presentation or native animation override. Each run checks hidden state
+and unchanged read receipts before the click, visible content at native show, and
+unique text insertion. `PROBE_INTENT_LEAD_MS` selects a fixed lead time; omitting it
+waits for readiness and deliberately measures a ready hit.
+
+```sh
+PROBE_PRODUCT_PREPARED=1 PROBE_INPUT=1 node benchmarks/window-bootstrap/run-app.mjs 10 macos-product-prepared
+PROBE_PRODUCT_PREPARED=1 PROBE_INTENT_LEAD_MS=0 PROBE_INPUT=1 node benchmarks/window-bootstrap/run-app.mjs 5 macos-zero-lead
+PROBE_PRODUCT_PREPARED=1 PROBE_INTENT_LEAD_MS=200 PROBE_INPUT=1 node benchmarks/window-bootstrap/run-app.mjs 5 macos-early-claim
+```
+
+[Recorded production-path results](results-macos-product-2026-09-23.json), same
+M4 Max, 3,000 synthetic entries and existing CLI 0.93.3:
+
+| Intent timing | Ready hits | Samples | Show median | Input confirmed median |
+| --- | --- | --- | --- | --- |
+| Wait for prepared content | 100% | 10 | 32.50 ms | 82.46 ms |
+| Click immediately | 0% | 5 | 451.13 ms | 492.84 ms |
+| Click 200 ms after hover | 0% | 5 | 346.94 ms | 421.82 ms |
+
+All 29 completed checks including warmups passed content, input and unchanged
+pre-click read-receipt checks. Ready-hit preparation costs 404.42 ms median before
+the click, in addition to the 150 ms row-intent debounce. Ready-hit show ranges
+24.26–68.57 ms and input confirmation 67.42–116.42 ms. Timing starts before the
+source row event dispatch, including renderer/main IPC; the earlier prototype
+started at its presentation IPC and is not an identical timing boundary.
+
+An earlier ten-sample attempt completed ten checks including warmups, then timed
+out after native show was requested. The exact stalled screenshot/input stage was
+not recorded; stage diagnostics were added and the full rerun passed. The cause
+remains unestablished. These small sequential runs do not establish real-world hit
+rate, physical input latency, display scanout, IME, multi-display/Spaces behavior
+or an RSS budget. The source window retains its own view. First-show screenshots
+were inspected; the input probe explicitly focuses the composer.
+
+The [implementation note](../../../../.agents/notes/implemented/bug-fix/2026-09-22-warm-window-content-readiness.md)
+owns cancellation, expiry and speculative-effect suppression. Shared data ownership
+and GPU preview remain in the linked architecture proposal.
 
 ## Earlier regression
 

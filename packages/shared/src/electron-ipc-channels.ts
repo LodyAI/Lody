@@ -11,6 +11,7 @@ import type {
   ElectronPublicBrowserState,
   ElectronUpdaterState,
   ElectronWindowTarget,
+  PreparedWindowTarget,
   GlobalShortcutTriggeredPayload,
   SessionCompletionNotificationClickPayload,
 } from './electron-ipc';
@@ -36,6 +37,8 @@ export type IpcPushMap = {
   'app.globalShortcut': GlobalShortcutTriggeredPayload;
   'app.sessionCompletionClick': SessionCompletionNotificationClickPayload;
   'app.windowTarget': ElectronWindowTarget;
+  'app.prepareWindowTarget': PreparedWindowTarget;
+  'app.activatePreparedWindow': PreparedWindowTarget;
 };
 
 export type IpcSendMap = {
@@ -49,6 +52,7 @@ export type IpcSendMap = {
   'cli.subscribe': null;
   'app.windowReady': null;
   'app.windowContentReady': ElectronWindowTarget;
+  'app.preparedWindowState': PreparedWindowTarget & { ready: boolean };
 };
 
 export const IPC_PUSH_CHANNELS = {
@@ -68,6 +72,8 @@ export const IPC_PUSH_CHANNELS = {
   appGlobalShortcut: 'app.globalShortcut',
   appSessionCompletionClick: 'app.sessionCompletionClick',
   appWindowTarget: 'app.windowTarget',
+  appPrepareWindowTarget: 'app.prepareWindowTarget',
+  appActivatePreparedWindow: 'app.activatePreparedWindow',
 } as const satisfies { [K: string]: keyof IpcPushMap };
 
 export const IPC_SEND_CHANNELS = {
@@ -81,6 +87,7 @@ export const IPC_SEND_CHANNELS = {
   cliSubscribe: 'cli.subscribe',
   appWindowReady: 'app.windowReady',
   appWindowContentReady: 'app.windowContentReady',
+  appPreparedWindowState: 'app.preparedWindowState',
 } as const satisfies { [K: string]: keyof IpcSendMap };
 
 const PUSH_CHANNEL_VALUES: readonly string[] = Object.values(IPC_PUSH_CHANNELS);

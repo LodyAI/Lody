@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { waitForTargetContentPainted } from '../../../apps/electron/src/renderer/src/warm-window-reveal';
+import { observePreparedTarget, waitForTargetContentPainted } from '../../../apps/electron/src/renderer/src/warm-window-reveal';
 
 afterEach(() => vi.useRealTimers());
 
@@ -67,4 +67,32 @@ describe('warm window reveal', () => {
     vi.advanceTimersByTime(32);
     expect(revealed).toBe(false);
   });
+});
+
+it('revokes prepared readiness when its stream disappears, and stops after disposal', async () => {
+  vi.useFakeTimers();
+  const root = document.createElement('div');
+  root.innerHTML = '<span data-window-session-ready="a" data-window-requires-stream="true"></span><div data-window-session-stream-ready="a"></div>';
+  let ready = false;
+  const stop = observePreparedTarget(root, { workspace: 'local', sessionId: 'a' }, state => { ready = state; });
+  vi.advanceTimersToNextFrame();
+  vi.advanceTimersToNextFrame();
+  expect(ready).toBe(true);
+  root.lastElementChild!.remove();
+  await Promise.resolve();
+  expect(ready).toBe(false);
+  root.insertAdjacentHTML('beforeend', '<div data-window-session-stream-ready="a"></div>');
+  await Promise.resolve();
+  vi.advanceTimersToNextFrame();
+  vi.advanceTimersToNextFrame();
+  expect(ready).toBe(true);
+  window.dispatchEvent(new Event('resize'));
+  expect(ready).toBe(false);
+  vi.advanceTimersToNextFrame();
+  vi.advanceTimersToNextFrame();
+  expect(ready).toBe(true);
+  stop();
+  root.innerHTML = '';
+  await Promise.resolve();
+  expect(ready).toBe(true);
 });

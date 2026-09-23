@@ -8,18 +8,14 @@ PR: [#885](https://github.com/LodyAI/Lody/pull/885), [#914](https://github.com/L
 
 ## Abstract
 
-Claimed warm windows exposed Loading or transient Session Not Found, retained spare
-identity, and recovered to the neutral route after a crash. Adoption now preserves
-the real identity and reload target. The native window remains hidden until its
-matching content is painted, without a blank renderer cover; preparation still
-contributes to click-to-show time. Local windows reuse metadata and loaded Session
-snapshots with independent persistence/cursors. Benchmarking exposed an unconditional
-151 ms miss penalty, now removed by checking live peers and accepting negative replies.
-The local spare now starts workspace initialization before a claim and retains it
-across matching navigation. Real desktop probes found a hidden virtual-list viewport
-after the old readiness signal; presentation now also waits for scroll restoration.
-Cold snapshot adoption and preloaded layout code reduced the measured 3,000-entry
-opening median from 1,139 ms to 431 ms; 100 entries still take 257 ms.
+Warm windows exposed Loading, transient Session Not Found, or a blank message
+viewport. Adoption now preserves the real target and presents only after history,
+layout and scroll restoration are ready; peer snapshots keep independent durable
+state. Shell/runtime optimization reduced the measured 3,000-entry opening median
+from 1,139 ms to 431 ms. macOS local mode now uses the same opt-in spare to prepare
+a predicted Session before the click and directly claim its existing renderer.
+Misses and clicks before preparation finishes still wait; this is not universal
+instant opening.
 
 ## Decision and evidence
 
@@ -87,7 +83,45 @@ rejected because it replayed bulk history through the projection. No second UI
 store, Mirror, daemon connection, or shared persistence/cursor is introduced.
 Cloud and dual-mode runtimes do not participate in peer sharing.
 
+## macOS target preparation
+
+The first stage of the [prepared-surface proposal](../../proposed/architecture/2026-09-23-prepared-session-surfaces.md)
+is integrated into the existing developer warmup setting, still off by default.
+Row hover/focus waits 150 ms; opening a Session menu requests immediately. Capture
+listeners are necessary because row controls stop bubbling. A click cancels pending
+intent so a fast open does not later start competing speculation.
+
+Main owns one target-bound hidden window in place of the neutral spare, with a
+30-second expiry and two-second cancellation grace for menu-to-click handoff.
+Requests are source-bound; renewal fences stale cancellation, and readiness includes
+a fresh preparation ID. Changing targets destroys the old view. Expiry, cancellation,
+source close and renderer failure release unclaimed resources. A claimed view keeps
+its lifetime and five-second recovery deadline; it adopts reload identity without
+navigating. Neutral replacement starts after presentation or unclaimed disposal.
+
+The renderer's explicit preparation state suppresses read receipts, workspace
+ownership (notifications, badges and background owner work), navigation autofocus
+and external-history refresh while allowing real hydration and layout. Main sends
+activation only after showing the window. Content removal and viewport resize
+revoke readiness. Live synchronization continues; source state and independent
+durable replicas retain their existing contracts. The native animation addon stays
+probe-only because its independent benefit was not established.
+
 ## Verification and limits
+
+The macOS product path passes 39 relevant component tests and 168 Electron tests;
+components/Electron typechecks and the OSS app build pass. The real Session-row
+Command-click probe measured ready-hit show/input-confirmation medians of
+32.50/82.46 ms (ten samples), zero-lead 451.13/492.84 ms (five), and 200 ms lead
+346.94/421.82 ms (five). All 29 final checks including warmups preserved unread
+state while hidden and showed visible content accepting unique text. Preparation
+still costs 404.42 ms median before a ready-hit click. An earlier attempt timed out
+after native show was requested; its exact screenshot/input stage was not recorded,
+and its cause remains unestablished. Stage diagnostics and a full rerun passed.
+The [benchmark README](../../../../packages/components/benchmarks/window-bootstrap/README.md#macos-production-preparation)
+owns reproducible commands, raw measurements and timing limits. Physical input,
+IME, Spaces/multi-display behavior and memory budgets remain unverified.
+
 
 The provider, renderer readiness, stream rendering and sticky-scroll suites pass
 48 deterministic tests. They cover pre-route initialization, ready/in-flight claim

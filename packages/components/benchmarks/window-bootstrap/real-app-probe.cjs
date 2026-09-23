@@ -16,7 +16,10 @@ const repeats = Number(process.env.PROBE_REPEATS ?? 10);
 const rounds = Number(process.env.PROBE_ROUNDS ?? 1500);
 const answer = 'Answer for round ' + (rounds - 1) + '.';
 const preparedMode = process.env.PROBE_PREPARED === '1';
+const productPreparedMode = process.env.PROBE_PRODUCT_PREPARED === '1';
 const checkInput = process.env.PROBE_INPUT === '1';
+const intentLeadMs = process.env.PROBE_INTENT_LEAD_MS === undefined ? null : Number(process.env.PROBE_INTENT_LEAD_MS);
+if (intentLeadMs !== null && (!Number.isFinite(intentLeadMs) || intentLeadMs < 0)) throw new Error('Invalid intent lead time');
 const nativeHost = process.env.PROBE_NATIVE_ADDON ? require(process.env.PROBE_NATIVE_ADDON) : null;
 let heldWindow = null;
 let sourceWindow = null;
@@ -43,6 +46,12 @@ const log = (x) => {
   records.push(x);
   fs.appendFileSync(output + '.jsonl', JSON.stringify(x) + '\n');
 };
+const registerHandler = ipcMain.handle.bind(ipcMain);
+ipcMain.handle = (channel, handler) => registerHandler(channel, (event, ...args) => {
+  if (channel === 'app.prepareWindow' || channel === 'app.cancelPreparedWindow')
+    log({ kind: 'intent-ipc', channel, sourceVisible: BrowserWindow.fromWebContents(event.sender)?.isVisible(), args });
+  return handler(event, ...args);
+});
 let running = null;
 app.on('browser-window-created', (_createdEvent, win) => {
   win.__created = performance.now();
@@ -64,8 +73,13 @@ app.on('browser-window-created', (_createdEvent, win) => {
     return show();
   };
   wc.send = (channel, ...args) => {
+    if (channel === 'app.prepareWindowTarget') {
+      win.__preparing = args[0];
+      win.__prepareStarted = performance.now();
+      log({ kind: 'prepare-target', id: win.id, at: win.__prepareStarted });
+    }
     if (channel === 'app.windowTarget') {
-      win.__claim = performance.now();
+      win.__claim ??= performance.now();
       log({
         kind: 'claim',
         id: win.id,
@@ -76,7 +90,12 @@ app.on('browser-window-created', (_createdEvent, win) => {
     }
     return send(channel, ...args);
   };
-  wc.on('ipc-message', (_, channel) => {
+  wc.on('ipc-message', (_, channel, state) => {
+    if (channel === 'app.preparedWindowState') {
+      win.__targetReady = state.ready;
+      if (state.ready) win.__prepareMs = performance.now() - win.__prepareStarted;
+      log({ kind: 'prepared-state', id: win.id, ready: state.ready });
+    }
     if (channel === 'app.windowReady') win.__shellReady = true;
     if (channel === 'app.windowContentReady' && win.__claim)
       log({ kind: 'content-ready', id: win.id, afterClaimMs: performance.now() - win.__claim });
@@ -88,8 +107,9 @@ app.on('browser-window-created', (_createdEvent, win) => {
   win.on('show', async () => {
     if (!win.__claim) return;
     const claimToShowMs = performance.now() - win.__claim;
+    log({ kind: 'native-show-event', id: win.id, claimToShowMs });
     try {
-      const capture = wc.capturePage();
+      const capture = wc.capturePage().then(image => { log({kind: 'capture-complete', id: win.id}); return image; });
       const inputResult = checkInput
         ? (async () => {
             const token = 'prepared-window-probe-' + win.id;
@@ -101,9 +121,11 @@ app.on('browser-window-created', (_createdEvent, win) => {
       })()`);
             if (!focused) throw new Error('Composer not editable at first show');
             await wc.insertText(token);
+            log({kind: 'input-inserted', id: win.id});
             await wc.executeJavaScript(
               'new Promise(resolve => requestAnimationFrame(() => resolve()))'
             );
+            log({kind: 'input-frame', id: win.id});
             const accepted = await wc.executeJavaScript(
               `document.querySelector('textarea[data-lody-composer-input]')?.value.includes(${JSON.stringify(token)})`
             );
@@ -210,6 +232,26 @@ app.whenReady().then(async () => {
         await spare.webContents.debugger.sendCommand('Profiler.enable');
         await spare.webContents.debugger.sendCommand('Profiler.start');
       }
+      if (productPreparedMode) {
+        await source.webContents.executeJavaScript(`(async () => {
+          const room = 'session-session-conversation-view-fixture';
+          const meta = (await window.repo.getDocMeta(room)).meta;
+          await window.repo.upsertDocMeta(room, { ...meta, lastReadAt: 0 });
+          const row = document.querySelector('[data-sidebar-session-id="session-conversation-view-fixture"]');
+          if (!row) throw new Error('Missing real Session row');
+          row.dispatchEvent(new MouseEvent('pointerout', { bubbles: true }));
+          row.dispatchEvent(new MouseEvent('pointerover', { bubbles: true }));
+        })()`);
+        if (intentLeadMs === null) await waitFor(() => spare.__targetReady, 'production prepared Session');
+        else await new Promise(resolve => setTimeout(resolve, intentLeadMs));
+        if (spare.isVisible()) throw new Error('Speculative window became visible');
+        const untouched = await source.webContents.executeJavaScript(`(async () =>
+          (await window.repo.getDocMeta('session-session-conversation-view-fixture')).meta.lastReadAt === 0)()`);
+        const targetUnread = !spare.__preparing || await spare.webContents.executeJavaScript(`(async () =>
+          (await window.repo.getDocMeta('session-session-conversation-view-fixture')).meta.lastReadAt === 0)()`);
+        if (!untouched || !targetUnread) throw new Error('Preparation marked Session read');
+        log({ kind: 'speculative-side-effects', id: spare.id, unreadPreserved: true, hidden: true });
+      }
       if (preparedMode) {
         heldWindow = spare;
         spare.__holdPresentation = true;
@@ -238,11 +280,15 @@ app.whenReady().then(async () => {
         running = { resolve, reject };
       });
       const timeout = setTimeout(() => running?.reject(new Error('No show')), 10000);
+      const readyAtClick = Boolean(spare.__targetReady);
       const started = performance.now();
+      if (productPreparedMode) spare.__claim = started;
       await source.webContents.executeJavaScript(
         preparedMode
           ? `window.ipc.invoke('app.benchmarkPresent')`
-          : `window.ipc.invoke('app.openWindow',{workspace:'local',sessionId:'session-conversation-view-fixture'})`
+          : productPreparedMode
+            ? `document.querySelector('[data-sidebar-session-id="session-conversation-view-fixture"]').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true }))`
+            : `window.ipc.invoke('app.openWindow',{workspace:'local',sessionId:'session-conversation-view-fixture'})`
       );
       const row = await shown;
       clearTimeout(timeout);
@@ -264,6 +310,7 @@ app.whenReady().then(async () => {
       results.push({
         ...row,
         prepared,
+        readyAtClick,
         requestToProbeCompleteMs: performance.now() - started,
         warmup: i < 3,
       });
@@ -278,9 +325,11 @@ app.whenReady().then(async () => {
         {
           variant: process.env.PROBE_VARIANT,
           preparedMode,
+          productPreparedMode,
           nativeAnimationDisabled: !!nativeHost,
-          timingBoundary: preparedMode ? 'prepared host presentation IPC' : 'target navigation IPC',
-          hitRate: preparedMode ? 1 : null,
+          timingBoundary: productPreparedMode ? 'source row Command-click dispatch' : preparedMode ? 'prepared host presentation IPC' : 'target navigation IPC',
+          intentLeadMs,
+          hitRate: productPreparedMode ? results.filter(r => !r.warmup && r.readyAtClick).length / repeats : preparedMode ? 1 : null,
           entries: rounds * 2,
           spareMinimumAgeMs: 1500,
           source: 'real desktop renderer / synthetic CRDT fixture / bundled CLI',

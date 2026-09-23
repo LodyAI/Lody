@@ -38,7 +38,10 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 
 - A neutral local warm spare may initialize the implicit workspace runtime without
   publishing route context. A matching claim must retain that runtime or its in-flight
-  initialization. Do not infer a cloud workspace or mount speculative Session UI.
+  initialization. Do not infer a cloud workspace. Only the main-owned macOS local
+  prepared-window lifecycle may mount a speculative Session; it must gate read
+  receipts, workspace ownership, autofocus and external-history refresh until
+  presentation. Raw background prefetch never gains this exception.
 
 - Background Session prefetch must never acquire a UI Session store or create a
   Mirror. Its disposable worker owns raw Doc import/export and a separate,

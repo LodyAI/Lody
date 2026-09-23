@@ -12,8 +12,9 @@ window. Propose preparing bounded, target-specific interactive surfaces before
 the request, then presenting an existing surface. A longer-term shared data owner
 could remove repeated document import across renderers; macOS GPU surfaces offer
 a separate visual-preview option. A macOS-only benchmark prototype now presents a prepared real Session in about
-41 ms median, with text insertion confirmed in 90 ms. Product integration remains
-proposed; cache misses and independent duplicate views are explicit limits.
+41 ms median, with text insertion confirmed in 90 ms. The first stage is now integrated into the opt-in macOS local warmup path;
+shared data ownership and GPU previews remain proposals. Cache misses and independent
+duplicate views are explicit limits.
 
 ## Evidence and constraints
 
@@ -28,16 +29,16 @@ Most measured time is still before native presentation.
 
 The [window Spec](../../../../specs/desktop-windows.md) preserves the source window
 when opening a new one. Moving its sole live view would violate this behavior.
-The provider's neutral-spare and background-prefetch rules currently prohibit
-speculative Session UI acquisition. A prepared-surface lifecycle needs an explicit
-draft contract and scoped rule changes before implementation; it must not silently
-reuse the existing raw-snapshot prefetch mechanism.
+The provider rules now allow only the main-owned macOS prepared-window lifecycle
+to mount a speculative Session, under the draft window contract. Raw-snapshot
+background prefetch remains separate and cannot acquire Session UI stores.
 
 ## Proposed sequence
 
-1. **Target-specific prepared surface.** Begin with one hidden target-bound window,
+1. **Target-specific prepared surface (integrated).** Use one hidden target-bound window,
    using the existing native host. Prepare from high-confidence intent (opening a
-   Session context menu, modifier-hover/focus) and a bounded recent-target cache.
+   Session context menu or row hover/focus). The current single slot has expiry and
+   cancellation, but no recent-target cache.
    Finish real hydration, layout and scroll restoration before marking it ready.
    A matching claim shows that exact renderer without navigation or remounting.
    Mouse-down alone is insufficient preparation lead time. Misses retain the
@@ -121,14 +122,18 @@ requires a unique absent token and retention after a frame, avoiding false passe
 from existing drafts. No insertion retries mask failures. Native text insertion
 is not physical keyboard/IME acceptance. Tail input latency still exceeds the
 proposed 100 ms target; native animation removal alone has no established stable
-benefit. Product-side speculative effects, target miss rates, memory budgets and
-signed arm64/x64 distribution remain unverified.
+benefit. Production lifecycle and side-effect validation are recorded in the
+   [implementation note](../../implemented/bug-fix/2026-09-22-warm-window-content-readiness.md).
+Real-world target hit rates, memory budgets and signed native distribution remain
+unverified; the native addon is still probe-only.
 
 ## Outcome
 
 Prefer a target-bound, fully interactive warm surface experiment first. Treat
 shared ownership as a separate architecture migration and GPU previews as an
-optional visual mechanism. The prototype changes no product runtime behavior or Spec guarantee. Documentation
+optional visual mechanism. The probe-only native addon changes no product behavior. The first-stage integration
+uses existing native BrowserWindows and the draft Spec; its implementation evidence
+lives in the linked note. Documentation
 checks retain the checkout's existing absent-submodule link failures, and root checks
 stop at missing packages/ignore dependencies. The macOS arm64 addon compiles and runs
 in the isolated probe; packaged native distribution has not been validated.

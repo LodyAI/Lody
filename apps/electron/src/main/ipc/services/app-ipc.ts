@@ -18,7 +18,12 @@ import {
 import { getIpcServiceDeps } from '../ipc-service-deps'
 import { parseDevbarControlInput } from '../../services/devbar/control'
 import { getDevbarConfig, getDevbarMetrics, setDevbarControl } from '../../services/devbar/service'
-import { getWindowWarmupMetrics, setWindowWarmupEnabled } from '../../window-warm-service'
+import {
+  prepareWindow,
+  cancelPreparedWindow,
+  getWindowWarmupMetrics,
+  setWindowWarmupEnabled
+} from '../../window-warm-service'
 import { setMenuLanguage } from '../../menu'
 import { localFileActionError } from '../../services/local-file-action-error'
 import { hasPathLauncher, launchLocalPath } from '../../services/local-path-launcher-service'
@@ -104,6 +109,25 @@ export class AppIpc extends IpcService {
     const { event } = getIpcContext()
     assertProductWindowSender(event)
     openSessionWindow(parseWindowTarget(raw))
+  }
+
+  @IpcMethod()
+  async prepareWindow(raw: WindowTarget, requestId: string): Promise<void> {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    if (typeof requestId !== 'string' || !/^[a-zA-Z0-9-]{1,64}$/.test(requestId))
+      throw new Error('Invalid preparation request')
+    const source = BrowserWindow.fromWebContents(event.sender)
+    if (source) prepareWindow(source, parseWindowTarget(raw), requestId)
+  }
+
+  @IpcMethod()
+  async cancelPreparedWindow(requestId: string): Promise<void> {
+    const { event } = getIpcContext()
+    assertProductWindowSender(event)
+    if (typeof requestId !== 'string' || requestId.length > 64)
+      throw new Error('Invalid preparation request')
+    cancelPreparedWindow(event.sender.id, requestId)
   }
 
   @IpcMethod()

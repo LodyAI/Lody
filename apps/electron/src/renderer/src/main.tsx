@@ -1,4 +1,7 @@
-import { waitForTargetContentPainted } from './warm-window-reveal'
+import { installWindowPreparationIntent } from '@lody/components/lib/window-preparation-intent'
+import { windowPreparationAtom } from '@lody/components/lib/window-preparation'
+import type { PreparedWindowTarget } from '@lody/shared/electron-ipc'
+import { observePreparedTarget, waitForTargetContentPainted } from './warm-window-reveal'
 import { preloadMainLayout } from '@lody/components/components/preloaded-main-layout'
 import {
   isSessionWindow,
@@ -128,7 +131,12 @@ function RendererCommitSentinel(): null {
  * would derive from its URL, then navigates client-side.
  */
 function installWarmWindowBinding(router: ReturnType<typeof createRouter>): void {
-  onIpcEvent('app.windowTarget', (target) => {
+  let preparation: PreparedWindowTarget | null = null
+  let stopObserving: (() => void) | undefined
+  const navigate = (
+    target: { workspace: string; sessionId?: string },
+    completed: () => void
+  ): void => {
     sessionStorage.setItem('lody:auxiliaryWindow', '1')
     sessionStorage.removeItem('lody:windowFocusConsumed')
     if (target.sessionId) {
@@ -150,10 +158,40 @@ function installWarmWindowBinding(router: ReturnType<typeof createRouter>): void
     // Main keeps the native window hidden until this exact target has painted.
     void navigation.finally(() => {
       clearWarmWindowFlag()
+      completed()
+    })
+  }
+  onIpcEvent('app.windowTarget', (target) => {
+    stopObserving?.()
+    preparation = null
+    jotaiStore.set(windowPreparationAtom, false)
+    navigate(target, () =>
       waitForTargetContentPainted(rootElement!, target, () =>
         sendIpc('app.windowContentReady', target)
       )
+    )
+  })
+  onIpcEvent('app.prepareWindowTarget', (target) => {
+    stopObserving?.()
+    preparation = target
+    jotaiStore.set(windowPreparationAtom, true)
+    navigate(target, () => {
+      if (preparation !== target) return
+      stopObserving = observePreparedTarget(rootElement!, target, (ready) =>
+        sendIpc('app.preparedWindowState', { ...target, ready })
+      )
     })
+  })
+  onIpcEvent('app.activatePreparedWindow', (target) => {
+    if (
+      preparation?.preparationId !== target.preparationId ||
+      preparation.workspace !== target.workspace ||
+      preparation.sessionId !== target.sessionId
+    )
+      return
+    stopObserving?.()
+    preparation = null
+    jotaiStore.set(windowPreparationAtom, false)
   })
 }
 
@@ -200,6 +238,7 @@ try {
     history: usesHashHistory ? createHashHistory() : undefined
   })
   installWarmWindowBinding(router)
+  installWindowPreparationIntent()
   if (isWarmWindow()) {
     void preloadMainLayout().catch((error) => {
       console.warn('[Lody] Warm workspace layout preload failed', error)
