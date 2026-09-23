@@ -1,26 +1,21 @@
 import { useEffect, useRef, type ComponentProps, type FormEvent, type ReactNode } from 'react';
-import {
-  ArrowLeft,
-  ArrowRight,
-  MessageCircle,
-  Monitor,
-  Power,
-  RefreshCw,
-  Share2,
-  X,
-} from 'lucide-react';
+import { ArrowLeft, ArrowRight, MessageCircle, Power, RefreshCw, Share2, X } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
 import { cn } from '@/lib/utils';
+import {
+  PreviewConnectionStatus,
+  type PreviewConnectionStatusProps,
+} from './preview-connection-status';
 
 type SessionBrowserToolbarProps = {
   leadingSlot?: ReactNode;
   focusAddress?: boolean;
   address: string;
-  remoteMachineName?: string;
+  previewStatus?: PreviewConnectionStatusProps;
   canGoBack: boolean;
   canGoForward: boolean;
   loading: boolean;
@@ -71,7 +66,7 @@ export function SessionBrowserToolbar({
   leadingSlot,
   focusAddress = false,
   address,
-  remoteMachineName,
+  previewStatus,
   canGoBack,
   canGoForward,
   loading,
@@ -158,15 +153,10 @@ export function SessionBrowserToolbar({
               disabled={busy}
               className="h-full min-w-0 flex-1 bg-transparent px-2.5 text-xs text-foreground outline-none placeholder:text-muted-foreground"
             />
-            {remoteMachineName ? (
-              <span
-                className="flex min-w-0 max-w-[40%] shrink-0 items-center gap-1 border-l border-input-border/70 px-2 text-[11px] text-muted-foreground"
-                aria-label={`${t('sessions.browser.remoteMachine', 'Remote machine')}: ${remoteMachineName}`}
-                title={remoteMachineName}
-              >
-                <Monitor className="h-3 w-3 shrink-0" aria-hidden />
-                <span className="truncate">{remoteMachineName}</span>
-              </span>
+            {previewStatus ? (
+              <div className="mr-0.5 flex shrink-0 items-center">
+                <PreviewConnectionStatus {...previewStatus} />
+              </div>
             ) : null}
           </div>
         </form>

@@ -201,39 +201,35 @@ export const DownloadFailed: Story = {
   args: { scenario: 'failed' },
   play: async (context) => {
     await enterAddress(context);
-    await expect(await within(context.canvasElement).findByRole('alert')).toHaveTextContent(
-      'cloudflared download failed (HTTP 404)'
-    );
+    await within(context.canvasElement).findByText('cloudflared download failed (HTTP 404)');
   },
 };
 export const RequestTimedOut: Story = {
   args: { scenario: 'timeout' },
   play: async (context) => {
     await enterAddress(context);
-    await expect(await within(context.canvasElement).findByRole('alert')).toHaveTextContent(
-      'Browser request timed out.'
-    );
+    await within(context.canvasElement).findByText('Browser request timed out.');
   },
 };
 export const Expired: Story = {
   args: { scenario: 'expired' },
   play: async ({ canvasElement }) => {
-    await within(canvasElement).findAllByText('Preview expired: idle for 1 hour');
+    await within(canvasElement).findByText('Preview link expired');
   },
 };
 export const Revoked: Story = {
   args: { scenario: 'revoked' },
   play: async ({ canvasElement }) => {
-    await within(canvasElement).findAllByRole('button', { name: 'Reopen preview' });
+    await within(canvasElement).findByRole('button', { name: 'Reopen preview' });
   },
 };
 export const RestoreStartsNewTunnel: Story = {
   args: { scenario: 'expired' },
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement);
-    const buttons = await canvas.findAllByRole('button', { name: 'Restore preview' });
-    await userEvent.click(buttons[buttons.length - 1]!);
-    await canvas.findAllByText('Connecting remote preview…');
+    const restore = await canvas.findByRole('button', { name: 'Restore preview' });
+    await userEvent.click(restore);
+    await canvas.findByText('Creating preview link…');
     await expect(canvas.getByRole('textbox', { name: 'Address' })).toHaveValue(
       'http://localhost:5173/dashboard?mode=dev'
     );

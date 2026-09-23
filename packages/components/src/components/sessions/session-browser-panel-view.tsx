@@ -6,7 +6,7 @@ import { Spinner } from '@/ui/spinner';
 import { cn } from '@/lib/utils';
 import { SessionBrowserToolbar } from './session-browser-toolbar';
 import {
-  PreviewConnectionStatus,
+  PreviewConnectionPlaceholder,
   type PreviewConnectionStatusProps,
 } from './preview-connection-status';
 
@@ -15,7 +15,6 @@ export type ManagedNavigationPhase = 'resolving-machine' | 'opening-local' | 'cr
 type SessionBrowserPanelViewProps = {
   className?: string;
   toolbar: ComponentProps<typeof SessionBrowserToolbar>;
-  remoteMachineName?: string;
   previewStatus?: PreviewConnectionStatusProps;
   error?: string | null;
   onDismissError: () => void;
@@ -28,7 +27,6 @@ type SessionBrowserPanelViewProps = {
 export function SessionBrowserPanelView({
   className,
   toolbar,
-  remoteMachineName,
   previewStatus,
   error,
   onDismissError,
@@ -37,20 +35,25 @@ export function SessionBrowserPanelView({
   children,
 }: SessionBrowserPanelViewProps) {
   const { t } = useTranslation();
+  const hasContent = Boolean(children);
+  // When remote content is absent the placeholder owns the single recovery
+  // action; keeping it out of the popover avoids two simultaneous Restore
+  // buttons. Local/connected content has no placeholder, so the popover owns it.
+  const toolbarPreviewStatus =
+    previewStatus && hasContent
+      ? previewStatus
+      : previewStatus && { ...previewStatus, onRestore: undefined, onStopSharing: undefined };
+  const previewDiagnostic =
+    previewStatus?.unavailableReason ??
+    previewStatus?.error ??
+    previewStatus?.connection?.error?.message ??
+    null;
+  const showErrorBanner =
+    Boolean(error) && !(previewStatus && !hasContent && previewDiagnostic === error);
   return (
     <div className={cn('flex h-full min-h-0 flex-col bg-background', className)}>
-      <SessionBrowserToolbar {...toolbar} />
-      {remoteMachineName && (
-        <p className="border-b border-border px-3 py-1 text-[11px] text-muted-foreground">
-          {t(
-            'sessions.browser.connection.enterConsent',
-            'For localhost on {{machine}}, Enter authorizes remote sharing. Anyone with the link can access it.',
-            { machine: remoteMachineName }
-          )}
-        </p>
-      )}
-      {previewStatus && <PreviewConnectionStatus {...previewStatus} />}
-      {error ? (
+      <SessionBrowserToolbar {...toolbar} previewStatus={toolbarPreviewStatus} />
+      {showErrorBanner ? (
         <div
           role="alert"
           className="flex items-start gap-2 border-b border-destructive/30 bg-destructive/8 px-3 py-2 text-xs text-destructive"
@@ -86,7 +89,7 @@ export function SessionBrowserPanelView({
       ) : (
         (children ??
         (previewStatus ? (
-          <PreviewConnectionStatus {...previewStatus} placeholder />
+          <PreviewConnectionPlaceholder {...previewStatus} />
         ) : (
           <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 bg-background px-6 text-center">
             <Globe2 className="h-7 w-7 text-muted-foreground/60" aria-hidden />

@@ -1,7 +1,7 @@
 import type { ComponentProps } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider } from 'jotai';
-import { fn } from 'storybook/test';
+import { expect, fn, userEvent } from 'storybook/test';
 import { useTranslation } from 'react-i18next';
 import type { PreviewConnection, SessionId, SessionMeta, MachineId } from '@lody/shared';
 import { SessionBrowserPanelView } from '@/components/sessions/session-browser-panel-view';
@@ -12,6 +12,7 @@ type ViewProps = ComponentProps<typeof SessionBrowserPanelView>;
 type Scenario = Omit<ViewProps, 'children'> & {
   page?: boolean;
   publicBrowser?: boolean;
+  remoteMachineName?: string;
   unavailable?: 'machineOffline' | 'ownerRequired' | 'sessionEnded';
 };
 
@@ -70,8 +71,9 @@ const toolbar: ViewProps['toolbar'] = {
   onStopSharing: fn(),
 };
 const restore = fn();
-const remote = { local: false, onRestore: restore };
-const local = { local: true, onRestore: restore };
+const stopSharing = fn();
+const remote = { local: false, onRestore: restore, onStopSharing: stopSharing };
+const local = { local: true, onRestore: restore, onStopSharing: stopSharing };
 const session = {
   id: 'storybook-preview-page' as SessionId,
   machineId: 'storybook-machine' as MachineId,
@@ -87,21 +89,19 @@ const session = {
 const pageHtml =
   '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><style>body{margin:0;padding:32px;font:15px system-ui;color:#20242b;background:#fff}small{color:#68717d}h1{font-size:26px;font-weight:600;margin:24px 0 12px}p{max-width:42ch;line-height:1.6}hr{border:0;border-top:1px solid #e5e7eb;margin:24px 0}</style><small>DEVELOPMENT SERVER · STORYBOOK FIXTURE</small><h1>Your local app</h1><p>This page stays available locally even when remote sharing expires.</p><hr><small>Static fixture content. No Cloudflare or development server connection.</small></html>';
 
-function PreviewStory({ page, publicBrowser, unavailable, ...props }: Scenario) {
+function PreviewStory({ page, publicBrowser, unavailable, remoteMachineName, ...props }: Scenario) {
   const { t } = useTranslation();
-  return (
-    <SessionBrowserPanelView
-      {...props}
-      toolbar={{ ...props.toolbar, remoteMachineName: props.remoteMachineName }}
-      previewStatus={
-        props.previewStatus && {
-          ...props.previewStatus,
-          unavailableReason: unavailable
-            ? t(`sessions.browser.connection.${unavailable}`)
-            : undefined,
-        }
+  const previewStatus = props.previewStatus
+    ? {
+        ...props.previewStatus,
+        remoteMachineName: remoteMachineName ?? props.previewStatus.remoteMachineName,
+        unavailableReason: unavailable
+          ? t(`sessions.browser.connection.${unavailable}`)
+          : props.previewStatus.unavailableReason,
       }
-    >
+    : undefined;
+  return (
+    <SessionBrowserPanelView {...props} previewStatus={previewStatus}>
       {publicBrowser ? (
         <PublicBrowserSurface
           browserId="storybook-public-browser"
@@ -130,6 +130,14 @@ function PreviewStory({ page, publicBrowser, unavailable, ...props }: Scenario) 
   );
 }
 
+const openStatusPopover: NonNullable<Story['play']> = async ({ canvasElement }) => {
+  const trigger = canvasElement.querySelector('[data-testid="preview-status-trigger"]');
+  if (!(trigger instanceof HTMLElement)) throw new Error('Expected preview status trigger');
+  trigger.focus();
+  await userEvent.keyboard('{Enter}');
+  await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+};
+
 const meta = {
   title: 'Sessions/Browser Preview/States',
   component: PreviewStory,
@@ -138,7 +146,7 @@ const meta = {
     docs: {
       description: {
         component:
-          'Production Browser presentation with controlled state. The page is rendered by the real ManagedPreviewSurface using an inert static HTML fixture; no tunnel, auth or native Electron engine is exercised. Controller stories cover Enter and restore separately. Theme and locale can be changed from the toolbar.',
+          'Production Browser presentation with controlled state. The status icon and popover use the real PreviewConnectionStatus component; the page is rendered by the real ManagedPreviewSurface using an inert static HTML fixture. No tunnel, auth or native Electron engine is exercised. Controller stories cover Enter and restore separately. Theme and locale can be changed from the toolbar.',
       },
     },
   },
@@ -150,7 +158,7 @@ const meta = {
     ),
   ],
   args: {
-    toolbar: { ...toolbar, remoteMachineName: 'Build Mac' },
+    toolbar,
     remoteMachineName: 'Build Mac',
     onDismissError: fn(),
   },
@@ -186,7 +194,7 @@ export const RemoteNotOpen: Story = { args: { previewStatus: remote } };
 export const RemoteConnected: Story = {
   args: {
     page: true,
-    previewStatus: { ...remote, connection: active },
+    previewStatus: { ...remote, connection: active, hasShareUrl: true },
     toolbar: { ...toolbar, hasShareUrl: true },
   },
 };
@@ -222,7 +230,7 @@ export const LocalDirect: Story = {
 export const LocalSharing: Story = {
   args: {
     ...LocalDirect.args,
-    previewStatus: { ...local, connection: active },
+    previewStatus: { ...local, connection: active, hasShareUrl: true },
     toolbar: { ...toolbar, hasShareUrl: true },
   },
 };
@@ -250,7 +258,10 @@ export const LocalChecking: Story = {
   args: { ...LocalDirect.args, previewStatus: { ...local, checking: true } },
 };
 export const PageLoading: Story = {
-  args: { ...RemoteConnected.args, toolbar: { ...toolbar, hasShareUrl: true, loading: true } },
+  args: {
+    ...RemoteConnected.args,
+    toolbar: { ...toolbar, hasShareUrl: true, loading: true },
+  },
 };
 export const AnnotationAvailable: Story = {
   args: { ...LocalDirect.args, toolbar: { ...toolbar, annotationAvailable: true } },
@@ -275,7 +286,12 @@ export const HistoryAvailable: Story = {
 };
 export const DownloadFailed: Story = {
   args: {
-    previewStatus: { ...remote, connection: failed, error: failed.error!.message },
+    previewStatus: {
+      ...remote,
+      connection: failed,
+      hasShareUrl: false,
+      error: failed.error!.message,
+    },
     error: failed.error!.message,
   },
 };
@@ -287,7 +303,6 @@ export const LongDiagnostic: Story = {
       error:
         'cloudflared readiness failed: the origin server at http://localhost:5173/dashboard?mode=dev did not respond; connection refused. Start the development server, then restore preview.',
     },
-    error: 'Preview tunnel creation failed: connection refused (127.0.0.1:5173).',
   },
 };
 export const PublicBrowserUnsupported: Story = {
@@ -306,3 +321,34 @@ export const MobileExpired: Story = {
 };
 export const DarkConnected: Story = { args: RemoteConnected.args, globals: { theme: 'dark' } };
 export const ChineseExpired: Story = { args: RemoteExpired.args, globals: { locale: 'zh_CN' } };
+
+export const StatusPopoverRemote: Story = {
+  args: RemoteConnected.args,
+  play: openStatusPopover,
+};
+export const StatusPopoverLocalExpired: Story = {
+  args: LocalShareExpired.args,
+  play: openStatusPopover,
+};
+export const StatusPopoverNarrow: Story = {
+  args: RemoteExpired.args,
+  parameters: { viewport: { defaultViewport: 'mobile1' } },
+  decorators: [
+    (Story) => (
+      <div style={{ width: 390, maxWidth: '100vw', height: '100vh' }}>
+        <Story />
+      </div>
+    ),
+  ],
+  play: openStatusPopover,
+};
+export const StatusPopoverDark: Story = {
+  args: RemoteConnected.args,
+  globals: { theme: 'dark' },
+  play: openStatusPopover,
+};
+export const StatusPopoverChinese: Story = {
+  args: RemoteExpired.args,
+  globals: { locale: 'zh_CN' },
+  play: openStatusPopover,
+};

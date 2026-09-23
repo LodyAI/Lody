@@ -63,13 +63,18 @@ Probes, status reads, invalid requests, protocol ping/pong, hidden Browser panel
 and local viewing do not. Expiration cannot be reversed by a late request.
 Activity stays in CLI memory, not high-frequency shared document writes.
 
-Browser always displays a textual connection state. Expired/failed remote
-content is replaced with a reason and one-click restore action, preserving the
-development address, path, and query. Restore is new explicit authorization and
-loads a new endpoint without replaying application operations. Browser explains
-that the share link changed and offers copying it. Offline/ended Sessions show
-why restoration is unavailable. Closing remote sharing never stops local viewing
-or the user's development server. Panel unmount does not close the endpoint.
+Browser exposes connection state as one address-bar status control with a
+distinct icon and accessible name; opening it shows the short textual state,
+the local/remote relationship, relevant diagnostics, and applicable recovery or
+stop-sharing actions. It preserves the facts that Enter authorizes the exact
+localhost target, link holders can access the shared preview, and remote sharing
+stops after one hour idle. Expired/failed remote content is replaced with a
+reason and one-click restore action, preserving the development address, path,
+and query. Restore is new explicit authorization and loads a new endpoint
+without replaying application operations. Browser explains that the share link
+changed and offers copying it. Offline/ended Sessions show why restoration is
+unavailable. Closing remote sharing never stops local viewing or the user's
+development server. Panel unmount does not close the endpoint.
 
 ## Boundaries and verification
 

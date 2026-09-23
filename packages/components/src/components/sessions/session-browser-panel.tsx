@@ -1059,6 +1059,9 @@ function SessionBrowserPanelController({
     (currentAddress?.engine === 'public-web' && publicState?.canGoForward === true) ||
     (currentAddress?.engine === 'managed-preview' && managedState?.canGoForward === true) ||
     (history.index >= 0 && history.index < history.entries.length - 1);
+  const remoteMachineName =
+    machinePlane === 'cloud' ? sessionMachine?.name?.trim() || session.machineId : undefined;
+  const hasShareUrl = currentAddress?.engine === 'managed-preview' && !!activeShareUrl;
   const previewUnavailableReason = session.isArchived
     ? t(
         'sessions.browser.connection.sessionEnded',
@@ -1082,7 +1085,10 @@ function SessionBrowserPanelController({
     busy: navigationBusy,
     unavailableReason: previewUnavailableReason,
     error: previewStatusError,
+    remoteMachineName,
+    hasShareUrl,
     onRestore: () => void restorePreview(),
+    onStopSharing: () => void stopSharing(),
   };
 
   return (
@@ -1092,8 +1098,6 @@ function SessionBrowserPanelController({
         leadingSlot: leadingSlot,
         focusAddress: active && currentAddress === null,
         address: address,
-        remoteMachineName:
-          machinePlane === 'cloud' ? sessionMachine?.name?.trim() || session.machineId : undefined,
         canGoBack: canGoBack,
         canGoForward: canGoForward,
         loading: loading,
@@ -1114,9 +1118,6 @@ function SessionBrowserPanelController({
         onShare: () => void handleShare(),
         onStopSharing: () => void stopSharing(),
       }}
-      remoteMachineName={
-        machinePlane === 'cloud' ? sessionMachine?.name?.trim() || session.machineId : undefined
-      }
       previewStatus={currentAddress?.engine === 'managed-preview' ? previewStatusProps : undefined}
       error={error}
       onDismissError={() => setError(null)}

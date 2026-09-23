@@ -18,7 +18,11 @@ test('Browser Preview stories render, complete their interactions and expose rec
     await test.step(id, async () => {
       // A fresh context also isolates next-themes, locale and resume-state caches.
       const context = await browser.newContext({
-        viewport: { width: id.endsWith('--mobile-expired') ? 390 : 1000, height: 640 },
+        viewport: {
+          width:
+            id.endsWith('--mobile-expired') || id.endsWith('--status-popover-narrow') ? 390 : 1000,
+          height: 640,
+        },
       });
       const page = await context.newPage();
       const errors: string[] = [];
@@ -46,20 +50,32 @@ test('Browser Preview stories render, complete their interactions and expose rec
         await expect(page.locator('#storybook-root input')).toBeVisible();
         await expect(page.locator('#storybook-root')).not.toBeEmpty();
         if (/--(machine-offline|owner-required|archived-session)$/.test(id)) {
-          const restore = page.getByRole('button', { name: 'Restore preview' });
-          await expect(restore.first()).toBeDisabled();
-          await expect(restore.last()).toBeDisabled();
+          await expect(page.getByRole('button', { name: 'Restore preview' })).toBeDisabled();
         }
         if (id.endsWith('--local-share-expired')) {
-          await expect(page.getByText('Local direct preview')).toBeVisible();
-          await expect(page.getByRole('button', { name: 'Restore preview' })).toBeEnabled();
+          const localPage = page
+            .frameLocator('iframe')
+            .getByRole('heading', { name: 'Your local app' });
+          await expect(localPage).toBeVisible();
+          await page.getByRole('button', { name: /Preview status/ }).click();
           await expect(
-            page.frameLocator('iframe').getByRole('heading', { name: 'Your local app' })
+            page.getByText('Local viewing continues; remote sharing is unavailable.')
           ).toBeVisible();
+          await expect(page.getByRole('button', { name: 'Restore preview' })).toBeEnabled();
         }
         if (id.endsWith('--remote-expired')) {
           await expect(page.locator('iframe')).toHaveCount(0);
-          await expect(page.getByRole('button', { name: 'Restore preview' }).last()).toBeEnabled();
+          await expect(page.getByText('Preview link expired')).toBeVisible();
+          await expect(page.getByRole('button', { name: 'Restore preview' })).toBeEnabled();
+        }
+        if (id.includes('--status-popover-')) {
+          await expect(page.getByRole('dialog')).toBeVisible();
+        }
+        if (id.endsWith('--status-popover-remote')) {
+          await expect(page.getByText('Remote machine: Build Mac')).toBeVisible();
+        }
+        if (id.endsWith('--status-popover-chinese')) {
+          await expect(page.getByText('闲置 1 小时后关闭。')).toBeVisible();
         }
         if (id.endsWith('--annotation-enabled'))
           await expect(page.getByRole('button', { name: 'Exit annotation mode' })).toHaveAttribute(

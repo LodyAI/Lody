@@ -396,7 +396,7 @@ describe('SessionBrowserPanel controller', () => {
     });
     await nextStatus();
     expect(rendered.querySelector('[data-testid="managed-preview"]')).toBeNull();
-    expect(rendered.textContent).toContain('Preview expired: idle for 1 hour');
+    expect(rendered.textContent).toContain('Preview link expired');
     expect((rendered.querySelector('input') as HTMLInputElement).value).toBe(
       'http://127.0.0.1:5173/dashboard?mode=dev'
     );
@@ -413,7 +413,9 @@ describe('SessionBrowserPanel controller', () => {
     expect(
       rendered.querySelector('[data-testid="managed-preview"]')?.getAttribute('data-viewer-url')
     ).toBe('https://restored.trycloudflare.com/dashboard?mode=dev&__lody_preview_token=new-token');
-    expect(rendered.textContent).toContain('Remote preview · Connected');
+    expect(
+      rendered.querySelector('[data-testid="preview-status-trigger"]')?.getAttribute('aria-label')
+    ).toContain('Preview connected');
   });
 
   it('renews only the foreground remote endpoint and rechecks without renewal on return', async () => {
@@ -452,7 +454,9 @@ describe('SessionBrowserPanel controller', () => {
       { renewEndpointId: undefined }
     );
     expect(rendered.querySelector('[data-testid="managed-preview"]')).toBeNull();
-    expect(rendered.textContent).toContain('Preview expired');
+    expect(
+      rendered.querySelector('[data-testid="preview-status-trigger"]')?.getAttribute('aria-label')
+    ).toContain('Preview link expired');
     expect(testRuntime.requestSessionPreviewCreate).not.toHaveBeenCalled();
   });
 
@@ -480,8 +484,9 @@ describe('SessionBrowserPanel controller', () => {
     expect(
       rendered.querySelector('[data-testid="managed-preview"]')?.getAttribute('data-viewer-url')
     ).toBe(localEndpoint.viewerUrl);
-    expect(rendered.textContent).toContain('Local direct preview');
-    expect(rendered.textContent).toContain('Preview expired');
+    expect(
+      rendered.querySelector('[data-testid="preview-status-trigger"]')?.getAttribute('aria-label')
+    ).toContain('Preview link expired');
     expect(testRuntime.requestSessionPreviewEndpointRelease).not.toHaveBeenCalled();
   });
 
@@ -513,8 +518,10 @@ describe('SessionBrowserPanel controller', () => {
       });
       await flushMicrotasks();
     });
-    expect(rendered.textContent).toContain('Remote preview · Connected');
-    expect(rendered.textContent).not.toContain('Preview expired');
+    expect(
+      rendered.querySelector('[data-testid="preview-status-trigger"]')?.getAttribute('aria-label')
+    ).toContain('Preview connected');
+    expect(rendered.textContent).not.toContain('Preview link expired');
     expect(rendered.querySelector('[data-testid="managed-preview"]')).not.toBeNull();
   });
 
@@ -929,9 +936,10 @@ describe('SessionBrowserPanel controller', () => {
     ).toBe(
       'https://browser-preview.trycloudflare.com/dashboard?mode=dev&__lody_preview_token=remote-token'
     );
+    expect(rendered.querySelector('[data-testid="preview-status-trigger"]')).not.toBeNull();
     expect(
-      rendered.querySelector('[aria-label="Remote machine: Remote workstation"]')
-    ).not.toBeNull();
+      rendered.querySelector('[data-testid="preview-status-trigger"]')?.getAttribute('aria-label')
+    ).toContain('Preview connected');
     expect((rendered.querySelector('input[aria-label="Address"]') as HTMLInputElement).value).toBe(
       'http://127.0.0.1:5173/dashboard?mode=dev'
     );
@@ -949,8 +957,11 @@ describe('SessionBrowserPanel controller', () => {
     await enterAddress(rendered, '127.0.0.1:5173/dashboard?mode=dev');
 
     expect(rendered.querySelector('[role="status"]')?.textContent).toContain(
-      'Connecting remote preview'
+      'Establishing a secure preview connection…'
     );
+    expect(
+      rendered.querySelector('[data-testid="preview-status-trigger"]')?.getAttribute('aria-label')
+    ).toContain('Creating preview link…');
     expect(
       (rendered.querySelector('input[aria-label="Address"]') as HTMLInputElement).disabled
     ).toBe(true);
@@ -973,7 +984,9 @@ describe('SessionBrowserPanel controller', () => {
     expect(surface?.getAttribute('data-logical-url')).toBe(
       'http://127.0.0.1:5173/dashboard?mode=dev'
     );
-    expect(rendered.querySelector('[role="status"]')).not.toBeNull();
+    expect(
+      rendered.querySelector('[data-testid="preview-status-trigger"]')?.getAttribute('aria-label')
+    ).toContain('Preview connected');
   });
 
   it('surfaces an unexpected remote navigation failure instead of rejecting silently', async () => {
