@@ -28,7 +28,6 @@ import {
   buildLocalPreviewRequestHeaders,
   buildLocalWebSocketUrl,
   headersToEntries,
-  headersToNodeRecord,
   maybeInjectVisualAnnotationRuntime,
   stripLocalWebSocketHeaders,
   assertRelativePreviewPath,
@@ -89,23 +88,6 @@ const resolveResourceLimits = (
 
 const sameTargetOrigin = (left: PreviewTarget, right: PreviewTarget): boolean =>
   left.protocol === right.protocol && left.host === right.host && left.port === right.port;
-
-const headersToNodeResponseHeaders = (
-  entries: HeaderEntry[]
-): Record<string, string | string[]> => {
-  const result: Record<string, string | string[]> = {};
-  for (const [name, value] of entries) {
-    const existing = result[name];
-    if (existing === undefined) {
-      result[name] = value;
-    } else if (Array.isArray(existing)) {
-      existing.push(value);
-    } else {
-      result[name] = [existing, value];
-    }
-  }
-  return result;
-};
 
 const incomingHeadersToEntries = (headers: IncomingHttpHeaders): HeaderEntry[] => {
   const entries: HeaderEntry[] = [];
@@ -512,7 +494,7 @@ export class LocalPreviewProxyManager {
       this.getWebSocketProtocols(request),
       {
         lookup: record.transport.lookup,
-        headers: headersToNodeRecord(stripLocalWebSocketHeaders([...headers.entries()])),
+        headers: Object.fromEntries(stripLocalWebSocketHeaders([...headers.entries()])),
         maxPayload: limits.maxResponseBodyBytes,
         handshakeTimeout: Math.min(limits.maxRequestDurationMs, 10_000),
       }
@@ -625,7 +607,7 @@ export class LocalPreviewProxyManager {
     record: LocalPreviewProxyRecord,
     headers: HeaderEntry[],
     setTokenCookie: boolean
-  ): Record<string, string | string[]> {
+  ): Record<string, string> {
     const sanitized = sanitizePreviewProxyResponseHeaders(headers).filter(
       ([name]) =>
         !['cache-control', 'cross-origin-embedder-policy', 'cross-origin-resource-policy'].includes(
@@ -642,7 +624,9 @@ export class LocalPreviewProxyManager {
         )}; Path=/; HttpOnly; ${record.remote ? 'Secure; SameSite=None; Partitioned' : 'SameSite=Lax'}`,
       ]);
     }
-    return headersToNodeResponseHeaders(sanitized);
+    // Fetch Headers already combined repeated names; upstream cookies were
+    // stripped by headersToEntries, and only our capability cookie is added here.
+    return Object.fromEntries(sanitized);
   }
 
   private async readRequestBody(

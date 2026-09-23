@@ -233,6 +233,23 @@ precedes forwarding; this does not grant access based on Origin.
 Mobile frontend and Electron production-mode bundles also compile; Electron's
 deployment origins were synthetic, so that build is not backend integration.
 
+## Ablation-based cleanup (2026-09-23)
+
+The baseline passed 87 Preview tests. Each retained simplification was applied
+separately and reran the whole Preview suite; no production fallback was added.
+
+| Ablation | Evidence and decision |
+| --- | --- |
+| Remove both manual header aggregation helpers | Retained: Fetch `Headers` already combines names. The proxy still removes application cookies and emits one capability cookie; duplicate-header/cookie boundary assertions pass. This is not a converter for arbitrary raw headers. |
+| Remove asynchronous in-memory slot wrappers, unused timestamp and returned key | Retained: reservation/release still mutate synchronously. Added a cross-workspace test proving the machine limit and slot reuse after revoke and failed download. |
+| Remove hand-initialized/no-op Promise resolver fields | Rejected and restored: all 88 unit tests passed, but the CLI build/typecheck failed with TS2550 because its configured library excludes `Promise.withResolvers`. Do not widen global compiler configuration for this cleanup. |
+| Remove in-flight health-check coalescing | Rejected and restored: the concurrent-health test starts a duplicate probe and observes an inactive endpoint instead of an active one. |
+
+After restoring both rejected ablations, all 88 Preview tests pass. The multi-owner
+fixture now closes its own child promise rather than the last-created child.
+These results establish the local regression boundary, not real-network performance
+or additional Windows/packaged-Electron acceptance.
+
 Deployed control integration, artifact publication, actual iframe/WS credentials,
 real-network health behavior and broad acceptance checks remain required. This record stays proposed until implementation and
 evidence cover the full contract.

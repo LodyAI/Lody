@@ -325,7 +325,7 @@ export class PreviewService {
   private readonly activeTunnels = new Map<SessionId, QuickTunnelSession>();
   private readonly operations = new Map<SessionId, Promise<unknown>>();
   private readonly cancelled = new Map<SessionId, AbortController>();
-  private readonly activeRegistryKeys = new Map<SessionId, string>();
+  private readonly slotIds = new Map<SessionId, string>();
   private readonly previewCreateAttempts: number[] = [];
   private readonly localProxyManager: LocalPreviewProxyManager;
 
@@ -542,13 +542,9 @@ export class PreviewService {
     await this.closeActiveTunnel(request.sessionId, 'replaced');
     signal.throwIfAborted();
 
-    const registryReservation = await this.reserveMachinePreviewSlot(
-      request.sessionId,
-      endpointId,
-      now
-    );
-    if ('failure' in registryReservation) {
-      return this.failCreatingConnection(request.sessionId, creating, registryReservation.failure);
+    const slotFailure = this.reserveMachinePreviewSlot(request.sessionId, endpointId);
+    if (slotFailure) {
+      return this.failCreatingConnection(request.sessionId, creating, slotFailure);
     }
 
     try {
@@ -580,7 +576,7 @@ export class PreviewService {
           this.serialize(request.sessionId, async () => {
             if (this.activeTunnels.get(request.sessionId) !== handle) return;
             this.activeTunnels.delete(request.sessionId);
-            await this.releaseMachinePreviewSlot(request.sessionId);
+            this.releaseMachinePreviewSlot(request.sessionId);
             if (result.error)
               await this.markTunnelClosedWithError(request.sessionId, active, result.error);
             else
@@ -610,7 +606,7 @@ export class PreviewService {
         if (this.activeTunnels.has(request.sessionId)) {
           await this.closeActiveTunnel(request.sessionId, 'revoked');
         } else {
-          await this.releaseMachinePreviewSlot(request.sessionId);
+          this.releaseMachinePreviewSlot(request.sessionId);
         }
       } catch (cleanupError) {
         if (cleanupError !== error)
@@ -971,7 +967,7 @@ export class PreviewService {
     try {
       await handle.close(reason);
     } finally {
-      await this.releaseMachinePreviewSlot(sessionId);
+      this.releaseMachinePreviewSlot(sessionId);
     }
   }
 
@@ -1027,30 +1023,27 @@ export class PreviewService {
     return null;
   }
 
-  private async reserveMachinePreviewSlot(
+  private reserveMachinePreviewSlot(
     sessionId: SessionId,
-    grantId: string,
-    _now: number
-  ): Promise<{ key: string } | { failure: ValidationFailure }> {
+    endpointId: string
+  ): ValidationFailure | null {
     const slots = machinePreviewSlots.get(this.deps.machineId) ?? new Set<string>();
     if (slots.size >= DEFAULT_PREVIEW_MAX_ACTIVE_TUNNELS_PER_MACHINE)
       return {
-        failure: {
-          code: 'resource_limit_exceeded',
-          message: 'Close an active preview before creating another.',
-          retryable: true,
-        },
+        code: 'resource_limit_exceeded',
+        message: 'Close an active preview before creating another.',
+        retryable: true,
       };
-    slots.add(grantId);
+    slots.add(endpointId);
     machinePreviewSlots.set(this.deps.machineId, slots);
-    this.activeRegistryKeys.set(sessionId, grantId);
-    return { key: grantId };
+    this.slotIds.set(sessionId, endpointId);
+    return null;
   }
 
-  private async releaseMachinePreviewSlot(sessionId: SessionId): Promise<void> {
-    const key = this.activeRegistryKeys.get(sessionId);
+  private releaseMachinePreviewSlot(sessionId: SessionId): void {
+    const key = this.slotIds.get(sessionId);
     if (!key) return;
-    this.activeRegistryKeys.delete(sessionId);
+    this.slotIds.delete(sessionId);
     const slots = machinePreviewSlots.get(this.deps.machineId);
     slots?.delete(key);
     if (slots?.size === 0) machinePreviewSlots.delete(this.deps.machineId);

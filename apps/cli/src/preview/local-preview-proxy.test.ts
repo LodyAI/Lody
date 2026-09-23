@@ -562,6 +562,10 @@ describe('LocalPreviewProxyManager', () => {
   it('isolates local and remote capabilities and never trusts a bare matching origin', async () => {
     const { server, target, requestUrls } = await listenHtmlServer();
     servers.push(server);
+    server.prependListener('request', (_request, response) => {
+      response.setHeader('set-cookie', ['app_session=private', 'app_other=private']);
+      response.setHeader('x-preview-values', ['first', 'second']);
+    });
     const local = new LocalPreviewProxyManager({ logger: createLogger() });
     const remote = new LocalPreviewProxyManager({ logger: createLogger() });
     managers.push(local, remote);
@@ -576,6 +580,9 @@ describe('LocalPreviewProxyManager', () => {
     expect(response.status).toBe(200);
     await response.text();
     expect(response.headers.get('set-cookie')).toContain('Secure; SameSite=None; Partitioned');
+    expect(response.headers.getSetCookie()).toHaveLength(1);
+    expect(response.headers.get('set-cookie')).not.toContain('private');
+    expect(response.headers.get('x-preview-values')).toBe('first, second');
     expect(response.headers.get('cache-control')).toBe('no-store');
     const bare = new URL('/', remoteEndpoint.viewerUrl);
     for (const headers of [

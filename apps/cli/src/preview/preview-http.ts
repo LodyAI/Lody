@@ -388,15 +388,6 @@ export function headersToEntries(
   return responseHeaders;
 }
 
-export function headersToNodeRecord(headers: HeaderEntry[]): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const [name, value] of headers) {
-    const existingValue = result[name];
-    result[name] = existingValue ? `${existingValue}, ${value}` : value;
-  }
-  return result;
-}
-
 export function buildLocalWebSocketUrl(localOrigin: URL, path: string): string {
   const proxyUrl = new URL(path, localOrigin);
   assertBoundLocalUrl(proxyUrl, localOrigin);

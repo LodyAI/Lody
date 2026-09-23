@@ -179,4 +179,20 @@ Next 最初拒绝未转换的外部 Origin。配置开发域名 allowlist 证实
 Mobile 前端与 Electron production-mode bundle
 也已编译通过；Electron 使用合成部署地址，不算后端联调。
 
+## 消融清理（2026-09-23）
+
+基线通过 87 项 Preview 测试。保留的每项简化均单独应用并重跑整个 Preview 测试集，
+未增加生产回退逻辑。
+
+| 消融项 | 证据与结论 |
+| --- | --- |
+| 删除两套手写 header 聚合函数 | 保留删除：Fetch `Headers` 已合并重复名称；代理仍剥离应用 Cookie，且只输出一枚 capability Cookie。重复 header/Cookie 边界断言通过；这不是任意原始 header 列表的通用转换器。 |
+| 删除纯内存槽位的异步包装、未使用时间参数和返回 key | 保留删除：预留与释放仍同步修改状态。新增跨工作区测试证明机器级上限，以及撤销、下载失败后的槽位复用。 |
+| 删除手工初始化及空操作 Promise resolver 字段 | 拒绝删除并恢复：88 项单测通过，但 CLI 构建/类型检查报 TS2550，因为当前配置的类型库不包含 `Promise.withResolvers`。不为这次清理扩大到全局编译配置变更。 |
+| 删除进行中的健康检查合并 | 拒绝删除并恢复：并发健康测试发起了重复探测，端点变成 inactive，而不是保持 active。 |
+
+恢复两项被拒绝的消融后，88 项 Preview 测试全部通过。多 owner fixture 也改为关闭自身的
+child promise，而非最后创建的 child。这些结果只证明本地回归边界，不证明实网性能，
+也未增加 Windows 或打包 Electron 的验收证据。
+
 部署后的控制联调、制品发布、真实 iframe/WS 凭据、实网健康行为与全面验收仍需完成。完整契约落实并有证据之前，本记录维持 proposed。

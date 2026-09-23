@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   LocalSessionControlResponseSchema,
   DEFAULT_PREVIEW_IDLE_TIMEOUT_MS,
+  DEFAULT_PREVIEW_MAX_ACTIVE_TUNNELS_PER_MACHINE,
   PREVIEW_ACCESS_TOKEN_QUERY_PARAM,
   type MachineId,
   type SessionId,
@@ -42,7 +43,7 @@ const sessionId = 'session-preview' as SessionId;
 const userId = 'user-preview';
 const logger = createLogger({ level: 'silent', transports: 'console' });
 
-function fixture() {
+function fixture(workspace = workspaceId) {
   let preview: SessionPreviewDocState = {};
   let meta: SessionMeta = {
     id: sessionId,
@@ -56,7 +57,7 @@ function fixture() {
   const service = new PreviewService({
     logger,
     machineId,
-    workspaceId,
+    workspaceId: workspace,
     userId,
     now: () => Date.now(),
     runtimeBaseUrl: 'https://runtime.example.test',
@@ -89,7 +90,6 @@ describe('PreviewService Quick Tunnel lifecycle', () => {
   const services: PreviewService[] = [];
   let server: http.Server;
   let port: number;
-  let exit: (error: CloudflaredError | null) => void;
   let proxyOrigin: string;
 
   function createRequest(
@@ -118,15 +118,13 @@ describe('PreviewService Quick Tunnel lifecycle', () => {
     vi.mocked(ensureCloudflaredBinary).mockResolvedValue('/synthetic/cloudflared');
     vi.mocked(startCloudflaredProcess).mockImplementation(async (options) => {
       proxyOrigin = options.proxyOrigin;
-      const closed = new Promise<CloudflaredError | null>((resolve) => {
-        exit = resolve;
-      });
+      const exited = Promise.withResolvers<CloudflaredError | null>();
       return {
         origin: 'https://synthetic-preview.trycloudflare.com',
-        closed,
+        closed: exited.promise,
         diagnostic: () => undefined,
         stop: async () => {
-          exit(null);
+          exited.resolve(null);
         },
       };
     });
@@ -158,11 +156,38 @@ describe('PreviewService Quick Tunnel lifecycle', () => {
     vi.clearAllMocks();
   });
 
-  function setup() {
-    const result = fixture();
+  function setup(workspace = workspaceId) {
+    const result = fixture(workspace);
     services.push(result.service);
     return result;
   }
+
+  it('shares the machine limit across workspaces and releases slots after revoke and failed creation', async () => {
+    const owners = [];
+    for (let index = 0; index < DEFAULT_PREVIEW_MAX_ACTIVE_TUNNELS_PER_MACHINE; index++) {
+      const workspace = `workspace-slot-${index}` as WorkspaceId;
+      const owner = setup(workspace);
+      const request = createRequest({ workspaceId: workspace });
+      expect((await owner.service.createPreview(request)).success).toBe(true);
+      owners.push({ ...owner, request });
+    }
+    const extraWorkspace = 'workspace-slot-extra' as WorkspaceId;
+    const extra = setup(extraWorkspace);
+    const request = createRequest({ workspaceId: extraWorkspace });
+    expect((await extra.service.createPreview(request)).error).toBe('resource_limit_exceeded');
+
+    const first = owners[0];
+    if (!first) throw new Error('Expected an active owner');
+    await first.service.revokePreview({ ...first.request, type: 'session/preview-revoke' });
+    expect(owners.slice(1).map((owner) => owner.state().connection?.status)).toEqual(
+      Array(DEFAULT_PREVIEW_MAX_ACTIVE_TUNNELS_PER_MACHINE - 1).fill('active')
+    );
+    vi.mocked(ensureCloudflaredBinary).mockRejectedValueOnce(new Error('Download unavailable'));
+    expect((await extra.service.createPreview(request)).error).toBe('tunnel_creation_failed');
+    expect((await extra.service.createPreview(request)).success).toBe(true);
+    expect(extra.state().connection?.status).toBe('active');
+    expect(await (await fetch(`http://127.0.0.1:${port}`)).text()).toBe('development server');
+  });
 
   it('creates without an agent candidate and preserves local viewing and the dev server after revoke', async () => {
     const { service, state } = setup();
