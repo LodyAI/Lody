@@ -58,7 +58,8 @@ import {
   type PreparedLaunch
 } from '@lody/cli-supervisor'
 import type { BootstrapSession } from './auth-service'
-import { isLocalPlatform, mainPlatformKind } from '../platform'
+import { desktopInstallationProfile, isLocalPlatform, mainPlatformKind } from '../platform'
+import type { DesktopExecutionHost } from './desktop-execution-host'
 import { getUserShellEnvCached, shouldUseWindowsShell } from './shell-env'
 import { applyProxyEnvFallback, resolveSystemProxyEnv } from './system-proxy-env'
 import type { CliOutputEvent, CliRunResult } from '../types'
@@ -120,6 +121,7 @@ type MachineIdLookupOptions = {
 
 type CliServiceOptions = {
   resolveBootstrapSession?: () => Promise<BootstrapSession | null>
+  executionHost?: DesktopExecutionHost
 }
 
 function resolveLocalProjectControlTimeoutMs(type: LocalProjectControlRequest['type']): number {
@@ -375,12 +377,15 @@ export class CliService {
   private cliAutoStartEnabled = true
   private powerSaveBlockerId: number | null = null
   private supervisor: CliSupervisor | null = null
-  private readonly supervisorInstanceId = randomUUID()
+  private readonly supervisorInstanceId: string
+  private readonly executionHost: DesktopExecutionHost | undefined
   private readonly supervisorToken = `${randomUUID()}${randomUUID()}`
   private hostLease: LocalCliHostLease | null = null
 
   constructor(options: CliServiceOptions = {}) {
     this.resolveBootstrapSession = options.resolveBootstrapSession
+    this.executionHost = options.executionHost
+    this.supervisorInstanceId = options.executionHost?.instanceId ?? randomUUID()
     const settings = readElectronSettings()
     if (typeof settings.preventSleepEnabled === 'boolean') {
       this.preventSleepEnabled = settings.preventSleepEnabled
@@ -435,8 +440,9 @@ export class CliService {
               : `Electron-managed CLI exited with code ${result.code ?? 'signal'}`
         }
       },
-      existingRuntimePolicy: 'attach',
-      ownership: {
+      existingRuntimePolicy:
+        desktopInstallationProfile.releaseChannel === 'nightly' ? 'reject' : 'attach',
+      ownership: this.executionHost?.ownership ?? {
         acquire: async (signal) => {
           const result = await acquireLocalCliHostLease({
             instanceId: this.supervisorInstanceId,

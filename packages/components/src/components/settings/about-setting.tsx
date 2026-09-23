@@ -18,14 +18,17 @@ import { getDownloadPageUrl, getWebsiteUrl } from '@/lib/lody-urls';
 import { developerModeEnabledAtom } from '@/atoms/settings';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { MobileAboutSettings } from '@/components/mobile/mobile-about-settings';
+import { collectClientBuildInfo } from '@/lib/client-build-info';
 
-const BUILD_DATE = typeof __BUILD_DATE__ !== 'undefined' ? __BUILD_DATE__ : 'development';
-const GIT_COMMIT = typeof __GIT_COMMIT__ !== 'undefined' ? __GIT_COMMIT__ : 'unknown';
+const buildInfo = collectClientBuildInfo();
+const BUILD_DATE = buildInfo.buildDate ?? 'development';
+const GIT_COMMIT = buildInfo.build ?? 'unknown';
+const OSS_GIT_COMMIT = buildInfo.ossCommit ?? null;
+const RELEASE_CHANNEL = buildInfo.releaseChannel ?? null;
 // Build-time linked client version, injected by the web build. Used when there
 // is no Electron updater state (i.e. on the web) so the About panel still shows
 // a version number.
-const APP_VERSION =
-  typeof __APP_VERSION__ !== 'undefined' && __APP_VERSION__.length > 0 ? __APP_VERSION__ : null;
+const APP_VERSION = buildInfo.appVersion || null;
 
 type AppIpc = NonNullable<ReturnType<typeof getIpcServices>>['app'];
 type DevbarConfig = Awaited<ReturnType<AppIpc['getDevbarConfig']>>;
@@ -231,7 +234,7 @@ export function AboutSettingsComponent() {
   const isMobile = useIsMobile();
 
   const handleOpenDownloadPage = useCallback(() => {
-    const url = getDownloadPageUrl(i18n.resolvedLanguage);
+    const url = `${getDownloadPageUrl(i18n.resolvedLanguage)}${RELEASE_CHANNEL === 'nightly' ? '#nightly' : ''}`;
     void openExternalUrl(url);
   }, [i18n.resolvedLanguage]);
 
@@ -279,9 +282,29 @@ export function AboutSettingsComponent() {
             {formatBuildDate(BUILD_DATE)}
           </span>
         </CompactRow>
-        <CompactRow label={t('settings.about.commitHash')}>
-          <span className="text-sm text-muted-foreground font-mono">{GIT_COMMIT}</span>
+        {RELEASE_CHANNEL !== null && (
+          <CompactRow label={t('settings.about.releaseChannel')}>
+            <span className="text-sm text-muted-foreground">
+              {t(`settings.about.channel.${RELEASE_CHANNEL}`)}
+            </span>
+          </CompactRow>
+        )}
+        <CompactRow
+          label={t(
+            OSS_GIT_COMMIT !== null ? 'settings.about.cloudCommit' : 'settings.about.commitHash'
+          )}
+        >
+          <span className="text-sm text-muted-foreground font-mono" title={GIT_COMMIT}>
+            {GIT_COMMIT.slice(0, 8)}
+          </span>
         </CompactRow>
+        {OSS_GIT_COMMIT !== null && (
+          <CompactRow label={t('settings.about.ossCommit')}>
+            <span className="text-sm text-muted-foreground font-mono" title={OSS_GIT_COMMIT}>
+              {OSS_GIT_COMMIT.slice(0, 8)}
+            </span>
+          </CompactRow>
+        )}
         <CompactRow label={t('settings.about.community', 'Community')}>
           <JoinCommunityButton />
         </CompactRow>

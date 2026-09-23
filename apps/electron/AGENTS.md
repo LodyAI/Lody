@@ -36,6 +36,10 @@ contracts, and window/renderer integration rules live in
 
 ## Build toolchain and window identity
 
+- `desktop-bootstrap` must be the first main import: Nightly chooses its data
+  directory before auth stores open. `desktop-channel` changes desktop identity,
+  never the shared CLI namespace, data root, or Host endpoint.
+
 - Electron 39's Chromium supports native top-level await. Keep renderer and module
   worker builds on native TLA; do not add `vite-plugin-top-level-await` or an
   equivalent full-bundle AST compatibility rewrite. Reprocessing Rollup's complete

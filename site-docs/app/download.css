@@ -138,6 +138,32 @@
 
 /* ---------- Platform grid ---------- */
 
+.download-nightly {
+  scroll-margin-top: calc(var(--dl-nav-offset) + 1.5rem);
+}
+.download-nightly__description,
+.download-nightly__status {
+  color: var(--dl-ink-muted);
+  line-height: 1.6;
+  margin-bottom: 1rem;
+}
+.download-nightly__entry {
+  margin-top: 1rem;
+  color: var(--dl-primary);
+}
+.download-nightly__entry a {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+.download-nightly__version {
+  font-family: var(--dl-mono);
+  margin: 1.25rem 0;
+  overflow-wrap: anywhere;
+}
+.download-nightly__status button {
+  width: fit-content;
+}
+
 .download-content {
   width: min(1060px, 92vw);
   margin: 0 auto;

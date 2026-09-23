@@ -49,13 +49,6 @@ export function getDevbarConfig(): DevbarConfig {
   }
 }
 
-export function configureDevbarDiagnostics(): void {
-  if (preciseMemory) {
-    // Avoid Chromium's bucketized, long-lived performance.memory cache.
-    app.commandLine.appendSwitch('enable-precise-memory-info')
-  }
-}
-
 export function isDevbarRendererEnabled(): boolean {
   return control.enabled
 }

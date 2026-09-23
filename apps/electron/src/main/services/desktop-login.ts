@@ -75,6 +75,7 @@ export function describeDesktopLoginFailure(
 }
 
 type Dependencies = {
+  channel?: 'stable' | 'nightly'
   openBrowser: (query: Record<string, string>) => Promise<void>
   exchange: (
     body: { token: string; state: string; code_verifier: string },
@@ -159,6 +160,7 @@ export class DesktopLogin {
     try {
       await this.dependencies.openBrowser({
         client_id: 'electron',
+        ...(this.dependencies.channel === 'nightly' ? { desktop_channel: 'nightly' } : {}),
         state: attempt.state,
         code_challenge: createHash('sha256').update(attempt.verifier).digest('base64url'),
         code_challenge_method: 'S256'
@@ -262,11 +264,11 @@ export class DesktopLogin {
   }
 }
 
-export function readDesktopLoginCallback(url: string): string | null {
+export function readDesktopLoginCallback(url: string, protocol = 'lody'): string | null {
   try {
     const parsed = new URL(url)
     if (
-      parsed.protocol !== 'lody:' ||
+      parsed.protocol !== `${protocol}:` ||
       parsed.hostname !== 'auth' ||
       parsed.pathname !== '/callback' ||
       parsed.search

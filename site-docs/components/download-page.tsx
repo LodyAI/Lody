@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { SiteFooter } from './site-footer';
 import { SiteNav } from './site-nav';
+import { NightlyDownloads } from './nightly-downloads';
 
 type DownloadLocale = 'en' | 'zh';
 type PlatformKey = 'mac' | 'win' | 'linux' | 'ios' | 'android' | 'browser';
@@ -43,8 +44,7 @@ const MOBILE_ANDROID_DOWNLOAD_BASE = 'https://updates.lody.ai/mobile/production'
 const MOBILE_ANDROID_FALLBACK_DOWNLOAD_URL = `${MOBILE_ANDROID_DOWNLOAD_BASE}/lody-android-latest.apk`;
 
 /** App Store product page — CN vs US storefront (main branch DownloadPage.vue). */
-const APP_STORE_HREF_EN =
-  'https://apps.apple.com/us/app/lody-run-code-agent-anywhere/id6761373528';
+const APP_STORE_HREF_EN = 'https://apps.apple.com/us/app/lody-run-code-agent-anywhere/id6761373528';
 const APP_STORE_HREF_ZH =
   'https://apps.apple.com/cn/app/lody-%E9%9A%8F%E6%97%B6%E9%9A%8F%E5%9C%B0%E8%BF%90%E8%A1%8C-code-agent/id6761373528';
 const GOOGLE_PLAY_HREF = 'https://play.google.com/store/apps/details?id=ai.lody.android';
@@ -293,6 +293,9 @@ export function DownloadPage({ locale }: { locale: DownloadLocale }) {
           </p>
           <h1>{t.title}</h1>
           <p className="download-subtitle">{t.subtitle}</p>
+          <p className="download-nightly__entry">
+            <a href="#nightly">{isZh ? '体验 Lody Nightly' : 'Try Lody Nightly'}</a>
+          </p>
           {version || releaseDate ? (
             <div className="download-meta">
               {version ? (
@@ -362,6 +365,7 @@ export function DownloadPage({ locale }: { locale: DownloadLocale }) {
             </div>
           </div>
         ))}
+        <NightlyDownloads locale={locale} />
       </section>
       <SiteFooter locale={locale} />
     </main>
