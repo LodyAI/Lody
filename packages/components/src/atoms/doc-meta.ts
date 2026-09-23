@@ -1,4 +1,6 @@
-import { atom, type PrimitiveAtom } from 'jotai';
+import { atom, type createStore, type PrimitiveAtom } from 'jotai';
+
+type JotaiStore = ReturnType<typeof createStore>;
 import { atomFamily } from 'jotai/utils';
 import { atomEffect } from 'jotai-effect';
 import type { LoroRepo } from 'loro-repo';
@@ -16,7 +18,7 @@ import {
 } from '@lody/shared';
 import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from './runtime';
 import { mergeBootstrapMetaCache } from '@/lib/doc-meta-bootstrap';
-import { listDocMetaEntries } from '@/lib/doc-meta-batch';
+import { listDocMetaEntries, type DocMetaCacheSnapshot } from '@/lib/doc-meta-batch';
 import { getDocMetaRoomKind, withDerivedDocMetaId } from '@/lib/doc-meta-room';
 
 // ---------------------------------------------------------------------------
@@ -257,6 +259,19 @@ export type DocMetaCacheScope = {
 
 /** Identifies which runtime owns the current singleton metadata projection. */
 export const docMetaCacheScopeAtom = atom<DocMetaCacheScope | null>(null);
+
+/**
+ * The ready projection for `repo`, or null while it bootstraps or belongs to
+ * another runtime. Lets runtime startup readers skip a second full meta scan.
+ */
+export function readReadyDocMetaCache(
+  store: Pick<JotaiStore, 'get'>,
+  repo: LoroRepo
+): DocMetaCacheSnapshot | null {
+  const scope = store.get(docMetaCacheScopeAtom);
+  if (!scope?.ready || scope.runtime.repo !== repo) return null;
+  return { sessions: store.get(sessionMetaCacheAtom), machines: store.get(machineMetaCacheAtom) };
+}
 
 // 兼容层
 // Doc-meta atoms expose durable CRDT state only. Live signals (machine online,

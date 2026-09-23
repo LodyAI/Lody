@@ -20,6 +20,7 @@ import {
   sessionMetaCacheSettledAtomFamily,
   docMetaCacheScopeAtom,
   docMetaSubscriptionAtom,
+  readReadyDocMetaCache,
   agentConfigMetaCacheAtom,
   machineMetaCacheAtom,
   sessionListAtom,
@@ -358,6 +359,46 @@ describe('docMetaSubscriptionAtom', () => {
         );
       }
       expect(after.find((session) => session.id === ids[0])?.title).toBe('Renamed');
+    } finally {
+      unmount();
+    }
+  });
+
+  it('lends the ready projection only to its own runtime repo', async () => {
+    const sessionId = 'lent-session' as SessionId;
+    const docId = getSessionRoomId(sessionId);
+    let finishScan!: () => void;
+    const scanGate = new Promise<void>((resolve) => {
+      finishScan = resolve;
+    });
+    class GatedRepoDouble extends CompatRepoDouble {
+      override async listDoc(): Promise<CompatRepoEntry[]> {
+        await scanGate;
+        return super.listDoc();
+      }
+    }
+    const repo = new GatedRepoDouble([
+      { docId, exists: true, meta: { id: sessionId, title: 'Before', createdAt: '2026-09-23' } },
+    ]);
+    const otherRepo = new CompatRepoDouble([]);
+    const store = createStore();
+    const unmount = store.sub(docMetaSubscriptionAtom, () => {});
+
+    try {
+      store.set(runtimeAtom, createRuntime(repo as unknown as LoroRepo));
+      await flush();
+      // Still bootstrapping: a reader must scan for itself.
+      expect(readReadyDocMetaCache(store, repo as unknown as LoroRepo)).toBeNull();
+
+      finishScan();
+      await flush();
+      repo.emit({ kind: 'doc-metadata', docId, patch: { title: 'Live' }, by: 'live' });
+      await flush();
+
+      expect(readReadyDocMetaCache(store, repo as unknown as LoroRepo)?.sessions[docId]).toEqual(
+        expect.objectContaining({ title: 'Live' })
+      );
+      expect(readReadyDocMetaCache(store, otherRepo as unknown as LoroRepo)).toBeNull();
     } finally {
       unmount();
     }

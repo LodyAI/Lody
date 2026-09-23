@@ -87,9 +87,20 @@ Measured in the same production build and workspace (9k nodes):
   composer's auto-resize no longer resets to `auto` and reads `scrollHeight` when empty,
   which forced a synchronous page layout on every switch (~5ms).
 
+- **Startup meta scans.** A cold load of a workspace with ~4,800 documents (104k meta rows)
+  scanned the whole `['m']` namespace three times: the doc-meta bootstrap, the background
+  eager-sync seed and the startup ACP capability pass. Each scan is one synchronous Flock
+  call of 550-900ms; the cache write after it takes ~1ms. The seed and the capability pass now
+  read the ready doc-meta projection (`readReadyDocMetaCache`, injected as
+  `RuntimeDeps.readDocMetaCache`) and scan only when no ready projection for their repo
+  exists. The projection is kept current by its own watch, so it is at least as fresh as a
+  new scan. The bootstrap scan itself stays one blocking call until Flock can page a scan.
+
 ## Open
 
 Konsta's `theme.css` still imports all Konsta styles; only this utility was shown to matter. No
 automated guard rejects unanchored positional selectors in the compiled CSS yet. The doc-meta
 lists are cheaper (above) but each cache update still derives every list in O(sessions). The
-sidebar still renders every row in React; only the browser's rendering work is skipped. Related scrolling work: [conversation follow modes](../architecture/2026-09-23-conversation-follow-modes.md).
+sidebar still renders every row in React; only the browser's rendering work is skipped. The
+bootstrap meta scan is still one synchronous Flock call (~700ms here); `scan` has no
+limit/cursor, so it cannot yield between batches. `includeRaw: false` would cut ~20%. Related scrolling work: [conversation follow modes](../architecture/2026-09-23-conversation-follow-modes.md).

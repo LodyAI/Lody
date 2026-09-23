@@ -71,8 +71,16 @@ Translation: current
   选中两行。输入框自动撑高在内容为空时不再先设 `auto` 再读 `scrollHeight`，此前每次切换都会强制
   一次整页同步布局（约 5ms）。
 
+- **启动时的元数据扫描。** 一个约 4,800 个文档（10.4 万条 meta 行）的工作区冷启动时，把整个 `['m']`
+  命名空间扫了三遍：doc-meta 初始化、后台 eager-sync 的种子、启动时的 ACP 能力刷新。每遍都是一次
+  550-900ms 的同步 Flock 调用，其后的缓存写入只要约 1ms。种子和能力刷新现在读取已就绪的 doc-meta
+  投影（`readReadyDocMetaCache`，通过 `RuntimeDeps.readDocMetaCache` 注入），只有当前 repo 没有
+  就绪投影时才扫描。投影由它自己的 watch 维持最新，因此至少和一次新扫描一样新。初始化扫描本身在
+  Flock 支持分页前仍是一次阻塞调用。
+
 ## 未决
 
 Konsta 的 `theme.css` 仍会导入全部 Konsta 样式；目前只证实这一条工具类有影响。还没有自动检查拒绝
 编译后 CSS 中未锚定的位置选择器。doc-meta 列表已变便宜（见上），但每次缓存更新仍以 O(会话数) 推导
-全部列表。侧边栏仍在 React 中渲染每一行，只是浏览器跳过了渲染工作。相关滚动工作：[对话跟随模式](../architecture/2026-09-23-conversation-follow-modes.md)。
+全部列表。侧边栏仍在 React 中渲染每一行，只是浏览器跳过了渲染工作。初始化的元数据扫描仍是一次同步 Flock 调用（这里约 700ms）；`scan` 没有
+limit/游标，无法在批次之间让出主线程。`includeRaw: false` 可省约 20%。相关滚动工作：[对话跟随模式](../architecture/2026-09-23-conversation-follow-modes.md)。
