@@ -21,24 +21,24 @@ failed runtime and continue with the others. Cache errors must not abort daemon
 startup; actual launch and installation keep strict validation.
 
 Registry generation excludes `pi-acp` from new-provider discovery. Existing registry
-providers remain runnable until their owner explicitly confirms the chat landing card.
-Startup must not auto-create builtin Pi while the same machine has a legacy Pi
-provider; after confirmed migration the existing same-ID builtin row is reused.
-Migration requires a target daemon advertising `builtinPi` version 1, changes the
-same provider row to `builtin/pi`, and preserves its ID, machine, name, environment,
-prompt and other fields. Deleted or already changed rows are not recreated or overwritten.
-Partial failures can be retried without remigrating completed rows.
+providers remain runnable. Startup must not auto-create builtin Pi while the same
+machine has a legacy Pi provider. The chat landing action adds a separate `builtin/pi`
+provider on the machine the user selected and leaves the legacy provider's identity,
+launch configuration, environment, and existing Session bindings unchanged. Its stable
+managed-provider ID makes retries idempotent; if that machine already has a builtin Pi
+provider, the action must not create another or change the current default selection.
+The managed provider does not inherit the self-managed provider's environment.
 The daemon advertises `builtinPi` only when its Node version and platform satisfy
 the pinned runtime manifest; an incompatible host must not offer migration.
-The landing card appears when at least one eligible provider's machine advertises
-that capability. Confirmation migrates only providers on supported machines;
-unsupported machines do not block them and their providers remain unchanged until
-a later confirmation after those machines become supported. Hide the card when no
-providers can migrate. Once migration starts, the card may show disabled progress feedback.
+The landing card appears when the selected machine has a legacy provider, advertises
+that capability, and has no builtin Pi provider. Other machines and unsupported machines
+remain unchanged. Once creation starts, the card may show disabled progress feedback.
 
-This is provider migration, not native session conversion. The new adapter accepts
-native Pi JSONL paths and cannot resume legacy `pi-acp` IDs. The confirmation card
-states that users should start a new chat; stored conversation history is not rewritten.
+Separate provider IDs isolate integration settings, not the Pi profile itself. Users
+who need separate profiles can set `PI_CODING_AGENT_DIR` on one provider; Lody does not
+move credentials or configuration files, and an independent profile may need its own
+authentication and model configuration. Managed Pi still cannot resume legacy
+`pi-acp` IDs, and stored conversation history is not rewritten.
 
 ## Evidence
 

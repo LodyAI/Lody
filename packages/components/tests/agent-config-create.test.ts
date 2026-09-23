@@ -10,7 +10,11 @@ import {
   type WorkspaceId,
 } from '@lody/shared';
 
-import { cmdCreateAgentConfigAtom, getAllAgentConfigAtom } from '../src/atoms/agents';
+import {
+  cmdCreateAgentConfigAtom,
+  cmdCreateAgentConfigIfAbsentAtom,
+  getAllAgentConfigAtom,
+} from '../src/atoms/agents';
 import { runtimeAtom, type WorkspaceRuntime } from '../src/atoms/runtime';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '../src/atoms/workspace-context';
 
@@ -106,5 +110,57 @@ describe('cmdCreateAgentConfigAtom', () => {
         name: 'Immediate ACP Provider',
       }),
     ]);
+  });
+});
+
+describe('cmdCreateAgentConfigIfAbsentAtom', () => {
+  it('keeps an existing row unchanged when an idempotent create is retried', async () => {
+    const store = createStore();
+    const workspaceId = 'workspace-agent-config-create-if-absent' as WorkspaceId;
+    const workspaceSlug = 'workspace-agent-config-create-if-absent';
+    const machineId = 'machine-agent-config-create-if-absent' as MachineId;
+    const configId = 'builtin-pi:machine-agent-config-create-if-absent' as AgentConfigId;
+    const key = machineFlockKeys.agentConfig(configId);
+    const existing = {
+      id: configId,
+      machineId,
+      name: 'My managed Pi',
+      description: undefined,
+      cliType: 'builtin' as const,
+      agentType: 'pi',
+      env: { PI_CODING_AGENT_DIR: '/synthetic/profile' },
+    };
+    const rows = new Map<string, MachineFlockScanRow>([
+      [serializeMachineFlockKey(key), { key, value: existing }],
+    ]);
+    const openFlockDoc = vi.fn(async () => ({
+      flock: { scan: vi.fn(() => rows.values()) },
+      syncOnce: vi.fn(() => never()),
+      joinRoom: vi.fn(),
+    }));
+    const flockRowPutIfAbsent = vi.fn(async () => ({ inserted: false, value: existing }));
+
+    store.set(runtimeAtom, {
+      workspaceId,
+      workspaceSlug,
+      repo: { openFlockDoc, flush: vi.fn(() => never()) },
+      writer: { flockRowPutIfAbsent } as unknown as WorkspaceRuntime['writer'],
+    } as unknown as WorkspaceRuntime);
+    store.set(currentWorkspaceIdAtom, workspaceId);
+    store.set(currentWorkspaceSlugAtom, workspaceSlug);
+
+    const result = await store.set(cmdCreateAgentConfigIfAbsentAtom, {
+      ...existing,
+      name: 'Pi',
+      env: {},
+    });
+
+    expect(result).toEqual({ id: configId, inserted: false });
+    expect(flockRowPutIfAbsent).toHaveBeenCalledWith(
+      `${workspaceId}:mf:${machineId}`,
+      key,
+      expect.objectContaining({ id: configId, name: 'Pi', env: {} })
+    );
+    expect(store.get(getAllAgentConfigAtom)).toEqual([existing]);
   });
 });

@@ -12,6 +12,7 @@ import {
   isCustomAcpLaunchSpec,
   isLoroRepoDocDeleted,
   machineFlockKeys,
+  parseMachineFlockRow,
   findBuiltinAgentOptOutToRetract,
   planBuiltinAgentOptOutForDeletedConfig,
   readMachineFlockRowsFromFlock,
@@ -65,6 +66,39 @@ export async function writeAgentConfigToMachineFlock(
     delete rows[serializeMachineFlockKey(optOutKey)];
   }
   return rows;
+}
+
+export async function writeAgentConfigToMachineFlockIfAbsent(
+  runtime: WorkspaceRuntime,
+  config: AgentConfigMeta
+): Promise<{ inserted: boolean; rows: MachineFlockRowMap }> {
+  const flockDocId = getMachineFlockDocId(runtime.workspaceId, config.machineId);
+  const key = machineFlockKeys.agentConfig(config.id);
+  const result = await runtime.writer.flockRowPutIfAbsent(flockDocId, key, config);
+  const storedRow = parseMachineFlockRow(key, result.value);
+  const storedConfig =
+    storedRow?.key[0] === 'agentConfig' ? (storedRow.value as AgentConfigMeta) : undefined;
+  if (
+    !storedConfig ||
+    storedConfig.id !== config.id ||
+    storedConfig.machineId !== config.machineId
+  ) {
+    throw new Error(`Existing agent config row is invalid: ${config.id}`);
+  }
+
+  const handle = await runtime.repo.openFlockDoc(flockDocId);
+  const rows: MachineFlockRowMap = {
+    ...readMachineFlockRowsFromFlock(handle.flock),
+    [serializeMachineFlockKey(key)]: { key, value: storedConfig },
+  };
+  if (result.inserted) {
+    const optOutKey = findBuiltinAgentOptOutToRetract(rows, config);
+    if (optOutKey) {
+      await runtime.writer.flockRowDelete(flockDocId, optOutKey);
+      delete rows[serializeMachineFlockKey(optOutKey)];
+    }
+  }
+  return { inserted: result.inserted, rows };
 }
 
 async function deleteAgentConfigFromMachineFlock(
@@ -370,6 +404,22 @@ export const cmdCreateAgentConfigAtom = atom(
       rows,
     });
     return config.id;
+  }
+);
+
+export const cmdCreateAgentConfigIfAbsentAtom = atom(
+  null,
+  async (get, _set, config: CreateAgentConfigInput) => {
+    const runtime = get(activeWorkspaceRuntimeAtom);
+    if (!runtime) throw new Error('Runtime not ready');
+    if (!config.machineId) throw new Error('machineId is required to create an agent config');
+    const result = await writeAgentConfigToMachineFlockIfAbsent(runtime, config);
+    _set(setMachineFlockRowsForMachineAtom, {
+      workspaceId: runtime.workspaceId,
+      machineId: config.machineId,
+      rows: result.rows,
+    });
+    return { id: config.id, inserted: result.inserted };
   }
 );
 

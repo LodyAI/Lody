@@ -45,3 +45,5 @@ Migration progress and retry feedback remain available for supported providers.
 Focused launch, migration, authentication and protocol tests cover local behavior.
 Packaging smoke uses the official CLI with a local synthetic model. It does not prove
 commercial-provider quality or Windows runtime behavior on this macOS host.
+
+Follow-up: [side-by-side managed and self-managed Pi proposal](../../proposed/feature/2026-09-22-managed-and-self-managed-pi.md).

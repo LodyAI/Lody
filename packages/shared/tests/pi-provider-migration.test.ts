@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isLegacyPiProvider, migratePiProvider } from '../src/pi-provider-migration';
+import { createManagedPiProvider, isLegacyPiProvider } from '../src/pi-provider-migration';
 
 describe('Pi provider migration', () => {
   const legacy = {
@@ -14,11 +14,21 @@ describe('Pi provider migration', () => {
     futureField: 'preserved',
   };
 
-  it('preserves identity, credentials and unknown configuration fields', () => {
-    const upgraded = migratePiProvider(legacy);
-    expect(upgraded).toEqual({ ...legacy, cliType: 'builtin', agentType: 'pi' });
+  it('creates a separate managed provider without changing the self-managed provider', () => {
+    const managed = createManagedPiProvider(legacy);
+    expect(managed).toEqual({
+      id: 'builtin-pi:machine',
+      machineId: 'machine',
+      name: 'Pi',
+      description: undefined,
+      cliType: 'builtin',
+      agentType: 'pi',
+      env: {},
+    });
     expect(legacy.cliType).toBe('registry');
-    expect(migratePiProvider(upgraded)).toBeUndefined();
+    expect(legacy.agentType).toBe('pi-acp');
+    expect(legacy.env).toEqual({ API_KEY: 'synthetic-secret' });
+    expect(createManagedPiProvider(managed)).toBeUndefined();
   });
 
   it('does not recreate deleted rows or overwrite a changed provider', () => {
@@ -30,7 +40,11 @@ describe('Pi provider migration', () => {
       { ...legacy, agentType: 'pi' },
     ]) {
       expect(isLegacyPiProvider(value)).toBe(false);
-      expect(migratePiProvider(value)).toBeUndefined();
+      expect(createManagedPiProvider(value)).toBeUndefined();
     }
+  });
+
+  it('uses one managed provider identity per machine across retries', () => {
+    expect(createManagedPiProvider(legacy)?.id).toBe(createManagedPiProvider(legacy)?.id);
   });
 });

@@ -35,3 +35,5 @@ Landing 按各 Provider 所属机器的 `builtinPi` 能力筛选旧 Provider。
 
 定向启动、迁移、认证和协议测试覆盖本地行为。打包 smoke 使用官方 CLI 连接本地模拟
 模型，不证明商业模型效果，也不能替代在 Windows 上验证运行时。
+
+后续：[托管与自管 Pi Provider 并存提案](../../proposed/feature/2026-09-22-managed-and-self-managed-pi.zh.md)。

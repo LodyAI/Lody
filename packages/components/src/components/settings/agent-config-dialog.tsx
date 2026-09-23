@@ -2252,6 +2252,12 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   'Custom providers are only probed when you click Test — re-test after changing the command.'
                 )}
               </p>
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                {t(
+                  'settings.agent.dialog.custom.piHint',
+                  'For a self-managed Pi provider, enter the command for an ACP-compatible adapter. The plain pi command is not an ACP server.'
+                )}
+              </p>
             </div>
           )}
 

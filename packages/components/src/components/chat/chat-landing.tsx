@@ -23,11 +23,9 @@ import {
   FREE_SESSION_LIMIT_PER_WORKSPACE,
   getServerNow,
   isLegacyPiProvider,
-  migratePiProvider,
+  createManagedPiProvider,
   machineSupportsProtocolCapability,
   MACHINE_PROTOCOL_CAPABILITIES,
-  getMachineFlockDocId,
-  machineFlockKeys,
   hashAnalyticsId,
   type SessionStartFailureReason,
   InFlightDedupe,
@@ -75,6 +73,7 @@ import {
   bugReportDialogOpenAtom,
   chatLandingSessionStateAtomFamily,
   getAllAgentConfigAtom,
+  cmdCreateAgentConfigIfAbsentAtom,
   inboxFeatureEnabledAtom,
   mobileKeyboardActionAtom,
   runtimeInitializingAtom,
@@ -578,6 +577,7 @@ function WorkspaceChatLanding({
   const navigate = useNavigate();
   const { openSettings } = useOpenSettings();
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
+  const createAgentConfigIfAbsent = useSetAtom(cmdCreateAgentConfigIfAbsentAtom);
   const workspaceRuntime = useAtomValue(runtimeAtom);
   const postHog = usePostHog();
   const multiWorkspaceAvailable = useAppCapability('multiWorkspace');
@@ -6076,34 +6076,34 @@ function WorkspaceChatLanding({
     </div>
   ) : null;
   const legacyPiProviders = executorConfigs.filter(
-    (config) => isLegacyPiProvider(config) && isOwnVisibleMachine(config.machineId)
+    (config) =>
+      isLegacyPiProvider(config) &&
+      config.machineId === selectedMachineId &&
+      isOwnVisibleMachine(config.machineId)
   );
   const [piMigrationBusy, setPiMigrationBusy] = useState(false);
   const [piMigrationError, setPiMigrationError] = useState(false);
-  const migratablePiProviders = legacyPiProviders.filter((config) =>
-    machineSupportsProtocolCapability(
-      machines.get(config.machineId),
-      MACHINE_PROTOCOL_CAPABILITIES.builtinPi
-    )
+  const addablePiProviders = legacyPiProviders.filter(
+    (config) =>
+      machineSupportsProtocolCapability(
+        machines.get(config.machineId),
+        MACHINE_PROTOCOL_CAPABILITIES.builtinPi
+      ) &&
+      !executorConfigs.some(
+        (candidate) =>
+          candidate.machineId === config.machineId &&
+          candidate.cliType === 'builtin' &&
+          candidate.agentType === 'pi'
+      )
   );
-  const canMigratePi = migratablePiProviders.length > 0;
-  const confirmPiMigration = async () => {
-    if (!runtime || piMigrationBusy || !canMigratePi) return;
+  const canAddManagedPi = addablePiProviders.length > 0;
+  const addManagedPi = async () => {
+    if (piMigrationBusy || !canAddManagedPi) return;
     setPiMigrationBusy(true);
     setPiMigrationError(false);
     try {
-      for (const config of migratablePiProviders) {
-        await runtime.writer.flockRowUpdate(
-          getMachineFlockDocId(runtime.workspaceId, config.machineId),
-          machineFlockKeys.agentConfig(config.id),
-          (current) =>
-            isLegacyPiProvider(current) &&
-            current.id === config.id &&
-            current.machineId === config.machineId
-              ? migratePiProvider(current)
-              : undefined
-        );
-      }
+      const managed = createManagedPiProvider(addablePiProviders[0]);
+      if (managed) await createAgentConfigIfAbsent(managed);
     } catch {
       setPiMigrationError(true);
     } finally {
@@ -6111,14 +6111,14 @@ function WorkspaceChatLanding({
     }
   };
   const composerNoticeNode =
-    sharingReviewNoticeNode || sessionLimitNoticeNode || canMigratePi ? (
+    sharingReviewNoticeNode || sessionLimitNoticeNode || canAddManagedPi ? (
       <>
         <PiProviderMigrationCard
-          count={migratablePiProviders.length}
+          count={addablePiProviders.length}
           busy={piMigrationBusy}
           error={piMigrationError}
-          canMigrate={canMigratePi}
-          onConfirm={() => void confirmPiMigration()}
+          canMigrate={canAddManagedPi}
+          onConfirm={() => void addManagedPi()}
         />
         {sharingReviewNoticeNode}
         {sessionLimitNoticeNode}
