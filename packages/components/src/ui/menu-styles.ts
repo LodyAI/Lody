@@ -4,9 +4,9 @@ import type { CSSProperties } from 'react';
 // toward the foreground. Derive it from --background rather than --border
 // because per-theme --border is tuned for elevated cards/popovers and can clash
 // hard against --background (e.g. Vesper's bright border over its near-black
-// background). The hairline ring uses this mix; separators are a stronger
-// ink/white wash so they stay visible on the dark popover fill. Dark theme
-// keeps this same per-theme mix (via `--menu-edge-color`), never a fixed gray.
+// background). Shared, via `--menu-edge-color`, by the surface's hairline ring
+// and the inner separators so they read as the same line in every theme, dark
+// included; never a fixed gray.
 const menuEdgeColor = 'color-mix(in oklab, hsl(var(--background)) 90%, hsl(var(--foreground)) 10%)';
 
 export const menuSurfaceClassName =
@@ -74,6 +74,7 @@ export const menuItemExtraClassName =
 export const menuGroupLabelClassName =
   'select-none px-2 pb-0.5 pt-1.5 text-[0.75em] font-normal leading-tight text-muted-foreground/80';
 
-export const menuSeparatorClassName = 'my-0.5 h-px bg-foreground/[0.10] dark:bg-white/[0.18]';
+// Reads the `--menu-edge-color` that `menuSurfaceStyle` sets on the surface.
+export const menuSeparatorClassName = 'my-0.5 h-px bg-[color:var(--menu-edge-color)]';
 
 export const menuSeparatorStyle: CSSProperties = {};
