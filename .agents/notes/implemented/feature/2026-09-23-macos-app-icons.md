@@ -36,7 +36,17 @@ Startup/settings read → reapply saved choice to current bundle
 The system `/usr/bin/osascript` Objective-C bridge calls NSWorkspace without a
 downloaded helper or runtime compiler. Paths are argv, not script interpolation.
 ASAR artwork is copied to a temporary real file and removed after AppKit consumes
-it. The Aqua asset is the same artwork as the iOS alternate icon.
+it. The Aqua source (`build/icon-aqua.png`) preserves the iOS artwork. The macOS
+runtime asset adds 10% transparent padding per side and uses the default padded
+icon's alpha silhouette for matching rounded corners. Settings, Finder and Dock
+all use this derived PNG; a raw iOS square appears oversized in the Dock.
+Regenerate from `apps/electron` (requires Pillow and macOS iconutil):
+
+```sh
+python3 scripts/pad-mac-icon.py --input-png build/icon-aqua.png \
+  --output-png resources/app-icons/aqua.png --output-icns /tmp/lody-aqua.icns \
+  --pad 0.10 --mask-png build/icon-mac.padded.png
+```
 
 ## Evidence and limits
 

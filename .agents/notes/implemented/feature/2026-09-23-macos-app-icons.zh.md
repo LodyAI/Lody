@@ -31,8 +31,17 @@ AppKit 修改 Finder 自定义元数据，Electron 同步运行中的 Dock。
 
 通过系统 `/usr/bin/osascript` 的 Objective-C 桥接调用 NSWorkspace，
 无需下载辅助程序或运行时编译器。路径通过 argv 传递，不拼接进脚本。
-ASAR 图像复制到临时真实文件，AppKit 使用后删除。Aqua 与 iOS 备选图标
-使用同一份美术资源。
+ASAR 图像复制到临时真实文件，AppKit 使用后删除。Aqua 源文件
+`build/icon-aqua.png` 保留 iOS 原画。macOS 运行时资源每边增加 10% 透明留白，
+并使用默认图标的透明通道轮廓匹配圆角。设置预览、Finder 和 Dock 均使用
+派生 PNG；直接使用 iOS 满幅方图会导致 Dock 图标显得过大。
+在 `apps/electron` 中重新生成（需要 Pillow 和 macOS iconutil）：
+
+```sh
+python3 scripts/pad-mac-icon.py --input-png build/icon-aqua.png \
+  --output-png resources/app-icons/aqua.png --output-icns /tmp/lody-aqua.icns \
+  --pad 0.10 --mask-png build/icon-mac.padded.png
+```
 
 ## 证据与限制
 
