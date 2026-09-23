@@ -195,5 +195,25 @@ For the font pickers the owner chose a Select-like trigger over a typed field.
 top of the popup. That makes the Appearance column one kind of control, and it
 is the part `OptionSelector`'s callers can move onto.
 
+## Second correction: one recessed material, lit correctly
+
+The owner rejected the flat fields as well. Sunken was never the problem in
+itself: when cards lift and buttons stand up, a flat field is the one thing
+without material, and that breaks the language the way the sunken/raised mix
+did. Every value holder, Selects included, is recessed again, still as one
+material.
+
+What made the first recess look like a hole was how it was lit, and there were
+two causes. In Lody Light the fill was a 92% gray on a white card. In Vesper the
+well (11%) was lighter than the card (8.6%) under a heavy black inner shadow,
+which is contradictory light. The recess is now shallow and lit from above:
+
+- a short inner shadow at the top edge, an inner hairline, and a lit lower lip
+- a fill just under the surface: 95% in light, and 4.5% in Vesper, darker than
+  the page, so it still reads on the darkest ground (6.5% vanished there)
+
+`Combobox.Button` and the in-popup search stay; they read the well like every
+other field.
+
 Related: [token gallery](2026-09-09-ui-token-gallery.md),
 [call-site migration](2026-09-22-ui-radix-callsite-migration.md).

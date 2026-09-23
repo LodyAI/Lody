@@ -627,7 +627,7 @@ const SHADOWS = [
     box: shadow.inset,
     fill: colors.wellBackground,
     ink: false,
-    note: 'fields and tracks: one hairline, not a recess',
+    note: 'fields and tracks: a shallow recess',
   },
   {
     name: 'shadow.raised',
