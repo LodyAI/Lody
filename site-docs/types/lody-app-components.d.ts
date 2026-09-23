@@ -824,19 +824,6 @@ declare module '@/components/sessions/floating-permission-request' {
   ): boolean;
 }
 
-declare module '@/ui/tooltip' {
-  import type { ReactElement, ReactNode } from 'react';
-
-  export interface TooltipProviderProps {
-    children?: ReactNode;
-    delayDuration?: number;
-    skipDelayDuration?: number;
-    disableHoverableContent?: boolean;
-  }
-
-  export function TooltipProvider(props: TooltipProviderProps): ReactElement | null;
-}
-
 declare module '@/atoms' {
   import type { PrimitiveAtom } from 'jotai';
   import type { WorkspaceId } from '@lody/shared';
@@ -1169,25 +1156,6 @@ declare module '@/atoms/doc-meta' {
   export const docMetaCacheReadyAtom: WritableAtom<boolean, [boolean], void>;
   export const sessionMetaAtomFamily: unknown;
   export type { Atom };
-}
-
-declare module '@/ui/tabs' {
-  import type { ComponentPropsWithoutRef, ReactElement } from 'react';
-
-  export function Tabs(
-    props: {
-      value?: string;
-      defaultValue?: string;
-      onValueChange?: (value: string) => void;
-    } & ComponentPropsWithoutRef<'div'>
-  ): ReactElement;
-  export function TabsList(props: ComponentPropsWithoutRef<'div'>): ReactElement;
-  export function TabsTrigger(
-    props: { value: string } & ComponentPropsWithoutRef<'button'>
-  ): ReactElement;
-  export function TabsContent(
-    props: { value: string } & ComponentPropsWithoutRef<'div'>
-  ): ReactElement;
 }
 
 declare module '@/hooks/use-mobile' {

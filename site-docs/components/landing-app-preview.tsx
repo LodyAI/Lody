@@ -104,7 +104,7 @@ import {
   type SessionListRow,
 } from '@/components/session-list';
 import { Button } from '@lody/ui/button';
-import { TooltipProvider } from '@/ui/tooltip';
+import { Tooltip } from '@lody/ui/tooltip';
 import {
   CODEX_COLLABORATION_MODE_CONFIG_ID,
   CODEX_COLLABORATION_MODE_DEFAULT_VALUE,
@@ -5235,7 +5235,7 @@ export function LandingAppPreview({
   return (
     <Provider store={previewStore}>
       <I18nextProvider i18n={demoI18n}>
-        <TooltipProvider>
+        <Tooltip.Provider>
           <div
             className={cn(
               shellClassName,
@@ -5392,7 +5392,7 @@ export function LandingAppPreview({
               </div>
             )}
           </div>
-        </TooltipProvider>
+        </Tooltip.Provider>
       </I18nextProvider>
     </Provider>
   );

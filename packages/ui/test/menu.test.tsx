@@ -295,6 +295,31 @@ describe('Menu checkbox and radio rows', () => {
     expect(ticked()).toEqual(['false', 'true']);
   });
 
+  test('indicatorSide="end" moves the mark behind the label and frees the leading box for icon', async () => {
+    mounted = await mount(
+      <Actions>
+        <Menu.RadioGroup value="a">
+          <Menu.RadioItem value="a" indicator="check" indicatorSide="end" icon={<i data-icon />}>
+            Alpha
+          </Menu.RadioItem>
+          <Menu.RadioItem value="b" indicator="check" indicatorSide="end" icon={<i data-icon />}>
+            Beta
+          </Menu.RadioItem>
+        </Menu.RadioGroup>
+      </Actions>
+    );
+    await click(trigger());
+
+    const checked = rowNamed('Alpha');
+    const unchecked = rowNamed('Beta');
+    // Leading is the caller's icon box, the mark is the last child — the
+    // checked row mounts a glyph inside it, the unchecked row does not.
+    expect(checked.firstElementChild?.querySelector('[data-icon]')).not.toBeNull();
+    expect(checked.lastElementChild?.childElementCount).toBe(1);
+    expect(unchecked.lastElementChild?.childElementCount).toBe(0);
+    expect(checked.getAttribute('aria-checked')).toBe('true');
+  });
+
   test('the mark is the leading box, so the label cannot slide as the row toggles', async () => {
     mounted = await mount(
       <Actions>

@@ -152,6 +152,56 @@
       "estimatedMinutes": 2
     },
     {
+      "id": "LODY-SHORTCUT-002",
+      "state": "active",
+      "priority": "P1",
+      "runtime": "simulator",
+      "title": "New-tab and digit shortcuts drive the conversation tab strip",
+      "owner": "desktop-shortcuts",
+      "feature": "src/features/shortcuts.feature",
+      "fixture": "ui-created-session-and-scripted-acp",
+      "fingerprint": "176e7647a641125f6b04a5d22cee689ea3421f2ae8bbf5fc57f53716899c63b1",
+      "ownerPaths": [
+        "packages/components/src/lib/commands/",
+        "packages/components/src/components/sessions/session-detail.tsx",
+        "packages/components/src/components/sessions/session-tab-bar.tsx"
+      ],
+      "actions": [
+        { "id": "settings.createCustomAcpAgent" },
+        { "id": "session.createFromComposer" },
+        { "id": "session.openDraftTabsWithShortcut", "args": { "count": 2, "binding": "Mod+t" } },
+        { "id": "shortcut.switchSessionTabByDigit", "args": { "positions": [1, 8, 2, "last"] } }
+      ],
+      "checkpoints": [
+        "Mod+t opens each new draft tab in the conversation strip",
+        "Mod+1 activates the parent conversation tab from a draft tab",
+        "a digit beyond the open tab count leaves the active tab unchanged",
+        "Mod+2 activates the second conversation tab by position",
+        "Mod+9 activates the last conversation tab"
+      ],
+      "cleanup": [
+        "draft tabs live only inside the disposable run directory",
+        "owned ACP process exits"
+      ],
+      "coverage": {
+        "renderer": "Session tab strip aria-selected state through real keydown dispatch",
+        "electronIpc": "Real renderer key events through the command registry",
+        "bundledCli": "Real owned runtime for Session creation",
+        "durableState": "UI-created Session plus draft tab order",
+        "externalWire": "Scripted ACP"
+      },
+      "signals": {
+        "criticality": 3,
+        "boundaryRisk": 3,
+        "changeFrequency": 3,
+        "escapedDefect": false
+      },
+      "freshness": 5,
+      "scoutJourneys": ["session"],
+      "blockedReason": null,
+      "estimatedMinutes": 3
+    },
+    {
       "id": "LODY-WORK-001",
       "state": "active",
       "priority": "P0",

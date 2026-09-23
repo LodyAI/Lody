@@ -85,7 +85,16 @@ export interface MenuCheckboxItemProps
   extends Omit<CheckboxItemBaseProps, 'className' | 'children'>, Omit<MenuRowProps, 'icon'> {}
 
 export interface MenuRadioItemProps
-  extends Omit<RadioItemBaseProps, 'className' | 'children'>, Omit<MenuRowProps, 'icon'> {}
+  extends Omit<RadioItemBaseProps, 'className' | 'children'>, MenuRowProps {
+  /** Selected-row mark: a dot (default) or a check for list-style pickers. */
+  indicator?: 'dot' | 'check';
+  /**
+   * Where the mark sits. `end` is for rows whose leading slot carries the
+   * item's own identity mark — pass that through `icon`; the caller then owns
+   * the paddings.
+   */
+  indicatorSide?: 'start' | 'end';
+}
 
 export interface MenuSubmenuTriggerProps
   extends Omit<SubmenuTriggerBaseProps, 'className' | 'children'>, MenuRowProps {
@@ -332,9 +341,19 @@ export const MenuCheckboxItem = forwardRef<HTMLDivElement, MenuCheckboxItemProps
 
 /** A row that picks one of a `Menu.RadioGroup`'s values; the same box, a dot. */
 export const MenuRadioItem = forwardRef<HTMLDivElement, MenuRadioItemProps>(function MenuRadioItem(
-  { className, children, shortcut, endContent, ...rest },
+  { className, children, icon, shortcut, endContent, indicator = 'dot', indicatorSide = 'start', ...rest },
   ref
 ) {
+  const mark = (
+    <span {...stylex.props(surface.indicator)}>
+      <BaseMenu.RadioItemIndicator
+        className={stylex.props(surface.indicatorGlyph).className}
+        render={<span />}
+      >
+        {indicator === 'check' ? <TickGlyph /> : <DotGlyph />}
+      </BaseMenu.RadioItemIndicator>
+    </span>
+  );
   return (
     <BaseMenu.RadioItem
       ref={ref}
@@ -342,18 +361,9 @@ export const MenuRadioItem = forwardRef<HTMLDivElement, MenuRadioItemProps>(func
       className={(state) => rowClassName(state, 'neutral', className)}
     >
       <Row
-        leading={
-          <span {...stylex.props(surface.indicator)}>
-            <BaseMenu.RadioItemIndicator
-              className={stylex.props(surface.indicatorGlyph).className}
-              render={<span />}
-            >
-              <DotGlyph />
-            </BaseMenu.RadioItemIndicator>
-          </span>
-        }
+        leading={indicatorSide === 'end' ? leadingFor(icon, undefined, 'neutral') : mark}
         shortcut={shortcut}
-        endContent={endContent}
+        endContent={indicatorSide === 'end' ? <>{endContent}{mark}</> : endContent}
       >
         {children}
       </Row>
