@@ -5,20 +5,23 @@ import type { CSSProperties } from 'react';
 // because per-theme --border is tuned for elevated cards/popovers and can clash
 // hard against --background (e.g. Vesper's bright border over its near-black
 // background). The hairline ring uses this mix; separators are a stronger
-// ink/white wash so they stay visible on the dark popover fill.
+// ink/white wash so they stay visible on the dark popover fill. Dark theme
+// keeps this same per-theme mix (via `--menu-edge-color`), never a fixed gray.
 const menuEdgeColor = 'color-mix(in oklab, hsl(var(--background)) 90%, hsl(var(--foreground)) 10%)';
 
 export const menuSurfaceClassName =
-  'min-w-[200px] rounded-lg bg-popover p-0.5 text-foreground dark:!bg-[rgb(24_24_24)] dark:![box-shadow:0_0_0_0.5px_rgb(80_80_80),0_8px_20px_0_rgb(0_0_0_/_0.7),0_0_2px_0_rgb(0_0_0_/_0.5)]';
+  'min-w-[200px] rounded-lg bg-popover p-0.5 text-foreground dark:!bg-[rgb(24_24_24)] dark:![box-shadow:0_0_0_0.5px_var(--menu-edge-color),0_8px_20px_0_rgb(0_0_0_/_0.7),0_0_2px_0_rgb(0_0_0_/_0.5)]';
 
-export const menuSurfaceStyle: CSSProperties = {
+export const menuSurfaceStyle = {
+  '--menu-edge-color': menuEdgeColor,
   backgroundColor: 'hsl(var(--popover))',
   // The edge is a 0.5px ring in this shadow stack, not a layout-affecting
   // border: a real border would shift the 220px min-width and the padding box.
-  // Dark theme overrides the fill, a brighter hairline, and a tighter/darker
-  // drop (spread 0, 2px ambient diffusion) via `menuSurfaceClassName`.
-  boxShadow: `0 0 0 0.5px ${menuEdgeColor}, 0 4px 12px 0 rgb(0 0 0 / 0.08), 0 1px 2px 0 rgb(0 0 0 / 0.06)`,
-};
+  // Dark theme overrides the fill and uses a tighter/darker drop (spread 0,
+  // 2px ambient diffusion) via `menuSurfaceClassName`; the ring color is the
+  // same `--menu-edge-color` in both.
+  boxShadow: `0 0 0 0.5px var(--menu-edge-color), 0 4px 12px 0 rgb(0 0 0 / 0.08), 0 1px 2px 0 rgb(0 0 0 / 0.06)`,
+} as CSSProperties;
 
 /**
  * Fixed box for an item's leading glyph. The icon is sized by this wrapper —

@@ -63,8 +63,8 @@ strings on i18n rather than the registry's inline English.
   (the Appearance slider) / `py-1` / `min-h-7`. Settings chrome is `1em` of the
   same token. Do not go back to `text-[13px]` or `text-xs` for menu rows.
   The hairline is a `0.5px` shadow ring (not a CSS border). Separators are
-  `foreground/10` in light and `white/18` in dark. Dark menus use a brighter
-  ring (`rgb(80 80 80)`) and a tighter, darker drop. Do not restore bulky
+  `foreground/10` in light and `white/18` in dark. The ring is the per-theme
+  `--menu-edge-color` mix in dark too, never a fixed gray. Do not restore bulky
   `min-h-8` rows or a 1px ring.
 
 ## Spinner
