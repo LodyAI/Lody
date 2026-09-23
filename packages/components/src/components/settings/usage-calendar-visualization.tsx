@@ -53,8 +53,6 @@ import {
   type UsageCalendarModel,
 } from './usage-calendar-model';
 import {
-  CELL_GAP_PX,
-  CELL_MIN_SIZE_PX,
   HEATMAP_COLUMN_TEMPLATE,
   HEATMAP_MIN_TRACK_WIDTH,
 } from './usage-calendar-geometry';
