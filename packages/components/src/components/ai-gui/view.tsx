@@ -2517,11 +2517,10 @@ const DashedNoticeRule = () => (
  * filled, hairline-ringed block reads as part of the prose rather than as chrome
  * dropped on top of it.
  *
- * Always open, and only as wide as it needs to be. A notice is a short aside,
- * so hiding it behind a disclosure asked for a click to read two lines, and
- * stretching it across the column gave a subordinate message the same visual
- * weight as the answer it comments on. The width cap keeps a long payload to a
- * readable measure instead of one very wide line.
+ * Always open and the full width of the column. A notice is a short aside, so
+ * hiding it behind a disclosure asked for a click to read two lines, and a
+ * fit-content card left a ragged right edge against the column's otherwise
+ * straight rail.
  *
  * Tone is carried by the glyph and the leading sentence: amber is warning and
  * red is failure, by convention, over a ~6% fill that stays out of the way.
@@ -2563,35 +2562,30 @@ const AgentNoticeBanner = ({
         : 'hsl(var(--muted-foreground))';
   // A hairline: Chromium rounds a 0.5px BORDER up to 1px at any DPR, so every
   // `border-[0.5px]` in the app actually paints 1px. `ui/AGENTS.md` settled on
-  // this same shadow ring for menus. The rule under the header reuses it, so
-  // edge and divider are one material rather than two greys.
+  // this same shadow ring for menus.
   const ringColor = `color-mix(in srgb, ${toneColor} 14%, hsl(var(--border)))`;
   const fillColor = `color-mix(in srgb, ${toneColor} 3.5%, transparent)`;
 
   return (
     <div
       style={{ boxShadow: `0 0 0 0.5px ${ringColor}`, background: fillColor }}
-      className="w-fit max-w-full overflow-hidden rounded-lg"
+      className="w-full overflow-hidden rounded-lg"
     >
-      {/* Header band, rule, body — the same three-part split a fenced code block
-          uses, so the two read as the same kind of embedded object. The detail
-          is a sibling of the header rather than a child of the column beside the
-          glyph: hanging it off the label indented every line past the icon, which
-          cost width the card does not have. */}
+      {/* Header and body read as one continuous band. The detail is a sibling
+          of the header rather than a child of the column beside the glyph:
+          hanging it off the label indented every line past the icon, which cost
+          width the card does not have. An action rides the header's trailing
+          edge so a retry stays on the same line as the message it answers. */}
       <div className="flex items-center gap-2 px-2 py-1.5">
         <Icon className={cn('h-3.5 w-3.5 shrink-0', accentClass)} aria-hidden="true" />
         <span className={cn('min-w-0 text-xs font-medium leading-4', accentClass)}>{label}</span>
+        {action ? <div className="ml-auto shrink-0">{action}</div> : null}
       </div>
       {detail ? (
-        <div style={{ boxShadow: `inset 0 0.5px 0 ${ringColor}` }} className="px-2 py-1.5">
+        <div className="px-2 pb-1.5">
           <span className="block min-w-0 whitespace-pre-wrap break-words text-xs leading-5 text-muted-foreground">
             {detail}
           </span>
-        </div>
-      ) : null}
-      {action ? (
-        <div style={{ boxShadow: `inset 0 0.5px 0 ${ringColor}` }} className="px-2 py-1.5">
-          {action}
         </div>
       ) : null}
     </div>
