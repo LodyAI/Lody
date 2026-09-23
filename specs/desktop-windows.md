@@ -27,7 +27,10 @@ conversation, and focus its composer once. The sidebar can be expanded.
 Workspace windows retain full navigation. Navigation, draft tabs, and panel state
 are independent per window.
 
-The optional developer window warm-up prepares the shell, not target Session data.
+The optional developer window warm-up prepares the shell and, in local mode, the
+implicit workspace runtime, Repo, and metadata sync before a target is selected.
+A matching claim retains that runtime, including initialization still in flight.
+The neutral route does not mount target Session UI or publish a workspace route.
 Local-only windows reuse same-workspace peer metadata and already loaded Session
 snapshots without sharing persistence or sync cursors. Snapshot import merges local
 edits; authoritative synchronization continues independently.

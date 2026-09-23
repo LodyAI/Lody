@@ -608,9 +608,8 @@ export function createWarmWindow(options: { icon?: string } = {}): BrowserWindow
 }
 
 /**
- * Hands a claimed warm window its concrete route and presents it. The renderer
- * navigates client-side; the themed shell is already painted, so the window is
- * shown immediately without a blank frame.
+ * Hands a claimed warm window its concrete route. Native presentation waits
+ * for matching painted content or the recovery deadline.
  */
 export function bindMainWindowTarget(window: BrowserWindow, target: ElectronWindowTarget): void {
   presentWindowTarget(

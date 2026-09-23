@@ -28,7 +28,8 @@ import { createWorkspaceRuntime } from './create-workspace-runtime';
 import { resolveCloudPlatformRuntimePolicy } from './cloud-platform-runtime-policy';
 import type { EagerSyncSurface } from './background-sync-coordinator';
 import { resolveEffectiveWorkspaceId } from './resolve-effective-workspace-id';
-import { useImplicitLocalWorkspace } from './local-platform-provider';
+import { getLocalWorkspaceSlug, useImplicitLocalWorkspace } from './local-platform-provider';
+import { isWarmWindow } from '@/lib/desktop-window';
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { maybeClearLodyCacheOnBoot } from '@/lib/clear-local-cache';
 import { isElectronRenderer } from '@/lib/electron';
@@ -65,7 +66,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const platform = usePlatform();
   // Use workspaceSlug for runtime initialization (available immediately from URL)
   // Use workspaceId for WebSocket connections (requires server response)
-  const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
+  const routeWorkspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
   const localProbeResult = useAtomValue(localProbeResultAtom);
   const localProbeAttempted = useAtomValue(localProbeAttemptedAtom);
@@ -115,6 +116,13 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const isLocalPlatform = platform.sync.mode === 'local';
   const telemetryEnabled = platform.capabilities.has('telemetry');
   const implicitLocalWorkspace = useImplicitLocalWorkspace();
+  // Start the local Repo and metadata sync while the spare still has no route.
+  // A matching claim keeps these effect keys unchanged and retains the runtime.
+  const workspaceSlug =
+    routeWorkspaceSlug ??
+    (isLocalPlatform && isWarmWindow() && implicitLocalWorkspace
+      ? getLocalWorkspaceSlug(implicitLocalWorkspace)
+      : null);
   const { ready: localAgentRuntimeReady } = resolveCloudPlatformRuntimePolicy({
     electron: isElectronRenderer(),
     localAgentEnabled,

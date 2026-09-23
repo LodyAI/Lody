@@ -15,7 +15,8 @@ matching content is painted, without a blank renderer cover; preparation still
 contributes to click-to-show time. Local windows reuse metadata and loaded Session
 snapshots with independent persistence/cursors. Benchmarking exposed an unconditional
 151 ms miss penalty, now removed by checking live peers and accepting negative replies.
-Full application click-to-show latency remains unverified.
+The local spare now starts workspace initialization before a claim and retains it
+across matching navigation. Full application click-to-show latency remains unverified.
 
 ## Decision and evidence
 
@@ -34,6 +35,14 @@ Main's independent five-second deadline exposes recovery UI if navigation/render
 fails. This fallback is not a content-ready acknowledgement. Closing the window
 cancels pending presentation; replacement prewarming begins after show to avoid
 competing with target preparation.
+
+`RuntimeProvider` initializes the implicit local workspace while the spare remains
+on its neutral route. This moves Repo creation, local metadata sync, and peer
+bootstrap ahead of the click without writing route context or mounting a Session.
+The effective workspace keys remain stable on a matching claim, retaining both a
+ready runtime and initialization still in flight. Missing local identity waits;
+ordinary neutral windows and cloud runtimes retain route-driven initialization.
+Target-specific history hydration and painting still occur after selection.
 
 `window-state.ts` owns product registration and close cleanup. Claimed windows can
 become the main fallback and survive closing the original. Only the current spare
@@ -68,9 +77,11 @@ Cloud and dual-mode runtimes do not participate in peer sharing.
 
 ## Verification and limits
 
-39 deterministic component tests plus nine shared IPC tests cover adoption,
+46 deterministic component tests plus nine shared IPC tests cover adoption,
 recovery, matching-sender/target reveal, hidden preparation, timeout/close cleanup,
 replacement timing, metadata races, CRDT reuse/merge, peer absence and cache selection.
+Provider lifecycle coverage verifies preparation before routing, retention across
+ready/in-flight claims, scope replacement, identity gating, and disposal.
 Components and Electron typechecks pass. Changed helper/benchmark lint is clean.
 
 The [benchmark](../../../../packages/components/benchmarks/window-bootstrap/README.md)
@@ -79,7 +90,8 @@ Electron renderers, native BroadcastChannel/Web Locks/IndexedDB, synthetic CRDT
 history, and the production reader. A native presentation probe runs production
 main/renderer readiness code and captures the first shown synthetic surface with
 30 readable rows. This verifies the presentation ordering, not the full Lody React
-interface. Click-to-show and data-readiness measurements must not be conflated.
+interface. Those recorded timings predate workspace runtime preinitialization;
+they do not measure its latency benefit. Click-to-show and data-readiness measurements must not be conflated.
 
 Real application visual acceptance remains unverified; E2E disables the warm pool
 and this checkout lacks complete desktop/CLI build artifacts and ACP submodules.
