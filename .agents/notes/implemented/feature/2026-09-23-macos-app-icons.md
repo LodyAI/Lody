@@ -7,7 +7,7 @@ Translation: current
 
 ## Abstract
 
-The desktop now offers Default and Aqua previews below Font size in Appearance
+The desktop now offers Default and Aqua previews below Terminal in Appearance
 on packaged macOS. It reuses the native-host picker and stores successful choices
 locally, restoring them after restart or bundle replacement. AppKit changes
 Finder custom metadata while Electron updates the running Dock. Ordinary code
@@ -48,6 +48,14 @@ python3 scripts/pad-mac-icon.py --input-png build/icon-aqua.png \
   --pad 0.10 --mask-png build/icon-mac.padded.png
 ```
 
+After changing or clearing the Finder icon, the native helper forces
+`LSRegisterURL(..., true)` and notifies `NSWorkspace` of the bundle change before
+updating the running Dock tile. This requests an immediate refresh of registered
+application information rather than waiting for the next launch. A failure after
+partial native application attempts to restore the previous choice without
+persisting the failed selection. Neither global cache deletion nor a Dock restart
+is used.
+
 ## Evidence and limits
 
 Tests cover restart/update restoration, default reset, native/write failures,
@@ -64,3 +72,12 @@ Never use this customization on release artifacts before signing/notarizing.
 The available installed app was already rejected as Unnotarized Developer ID,
 so it could not establish Gatekeeper behavior or a notarized update cycle.
 Do not present those unexecuted checks as passed.
+
+The first quit after a selection was reported to briefly restore the old Dock
+icon, with later launches/quits correct. The registration refresh is a mitigation:
+Apple documents refreshing Launch Services information, not a guarantee that Dock
+invalidates its launch-time icon cache. The native probe passes with the refresh,
+and a deterministic controller test covers failure after the icon was written.
+A pinned Dock item across first quit has **not** been visually verified; the
+reporting Mac is unavailable remotely. Verify Default → Aqua → quit and
+Aqua → Default → quit on that machine before treating the cache bug as resolved.

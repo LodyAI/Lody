@@ -88,6 +88,18 @@ void test('a preference write failure rolls the native icon back', async () => {
   assert.deepEqual(state, { saved: 'default', installed: 'default' })
 })
 
+void test('a refresh failure after changing the native icon restores the previous choice', async () => {
+  const { state, deps, controller } = fixture()
+  deps.apply = async (name) => {
+    state.installed = name
+    if (name === 'aqua') throw new Error('Unable to refresh application icon')
+  }
+  await assert.rejects(controller.setIcon('aqua'), /Unable to refresh/)
+  assert.deepEqual(state, { saved: 'default', installed: 'default' })
+  await controller.setIcon('default')
+  assert.deepEqual(state, { saved: 'default', installed: 'default' })
+})
+
 void test('startup and competing windows cannot reorder changes', async () => {
   const { state, deps, controller } = fixture()
   const entered = Promise.withResolvers()

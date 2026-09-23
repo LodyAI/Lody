@@ -242,8 +242,6 @@ export function AppearanceSettingsView({
         </CompactRow>
       </CompactSection>
 
-      <MobileAppIconSettings layout={isElectron ? 'desktop' : 'mobile'} />
-
       {isElectron ? (
         <CompactSection title={t('settings.terminal.title', 'Terminal')}>
           <CompactRow
@@ -334,6 +332,7 @@ export function AppearanceSettingsView({
           </div>
         </CompactSection>
       ) : null}
+      <MobileAppIconSettings layout={isElectron ? 'desktop' : 'mobile'} />
     </div>
   );
 }

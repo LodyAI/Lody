@@ -6,8 +6,8 @@ Translation: current
 [中文](app-icon-selection.zh.md)
 
 In a native host that supports alternate app icons, a person can open Appearance
-settings and select a bundled icon by its preview immediately below Font size,
-then later restore the default. Hosts without this capability show no icon picker.
+settings and select a bundled icon by its preview, then later restore the default.
+The picker appears below Terminal on desktop and below Font size on iOS. Hosts without this capability show no icon picker.
 
 The host provides the icon catalog and reads and changes the installed icon.
 The shared UI waits for native confirmation before moving the checkmark, disables

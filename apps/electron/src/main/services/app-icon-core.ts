@@ -35,8 +35,8 @@ export function createAppIconController(deps: {
         const name = parseAppIconName(raw)
         if (!deps.supported) throw new Error('App icons are unsupported on this host')
         const previous = deps.read()
-        await deps.apply(name)
         try {
+          await deps.apply(name)
           deps.write(name)
         } catch (error) {
           await deps.apply(previous)

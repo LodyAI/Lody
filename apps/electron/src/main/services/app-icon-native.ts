@@ -8,12 +8,18 @@ const execFileAsync = promisify(execFile)
 // not the signed icon resources or Info.plist inside Contents.
 const script = `
 ObjC.import('AppKit');
+ObjC.import('CoreServices');
 function run(args) {
   var image = args[1] ? $.NSImage.alloc.initWithContentsOfFile(args[1]) : $();
   if (args[1] && (!image || image.isNil())) throw new Error('Invalid icon image');
   if (!$.NSWorkspace.sharedWorkspace.setIconForFileOptions(image, args[0], 0)) {
     throw new Error('Unable to change application icon');
   }
+  // The running Dock tile is separate from the icon cached for a stopped app.
+  // Force registration now instead of waiting for the next application launch.
+  var status = $.LSRegisterURL($.NSURL.fileURLWithPath(args[0]), true);
+  if (status !== 0) throw new Error('Unable to refresh application icon: ' + status);
+  $.NSWorkspace.sharedWorkspace.noteFileSystemChanged(args[0]);
 }
 `
 

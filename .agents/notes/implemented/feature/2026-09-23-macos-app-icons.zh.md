@@ -7,7 +7,7 @@ Translation: current
 
 ## 摘要
 
-已打包的 macOS 桌面应用在外观设置的字号下方提供“默认”和 Aqua 预览。
+已打包的 macOS 桌面应用在外观设置的 Terminal 下方提供“默认”和 Aqua 预览。
 复用原生宿主选择器，将成功选择保存在本机，重启或应用包替换后恢复。
 AppKit 修改 Finder 自定义元数据，Electron 同步运行中的 Dock。
 普通签名校验通过，但严格校验拒绝自定义图标元数据；恢复默认会清除它。
@@ -43,6 +43,12 @@ python3 scripts/pad-mac-icon.py --input-png build/icon-aqua.png \
   --pad 0.10 --mask-png build/icon-mac.padded.png
 ```
 
+设置或清除 Finder 图标后，原生辅助逻辑先强制执行
+`LSRegisterURL(..., true)`，再通知 `NSWorkspace` 应用包已变更，最后更新
+运行中的 Dock 图标。这会请求立即刷新已注册的应用信息，无需等到下次启动。
+原生操作部分完成后若失败，会尝试恢复之前的图标，不保存失败的选择。
+不删除全局缓存，也不重启 Dock。
+
 ## 证据与限制
 
 测试覆盖重启／更新恢复、默认重置、原生及保存失败、并发串行和不支持／
@@ -57,3 +63,11 @@ python3 scripts/pad-mac-icon.py --input-png build/icon-aqua.png \
 发布产物签名／公证前不得应用此自定义。现有安装本身被系统判为
 Unnotarized Developer ID，因此无法据此确认 Gatekeeper 行为或已公证
 应用更新流程，不能把这些未执行的检查描述为通过。
+
+已收到切换后第一次退出短暂恢复旧 Dock 图标、之后启动和退出均正常的反馈。
+强制注册刷新属于缓解措施：Apple 文档保证更新 Launch Services 信息，
+不保证 Dock 的启动时图标缓存会失效。加入刷新后的原生探针已通过，
+确定性控制器测试覆盖图标已写入后刷新失败的回退。
+尚未目视验证固定 Dock 图标的首次退出行为，反馈机器暂时无法远程访问。
+必须在该机器验证“默认 → Aqua → 退出”和“Aqua → 默认 → 退出”，
+才能确认缓存问题已解决。
