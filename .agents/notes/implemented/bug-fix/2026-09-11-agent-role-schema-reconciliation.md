@@ -63,12 +63,12 @@ independent frozen-lockfile install; the checkout's install guard permits this l
 Sequential ablations used the five suites above (63 tests); the negative control
 used the startup suite (12 tests). Passing tests alone are not equivalence evidence.
 
-| Experiment                                  | Evidence / outcome                                                                            | Decision           |
-| ------------------------------------------- | --------------------------------------------------------------------------------------------- | ------------------ |
-| Explicit-undefined baseline                 | 63 pass; scoped type-aware lint has no errors                                                 | Keep CI fix        |
-| Remove caller-side machine ID deduplication | Subscription owner already normalizes via `Set`; 63 pass                                      | Keep deletion      |
-| Remove separate machine ID from probe key   | Exact-target config lookup guarantees the serialized config already contains that ID; 63 pass | Keep deletion      |
-| Remove effect cleanup                       | 2 fail / 10 pass: sign-out and workspace disposal incorrectly mutate the stored Role          | Restore protection |
+| Experiment | Evidence / outcome | Decision |
+| --- | --- | --- |
+| Explicit-undefined baseline | 63 pass; scoped type-aware lint has no errors | Keep CI fix |
+| Remove caller-side machine ID deduplication | Subscription owner already normalizes via `Set`; 63 pass | Keep deletion |
+| Remove separate machine ID from probe key | Exact-target config lookup guarantees the serialized config already contains that ID; 63 pass | Keep deletion |
+| Remove effect cleanup | 2 fail / 10 pass: sign-out and workspace disposal incorrectly mutate the stored Role | Restore protection |
 
 The retained simplifications do not change migration intent or weaken identity,
 schema freshness, ownership, model compatibility or transactional write guards.

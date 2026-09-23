@@ -26,11 +26,11 @@ is still cold. `pnpm e2e:check` is green; the daily run will confirm.
 - First e2e-full run on #813 (run 35359528422): 21/22 passed; only
   `LODY-SESSION-004` failed at `expectColdHydrationExactDelete`
   (`session-relation-lifecycle-page.ts:200`) with `Expected: false,
-Received: true` — the closed empty tab's `session-{id}` doc stayed in
+  Received: true` — the closed empty tab's `session-{id}` doc stayed in
   `repo.listDoc()` for the full 30s poll.
 - `git show 884ec6ce~1` (pre-#746 `handleTabClose`) had:
   `if (tabMeta && !tabMeta.lastMessageAt) await deleteSessions([id]) else
-await archiveSession(id)`. The current code unconditionally calls
+  await archiveSession(id)`. The current code unconditionally calls
   `setSessionTabClosed` — no remaining path deletes an empty closed tab
   (verified across components, shared, CLI, and electron).
 - The contract survived as documentation: `use-session-actions.ts` still

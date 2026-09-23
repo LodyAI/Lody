@@ -51,7 +51,7 @@ The page now renders a handoff panel in the ordinary login card:
   the switch makes a transfer that resolves afterwards discard its code instead of
   producing a handoff, and the short-lived `better-auth.electron` cookie is cleared
   around each transfer so a stale code cannot be read back as this attempt's.
-- Only a _confirmed_ sign-out releases the handoff. `signOutWithoutRedirect` used to
+- Only a *confirmed* sign-out releases the handoff. `signOutWithoutRedirect` used to
   swallow both failure shapes — Better Auth throws on transport failures and reports
   API failures in `response.error` — so a failed sign-out was indistinguishable from
   a successful one while this browser's cookie, the very thing a transfer hands over,

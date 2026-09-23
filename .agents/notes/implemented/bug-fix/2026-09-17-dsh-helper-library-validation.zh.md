@@ -56,11 +56,11 @@ helper，这是本次修复真实的代价。
 在已安装的签名版本（0.95.0，团队 `YTRMX32C99`，hardened runtime）上确认了问题与修复，三组
 对照共用同一个 npx 闭包（`@deepseek-ai/dsh` 0.1.5-rc.2）与同一份生成的 profile：
 
-| 运行时                                        | 结果                                                     |
-| --------------------------------------------- | -------------------------------------------------------- |
-| 系统 Node 22.23.1                             | 返回合法的 ACP `initialize`（`acp-extension-dsh` 0.2.0） |
-| 随包发布的 Lody Helper                        | koffi `dlopen` 被拒，插件树失败，进程退出                |
-| 同一 Helper 用本记录的 inherit plist 重新签名 | 返回合法 `initialize`，stderr 为空                       |
+| 运行时 | 结果 |
+| --- | --- |
+| 系统 Node 22.23.1 | 返回合法的 ACP `initialize`（`acp-extension-dsh` 0.2.0） |
+| 随包发布的 Lody Helper | koffi `dlopen` 被拒，插件树失败，进程退出 |
+| 同一 Helper 用本记录的 inherit plist 重新签名 | 返回合法 `initialize`，stderr 为空 |
 
 第三组对照复制了应用包，只对其中嵌套的 helper 用已提交的
 `entitlements.mac.inherit.plist` 重新签名，未改动已安装的应用。第一组并不是"未加固"的

@@ -24,11 +24,11 @@ doc。本次恢复保留非空 tab 的 `isTabClosed` 新模型，但加回精确
 - #813 第一次 e2e-full（run 35359528422）：21/22 通过；唯一失败是
   `LODY-SESSION-004` 的 `expectColdHydrationExactDelete`
   （`session-relation-lifecycle-page.ts:200`），`Expected: false,
-Received: true`——被关掉的空 tab 的 `session-{id}` doc 在 30 秒
+  Received: true`——被关掉的空 tab 的 `session-{id}` doc 在 30 秒
   轮询内始终存在于 `repo.listDoc()`。
 - `git show 884ec6ce~1`（#746 之前的 `handleTabClose`）：
   `if (tabMeta && !tabMeta.lastMessageAt) await deleteSessions([id])
-else await archiveSession(id)`。当前代码无条件调用
+  else await archiveSession(id)`。当前代码无条件调用
   `setSessionTabClosed`——components、shared、CLI、electron 里都不
   再有删除空 closed tab 的路径。
 - 契约仍以注释形式存活：`use-session-actions.ts` 仍写着 "empty tabs

@@ -64,11 +64,11 @@ The failure and the fix were confirmed on the installed signed build (0.95.0, Te
 `YTRMX32C99`, hardened runtime) with three controls sharing one npx closure
 (`@deepseek-ai/dsh` 0.1.5-rc.2) and one generated profile:
 
-| Runtime                                              | Result                                                    |
-| ---------------------------------------------------- | --------------------------------------------------------- |
-| System Node 22.23.1                                  | valid ACP `initialize` (`acp-extension-dsh` 0.2.0)        |
-| Shipped Lody Helper                                  | koffi `dlopen` rejected, plugin tree fails, process exits |
-| Same Helper re-signed with this note's inherit plist | valid `initialize`, empty stderr                          |
+| Runtime | Result |
+| --- | --- |
+| System Node 22.23.1 | valid ACP `initialize` (`acp-extension-dsh` 0.2.0) |
+| Shipped Lody Helper | koffi `dlopen` rejected, plugin tree fails, process exits |
+| Same Helper re-signed with this note's inherit plist | valid `initialize`, empty stderr |
 
 The third control copied the app bundle, re-signed only the nested helper with the
 committed `entitlements.mac.inherit.plist`, and left the installed app untouched. The
