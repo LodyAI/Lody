@@ -28,6 +28,7 @@ import { authClient } from './auth'
 import { installNativeTabBehavior } from './native-tab-behavior'
 import { createRendererErrorReporting, type RendererFatalScope } from './renderer-error-reporting'
 import { DesktopDevbar } from './devbar/index'
+import { installAppIconBridge } from './app-icon'
 
 // Desktop windows should not Tab-cycle a focus ring through the whole UI like a web page.
 installNativeTabBehavior()
@@ -213,6 +214,7 @@ window.addEventListener('unhandledrejection', (event) => {
 })
 
 try {
+  installAppIconBridge()
   // Resolve and persist the desktop's first-run language before React can
   // commit. AppInitializer keeps later changes synchronized; awaiting here
   // closes the window where onboarding could paint once in English first.

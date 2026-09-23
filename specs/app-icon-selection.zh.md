@@ -13,10 +13,23 @@ Translation: current
 可重试的错误。重新打开设置时再次读取原生状态。选择属于当前设备，
 不属于工作区或账号偏好。
 
+已打包的 macOS 桌面应用提供“默认”和 Aqua。主进程串行处理多个窗口的
+切换请求，将确认成功的选择保存在本机，并在启动时重新应用，避免更新替换
+应用包后丢失偏好。“默认”会清除 Finder 自定义图标，运行中的 Dock 同步
+所选图标。Windows、Linux、浏览器及未打包的 Electron 不提供此能力。
+只接受内置图标标识，不接受渲染进程传入的文件路径。
+
+macOS 自定义图标使用 Finder 元数据。签名覆盖的资源保持不变，普通签名
+校验通过，但严格校验会拒绝这些元数据，直到恢复默认图标。发布产物仍须
+不带自定义元数据，并通过严格签名和公证校验。
+
 ## 实现证据
 
 - `packages/components/src/components/mobile/mobile-app-icon-settings.tsx`
 - `packages/components/tests/mobile-app-icon-settings.test.tsx`
 - `packages/components/src/stories/MobileAppIconSettings.stories.tsx`
+- `apps/electron/src/main/services/app-icon-service.ts`
+- `apps/electron/src/main/services/app-icon-native.test.mjs`
 
-本仓库不负责原生打包，也不能据此确认真机行为。
+原生探针在临时签名的 macOS 应用包上验证图标落盘与签名资源保留。
+完整的已公证应用更新流程仍需发布验证。iOS 打包由外部宿主负责。

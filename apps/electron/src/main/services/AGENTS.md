@@ -1,5 +1,11 @@
 # Main services
 
+App icons are macOS packaged-app only. `app-icon-service.ts` owns device-local
+preferences and the serialized native apply path; the renderer supplies only a
+catalog identifier. Never edit signed resources or the shared development
+Electron bundle. Finder custom metadata affects strict validation; see the
+[icon decision](../../../../../.agents/notes/implemented/feature/2026-09-23-macos-app-icons.md).
+
 Native notifications must stay strongly referenced after delivery succeeds, until
 click, close, or failure. `NotificationService` owns those references and
 `notification-delivery.ts` releases them; returning IPC success is not dismissal.

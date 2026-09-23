@@ -9,6 +9,8 @@ import dns from 'node:dns'
 import { writeHeapSnapshot } from 'node:v8'
 import icon from '../../resources/icon.png?asset'
 import macIcon from '../../build/icon-mac.padded.png?asset'
+import aquaIcon from '../../resources/app-icons/aqua.png?asset'
+import { createElectronAppIconService } from './services/app-icon-service'
 import {
   acquireSingleInstanceLock,
   initializeAuthDeepLinks,
@@ -216,6 +218,14 @@ if (hasSingleInstanceLock) {
     await startDevbarDevframeService()
     recordE2EBootDiagnostic('initializing-services')
     if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(macIcon)
+    const appIconService = createElectronAppIconService(macIcon, aquaIcon)
+    if (process.platform === 'darwin' && app.isPackaged) {
+      void Promise.resolve()
+        .then(() => appIconService.getState())
+        .catch((error: unknown) => {
+          console.warn('[Electron] Failed to restore app icon', error)
+        })
+    }
 
     logDeepLinkDebug('app.whenReady resolved', {
       isDefaultProtocolClient: app.isDefaultProtocolClient(LODY_PROTOCOL),
@@ -312,6 +322,7 @@ if (hasSingleInstanceLock) {
       setMainWindowProductReloadTarget(window)
     }
     registerIpcServices({
+      appIconService,
       cliService,
       appUpdaterService,
       authService,

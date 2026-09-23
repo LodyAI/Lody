@@ -1,4 +1,5 @@
 import { assertProductWindowSender } from '../assert-sender'
+import { parseAppIconName } from '../../services/app-icon-core'
 import { productWindows } from '../../window-state'
 import { parseWindowTarget, openSessionWindow, type WindowTarget } from '../../session-windows'
 import { access } from 'node:fs/promises'
@@ -98,6 +99,19 @@ export function installNativeThemeWatch(): void {
 
 export class AppIpc extends IpcService {
   static override readonly groupName = 'app'
+
+  @IpcMethod()
+  async getAppIconState() {
+    assertProductWindowSender(getIpcContext().event)
+    return getIpcServiceDeps().appIconService.getState()
+  }
+
+  @IpcMethod()
+  async setAppIcon(raw: { name: string }) {
+    assertProductWindowSender(getIpcContext().event)
+    const name = parseAppIconName(raw?.name)
+    return getIpcServiceDeps().appIconService.setIcon(name)
+  }
 
   @IpcMethod()
   async openWindow(raw: WindowTarget) {
