@@ -35,7 +35,7 @@ Startup/settings read → reapply saved choice to current bundle
 
 The system `/usr/bin/osascript` Objective-C bridge calls NSWorkspace without a
 downloaded helper or runtime compiler. Paths are argv, not script interpolation.
-ASAR artwork is copied to a temporary real file and removed after AppKit consumes
+Alternate ASAR artwork is copied to a temporary real file and removed after AppKit consumes
 it. The Aqua source (`build/icon-aqua.png`) preserves the iOS artwork. The macOS
 runtime asset adds 10% transparent padding per side and uses the default padded
 icon's alpha silhouette for matching rounded corners. Settings, Finder and Dock
@@ -81,3 +81,22 @@ and a deterministic controller test covers failure after the icon was written.
 A pinned Dock item across first quit has **not** been visually verified; the
 reporting Mac is unavailable remotely. Verify Default → Aqua → quit and
 Aqua → Default → quit on that machine before treating the cache bug as resolved.
+
+## Ablation evidence
+
+Single-variable experiments against `0acb7427` distinguish redundancy from guards:
+
+| Removed | Observed result | Decision |
+| --- | --- | --- |
+| Default-icon temporary PNG copy | Same native reset and strict signature result; temporary mkdir/read/write/remove each drop from 1 to 0; reset also succeeds when temporary storage is unavailable | Remove |
+| Serialized queue | Competing-window ordering test fails | Keep |
+| Rollback | Preference-write and partial-native-failure tests fail | Keep |
+| Startup reapplication | Restart/update restoration test fails | Keep |
+| Conf constructor normalization | Packaged CommonJS import is an object; direct construction throws `Conf is not a constructor` | Keep |
+
+The service experiment transpiled the real service with an injected Electron app
+and instrumented filesystem, using real preferences and native helpers on a signed
+temporary bundle. Aqua still writes the custom icon and cleans its temporary PNG.
+Dock drawing was injected, so this does not close the first-quit visual gap above.
+Refresh calls were not classified as redundant: the available tests cannot observe
+the reported Dock cache issue, so passing without them would not prove equivalence.

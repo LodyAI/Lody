@@ -13,20 +13,23 @@ export function createElectronAppIconService(defaultIcon: string, aquaIcon: stri
     supported,
     ...preferences,
     apply: async (name) => {
-      const iconPath = name === 'default' ? defaultIcon : aquaIcon
-      // Electron reads assets from ASAR, but AppKit needs a real filesystem path.
-      const directory = await mkdtemp(join(app.getPath('temp'), 'lody-app-icon-'))
-      try {
-        const imagePath = join(directory, 'icon.png')
-        await writeFile(imagePath, await readFile(iconPath))
-        const bundlePath = join(app.getPath('exe'), '../../..')
-        await setMacApplicationIcon(bundlePath, name === 'default' ? null : imagePath)
-        app.dock?.setIcon(iconPath)
-      } finally {
-        await rm(directory, { recursive: true, force: true }).catch((error: unknown) => {
-          console.warn('[Electron] Failed to remove temporary app icon', error)
-        })
+      const bundlePath = join(app.getPath('exe'), '../../..')
+      if (name === 'default') {
+        await setMacApplicationIcon(bundlePath, null)
+      } else {
+        // Electron reads ASAR assets, but AppKit needs a real file for alternate icons.
+        const directory = await mkdtemp(join(app.getPath('temp'), 'lody-app-icon-'))
+        try {
+          const imagePath = join(directory, 'icon.png')
+          await writeFile(imagePath, await readFile(aquaIcon))
+          await setMacApplicationIcon(bundlePath, imagePath)
+        } finally {
+          await rm(directory, { recursive: true, force: true }).catch((error: unknown) => {
+            console.warn('[Electron] Failed to remove temporary app icon', error)
+          })
+        }
       }
+      app.dock?.setIcon(name === 'default' ? defaultIcon : aquaIcon)
     }
   })
 }
