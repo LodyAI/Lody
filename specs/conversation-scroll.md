@@ -27,7 +27,9 @@ for, and never move unless the user or the arrival of new output asks it to.
   A message taller than the viewport is shown from its end instead.
 - **Queued or steering messages** sent while the agent is working do not move the view.
 - **Opening** reveals the conversation only once it can be shown at its restored
-  position; it must not flash through intermediate positions.
+  position; it must not flash through intermediate positions, and late row measurements
+  must not leave it hidden
+  ([initial scroll recovery](../.agents/notes/implemented/bug-fix/2026-09-23-initial-scroll-recovery.md)).
 
 ## Open questions
 

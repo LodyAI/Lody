@@ -79,7 +79,15 @@ measured destination and visible-row geometry to agree. Direct row ResizeObserve
 records and spacer/row geometry commits drive this check without a settle timer.
 Those row records also correct following before the spacer's deferred resize;
 programmatic corrections record their own scrollTop so the resulting scroll event
-is not read as reader intent. Only mounted rows are observed, and normal window loads never hide a
+is not read as reader intent. Cached pixel restoration uses that own-write path too,
+reapplying the clamped target as geometry changes until reveal. A one-shot Virtua
+scroll request can expire before late measurements change its anchor, leaving the
+visibility gate waiting forever for an offset nobody will restore. Any navigation —
+reader input that releases follow, a suppressed jump, the end, or a send — retires
+the pending cached target.
+The [late-measurement decision](../../../../.agents/notes/implemented/bug-fix/2026-09-23-initial-scroll-recovery.md)
+records the reproduction and evidence boundary.
+Only mounted rows are observed, and normal window loads never hide a
 previously revealed conversation. `use-conversation-stream-items.ts` keys that
 readiness and the visible hydration range by `factSource ?? view`. Accepted-history
 projection wrappers may change while the underlying conversation stays the same;

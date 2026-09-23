@@ -146,6 +146,19 @@ export function useStickyScroll({
   suppressAutoScrollRef,
 }: UseStickyScrollOptions): UseStickyScrollResult {
   const cachedPositionAtMountRef = useRef(getScrollPosition(sessionId));
+  /**
+   * The cached reading offset still being restored, or null. Cold measurements
+   * can change both the clamped maximum and Virtua's anchor after any one-shot
+   * scroll request would have expired, so the restore is reapplied on every
+   * geometry/scroll delivery until the view is revealed; any navigation (reader
+   * input, a jump, the end, a send) supersedes it. See the
+   * [initial scroll recovery note](../../../../.agents/notes/implemented/bug-fix/2026-09-23-initial-scroll-recovery.md).
+   */
+  const initialOffsetRef = useRef(
+    cachedPositionAtMountRef.current?.type === 'offset'
+      ? cachedPositionAtMountRef.current.scrollOffset
+      : null
+  );
   const mountedAtRef = useRef(0);
   /**
    * Virtua's measurements from the last time this session was open. Without
@@ -233,6 +246,8 @@ export function useStickyScroll({
 
   const release = useCallback(
     (reason: string) => {
+      // A restoring reader is already `free`; their input still supersedes it.
+      initialOffsetRef.current = null;
       if (modeRef.current !== 'free') setMode('free', reason);
     },
     [setMode]
@@ -393,13 +408,25 @@ export function useStickyScroll({
     const viewport = scrollElementRef.current;
     const virtualizer = vlistRef.current;
     if (!viewport || !virtualizer) return;
-    const cached = cachedPositionAtMountRef.current;
-    let blocker: string | null = null;
-    if (cached?.type === 'offset') {
-      const target = Math.min(cached.scrollOffset, getScrollElementMaxOffset(viewport));
-      if (Math.abs(viewport.scrollTop - target) > 1) blocker = 'cached-offset-pending';
+    if (suppressAutoScrollRef?.current) initialOffsetRef.current = null;
+    if (initialOffsetRef.current !== null) {
+      const target = Math.min(initialOffsetRef.current, getScrollElementMaxOffset(viewport));
+      if (Math.abs(viewport.scrollTop - target) > 1) {
+        // Late measurements moved the clamp or Virtua's anchor: restore again,
+        // as our own write so it is not read as reader intent.
+        writeScrollTop(viewport, target);
+        if (lastSettleBlockerRef.current !== 'cached-offset-reapplied') {
+          lastSettleBlockerRef.current = 'cached-offset-reapplied';
+          scrollDebug('reveal-blocked', {
+            blocker: 'cached-offset-reapplied',
+            target: Math.round(target),
+            viewport: describeViewport(viewport),
+          });
+        }
+        return;
+      }
     }
-    blocker ??= getInitialScrollLayoutBlocker(
+    const blocker = getInitialScrollLayoutBlocker(
       viewport,
       virtualizer,
       itemCountRef.current,
@@ -425,7 +452,7 @@ export function useStickyScroll({
       viewport: describeViewport(viewport),
     });
     persistVirtualizerCache();
-  }, [persistVirtualizerCache, vlistRef]);
+  }, [persistVirtualizerCache, suppressAutoScrollRef, vlistRef, writeScrollTop]);
   settleInitialLayoutRef.current = settleInitialLayout;
 
   /** Every geometry change — rows, spacer commits, viewport height — lands here. */
@@ -673,10 +700,14 @@ export function useStickyScroll({
     }
 
     const cachedState = cachedPositionAtMountRef.current;
-    if (cachedState?.type === 'offset') {
+    if (initialOffsetRef.current !== null) {
       setMode('free', 'restore-offset');
-      currentVlist.scrollTo(cachedState.scrollOffset);
-      lastScrollTopRef.current = scrollElement.scrollTop;
+      // Synchronous, not Virtua's one-shot scrollTo: that request can expire
+      // before late measurements arrive. settleInitialLayout reapplies it.
+      writeScrollTop(
+        scrollElement,
+        Math.min(initialOffsetRef.current, getScrollElementMaxOffset(scrollElement))
+      );
     } else {
       setMode('follow', 'restore-end');
       scrollToRealBottom('restore-end');
@@ -697,6 +728,7 @@ export function useStickyScroll({
     setMode,
     settleInitialLayout,
     vlistRef,
+    writeScrollTop,
   ]);
 
   useEffect(() => {
@@ -711,6 +743,7 @@ export function useStickyScroll({
   });
 
   const scrollToBottom = useCallback(() => {
+    initialOffsetRef.current = null;
     saveScrollPosition(sessionId, { type: 'end' });
     if (itemCountRef.current <= 0) return;
     cancelGlide();
@@ -720,6 +753,7 @@ export function useStickyScroll({
   const anchorToRow = useCallback(
     (index: number) => {
       if (index < 0 || index >= itemCountRef.current) return;
+      initialOffsetRef.current = null;
       saveScrollPosition(sessionId, { type: 'end' });
       anchorIndexRef.current = index;
       if (modeRef.current !== 'anchored') {

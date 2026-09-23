@@ -44,6 +44,10 @@ The mode lives in the hook; observers never change it.
 - Re-arm: a downward scroll ending within 4px of the real bottom with no reply room left,
   an explicit jump to the end, or a send.
 - Own `scrollTop` writes are recorded so their scroll event is not read as intent.
+- A cached reading offset is restored synchronously and reapplied on every geometry or
+  scroll delivery until reveal; every navigation (release, suppressed jump, explicit end,
+  send) retires it. This carries PR #896's
+  [initial scroll recovery](../bug-fix/2026-09-23-initial-scroll-recovery.md) into the modes.
 - Viewport height changes keep the current mode's position; the skip flag is removed.
 - A direct send (agent idle) anchors its user row: the row is scrolled to where the
   first row sits at rest, and an element after `Virtualizer` reserves
