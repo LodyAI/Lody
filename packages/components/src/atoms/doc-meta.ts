@@ -19,6 +19,7 @@ import {
 import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from './runtime';
 import { mergeBootstrapMetaCache } from '@/lib/doc-meta-bootstrap';
 import { listDocMetaEntries, type DocMetaCacheSnapshot } from '@/lib/doc-meta-batch';
+import { jsonValueEqual } from '@/lib/json-value-equal';
 import { getDocMetaRoomKind, withDerivedDocMetaId } from '@/lib/doc-meta-room';
 
 // ---------------------------------------------------------------------------
@@ -128,34 +129,7 @@ function sessionListEntryEqual(a: SessionMeta, b: SessionMeta): boolean {
     const av = a[key];
     const bv = b[key];
     if (av === bv) continue;
-    if (!sessionMetaValueEqual(av, bv)) return false;
-  }
-  return true;
-}
-
-/**
- * Structural equality for metadata values (plain JSON from the CRDT). Walks the
- * values instead of serializing both sides: every metadata event compares every
- * session, and `JSON.stringify` allocated two strings per object field per session.
- */
-function sessionMetaValueEqual(a: unknown, b: unknown): boolean {
-  if (Object.is(a, b)) return true;
-  if (typeof a !== 'object' || a === null || typeof b !== 'object' || b === null) return false;
-  if (Array.isArray(a)) {
-    if (!Array.isArray(b) || a.length !== b.length) return false;
-    for (let index = 0; index < a.length; index++) {
-      if (!sessionMetaValueEqual(a[index], b[index])) return false;
-    }
-    return true;
-  }
-  if (Array.isArray(b)) return false;
-  const left = a as Record<string, unknown>;
-  const right = b as Record<string, unknown>;
-  const leftKeys = Object.keys(left);
-  if (leftKeys.length !== Object.keys(right).length) return false;
-  for (const key of leftKeys) {
-    if (!Object.prototype.hasOwnProperty.call(right, key)) return false;
-    if (!sessionMetaValueEqual(left[key], right[key])) return false;
+    if (!jsonValueEqual(av, bv)) return false;
   }
   return true;
 }
@@ -171,7 +145,7 @@ function metaRecordEqual(
   if (aKeys.length !== bKeys.length) return false;
   for (const key of aKeys) {
     if (!Object.prototype.hasOwnProperty.call(b, key)) return false;
-    if (!sessionMetaValueEqual(a[key], b[key])) return false;
+    if (!jsonValueEqual(a[key], b[key])) return false;
   }
   return true;
 }
@@ -184,7 +158,7 @@ function sessionMetaEqual(a: SessionMeta, b: SessionMeta): boolean {
 
   for (const key of aKeys) {
     if (!Object.prototype.hasOwnProperty.call(b, key)) return false;
-    if (!sessionMetaValueEqual(a[key], b[key])) return false;
+    if (!jsonValueEqual(a[key], b[key])) return false;
   }
 
   return true;

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useAtomValue, useSetAtom } from 'jotai';
+import { useSetAtom, useStore } from 'jotai';
 import {
   sidebarNavCallbacksAtom,
   sidebarNavItemsAtom,
@@ -34,22 +34,22 @@ function isPopupOpen(): boolean {
 /** App-level navigation commands plus the single global focus-scope switcher. */
 export function useKeyboardNavigation(): void {
   const { t } = useTranslation();
-  const flatItems = useAtomValue(sidebarNavItemsAtom);
-  const sidebarCallbacks = useAtomValue(sidebarNavCallbacksAtom);
   const toggleNavigationSidebar = useSetAtom(toggleNavigationSidebarAtom);
   const isMobile = useIsMobile();
 
-  const flatItemsRef = useRef(flatItems);
-  flatItemsRef.current = flatItems;
-  const callbacksRef = useRef(sidebarCallbacks);
-  callbacksRef.current = sidebarCallbacks;
+  // Read at key time, never subscribed: this hook lives in the workspace layout,
+  // and the sidebar republishes its rows whenever any session changes, which
+  // would re-render the whole layout (every sidebar row) for nothing.
+  const store = useStore();
+  const getCallbacks = useCallback(() => store.get(sidebarNavCallbacksAtom), [store]);
 
   const getVisibleSessionIds = useCallback(
     () =>
-      flatItemsRef.current
+      store
+        .get(sidebarNavItemsAtom)
         .filter((item): item is SidebarNavItem & { kind: 'session' } => item.kind === 'session')
         .map((item) => item.sessionId),
-    []
+    [store]
   );
 
   // Switching sessions renders the whole conversation synchronously, which
@@ -86,16 +86,16 @@ export function useKeyboardNavigation(): void {
     (sessionIds: readonly string[]): string | null => {
       const target = pendingSessionRef.current;
       if (target === null) return null;
-      const callbacks = callbacksRef.current;
+      const callbacks = getCallbacks();
       if (!callbacks) return null;
       if (callbacks.getSelectedSessionId() !== navigatedSessionRef.current) return null;
       return sessionIds.includes(target) ? target : null;
     },
-    []
+    [getCallbacks]
   );
 
   const flushSessionNavigation = useCallback(() => {
-    const callbacks = callbacksRef.current;
+    const callbacks = getCallbacks();
     const target = pendingSessionRef.current;
     if (!callbacks || target === null) {
       frameRef.current = null;
@@ -114,13 +114,13 @@ export function useKeyboardNavigation(): void {
       // The burst moved on while this navigation rendered; take the latest.
       if (pendingSessionRef.current !== navigatedSessionRef.current) flushSessionNavigation();
     });
-  }, [abandonBurst, claimBurstTarget, getVisibleSessionIds]);
+  }, [abandonBurst, claimBurstTarget, getCallbacks, getVisibleSessionIds]);
 
   useEffect(() => () => abandonBurst(), [abandonBurst]);
 
   const navigateVisibleSession = useCallback(
     (direction: 'previous' | 'next') => {
-      const callbacks = callbacksRef.current;
+      const callbacks = getCallbacks();
       if (!callbacks) return;
       const sessionIds = getVisibleSessionIds();
       if (sessionIds.length === 0) return;
@@ -141,7 +141,7 @@ export function useKeyboardNavigation(): void {
       pendingSessionRef.current = nextId;
       if (frameRef.current === null) flushSessionNavigation();
     },
-    [abandonBurst, claimBurstTarget, flushSessionNavigation, getVisibleSessionIds]
+    [abandonBurst, claimBurstTarget, flushSessionNavigation, getCallbacks, getVisibleSessionIds]
   );
 
   useFocusScopeSwitcher({ enabled: !isMobile });
@@ -161,10 +161,7 @@ export function useKeyboardNavigation(): void {
     category: 'Navigation',
     keybindings: getCommandKeybindings('session.previousVisible'),
     when: () =>
-      !isMobile &&
-      !isPopupOpen() &&
-      callbacksRef.current !== null &&
-      getVisibleSessionIds().length > 0,
+      !isMobile && !isPopupOpen() && getCallbacks() !== null && getVisibleSessionIds().length > 0,
     run: () => navigateVisibleSession('previous'),
   });
 
@@ -174,10 +171,7 @@ export function useKeyboardNavigation(): void {
     category: 'Navigation',
     keybindings: getCommandKeybindings('session.nextVisible'),
     when: () =>
-      !isMobile &&
-      !isPopupOpen() &&
-      callbacksRef.current !== null &&
-      getVisibleSessionIds().length > 0,
+      !isMobile && !isPopupOpen() && getCallbacks() !== null && getVisibleSessionIds().length > 0,
     run: () => navigateVisibleSession('next'),
   });
 
@@ -196,12 +190,12 @@ export function useKeyboardNavigation(): void {
       ) {
         return;
       }
-      const callbacks = callbacksRef.current;
+      const callbacks = getCallbacks();
       if (!callbacks) return;
       event.preventDefault();
       callbacks.onNavigateToNewSession();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [isMobile]);
+  }, [getCallbacks, isMobile]);
 }

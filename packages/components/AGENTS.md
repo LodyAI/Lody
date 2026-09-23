@@ -54,6 +54,11 @@ mobile surfaces. Background for the rules below:
   which also applies paint containment): a row must draw inside its own box (inset
   focus rings; connectors inside the leading slot). Recursive GitHub trees go through
   `lib/repo-file-paths-cache.ts`, never a direct `githubFetchFilePaths` per search.
+- Layout-level components never subscribe to high-frequency atoms (presence and its
+  clock, all sessions): host such hooks in a leaf that renders nothing
+  (`LodyLiveActivityHost`) and read sidebar navigation state at key time. Sidebar rows
+  are memoized: keep item and live-status identity while unchanged and pass
+  selection-independent handlers, or every row re-renders on each switch or tick.
 - Markdown code blocks tokenize in `lib/markdown-highlight.worker.ts`; the main thread
   keeps only cache hits and the no-worker fallback. Builds without an `es` worker format
   alias `@/lib/markdown-highlight-worker` to a null shim (see site-docs).

@@ -63,11 +63,15 @@ export function scrollDebug(event: string, data?: Record<string, unknown>): void
   if (consoleEnabled) console.debug(`[lody:scroll] ${event}`, data ?? '');
 }
 
-/** Geometry snapshot of a scroll viewport for log entries. */
+/**
+ * Geometry snapshot of a scroll viewport for log entries. Callers build log data
+ * eagerly, so this reads nothing while recording is off: these reads force
+ * layout in the middle of a commit.
+ */
 export const describeViewport = (
   viewport: Pick<HTMLElement, 'scrollTop' | 'scrollHeight' | 'clientHeight'> | null
 ): Record<string, number> | null =>
-  viewport
+  recordingEnabled && viewport
     ? {
         scrollTop: Math.round(viewport.scrollTop),
         scrollHeight: viewport.scrollHeight,

@@ -96,11 +96,33 @@ Measured in the same production build and workspace (9k nodes):
   exists. The projection is kept current by its own watch, so it is at least as fresh as a
   new scan. The bootstrap scan itself stays one blocking call until Flock can page a scan.
 
+- **Keyboard switching.** Switching by keyboard at ~6/s kept the CPU busy. A React
+  DevTools-hook commit census showed each switch as ~46 commits, five of them re-rendering
+  ~18k components (the whole layout). Causes:
+  - `useLodyLiveActivity` subscribed the top-level layout to every session, presence and its
+    clock, so each ~300ms tick re-rendered the app even on web, where the feature is off. It
+    now lives in the leaf `LodyLiveActivityHost`.
+  - `useKeyboardNavigation` subscribed the workspace layout to the sidebar's nav items; it
+    reads them at key time.
+  - All 248 "Updated" rows re-rendered on every switch and tick: the select/archive handlers
+    depended on the selection, and presence ticks rebuilt the live-status map and every item.
+    Handlers read the selection from a ref, and the status map and items keep their previous
+    objects while unchanged (`lib/json-value-equal.ts`).
+  - `Notification.permission` (~3ms, a browser round trip) was read on every prompt mount; the
+    latest-PR lookup is memoized per session meta; scroll debug geometry is not read while
+    logging is off.
+
+  Measured over 44 switches: main-thread tasks 6.6s → 4.3s, script 4.6s → 2.2s, blocking
+  time 2.1s → 0.5s; the switch commit renders ~2k components instead of ~18k.
+
 ## Open
 
 Konsta's `theme.css` still imports all Konsta styles; only this utility was shown to matter. No
 automated guard rejects unanchored positional selectors in the compiled CSS yet. The doc-meta
 lists are cheaper (above) but each cache update still derives every list in O(sessions). The
-sidebar still renders every row in React; only the browser's rendering work is skipped. The
+sidebar still renders every row in React; only the browser's rendering work is skipped. A per-switch
+render of the new conversation (~50ms of script) remains; a clock atom of relative times still
+re-renders every sidebar row when it ticks, and machine Flock readers re-encode version vectors
+(~4ms) on every mount. The
 bootstrap meta scan is still one synchronous Flock call (~700ms here); `scan` has no
 limit/cursor, so it cannot yield between batches. `includeRaw: false` would cut ~20%. Related scrolling work: [conversation follow modes](../architecture/2026-09-23-conversation-follow-modes.md).
