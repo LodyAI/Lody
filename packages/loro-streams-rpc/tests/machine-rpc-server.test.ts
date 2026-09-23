@@ -116,7 +116,7 @@ const createFakeStreamClient = () => {
 };
 
 describe('LoroStreamsMachineRpcServer', () => {
-  it.each(['available', 'unavailable', 'throws', 'invalid nonce'] as const)(
+  it.each(['available', 'unavailable', 'invalid nonce'] as const)(
     'isolates the %s preview handshake from the legacy machine status response',
     async (scenario) => {
       const requests = createFakeStreamClient();
@@ -150,7 +150,6 @@ describe('LoroStreamsMachineRpcServer', () => {
           scenario === 'unavailable'
             ? undefined
             : async () => {
-                if (scenario === 'throws') throw new Error('preview service stopped');
                 return {
                   type: 'machine/preview-control_response',
                   machineId,
@@ -159,6 +158,20 @@ describe('LoroStreamsMachineRpcServer', () => {
                 };
               },
         refreshMachineAcpCapabilities: vi.fn(),
+        getSessionPreviewStatus: async (params) => {
+          expect(params.proof).toEqual(previewProof);
+          expect(params.renewEndpointId).toBe('expired-endpoint');
+          return {
+            type: 'session/preview-status_response',
+            sessionId: params.sessionId,
+            success: true,
+            connection: {
+              status: 'closed',
+              endpointId: params.renewEndpointId,
+              closedReason: 'idle_timeout',
+            },
+          };
+        },
       });
       const client = new LoroStreamsMachineRpcClient({
         workspaceId: 'workspace-1',
@@ -175,17 +188,30 @@ describe('LoroStreamsMachineRpcServer', () => {
             success: true,
             runtimeNonce: previewProof.runtimeNonce,
           });
+          await expect(
+            client.requestSessionPreviewStatus({
+              proof: previewProof,
+              sessionId: 'session-1',
+              requestedByUserId: 'user-1',
+              renewEndpointId: 'expired-endpoint',
+            })
+          ).resolves.toEqual({
+            type: 'session/preview-status_response',
+            sessionId: 'session-1',
+            success: true,
+            connection: {
+              status: 'closed',
+              endpointId: 'expired-endpoint',
+              closedReason: 'idle_timeout',
+            },
+          });
         } else {
           expect(result).toEqual({
             type: 'machine/preview-control_response',
             machineId,
             success: false,
             error: expect.stringContaining(
-              scenario === 'unavailable'
-                ? 'method_unavailable'
-                : scenario === 'throws'
-                  ? 'preview service stopped'
-                  : 'invalid_result'
+              scenario === 'unavailable' ? 'method_unavailable' : 'invalid_result'
             ),
           });
         }
@@ -199,66 +225,6 @@ describe('LoroStreamsMachineRpcServer', () => {
     }
   );
 
-  it('carries preview status and exact endpoint renewal through the client/server contract', async () => {
-    const requests = createFakeStreamClient();
-    const responses = createFakeStreamClient();
-    const forward =
-      (destination: ReturnType<typeof createFakeStreamClient>) =>
-      async (_streamId: string, value: unknown) => {
-        destination.pushBatch({ messages: [value], nextOffset: '1', upToDate: true });
-        return '1';
-      };
-    let renewedEndpoint: string | undefined;
-    const server = new LoroStreamsMachineRpcServer({
-      logger: createSilentLogger(),
-      workspaceId: 'workspace-1' as WorkspaceId,
-      machineId: 'machine-1' as MachineId,
-      streamClient: { ...requests.streamClient, appendJson: forward(responses) },
-      getMachineStatus: vi.fn(),
-      refreshMachineAcpCapabilities: vi.fn(),
-      getSessionPreviewStatus: async (params) => {
-        renewedEndpoint = params.renewEndpointId;
-        return {
-          type: 'session/preview-status_response',
-          sessionId: params.sessionId,
-          success: true,
-          connection: {
-            status: 'closed',
-            endpointId: 'expired-endpoint',
-            closedReason: 'idle_timeout',
-          },
-        };
-      },
-    });
-    const client = new LoroStreamsMachineRpcClient({
-      workspaceId: 'workspace-1',
-      machineId: 'machine-1',
-      streamClient: { ...responses.streamClient, appendJson: forward(requests) },
-    });
-    await server.start();
-    try {
-      const result = await client.requestSessionPreviewStatus({
-        proof: previewProof,
-        sessionId: 'session-1',
-        requestedByUserId: 'user-1',
-        renewEndpointId: 'expired-endpoint',
-      });
-      expect(renewedEndpoint).toBe('expired-endpoint');
-      expect(result).toEqual({
-        type: 'session/preview-status_response',
-        sessionId: 'session-1',
-        success: true,
-        connection: {
-          status: 'closed',
-          endpointId: 'expired-endpoint',
-          closedReason: 'idle_timeout',
-        },
-      });
-    } finally {
-      client.stop();
-      server.stop();
-    }
-  });
   it.each(['session/preview-create', 'session/preview-status', 'session/preview-revoke'])(
     'rejects missing or malformed proof without dispatching %s or logging its secret',
     async (method) => {

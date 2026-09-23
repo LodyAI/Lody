@@ -202,6 +202,14 @@ Mobile 前端与 Electron production-mode bundle
 child promise，而非最后创建的 child。这些结果只证明本地回归边界，不证明实网性能，
 也未增加 Windows 或打包 Electron 的验收证据。
 
+## 测试清理（2026-09-23）
+
+测试清理以行为边界而非行数配额为准：header/注入 helper 的重复检查交给真实
+HTTP/WS 覆盖，重复的 RPC/UI 成功路径搭建并入生命周期转换，删除纯文案断言。
+鉴权、origin/source 校验、进程清理、延迟定时器到期及分段日志解析仍保留；
+独立审阅否决了将后两项当作重复测试删除。各展示状态的 story 保持可用。
+此次只精简测试，不改变产品行为，也不增加实网验收结论。
+
 ## Storybook 状态覆盖（2026-09-23）
 
 浏览器展示统一由 `SessionBrowserPanelView` 负责，生产控制器与 38 个状态 story

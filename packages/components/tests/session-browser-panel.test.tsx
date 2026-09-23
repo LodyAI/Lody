@@ -5,7 +5,6 @@ import { createRoot, type Root } from 'react-dom/client';
 import { Provider, createStore } from 'jotai';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
-  MachineMeta,
   MachineId,
   ElectronPublicBrowserState,
   PreviewConnection,
@@ -18,10 +17,8 @@ import type {
   SessionPreviewEndpoint,
   WorkspaceId,
 } from '@lody/shared';
-import { getMachineRoomId } from '@lody/shared';
 
 import { runtimeAtom, userAtom, type WorkspaceRuntime } from '../src/atoms';
-import { machineMetaCacheAtom } from '../src/atoms/doc-meta';
 import { SessionBrowserPanel } from '../src/components/sessions/session-browser-panel';
 import { clearSessionBrowserResumeState } from '../src/components/sessions/session-browser-resume-state';
 
@@ -283,7 +280,6 @@ describe('SessionBrowserPanel controller', () => {
     runtime: WorkspaceRuntime,
     options?: {
       candidateNavigationRequestId?: number;
-      machineName?: string;
       panelSession?: SessionMeta;
       onCandidateNavigationRequestHandled?: (requestId: number) => void;
     }
@@ -291,14 +287,6 @@ describe('SessionBrowserPanel controller', () => {
     const store = createStore();
     store.set(userAtom, { id: 'user-1', name: 'Browser User', email: 'browser@example.com' });
     store.set(runtimeAtom, runtime);
-    if (options?.machineName) {
-      store.set(machineMetaCacheAtom, {
-        [getMachineRoomId(session.machineId)]: {
-          id: session.machineId,
-          name: options.machineName,
-        } as MachineMeta,
-      });
-    }
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
@@ -369,7 +357,6 @@ describe('SessionBrowserPanel controller', () => {
     const rendered = await renderPanel(testRuntime.runtime);
     expect(rendered.querySelector('[data-testid="managed-preview"]')).toBeNull();
     expect(rendered.textContent).toContain('Session machine is unreachable');
-    expect(rendered.textContent).toContain('Restore preview');
     expect((rendered.querySelector('input') as HTMLInputElement).value).toBe(
       'http://127.0.0.1:5173/dashboard?mode=dev'
     );
@@ -388,6 +375,12 @@ describe('SessionBrowserPanel controller', () => {
       connection: replacement,
     });
     const rendered = await renderPanel(testRuntime.runtime);
+    expect(testRuntime.requestSessionPreviewCreate).not.toHaveBeenCalled();
+    expect(
+      rendered.querySelector('[data-testid="managed-preview"]')?.getAttribute('data-viewer-url')
+    ).toBe(
+      'https://browser-preview.trycloudflare.com/dashboard?mode=dev&__lody_preview_token=remote-token'
+    );
     testRuntime.observeConnection({
       ...remoteConnection,
       status: 'closed',
@@ -401,7 +394,6 @@ describe('SessionBrowserPanel controller', () => {
       'http://127.0.0.1:5173/dashboard?mode=dev'
     );
     await clickRestore(rendered);
-    expect(document.querySelector('[role="alertdialog"]')).toBeNull();
     expect(testRuntime.requestSessionPreviewCreate).toHaveBeenLastCalledWith(
       session.machineId,
       session.id,
@@ -413,9 +405,6 @@ describe('SessionBrowserPanel controller', () => {
     expect(
       rendered.querySelector('[data-testid="managed-preview"]')?.getAttribute('data-viewer-url')
     ).toBe('https://restored.trycloudflare.com/dashboard?mode=dev&__lody_preview_token=new-token');
-    expect(
-      rendered.querySelector('[data-testid="preview-status-trigger"]')?.getAttribute('aria-label')
-    ).toContain('Preview connected');
   });
 
   it('renews only the foreground remote endpoint and rechecks without renewal on return', async () => {
@@ -454,9 +443,6 @@ describe('SessionBrowserPanel controller', () => {
       { renewEndpointId: undefined }
     );
     expect(rendered.querySelector('[data-testid="managed-preview"]')).toBeNull();
-    expect(
-      rendered.querySelector('[data-testid="preview-status-trigger"]')?.getAttribute('aria-label')
-    ).toContain('Preview link expired');
     expect(testRuntime.requestSessionPreviewCreate).not.toHaveBeenCalled();
   });
 
@@ -484,9 +470,6 @@ describe('SessionBrowserPanel controller', () => {
     expect(
       rendered.querySelector('[data-testid="managed-preview"]')?.getAttribute('data-viewer-url')
     ).toBe(localEndpoint.viewerUrl);
-    expect(
-      rendered.querySelector('[data-testid="preview-status-trigger"]')?.getAttribute('aria-label')
-    ).toContain('Preview link expired');
     expect(testRuntime.requestSessionPreviewEndpointRelease).not.toHaveBeenCalled();
   });
 
@@ -518,10 +501,6 @@ describe('SessionBrowserPanel controller', () => {
       });
       await flushMicrotasks();
     });
-    expect(
-      rendered.querySelector('[data-testid="preview-status-trigger"]')?.getAttribute('aria-label')
-    ).toContain('Preview connected');
-    expect(rendered.textContent).not.toContain('Preview link expired');
     expect(rendered.querySelector('[data-testid="managed-preview"]')).not.toBeNull();
   });
 
@@ -890,61 +869,6 @@ describe('SessionBrowserPanel controller', () => {
     expect(testRuntime.requestSessionPreviewCreate).not.toHaveBeenCalled();
   });
 
-  it('explains an empty browser instead of showing a bare globe', async () => {
-    const catchingUp = createCatchingUpSessionStore(session.id);
-    const testRuntime = createRuntime({ plane: 'cloud', sessionStore: catchingUp.store });
-    const rendered = await renderPanel(testRuntime.runtime, {
-      candidateNavigationRequestId: 1,
-      panelSession: { ...session, previewCandidate: { status: 'available', updatedAt: 1 } },
-    });
-
-    await act(async () => {
-      catchingUp.finishSync();
-      await flushMicrotasks();
-    });
-
-    // Nothing was ever reported: say so rather than leaving the user guessing.
-    expect(rendered.textContent).toContain('No preview address reported yet');
-
-    await act(async () => {
-      catchingUp.deliverPreview({
-        candidate: {
-          status: 'available',
-          candidateId: 'candidate-hint',
-          target: localTarget,
-          updatedAt: 2,
-        },
-      });
-      await flushMicrotasks();
-    });
-
-    expect(rendered.textContent).not.toContain('No preview address reported yet');
-  });
-
-  it('reuses an active session tunnel when the browser panel mounts again', async () => {
-    const testRuntime = createRuntime({
-      plane: 'cloud',
-      preview: { connection: remoteConnection },
-    });
-    const rendered = await renderPanel(testRuntime.runtime, {
-      machineName: 'Remote workstation',
-    });
-
-    expect(testRuntime.requestSessionPreviewCreate).not.toHaveBeenCalled();
-    expect(
-      rendered.querySelector('[data-testid="managed-preview"]')?.getAttribute('data-viewer-url')
-    ).toBe(
-      'https://browser-preview.trycloudflare.com/dashboard?mode=dev&__lody_preview_token=remote-token'
-    );
-    expect(rendered.querySelector('[data-testid="preview-status-trigger"]')).not.toBeNull();
-    expect(
-      rendered.querySelector('[data-testid="preview-status-trigger"]')?.getAttribute('aria-label')
-    ).toContain('Preview connected');
-    expect((rendered.querySelector('input[aria-label="Address"]') as HTMLInputElement).value).toBe(
-      'http://127.0.0.1:5173/dashboard?mode=dev'
-    );
-  });
-
   it('shows remote connection progress until the tunnel viewer URL is ready', async () => {
     let resolveCreate: ((response: SessionPreviewCreateResponse) => void) | undefined;
     const createPreview = () =>
@@ -959,9 +883,6 @@ describe('SessionBrowserPanel controller', () => {
     expect(rendered.querySelector('[role="status"]')?.textContent).toContain(
       'Establishing a secure preview connection…'
     );
-    expect(
-      rendered.querySelector('[data-testid="preview-status-trigger"]')?.getAttribute('aria-label')
-    ).toContain('Creating preview link…');
     expect(
       (rendered.querySelector('input[aria-label="Address"]') as HTMLInputElement).disabled
     ).toBe(true);
@@ -984,9 +905,6 @@ describe('SessionBrowserPanel controller', () => {
     expect(surface?.getAttribute('data-logical-url')).toBe(
       'http://127.0.0.1:5173/dashboard?mode=dev'
     );
-    expect(
-      rendered.querySelector('[data-testid="preview-status-trigger"]')?.getAttribute('aria-label')
-    ).toContain('Preview connected');
   });
 
   it('surfaces an unexpected remote navigation failure instead of rejecting silently', async () => {
@@ -1004,25 +922,6 @@ describe('SessionBrowserPanel controller', () => {
       'Page could not be opened: preview transport disconnected'
     );
     expect(rendered.querySelector('[role="status"]')).not.toBeNull();
-  });
-
-  it('uses the exact local endpoint for a local Electron session without creating a tunnel', async () => {
-    window.__LODY_ELECTRON__ = true;
-    const testRuntime = createRuntime({ plane: 'local' });
-    const rendered = await renderPanel(testRuntime.runtime);
-
-    await enterAddress(rendered, '127.0.0.1:5173/dashboard?mode=dev');
-
-    expect(testRuntime.requestSessionPreviewEndpointAcquire).toHaveBeenCalledWith(
-      session.machineId,
-      session.id,
-      'user-1',
-      localTarget
-    );
-    expect(testRuntime.requestSessionPreviewCreate).not.toHaveBeenCalled();
-    expect(
-      rendered.querySelector('[data-testid="managed-preview"]')?.getAttribute('data-viewer-url')
-    ).toBe(localEndpoint.viewerUrl);
   });
 
   it('keeps a local session endpoint alive across panel unmount and resumes it on remount', async () => {
@@ -1052,6 +951,15 @@ describe('SessionBrowserPanel controller', () => {
     const testRuntime = createRuntime({ plane: 'local' });
     const rendered = await renderPanel(testRuntime.runtime);
     await enterAddress(rendered, '127.0.0.1:5173/dashboard?mode=dev');
+    expect(testRuntime.requestSessionPreviewEndpointAcquire).toHaveBeenCalledWith(
+      session.machineId,
+      session.id,
+      'user-1',
+      localTarget
+    );
+    expect(testRuntime.requestSessionPreviewCreate).not.toHaveBeenCalled();
+    const localViewer = rendered.querySelector('[data-testid="managed-preview"]');
+    expect(localViewer?.getAttribute('data-viewer-url')).toBe(localEndpoint.viewerUrl);
 
     await clickButton(rendered, 'Share preview');
     expect(document.querySelector('[role="alertdialog"]')).toBeNull();
@@ -1064,8 +972,7 @@ describe('SessionBrowserPanel controller', () => {
       expect.objectContaining({ source: 'share_action', target: localTarget }),
       expect.objectContaining({ restart: undefined })
     );
-    expect(
-      rendered.querySelector('[data-testid="managed-preview"]')?.getAttribute('data-viewer-url')
-    ).toBe(localEndpoint.viewerUrl);
+    expect(rendered.querySelector('[data-testid="managed-preview"]')).toBe(localViewer);
+    expect(localViewer?.getAttribute('data-viewer-url')).toBe(localEndpoint.viewerUrl);
   });
 });

@@ -192,16 +192,14 @@ describe('LocalPreviewProxyManager', () => {
 
   it.each([
     ['gzip', 'text/html'],
-    ['br', 'text/html'],
-    ['gzip', 'application/json'],
     ['br', 'application/json'],
   ])('decodes actual %s %s responses without stale encoding or length', async (encoding, type) => {
     const html = type === 'text/html';
     const original = html ? '<html><body>compressed preview</body></html>' : '{"value":"preview"}';
     const compressed = (encoding === 'gzip' ? gzipSync : brotliCompressSync)(original);
-    let acceptEncoding: string | undefined;
+    let upstreamHeaders: http.IncomingHttpHeaders | undefined;
     const endpoint = await fixture((request, response) => {
-      acceptEncoding = request.headers['accept-encoding'];
+      upstreamHeaders = request.headers;
       response.writeHead(200, {
         'content-type': type,
         'content-encoding': encoding,
@@ -210,10 +208,20 @@ describe('LocalPreviewProxyManager', () => {
       });
       response.end(compressed);
     });
-    const response = await fetch(endpoint.viewerUrl);
+    const response = await fetch(endpoint.viewerUrl, {
+      headers: {
+        'accept-encoding': 'gzip, br',
+        'if-none-match': '"cached"',
+        'if-modified-since': 'Tue, 05 May 2026 00:00:00 GMT',
+        referer: 'https://attacker.example/app',
+      },
+    });
     const body = await response.text();
     expect(response.status).toBe(200);
-    expect(acceptEncoding).toBe('identity');
+    expect(upstreamHeaders?.['accept-encoding']).toBe('identity');
+    expect(upstreamHeaders?.['if-none-match']).toBeUndefined();
+    expect(upstreamHeaders?.['if-modified-since']).toBeUndefined();
+    expect(upstreamHeaders?.referer).toBeUndefined();
     expect(response.headers.get('content-encoding')).toBeNull();
     expect(response.headers.get('cache-control')).toBe('no-store');
     if (html) {
@@ -458,14 +466,20 @@ describe('LocalPreviewProxyManager', () => {
     const unauthenticatedAssetResponse = await fetch(assetUrl);
     expect(unauthenticatedAssetResponse.status).toBe(403);
 
+    const referer = new URL(endpoint.viewerUrl);
+    referer.pathname = '/DownloadPage.vue';
+    referer.search = `?vue&type=style&index=0&lang.css&${referer.search.slice(1)}`;
+    referer.hash = 'section';
     const refererAuthorizedAssetResponse = await fetch(assetUrl, {
       headers: {
-        referer: endpoint.viewerUrl,
+        referer: referer.href,
       },
     });
     expect(refererAuthorizedAssetResponse.status).toBe(200);
     expect(await refererAuthorizedAssetResponse.text()).toContain('rgb(1, 2, 3)');
-    expect(styleReferers).toEqual([`http://127.0.0.1:${target.port}/`]);
+    expect(styleReferers).toEqual([
+      `http://127.0.0.1:${target.port}/DownloadPage.vue?vue&type=style&index=0&lang.css#section`,
+    ]);
 
     // Validate the actual forwarding marker on an unannotated response, not a
     // synthetic header fixture. The same check guards cloud tunnel readiness.

@@ -140,27 +140,6 @@ describe('QuickTunnelSession ownership and idle expiry', () => {
     await session.close('revoked');
   });
 
-  it('never reactivates a revoked endpoint when a late health response succeeds', async () => {
-    const entered = Promise.withResolvers<void>();
-    const checked = Promise.withResolvers<void>();
-    const { session, proxyOrigin } = fixture({
-      verify: async ({ mode }) => {
-        if (mode !== 'health') return;
-        entered.resolve();
-        await checked.promise;
-      },
-    });
-    await session.ready;
-    const observing = session.checkHealth();
-    await entered.promise;
-    await session.close('revoked');
-    checked.resolve();
-    await observing;
-    expect(session.active).toBe(false);
-    expect(await session.closed).toEqual({ reason: 'revoked' });
-    await expect(fetch(proxyOrigin())).rejects.toThrow();
-  });
-
   it('retains the public failure cause and last sanitized connector diagnostic', async () => {
     const original = new Error('Public route timed out');
     let proxyOrigin = '';

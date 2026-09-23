@@ -258,6 +258,16 @@ fixture now closes its own child promise rather than the last-created child.
 These results establish the local regression boundary, not real-network performance
 or additional Windows/packaged-Electron acceptance.
 
+## Test pruning (2026-09-23)
+
+Test pruning keeps behavioral boundaries rather than a line-count quota: helper
+header/injection checks give way to real HTTP/WS coverage, duplicate successful
+RPC/UI setups fold into lifecycle transitions, and copy-only assertions are removed.
+Auth, origin/source checks, process cleanup, delayed-timer expiry and split-log
+parsing remain; independent review rejected deleting the latter two as redundant.
+Stories remain available for every presentation state. This is test-only cleanup,
+not a change to product behavior or an expansion of live-network acceptance.
+
 ## Storybook state coverage (2026-09-23)
 
 Browser presentation now has one owner, `SessionBrowserPanelView`, consumed by the

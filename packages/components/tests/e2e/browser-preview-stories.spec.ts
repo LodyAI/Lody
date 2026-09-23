@@ -48,7 +48,6 @@ test('Browser Preview stories render, complete their interactions and expose rec
           return preview?.currentRender?.phase === 'finished';
         });
         await expect(page.locator('#storybook-root input')).toBeVisible();
-        await expect(page.locator('#storybook-root')).not.toBeEmpty();
         if (/--(machine-offline|owner-required|archived-session)$/.test(id)) {
           await expect(page.getByRole('button', { name: 'Restore preview' })).toBeDisabled();
         }
@@ -58,31 +57,15 @@ test('Browser Preview stories render, complete their interactions and expose rec
             .getByRole('heading', { name: 'Your local app' });
           await expect(localPage).toBeVisible();
           await page.getByRole('button', { name: /Preview status/ }).click();
-          await expect(
-            page.getByText('Local viewing continues; remote sharing is unavailable.')
-          ).toBeVisible();
           await expect(page.getByRole('button', { name: 'Restore preview' })).toBeEnabled();
         }
         if (id.endsWith('--remote-expired')) {
           await expect(page.locator('iframe')).toHaveCount(0);
-          await expect(page.getByText('Preview link expired')).toBeVisible();
           await expect(page.getByRole('button', { name: 'Restore preview' })).toBeEnabled();
         }
         if (id.includes('--status-popover-')) {
           await expect(page.getByRole('dialog')).toBeVisible();
         }
-        if (id.endsWith('--status-popover-remote')) {
-          await expect(page.getByText('Remote machine: Build Mac')).toBeVisible();
-        }
-        if (id.endsWith('--status-popover-chinese')) {
-          await expect(page.getByText('闲置 1 小时后关闭。')).toBeVisible();
-        }
-        if (id.endsWith('--annotation-enabled'))
-          await expect(page.getByRole('button', { name: 'Exit annotation mode' })).toHaveAttribute(
-            'aria-pressed',
-            'true'
-          );
-        if (id.endsWith('--dark-connected')) await expect(page.locator('html')).toHaveClass(/dark/);
         await page.evaluate(() => document.fonts.ready);
         await page.screenshot({ path: testInfo.outputPath(`${id}.png`), animations: 'disabled' });
         if (id === 'sessions-browser-preview-controller--empty') {

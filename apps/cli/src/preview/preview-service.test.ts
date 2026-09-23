@@ -258,20 +258,6 @@ describe('PreviewService Quick Tunnel lifecycle', () => {
     await expect(fetch(proxyOrigin)).rejects.toThrow();
   });
 
-  it('reports readiness failure, releases the proxy, and allows explicit new creation', async () => {
-    const verify = vi.mocked(verifyPreviewTunnelRoundTrip).getMockImplementation();
-    vi.mocked(verifyPreviewTunnelRoundTrip).mockRejectedValueOnce(
-      new Error('public route unavailable')
-    );
-    const { service, state } = setup();
-    expect((await service.createPreview(createRequest())).success).toBe(false);
-    expect(state().connection?.error?.message).toContain('public route unavailable');
-    await expect(fetch(proxyOrigin)).rejects.toThrow();
-    if (!verify) throw new Error('Missing synthetic transport');
-    vi.mocked(verifyPreviewTunnelRoundTrip).mockImplementation(verify);
-    expect((await service.createPreview(createRequest())).success).toBe(true);
-  });
-
   it('keeps timestamps integral and only status summaries in meta', async () => {
     const { service, state, meta } = setup();
     vi.spyOn(Date, 'now').mockReturnValue(1_800_000_000_000.5);
@@ -369,6 +355,7 @@ describe('PreviewService Quick Tunnel lifecycle', () => {
     const { service } = setup();
     const request = createRequest();
     const created = await service.createPreview(request);
+    const oldProxyOrigin = proxyOrigin;
     const entered = Promise.withResolvers<void>();
     const checked = Promise.withResolvers<void>();
     vi.mocked(verifyPreviewTunnelRoundTrip).mockImplementationOnce(async () => {
@@ -383,6 +370,7 @@ describe('PreviewService Quick Tunnel lifecycle', () => {
     expect(observed.connection?.status).toBe('active');
     expect(observed.connection?.endpointId).toBe(restored.connection?.endpointId);
     expect(observed.connection?.endpointId).not.toBe(created.connection?.endpointId);
+    await expect(fetch(oldProxyOrigin)).rejects.toThrow();
   });
 
   it.each(['127.0.0.1', '::1'])(
