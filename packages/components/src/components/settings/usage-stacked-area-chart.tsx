@@ -9,6 +9,7 @@ import {
   YAxis,
 } from 'recharts';
 import { cn } from '@/lib/utils';
+import { Skeleton } from '../../ui/skeleton';
 
 export type StackedAreaSeriesValue = {
   id: string;
@@ -51,6 +52,14 @@ type UsageStackedAreaChartProps = {
    * stroke color (instead of relying on a swatch or ring).
    */
   tintSeriesLabel?: boolean;
+  /**
+   * Render a chart-shaped placeholder while the range data resolves. Only takes
+   * effect when there is no data to show yet — populated charts stay mounted
+   * during background refreshes so they never flash back into a skeleton.
+   */
+  loading?: boolean;
+  /** Accessible loading announcement; rendered visually hidden. */
+  loadingText?: string;
 };
 
 type UsagePerspectiveChartProps = {
@@ -248,6 +257,62 @@ function UsageTooltip({
   );
 }
 
+const LEGEND_PLACEHOLDER_WIDTHS = [112, 96, 128, 88, 104];
+
+function ChartLoadingPlaceholder({ chartHeight }: { chartHeight: number }) {
+  return (
+    <>
+      <div className="p-4">
+        {/* Same footprint as the real chart: a full-height plot with layered
+           area silhouettes, gridlines, and axis tick placeholders. */}
+        <Skeleton
+          className="relative w-full overflow-hidden rounded-md bg-primary/[0.06]"
+          style={{ height: chartHeight }}
+        >
+          <svg
+            aria-hidden="true"
+            className="absolute inset-0 h-full w-full"
+            viewBox="0 0 600 200"
+            preserveAspectRatio="none"
+          >
+            {[0.25, 0.5, 0.75].map((progress) => (
+              <line
+                key={progress}
+                x1="0"
+                x2="600"
+                y1={200 * progress}
+                y2={200 * progress}
+                stroke={GRID_COLOR}
+                strokeOpacity="0.4"
+              />
+            ))}
+            <path
+              d="M0,150 C60,142 100,92 160,82 C240,68 300,112 380,92 C460,74 540,42 600,52 L600,200 L0,200 Z"
+              fill="hsl(var(--chart-1) / 0.14)"
+            />
+            <path
+              d="M0,176 C80,170 140,132 220,126 C320,118 400,142 500,120 C550,109 580,106 600,102 L600,200 L0,200 Z"
+              fill="hsl(var(--chart-2, var(--chart-1)) / 0.18)"
+            />
+          </svg>
+          <div className="absolute inset-x-14 bottom-1.5 flex justify-between">
+            {Array.from({ length: 8 }).map((_, index) => (
+              <Skeleton key={index} className="h-2 w-6 rounded-sm" />
+            ))}
+          </div>
+        </Skeleton>
+      </div>
+      <div className="border-t border-border/60 px-4 pb-3 pt-2">
+        <div className="flex flex-wrap gap-x-3 gap-y-1.5">
+          {LEGEND_PLACEHOLDER_WIDTHS.map((width) => (
+            <Skeleton key={width} className="h-4 rounded-sm" style={{ width }} />
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
 export function UsageStackedAreaChart({
   title,
   buckets,
@@ -258,12 +323,30 @@ export function UsageStackedAreaChart({
   tooltipValueFormatter = (value) => new Intl.NumberFormat().format(Math.round(value)),
   renderSeriesMarker,
   tintSeriesLabel = false,
+  loading = false,
+  loadingText,
 }: UsageStackedAreaChartProps) {
   const gradientPrefix = useId().replace(/[^a-zA-Z0-9_-]/g, '');
   const isMobile = useIsMobileChart();
   const chartHeight = isMobile ? CHART_HEIGHT_MOBILE : CHART_HEIGHT_DESKTOP;
 
   const prepared = useMemo(() => prepareChart(buckets, maxSeries), [buckets, maxSeries]);
+
+  if (loading && !prepared) {
+    return (
+      <div
+        className={cn('overflow-hidden rounded-lg border border-border/70 bg-card/60', className)}
+        role="status"
+        aria-busy="true"
+      >
+        <header className="flex min-h-10 items-center gap-2 border-b border-border/70 dark:bg-muted/40 px-3 py-1.5">
+          <p className="text-xs font-normal text-muted-foreground">{title}</p>
+        </header>
+        <ChartLoadingPlaceholder chartHeight={chartHeight} />
+        {loadingText ? <span className="sr-only">{loadingText}</span> : null}
+      </div>
+    );
+  }
 
   if (!prepared) {
     return (
