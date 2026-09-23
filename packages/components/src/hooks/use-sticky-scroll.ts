@@ -253,11 +253,27 @@ export function useStickyScroll({
     [setMode]
   );
 
-  const writeScrollTop = useCallback((viewport: HTMLElement, offset: number) => {
-    viewport.scrollTop = offset;
-    expectedScrollTopRef.current = viewport.scrollTop;
-    lastScrollTopRef.current = viewport.scrollTop;
-  }, []);
+  const writeScrollTop = useCallback(
+    (viewport: HTMLElement, offset: number) => {
+      viewport.scrollTop = offset;
+      expectedScrollTopRef.current = viewport.scrollTop;
+      lastScrollTopRef.current = viewport.scrollTop;
+      // Before the reveal, let Virtua read the new offset now. Its only input is
+      // the scroll event, which arrives next frame; until then it renders the
+      // old range, so the reveal waits (`offset-mismatch`, then
+      // `target-unmounted`) and the browser paints a hidden frame. The later
+      // native event is then a no-op for it and is consumed as our own write.
+      const virtualizer = vlistRef.current;
+      if (
+        !initialScrollRestoredRef.current &&
+        virtualizer &&
+        Math.abs(virtualizer.scrollOffset - viewport.scrollTop) > 1
+      ) {
+        viewport.dispatchEvent(new Event('scroll'));
+      }
+    },
+    [vlistRef]
+  );
 
   const scrollToRealBottom = useCallback(
     (source: string) => {
@@ -444,6 +460,11 @@ export function useStickyScroll({
       return;
     }
     initialScrollRestoredRef.current = true;
+    // Reveal in this frame. Observers and scroll callbacks run before paint, but
+    // a state update made from them commits in a later task, so the browser
+    // would paint one more hidden frame first. React's commit then writes the
+    // same value.
+    viewport.style.visibility = 'visible';
     setInitialScrollRestored(true);
     scrollDebug('revealed', {
       afterMs: Math.round(performance.now() - mountedAtRef.current),
