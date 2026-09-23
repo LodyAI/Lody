@@ -33,8 +33,8 @@ custom metadata and pass strict signing/notarization checks.
 - `packages/components/tests/mobile-app-icon-settings.test.tsx`
 - `packages/components/src/stories/MobileAppIconSettings.stories.tsx`
 - `apps/electron/src/main/services/app-icon-service.ts`
-- `apps/electron/src/main/services/app-icon-native.test.mjs`
 
-The native probe checks on-disk customization and signature preservation on a
-temporary signed macOS bundle. A full notarized-app update cycle remains a
+Development-time native probes checked on-disk customization and signature
+preservation on a temporary signed macOS bundle. The feature-specific native and
+controller test files were subsequently removed; those results are historical evidence. A full notarized-app update cycle remains a
 release verification requirement. iOS packaging belongs to its external host.

@@ -13,7 +13,7 @@ import {
   globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }
 ).IS_REACT_ACT_ENVIRONMENT = true;
 
-describe.each(['mobile', 'desktop'] as const)('%s app icon settings', (layout) => {
+describe('app icon settings', () => {
   let container: HTMLDivElement;
   let root: Root;
   let current: string;
@@ -53,7 +53,7 @@ describe.each(['mobile', 'desktop'] as const)('%s app icon settings', (layout) =
 
   it('reads the installed icon and can switch both ways', async () => {
     current = 'alternate';
-    await act(async () => root.render(<MobileAppIconSettings layout={layout} bridge={bridge} />));
+    await act(async () => root.render(<MobileAppIconSettings bridge={bridge} />));
     expect(button('Icon 2').getAttribute('aria-pressed')).toBe('true');
     await act(async () => button('Default').click());
     expect(current).toBe('default');
@@ -68,7 +68,7 @@ describe.each(['mobile', 'desktop'] as const)('%s app icon settings', (layout) =
       { name: 'default', previewUrl: '/default.png' },
       { name: 'alternate', displayName: 'Aqua', previewUrl: '/alternate.png' },
     ];
-    await act(async () => root.render(<MobileAppIconSettings layout={layout} bridge={bridge} />));
+    await act(async () => root.render(<MobileAppIconSettings bridge={bridge} />));
     await act(async () => button('Aqua').click());
     expect(current).toBe('alternate');
     expect(button('Aqua').getAttribute('aria-pressed')).toBe('true');
@@ -81,7 +81,7 @@ describe.each(['mobile', 'desktop'] as const)('%s app icon settings', (layout) =
       new Promise((resolve) => {
         finish = resolve;
       });
-    await act(async () => root.render(<MobileAppIconSettings layout={layout} bridge={bridge} />));
+    await act(async () => root.render(<MobileAppIconSettings bridge={bridge} />));
     await act(async () => button('Icon 2').click());
     expect(button('Default').getAttribute('aria-pressed')).toBe('true');
     expect(button('Default').disabled).toBe(true);
@@ -95,7 +95,7 @@ describe.each(['mobile', 'desktop'] as const)('%s app icon settings', (layout) =
     bridge.setIcon = async () => {
       throw new Error('Native rejection');
     };
-    await act(async () => root.render(<MobileAppIconSettings layout={layout} bridge={bridge} />));
+    await act(async () => root.render(<MobileAppIconSettings bridge={bridge} />));
     await act(async () => button('Icon 2').click());
     expect(button('Default').getAttribute('aria-pressed')).toBe('true');
     expect(container.querySelector('[role="alert"]')).not.toBeNull();
@@ -109,7 +109,7 @@ describe.each(['mobile', 'desktop'] as const)('%s app icon settings', (layout) =
     await act(async () => root.render(<MobileAppIconSettings />));
     expect(container.textContent).toBe('');
     bridge.getState = async () => ({ supported: false, name: 'default' });
-    await act(async () => root.render(<MobileAppIconSettings layout={layout} bridge={bridge} />));
+    await act(async () => root.render(<MobileAppIconSettings bridge={bridge} />));
     expect(container.textContent).toBe('');
   });
 
@@ -117,7 +117,7 @@ describe.each(['mobile', 'desktop'] as const)('%s app icon settings', (layout) =
     bridge.getState = async () => {
       throw new Error('Bridge unavailable');
     };
-    await act(async () => root.render(<MobileAppIconSettings layout={layout} bridge={bridge} />));
+    await act(async () => root.render(<MobileAppIconSettings bridge={bridge} />));
     expect(button('Default').disabled).toBe(true);
     bridge.getState = async () => ({ supported: true, name: 'alternate' });
     await act(async () => button('Retry').click());

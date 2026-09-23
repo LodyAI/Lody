@@ -30,7 +30,7 @@ macOS 自定义图标使用 Finder 元数据。签名覆盖的资源保持不变
 - `packages/components/tests/mobile-app-icon-settings.test.tsx`
 - `packages/components/src/stories/MobileAppIconSettings.stories.tsx`
 - `apps/electron/src/main/services/app-icon-service.ts`
-- `apps/electron/src/main/services/app-icon-native.test.mjs`
 
-原生探针在临时签名的 macOS 应用包上验证图标落盘与签名资源保留。
+开发期间的原生探针曾在临时签名的 macOS 应用包上验证图标落盘与签名资源保留。
+本功能的原生与控制器测试文件随后已移除，上述结果仅为历史验证证据。
 完整的已公证应用更新流程仍需发布验证。iOS 打包由外部宿主负责。

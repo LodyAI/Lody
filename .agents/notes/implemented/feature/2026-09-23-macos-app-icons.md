@@ -58,6 +58,10 @@ is used.
 
 ## Evidence and limits
 
+The feature-specific native/controller tests and the added desktop UI test
+parameterization were removed at the maintainer’s request. Test and ablation
+results below record development-time experiments, not retained regression coverage.
+
 Tests cover restart/update restoration, default reset, native/write failures,
 serialization and unsupported/invalid input. The macOS probe checks the Finder
 flag, unchanged signed resources, ordinary signature validation, and strict
