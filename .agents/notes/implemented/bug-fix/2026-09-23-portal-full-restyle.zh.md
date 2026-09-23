@@ -112,6 +112,15 @@ Translation: current
   每个事件从全局序列取一个新数字。戳相同即行未变；重新打开的 Flock 不会重复旧的戳。loro-repo 的 meta
   持久化在每次落盘时仍读取 meta 版本（每次切换约 3.4ms）：那里它同时是增量导出的书签。
 
+- **Context 抖动。** 统计切换时 value 发生变化的 Context Provider，发现：侧边栏外 framer-motion 的
+  `PresenceChild`（约 2.9 万个 fiber）在 `WebWorkspaceLayout` 每次渲染时都变化（`presenceAffectsLayout` 会在复用时
+  拷贝其 value）；PR 链接的 Context 每次切换变化约 15 次（内联回调）；对话行的 Context 约 12 次（每次渲染新建
+  `held` 集合）。现在侧边栏的 presence 不影响布局，回调保持稳定，held 集合按 id 做 key；Context 传播从每次切换
+  约 1.6ms 降到约 0.5ms。
+- **Overscan（已否决）。** 原以为把对话的 800px overscan 推迟到读者有交互时再启用，可以把行挂载减半。实测没有
+  变化（约 702 → 约 696）：Virtua 在自动估算行高（未传 `itemSize`）时忽略 `bufferSize`，而恢复的测量缓存会让它
+  保持这一状态，所以已缓存的对话在切换时本来就不渲染 overscan。该改动已撤回。
+
 ## 未决
 
 Konsta 的 `theme.css` 仍会导入全部 Konsta 样式；目前只证实这一条工具类有影响。还没有自动检查拒绝

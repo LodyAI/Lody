@@ -145,6 +145,19 @@ Measured in the same production build and workspace (9k nodes):
   a reopened Flock never repeats a stamp. The loro-repo meta persister still reads the meta
   version on each flush (~3.4ms per switch): there it is also the incremental-export bookmark.
 
+- **Context churn.** A census of context providers whose value changed during a switch found
+  framer-motion's `PresenceChild` around the sidebar (~29k fibers) changing on every render of
+  `WebWorkspaceLayout` (`presenceAffectsLayout` copies its value when it is reused), the PR link
+  context changing ~15 times per switch (an inline callback), and the conversation rows' context
+  ~12 times (a fresh `held` set per render). The sidebar presence no longer affects layout, the
+  callbacks are stable and the held set is keyed by its ids; context propagation fell from
+  ~1.6ms to ~0.5ms per switch.
+- **Overscan (rejected).** Deferring the conversation's 800px overscan until the reader engages
+  was expected to halve row mounts. It did not change them (~702 → ~696): Virtua ignores
+  `bufferSize` while it auto-estimates item size (no `itemSize`), which a restored measurement
+  cache keeps it doing, so cached conversations render no overscan on a switch anyway. The
+  change was reverted.
+
 ## Open
 
 Konsta's `theme.css` still imports all Konsta styles; only this utility was shown to matter. No

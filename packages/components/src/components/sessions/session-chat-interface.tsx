@@ -4422,12 +4422,14 @@ export const SessionChatInterface = memo(
       handlePinMessage(null);
     }, [handlePinMessage]);
 
+    // The pin context wraps the whole conversation; keep its handler stable.
+    const pinMessage = useStableCallback(handlePinMessage);
     const pinContextValue = useMemo<SessionPinContextValue>(
       () => ({
         pinnedHistoryId,
-        onPin: handlePinMessage,
+        onPin: pinMessage,
       }),
-      [pinnedHistoryId, handlePinMessage]
+      [pinnedHistoryId, pinMessage]
     );
 
     // The pinned turn is hydrated on demand through the view; nothing else
@@ -5794,14 +5796,27 @@ export const SessionChatInterface = memo(
 
     const headerGitHubActions = headerActionsSlot !== undefined ? headerActionsSlot : prBadge;
 
+    // Stable identity: it is the PrLinkProvider value over the whole
+    // conversation, and a new function per render re-propagated that context
+    // through every row. It reads the latest PR when called.
+    const openLatestPrTab = useStableCallback(() => {
+      if (
+        !onOpenPrTab ||
+        !latestPr ||
+        !latestPrRepoFullName ||
+        typeof latestPrNumber !== 'number'
+      ) {
+        return;
+      }
+      onOpenPrTab({
+        prNumber: latestPrNumber,
+        repoFullName: latestPrRepoFullName,
+        headCommitSha: getSessionPullRequestLegacyFields(latestPr).headCommitSha,
+      });
+    });
     const prLinkHandler =
       onOpenPrTab && latestPr && latestPrRepoFullName && latestPrNumber
-        ? () =>
-            onOpenPrTab({
-              prNumber: latestPrNumber,
-              repoFullName: latestPrRepoFullName,
-              headCommitSha: getSessionPullRequestLegacyFields(latestPr).headCommitSha,
-            })
+        ? openLatestPrTab
         : undefined;
     // Pending permission requests live in the active (latest) assistant turn.
     const permissionSessionHistory = sessionHistory as unknown as Parameters<

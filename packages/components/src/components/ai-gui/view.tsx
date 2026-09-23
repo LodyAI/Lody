@@ -1701,13 +1701,17 @@ export const SessionChatStreamView = forwardRef<
           )
         ),
     });
+    // Every row reads this context. `holds` is a fresh Map per render, so key the
+    // held set by its ids: a new set per render re-rendered every row, ~10 times
+    // per session switch.
+    const heldTurnIdsKey = [...nativeTextSelection.holds.keys()].join('\0');
+    const heldTurnIds = useMemo(
+      () => new Set(heldTurnIdsKey === '' ? [] : heldTurnIdsKey.split('\0')),
+      [heldTurnIdsKey]
+    );
     const nativeSelectionRows = useMemo(
-      () => ({
-        rows: selectableRows,
-        leading: leadingRowCount,
-        held: new Set(nativeTextSelection.holds.keys()),
-      }),
-      [selectableRows, leadingRowCount, nativeTextSelection.holds]
+      () => ({ rows: selectableRows, leading: leadingRowCount, held: heldTurnIds }),
+      [selectableRows, leadingRowCount, heldTurnIds]
     );
 
     // ---- Outline rail ------------------------------------------------------
