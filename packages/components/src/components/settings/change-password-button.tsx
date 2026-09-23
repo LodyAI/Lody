@@ -149,9 +149,9 @@ export function ChangePasswordButton({
   return (
     <>
       <Button
-        variant="ghost"
+        variant="secondary"
         size="small"
-        className="bg-foreground/[0.06] font-normal hover:bg-foreground/[0.1]"
+        className="font-normal"
         disabled={disabled}
         onClick={() => setOpen(true)}
       >

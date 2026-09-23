@@ -2,11 +2,16 @@ import React, { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
 
 /**
- * A standalone settings list row (MCP server, Agent role, provider). Light: the
- * same lifted surface as a CompactSection; dark keeps a flat translucent fill.
+ * The settings card: `@lody/ui`'s card rung restated in Tailwind, because this layer
+ * does not compile StyleX. No border — the edge is a hairline, a contact shadow and a
+ * short lift (`shadow.card`); dark keeps a translucent fill under a top highlight and
+ * a light hairline. Keep the values in step with `packages/ui/src/tokens/colors.stylex.ts`.
  */
-export const SETTINGS_ROW_CARD_CLASS =
-  'rounded-lg border-[0.5px] border-border bg-card shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.03)] dark:border-transparent dark:bg-foreground/[0.04] dark:shadow-none';
+const SETTINGS_SURFACE_CLASS =
+  'rounded-[14px] bg-card shadow-[0_0_0_0.5px_hsl(225_10%_11%/0.07),0_1px_2px_hsl(225_10%_11%/0.04),0_8px_24px_-6px_hsl(225_10%_11%/0.08)] dark:bg-foreground/[0.04] dark:shadow-[inset_0_1px_0_hsl(0_0%_100%/0.05),0_0_0_0.5px_hsl(0_0%_100%/0.06)]';
+
+/** A standalone settings list row (MCP server, Agent role, provider): the same card. */
+export const SETTINGS_ROW_CARD_CLASS = SETTINGS_SURFACE_CLASS;
 
 interface CompactSectionProps {
   title?: string;
@@ -38,17 +43,11 @@ export function CompactSection({
   contentClassName,
 }: CompactSectionProps) {
   return (
-    <section
-      className={cn(
-        'overflow-hidden rounded-lg border border-border/70 bg-card/60 text-[1em]',
-        // Light: a lifted white section (see the settings surface scope in
-        // tailwind/index.css); dark keeps the flat translucent fill.
-        'shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.03)] dark:shadow-none',
-        className
-      )}
-    >
+    <section className="flex min-w-0 flex-col gap-1.5 text-[1em]">
+      {/* The heading names the group from outside it, so the card holds rows only:
+          a band with a rule under it is a second edge inside the first. */}
       {title || headerRight ? (
-        <header className="flex min-h-10 items-center justify-between gap-2 border-b border-border/70 px-3 py-1.5 dark:bg-muted/40">
+        <header className="flex min-h-6 items-end justify-between gap-2 px-4">
           <div className="min-w-0 flex-1 leading-tight">
             {title ? (
               <p className="text-[0.75em] font-normal text-muted-foreground">{title}</p>
@@ -86,7 +85,9 @@ export function CompactSection({
           ) : null}
         </header>
       ) : null}
-      <div className={cn('divide-y divide-border/60', contentClassName)}>{children}</div>
+      <div className={cn('overflow-hidden', SETTINGS_SURFACE_CLASS, className)}>
+        <div className={cn('divide-y divide-border/60', contentClassName)}>{children}</div>
+      </div>
     </section>
   );
 }
@@ -105,7 +106,7 @@ export function CompactRow({
         // render inside a panel that is much narrower than the window, so a column capped at a
         // fixed px width (which a viewport breakpoint cannot see) would eat the whole row and
         // push the control past the panel's clipped edge.
-        'flex flex-col gap-2 px-3 py-2 sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-4',
+        'flex flex-col gap-2 px-4 py-2.5 sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-4',
         alignTop && 'sm:items-start sm:[&>div:last-child]:self-start',
         !alignTop && 'sm:items-center',
         className

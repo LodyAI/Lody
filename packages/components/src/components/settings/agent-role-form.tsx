@@ -300,14 +300,14 @@ export function AgentRoleForm({
         {/* Stated rather than left to be discovered: a Role looks like a
             standing assistant, so its owner has to be told the sessions it
             creates keep nothing between them. */}
-        <div className="rounded-lg border border-border/70 bg-card/60 px-3 py-2.5">
+        <div className="rounded-[10px] bg-foreground/[0.03] px-3 py-2.5">
           <p className="text-sm">{t('settings.agentRoles.form.memory')}</p>
           <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
             {t('settings.agentRoles.form.memoryHint')}
           </p>
         </div>
 
-        <div className="flex items-center justify-between gap-4 rounded-lg border border-border/70 bg-card/60 px-3 py-2.5">
+        <div className="flex items-center justify-between gap-4 rounded-[10px] bg-foreground/[0.03] px-3 py-2.5">
           <div className="min-w-0">
             <UiField.Label htmlFor={`${fieldId}-share`} className="text-sm">
               {t('settings.agentRoles.form.share')}

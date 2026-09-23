@@ -70,5 +70,37 @@ token 组，在凸起面上叠一层只有几个百分点的光线衰减，按�
 - Storybook preview 之前还在引用已删除的 Radix `src/ui/tooltip`，导致所有 story
   都加载失败；现已改用 `@lody/ui/tooltip` 的 `Tooltip.Provider`。
 
+## 业务层：设置页实样
+
+负责人担心这会让整个产品显得太重，因为一套视觉系统靠的不只是原子组件，业务组件
+同样在承载它。在真实界面上做了前后对比，结论是不会。原子组件的改动几乎看不出来：
+次级按钮变白、多一道发丝边，菜单和对话框少了一圈灰雾。真正的重量来自业务层自己的
+容器，它们和「depth without lines」是相反的：
+
+- `packages/components` 里有 161 个文件在画 Tailwind `border`，其中
+  `rounded-lg border` 出现 129 次。设置分组里有一条带分隔线的标题栏，Agent Role
+  表单在带边框的卡片里又套了带边框的盒子。
+- 业务层在覆盖原子组件。`account-setting-pure.tsx` 和
+  `change-password-button.tsx` 通过 `className` 给 ghost `Button` 刷了灰底，这是
+  `@lody/ui` 规则明确禁止的。
+- 单独的设置 story 渲染在 `data-settings-surface` 之外，所以显示的是应用里根本
+  不会出现的灰卡片。评判设置页必须放在这个作用域里，
+  `Design System/Settings Material Study` 就是用四个真实界面这样做的。
+
+实样改的是设置页共享的容器，而不是逐页修改，这样所有用到它们的页面会一起变化
+（16 个文件用 `CompactSection`，5 个用 `SETTINGS_ROW_CARD_CLASS`）：
+
+- `CompactSection` 和 `SETTINGS_ROW_CARD_CLASS` 改为无边框的 14px 卡片，边缘就是
+  `shadow.card`。因为这一层不编译 StyleX，所以用 Tailwind 重写了一遍数值，在
+  `@lody/ui` 出分组列表基元替代它们之前，两边必须保持一致。分组标题放到卡片上方，
+  行与行之间只用分隔线，危险区用一圈破坏色发丝环标出。
+- `form-primitives` 的 `Section` 不再画框。一个表单就是一个表面，分组靠留白隔开。
+  Role 表单里的两条说明行改用 region 填充，不再描边。
+- 质感预算：行内单独出现的操作用真正的 `secondary` 按钮，不再是刷了灰底的 ghost。
+
+仍带边框、尚未迁移的有：机器列表表格、Role 表单对话框的外框和底部分隔线，以及所有
+非设置页的界面。14 个设置相关测试文件（90 个测试）通过，components 的 typecheck 无
+报错。验证方式是在 study story 上用两套配色目视检查，尚无人工确认。
+
 相关：[token gallery](2026-09-09-ui-token-gallery.md)、
 [调用点迁移](2026-09-22-ui-radix-callsite-migration.md)。

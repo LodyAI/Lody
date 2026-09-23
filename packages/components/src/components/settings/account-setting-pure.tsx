@@ -585,9 +585,9 @@ export function AccountSettingsPure({
           ) : null}
           <CompactRow label={t('settings.account.signOut')}>
             <Button
-              variant="ghost"
+              variant="secondary"
               size="small"
-              className="bg-foreground/[0.06] font-normal hover:bg-foreground/[0.1]"
+              className="font-normal"
               onClick={() => {
                 void onSignOut();
               }}
@@ -1048,7 +1048,10 @@ export function AccountSettingsPure({
 
       {/* Danger Zone */}
       {isWorkspaceSurface ? (
-        <CompactSection title={t('workspace.danger.title')} className="border-destructive/20">
+        <CompactSection
+          title={t('workspace.danger.title')}
+          className="ring-[0.5px] ring-destructive/30"
+        >
           {role === 'owner' ? workspaceOwnershipSlot : null}
           {role !== 'owner' && (
             <CompactRow

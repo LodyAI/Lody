@@ -84,5 +84,46 @@ relevant findings:
 - The Storybook preview imported the deleted Radix `src/ui/tooltip`, and every
   story failed to load. It now uses `@lody/ui/tooltip`'s `Tooltip.Provider`.
 
+## Business layer: the settings prototype
+
+The owner asked whether this would make the whole product feel heavy, since a
+visual system is carried by business components as much as by atoms. Measured
+before and after in real surfaces, it would not. The atoms changed almost
+nothing a person would see: a secondary button turns white with a hairline, and
+menus and dialogs lose their haze. The weight was in the business layer's own
+containers, which contradict "depth without lines":
+
+- 161 files in `packages/components` draw Tailwind `border`s, with 129 uses of
+  `rounded-lg border`. The settings sections wrap a header band with a rule
+  under it, and the Agent Role form nests bordered boxes inside a bordered card.
+- The business layer paints over atoms. `account-setting-pure.tsx` and
+  `change-password-button.tsx` gave a ghost `Button` a gray fill through
+  `className`, which the `@lody/ui` rules forbid.
+- A standalone settings story renders outside `data-settings-surface`. It
+  therefore shows gray cards the app never draws, and settings must be judged
+  inside that scope. `Design System/Settings Material Study` does that with four
+  real surfaces.
+
+The prototype changes the shared settings containers rather than individual
+pages, so every page using them moves together (16 files use `CompactSection`,
+5 use `SETTINGS_ROW_CARD_CLASS`):
+
+- `CompactSection` and `SETTINGS_ROW_CARD_CLASS` are borderless 14px cards whose
+  edge is `shadow.card`, restated in Tailwind because this layer does not
+  compile StyleX. The two must be kept in step until a `@lody/ui` grouped-list
+  primitive replaces them. A section's title sits above its card, rows split by
+  a line, and the danger zone marks itself with a destructive hairline ring.
+- The `form-primitives` `Section` draws no box. A form is one surface, and its
+  groups are set apart by space. The Role form's two note rows take the region
+  fill instead of a border.
+- Material budget: a standalone action in a row is a real `secondary` button,
+  never a ghost painted gray.
+
+Still bordered and not yet migrated: the machines overview table, the Role form
+dialog frame and its footer rule, and every non-settings surface. The 14
+settings test files (90 tests) pass and the components typecheck is clean.
+Verification was visual, in both palettes, on the study story; no human
+sign-off yet.
+
 Related: [token gallery](2026-09-09-ui-token-gallery.md),
 [call-site migration](2026-09-22-ui-radix-callsite-migration.md).

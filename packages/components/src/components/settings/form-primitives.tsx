@@ -9,7 +9,7 @@ import { Textarea, type TextareaProps } from '@lody/ui/textarea';
  * The shared grammar of the settings editors.
  *
  * Every settings form — MCP connection, Agent Role — is the same stack of
- * bordered sections holding labelled fields, so the spacing and typography live
+ * titled groups holding labelled fields, so the spacing and typography live
  * here once. A local copy per editor is how three dialogs that are supposed to
  * look like one surface drift apart one padding value at a time.
  */
@@ -24,7 +24,9 @@ export function Section({
   children: ReactNode;
 }) {
   return (
-    <section className="space-y-3 rounded-lg border border-border/70 bg-card/60 p-3">
+    // One form is one surface: a group is set apart by the space above it, not by a
+    // bordered box inside the box it already sits in.
+    <section className="space-y-3 pt-2">
       <header>
         <h3 className="text-xs font-normal text-muted-foreground">{title}</h3>
         {hint ? (
