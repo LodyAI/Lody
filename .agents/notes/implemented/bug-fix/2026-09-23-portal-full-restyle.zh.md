@@ -64,6 +64,13 @@ Translation: current
 - **doc-meta。** 同时完成的完整元数据读取按微任务合并为一次缓存写入，而不是每个文档一次；元数据对象
   未变的列表项保持同一引用；值比较改为遍历 JSON，而不是序列化。
 
+- **切换渲染。** 之后的生产 trace 显示每次切换会话是一个约 100ms 的同步任务：render 约 49ms，passive
+  effect 约 16ms，DOM 更新约 14ms。工作区分组的行是 memo 分组内的内联 JSX，而分组接收
+  `selectedSessionId`，所以任何选中变化都会重新渲染整组的行（"Chats" 共 244 行），每行都带悬浮卡片、
+  右键菜单和 Tooltip。现在行是 memo 的 `SessionGroupRow`，接收 `isSelected`，切换时只重新渲染旧、新
+  选中两行。输入框自动撑高在内容为空时不再先设 `auto` 再读 `scrollHeight`，此前每次切换都会强制
+  一次整页同步布局（约 5ms）。
+
 ## 未决
 
 Konsta 的 `theme.css` 仍会导入全部 Konsta 样式；目前只证实这一条工具类有影响。还没有自动检查拒绝

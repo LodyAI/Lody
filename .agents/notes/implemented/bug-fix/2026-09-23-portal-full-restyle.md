@@ -78,6 +78,15 @@ Measured in the same production build and workspace (9k nodes):
   microtask instead of one per document, list entries keep their identity while their metadata
   object is unchanged, and value equality walks the JSON instead of serializing it.
 
+- **Switch render.** A later production trace showed each session switch as one ~100ms
+  synchronous task: ~49ms render, ~16ms passive effects, ~14ms DOM mutation. Workspace
+  group rows were inline JSX inside a memoized group that receives `selectedSessionId`,
+  so any selection change re-rendered every row of the group (244 in "Chats"), each with
+  a hover card, context menu and tooltip. Rows are now a memoized `SessionGroupRow`
+  taking `isSelected`, so a switch re-renders the old and new selected rows. The
+  composer's auto-resize no longer resets to `auto` and reads `scrollHeight` when empty,
+  which forced a synchronous page layout on every switch (~5ms).
+
 ## Open
 
 Konsta's `theme.css` still imports all Konsta styles; only this utility was shown to matter. No

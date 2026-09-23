@@ -90,5 +90,16 @@ describe('ChatComposer auto resize', () => {
       Number.parseFloat(computed.paddingBottom || '0');
     expect(textarea?.style.height).toBe(`${elevenRowsHeight}px`);
     expect(textarea?.style.overflowY).toBe('auto');
+
+    // Cleared (e.g. after sending): back to the two-row minimum, whatever the
+    // wrapped placeholder would report as scrollHeight.
+    scrollHeight = 480;
+    await act(async () => root.render(renderComposer('')));
+    const twoRowsHeight =
+      24 * 2 +
+      Number.parseFloat(computed.paddingTop || '0') +
+      Number.parseFloat(computed.paddingBottom || '0');
+    expect(textarea?.style.height).toBe(`${twoRowsHeight}px`);
+    expect(textarea?.style.overflowY).toBe('hidden');
   });
 });
