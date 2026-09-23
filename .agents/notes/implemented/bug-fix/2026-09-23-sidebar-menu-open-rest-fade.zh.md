@@ -5,6 +5,8 @@ Translation: current
 
 [English](2026-09-23-sidebar-menu-open-rest-fade.md)
 
+PR: [#919](https://github.com/LodyAI/Lody/pull/919)
+
 ## 摘要
 
 打开侧栏行的右键菜单时，行的常驻图标仍叠在显示出的操作控件上：树形连接线

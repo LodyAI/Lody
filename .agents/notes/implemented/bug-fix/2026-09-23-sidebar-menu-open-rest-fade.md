@@ -5,6 +5,8 @@ Translation: current
 
 [中文](2026-09-23-sidebar-menu-open-rest-fade.zh.md)
 
+PR: [#919](https://github.com/LodyAI/Lody/pull/919)
+
 ## Abstract
 
 Opening a sidebar row's context menu left the row's resting icons visible on top
