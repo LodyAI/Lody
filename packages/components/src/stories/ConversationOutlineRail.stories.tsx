@@ -430,6 +430,7 @@ function ExtremeConversationViewFrame() {
     lastAssistantMessageId,
     lastCompletedAssistantMessageId,
     onVisibleTurnRangeChange,
+    onRetainedTurnIdsChange,
     onOutlinePreviewRound,
   } = useConversationStreamItems(view, sessionId);
   return (
@@ -448,6 +449,7 @@ function ExtremeConversationViewFrame() {
           showScrollToLatest={false}
           lastAssistantMessageId={lastAssistantMessageId}
           lastCompletedAssistantMessageId={lastCompletedAssistantMessageId}
+          onRetainedTurnIdsChange={onRetainedTurnIdsChange}
           onVisibleTurnRangeChange={onVisibleTurnRangeChange}
           onOutlinePreviewRound={onOutlinePreviewRound}
         />

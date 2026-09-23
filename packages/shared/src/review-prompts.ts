@@ -33,11 +33,30 @@ export const PR_BRANCH_UPKEEP_PROMPT = [
   'for something that overrides it — in that case say so instead of pushing silently.',
 ].join(' ');
 
-export const CREATE_PR_BASE_PROMPT =
-  'Create a PR for the current worktree (a regular PR, not a draft). Use `gh` from the current PATH and run GitHub-authenticated commands with elevated permissions. If authentication fails in the sandbox, retry with elevated permissions before asking the user to log in. Verify that the pushed commit matches the PR head, then report the PR URL.';
+/**
+ * Why the PR prompts send `gh` outside the sandbox. The user reads this text in
+ * their own chat, so it names the reason (the saved GitHub login) instead of
+ * asking for "elevated permissions", which read like an injected instruction.
+ */
+const GH_AUTH_INSTRUCTION =
+  'Use `gh` from the current PATH. `gh` signs in with the GitHub login saved on this machine, which sandboxed commands usually cannot read, so run the `gh` commands that talk to GitHub outside the sandbox (request approval if your tool requires it). Ask the user to log in only if authentication still fails there. Verify that the pushed commit matches the PR head, then report the PR URL.';
 
-export const CREATE_DRAFT_PR_BASE_PROMPT =
-  'Create a draft PR for the current worktree. Use `gh` from the current PATH and run GitHub-authenticated commands with elevated permissions. If authentication fails in the sandbox, retry with elevated permissions before asking the user to log in. Verify that the pushed commit matches the PR head, then report the PR URL.';
+export const CREATE_PR_BASE_PROMPT = `Create a PR for the current worktree (a regular PR, not a draft). ${GH_AUTH_INSTRUCTION}`;
+
+export const CREATE_DRAFT_PR_BASE_PROMPT = `Create a draft PR for the current worktree. ${GH_AUTH_INSTRUCTION}`;
+
+/**
+ * Lead lines the Info Bar puts before its PR prompts, so a user scrolling back
+ * sees that the message came from the button they clicked. Kept out of the base
+ * prompts because the auto-review engine sends those without any click.
+ */
+export const CREATE_PR_ORIGIN_PROMPT = '(Sent by the **Create PR** button in Lody.)';
+
+export const CREATE_DRAFT_PR_ORIGIN_PROMPT = '(Sent by the **Create Draft PR** button in Lody.)';
+
+/** Puts a quick action's origin line above the prompt it sent. */
+export const withQuickActionOrigin = (origin: string, prompt: string): string =>
+  `${origin}\n\n${prompt}`;
 
 /** Joins a PR-creation prompt to the standing upkeep instruction. */
 export const withPrBranchUpkeep = (basePrompt: string, upkeep: string): string =>

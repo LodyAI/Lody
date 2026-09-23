@@ -192,6 +192,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       lastCompletedAssistantMessageId,
       onVisibleTurnRangeChange: handleVisibleTurnRangeChange,
       onOutlinePreviewRound: handleOutlinePreviewRound,
+      onRetainedTurnIdsChange,
     } = useConversationStreamItems(view, sessionId);
     useEffect(() => {
       onLastCompletedAssistantMessageIdChange?.(lastCompletedAssistantMessageId);
@@ -293,6 +294,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
         suppressStickyAutoScrollRef={suppressStickyAutoScrollRef}
         outlineOverlayRoot={outlineOverlayRoot}
         conversationView={view}
+        onRetainedTurnIdsChange={onRetainedTurnIdsChange}
         onVisibleTurnRangeChange={handleVisibleTurnRangeChange}
         onOutlinePreviewRound={handleOutlinePreviewRound}
       />

@@ -169,7 +169,7 @@ function getSessionShareActionLabel(
  * glyphs sitting ~1px above the icon beside them; at `normal` the half-leading
  * is zero and the ink lands where the font intends, for whatever interface
  * font is selected. */
-const SESSION_HEADER_STATUS_PILL_CLASS =
+export const SESSION_HEADER_STATUS_PILL_CLASS =
   'inline-flex h-6 shrink-0 select-none items-center gap-1.5 rounded-md border border-border/70 bg-transparent px-2 ' +
   'text-[0.7rem] font-medium leading-[normal] text-muted-foreground transition-colors ' +
   'hover:border-border hover:text-foreground ' +
@@ -249,7 +249,7 @@ export function SessionAccessControl({
     'sharing.header.sharedDescription',
     'Anyone with the link can read a published copy of this conversation.'
   );
-  const shareLabel = t('sharing.manager.title', 'Share conversation');
+  const shareLabel = t('sharing.manager.title', 'Share');
   const shareDescription = t(
     'sharing.header.shareDescription',
     'Publish a read-only copy of this conversation as a link.'

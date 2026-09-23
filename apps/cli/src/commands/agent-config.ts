@@ -148,9 +148,9 @@ export function resolveAgentConfigSelector(
 }
 
 // CLI inference predates explicit cliType. Keep the historical Claude/Codex
-// aliases and the unambiguous built-in Grok/Bub aliases here; `kimi` continues
+// aliases and the unambiguous built-in Grok/Bub/Dimcode aliases here; `kimi` continues
 // to mean the registry agent for backward compatibility.
-const LEGACY_BUILTIN_AGENT_TYPES = new Set(['claude', 'codex', 'grok', 'bub']);
+const LEGACY_BUILTIN_AGENT_TYPES = new Set(['claude', 'codex', 'grok', 'bub', 'dimcode']);
 
 export function inferAgentConfigCliType(agentType: string): AgentConfigCliType {
   const normalized = normalizeCliValue(agentType)?.toLowerCase();

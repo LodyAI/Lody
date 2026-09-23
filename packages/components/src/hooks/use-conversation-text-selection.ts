@@ -54,7 +54,7 @@ export function useConversationTextSelection<T>({
   leadingRowCount: number;
   captureTurn: (id: string) => T;
   onCopyUnavailable: () => void;
-  onChange: () => void;
+  onChange: (ids: ReadonlySet<string>) => void;
   onRelease: () => void;
   activeRef: MutableRefObject<boolean>;
 }) {
@@ -82,7 +82,7 @@ export function useConversationTextSelection<T>({
     const publish = () => {
       if (!disposed) {
         setVersion((value) => value + 1);
-        current.current.onChange();
+        current.current.onChange(new Set(retained.current.keys()));
       }
     };
     const release = () => {

@@ -80,6 +80,7 @@ type HarnessProps = {
   initialContentReady?: boolean;
   onAtBottomChange?: (atBottom: boolean) => void;
   skipNextViewportResizeAutoScrollRef?: React.MutableRefObject<boolean>;
+  suppressAutoScrollRef?: React.RefObject<boolean>;
 };
 
 async function advanceAnimationFrames(): Promise<void> {
@@ -242,6 +243,7 @@ function HookHarness({
   initialContentReady,
   onAtBottomChange,
   skipNextViewportResizeAutoScrollRef,
+  suppressAutoScrollRef,
 }: HarnessProps) {
   const vlistRef = useRef<VirtualizerHandle | null>(vlist);
   vlistRef.current = vlist;
@@ -254,6 +256,7 @@ function HookHarness({
     initialContentReady,
     onAtBottomChange,
     skipNextViewportResizeAutoScrollRef,
+    suppressAutoScrollRef,
   });
   const { scrollRef } = result;
 
@@ -377,17 +380,19 @@ describe('useStickyScroll Virtua adapter', () => {
     expect(latestResult?.initialScrollRestored).toBe(true);
   });
 
-  it('waits for Virtua to apply an asynchronous cached-offset restoration', async () => {
+  it('waits for Virtua to observe a restored offset before revealing', async () => {
     const sessionId = 'session-delayed-offset' as SessionId;
     saveScrollPosition(sessionId, { type: 'offset', scrollOffset: 96 });
     const fixture = createScrollFixture();
     const vlist = createMockVirtualizerHandle(fixture.scrollElement);
-    vlist.scrollTo.mockImplementation(() => {});
+    let observedOffset = 0;
+    Object.defineProperty(vlist, 'scrollOffset', { get: () => observedOffset });
     await renderHarness({ sessionId, vlist, scrollElement: fixture.scrollElement, itemCount: 4 });
     expect(latestResult?.initialScrollRestored).toBe(false);
+    expect(fixture.getScrollTop()).toBe(96);
     expect(getScrollPosition(sessionId)).toEqual({ type: 'offset', scrollOffset: 96 });
     await act(async () => {
-      fixture.setScrollTop(96);
+      observedOffset = 96;
       latestResult?.handleScroll(96);
     });
     expect(latestResult?.initialScrollRestored).toBe(true);
@@ -408,6 +413,62 @@ describe('useStickyScroll Virtua adapter', () => {
     });
     expect(latestResult?.initialScrollRestored).toBe(true);
   });
+
+  it('restores a cached offset again when late measurements change the clamped destination', async () => {
+    const sessionId = 'session-late-offset-measurement' as SessionId;
+    saveScrollPosition(sessionId, { type: 'offset', scrollOffset: 1200 });
+    const fixture = createScrollFixture();
+    fixture.lastRow.style.visibility = 'hidden';
+    const vlist = createMockVirtualizerHandle(fixture.scrollElement);
+    await renderHarness({ sessionId, vlist, scrollElement: fixture.scrollElement, itemCount: 4 });
+    expect(fixture.getScrollTop()).toBe(240);
+    expect(latestResult?.initialScrollRestored).toBe(false);
+
+    await act(async () => {
+      // The virtualizer's initial request has ended; a late row measurement
+      // expands the spacer and corrects its anchor to a different offset.
+      fixture.setScrollHeight(3000);
+      fixture.setScrollTop(1800);
+      fixture.lastRow.style.visibility = '';
+      emitResize(fixture.lastRow);
+    });
+    expect(fixture.getScrollTop()).toBe(1200);
+    await act(async () => latestResult?.handleScroll(1200));
+    expect(latestResult?.initialScrollRestored).toBe(true);
+    expect(getScrollPosition(sessionId)).toEqual({ type: 'offset', scrollOffset: 1200 });
+  });
+
+  it.each(['latest', 'jump', 'wheel'] as const)(
+    'lets %s replace a pending cached restoration',
+    async (intent) => {
+      const sessionId = 'session-replace-initial-offset' as SessionId;
+      saveScrollPosition(sessionId, { type: 'offset', scrollOffset: 96 });
+      const fixture = createScrollFixture();
+      fixture.lastRow.style.visibility = 'hidden';
+      const suppressAutoScrollRef = { current: false };
+      await renderHarness({
+        sessionId,
+        vlist: createMockVirtualizerHandle(fixture.scrollElement),
+        scrollElement: fixture.scrollElement,
+        itemCount: 4,
+        suppressAutoScrollRef,
+      });
+      expect(latestResult?.initialScrollRestored).toBe(false);
+      await act(async () => {
+        if (intent === 'latest') latestResult?.scrollToBottom();
+        else {
+          if (intent === 'jump') suppressAutoScrollRef.current = true;
+          else fixture.scrollElement.dispatchEvent(new WheelEvent('wheel', { deltaY: -20 }));
+          fixture.setScrollTop(40);
+        }
+        fixture.lastRow.style.visibility = '';
+        emitResize(fixture.lastRow);
+        latestResult?.handleScroll(fixture.getScrollTop());
+      });
+      expect(latestResult?.initialScrollRestored).toBe(true);
+      expect(fixture.getScrollTop()).toBe(intent === 'latest' ? 240 : 40);
+    }
+  );
 
   it('follows row growth before the spacer resize is delivered', async () => {
     const fixture = createScrollFixture();
@@ -581,7 +642,6 @@ describe('useStickyScroll Virtua adapter', () => {
       await advanceAnimationFrames();
     });
 
-    expect(vlist.scrollTo).toHaveBeenCalledWith(96);
     expect(fixture.getScrollTop()).toBe(96);
     expect(latestResult?.isSticky).toBe(false);
     expect(latestResult?.initialScrollRestored).toBe(true);
@@ -785,7 +845,8 @@ describe('useStickyScroll Virtua adapter', () => {
       await advanceAnimationFrames();
     });
 
-    expect(vlist.scrollTo).toHaveBeenCalledWith(96);
+    expect(fixture.getScrollTop()).toBe(96);
+    expect(latestResult?.initialScrollRestored).toBe(true);
     expect(latestResult?.isSticky).toBe(false);
 
     await act(async () => {

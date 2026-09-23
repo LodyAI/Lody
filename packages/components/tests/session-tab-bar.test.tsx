@@ -166,10 +166,13 @@ describe('SessionTabBar drag sources', () => {
     // The draft that replaces it is also alone, so it has no close button either.
     expect(container.querySelector('[role="tab"] button[aria-label^="Close"]')).toBeNull();
     expect(container.querySelector('output')?.textContent).toMatch(/^draft:/);
-    await act(async () =>
-      container.querySelector<HTMLButtonElement>('[aria-label="Closed conversations"]')!.click()
-    );
-    expect(document.querySelector('[aria-label="Unread messages"]')).toBeNull();
+    // Output the user has not read stays discoverable through the closed list.
+    const closedTabs = container.querySelector<HTMLButtonElement>(
+      '[aria-label="Closed conversations: Unread messages"]'
+    )!;
+    expect(closedTabs.querySelector('[data-closed-tabs-unread]')).not.toBeNull();
+    await act(async () => closedTabs.click());
+    expect(document.querySelector('[aria-label="Unread messages"]')).not.toBeNull();
     await act(async () =>
       document
         .querySelector<HTMLButtonElement>('[aria-label="Reopen conversation: Main session"]')!

@@ -56,6 +56,7 @@ import {
   createAcpStartupMonitor,
 } from './acp-startup-monitor';
 import { withLodyNpmCacheForNpx } from './npx-cache';
+import { resolveDeepSeekHarnessSpawn } from './deepseek-harness-runtime';
 import { runNpxStartupWithRecovery } from './acp-npx-startup-policy';
 import { truncateLogText } from '@/utils/log-format';
 import {
@@ -258,7 +259,14 @@ export const spawnAcpProcess = (options: SpawnAcpProcessOptions): ChildProcess =
   }
   const spawnFn = options.spawnImpl ?? spawn;
 
-  return spawnFn(command, args, {
+  const executable = resolveDeepSeekHarnessSpawn({
+    command,
+    args,
+    env: options.env,
+    workdir: options.workdir,
+  });
+
+  return spawnFn(executable.command, executable.args, {
     cwd: options.workdir,
     env: options.env,
     stdio: ['pipe', 'pipe', 'pipe'],

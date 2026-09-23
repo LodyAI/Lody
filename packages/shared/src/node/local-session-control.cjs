@@ -396,7 +396,8 @@ function isACPSessionConfig(value) {
     agentType === 'codex' ||
     agentType === 'kimi' ||
     agentType === 'deepseek' ||
-    agentType === 'bub';
+    agentType === 'bub' ||
+    agentType === 'dimcode';
   if (
     typeof value.prompt !== 'string' ||
     (cliType === 'builtin' && !isBuiltinAgentType) ||

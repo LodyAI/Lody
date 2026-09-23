@@ -15,6 +15,7 @@ import {
   type ConversationFontSize,
 } from '@/atoms';
 import { MobileAppearanceSettings } from '@/components/mobile/mobile-appearance-settings';
+import { MobileAppIconSettings } from '@/components/mobile/mobile-app-icon-settings';
 import { OptionSelector, type OptionSelectorOption } from '@/components/shared/option-selector';
 import { buildTerminalFontPreviewFamily } from '@/components/terminal/terminal-theme';
 import { useIsMobile } from '@/hooks/use-mobile';
@@ -240,6 +241,8 @@ export function AppearanceSettingsView({
           />
         </CompactRow>
       </CompactSection>
+
+      <MobileAppIconSettings />
 
       {isElectron ? (
         <CompactSection title={t('settings.terminal.title', 'Terminal')}>

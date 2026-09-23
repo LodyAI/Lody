@@ -31,14 +31,29 @@ export function shouldMarkSessionRead({
   return lastMessageAt > lastReadAt;
 }
 
-/** Closed conversations suppress unread indicators without changing read receipts. */
-export function sessionHasUnreadMessages(session: {
+type SessionUnreadInput = {
   lastMessageAt?: number;
   lastReadAt?: number;
   isTabClosed?: boolean;
   isArchived?: boolean;
-}): boolean {
+};
+
+/** Closed conversations suppress unread indicators without changing read receipts. */
+export function sessionHasUnreadMessages(session: SessionUnreadInput): boolean {
   if (session.isTabClosed === true || session.isArchived === true) return false;
+  return hasUnreadOutput(session);
+}
+
+/**
+ * Unread output in a closed or archived conversation. Only the closed-conversations
+ * list surfaces it; tabs, sidebar summaries, and badges stay quiet.
+ */
+export function closedSessionHasUnreadMessages(session: SessionUnreadInput): boolean {
+  if (session.isTabClosed !== true && session.isArchived !== true) return false;
+  return hasUnreadOutput(session);
+}
+
+function hasUnreadOutput(session: SessionUnreadInput): boolean {
   const lastMessageAt = typeof session.lastMessageAt === 'number' ? session.lastMessageAt : null;
   if (lastMessageAt === null) return false;
   const lastReadAt = typeof session.lastReadAt === 'number' ? session.lastReadAt : null;

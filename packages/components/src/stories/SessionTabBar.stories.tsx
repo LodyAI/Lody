@@ -74,6 +74,7 @@ const archivedChildSessions: SessionMeta[] = [
     title: 'Old branch review',
     userId: 'user-1',
     lastMessageAt: Date.now() - 60_000,
+    lastReadAt: Date.now() - 30_000,
     status: { type: 'idle' },
     cliType: 'builtin',
     agentType: 'codex',
@@ -777,5 +778,40 @@ export const UnreadChildTabs: Story = {
           'request (outranks everything), and a caught-up child (plain agent icon).',
       },
     },
+  },
+};
+
+export const ClosedTabUnread: Story = {
+  name: 'Unread output in a closed tab',
+  args: {
+    parentSession: screenshotParentSession,
+    childSessions,
+    draftTabs: [],
+    archivedChildSessions: [
+      {
+        ...archivedChildSessions[0]!,
+        id: 'session-closed-unread' as SessionId,
+        title: 'Fix flaky upload test',
+        isTabClosed: true,
+        lastMessageAt: Date.now() - 20_000,
+        lastReadAt: Date.now() - 600_000,
+      },
+      ...archivedChildSessions,
+    ],
+    activeTabSessionId: screenshotParentSession.id,
+  },
+  parameters: {
+    docs: {
+      description: {
+        story:
+          'A closed tab received output after the user last read it: the history button ' +
+          'carries the unread dot, and the closed list marks the conversation that caused it.',
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(
+      within(canvasElement).getByRole('button', { name: /Closed conversations/ })
+    );
   },
 };

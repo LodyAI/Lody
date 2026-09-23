@@ -96,7 +96,7 @@ async function render(session: SessionMeta | null, enabled = true) {
 it('opens sharing for the selected child Tab and closes the mobile action sheet', async () => {
   await render(child);
   const button = [...container.querySelectorAll('button')].find(
-    (node) => node.textContent === 'Share conversation'
+    (node) => node.textContent === 'Share'
   );
   expect(button).toBeDefined();
   await act(async () => button!.click());
@@ -104,17 +104,17 @@ it('opens sharing for the selected child Tab and closes the mobile action sheet'
   expect(container.querySelector('[role="dialog"]')?.getAttribute('data-workspace')).toBe(
     'workspace'
   );
-  expect(container.textContent).not.toContain('Share conversation');
+  expect(container.textContent).not.toContain('Share');
   await act(async () => container.querySelector<HTMLButtonElement>('button')!.click());
   expect(container.querySelector('[role="dialog"]')).toBeNull();
 });
 it('does not offer a public link on a local platform', async () => {
   await render(child, false);
-  expect(container.textContent).not.toContain('Share conversation');
+  expect(container.textContent).not.toContain('Share');
   expect(container.querySelector('[role="dialog"]')).toBeNull();
 });
 it('does not substitute the root conversation for a draft or viewer', async () => {
   await render(null);
-  expect(container.textContent).not.toContain('Share conversation');
+  expect(container.textContent).not.toContain('Share');
   expect(container.querySelector('[role="dialog"]')).toBeNull();
 });

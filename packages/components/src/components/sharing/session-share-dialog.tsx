@@ -61,7 +61,7 @@ export function SessionShareDialogFrame({
             the action reads as a small label above it, not as the larger line. */}
         <Dialog.Header className="shrink-0 gap-0.5 px-5 pb-3 pr-11 pt-4 text-left">
           <Dialog.Description className="text-xs font-medium text-muted-foreground">
-            {t('sharing.manager.title', 'Share conversation')}
+            {t('sharing.manager.title', 'Share')}
           </Dialog.Description>
           <Dialog.Title className="truncate text-base font-semibold leading-6 text-foreground">
             {title}

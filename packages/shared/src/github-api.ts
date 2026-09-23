@@ -326,7 +326,6 @@ export type GitHubCreateReviewCommentInput = {
   side: 'LEFT' | 'RIGHT';
   startLine?: number | null;
   startSide?: 'LEFT' | 'RIGHT' | null;
-  subjectType?: 'line' | 'file';
 };
 
 // ============================================================================
@@ -1784,6 +1783,10 @@ export async function githubFetchPRReviewComments(
   return groupGitHubReviewComments(recent);
 }
 
+/**
+ * Create a line-anchored review comment. GitHub validates the body against a
+ * oneOf schema whose `line` variant rejects `subject_type`, so it is omitted.
+ */
 export async function githubCreatePRReviewComment(
   token: string,
   repoFullName: string,
@@ -1796,7 +1799,6 @@ export async function githubCreatePRReviewComment(
     path: input.path,
     line: input.line,
     side: input.side,
-    subject_type: input.subjectType ?? 'line',
   };
   if (input.startLine !== undefined && input.startLine !== null) {
     payload.start_line = input.startLine;

@@ -22,3 +22,12 @@ Translation: current
 当前工作树未安装依赖，定向 Vitest 测试及组件类型检查无法启动（缺少 `vitest` 和 `tsgo`）。
 独立运行 Vitest 3.2.4 后，9 个已读／未读测试全部通过；直接 Node 断言也验证了生产函数。
 格式化和 `git diff --check` 通过。文档检查报告已有的缺失 ACP 子模块链接；尚未进行原生界面验证。
+
+## 已关闭列表的未读标记
+
+全部抑制后，已关闭标签里的新输出无从发现。现在只要列表中有对话的输出晚于其
+`lastReadAt`，顶栏的已关闭列表按钮右上角就显示小圆点，对应行用未读圆点代替 Agent 图标。
+`closedSessionHasUnreadMessages` 只对已关闭／已归档对话做同样的时间戳比较；
+`sessionHasUnreadMessages` 在其他位置（包括桌面端侧边栏和手机端 Session 列表）继续抑制它们。从未读过且有消息的已关闭对话算作未读，
+与打开的标签一致。由已读回执和标签栏测试、`Unread output in a closed tab` Story 覆盖，
+并已在 Storybook 中检查两种主题。

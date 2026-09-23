@@ -8,6 +8,7 @@ import type {
   LoroSidebarOrganizeMode,
 } from '@/components/loro-sidebar';
 import { LoroSidebar } from '@/components/loro-sidebar';
+import { SidebarFilterPopover } from '@/components/sidebar-filter-popover';
 import { LocalProjectItem } from '@/components/loro-app-sidebar';
 import { SidebarSectionHeader } from '@/components/sidebar-row-shared';
 import { buildSidebarOpenerRowResolver } from '@/components/sessions/session-list-rows';
@@ -593,6 +594,31 @@ export const WorkspaceSyncing: Story = {
   },
 };
 
+/** My Tasks removed every Workspace section; the recovery action switches to All Tasks. */
+export const FilteredWorkspaceEmpty: Story = {
+  name: 'Workspace · filtered empty',
+  render: (args) => <StoryLayout {...args} />,
+  args: {
+    ...Default.args!,
+    chatScope: 'my',
+    pinnedItems: [],
+    sessionListProps: {
+      sessions: [],
+      repos: [],
+    },
+  },
+};
+
+/** All Tasks is selected, but the workspace genuinely has no tasks yet. */
+export const WorkspaceEmpty: Story = {
+  name: 'Workspace · empty',
+  render: (args) => <StoryLayout {...args} />,
+  args: {
+    ...FilteredWorkspaceEmpty.args!,
+    chatScope: 'team',
+  },
+};
+
 export const ElectronAlwaysVisibleCollapseToggle: Story = {
   render: (args) => <WithProjectsLayout {...args} />,
   args: {
@@ -1059,6 +1085,7 @@ function ProductionLikeTopContent({
   onNew,
   chatsCollapsed,
   onToggleChatsCollapsed,
+  filterAction,
 }: {
   chatSessions: SessionListRow[];
   githubWorktreeCount: number;
@@ -1068,6 +1095,7 @@ function ProductionLikeTopContent({
   onNew: (repoFullName?: string) => void;
   chatsCollapsed: boolean;
   onToggleChatsCollapsed: () => void;
+  filterAction?: ReactNode;
 }) {
   const isMobile = useIsMobile();
   const [localProjectsCollapsed, setLocalProjectsCollapsed] = useState(false);
@@ -1114,14 +1142,19 @@ function ProductionLikeTopContent({
             isMobile={isMobile}
             toggleLabel="Toggle"
             onToggleCollapsed={() => setLocalProjectsCollapsed((v) => !v)}
+            // Mirrors LoroAppSidebar's headerAction: the import button plus
+            // the sidebar filter trigger on the first section.
             action={
-              <button
-                type="button"
-                className="inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground/80 hover:bg-muted/30 hover:text-foreground"
-                aria-label="Import local project folder"
-              >
-                <FolderPlus className="h-4 w-4" />
-              </button>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground/80 hover:bg-muted/30 hover:text-foreground"
+                  aria-label="Import local project folder"
+                >
+                  <FolderPlus className="h-4 w-4" />
+                </button>
+                {filterAction}
+              </div>
             }
           />
           {localProjectsCollapsed ? null : (
@@ -1291,11 +1324,26 @@ function WithProjectsLayout(args: Parameters<typeof LoroSidebar>[0]) {
 
   const isMobile = useIsMobile();
 
+  // Mirrors LoroAppSidebar: one filter element shared between the first
+  // topContent header and LoroSidebar's own slots — gated on the same
+  // pinnedItems prop the sidebar sees, not the raw session flags.
+  const hasPinnedItems = Boolean(args.pinnedItems?.length);
+  const sidebarFilterAction = (
+    <SidebarFilterPopover
+      organize="workspace"
+      scope="my"
+      side="bottom"
+      align="end"
+      triggerClassName="h-5 w-5 [&_svg]:h-4 [&_svg]:w-4"
+    />
+  );
+
   const sidebar = (
     <LoroSidebar
       {...args}
       activeNav={activeNav}
       currentWorkspaceId={workspaceId}
+      desktopFilterAction={sidebarFilterAction}
       topContent={
         <ProductionLikeTopContent
           chatSessions={chatSessions}
@@ -1306,6 +1354,7 @@ function WithProjectsLayout(args: Parameters<typeof LoroSidebar>[0]) {
           onNew={createTask}
           chatsCollapsed={chatsCollapsed}
           onToggleChatsCollapsed={() => setChatsCollapsed((p) => !p)}
+          filterAction={hasPinnedItems ? null : sidebarFilterAction}
         />
       }
       sessionListProps={{

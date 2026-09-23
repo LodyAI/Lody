@@ -226,6 +226,7 @@ describe('ManagedAgentRuntimeManager', () => {
     ['codex', 'linux', 'x64', 'linux-x64'],
     ['claude-code', 'linux', 'x64', 'linux-x64'],
     ['kimi-code', 'linux', 'x64', 'node'],
+    ['pi', 'linux', 'x64', 'node'],
     ['grok-build', 'linux', 'x64', 'linux-x64'],
     ['grok-build', 'win32', 'x64', 'win32-x64'],
   ] as const)(
@@ -256,13 +257,97 @@ describe('ManagedAgentRuntimeManager', () => {
     }
   );
 
-  it('rejects malformed legacy runtime metadata', async () => {
+  it.each(['archiveSha256', 'archiveSize', 'command', 'minNodeVersion'] as const)(
+    'reinstalls a same-version runtime when %s changes',
+    async (field) => {
+      const { archiveBytes, definition, originalArchive } =
+        await installTinyCodexArchiveDefinition('repacked-codex.tar.zst');
+      try {
+        const archive = definition.platforms['linux-x64'];
+        const command = await installCachedCodex({
+          version: definition.version,
+          installedAt: '2026-08-01T00:00:00.000Z',
+          archiveSha256: archive.sha256,
+          archiveSize: archive.size,
+        });
+        const metadataPath = join(dirname(dirname(command)), 'metadata.json');
+        const metadata = JSON.parse(await readFile(metadataPath, 'utf8'));
+        const staleValues = {
+          archiveSha256: 'f'.repeat(64),
+          archiveSize: archive.size + 1,
+          command: 'bin/old-codex',
+          minNodeVersion: '22.19.0',
+        };
+        if (field === 'command') {
+          await writeFile(join(dirname(command), 'old-codex'), 'stale-codex');
+        }
+        await writeFile(metadataPath, JSON.stringify({ ...metadata, [field]: staleValues[field] }));
+        const manager = new ManagedAgentRuntimeManager({
+          rootDir,
+          platform: 'linux',
+          arch: 'x64',
+          runtimeBaseUrl: 'https://runtime.example.test',
+          fetchImpl: async () => new Response(archiveBytes),
+        });
+
+        await expect(manager.getRuntimeStatus('codex')).resolves.toMatchObject({
+          kind: 'not-installed',
+        });
+        await expect(manager.prepareCache()).resolves.toBeUndefined();
+        await expect(manager.resolveRuntimeForLaunch('codex')).resolves.toMatchObject({
+          command,
+          version: definition.version,
+          updateAvailable: false,
+        });
+        expect(await readFile(command, 'utf8')).toBe('tiny-codex');
+        expect(JSON.parse(await readFile(metadataPath, 'utf8'))).toMatchObject({
+          archiveSha256: archive.sha256,
+          archiveSize: archive.size,
+          command: archive.cmd,
+        });
+      } finally {
+        definition.platforms['linux-x64'] = originalArchive;
+      }
+    }
+  );
+
+  it.each([
+    Object.assign(new Error('permission denied'), { code: 'EACCES' }),
+    new Error('unexpected cleanup failure'),
+    'non-Error cleanup failure',
+  ])('continues cleaning other runtimes after a startup cleanup failure: %s', async (error) => {
+    const obsolete = await installCachedCodex({
+      version: '0.1.0',
+      installedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const retained = await installCachedCodex({
+      version: '0.2.0',
+      installedAt: '2026-02-01T00:00:00.000Z',
+    });
+    const manager = new ManagedAgentRuntimeManager({ rootDir, platform: 'linux', arch: 'x64' });
+    const prune = vi.spyOn(manager, 'pruneSupersededVersions').mockRejectedValueOnce(error);
+    try {
+      await expect(manager.prepareCache()).resolves.toBeUndefined();
+      expect(existsSync(obsolete)).toBe(false);
+      expect(existsSync(retained)).toBe(true);
+    } finally {
+      prune.mockRestore();
+    }
+  });
+
+  it('skips malformed metadata during startup but still rejects it for launch and install', async () => {
     const command = await installCachedCodex({
-      version: '0.147.0',
+      version: CODEX_RUNTIME_VERSION,
       installedAt: '2026-08-01T00:00:00.000Z',
       metadataFormat: 'legacy',
     });
-    const metadataPath = join(rootDir, 'codex', '0.147.0', 'linux-x64', 'metadata.json');
+    const metadataPath = join(
+      rootDir,
+      'codex',
+      CODEX_RUNTIME_VERSION,
+      'linux-x64',
+      'metadata.json'
+    );
     const metadata = JSON.parse(await readFile(metadataPath, 'utf8')) as Record<string, unknown>;
     await writeFile(metadataPath, JSON.stringify({ ...metadata, unexpected: true }));
     const manager = new ManagedAgentRuntimeManager({
@@ -271,10 +356,32 @@ describe('ManagedAgentRuntimeManager', () => {
       arch: 'x64',
     });
 
-    await expect(manager.prepareCache()).rejects.toThrow(
-      'Managed runtime cache metadata is invalid for codex/0.147.0/linux-x64'
-    );
+    await expect(manager.prepareCache()).resolves.toBeUndefined();
+    await expect(manager.listAvailableUpdates()).resolves.toEqual([]);
+    for (const operation of [
+      () => manager.getRuntimeStatus('codex'),
+      () => manager.resolveRuntimeForLaunch('codex'),
+      () => manager.ensureCurrentRuntime('codex'),
+    ]) {
+      await expect(operation()).rejects.toThrow(
+        `Managed runtime cache metadata is invalid for codex/${CODEX_RUNTIME_VERSION}/linux-x64`
+      );
+    }
     expect(existsSync(command)).toBe(true);
+  });
+
+  it('still finds updates for other runtimes when one cache cannot be read', async () => {
+    await installCachedCodex({
+      version: '0.1.0',
+      installedAt: '2026-01-01T00:00:00.000Z',
+    });
+    const manager = new ManagedAgentRuntimeManager({ rootDir, platform: 'linux', arch: 'x64' });
+    const status = vi.spyOn(manager, 'getRuntimeStatus').mockRejectedValueOnce(new Error('EIO'));
+    try {
+      await expect(manager.listAvailableUpdates()).resolves.toEqual(['codex']);
+    } finally {
+      status.mockRestore();
+    }
   });
 
   it('matches the exact locked Codex dependency version', () => {

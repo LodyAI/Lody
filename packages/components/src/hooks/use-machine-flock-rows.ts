@@ -19,6 +19,8 @@ import {
   setMachineFlockRowsForMachineAtom,
 } from '@/atoms/machine-flock';
 import { activeWorkspaceRuntimeAtom, type WorkspaceRuntime } from '@/atoms/runtime';
+import { deferredPostHog } from '@/lib/deferred-posthog';
+import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { readinessBinding } from '@/lib/room-readiness';
 import {
   flockVersionTokensEqual,
@@ -183,6 +185,67 @@ const SHARED_MACHINE_FLOCK_EVENTS = new WeakMap<
 >();
 const EMPTY_MACHINE_IDS = new Set<MachineId>();
 let machineFlockRowsPerfMeasureSeq = 0;
+
+export const MACHINE_FLOCK_REMOTE_SYNC_RETRY_BASE_DELAY_MS = 1_000;
+export const MACHINE_FLOCK_REMOTE_SYNC_RETRY_MAX_DELAY_MS = 60_000;
+
+export function getMachineFlockRemoteSyncRetryDelayMs(failureCount: number): number {
+  return Math.min(
+    MACHINE_FLOCK_REMOTE_SYNC_RETRY_BASE_DELAY_MS * 2 ** Math.max(0, failureCount - 1),
+    MACHINE_FLOCK_REMOTE_SYNC_RETRY_MAX_DELAY_MS
+  );
+}
+
+// One report per machine until a remote sync succeeds again. Every mounted
+// consumer retries on its own backoff; without this a machine whose stream
+// keeps failing would report once per consumer per retry.
+const REPORTED_MACHINE_FLOCK_REMOTE_SYNC_FAILURES = new Set<string>();
+
+function readErrorHttpStatus(error: unknown): number | null {
+  if (typeof error !== 'object' || error === null) return null;
+  const { status, statusCode } = error as { status?: unknown; statusCode?: unknown };
+  const value = typeof status === 'number' ? status : statusCode;
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function reportMachineFlockRemoteSyncFailure(args: {
+  cacheKey: string;
+  workspaceId: string;
+  machineId: MachineId;
+  familiesKey: string;
+  failureCount: number;
+  retryDelayMs: number;
+  error: unknown;
+}): void {
+  const firstReport = !REPORTED_MACHINE_FLOCK_REMOTE_SYNC_FAILURES.has(args.cacheKey);
+  const log = firstReport ? console.warn : console.debug;
+  log('[machine-flock] remote sync failed; keeping cached rows and retrying', {
+    workspaceId: args.workspaceId,
+    machineId: args.machineId,
+    failureCount: args.failureCount,
+    retryDelayMs: args.retryDelayMs,
+    error: args.error,
+  });
+  if (!firstReport) return;
+  REPORTED_MACHINE_FLOCK_REMOTE_SYNC_FAILURES.add(args.cacheKey);
+  try {
+    // Only low-cardinality fields: the raw error message can carry stream URLs.
+    capturePostHogEvent(deferredPostHog, 'machine_flock/remote_sync_failed', {
+      workspace_id: args.workspaceId,
+      machine_id: args.machineId,
+      families: args.familiesKey ? args.familiesKey.split('\0') : [],
+      error_type: args.error instanceof Error ? args.error.name || 'Error' : typeof args.error,
+      http_status: readErrorHttpStatus(args.error),
+      online: typeof navigator === 'undefined' ? null : navigator.onLine,
+    });
+  } catch {
+    // Analytics is side-effect-only: must never throw into product code.
+  }
+}
+
+function clearMachineFlockRemoteSyncFailure(cacheKey: string): void {
+  REPORTED_MACHINE_FLOCK_REMOTE_SYNC_FAILURES.delete(cacheKey);
+}
 
 function getPerformanceNow(): number {
   return typeof performance !== 'undefined' && typeof performance.now === 'function'
@@ -849,11 +912,13 @@ export function useMachineFlockRowsByMachineIdsState(
             clearTimeout(remoteSyncTimer);
           }
         });
+        let remoteSyncFailureCount = 0;
         const runRemoteSync = (): void => {
           remoteSyncTimer = null;
           if (!isCurrent()) return;
+          let roomLease: MachineFlockRoomLease | null = null;
           void (async () => {
-            const roomLease = acquireMachineFlockRoom(
+            roomLease = acquireMachineFlockRoom(
               runtime,
               machineId,
               remoteSyncOwner,
@@ -899,7 +964,32 @@ export function useMachineFlockRowsByMachineIdsState(
               }
             }
             markRemoteSynced();
-          })().catch(() => undefined);
+            remoteSyncFailureCount = 0;
+            clearMachineFlockRemoteSyncFailure(cacheKey);
+          })().catch((error: unknown) => {
+            if (!isCurrent()) return;
+            // A failed join or first sync never settles again on its own, and
+            // the effect skips an unchanged task, so without a retry here the
+            // machine would keep only its cached rows until a remount.
+            // Drop this attempt's lease now so a dead room is not kept alive
+            // (and reused) until the retry fires.
+            if (roomLease) {
+              task.cleanupFns.delete(roomLease.release);
+              roomLease.release();
+            }
+            remoteSyncFailureCount += 1;
+            const retryDelayMs = getMachineFlockRemoteSyncRetryDelayMs(remoteSyncFailureCount);
+            reportMachineFlockRemoteSyncFailure({
+              cacheKey,
+              workspaceId: runtime.workspaceId,
+              machineId,
+              familiesKey,
+              failureCount: remoteSyncFailureCount,
+              retryDelayMs,
+              error,
+            });
+            remoteSyncTimer = setTimeout(runRemoteSync, retryDelayMs);
+          });
         };
         if (remoteSyncDelayMs > 0) {
           remoteSyncTimer = setTimeout(runRemoteSync, remoteSyncDelayMs);

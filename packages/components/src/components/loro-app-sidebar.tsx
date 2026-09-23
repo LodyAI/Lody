@@ -116,6 +116,7 @@ import {
   type LoroSidebarLabels,
   type LoroSidebarWorkspace,
 } from '@/components/loro-sidebar';
+import { SidebarFilterPopover } from '@/components/sidebar-filter-popover';
 import { Dialog } from '@/ui/dialog';
 import { Button } from '@lody/ui/button';
 import { Checkbox } from '@lody/ui/checkbox';
@@ -1506,6 +1507,11 @@ const SortableLocalProjectItem = memo(
     localProjectItemPropsEqual(prev, next)
 );
 
+export const hasWorkspaceSidebarTopContent = (
+  localProjectSectionCount: number,
+  showGithubWorktrees: boolean
+): boolean => localProjectSectionCount > 0 || showGithubWorktrees;
+
 export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   const { t, i18n } = useTranslation();
   const router = useRouter();
@@ -2540,13 +2546,43 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       ),
       showMyTasks: t('sessions.sidebar.my', 'My Tasks'),
       showAllTasks: t('sessions.sidebar.team', 'All Tasks'),
+      emptyMyTasks: t('sidebar.filter.emptyMyTasks', 'No tasks match this view'),
+      emptyMyTasksHint: t(
+        'sidebar.filter.emptyMyTasksHint',
+        'Try showing every task in this workspace.'
+      ),
+      emptyAllTasks: t('sidebar.filter.emptyAllTasks', 'No tasks yet'),
+      emptyAllTasksHint: t(
+        'sidebar.filter.emptyAllTasksHint',
+        'Tasks in this workspace will appear here.'
+      ),
+      showAllTasksAction: t('sidebar.filter.showAllTasks', 'Show all tasks'),
     }),
     [t]
   );
-  const sidebarFilterPlaceholder =
-    !isMobile && pinnedItems.length === 0 ? (
-      <span aria-hidden="true" className="block h-6 w-6" />
-    ) : null;
+  // The filter trigger renders in-flow as the action of whichever section
+  // header is first, so alignment comes from the header row itself — no
+  // overlay or placeholder. `open` is owned here, the common ancestor of every
+  // candidate slot, so remounting the one instance at a new slot does not
+  // close an open popover.
+  const [sidebarFilterOpen, setSidebarFilterOpen] = useState(false);
+  const sidebarFilterPopover = !isMobile ? (
+    <SidebarFilterPopover
+      organize={organizeMode}
+      scope={chatScope}
+      onOrganizeChange={handleOrganizeModeChange}
+      onScopeChange={handleChatScopeChanged}
+      showUpdatedProjectNames={showUpdatedProjectNames}
+      onShowUpdatedProjectNamesChange={setShowUpdatedProjectNames}
+      labels={filterLabels}
+      open={sidebarFilterOpen}
+      onOpenChange={setSidebarFilterOpen}
+      side="bottom"
+      align="end"
+      triggerClassName="h-5 w-5 [&_svg]:h-4 [&_svg]:w-4"
+    />
+  ) : null;
+  const firstSectionFilterAction = pinnedItems.length === 0 ? sidebarFilterPopover : null;
   const localProjectsTopContent =
     localProjectSections.length === 0 ? null : (
       // Sections carry their own bottom margin (see sidebarTopContent): 12px
@@ -2558,7 +2594,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
             ? section.projects.map((project) => `${section.machineId}:${project.id}`)
             : [];
           const canReorderProjects = !isMobile && sectionProjectKeys.length > 1;
-          const headerFilter = sectionIndex === 0 ? sidebarFilterPlaceholder : null;
+          const headerFilter = sectionIndex === 0 ? firstSectionFilterAction : null;
           const dividerRight =
             section.canImport && isElectron ? (
               <button
@@ -2988,7 +3024,10 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   ]);
 
   const githubWorktreesLabel = useMemo(() => t('sidebar.githubWorktrees', 'GitHub Worktrees'), [t]);
-  const sidebarTopContent = (
+  const sidebarTopContent = hasWorkspaceSidebarTopContent(
+    localProjectSections.length,
+    showGithubWorktrees
+  ) ? (
     // Sections carry their own bottom margin: 12px expanded (wider than the
     // 10px between repo groups and the 2-4px between a section header and its
     // content, so headers bind to the list below them), 4px collapsed so a
@@ -3005,12 +3044,12 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
           toggleLabel={toggleLabel}
           onToggleCollapsed={handleToggleGithubWorktreesSection}
           action={
-            localProjectSections.length === 0 ? (sidebarFilterPlaceholder ?? undefined) : undefined
+            localProjectSections.length === 0 ? (firstSectionFilterAction ?? undefined) : undefined
           }
         />
       ) : null}
     </div>
-  );
+  ) : null;
 
   // Chats renders after the GitHub Worktrees list so it reads as the last
   // section in Workspace mode.
@@ -3023,7 +3062,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       chatsCollapsed={chatsCollapsed}
       headerAction={
         localProjectSections.length === 0 && !showGithubWorktrees
-          ? (sidebarFilterPlaceholder ?? undefined)
+          ? (firstSectionFilterAction ?? undefined)
           : undefined
       }
       selectedSessionId={selectedSessionId}
@@ -3353,7 +3392,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         isElectronMacOS={isElectronMacOS && !isElectronFullscreen}
         activeNav={activeNav}
         topContent={sidebarTopContent ?? undefined}
-        desktopFilterPlaceholder={sidebarFilterPlaceholder ?? undefined}
+        desktopFilterAction={sidebarFilterPopover ?? undefined}
         afterSessionListContent={sidebarChatsContent ?? undefined}
         bottomFloatingContent={sidebarBottomFloatingContent ?? undefined}
         labels={labels}

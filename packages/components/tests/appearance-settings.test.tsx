@@ -7,6 +7,7 @@ import { createStore, Provider } from 'jotai';
 
 import { conversationFontSizeAtom } from '../src/atoms/settings';
 import { MobileAppearanceSettings } from '../src/components/mobile/mobile-appearance-settings';
+import type { AppIconBridge } from '../src/components/mobile/mobile-app-icon-settings';
 import { AppearanceSettingsView } from '../src/components/settings/appearance-setting';
 import type { Theme } from '../src/theme-provider';
 import { initI18n } from '../src/i18n';
@@ -78,6 +79,7 @@ describe('AppearanceSettingsView', () => {
       await act(async () => root?.unmount());
     }
     container?.remove();
+    delete window.__LODY_APP_ICON__;
     vi.unstubAllGlobals();
     Element.prototype.scrollIntoView = originalScrollIntoView;
     root = undefined;
@@ -201,6 +203,30 @@ describe('AppearanceSettingsView', () => {
     expect(container?.textContent).toContain('Font size');
     expect(container?.textContent).not.toContain('Interface font');
     expect(container?.textContent).not.toContain('Terminal');
+  });
+
+  it('places native app icon selection below font size in narrow and wide appearance layouts', async () => {
+    const bridge: AppIconBridge = {
+      icons: [
+        { name: 'default', previewUrl: '/default.png' },
+        { name: 'alternate', previewUrl: '/alternate.png' },
+      ],
+      getState: async () => ({ supported: true, name: 'default' }),
+      setIcon: async ({ name }) => ({ supported: true, name }),
+    };
+    window.__LODY_APP_ICON__ = bridge;
+
+    const expectIconAfterFontSize = () => {
+      const content = container?.textContent ?? '';
+      expect(content).toContain('App icon');
+      expect(content.indexOf('App icon')).toBeGreaterThan(content.indexOf('Font size'));
+    };
+
+    await act(async () => root?.render(<MobileAppearanceSettings />));
+    expectIconAfterFontSize();
+
+    await act(async () => root?.render(<AppearanceHarness isElectron={false} />));
+    expectIconAfterFontSize();
   });
 
   it('renders interface and terminal system font selectors in Electron', async () => {

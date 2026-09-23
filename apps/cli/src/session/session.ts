@@ -25,6 +25,7 @@ import {
 import { runNpxStartupWithRecovery } from '@/agent/acp-npx-startup-policy';
 import { ensureLodyDataDir, getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { withLodyNpmCacheForNpx } from '@/agent/npx-cache';
+import { resolveDeepSeekHarnessSpawn } from '@/agent/deepseek-harness-runtime';
 import {
   type AcpLauncher,
   captureAcpSpawnFailed,
@@ -545,7 +546,13 @@ export class Session extends EventEmitter<SessionEvents> implements ISession {
       let agentProcessHandle: SessionProcessHandle;
       try {
         callbacks.abortSignal?.throwIfAborted();
-        agentProcessHandle = await this.sandbox.spawn(callbacks.command, callbacks.args ?? [], {
+        const executable = resolveDeepSeekHarnessSpawn({
+          command: callbacks.command,
+          args: callbacks.args ?? [],
+          env,
+          workdir: this.getWorkdir(),
+        });
+        agentProcessHandle = await this.sandbox.spawn(executable.command, executable.args, {
           cwd: this.getWorkdir(),
           env,
           stdio: ['pipe', 'pipe', 'pipe'],

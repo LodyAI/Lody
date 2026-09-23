@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { sessionHasUnreadMessages, shouldMarkSessionRead } from '../src/lib/session-read-receipt';
+import {
+  closedSessionHasUnreadMessages,
+  sessionHasUnreadMessages,
+  shouldMarkSessionRead,
+} from '../src/lib/session-read-receipt';
 
 const visibleUnread = {
   rendersConversation: true,
@@ -58,5 +62,25 @@ describe('sessionHasUnreadMessages', () => {
     expect(sessionHasUnreadMessages({ lastMessageAt: 200, lastReadAt: 100 })).toBe(true);
     expect(sessionHasUnreadMessages({ lastMessageAt: 200, lastReadAt: 200 })).toBe(false);
     expect(sessionHasUnreadMessages({})).toBe(false);
+  });
+});
+
+describe('closedSessionHasUnreadMessages', () => {
+  it.each([{ isTabClosed: true }, { isArchived: true }])(
+    'reports unread output of a closed conversation: %o',
+    (closure) => {
+      expect(
+        closedSessionHasUnreadMessages({ lastMessageAt: 200, lastReadAt: 100, ...closure })
+      ).toBe(true);
+      expect(closedSessionHasUnreadMessages({ lastMessageAt: 200, ...closure })).toBe(true);
+      expect(
+        closedSessionHasUnreadMessages({ lastMessageAt: 200, lastReadAt: 200, ...closure })
+      ).toBe(false);
+      expect(closedSessionHasUnreadMessages({ ...closure })).toBe(false);
+    }
+  );
+
+  it('ignores open conversations, which surface unread on their own tab', () => {
+    expect(closedSessionHasUnreadMessages({ lastMessageAt: 200, lastReadAt: 100 })).toBe(false);
   });
 });

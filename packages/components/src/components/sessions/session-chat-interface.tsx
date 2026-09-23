@@ -187,6 +187,7 @@ import type { SessionSharingState } from '@/lib/session-sharing';
 import {
   SessionAccessControl,
   SessionArchivedBadge,
+  SESSION_HEADER_STATUS_PILL_CLASS,
   getSessionSharingDescription,
   getSessionSharingLabel,
   type SessionSharingTranslator,
@@ -228,9 +229,12 @@ import { PrLinkProvider } from '@/components/ai-gui/pr-link-context';
 import {
   COMMIT_AND_PUSH_PROMPT,
   CREATE_DRAFT_PR_BASE_PROMPT,
+  CREATE_DRAFT_PR_ORIGIN_PROMPT,
   CREATE_PR_BASE_PROMPT,
+  CREATE_PR_ORIGIN_PROMPT,
   PR_BRANCH_UPKEEP_PROMPT,
   withPrBranchUpkeep,
+  withQuickActionOrigin,
 } from './create-pr-prompt';
 import { AutoReviewMenuItem } from './auto-review-menu-item';
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
@@ -1258,7 +1262,7 @@ export function SessionHeaderMenu({
           {onOpenPublicShare && (
             <Menu.Item onClick={onOpenPublicShare}>
               <Share2 className="h-3.5 w-3.5 shrink-0" />
-              {t('sharing.manager.title', 'Share conversation')}
+              {t('sharing.manager.title', 'Share')}
             </Menu.Item>
           )}
 
@@ -4392,13 +4396,18 @@ export const SessionChatInterface = memo(
     // Composed, not two fully-inlined strings: the upkeep paragraph then lives in
     // one key per language instead of being repeated inside both prompts.
     const prBranchUpkeep = t('sessions.prompts.prBranchUpkeep', PR_BRANCH_UPKEEP_PROMPT);
-    const createPrPrompt = withPrBranchUpkeep(
-      t('sessions.prompts.createPr', CREATE_PR_BASE_PROMPT),
-      prBranchUpkeep
+    // The origin line tells the user, reading back, that this message came from
+    // the button rather than from something they typed.
+    const createPrPrompt = withQuickActionOrigin(
+      t('sessions.prompts.createPrOrigin', CREATE_PR_ORIGIN_PROMPT),
+      withPrBranchUpkeep(t('sessions.prompts.createPr', CREATE_PR_BASE_PROMPT), prBranchUpkeep)
     );
-    const createDraftPrPrompt = withPrBranchUpkeep(
-      t('sessions.prompts.createDraftPr', CREATE_DRAFT_PR_BASE_PROMPT),
-      prBranchUpkeep
+    const createDraftPrPrompt = withQuickActionOrigin(
+      t('sessions.prompts.createDraftPrOrigin', CREATE_DRAFT_PR_ORIGIN_PROMPT),
+      withPrBranchUpkeep(
+        t('sessions.prompts.createDraftPr', CREATE_DRAFT_PR_BASE_PROMPT),
+        prBranchUpkeep
+      )
     );
     const commitAndPushPrompt = t('sessions.prompts.commitAndPush', COMMIT_AND_PUSH_PROMPT);
 
@@ -5744,33 +5753,29 @@ export const SessionChatInterface = memo(
       <>
         {shouldShowOpenInIdeButton && isElectronRendererForPathLaunch && (
           <div className={cn(SESSION_PAGE_HEADER_PILLS_CLASS, 'items-center')}>
-            <Button
-              className="h-6 px-2 py-1 rounded-r-none border-r-0 gap-1"
-              variant="secondary"
-              size="small"
+            <button
+              type="button"
+              className={cn(
+                SESSION_HEADER_STATUS_PILL_CLASS,
+                'gap-1 rounded-r-none border-r-0'
+              )}
               onClick={handleOpenInIde}
             >
               <SelectedPathLauncherIcon className="h-3.5 w-3.5" />
               <span className="text-xs">{selectedPathLauncher.label}</span>
-            </Button>
+            </button>
             <Menu.Root>
-              <Menu.Trigger render={<Button
-                  className="h-6 px-1 py-1 rounded-l-none"
-                  variant="secondary"
-                  size="small"
-                  aria-label={t('sessions.selectPathLauncher', 'Select launcher')}
-                >
-                  <ChevronDown className="h-3 w-3" />
-                </Button>}>
-                <Button
-                  className="h-6 px-1 py-1 rounded-l-none"
-                  variant="secondary"
-                  size="small"
-                  aria-label={t('sessions.selectPathLauncher', 'Select launcher')}
-                >
-                  <ChevronDown className="h-3 w-3" />
-                </Button>
-              </Menu.Trigger>
+              <Menu.Trigger
+                render={
+                  <button
+                    type="button"
+                    className={cn(SESSION_HEADER_STATUS_PILL_CLASS, 'rounded-l-none px-1')}
+                    aria-label={t('sessions.selectPathLauncher', 'Select launcher')}
+                  >
+                    <ChevronDown className="h-3 w-3" />
+                  </button>
+                }
+              />
               <Menu.Content align="end">
                 {pathLauncherOptions.map((launcher) => {
                   const launcherId = getPathLauncherId(launcher);
@@ -5897,6 +5902,9 @@ export const SessionChatInterface = memo(
 
     return (
       <PrLinkProvider prUrl={latestPr?.url} onOpenPrTab={prLinkHandler}>
+        {isVisible && sessionDocReady && sessionDocSynced && (
+          <span hidden data-window-session-ready={session.id} />
+        )}
         <SessionConversationPage
           className={className}
           dropActive={imageDropZone.isActive || sessionMentionOverlay}

@@ -70,7 +70,14 @@ measured destination and visible-row geometry to agree. Direct row ResizeObserve
 records and spacer/row geometry commits drive this check without a settle timer.
 Those row records also correct following before the spacer's deferred resize;
 programmatic corrections use the library's scroll setter to preserve user-intent
-tracking. Only mounted rows are observed, and normal window loads never hide a
+tracking. Cached pixel restoration uses that setter too, reapplying the clamped
+target as geometry changes until reveal. A one-shot Virtua scroll request can
+expire before late measurements change its anchor, leaving the visibility gate
+waiting forever for an offset nobody will restore. Explicit latest navigation,
+upward wheel intent, or a suppressed jump retires the pending cached target.
+The [late-measurement decision](../../../../.agents/notes/implemented/bug-fix/2026-09-23-initial-scroll-recovery.md)
+records the reproduction and evidence boundary.
+Only mounted rows are observed, and normal window loads never hide a
 previously revealed conversation. `use-conversation-stream-items.ts` keys that
 readiness and the visible hydration range by `factSource ?? view`. Accepted-history
 projection wrappers may change while the underlying conversation stays the same;
@@ -78,6 +85,16 @@ resetting on wrapper identity would hide the chat again and discard an off-tail
 reading window. A new underlying source, even with the same session id, must pass
 initial loading again. Range acquisition still uses the current projection so its
 turn positions and content remain current.
+
+The rendered body set belongs to the reading window, the retained 40-turn tail,
+and native text selection. Other consumers may hydrate the same cache for facts,
+search or outline previews, but those bodies remain placeholders in the stream.
+Keeping the entry tail leased prevents the first narrower viewport report from
+making already displayed rows evictable. Selection publishes retained turn IDs
+before a scroll-driven window change; releasing selection removes that exception.
+A loaded user predecessor still supplies assistant configuration even when its
+own rendered row is a placeholder. See the
+[background hydration decision](../../../../.agents/notes/implemented/bug-fix/2026-09-22-background-hydration-render-window.md).
 
 The composer one-shot ref preserves the reader's position while typing without
 changing keyboard, terminal, or window-resize follow behavior, which is why it is

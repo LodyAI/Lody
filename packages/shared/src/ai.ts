@@ -37,6 +37,7 @@ export const BUILTIN_AGENTS = [
   ...MANAGED_BUILTIN_RUNTIMES.map(({ agentType, displayName }) => ({ agentType, displayName })),
   { agentType: 'deepseek', displayName: 'DeepSeek Harness' },
   { agentType: 'bub', displayName: 'Bub' },
+  { agentType: 'dimcode', displayName: 'Dimcode' },
 ] as const;
 
 export type BuiltinAgent = (typeof BUILTIN_AGENTS)[number];
@@ -72,6 +73,7 @@ const BUILTIN_ACP_TITLE_OWNERSHIP: Record<BuiltinAgentType, 'none' | 'untagged' 
   // Bub's ACP server does not push an authoritative session title, so Lody
   // keeps running its isolated title agent.
   bub: 'none',
+  dimcode: 'none',
 };
 
 const builtinAcpTitleOwnership = (
@@ -501,9 +503,10 @@ export const isManagedBuiltinAgentType = (
  * Builtins that may be created through the durable provider-setup queue.
  * Managed runtimes use it for download + verification; Bub uses the same queue
  * only to keep its user-installed command unpublished until a live probe passes.
+ * Dimcode uses the same verification path with its npx-managed package.
  */
 export const supportsBuiltinProviderSetup = (agentType: string): agentType is BuiltinAgentType =>
-  isManagedBuiltinAgentType(agentType) || agentType === 'bub';
+  isManagedBuiltinAgentType(agentType) || agentType === 'bub' || agentType === 'dimcode';
 
 export const getManagedBuiltinRuntimeByAgentType = (
   agentType: string

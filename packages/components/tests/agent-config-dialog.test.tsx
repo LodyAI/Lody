@@ -323,7 +323,7 @@ describe('AgentConfigDialog', () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it('tests Bub through durable setup, shows installation recovery, then refreshes the published provider', async () => {
+  it.each(['bub', 'dimcode'])('%s setup supports retry and refresh', async (agentType) => {
     const workspaceId = 'workspace-bub-test' as WorkspaceId;
     const workspaceSlug = 'workspace-bub-test';
     const mirrorRows = new Map<string, MachineFlockScanRow>();
@@ -362,11 +362,11 @@ describe('AgentConfigDialog', () => {
       type: 'machine/acp-capabilities-refresh_response',
       ...args,
       cliType: 'builtin',
-      agentType: 'bub',
+      agentType,
       success: true,
     }));
     await renderDialog(
-      { kind: 'create', initialForm: { agentType: 'bub', cliType: 'builtin', name: 'Bub' } },
+      { kind: 'create', initialForm: { agentType, cliType: 'builtin', name: agentType } },
       createMachine('Workstation', { providerSetup: PROVIDER_SETUP_PROTOCOL_VERSION }),
       onSubmit,
       vi.fn(async () => ({ status: 'installed' as const })),
@@ -378,7 +378,7 @@ describe('AgentConfigDialog', () => {
         .click();
     });
     let setup = store.get(getAllProviderSetupsAtom)[0]!;
-    expect(setup.config.agentType).toBe('bub');
+    expect(setup.config.agentType).toBe(agentType);
     expect(store.get(getAllAgentConfigAtom)).toEqual([]);
     expect(getPrimaryAction('Create').disabled).toBe(true);
     expect(getOptionByText('Claude').disabled).toBe(true);
@@ -415,15 +415,25 @@ describe('AgentConfigDialog', () => {
       });
       publishRows();
     });
-    expect(document.body.textContent).toContain('Bub or its ACP server is not installed');
-    expect(document.body.textContent).toContain(
-      'curl -fsSL https://bub.build/install.sh | bash -- --preset acp'
-    );
-    expect(document.body.textContent).toContain('Open install guide');
+    if (agentType === 'bub') {
+      expect(document.body.textContent).toContain('Bub or its ACP server is not installed');
+      expect(document.body.textContent).toContain(
+        'curl -fsSL https://bub.build/install.sh | bash -- --preset acp'
+      );
+      expect(document.body.textContent).toContain('Open install guide');
+    } else {
+      expect(document.body.textContent).toContain(
+        'This runtime is not available on the target machine.'
+      );
+      expect(document.body.textContent).not.toContain('Open install guide');
+    }
     await act(async () => {
       getPrimaryAction('Retry').click();
     });
-    expect(store.get(getAllProviderSetupsAtom)[0]).toMatchObject({ status: 'queued', attempt: 2 });
+    expect(store.get(getAllProviderSetupsAtom)[0]).toMatchObject({
+      status: 'queued',
+      attempt: 2,
+    });
     expect(document.body.textContent).not.toContain('Install it in one step:');
 
     await act(async () => {

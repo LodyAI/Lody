@@ -356,47 +356,50 @@ describe('local-host actions vs a resolvable host path', () => {
     expect(openLocalPath).toHaveBeenLastCalledWith(artifact);
   });
 
-  it('offers the complete local Markdown-link menu and removes line anchors before IPC', async () => {
-    const actions = await resolveActions();
-    const items = actions.buildMarkdownLinkMenuItems('/tmp/build/Lody.zip:366');
-    expect(items.map((item) => item.id)).toEqual([
-      'copy-path',
-      'open-file',
-      'open-in-editor',
-      'open-with',
-      'reveal',
-    ]);
+  it.each(['/tmp/build/Lody.zip', '/tmp/worktrees/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/Lody.zip'])(
+    'keeps the local Markdown-link target and removes line anchors: %s',
+    async (artifact) => {
+      const actions = await resolveActions();
+      const items = actions.buildMarkdownLinkMenuItems(`${artifact}:366`);
+      expect(items.map((item) => item.id)).toEqual([
+        'copy-path',
+        'open-file',
+        'open-in-editor',
+        'open-with',
+        'reveal',
+      ]);
 
-    const action = (id: string) => {
-      const item = items.find((candidate) => candidate.id === id);
-      if (!item || item.kind !== 'action') throw new Error(`Missing action: ${id}`);
-      return item;
-    };
-    await act(async () => {
-      action('copy-path').run();
-      action('open-file').run();
-      action('open-in-editor').run();
-      await Promise.resolve();
-    });
-    expect(writeTextToClipboard).toHaveBeenLastCalledWith('/tmp/build/Lody.zip');
-    expect(openLocalPath).toHaveBeenLastCalledWith('/tmp/build/Lody.zip');
-    expect(launchLocalPath).toHaveBeenLastCalledWith(
-      expect.objectContaining({ targetPath: '/tmp/build/Lody.zip' })
-    );
+      const action = (id: string) => {
+        const item = items.find((candidate) => candidate.id === id);
+        if (!item || item.kind !== 'action') throw new Error(`Missing action: ${id}`);
+        return item;
+      };
+      await act(async () => {
+        action('copy-path').run();
+        action('open-file').run();
+        action('open-in-editor').run();
+        await Promise.resolve();
+      });
+      expect(writeTextToClipboard).toHaveBeenLastCalledWith(artifact);
+      expect(openLocalPath).toHaveBeenLastCalledWith(artifact);
+      expect(launchLocalPath).toHaveBeenLastCalledWith(
+        expect.objectContaining({ targetPath: artifact })
+      );
 
-    const openWith = items.find((item) => item.id === 'open-with');
-    if (!openWith || openWith.kind !== 'submenu') throw new Error('Missing Open with submenu');
-    expect(openWith.items.length).toBeGreaterThan(0);
-    await act(async () => {
-      openWith.items[0]?.run();
-      action('reveal').run();
-      await Promise.resolve();
-    });
-    expect(launchLocalPath).toHaveBeenLastCalledWith(
-      expect.objectContaining({ targetPath: '/tmp/build/Lody.zip' })
-    );
-    expect(revealLocalPath).toHaveBeenLastCalledWith('/tmp/build/Lody.zip');
-  });
+      const openWith = items.find((item) => item.id === 'open-with');
+      if (!openWith || openWith.kind !== 'submenu') throw new Error('Missing Open with submenu');
+      expect(openWith.items.length).toBeGreaterThan(0);
+      await act(async () => {
+        openWith.items[0]?.run();
+        action('reveal').run();
+        await Promise.resolve();
+      });
+      expect(launchLocalPath).toHaveBeenLastCalledWith(
+        expect.objectContaining({ targetPath: artifact })
+      );
+      expect(revealLocalPath).toHaveBeenLastCalledWith(artifact);
+    }
+  );
 
   it('does not offer local shell actions for an absolute remote path', async () => {
     localMachineId = 'another-machine';

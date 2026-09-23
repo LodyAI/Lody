@@ -12,6 +12,7 @@ import {
   DeepSeekHarnessMixedSessionCompressionError,
   resolveDeepSeekHarnessHome,
   resolveDeepSeekHarnessProcessLaunch,
+  resolveDeepSeekHarnessSpawn,
   resolveDeepSeekHarnessSessionCompression,
 } from './deepseek-harness-runtime';
 
@@ -157,68 +158,203 @@ describe('resolveDeepSeekHarnessProcessLaunch', () => {
     expect(await readdir(rootDir)).toEqual(expect.arrayContaining(['profiles', 'sessions']));
   });
 
-  it('executes the pinned dsh entry with the selected Lody Node runtime', async () => {
-    const rootDir = await mkdtemp(join(tmpdir(), 'lody-dsh-home-'));
-    temporaryRoots.push(rootDir);
-    const closureRoot = join(rootDir, 'synthetic-npx', 'node_modules');
-    const binDir = join(closureRoot, '.bin');
-    const packageRoot = join(closureRoot, '@deepseek-ai', 'dsh');
-    const outputPath = join(rootDir, 'dsh-bootstrap-output.json');
-    await mkdir(join(packageRoot, 'lib'), { recursive: true });
-    await mkdir(binDir, { recursive: true });
-    await writeFile(
-      join(packageRoot, 'package.json'),
-      JSON.stringify({
-        name: '@deepseek-ai/dsh',
-        version: DEEPSEEK_HARNESS_VERSION,
-        type: 'module',
-      })
-    );
-    await writeFile(
-      join(packageRoot, 'lib', 'bin.js'),
-      `
+  it.each(['posix', 'windows'] as const)(
+    'executes the pinned dsh entry through the %s launch path',
+    async (platform) => {
+      const rootDir = await mkdtemp(join(tmpdir(), 'lody-dsh-home-'));
+      temporaryRoots.push(rootDir);
+      const closureRoot = join(rootDir, 'synthetic-npx', 'node_modules');
+      const binDir = join(closureRoot, '.bin');
+      const packageRoot = join(closureRoot, '@deepseek-ai', 'dsh');
+      const outputPath = join(rootDir, 'dsh-bootstrap-output.json');
+      const nativeRoot = join(closureRoot, '@deepseek-ai', 'dsh-win32-process');
+      const runnerRoot = join(closureRoot, '@deepseek-ai', 'dsh-subprocess-local');
+      for (const root of [nativeRoot, runnerRoot]) {
+        await mkdir(join(root, 'lib'), { recursive: true });
+        await writeFile(join(root, 'package.json'), JSON.stringify({ type: 'module' }));
+      }
+      // Synthetic native boundary: retain all arguments so the test verifies
+      // that adding the no-window flag preserves Job launch and stdio inputs.
+      await writeFile(
+        join(nativeRoot, 'lib', 'index.js'),
+        `
+const api = {
+  createProcessW: (...args) => args,
+  createProcessAsUserW: (...args) => args,
+};
+export const loadWin32ProcessBindings = () => api;
+export const probe = () => [
+  api.createProcessW('exe', 'argv', null, null, 1, 1028, 'env', 'cwd', 'stdio', 'result'),
+  api.createProcessAsUserW('token', 'exe', 'argv', null, null, 1, 1028, 'env', 'cwd', 'stdio', 'result'),
+];
+`
+      );
+      await writeFile(
+        join(runnerRoot, 'lib', 'runner.js'),
+        `
+import { probe } from '../../dsh-win32-process/lib/index.js';
+process.stdout.write(JSON.stringify({ native: probe(), argv: process.argv.slice(2) }));
+`
+      );
+      await mkdir(join(packageRoot, 'lib'), { recursive: true });
+      await mkdir(binDir, { recursive: true });
+      await writeFile(
+        join(packageRoot, 'package.json'),
+        JSON.stringify({
+          name: '@deepseek-ai/dsh',
+          version: DEEPSEEK_HARNESS_VERSION,
+          type: 'module',
+        })
+      );
+      await writeFile(
+        join(packageRoot, 'lib', 'bin.js'),
+        `
 import { writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { promisify } from 'node:util';
+import { execFile } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { probe } from '../../dsh-win32-process/lib/index.js';
 export async function runCli() {
+  const native = probe();
+  const runner = await promisify(execFile)(process.execPath, [fileURLToPath(new URL('../../dsh-subprocess-local/lib/runner.js', import.meta.url)), '--', 'synthetic command']);
+  const outputs = [];
+  for (let index = 0; index < 3; index++) {
+    const result = await promisify(execFile)(process.execPath, ['-e', 'process.stdout.write(process.argv[1])', 'synthetic output ' + index]);
+    outputs.push(result.stdout);
+  }
+  const failure = await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['-e', 'process.stderr.write("synthetic failure"); process.exitCode = 23'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stderr = '';
+    child.stderr.on('data', chunk => { stderr += chunk; });
+    child.on('error', reject);
+    child.on('close', code => resolve({ code, stderr }));
+  });
   await writeFile(process.env.DSH_BOOTSTRAP_OUTPUT, JSON.stringify({
     execPath: process.execPath,
     argv: process.argv,
     importedAsMain: import.meta.main === true,
+    outputs,
+    failure,
+    native,
+    runner: JSON.parse(runner.stdout),
   }));
 }
 `.trim()
-    );
+      );
 
-    const launch = await resolveDeepSeekHarnessProcessLaunch({
-      adapterPath: '/bundled/deepseek-acp.js',
-      rootDir,
-      extraArgs: ['--synthetic-flag'],
-    });
-    const launcherIndex = launch.args.indexOf('node');
-    expect(launcherIndex).toBeGreaterThan(0);
-    const launcher = launch.args.at(launcherIndex + 2);
-    if (!launcher) throw new Error('DeepSeek Harness Node launcher was missing');
-    await promisify(execFile)(process.execPath, ['-e', launcher], {
-      env: {
-        ...process.env,
-        ...launch.env,
-        PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
-        DSH_BOOTSTRAP_OUTPUT: outputPath,
-      },
-    });
+      const launch = await resolveDeepSeekHarnessProcessLaunch({
+        adapterPath: '/bundled/deepseek-acp.js',
+        rootDir,
+        extraArgs: ['--synthetic-flag'],
+      });
+      const launcherIndex = launch.args.indexOf('node');
+      expect(launcherIndex).toBeGreaterThan(0);
+      const launcher = launch.args.at(launcherIndex + 2);
+      if (!launcher) throw new Error('DeepSeek Harness Node launcher was missing');
+      let executable = { command: process.execPath, args: ['-e', launcher] };
+      const forwardedPath = join(rootDir, 'npx-arguments.json');
+      const spawnTracePath = join(rootDir, 'spawn-trace.jsonl');
+      const observerPath = join(rootDir, 'observe-spawn.cjs');
+      // Observe the real normalized child-process boundary before the generated
+      // policy loads. Simulate Windows policy on POSIX, then restore the actual
+      // platform before executing native processes. Every child loads its own copy.
+      await writeFile(
+        observerPath,
+        `
+const { ChildProcess } = require('node:child_process');
+const { appendFileSync } = require('node:fs');
+require('node:path');
+const platform = process.platform;
+Object.defineProperty(process, 'platform', { value: ${JSON.stringify(platform === 'windows' ? 'win32' : 'linux')}, configurable: true });
+const spawn = ChildProcess.prototype.spawn;
+ChildProcess.prototype.spawn = function(options) {
+  appendFileSync(process.env.SPAWN_TRACE_PATH, JSON.stringify({ windowsHide: options.windowsHide }) + '\\n');
+  Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+  return spawn.call(this, options);
+};
+`
+      );
+      if (platform === 'windows') {
+        const npmDir = join(rootDir, 'Node with spaces', 'node_modules', 'npm', 'bin');
+        const nodeDir = join(rootDir, 'Node with spaces');
+        await mkdir(npmDir, { recursive: true });
+        await writeFile(join(nodeDir, 'npx.cmd'), '@exit /b 99\r\n');
+        await writeFile(
+          join(npmDir, 'npx-cli.js'),
+          `
+const { writeFileSync } = require('node:fs');
+const { spawn } = require('node:child_process');
+const args = process.argv.slice(2);
+writeFileSync(process.env.NPX_ARGUMENTS_OUTPUT, JSON.stringify({ args, cache: process.env.npm_config_cache }));
+const child = spawn(process.execPath, args.slice(args.indexOf('node') + 1), { env: process.env, stdio: 'inherit' });
+child.on('error', error => { throw error; });
+child.on('exit', code => { process.exitCode = code ?? 1; });
+`
+        );
+        // Exercise the real, complete package closure, not a shortened argument fixture.
+        expect(launch.args.join(' ').length).toBeGreaterThan(8191);
+        executable = resolveDeepSeekHarnessSpawn({
+          ...launch,
+          env: { ...launch.env, Path: nodeDir },
+          workdir: rootDir,
+          platform: 'win32',
+        });
+      }
+      await promisify(execFile)(executable.command, executable.args, {
+        env: {
+          ...process.env,
+          ...launch.env,
+          PATH: `${binDir}${delimiter}${process.env.PATH ?? ''}`,
+          DSH_BOOTSTRAP_OUTPUT: outputPath,
+          NPX_ARGUMENTS_OUTPUT: forwardedPath,
+          SPAWN_TRACE_PATH: spawnTracePath,
+          NODE_OPTIONS: `--require ${JSON.stringify(observerPath)}`,
+          npm_config_cache: join(rootDir, 'owned-cache'),
+        },
+      });
 
-    const result: unknown = JSON.parse(await readFile(outputPath, 'utf8'));
-    expect(result).toEqual({
-      execPath: process.execPath,
-      argv: [
-        process.execPath,
-        join(packageRoot, 'lib', 'bin.js'),
-        '--profile',
-        expect.stringMatching(/^lody-acp-/),
-        '--synthetic-flag',
-      ],
-      importedAsMain: false,
-    });
-  });
+      if (platform === 'windows') {
+        expect(JSON.parse(await readFile(forwardedPath, 'utf8'))).toEqual({
+          args: launch.args,
+          cache: join(rootDir, 'owned-cache'),
+        });
+      }
+      const spawnTrace = (await readFile(spawnTracePath, 'utf8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      // npm (Windows path only), forwarder, then five DSH subprocesses. All
+      // Windows boundaries stay hidden; POSIX DSH retains Node's default.
+      expect(spawnTrace).toEqual(
+        platform === 'windows'
+          ? Array.from({ length: 7 }, () => ({ windowsHide: true }))
+          : [{ windowsHide: true }, ...Array.from({ length: 5 }, () => ({ windowsHide: false }))]
+      );
+
+      const result: unknown = JSON.parse(await readFile(outputPath, 'utf8'));
+      const flags = platform === 'windows' ? 1028 | 0x08000000 : 1028;
+      const native = [
+        ['exe', 'argv', null, null, 1, flags, 'env', 'cwd', 'stdio', 'result'],
+        ['token', 'exe', 'argv', null, null, 1, flags, 'env', 'cwd', 'stdio', 'result'],
+      ];
+      expect(result).toEqual({
+        execPath: process.execPath,
+        argv: [
+          process.execPath,
+          join(packageRoot, 'lib', 'bin.js'),
+          '--profile',
+          expect.stringMatching(/^lody-acp-/),
+          '--synthetic-flag',
+        ],
+        importedAsMain: false,
+        outputs: ['synthetic output 0', 'synthetic output 1', 'synthetic output 2'],
+        failure: { code: 23, stderr: 'synthetic failure' },
+        native,
+        runner: { native, argv: ['--', 'synthetic command'] },
+      });
+    }
+  );
 
   it('uses zstd when an existing standalone Harness root is compressed', async () => {
     const rootDir = await mkdtemp(join(tmpdir(), 'lody-dsh-home-'));
@@ -287,5 +423,55 @@ export async function runCli() {
     expect(await readdir(rootDir)).toEqual(['sessions']);
     expect(await readFile(rawArtifact, 'utf8')).toBe('raw-jsonl');
     expect(await readFile(zstdArtifact, 'utf8')).toBe('zstd-bytes');
+  });
+});
+
+describe('resolveDeepSeekHarnessSpawn', () => {
+  it('preserves npx failures and never falls through to another npm installation', async () => {
+    const rootDir = await mkdtemp(join(tmpdir(), 'lody-dsh-npx-'));
+    temporaryRoots.push(rootDir);
+    const npmBin = join(rootDir, 'node_modules', 'npm', 'bin');
+    await mkdir(npmBin, { recursive: true });
+    await writeFile(join(rootDir, 'npx.cmd'), '@exit /b 99\r\n');
+    const entry = join(npmBin, 'npx-cli.js');
+    await writeFile(entry, 'console.error("synthetic npm failure"); process.exitCode = 17;');
+    const options = {
+      command: 'npx',
+      args: ['--prefer-online', '-y'],
+      workdir: rootDir,
+      env: { LODY_DSH_NODE_EXECUTABLE: process.execPath, Path: rootDir },
+      platform: 'win32' as const,
+    };
+    const launch = resolveDeepSeekHarnessSpawn(options);
+    await expect(promisify(execFile)(launch.command, launch.args)).rejects.toMatchObject({
+      code: 17,
+      stderr: expect.stringContaining('synthetic npm failure'),
+    });
+    await rm(entry);
+    const otherNode = join(rootDir, 'another-node');
+    const otherNpmBin = join(otherNode, 'node_modules', 'npm', 'bin');
+    await mkdir(otherNpmBin, { recursive: true });
+    await writeFile(join(otherNode, 'npx.cmd'), '@exit /b 99\r\n');
+    await writeFile(join(otherNpmBin, 'npx-cli.js'), 'process.exitCode = 0;');
+    options.env.Path = `${rootDir};${otherNode}`;
+    expect(() => resolveDeepSeekHarnessSpawn(options)).toThrow('npx-cli.js is missing');
+    await rm(join(rootDir, 'npx.cmd'));
+    options.env.Path = rootDir;
+    expect(() => resolveDeepSeekHarnessSpawn(options)).toThrow('npx was not found');
+  });
+
+  it('leaves non-Windows and non-DSH commands unchanged', () => {
+    const options = { command: 'npx', args: ['-y', 'example'], env: {}, workdir: '/unused' };
+    expect(resolveDeepSeekHarnessSpawn({ ...options, platform: 'win32' })).toEqual({
+      command: options.command,
+      args: options.args,
+    });
+    expect(
+      resolveDeepSeekHarnessSpawn({
+        ...options,
+        env: { LODY_DSH_NODE_EXECUTABLE: process.execPath },
+        platform: 'linux',
+      })
+    ).toEqual({ command: options.command, args: options.args });
   });
 });

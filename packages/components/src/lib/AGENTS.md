@@ -83,7 +83,8 @@ Rationale: [components](../../../../.agents/docs/components-package.md) and
 - `session-file-open-target.ts` alone owns path normalization. Canonical workspace-relative
   paths (tree, quick open, mobile browser, LSP) travel verbatim. Only Markdown hrefs
   are URL-decoded and stripped of `:<line>` / `#L<line>` suffixes, absolute host
-  roots, and `.../worktrees/<uuid>/` prefixes.
+  roots; same-machine Electron preserves other worktree paths instead of stripping
+  `.../worktrees/<uuid>/` prefixes. Display shortening never rewrites click targets.
   Line anchors travel as fields, not inside paths.
 - Cache resolved opens under BOTH `response.path` (the save identity) and the requested
   path (viewer/change-check identity). After save, refresh EVERY `cacheKeys` alias.

@@ -601,9 +601,10 @@ export function useSessionFileActions({
         rawPath: trimmed,
         pathKind: 'markdown-href',
         workspacePath,
+        preserveWorktreePath: isElectronRenderer && isLocalMachine,
       }).filePath;
     },
-    [workspacePath]
+    [isElectronRenderer, isLocalMachine, workspacePath]
   );
 
   const buildMarkdownLinkMenuItems = useCallback(

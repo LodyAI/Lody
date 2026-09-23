@@ -73,7 +73,7 @@ function primeWindowWarmPool(): void {
   warmReadyTimer.unref?.()
 
   window.once('closed', () => {
-    clearWarmReadyTimer()
+    if (warmWindows.has(window.id)) clearWarmReadyTimer()
     warmWindows.delete(window.id)
     pool.forget(entry)
   })

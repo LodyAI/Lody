@@ -214,6 +214,8 @@ export type SessionListProps = {
    * row above the loading skeleton so the control stays reachable.
    */
   headerAction?: ReactNode;
+  /** Content rendered below the standalone header action when no groups remain. */
+  emptyState?: ReactNode;
 };
 
 export type SessionRowGroup = {
@@ -758,7 +760,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
           </button>
         )}
 
-        {headerAction ? <div className="shrink-0">{headerAction}</div> : null}
+        {headerAction ? <div className="mr-2 shrink-0">{headerAction}</div> : null}
       </div>
 
       {!group.collapsed && (
@@ -1398,6 +1400,7 @@ export const SessionList = memo(function SessionList({
   onNavigateToNewSession,
   getSessionHref,
   headerAction,
+  emptyState,
 }: SessionListProps) {
   const { t } = useTranslation();
   const archiveTooltipLabel = t('sessions.archive', 'Archive session');
@@ -1478,7 +1481,7 @@ export const SessionList = memo(function SessionList({
     return (
       <div className="flex flex-col">
         {headerAction ? (
-          <div className="flex h-7 shrink-0 items-center justify-end">{headerAction}</div>
+          <div className="flex h-7 shrink-0 items-center justify-end pr-2">{headerAction}</div>
         ) : null}
         <SidebarListSkeleton className={className} />
       </div>
@@ -1509,8 +1512,15 @@ export const SessionList = memo(function SessionList({
 
   if (!groups.length) {
     // Keep the header action reachable even when every group filtered out.
-    if (headerAction) {
-      return <div className="flex h-7 shrink-0 items-center justify-end">{headerAction}</div>;
+    if (headerAction || emptyState) {
+      return (
+        <div className="flex flex-col">
+          {headerAction ? (
+            <div className="flex h-7 shrink-0 items-center justify-end pr-2">{headerAction}</div>
+          ) : null}
+          {emptyState}
+        </div>
+      );
     }
     return null;
   }

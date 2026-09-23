@@ -1,3 +1,4 @@
+import { waitForTargetContentPainted } from './warm-window-reveal'
 import {
   isSessionWindow,
   isWarmWindow,
@@ -153,27 +154,6 @@ function WarmWindowSurface(): ReactElement | null {
   )
 }
 
-function waitForTargetContentPainted(onTargetPainted: () => void): void {
-  let stableFrames = 0
-  const startedAt = performance.now()
-  const check = () => {
-    // `innerText` intentionally excludes route shells that are still hidden by
-    // Suspense/CSS. `textContent` becomes non-empty too early and would bring
-    // the exact blank-frame regression back under a slower renderer.
-    const hasContent = Boolean(rootElement?.innerText?.trim())
-    stableFrames = hasContent ? stableFrames + 1 : 0
-    // The first non-empty commit can still be followed by a layout pass that
-    // replaces the route shell. Require two consecutive frames so the opaque
-    // surface is removed only after a real target frame is on screen.
-    if (stableFrames >= 2 || performance.now() - startedAt >= 5000) {
-      onTargetPainted()
-      return
-    }
-    requestAnimationFrame(check)
-  }
-  requestAnimationFrame(check)
-}
-
 /**
  * Binds a claimed warm window to a concrete route without a reload. The renderer
  * is already booted; this reproduces the storage flags a fresh auxiliary window
@@ -207,7 +187,7 @@ function installWarmWindowBinding(
     // and the first layout/paint of the workspace surface.
     void navigation.finally(() => {
       clearWarmWindowFlag()
-      waitForTargetContentPainted(onTargetPainted)
+      waitForTargetContentPainted(rootElement!, target, onTargetPainted)
     })
   })
 }
