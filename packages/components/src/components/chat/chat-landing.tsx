@@ -1,3 +1,4 @@
+import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import {
   useCallback,
   useEffect,
@@ -224,6 +225,7 @@ import { withGitHubTokenRetry } from '@/lib/github-token';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useVisibleLocalProjectsFromMachineIndex } from '@/hooks/use-visible-local-projects';
 import {
+  isLocalProjectRemovalCompletionSuppressed,
   useLocalProjectRemovalResultNotifications,
   usePendingLocalProjectRemovals,
 } from '@/hooks/use-remove-local-project';
@@ -378,6 +380,7 @@ import {
   getSharingReviewTeamHasNoVisibleLocalResources,
   getSharingReviewTeamLooksEmpty,
   shouldRetrySharingReviewConflict,
+  shouldReportLocalProjectUnavailable,
   getChatLandingSubmitDisabled,
   getChatLandingVisibleComposerStatus,
   isChatLandingMachineReachable,
@@ -1156,6 +1159,7 @@ function WorkspaceChatLanding({
   const fireProjectSelectedOnChange = useFireOnKeyChange();
   const fireAgentConfigOnChange = useFireOnKeyChange();
   const preSelectionAppliedRef = useRef<string | null>(null);
+  const previousPreSelectionKeyRef = useRef<string | null>(null);
   // False while a just-applied URL intent has not rendered yet; the selection
   // mirror must not compare against that pre-application state.
   const selectionSyncArmedRef = useRef(false);
@@ -1401,6 +1405,8 @@ function WorkspaceChatLanding({
     repo: preSelectedRepo,
   });
   useEffect(() => {
+    const previousPreSelectionKey = previousPreSelectionKeyRef.current;
+    previousPreSelectionKeyRef.current = preSelectionKey;
     if (preSelectionAppliedRef.current === preSelectionKey) return;
     preSelectionAppliedRef.current = preSelectionKey;
     // The applied selection reaches state next render; disarm the mirror so it
@@ -1425,6 +1431,11 @@ function WorkspaceChatLanding({
     } else if (preSelectedRepo) {
       setContextType('github');
       setSelectedRepo(preSelectedRepo);
+    } else if (previousPreSelectionKey?.startsWith('local|')) {
+      // A sidebar removal navigates from a URL-named local project to plain
+      // `/chat` while this landing stays mounted. Clear the stale local
+      // selection before the optimistic Flock overlay can report it missing.
+      handleSelectedLocalProjectChange(null);
     }
   }, [
     preSelectionKey,
@@ -1510,7 +1521,24 @@ function WorkspaceChatLanding({
       isDocMetaCacheReady: docMetaCacheReady,
       isMetaRoomFirstSyncPending,
     });
-    if (localProjectAvailability !== 'unavailable') return;
+    const localProjectKey = buildLocalProjectKey(
+      selectedLocalProject.machineId,
+      selectedLocalProject.localProjectId
+    );
+    const removalInProgress =
+      pendingLocalProjectRemovals.has(localProjectKey) ||
+      isLocalProjectRemovalCompletionSuppressed(
+        selectedLocalProject.machineId,
+        selectedLocalProject.localProjectId
+      );
+    if (
+      !shouldReportLocalProjectUnavailable({
+        availability: localProjectAvailability,
+        removalInProgress,
+      })
+    ) {
+      return;
+    }
     toast.error(t('sidebar.localProjects.forbidden', 'Local project is not available'));
     handleSelectedLocalProjectChange(null);
     setContextType(hasGitHubRepos ? 'github' : 'chat');
@@ -1526,6 +1554,7 @@ function WorkspaceChatLanding({
     visibleLocalProjectAccess,
     visibleLocalProjectsLoading,
     isMetaRoomFirstSyncPending,
+    pendingLocalProjectRemovals,
     hasGitHubRepos,
     t,
     handleSelectedLocalProjectChange,
@@ -4456,8 +4485,7 @@ function WorkspaceChatLanding({
       if (typeof session.lastMessageAt === 'number' && Number.isFinite(session.lastMessageAt)) {
         const prev = latest.get(key) ?? 0;
         if (session.lastMessageAt > prev) latest.set(key, session.lastMessageAt);
-        const isUnread =
-          typeof session.lastReadAt !== 'number' || session.lastMessageAt > session.lastReadAt;
+        const isUnread = sessionHasUnreadMessages(session);
         if (isUnread) unread.set(key, (unread.get(key) ?? 0) + 1);
       }
     }
@@ -4533,19 +4561,13 @@ function WorkspaceChatLanding({
     return counts;
   }, [visibleSessions]);
   const githubRepositoryLatestMessageAt = mobileSheetRecency.byRepo;
-  /* Unread-session count per repository — drives the row's trailing
-     badge. Mirrors `localProjectActivity.unread` semantics: a session
-     is unread when `lastMessageAt` is newer than `lastReadAt` (or
-     `lastReadAt` is missing entirely). */
+  /* Unread-session count per repository drives the row's trailing badge. */
   const githubRepositoryUnreadCount = useMemo(() => {
     const unread = new Map<string, number>();
     for (const session of visibleSessions) {
       const repoFullName = getSessionGitHubRepoFullName(session);
       if (!repoFullName) continue;
-      if (typeof session.lastMessageAt !== 'number') continue;
-      const isUnread =
-        typeof session.lastReadAt !== 'number' || session.lastMessageAt > session.lastReadAt;
-      if (!isUnread) continue;
+      if (!sessionHasUnreadMessages(session)) continue;
       unread.set(repoFullName, (unread.get(repoFullName) ?? 0) + 1);
     }
     return unread;
@@ -6461,17 +6483,53 @@ function WorkspaceChatLanding({
             emptyChats: t('chat.mobileHome.emptyChatsAllMachines', '当前 workspace 还没有任何对话'),
             emptyFilteredChats: t('chat.mobileHome.emptyFilteredChats', '当前过滤条件下没有对话'),
             clearChatFilters: t('chat.mobileHome.clearFilters', '清除所有过滤'),
-            /* First-run hint (no machines + no chats): the user installed
-               the mobile app before starting the desktop client, so nudge
-               them to the download page. The mobile app can't run the agent
-               itself. Kept short on purpose. */
+            /* First-run guide (no machines + no chats): the user installed
+               the mobile app before ever connecting a computer, so walk them
+               through the two ways to connect one — the `lody daemon start`
+               one-liner on any machine, or the desktop app on their computer.
+               The mobile app can't run agents itself — and the phone never
+               opens the download page: both CTAs hand the command/link to the
+               computer via share sheet or clipboard instead. */
             onboarding: {
-              title: t('chat.mobileHome.onboarding.title', 'Lody runs on your computer'),
+              title: t('chat.mobileHome.onboarding.title', 'Connect a machine to start'),
               description: t(
                 'chat.mobileHome.onboarding.description',
-                'Download the desktop app to get started.'
+                'Agents run on a computer you own — this app is mission control.'
               ),
-              downloadButton: t('chat.mobileHome.onboarding.downloadButton', 'Download Lody'),
+              commandHeading: t(
+                'chat.mobileHome.onboarding.commandHeading',
+                'One command — on any machine'
+              ),
+              command: 'npx lody daemon start',
+              commandHint: t(
+                'chat.mobileHome.onboarding.commandHint',
+                'Run it on a server, VM, or your own computer (Node.js 22.14+). It signs the machine into your account — a machine without a browser prints a link you can open on this phone.'
+              ),
+              copyCommandLabel: t('chat.mobileHome.onboarding.copyCommand', 'Copy command'),
+              shareCommandLabel: t('chat.mobileHome.onboarding.shareCommand', 'Send to computer'),
+              desktopHeading: t('chat.mobileHome.onboarding.desktopHeading', 'Or on your computer'),
+              desktopHint: t(
+                'chat.mobileHome.onboarding.desktopHint',
+                'Install the desktop app and sign in — it starts the agent runtime automatically.'
+              ),
+              shareDownloadLabel: t('chat.mobileHome.onboarding.shareDownload', 'Send to computer'),
+              copyDownloadLabel: t('chat.mobileHome.onboarding.copyDownload', 'Copy download link'),
+              nextStepsHeading: t(
+                'chat.mobileHome.onboarding.nextStepsHeading',
+                'Once a machine is online'
+              ),
+              nextStepMachine: t(
+                'chat.mobileHome.onboarding.nextStepMachine',
+                'It shows up in this workspace automatically.'
+              ),
+              nextStepProject: t(
+                'chat.mobileHome.onboarding.nextStepProject',
+                'Add a project folder on it from Projects → +.'
+              ),
+              nextStepAgent: t(
+                'chat.mobileHome.onboarding.nextStepAgent',
+                'Pick an agent in Settings → Agents, then send your first task.'
+              ),
             },
           }}
           onWorkspaceMenuOpen={
@@ -6503,10 +6561,9 @@ function WorkspaceChatLanding({
           }}
           showArchived={mobileHomeShowArchived}
           onShowArchivedToggle={() => setMobileHomeShowArchived((prev) => !prev)}
-          /* First-run onboarding CTA — opens the localized download page in
-             the external browser (same handler the desktop no-machine hint
-             uses). */
-          onDownloadClient={handleDownloadClient}
+          /* The localized download URL is the payload the guide's share/copy
+             actions hand to the user's computer — the phone never opens it. */
+          onboardingDownloadUrl={getDownloadPageUrl(i18n.resolvedLanguage ?? i18n.language)}
         />
         {multiWorkspaceAvailable ? (
           <>

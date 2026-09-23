@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, realpathSync } from 'node:fs';
 import { mkdir, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -26,6 +27,84 @@ const ZSTD_SESSION_ARTIFACT = 'session.jsonl.zstd';
 const DSH_NODE_EXECUTABLE_ENV = 'LODY_DSH_NODE_EXECUTABLE';
 const DSH_NODE_ARGS_ENV = 'LODY_DSH_NODE_ARGS';
 
+// windowsHide is not inherited by descendants. npm's shell and DSH's Windows
+// Job runner omit it, so apply the ACP host policy inside those two processes.
+// Intercept the normalized async spawn boundary, covering CJS/ESM spawn, execFile
+// and fork without changing their overloads, stdio, environment or lifecycle.
+const HIDE_WINDOWS_CHILD_CONSOLES = `
+import { ChildProcess } from 'node:child_process';
+if (process.platform === 'win32') {
+  const spawn = ChildProcess.prototype.spawn;
+  ChildProcess.prototype.spawn = function (options) {
+    return spawn.call(this, { ...options, windowsHide: true });
+  };
+}
+`.trim();
+
+/** Keep npx's logical command/argv for cache recovery; bypass its Windows shell shim only at spawn. */
+export function resolveDeepSeekHarnessSpawn(options: {
+  command: string;
+  args: string[];
+  env: NodeJS.ProcessEnv;
+  workdir: string;
+  platform?: NodeJS.Platform;
+}): { command: string; args: string[] } {
+  const { command, args, env, workdir } = options;
+  if (
+    (options.platform ?? process.platform) !== 'win32' ||
+    command !== 'npx' ||
+    !env[DSH_NODE_EXECUTABLE_ENV]
+  ) {
+    return { command, args };
+  }
+
+  const envValue = (name: string) => {
+    const key = Object.keys(env)
+      .sort()
+      .find((candidate) => candidate.toLowerCase() === name);
+    return key ? env[key] : undefined;
+  };
+  const directories = [workdir, ...(envValue('path') ?? '').split(';')];
+  const extensions = (envValue('pathext') ?? '.COM;.EXE;.BAT;.CMD').split(';');
+  for (const directory of directories) {
+    if (!directory) continue;
+    for (const extension of extensions) {
+      const executable = resolve(
+        workdir,
+        directory.replace(/^"|"$/g, ''),
+        `npx${extension.toLowerCase()}`
+      );
+      if (!existsSync(executable)) continue;
+      // Native shims already avoid cmd.exe and its 8191-character limit.
+      if (/\.(exe|com)$/i.test(extension)) return { command: executable, args };
+      const entry = join(
+        dirname(realpathSync(executable)),
+        'node_modules',
+        'npm',
+        'bin',
+        'npx-cli.js'
+      );
+      if (!existsSync(entry)) {
+        throw new Error(
+          `Cannot launch DeepSeek Harness without cmd.exe: npm's npx-cli.js is missing beside ${executable}. Install Node.js with npm and retry.`
+        );
+      }
+      return {
+        command: process.execPath,
+        args: [
+          '--import',
+          `data:text/javascript;base64,${encodeBase64(HIDE_WINDOWS_CHILD_CONSOLES)}`,
+          entry,
+          ...args,
+        ],
+      };
+    }
+  }
+  throw new Error(
+    'Cannot launch DeepSeek Harness: npx was not found on PATH. Install Node.js with npm and retry.'
+  );
+}
+
 function encodeBase64(value: string): string {
   return Buffer.from(value, 'utf8').toString('base64');
 }
@@ -37,7 +116,7 @@ const executable = process.env.${DSH_NODE_EXECUTABLE_ENV};
 const encodedArgs = process.env.${DSH_NODE_ARGS_ENV};
 if (!executable || !encodedArgs) throw new Error('Missing Lody DSH runtime launch environment');
 const args = JSON.parse(Buffer.from(encodedArgs, 'base64').toString('utf8'));
-const child = spawn(executable, args, { env: process.env, stdio: 'inherit' });
+const child = spawn(executable, args, { env: process.env, stdio: 'inherit', windowsHide: true });
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => child.kill(signal));
 }
@@ -55,7 +134,8 @@ child.on('exit', (code) => {
 
 function createDeepSeekHarnessBootstrapSource(): string {
   return `
-import { readFile } from 'node:fs/promises';
+${HIDE_WINDOWS_CHILD_CONSOLES}
+import { readFile, realpath } from 'node:fs/promises';
 import { delimiter, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -78,6 +158,34 @@ if (!entryPath) {
   throw new Error(
     'The pinned @deepseek-ai/dsh@' + expectedVersion + ' entry was not found in the npx closure'
   );
+}
+
+if (process.platform === 'win32') {
+  // The pinned Job runner calls CreateProcessW directly, bypassing Node's
+  // windowsHide. Preserve its suspended launch, Unicode env, Job and IPC;
+  // only add CREATE_NO_WINDOW at the shared native process boundary.
+  const familyRoot = dirname(dirname(dirname(await realpath(entryPath))));
+  const nativeEntry = pathToFileURL(join(familyRoot, 'dsh-win32-process', 'lib', 'index.js')).href;
+  const nativePolicy = [
+    'const { loadWin32ProcessBindings } = await import(' + JSON.stringify(nativeEntry) + ');',
+    'const api = loadWin32ProcessBindings();',
+    'for (const [name, flagsIndex] of [["createProcessW", 5], ["createProcessAsUserW", 6]]) {',
+    '  const create = api[name];',
+    '  api[name] = (...args) => { args[flagsIndex] |= 0x08000000; return create(...args); };',
+    '}',
+  ].join('\\n');
+  const preload = 'data:text/javascript;base64,' + Buffer.from(nativePolicy).toString('base64');
+  await import(preload);
+  const runnerEntry = join(familyRoot, 'dsh-subprocess-local', 'lib', 'runner.js');
+  const spawn = ChildProcess.prototype.spawn;
+  ChildProcess.prototype.spawn = function (options) {
+    // Only the pinned native Job runner needs this preload. Do not export a
+    // NODE_OPTIONS hook to agent commands or MCP servers.
+    if (options.file === process.execPath && options.args[1] === runnerEntry) {
+      options = { ...options, args: [options.args[0], '--import', preload, ...options.args.slice(1)] };
+    }
+    return spawn.call(this, options);
+  };
 }
 
 const dshArgs = process.argv.slice(1);

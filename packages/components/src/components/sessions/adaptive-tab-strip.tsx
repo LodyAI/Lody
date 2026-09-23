@@ -13,7 +13,6 @@ import {
 } from 'react';
 
 import { cn } from '@/lib/utils';
-import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 
 export const ACTIVE_TAB_MIN_WIDTH = 180;
 
@@ -139,6 +138,18 @@ export function allocateAdaptiveTabStripLayout({
 const CLOSE_MODE_EXIT_SLOP_BOTTOM = 40;
 const CLOSE_MODE_EXIT_SLOP_TRAILING = 60;
 
+/**
+ * The active tab keeps `ACTIVE_TAB_MIN_WIDTH` only while the strip can afford
+ * it; below this container width the pin is suppressed and the tabs divide
+ * evenly, which is what keeps a single `min-width` from overflowing a narrow
+ * strip. The value is a little over `2 × ACTIVE_TAB_MIN_WIDTH` — the width at
+ * which pinning stops starving the inactive tabs — and is validated across the
+ * width and tab-count range rather than derived, because Tailwind needs the
+ * complete class literal in the source. The pinned length itself arrives
+ * through the item's custom property.
+ */
+const ACTIVE_MIN_WIDTH_CLASS = '@[366px]:min-w-(--tab-active-min-width)';
+
 const EMPTY_MARGIN_MAP: ReadonlyMap<string, number> = new Map();
 
 /* The freeze only arms on a real pointer gesture inside the strip — Chromium
@@ -168,15 +179,13 @@ function spreadFrozenTabStripLayout(
     itemIds,
     activeItemId,
     gap: frozen.gap,
-    paddingLeft: frozen.paddingLeft,
-    paddingRight: frozen.paddingRight,
+    paddingLeft: previousLayout.paddingLeft,
+    paddingRight: previousLayout.paddingRight,
     activeMinWidth,
   });
-  return freezeTabStripLayout(spread, frozen.viewportWidth, activeItemId);
+  return freezeTabStripLayout(spread, activeItemId);
 }
-
 type FrozenTabStripLayout = {
-  viewportWidth: number;
   paddingLeft: number;
   paddingRight: number;
   gap: number;
@@ -209,12 +218,10 @@ function retainFrozenTabStripLayout(
 
 function freezeTabStripLayout(
   layout: AdaptiveTabStripLayout,
-  viewportWidth: number,
   activeItemId: string | null
 ): FrozenTabStripLayout {
   const widthById = new Map(layout.items.map((item) => [item.id, item.width]));
   return {
-    viewportWidth,
     paddingLeft: layout.paddingLeft,
     paddingRight: layout.paddingRight,
     gap: layout.items.length > 1 ? layout.items[0].marginRight : 0,
@@ -228,7 +235,44 @@ function freezeTabStripLayout(
 type AdaptiveTabStripContextValue = {
   itemLayoutById: ReadonlyMap<string, AdaptiveTabStripItemLayout> | null;
   fallbackMarginById: ReadonlyMap<string, number>;
+  /**
+   * The active tab keeps at least this width while the container can afford
+   * it; `AdaptiveTabStripItem` turns the value into the item's pinned minimum.
+   */
+  activeMinWidth: number;
+  activeItemId: string | null;
 };
+
+/**
+ * Read the strip's painted geometry out of the DOM. The browser owns the
+ * resting layout (`flex: 1 1 0` + the pinned active minimum), so the widths
+ * the close-mode freeze and its slide animations need only exist at the moment
+ * a pointer gesture starts one — measuring then avoids tracking the viewport
+ * on every frame a sidebar animates.
+ */
+function captureStripGeometry(
+  strip: HTMLElement,
+  itemIds: readonly string[],
+  gap: number
+): AdaptiveTabStripLayout | null {
+  const stripStyle = getComputedStyle(strip);
+  const items: AdaptiveTabStripItemLayout[] = [];
+
+  for (const [index, id] of itemIds.entries()) {
+    const element = strip.querySelector<HTMLElement>(`[data-adaptive-tab-strip-item="${id}"]`);
+    if (!element) return null;
+    // Each item owns the trailing gap in both resting and frozen layouts.
+    const style = getComputedStyle(element);
+    const marginRight = index === itemIds.length - 1 ? 0 : parseFloat(style.marginRight) || gap;
+    items.push({ id, width: element.getBoundingClientRect().width, marginRight });
+  }
+
+  return {
+    paddingLeft: parseFloat(stripStyle.paddingLeft) || 0,
+    paddingRight: parseFloat(stripStyle.paddingRight) || 0,
+    items,
+  };
+}
 
 const AdaptiveTabStripContext = createContext<AdaptiveTabStripContextValue | null>(null);
 
@@ -257,7 +301,7 @@ export function AdaptiveTabStrip({
   ...props
 }: AdaptiveTabStripProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
-  const [viewportWidth, setViewportWidth] = useState<number | null>(null);
+  const stripRef = useRef<HTMLDivElement>(null);
   const armedAtRef = useRef<number | null>(null);
   const [frozenLayout, setFrozenLayout] = useState<FrozenTabStripLayout | null>(null);
   const [slideMargins, setSlideMargins] = useState<ReadonlyMap<string, number>>(EMPTY_MARGIN_MAP);
@@ -265,85 +309,85 @@ export function AdaptiveTabStrip({
     useState<ReadonlyMap<string, number>>(EMPTY_MARGIN_MAP);
   const [renderedItemIds, setRenderedItemIds] = useState(itemIds);
   const [renderedActiveItemId, setRenderedActiveItemId] = useState(activeItemId);
-  const [renderedViewportWidth, setRenderedViewportWidth] = useState(viewportWidth);
-  const appliedLayoutRef = useRef<AdaptiveTabStripLayout | null>(null);
-  const appliedViewportWidthRef = useRef<number | null>(null);
+  /**
+   * Geometry captured when a pointer gesture arms close mode. The resting
+   * widths belong to the browser (flex), so the freeze and its slide
+   * animations read this snapshot instead of tracking the viewport; it is
+   * taken on `pointerdown`, which is the only way close mode can start.
+   */
+  const capturedLayoutRef = useRef<AdaptiveTabStripLayout | null>(null);
+  /** Strip width at the moment the gesture's geometry was captured. */
+  const capturedWidthRef = useRef(0);
+  /**
+   * Live container width, tracked WITHOUT re-rendering: flex already resizes
+   * the tabs, so the only consumer is the frozen layout's "the strip shrank
+   * past the width I captured" release.
+   */
+  const viewportWidthRef = useRef(0);
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return undefined;
-
     const measure = () => {
-      const nextWidth = viewport.clientWidth;
-      setViewportWidth((currentWidth) => (currentWidth === nextWidth ? currentWidth : nextWidth));
+      viewportWidthRef.current = viewport.clientWidth;
+      // A shrink past the captured width releases the freeze: Chromium caps
+      // the override at the real width but keeps it when the strip grows. The
+      // rest of the resize needs no state — flex has already resized the tabs.
+      // Do not enqueue identity updates: React can replay an eagerly computed
+      // null after the discrete close event has established a frozen layout.
+      if (capturedWidthRef.current > 0 && viewportWidthRef.current < capturedWidthRef.current) {
+        setFrozenLayout(null);
+      }
     };
-
     measure();
-    return observeResizeOnAnimationFrame(viewport, measure);
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(measure);
+      observer.observe(viewport);
+      return () => observer.disconnect();
+    }
+    return undefined;
   }, []);
 
-  const layout = useMemo(() => {
-    if (viewportWidth === null) return null;
-    if (
-      frozenLayout !== null &&
-      viewportWidth >= frozenLayout.viewportWidth &&
-      itemIds.every((id) => frozenLayout.widthById.has(id))
-    ) {
-      return retainFrozenTabStripLayout(frozenLayout, itemIds, activeItemId);
-    }
-    return allocateAdaptiveTabStripLayout({
-      viewportWidth,
-      itemIds,
-      activeItemId,
-      gap,
-      paddingLeft,
-      paddingRight,
-      activeMinWidth,
-    });
-  }, [
-    activeItemId,
-    activeMinWidth,
-    frozenLayout,
-    gap,
-    itemIds,
-    paddingLeft,
-    paddingRight,
-    viewportWidth,
-  ]);
+  // Frozen widths are the ONE place the strip still owns item geometry. While
+  // frozen the browser's flex sizing is overridden with the captured widths,
+  // so the surviving tabs stay put as Chromium's rapid-close mode does.
+  const layout = useMemo(
+    () =>
+      frozenLayout === null || !itemIds.every((id) => frozenLayout.widthById.has(id))
+        ? null
+        : retainFrozenTabStripLayout(frozenLayout, itemIds, activeItemId),
+    [activeItemId, frozenLayout, itemIds]
+  );
 
-  // Snapshot the committed geometry so the NEXT render's diff reads the
-  // previous commit's layout and viewport.
-  useLayoutEffect(() => {
-    appliedLayoutRef.current = layout;
-    appliedViewportWidthRef.current = viewportWidth;
-  }, [layout, viewportWidth]);
+  // Tab ids are compared by VALUE, not array identity: a parent re-render
+  // (which a sidebar toggle causes) rebuilds `itemIds` as an equal-content
+  // array, and treating that as a tab change would suppress the transition on
+  // every resize instead of the other way around. `\u0000` cannot appear in an
+  // id, so the joined form is exact.
+  const itemIdsKey = itemIds.join('\u0000');
+  const renderedItemIdsKey = renderedItemIds.join('\u0000');
 
-  // Removals, selection changes, and viewport changes are decided DURING
-  // RENDER — React's derived-state adjustment pattern. A removal commit's very
-  // first render already calls setFrozenLayout, so React discards that output
-  // and commits only the frozen result: the unfrozen allocation never reaches
-  // the DOM. Deciding in an effect let that first allocation paint (or seed a
+  // Removals and selection changes are decided DURING RENDER — React's
+  // derived-state adjustment pattern. A removal commit's very first render
+  // already calls setFrozenLayout, so React discards that output and commits
+  // only the frozen result: the unfrozen layout never reaches the DOM.
+  // Deciding in an effect let that first allocation paint (or seed a
   // transition's starting width), which flashed survivors at the fresh width
   // for a frame before the freeze landed.
-  if (
-    renderedItemIds !== itemIds ||
-    renderedActiveItemId !== activeItemId ||
-    renderedViewportWidth !== viewportWidth
-  ) {
+  if (renderedItemIdsKey !== itemIdsKey || renderedActiveItemId !== activeItemId) {
     const previousItemIds = renderedItemIds;
     const previousActiveItemId = renderedActiveItemId;
-    const previousLayout = appliedLayoutRef.current;
-    const previousViewportWidth = appliedViewportWidthRef.current;
+    const previousLayout = capturedLayoutRef.current;
     setRenderedItemIds(itemIds);
     setRenderedActiveItemId(activeItemId);
-    setRenderedViewportWidth(viewportWidth);
 
     const currentIds = new Set(itemIds);
     const previousIds = new Set(previousItemIds);
     const removedIds = previousItemIds.filter((id) => !currentIds.has(id));
     const addedIds = itemIds.filter((id) => !previousIds.has(id));
-    const geometryStable =
-      previousLayout !== null && viewportWidth !== null && previousViewportWidth === viewportWidth;
+    // Without a pointer-armed snapshot there is no geometry to animate from:
+    // a programmatic or keyboard close relayouts through flex immediately.
+    const hasCapturedGeometry = previousLayout !== null;
 
     // Chromium animates EVERY removal through StartRemoveTabAnimation: the
     // survivor moving into a freed slot starts with a margin-inline-start
@@ -355,7 +399,7 @@ export function AdaptiveTabStrip({
     // slot from zero — Chromium hides this by shrinking the closed tab inside
     // the gap, which our approximation cannot do — so the promoted tab grows
     // into the slot's width in place instead.
-    if (geometryStable && removedIds.length > 0) {
+    if (hasCapturedGeometry && removedIds.length > 0) {
       const spaceById = new Map(
         previousLayout.items.map((item) => [item.id, item.width + item.marginRight])
       );
@@ -395,7 +439,7 @@ export function AdaptiveTabStrip({
     // removes AND adds is a substitution (a draft promoting to a session, or an
     // auto-created draft replacing a closed tab), so the replacement morphs
     // from the nearest removed item's width instead of appearing from nothing.
-    if (geometryStable && addedIds.length > 0 && previousItemIds.length > 0) {
+    if (hasCapturedGeometry && addedIds.length > 0 && previousItemIds.length > 0) {
       const widthByRemoved = new Map(previousLayout.items.map((item) => [item.id, item.width]));
       const addedIndexById = new Map(itemIds.map((id, index) => [id, index]));
       const nextWidths = new Map(enteringWidths);
@@ -427,7 +471,7 @@ export function AdaptiveTabStrip({
       // Chromium exits close mode outright once one visible tab is left.
       const stale =
         itemIds.length <= 1 ||
-        (viewportWidth !== null && viewportWidth < frozenLayout.viewportWidth) ||
+        (viewportWidthRef.current > 0 && viewportWidthRef.current < capturedWidthRef.current) ||
         itemIds.some((id) => !frozenLayout.widthById.has(id));
       if (stale) {
         setFrozenLayout(null);
@@ -455,7 +499,7 @@ export function AdaptiveTabStrip({
         }
       }
     } else if (
-      geometryStable &&
+      hasCapturedGeometry &&
       removedIds.length > 0 &&
       addedIds.length === 0 &&
       itemIds.length > 1 &&
@@ -467,7 +511,7 @@ export function AdaptiveTabStrip({
       // active width: closing the active tab delivers the removal and the new
       // selection in the same commit, and the layout it is frozen from still
       // shows the old active tab.
-      setFrozenLayout(freezeTabStripLayout(previousLayout, viewportWidth, previousActiveItemId));
+      setFrozenLayout(freezeTabStripLayout(previousLayout, previousActiveItemId));
     }
   }
 
@@ -531,27 +575,44 @@ export function AdaptiveTabStrip({
               ])
             ),
       fallbackMarginById,
+      activeMinWidth,
+      activeItemId,
     };
-  }, [enteringWidths, gap, itemIds, layout, slideMargins]);
+  }, [activeItemId, activeMinWidth, enteringWidths, gap, itemIds, layout, slideMargins]);
 
-  // The viewport is the flex remainder after the surrounding fixed controls.
-  // Integer widths and margins replace Radix's max-content table wrapper, which
-  // made equal flex children wider than the visible tab area.
+  // The viewport is the flex remainder after the surrounding fixed controls,
+  // and the CONTAINER the items' active-minimum query measures. The row itself
+  // is plain flex: equal flexible children that the browser sizes in the same
+  // style recalculation as the panel around them, so a sidebar toggle needs no
+  // measurement loop and no per-frame width writes.
   return (
     <div
       ref={viewportRef}
-      className={cn('min-w-0 flex-1 overflow-hidden', viewportClassName)}
+      className={cn(
+        'min-w-0 flex-1 overflow-hidden',
+        itemIds.length > 1 && '@container',
+        viewportClassName
+      )}
       data-adaptive-tab-strip-viewport=""
       onPointerDown={() => {
         // Chromium only enters rapid-close mode for a pointer-triggered close:
         // arm the gesture here so a keyboard/programmatic removal cannot freeze
         // the strip just because the pointer happens to be hovering over it.
         armedAtRef.current = performance.now();
+        // The resting widths belong to the browser; capture them once, here,
+        // so the freeze and its slide margins have geometry to animate from.
+        const strip = stripRef.current;
+        const viewport = viewportRef.current;
+        if (strip && viewport) {
+          capturedLayoutRef.current = captureStripGeometry(strip, itemIds, gap);
+          capturedWidthRef.current = viewport.clientWidth;
+        }
       }}
     >
       <AdaptiveTabStripContext.Provider value={contextValue}>
         <div
           {...props}
+          ref={stripRef}
           className={cn('flex w-full items-center', className)}
           style={
             {
@@ -582,6 +643,10 @@ export const AdaptiveTabStripItem = forwardRef<HTMLDivElement, AdaptiveTabStripI
     }
 
     const itemLayout = context.itemLayoutById?.get(itemId);
+    const isActive = context.activeItemId === itemId;
+    // Frozen layouts own explicit widths; otherwise the browser divides the row
+    // (`flex: 1 1 0`) and the active tab keeps its minimum through a container
+    // query on the strip, which only fires once the row can afford it.
     const layoutStyle: CSSProperties = itemLayout
       ? {
           flex: '0 0 auto',
@@ -592,17 +657,27 @@ export const AdaptiveTabStripItem = forwardRef<HTMLDivElement, AdaptiveTabStripI
       : {
           flex: '1 1 0',
           marginRight: context.fallbackMarginById.get(itemId) ?? 0,
+          ...(isActive
+            ? // Tailwind cannot interpolate the container-query variant, so the
+              // pinned minimum is a static class and only the length travels
+              // through this custom property.
+              ({
+                ['--tab-active-min-width' as string]: `${context.activeMinWidth}px`,
+              } as CSSProperties)
+            : null),
         };
 
-    // margin-inline-start plays the removal slide; width plays the insert
-    // grow-in and the release re-expansion. Reduced-motion users get the same
-    // resting geometry without the animation.
+    // Only explicitly frozen geometry transitions. Initial mount, restored
+    // tabs and container resizes use flex directly, without an opening tween.
     return (
       <div
         {...props}
         ref={ref}
         className={cn(
-          'min-w-0 overflow-hidden transition-[width,margin-inline-start] duration-200 motion-reduce:transition-none',
+          'min-w-0 overflow-hidden',
+          itemLayout &&
+            'transition-[width,margin-inline-start] duration-200 motion-reduce:transition-none',
+          !itemLayout && isActive && ACTIVE_MIN_WIDTH_CLASS,
           className
         )}
         style={{ ...style, ...layoutStyle }}

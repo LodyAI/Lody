@@ -163,6 +163,7 @@ describe('project skills helpers', () => {
       'kimi-code',
       'kimi-code-cli',
       'deepseek',
+      'dimcode',
     ]) {
       expect(
         getRegisteredGlobalSkillDirs([{ cliType: 'registry', agentType }]).has(

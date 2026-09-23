@@ -31,20 +31,29 @@ export function shouldMarkSessionRead({
   return lastMessageAt > lastReadAt;
 }
 
-/**
- * Does this session have output the user has not seen yet?
- *
- * The same comparison `shouldMarkSessionRead` uses to DECIDE a read receipt,
- * exported so the surfaces that ANNOUNCE unread state (desktop session tabs,
- * conversation status slots) cannot drift from it. Sub-session tabs are the
- * load-bearing case: a child Session with `childSessionPlacement: 'side-panel'`
- * or a top-strip child tab has no sidebar row of its own, so the tab is the
- * only place its unread state can surface.
- */
-export function sessionHasUnreadMessages(session: {
+type SessionUnreadInput = {
   lastMessageAt?: number;
   lastReadAt?: number;
-}): boolean {
+  isTabClosed?: boolean;
+  isArchived?: boolean;
+};
+
+/** Closed conversations suppress unread indicators without changing read receipts. */
+export function sessionHasUnreadMessages(session: SessionUnreadInput): boolean {
+  if (session.isTabClosed === true || session.isArchived === true) return false;
+  return hasUnreadOutput(session);
+}
+
+/**
+ * Unread output in a closed or archived conversation. Only the closed-conversations
+ * list surfaces it; tabs, sidebar summaries, and badges stay quiet.
+ */
+export function closedSessionHasUnreadMessages(session: SessionUnreadInput): boolean {
+  if (session.isTabClosed !== true && session.isArchived !== true) return false;
+  return hasUnreadOutput(session);
+}
+
+function hasUnreadOutput(session: SessionUnreadInput): boolean {
   const lastMessageAt = typeof session.lastMessageAt === 'number' ? session.lastMessageAt : null;
   if (lastMessageAt === null) return false;
   const lastReadAt = typeof session.lastReadAt === 'number' ? session.lastReadAt : null;

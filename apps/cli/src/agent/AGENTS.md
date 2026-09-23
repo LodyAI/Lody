@@ -13,6 +13,8 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
 - Grok Always Approve uses `allow_once`, never lasting grants; pending calls drain through
   the durable permission flow on accepted config changes. Questions remain interactive.
 - Builtin Grok must default `clientCapabilities.terminal` to false.
+- ACP file reads map native `ENOENT` to `RequestError.resourceNotFound`; preserve
+  other failures and session validation rather than returning empty content.
 - Send the driving turn's config on every session establishment as `_meta.lody.sessionConfig`;
   provider-specific startup translation belongs in the ACP adapter. `session/set_config_option`
   stays the live-session switch, and a successful selection becomes a later replacement's
@@ -44,19 +46,21 @@ context/acp-agent-edit-evidence.md; adapter repos: [apps/cli/AGENTS.md](../../AG
   `acp-session-start-gate.ts` (default 2, `LODY_MAX_CONCURRENT_ACP_SESSION_STARTS`). Never bypass
   that gate.
 - `setting.ts`: every builtin requires `resolveACPProcessLaunchAsync()`.
-- `deepseek-harness-runtime.ts` is NOT a managed runtime: keep it out of runtime download,
-  prefetch, override, and auth flows. npx installs the closure; run `dsh --profile` with packaged
-  `process.execPath` and inherited `ELECTRON_RUN_AS_NODE`. Credentials stay in agent env; never
-  write them into the generated config. The adapter applies model/reasoning selection
-  through the Agent-scoped request waterfall, permissions through Harness presets,
-  and `agent_preset` through `AgentPresets.mount/recompose` — never as UI-only state. Presets
-  may change only before the first prompt. Per-Agent ACP stdio/HTTP MCP servers belong in the
-  extension adapter, not the immutable host composition. JSONL encoding detection is READ-ONLY:
-  fail a mixed root naming both paths; never migrate, rename, or delete session artifacts.
+- `deepseek-harness-runtime.ts` is NOT managed: no download, prefetch, override, or
+  auth integration. Preserve logical npx argv for recovery; Windows uses npm's JS
+  entry without cmd.exe. Keep npm, the forwarder, DSH and native Job children
+  windowless without changing stdio, environment or containment. npx installs the
+  closure; `dsh --profile` uses `process.execPath` with inherited `ELECTRON_RUN_AS_NODE`.
+  Credentials stay in env, never config. Model/reasoning use the Agent request
+  waterfall; permissions use Harness presets; `agent_preset` uses
+  `AgentPresets.mount/recompose`, never UI-only state.
+  Presets change only before the first prompt. Per-Agent ACP stdio/HTTP MCP
+  belongs in the adapter, not host composition. JSONL encoding detection
+  is READ-ONLY: fail mixed roots naming both paths; never modify artifacts.
 - `managed-agent-runtime.ts`: Codex pins come only from `codex-runtime-manifest.json`, Claude
   pins only from `claude-runtime-manifest.json`; reject a dependency/manifest version mismatch
   and never duplicate those pins or checksums beside the manager. Do not loosen the metadata
-  schema or accept unknown legacy fields. The Grok submodule is never the source for production
+  schema or accept unknown legacy fields. Definition drift is a miss; cleanup and update scans are best effort. The Grok submodule is never the source for production
   runtime binaries, and the desktop must not depend on the Kimi submodule workspace. Custom
   methods stay capability-gated. Inject the artifact base URL from
   `CloudPort.runtimeArtifacts`; never read deployment environment or derive the channel here.

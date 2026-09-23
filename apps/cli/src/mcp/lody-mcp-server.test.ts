@@ -72,7 +72,7 @@ const {
   buildInvocationIdentity,
   summarizeProjectRefForMcp,
   resolveSessionExecutionSnapshot,
-  makeMachineOnlineLookupForMcp,
+  makeMachineLivenessLookupForMcp,
   truncateUtf8HeadTail,
 } = __lodyMcpServerInternals;
 
@@ -1115,19 +1115,39 @@ describe('session MCP input schemas', () => {
 
   it('shares one remote Machine presence read across a batch', async () => {
     const getOnlineMachineIds = vi.fn(async () => new Set(['remote-a', 'remote-b']));
-    const isMachineOnline = makeMachineOnlineLookupForMcp(
+    const machineLiveness = makeMachineLivenessLookupForMcp(
       { getOnlineMachineIds } as never,
       createMcpContext()
     );
 
     await expect(
       Promise.all([
-        isMachineOnline('machine-id'),
-        isMachineOnline('remote-a'),
-        isMachineOnline('remote-b'),
+        machineLiveness('machine-id'),
+        machineLiveness('remote-a'),
+        machineLiveness('remote-b'),
       ])
-    ).resolves.toEqual([true, true, true]);
+    ).resolves.toEqual(['online', 'online', 'online']);
     expect(getOnlineMachineIds).toHaveBeenCalledTimes(1);
+  });
+
+  it('separates a Machine absent from a joined presence room from one it could not check', async () => {
+    const joined = makeMachineLivenessLookupForMcp(
+      { getOnlineMachineIds: vi.fn(async () => new Set(['remote-a'])) } as never,
+      createMcpContext()
+    );
+    // A joined room that simply lacks the entry is real evidence of an offline Machine.
+    await expect(joined('remote-b')).resolves.toBe('offline');
+
+    const unavailable = makeMachineLivenessLookupForMcp(
+      { getOnlineMachineIds: vi.fn(async () => null) } as never,
+      createMcpContext()
+    );
+    // A null snapshot is "presence room unavailable" and must never read as offline:
+    // every dispatch guard blocks on 'offline' alone, so this is what kept a healthy
+    // remote Machine usable while presence was still joining.
+    await expect(unavailable('remote-b')).resolves.toBe('unknown');
+    // The local Machine never depends on the presence room to prove its own liveness.
+    await expect(unavailable('machine-id')).resolves.toBe('online');
   });
 
   it('truncates history text on Unicode boundaries with exact omitted bytes', () => {

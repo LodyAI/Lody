@@ -28,6 +28,7 @@ import type {
   MachineAcpCapabilitiesRefreshResponse,
   MachineBugReportResponse,
   MachineId,
+  MachinePiExtensionsResponse,
   MachinePingResponse,
   MachineRestartResponse,
   MachineStatusResponse,
@@ -345,6 +346,9 @@ type RpcServerDeps = {
     agentType: string;
     onAcpBinaryProgress?: (message: MachineAcpBinaryProgressMessage) => void;
   }) => Promise<MachineAcpBinaryInstallResponse>;
+  listMachinePiExtensions?: (args: {
+    configId?: AgentConfigId;
+  }) => Promise<MachinePiExtensionsResponse>;
   submitBugReport?: (args: {
     description: string;
     reporterUserId: string;
@@ -1062,6 +1066,20 @@ export class LoroStreamsMachineRpcServer {
           await this.appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
+        case 'machine/pi-extensions': {
+          if (!this.deps.listMachinePiExtensions) {
+            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+              code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
+              message: 'Pi extension listing is not available on this machine.',
+            });
+            return;
+          }
+          const response = await this.deps.listMachinePiExtensions({
+            configId: request.params.configId as AgentConfigId | undefined,
+          });
+          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          return;
+        }
         case 'machine/bug-report': {
           if (!this.deps.submitBugReport) {
             await this.appendErrorResponse(request.replyTo, request.id, request.method, {
@@ -1659,6 +1677,7 @@ export class LoroStreamsMachineRpcServer {
       | MachineAcpBinaryInstallResponse
       | MachineAcpBinaryProgressMessage
       | MachineBugReportResponse
+      | MachinePiExtensionsResponse
       | SessionCancelResponse
       | LoroSessionLiveStatusRpcResponse
       | SessionSteerResponse

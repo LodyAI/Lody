@@ -29,6 +29,10 @@ const isNeverCollapsedAssistantItem = (content: MessageContent | undefined): boo
   content?.type === 'plan' ||
   content?.type === 'goal' ||
   content?.type === 'proposed_plan' ||
+  // A warning/failure the stream folded back onto its emitting turn trails the
+  // answer the same way an attachment does. Left out, a turn that ends in one
+  // reports no visible answer and folds its own reply into "Worked for …".
+  content?.type === 'system_notice' ||
   (content?.type === 'tool_call' && content.kind === 'switch_mode');
 
 /**

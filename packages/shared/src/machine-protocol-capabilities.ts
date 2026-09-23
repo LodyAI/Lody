@@ -16,6 +16,7 @@ export const MACHINE_PROTOCOL_CAPABILITIES = {
   localFileResources: 'localFileResources',
   acpProtocolAuthentication: 'acpProtocolAuthentication',
   previewControl: 'previewControl',
+  piExtensions: 'piExtensions',
 } as const;
 
 export const ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION = 2;
@@ -25,6 +26,7 @@ export const PROVIDER_SETUP_PROTOCOL_VERSION = 1;
 export const LOCAL_FILE_RESOURCES_PROTOCOL_VERSION = 1;
 export const ACP_PROTOCOL_AUTHENTICATION_VERSION = 2;
 export const PREVIEW_CONTROL_PROTOCOL_VERSION = 1;
+export const PI_EXTENSIONS_PROTOCOL_VERSION = 1;
 
 type MachineProtocolCapabilityCarrier = {
   protocolCapabilities?: MachineProtocolCapabilities;
@@ -141,5 +143,15 @@ export function machineSupportsLocalFileResourcesProtocol(
     machine,
     MACHINE_PROTOCOL_CAPABILITIES.localFileResources,
     LOCAL_FILE_RESOURCES_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsPiExtensions(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.piExtensions,
+    PI_EXTENSIONS_PROTOCOL_VERSION
   );
 }

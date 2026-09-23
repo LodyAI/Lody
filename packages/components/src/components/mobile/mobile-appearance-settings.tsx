@@ -14,6 +14,7 @@ import {
 } from '@/components/mobile/mobile-inline-picker';
 import { MobileSettingsPickerTrigger } from '@/components/mobile/mobile-settings-picker-trigger';
 import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
+import { MobileAppIconSettings } from '@/components/mobile/mobile-app-icon-settings';
 import { buildConversationFontSizeChoices } from '@/components/settings/conversation-font-size-options';
 import { currentSupportedLanguages, languageCodeToName } from '../../i18n';
 import { cn } from '@/lib/utils';
@@ -118,6 +119,8 @@ export function MobileAppearanceSettings() {
           </MobileSettingsRow>
         </MobileInlinePickerRowSlot>
       </MobileSettingsSection>
+
+      <MobileAppIconSettings />
     </MobileInlinePickerCoordinator>
   );
 }

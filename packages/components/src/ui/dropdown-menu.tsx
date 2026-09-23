@@ -240,30 +240,69 @@ const DropdownMenuSubTrigger = React.forwardRef<
     inset?: boolean;
     icon?: React.ReactNode;
   }
->(({ className, inset, icon, children, onPointerEnter, disabled, ...props }, ref) => {
-  const setSubmenuOpen = React.useContext(DropdownMenuSubOpenContext);
+>(
+  (
+    {
+      className,
+      inset,
+      icon,
+      children,
+      onPointerEnter,
+      onPointerMove,
+      onClick,
+      disabled,
+      ...props
+    },
+    ref
+  ) => {
+    const setSubmenuOpen = React.useContext(DropdownMenuSubOpenContext);
 
-  return (
-    <DropdownMenuPrimitive.SubTrigger
-      ref={ref}
-      className={cn(menuItemClassName, inset && 'ps-8', className)}
-      disabled={disabled}
-      onPointerEnter={(event) => {
-        onPointerEnter?.(event);
-        if (!event.defaultPrevented && event.pointerType === 'mouse' && !disabled) {
-          setSubmenuOpen?.(true);
-        }
-      }}
-      {...props}
-    >
-      {icon ? <span className={menuItemIconClassName}>{icon}</span> : null}
-      {children}
-      <span className={cn(menuItemIconClassName, 'ms-auto me-0 size-4 [&>svg]:size-3')}>
-        <ChevronRight />
-      </span>
-    </DropdownMenuPrimitive.SubTrigger>
-  );
-});
+    const focusOpenSubmenuSearch = (event: React.MouseEvent<HTMLDivElement>) => {
+      if (event.defaultPrevented || disabled || !window.matchMedia?.('(pointer: fine)').matches)
+        return;
+      const trigger = event.currentTarget;
+      if (trigger.getAttribute('aria-expanded') !== 'true') return;
+      const content = trigger.ownerDocument.getElementById(
+        trigger.getAttribute('aria-controls') ?? ''
+      );
+      const search = content?.querySelector<HTMLInputElement>('[data-lody-menu-search]');
+      if (!search || search.closest(MENU_CONTENT_SELECTOR) !== content) return;
+      // Radix refocuses the trigger on every mouse move/click, undoing the
+      // search field's mount autofocus as the pointer settles over this row.
+      event.preventDefault();
+      search.focus({ preventScroll: true });
+    };
+
+    return (
+      <DropdownMenuPrimitive.SubTrigger
+        ref={ref}
+        className={cn(menuItemClassName, inset && 'ps-8', className)}
+        disabled={disabled}
+        onPointerEnter={(event) => {
+          onPointerEnter?.(event);
+          if (!event.defaultPrevented && event.pointerType === 'mouse' && !disabled) {
+            setSubmenuOpen?.(true);
+          }
+        }}
+        onPointerMove={(event) => {
+          onPointerMove?.(event);
+          if (event.pointerType === 'mouse') focusOpenSubmenuSearch(event);
+        }}
+        onClick={(event) => {
+          onClick?.(event);
+          focusOpenSubmenuSearch(event);
+        }}
+        {...props}
+      >
+        {icon ? <span className={menuItemIconClassName}>{icon}</span> : null}
+        {children}
+        <span className={cn(menuItemIconClassName, 'ms-auto me-0 size-4 [&>svg]:size-3')}>
+          <ChevronRight />
+        </span>
+      </DropdownMenuPrimitive.SubTrigger>
+    );
+  }
+);
 DropdownMenuSubTrigger.displayName = DropdownMenuPrimitive.SubTrigger.displayName;
 
 /**
@@ -408,32 +447,49 @@ const DropdownMenuRadioItem = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.RadioItem> & {
     /** Selected-row mark: a dot (default) or a check for list-style pickers. */
     indicator?: 'dot' | 'check';
+    /**
+     * Where the mark sits. `end` is for rows whose leading slot carries the
+     * item's own identity mark (e.g. a workspace avatar); callers then own
+     * the paddings — drop the `ps-8` selection indent and reserve `pe-8` so
+     * trailing content never slides under the mark.
+     */
+    indicatorSide?: 'start' | 'end';
   }
->(({ className, children, onSelect, indicator = 'dot', ...props }, ref) => {
-  const selectionContext = React.useContext(DropdownMenuSelectionContext);
-  return (
-    <DropdownMenuPrimitive.RadioItem
-      ref={ref}
-      className={cn(menuSelectionItemClassName, className)}
-      onSelect={(event) => {
-        selectionContext?.markItemSelected();
-        onSelect?.(event);
-      }}
-      {...props}
-    >
-      <span className="absolute start-3 flex h-3.5 w-3.5 items-center justify-center">
-        <DropdownMenuPrimitive.ItemIndicator>
-          {indicator === 'check' ? (
-            <Check className="size-3.5!" />
-          ) : (
-            <Circle className="size-2! fill-current" />
+>(
+  (
+    { className, children, onSelect, indicator = 'dot', indicatorSide = 'start', ...props },
+    ref
+  ) => {
+    const selectionContext = React.useContext(DropdownMenuSelectionContext);
+    return (
+      <DropdownMenuPrimitive.RadioItem
+        ref={ref}
+        className={cn(menuSelectionItemClassName, className)}
+        onSelect={(event) => {
+          selectionContext?.markItemSelected();
+          onSelect?.(event);
+        }}
+        {...props}
+      >
+        <span
+          className={cn(
+            'absolute flex h-3.5 w-3.5 items-center justify-center',
+            indicatorSide === 'end' ? 'end-3' : 'start-3'
           )}
-        </DropdownMenuPrimitive.ItemIndicator>
-      </span>
-      {children}
-    </DropdownMenuPrimitive.RadioItem>
-  );
-});
+        >
+          <DropdownMenuPrimitive.ItemIndicator>
+            {indicator === 'check' ? (
+              <Check className="size-3.5!" />
+            ) : (
+              <Circle className="size-2! fill-current" />
+            )}
+          </DropdownMenuPrimitive.ItemIndicator>
+        </span>
+        {children}
+      </DropdownMenuPrimitive.RadioItem>
+    );
+  }
+);
 DropdownMenuRadioItem.displayName = DropdownMenuPrimitive.RadioItem.displayName;
 
 const DropdownMenuLabel = React.forwardRef<
@@ -596,6 +652,7 @@ const DropdownMenuSearchInput = React.forwardRef<HTMLInputElement, DropdownMenuS
             event.stopPropagation();
           }}
           placeholder={placeholder}
+          data-lody-menu-search=""
           aria-label={ariaLabel ?? placeholder}
           className="min-w-0 flex-1 border-none bg-transparent text-[0.9em] leading-tight outline-none placeholder:text-muted-foreground focus:outline-none focus:ring-0"
         />

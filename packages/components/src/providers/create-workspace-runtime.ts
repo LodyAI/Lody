@@ -1,3 +1,8 @@
+import {
+  createLocalWindowBootstrap,
+  createSessionSnapshotLoader,
+  readSessionBootstrapSnapshot,
+} from './local-window-bootstrap';
 import { jotaiStore } from '@/lib/utils';
 import { desktopWindowId } from '@/lib/desktop-window';
 import { navigationSidebarHiddenAtom } from '@/atoms/layout-state';
@@ -411,10 +416,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   let resolveRoomTransportsImpl:
     | ((room: WorkspaceTransportRoom) => WorkspaceTransportRoute)
     | null = null;
+  const repoStorage = new IndexedDBStorageAdaptor({ dbName: cacheIdentity.repoDbName });
+  const openSessionWithSnapshot = createSessionSnapshotLoader(repoStorage);
   const repo = await LoroRepo.create({
-    storageAdapter: new IndexedDBStorageAdaptor({
-      dbName: cacheIdentity.repoDbName,
-    }),
+    storageAdapter: repoStorage,
     metaDebounceCommitMs: 0,
     resolveRoomTransports: (room) =>
       resolveRoomTransportsImpl?.(room) ?? { transportIds: ['cloud'] },
@@ -465,6 +470,11 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   // False only on the local-only platform: no Streams member, no token
   // provider, no cloud presence/RPC — zero cloud I/O by construction.
   const cloudPlaneEnabled = syncMode !== 'local';
+  const sharedWindowDocuments = new Map<string, LoroDoc>();
+  const windowBootstrap =
+    syncMode === 'local' && typeof BroadcastChannel !== 'undefined'
+      ? createLocalWindowBootstrap(repo, deps.workspaceId, sharedWindowDocuments)
+      : null;
   let notifyTargetRouteChange = (): void => {};
   const targetRouter = new WorkspaceTargetRouter({
     repo,
@@ -1712,6 +1722,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestLocalProjectGitState,
     requestLocalProjectControl,
     requestMachineBugReport,
+    requestMachinePiExtensions,
   } = createWorkspaceMachineRpcFacade({
     getSessionToken: () => authToken,
     getMachineProtocolCapabilities: async (machineId) => {
@@ -3728,25 +3739,22 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const createSessionStore = async (sessionId: SessionId): Promise<SessionDocStore> => {
     const roomId = getSessionRoomId(sessionId);
 
-    // Open persisted doc immediately - this reads from local IndexedDB
-    // and does NOT require transport/workspaceId
-    const persistedDoc = await repo.openPersistedDoc(roomId);
+    // Merge bootstrap state before Repo adopts a cold document and before its
+    // history reader subscribes. Existing live documents retain their identity.
+    const persistedDoc = await openSessionWithSnapshot(repo, roomId, () =>
+      readSessionBootstrapSnapshot(
+        () =>
+          withTimeout(
+            readEagerSyncSnapshot(eagerSyncScope, roomId).then(async (entry) =>
+              entry ? new Uint8Array(await entry.snapshot.arrayBuffer()) : undefined
+            ),
+            1_500,
+            'Eager-sync cache read timed out'
+          ),
+        () => windowBootstrap?.readDocument(roomId) ?? Promise.resolve(undefined)
+      )
+    );
     const sessionDoc = persistedDoc.doc as LoroDoc;
-
-    // Only an actual store consumer materializes a prefetched snapshot. Import
-    // merges with this replica's unsent user edits; never replace its document.
-    const cached = await withTimeout(
-      readEagerSyncSnapshot(eagerSyncScope, roomId),
-      1_500,
-      'Eager-sync cache read timed out'
-    ).catch(() => undefined);
-    if (cached) {
-      try {
-        (persistedDoc.doc as LoroDoc).import(new Uint8Array(await cached.snapshot.arrayBuffer()));
-      } catch {
-        // A rebuildable cache must not prevent normal foreground synchronization.
-      }
-    }
 
     const {
       mirror,
@@ -3871,6 +3879,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       };
     };
 
+    sharedWindowDocuments.set(roomId, sessionDoc);
     void firstSynced.catch(() => {});
 
     return {
@@ -3894,6 +3903,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       sessionData,
       dispose: () => {
         disposed = true;
+        sharedWindowDocuments.delete(roomId);
         materializedSessionIds.delete(sessionId);
         stopSyncNow();
         syncTracker.dispose();
@@ -4325,6 +4335,8 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
       return disposePromise;
     }
 
+    windowBootstrap?.close();
+    sharedWindowDocuments.clear();
     disposePromise = (async () => {
       cancelDelayedBackgroundSyncStart?.();
       cancelDelayedBackgroundSyncStart = null;
@@ -4611,6 +4623,7 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
     requestLocalProjectGitState,
     requestLocalProjectControl,
     requestMachineBugReport,
+    requestMachinePiExtensions,
     dispose,
   };
 }

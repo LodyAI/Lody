@@ -1002,6 +1002,12 @@ export function MachineAgentSettings({
         machine={dialogMachine}
         onSubmit={handleDialogSubmit}
         onRefreshCapabilities={refreshCapabilities}
+        onScanPiExtensions={
+          runtime
+            ? ({ machineId, configId }) =>
+                runtime.requestMachinePiExtensions(machineId, { configId })
+            : undefined
+        }
         onCheckBinaryStatus={checkBinaryStatus}
         onInstallBinary={installBinary}
       />

@@ -61,23 +61,19 @@ selector values to collaborators.
 
 ## Presence is ephemeral and partitioned by origin
 
-`presence.ts`: machine presence refreshes on `CliPresenceRuntime`'s own 30s timer.
-It keeps TWO stores and the distinction is load-bearing: `store` is the workspace-wide
-replica (own writes plus every peer seen in the shared room; read by machine-online
-checks and the PR poller), while `localOriginStore` holds ONLY entries this process
-authored and is the sole payload of the local data plane (`encodeLocalOriginPresence` /
-`subscribeLocalOriginPresence`). Write locally-authored presence exclusively through
-`writeLocalOrigin`/`deleteLocalOrigin`, and never relay the replica —
-`specs/local-first-two-plane.md` explains the partition.
+Read [the presence rules](../../../../../.agents/docs/cli-lib-loro-presence.md) before
+publishing presence or changing `presence.ts`/`session-active-presence.ts`: the origin
+partition and the two stores, the single-owner rule for session active presence, and
+turn-finalization side effects. Intent and the reader contract:
+`specs/loro-ephemeral-presence-channel.md`.
 
-`session-active-presence.ts` alone owns session active presence: it starts once for a
-visible CLI turn, accepts phase updates, heartbeats while active, and clears on the
-owning Effect release. Never publish or clear session presence from `setStatus`, RPC
-dispatch, permission/image callbacks, or watcher recovery paths. Its scope covers ALL
-turn-finalization stages, so optional cloud side effects inside it (usage flush,
-completion notification, Live Activity sync) MUST go through
-`MessageHandler.runTurnCloudSideEffect`; third-party calls (GitHub, model APIs) are a
-different reachability domain and are NOT gated by it.
+A workspace has ONE serial presence queue and the machine heartbeat shares it. Trigger
+a presence write ONLY from a timer, a lifecycle transition, or a user navigation,
+NEVER from a stream/progress/chunk callback however small one payload is, and bound
+every field in `packages/shared/src/presence.ts`. A burst delays the heartbeat past
+its 90s freshness window while the room still reports `joined`, so the machine reads
+offline with no error raised anywhere. The `(phase, detail)` dedupe is NOT a rate
+limit: a detail that changes per emit (percentage, counter, label) defeats it.
 
 Never reintroduce periodic doc-meta writes (`lastSeen`/`lastRunningSeen`) — they stall
 Loro flush; meta timestamps are written only at status transitions. Durable

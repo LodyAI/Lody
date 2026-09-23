@@ -20,7 +20,7 @@ this page is the full text of the rules summarised there.
   and three surfaces render it**: the Files tree's right-click menu, the side
   panel's ⋯ button (left of `+`, and absent unless the active tab is a file),
   and the file-error card. The split it encodes is the invariant, not a detail:
-  `Copy file path` is offered ANYWHERE (every platform can write to the
+  copying a path is offered ANYWHERE (every platform can write to the
   clipboard), while
   reaching a shell — `Open in default app` / `Open in browser`
   (`app.openLocalPath` → `shell.openPath`), `Reveal in file manager` /
@@ -50,8 +50,13 @@ this page is the full text of the rules summarised there.
   local-project root) and is built ONLY from that workspace root plus a
   genuinely workspace-relative viewer path — `lib/session-local-file-path.ts`
   rejects absolute and `..` paths, so a remote session can never hand this
-  machine's shell a path of its choosing; an unresolved root degrades the copy
-  to the workspace-relative path. `SessionFileErrorState` owns which error kinds
+  machine's shell a path of its choosing. The Files tree and the side-panel ⋯
+  menu expose that identity as two copy actions — `Copy relative path` always,
+  and `Copy absolute path` only once the workspace root resolves or the path is
+  already absolute; an unresolved root leaves the relative copy alone. The
+  file-error card and the Markdown-link menu keep one `Copy file path` /
+  `Copy Path` action, which copies the absolute path when it resolves and
+  otherwise the path as held. `SessionFileErrorState` owns which error kinds
   get the row (`offersFileActions`): only too-large and unsupported, never a
   missing, denied, or offline file where every button would fail. That card has
   NO status glyph and stacks its actions full-width in one column: a 40px icon

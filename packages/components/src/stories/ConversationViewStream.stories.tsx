@@ -7,15 +7,20 @@
  * "Worked for …" group to check that expansion still lands rows under the
  * same rail.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react';
-import type { SessionHistory, SessionId } from '@lody/shared';
+import type { SessionHistory, SessionId, WorkspaceId } from '@lody/shared';
 import { LoroDoc } from 'loro-crdt';
 import { MessageRowView, SessionChatStreamView } from '@/components/ai-gui/view';
 import type { SessionChatStreamViewProps } from '@/components/ai-gui/view';
 import type { SessionChatStreamHandle } from '@/components/ai-gui/view';
 import { useConversationStreamItems } from '@/hooks/use-conversation-stream-items';
-import { createConversationSession, type ConversationView } from '@/lib/conversation-view';
+import {
+  createProjectedConversationView,
+  createConversationSession,
+  createConversationDerivation,
+  type ConversationView,
+} from '@/lib/conversation-view';
 
 const meta = {
   title: 'Sessions/ConversationView',
@@ -157,6 +162,7 @@ function WindowedStream({
     lastAssistantMessageId,
     lastCompletedAssistantMessageId,
     onVisibleTurnRangeChange,
+    onRetainedTurnIdsChange,
     onOutlinePreviewRound,
   } = useConversationStreamItems(view, streamSessionId);
   return (
@@ -171,6 +177,7 @@ function WindowedStream({
         showScrollToLatest={false}
         lastAssistantMessageId={lastAssistantMessageId}
         lastCompletedAssistantMessageId={lastCompletedAssistantMessageId}
+        onRetainedTurnIdsChange={onRetainedTurnIdsChange}
         onVisibleTurnRangeChange={onVisibleTurnRangeChange}
         onOutlinePreviewRound={onOutlinePreviewRound}
       />
@@ -195,7 +202,13 @@ export const ShortConversationWindowed: Story = {
  * `SessionChatStreamView` over a warm view. Frame-by-frame capture of that
  * mount is what reproduces the flash reported after #376.
  */
-function OpenFlickerStory({ rounds }: { rounds: number }) {
+function OpenFlickerStory({
+  rounds,
+  backgroundFacts = false,
+}: {
+  rounds: number;
+  backgroundFacts?: boolean;
+}) {
   const [view, setView] = useState<ConversationView | null>(null);
   const [openId, setOpenId] = useState(0);
   useEffect(() => {
@@ -224,6 +237,7 @@ function OpenFlickerStory({ rounds }: { rounds: number }) {
           Close
         </button>
         <span data-testid="view-ready">{view ? 'view-ready' : 'building'}</span>
+        {backgroundFacts && view && <BackgroundFactControls view={view} />}
       </div>
       <div className="min-h-0 flex-1" data-testid="conversation-slot">
         {view && openId > 0 && <OpenedStream key={openId} view={view} />}
@@ -251,6 +265,7 @@ function OpenedStream({
     lastAssistantMessageId,
     lastCompletedAssistantMessageId,
     onVisibleTurnRangeChange,
+    onRetainedTurnIdsChange,
     onOutlinePreviewRound,
   } = useConversationStreamItems(view, streamSessionId);
   return (
@@ -268,11 +283,65 @@ function OpenedStream({
       showScrollToLatest={false}
       lastAssistantMessageId={lastAssistantMessageId}
       lastCompletedAssistantMessageId={lastCompletedAssistantMessageId}
+      onRetainedTurnIdsChange={onRetainedTurnIdsChange}
       onVisibleTurnRangeChange={onVisibleTurnRangeChange}
       onOutlinePreviewRound={onOutlinePreviewRound}
     />
   );
 }
+
+function BackgroundFactControls({ view }: { view: ConversationView }) {
+  const scan = useRef<ReturnType<typeof createConversationDerivation<string>> | null>(null);
+  const advance = useRef<(() => void) | undefined>(undefined);
+  const unsubscribe = useRef<(() => void) | undefined>(undefined);
+  const [facts, setFacts] = useState(0);
+  useEffect(
+    () => () => {
+      unsubscribe.current?.();
+      scan.current?.dispose();
+      advance.current?.();
+    },
+    [view]
+  );
+  const start = () => {
+    if (scan.current) return;
+    const next = createConversationDerivation(view, (turn) => turn.id, {
+      yieldToEventLoop: () =>
+        new Promise<void>((resolve) => {
+          advance.current = resolve;
+        }),
+    });
+    scan.current = next;
+    const update = () => setFacts(next.facts.size);
+    unsubscribe.current = next.subscribe(update);
+    update();
+  };
+  return (
+    <>
+      <button type="button" onClick={start} disabled={!!scan.current}>
+        Start background scan
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          const next = advance.current;
+          advance.current = undefined;
+          next?.();
+        }}
+      >
+        Next fact batch
+      </button>
+      <span>
+        {facts} / {view.turnCount} facts
+      </span>
+    </>
+  );
+}
+
+/** Open first, then release background batches while observing the visible tail. */
+export const OpenWithBackgroundFacts: Story = {
+  render: () => <OpenFlickerStory rounds={150} backgroundFacts />,
+};
 
 /** Mount the stream over a warm 3,000-turn view — the reported open flicker. */
 export const OpenLongConversation: Story = {
@@ -343,6 +412,49 @@ function SwitchFlickerStory({ rounds }: { rounds: number }) {
 export const SwitchBetweenLongConversations: Story = {
   render: () => <SwitchFlickerStory rounds={ROUNDS} />,
 };
+
+/** Reconcile a display projection without changing the underlying conversation. */
+function ProjectionRefreshStory() {
+  const [base, setBase] = useState<ConversationView | null>(null);
+  const [revision, setRevision] = useState(0);
+  useEffect(() => {
+    const view = openWindowedView(buildHistory(ROUNDS));
+    setBase(view);
+    return () => view.dispose();
+  }, []);
+  const view = useMemo(() => {
+    if (!base || revision === 0) return base;
+    const entry = base.turn(base.turnCount - 1);
+    if (!entry) return base;
+    // An accepted entry can already be authoritative while its projection is
+    // still retained. Rewrapping must not hide otherwise identical content.
+    return createProjectedConversationView(base, [
+      {
+        workspaceId: 'projection-refresh-story' as WorkspaceId,
+        sessionId,
+        entry,
+      },
+    ]);
+  }, [base, revision]);
+  return (
+    <div className="flex h-screen flex-col bg-background">
+      <button
+        type="button"
+        data-testid="refresh-projection"
+        disabled={!base}
+        className="shrink-0 rounded border px-3 py-1 text-sm"
+        onClick={() => setRevision((value) => value + 1)}
+      >
+        Refresh projection {revision}
+      </button>
+      <div className="min-h-0 flex-1" data-testid="conversation-slot">
+        {base && <OpenedStream view={view} />}
+      </div>
+    </div>
+  );
+}
+
+export const RefreshAcceptedHistory: Story = { render: () => <ProjectionRefreshStory /> };
 
 const JUMP_SESSION_ID = 'session-worked-group-expand-jump' as SessionId;
 
@@ -515,6 +627,7 @@ function NativeTextSelectionStory() {
           items={stream.items}
           lastAssistantMessageId={stream.lastAssistantMessageId}
           lastCompletedAssistantMessageId={stream.lastCompletedAssistantMessageId}
+          onRetainedTurnIdsChange={stream.onRetainedTurnIdsChange}
           onVisibleTurnRangeChange={stream.onVisibleTurnRangeChange}
           onOutlinePreviewRound={stream.onOutlinePreviewRound}
           leadingContent={<div>Selection regression fixture</div>}
@@ -527,3 +640,118 @@ function NativeTextSelectionStory() {
 }
 
 export const NativeTextSelection: Story = { render: () => <NativeTextSelectionStory /> };
+
+const at2 = (n: number) => new Date(Date.UTC(2026, 8, 20, 14, 0, 0) + n * 60_000).toISOString();
+
+const noticeUser = (n: number, text: string): SessionHistory =>
+  ({
+    id: `n-user-${n}`,
+    role: 'user',
+    timestamp: at2(n * 2),
+    read: true,
+    finished: true,
+    status: 'handled',
+    fileDiff: [],
+    items: [{ type: 'text', text }],
+    inputConfig: {
+      prompt: text,
+      cliType: 'builtin',
+      agentType: 'claude',
+      modeId: 'default',
+      modelId: 'sonnet',
+    },
+  }) as unknown as SessionHistory;
+
+const noticeAssistant = (n: number, items: unknown[]): SessionHistory =>
+  ({
+    id: `n-assistant-${n}`,
+    role: 'assistant',
+    timestamp: at2(n * 2 + 1),
+    userTurnId: `n-user-${n}`,
+    endedAt: Date.UTC(2026, 8, 20, 14, 0, 0) + (n * 2 + 1) * 60_000 + 18_000,
+    finished: true,
+    fileDiff: [],
+    items,
+  }) as unknown as SessionHistory;
+
+/** `meta` is schema-checked on write, so these carry real codes, not prose. */
+const noticeSystem = (id: string, n: number, name: string, noticeMeta: unknown): SessionHistory =>
+  ({
+    id,
+    role: 'system',
+    timestamp: at2(n * 2 + 1),
+    read: true,
+    items: [{ type: 'system_notice', name, meta: noticeMeta }],
+  }) as unknown as SessionHistory;
+
+function buildNoticeHistory(): SessionHistory[] {
+  return [
+    noticeUser(0, 'Have a look at the avatar cache and tell me why it keeps refetching.'),
+    noticeAssistant(0, [
+      { type: 'thought', text: 'Checking how the blob cache is keyed and when it is revoked.' },
+      {
+        type: 'tool_call',
+        toolCallId: 'n-tool-0-1',
+        status: 'completed',
+        title: 'Read packages/components/src/lib/avatar-cache.ts',
+        kind: 'read',
+        rawInput: { path: 'packages/components/src/lib/avatar-cache.ts' },
+      },
+      {
+        type: 'text',
+        text: 'The cache itself is fine — it keeps a durable copy in CacheStorage and revalidates in the background.\n\nWhat breaks is ownership: the blob URL is handed out as a plain string and copied into component state, so a revalidation swap revokes a URL another component is still rendering.',
+      },
+    ]),
+    noticeSystem('n-warning-0', 1, 'agent_warning', {
+      message:
+        'The configured model is unavailable for this account, so the request fell back to the default model. Billing and rate limits follow the fallback, not the model you selected.',
+      source: 'acp',
+    }),
+    noticeUser(1, '那就把所有权收敛到缓存里，别让组件各存一份。'),
+    noticeAssistant(1, [
+      { type: 'thought', text: 'Switching readers to a subscription so the cache owns the URL.' },
+      {
+        type: 'tool_call',
+        toolCallId: 'n-tool-1-1',
+        status: 'completed',
+        title: 'Edit packages/components/src/lib/avatar-cache.ts',
+        kind: 'edit',
+        rawInput: { path: 'packages/components/src/lib/avatar-cache.ts' },
+      },
+      {
+        type: 'text',
+        text: 'Readers now subscribe per cache key, and a superseded URL is only revoked once the last reader is gone — so no component can be left pointing at a dead `blob:`.',
+      },
+    ]),
+    noticeUser(2, 'Now run the full suite.'),
+    noticeAssistant(2, [
+      {
+        type: 'tool_call',
+        toolCallId: 'n-tool-2-1',
+        status: 'completed',
+        title: 'pnpm --filter @lody/components test',
+        kind: 'execute',
+        rawInput: { command: 'pnpm --filter @lody/components test' },
+      },
+    ]),
+    noticeSystem('n-failed-0', 3, 'chat_failed', {
+      reason: 'agent_disconnected',
+      message: 'The agent process exited before the turn completed.',
+    }),
+  ];
+}
+
+/**
+ * A whole conversation with both notice tones in place: user turns, agent prose
+ * and tool work, a mid-conversation `agent_warning` the turn survived, and a
+ * terminal `chat_failed`. Here to judge the notices against the rows they sit
+ * between — in isolation it is easy to make one louder than the conversation.
+ */
+export const ConversationWithNotices: Story = {
+  render: () => (
+    <WindowedStream
+      history={buildNoticeHistory()}
+      streamSessionId={'session-conversation-notices' as SessionId}
+    />
+  ),
+};

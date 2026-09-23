@@ -267,7 +267,7 @@ export function SessionAccessControl({
     'sharing.header.sharedDescription',
     'Anyone with the link can read a published copy of this conversation.'
   );
-  const shareLabel = t('sharing.manager.title', 'Share conversation');
+  const shareLabel = t('sharing.manager.title', 'Share');
   const shareDescription = t(
     'sharing.header.shareDescription',
     'Publish a read-only copy of this conversation as a link.'

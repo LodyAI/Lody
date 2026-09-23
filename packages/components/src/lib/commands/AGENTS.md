@@ -76,6 +76,14 @@ only tells global dispatch to yield for events originating in its subtree.
   registers one. No closer (Chat Landing and other surfaces) closes the
   BrowserWindow. The main-process `close` handler still hides on macOS instead of
   quitting. The chord is not listed or rebindable in keyboard settings.
+- Developer Mode's pointer-aware close beta defaults off. When enabled,
+  `semantic-action-router.ts` selects the innermost visible registered action scope
+  from pointer/keyboard intent; SessionDetail supplies the close handlers. Empty
+  panels collapse and transfer focus; cancelled/blocked closes never try siblings.
+  Open modal/menu layers block background close. Native browser ownership signals
+  contain only browser id and input source, never page contents or typed keys.
+  Keep the native accelerator and normal key-repeat behavior. See
+  [semantic targeting](../../../../../specs/semantic-action-targeting.md).
 - Commands carry `titleKey`; palette/settings resolve it through i18n at render time.
 - Desktop native Tab handling is in
   `apps/electron/src/renderer/src/native-tab-behavior.ts`.

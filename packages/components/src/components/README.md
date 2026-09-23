@@ -1,7 +1,7 @@
 # Product surfaces
 
 Binding rules live in [AGENTS.md](AGENTS.md); this index explains ownership.
-Child directories such as `sessions/`, `mobile/`, and `chat/` own their scoped rules.
+Child directories such as `sessions/`, `mobile/`, `chat/`, and `archive/` own their scoped rules.
 
 ## Sidebar and session rows
 
@@ -9,12 +9,34 @@ The sidebar spans `loro-sidebar.tsx`, `loro-app-sidebar.tsx`, `session-list.tsx`
 `sidebar-*.tsx`. `sessions/session-list-rows.ts` resolves row relationships, while
 `lib/session-opened-by-tree.ts` builds the presentation tree.
 
+GitHub repository groups and local project folders both expose a desktop drag handle.
+Their orders are persisted per workspace; local project keys also include the owning
+machine so projects from different devices cannot collide. See the
+[sidebar project ordering Spec](../../../../specs/sidebar-project-ordering.md).
+
 [Sidebar relationship rationale](../../../../.agents/docs/components-sidebar-session-tree.md)
 explains why exact opener navigation and root-row indentation use separate ids.
 A child Tab may open an independent Session: the row sits under the root, but its
 navigation must still return to the precise creating Tab.
 
+Updated organize mode is a mixed recency list. The sidebar view popover exposes
+`Show Project` as a switch below the View and Tasks menu groups. It controls the
+second line with folder / muted GitHub owner mark + project name. The complete
+row acts as the Switch hover target, changing only the track color. It remains
+visible but disabled in Project mode, with a right-side tooltip explaining that
+it is available in Updated view. Touch users open the same hint by tapping the
+disabled row, while keyboard focus also exposes it. GitHub owner marks keep
+their original colors at a fixed 60% opacity in every row state. Nested opened
+Sessions stay one title line so the 30px tree trunk still meets. Workspace-mode
+Pinned omits the line.
+Decisions:
+[project context](../../../../.agents/notes/implemented/feature/2026-09-20-sidebar-updated-project-context.md)
+and [display preference](../../../../.agents/notes/implemented/feature/2026-09-20-sidebar-updated-project-display-preference.md).
+
 ## Entry points and layout
+
+- [Zen layout](../../../../specs/zen-layout.md): `AppCommands` dispatches the shared
+  layout action; the mounted desktop Session publishes its right-panel controls.
 
 - Sidebar Search, immediately below New Chat, opens the shared command palette
   through `lib/commands/palette-state.ts`; see the [Spec](../../../../specs/sidebar-search.md).

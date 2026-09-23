@@ -132,6 +132,19 @@ export interface SessionObservation {
   unsubscribe(): void;
 }
 
+/** Narrow synchronous projection for metadata observers; never materializes bodies. */
+export interface SessionModelSummaryReader {
+  count(): number;
+  readModelSummaryAt(position: number):
+    | {
+        role: string | undefined;
+        modelInfo: { modelId: string | undefined; name: string | undefined };
+        itemCount: number;
+        planCount: number;
+      }
+    | undefined;
+}
+
 /** Authoritative reads. In-process storage returns synchronously; the display
  * cache also accepts delayed reads and fences their results against events. */
 export interface SessionHistoryReader {

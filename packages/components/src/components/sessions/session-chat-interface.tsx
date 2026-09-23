@@ -1,3 +1,4 @@
+import { windowPreparationAtom } from '@/lib/window-preparation';
 import { conversationCopyRange } from '@/lib/conversation-copy-range';
 import { describeCopiedConversation } from '@/lib/describe-copied-conversation';
 import { SessionShareRequestCards } from '../sharing/session-share-request-cards';
@@ -228,9 +229,12 @@ import { PrLinkProvider } from '@/components/ai-gui/pr-link-context';
 import {
   COMMIT_AND_PUSH_PROMPT,
   CREATE_DRAFT_PR_BASE_PROMPT,
+  CREATE_DRAFT_PR_ORIGIN_PROMPT,
   CREATE_PR_BASE_PROMPT,
+  CREATE_PR_ORIGIN_PROMPT,
   PR_BRANCH_UPKEEP_PROMPT,
   withPrBranchUpkeep,
+  withQuickActionOrigin,
 } from './create-pr-prompt';
 import { AutoReviewMenuItem } from './auto-review-menu-item';
 import { WorktreeIcon } from '@/components/icons/worktree-icon';
@@ -1272,7 +1276,7 @@ export function SessionHeaderMenu({
           {onOpenPublicShare && (
             <DropdownMenuItem onClick={onOpenPublicShare}>
               <Share2 className="h-3.5 w-3.5 shrink-0" />
-              {t('sharing.manager.title', 'Share conversation')}
+              {t('sharing.manager.title', 'Share')}
             </DropdownMenuItem>
           )}
 
@@ -2000,6 +2004,7 @@ export const SessionChatInterface = memo(
       };
     }, [session.id]);
     const { t, i18n } = useTranslation();
+    const preparingWindow = useAtomValue(windowPreparationAtom);
     const isMobile = useIsMobile();
     const isNativeApp = isNativeAppShell();
     const hidesBillingUi = isMobile || isNativeApp;
@@ -2202,6 +2207,13 @@ export const SessionChatInterface = memo(
       selectedModelId: sessionConfigCandidates.modelId,
       configOptionValues: sessionConfigCandidates.configOptionValues,
     });
+    const steerCapability = session.agentConfigId
+      ? sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)]
+      : undefined;
+    const nativeSteerAvailable = shouldRequestNativeQueueSteer(
+      capabilityAuthority,
+      steerCapability
+    );
     const sessionSelectorOptions = useMemo(
       () => ({
         capabilityAuthority,
@@ -2838,10 +2850,6 @@ export const SessionChatInterface = memo(
       }
       return resolveActivityFromHistory(sessionHistory);
     }, [liveSessionStatus, sessionHistory]);
-    const runningReasoningLabel =
-      session.agentType === 'codex' && liveSessionStatus?.type === 'running'
-        ? (liveSessionStatus.detail ?? null)
-        : null;
 
     const activeAssistantTurnId = useMemo(() => {
       return resolveActiveAssistantTurnId(sessionHistory);
@@ -3485,7 +3493,7 @@ export const SessionChatInterface = memo(
       if (
         !shouldMarkSessionRead({
           rendersConversation: !hideMessageArea,
-          isVisible,
+          isVisible: isVisible && !preparingWindow,
           lastMessageAt,
           lastReadAt: lastReadAtForReceiptRef.current,
         })
@@ -3499,7 +3507,7 @@ export const SessionChatInterface = memo(
       // a new message arrives. Deliberately do not depend on lastReadAt: moving
       // that receipt backwards is the user's explicit "Mark as unread" action,
       // which must remain visible until they leave and reopen the conversation.
-    }, [hideMessageArea, isVisible, markSessionRead, session.id, session.lastMessageAt]);
+    }, [hideMessageArea, isVisible, preparingWindow, markSessionRead, session.id, session.lastMessageAt]);
 
     const isDispatching = inputActionState === 'dispatching';
     const isAgentBusy = isSessionPromptBusy({
@@ -3635,15 +3643,13 @@ export const SessionChatInterface = memo(
         : isSessionActive
           ? liveSessionStatus?.type === 'requestPermission'
             ? t('sessions.statusIndicator.requestPermission')
-            : // Codex's transient reasoning summary, when it reports one.
-              (runningReasoningLabel ??
-              (runningActivity === 'imageGenerating'
-                ? t('sessions.statusIndicator.imageGenerating')
-                : // Reading, running and editing all read as "Working"; the
-                  // collapsed tool groups above already say which.
-                  runningActivity === 'exploring' || runningActivity === 'writing'
-                  ? t('sessions.working', 'Working')
-                  : t('sessions.statusIndicator.thinking')))
+            : runningActivity === 'imageGenerating'
+              ? t('sessions.statusIndicator.imageGenerating')
+              : // Reading, running and editing all read as "Working"; the
+                // collapsed tool groups above already say which.
+                runningActivity === 'exploring' || runningActivity === 'writing'
+                ? t('sessions.working', 'Working')
+                : t('sessions.statusIndicator.thinking')
           : hasPendingDispatch && statusStripState == null
             ? // Pre-start only while the turn can actually start: any
               // connection/machine problem (browser offline, machine removed or
@@ -3955,6 +3961,7 @@ export const SessionChatInterface = memo(
           isPromptBusy: isAgentBusy,
           hasUnfinishedAssistantTurn: activeAssistantTurnId != null,
           queuedMessageBehavior,
+          nativeSteerAvailable,
         });
         const startedAtMs = getPerformanceNowMs();
         const inputSummary = summarizeInputBlocksForAnalytics(normalized);
@@ -4064,6 +4071,7 @@ export const SessionChatInterface = memo(
         isAgentBusy,
         queueInputBlocks,
         queuedMessageBehavior,
+        nativeSteerAvailable,
         sessionDocReady,
         selectedModeId,
         selectedModelId,
@@ -4405,13 +4413,18 @@ export const SessionChatInterface = memo(
     // Composed, not two fully-inlined strings: the upkeep paragraph then lives in
     // one key per language instead of being repeated inside both prompts.
     const prBranchUpkeep = t('sessions.prompts.prBranchUpkeep', PR_BRANCH_UPKEEP_PROMPT);
-    const createPrPrompt = withPrBranchUpkeep(
-      t('sessions.prompts.createPr', CREATE_PR_BASE_PROMPT),
-      prBranchUpkeep
+    // The origin line tells the user, reading back, that this message came from
+    // the button rather than from something they typed.
+    const createPrPrompt = withQuickActionOrigin(
+      t('sessions.prompts.createPrOrigin', CREATE_PR_ORIGIN_PROMPT),
+      withPrBranchUpkeep(t('sessions.prompts.createPr', CREATE_PR_BASE_PROMPT), prBranchUpkeep)
     );
-    const createDraftPrPrompt = withPrBranchUpkeep(
-      t('sessions.prompts.createDraftPr', CREATE_DRAFT_PR_BASE_PROMPT),
-      prBranchUpkeep
+    const createDraftPrPrompt = withQuickActionOrigin(
+      t('sessions.prompts.createDraftPrOrigin', CREATE_DRAFT_PR_ORIGIN_PROMPT),
+      withPrBranchUpkeep(
+        t('sessions.prompts.createDraftPr', CREATE_DRAFT_PR_BASE_PROMPT),
+        prBranchUpkeep
+      )
     );
     const commitAndPushPrompt = t('sessions.prompts.commitAndPush', COMMIT_AND_PUSH_PROMPT);
 
@@ -5238,33 +5251,21 @@ export const SessionChatInterface = memo(
       ]
     );
 
-    const queueSteerCapability = session.agentConfigId
-      ? sessionMachine?.acpCapabilities?.[getAcpCapabilityCacheKey(session.agentConfigId)]
-      : undefined;
-    const shouldUseNativeQueueSteer = shouldRequestNativeQueueSteer(
-      capabilityAuthority,
-      queueSteerCapability
-    );
     const handleSteerQueuedMessage = useCallback(
       async (item: MessageQueueItem) => {
         // Interrupt-and-send always runs the queue head next, so it is only a
         // valid steer substitute for the first item. Later items are steerable
         // exclusively through native acknowledged steering.
-        if (messageQueue[0]?.$cid !== item.$cid && !shouldUseNativeQueueSteer) {
+        if (messageQueue[0]?.$cid !== item.$cid && !nativeSteerAvailable) {
           return;
         }
-        if (shouldUseNativeQueueSteer) {
+        if (nativeSteerAvailable) {
           await handleNativeSteerQueuedMessage(item);
           return;
         }
         await handleInterruptAndSend(item);
       },
-      [
-        handleInterruptAndSend,
-        handleNativeSteerQueuedMessage,
-        messageQueue,
-        shouldUseNativeQueueSteer,
-      ]
+      [handleInterruptAndSend, handleNativeSteerQueuedMessage, messageQueue, nativeSteerAvailable]
     );
 
     const handleReorderQueueItem = useCallback(
@@ -5770,7 +5771,7 @@ export const SessionChatInterface = memo(
         {shouldShowOpenInIdeButton && isElectronRendererForPathLaunch && (
           <div className={cn(SESSION_PAGE_HEADER_PILLS_CLASS, 'items-center')}>
             <Button
-              className="h-6 px-2 py-1 rounded-r-none border-r-0 gap-1"
+              className="h-6 px-2 py-1 rounded-r-none border-r-0 gap-1 shadow-none"
               variant="outline"
               size="sm"
               onClick={handleOpenInIde}
@@ -5781,7 +5782,7 @@ export const SessionChatInterface = memo(
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
-                  className="h-6 px-1 py-1 rounded-l-none"
+                  className="h-6 px-1 py-1 rounded-l-none shadow-none"
                   variant="outline"
                   size="sm"
                   aria-label={t('sessions.selectPathLauncher', 'Select launcher')}
@@ -5915,6 +5916,15 @@ export const SessionChatInterface = memo(
 
     return (
       <PrLinkProvider prUrl={latestPr?.url} onOpenPrTab={prLinkHandler}>
+        {isVisible &&
+          sessionDocReady &&
+          (sessionHistory.length > 0 || (sessionHistoryLength === 0 && sessionDocSynced)) && (
+            <span
+              hidden
+              data-window-session-ready={session.id}
+              data-window-requires-stream={sessionHistoryLength > 0 ? 'true' : undefined}
+            />
+          )}
         <SessionConversationPage
           className={className}
           dropActive={imageDropZone.isActive || sessionMentionOverlay}
@@ -6204,7 +6214,7 @@ export const SessionChatInterface = memo(
                             !!activeAssistantTurnId &&
                             !isExternalHistoryRefreshing
                           }
-                          nativeSteerAvailable={shouldUseNativeQueueSteer}
+                          nativeSteerAvailable={nativeSteerAvailable}
                         />
                       ) : undefined
                     }
@@ -6217,7 +6227,8 @@ export const SessionChatInterface = memo(
                   <div className={shareSelection.active ? 'hidden' : 'contents'}>
                     {shouldReplaceComposerWithPermission ? null : (
                       <SessionChatInputArea
-                        claimNavigationFocus={isVisible ? claimNavigationFocus : undefined}
+                        isVisible={isVisible && !shareSelection.active}
+                        claimNavigationFocus={isVisible && !preparingWindow ? claimNavigationFocus : undefined}
                         ref={inputAreaRef}
                         session={session}
                         sessionLocalProjectRootPath={resolvedLocalProjectMeta?.rootPath ?? null}

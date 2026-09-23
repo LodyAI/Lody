@@ -321,6 +321,64 @@ function GlmPresetWrapper({ credentialModeId }: { credentialModeId?: string } = 
   );
 }
 
+function PiExtensionsWrapper({
+  supported = true,
+  scanError = false,
+}: {
+  supported?: boolean;
+  scanError?: boolean;
+}) {
+  const [open, setOpen] = useState(true);
+  return (
+    <AgentConfigDialog
+      open={open}
+      onOpenChange={setOpen}
+      mode={{
+        kind: 'edit',
+        config: {
+          ...existingConfig,
+          name: 'Pi',
+          agentType: 'pi',
+          runtimeOverrides: { piExtensions: ['/fixture/custom/provider.ts'] },
+        },
+      }}
+      machine={{
+        ...makeMachineWithClaudeCaps(),
+        protocolCapabilities: supported ? { piExtensions: 1 } : {},
+      }}
+      onSubmit={async () => {}}
+      onRefreshCapabilities={async (args) => ({
+        ...(await refreshCapabilities(args)),
+        agentType: 'pi',
+      })}
+      onScanPiExtensions={async () =>
+        scanError
+          ? { success: false, error: 'Synthetic scan failure' }
+          : {
+              success: true,
+              discovery: {
+                version: 1,
+                agentDir: '/fixture/pi/agent',
+                warnings: [],
+                extensions: [
+                  {
+                    path: '/fixture/pi/agent/extensions/provider.ts',
+                    name: 'Provider extension',
+                    source: 'directory',
+                  },
+                  {
+                    path: '/fixture/pi/agent/npm/node_modules/example-tools/index.js',
+                    name: 'Example tools',
+                    source: 'package',
+                  },
+                ],
+              },
+            }
+      }
+    />
+  );
+}
+
 const meta = {
   title: 'Settings/AgentConfigDialog',
   parameters: { layout: 'fullscreen' },
@@ -329,6 +387,12 @@ const meta = {
 
 export default meta;
 type Story = StoryObj<typeof meta>;
+
+export const PiExtensions: Story = { render: () => <PiExtensionsWrapper /> };
+export const PiExtensionsUnsupported: Story = {
+  render: () => <PiExtensionsWrapper supported={false} />,
+};
+export const PiExtensionsScanError: Story = { render: () => <PiExtensionsWrapper scanError /> };
 
 export const Create: Story = {
   render: () => <CreateWrapper />,

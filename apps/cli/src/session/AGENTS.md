@@ -93,9 +93,9 @@ Contract: specs/session-orchestration.md.
 - Dispatch and claim rescan the current row and reject changed compatibility under canonical
   `buildSessionLaunchConfig` semantics; a published incompatible resource cleans up first.
 - Nested child Sessions are rejected: ownership resolves one parent hop only.
-- Fork commits at `LoroDocumentManager.persistPendingChanges()`; cloud `waitUntilSynced()` is
-  never a success condition. Persist the target placeholder before ACP; a failed final commit
-  terminates the fork and durably deletes the target.
+- Fork commits at `persistPendingChanges()`, never cloud sync. Persist its placeholder
+  before ACP; failed commits terminate and durably delete the target. Post-commit
+  display projections stay outside compensation.
 - Fork an active source turn only on an advertised `_meta.lody.forkAtTurn = { version: 1 }`, pass
   the adapter's `_meta.lody.turnId` through unchanged as `acpTurnId`, and reuse the source Git
   identity only on an exact requester match. New-worktree forks also require native fork support,

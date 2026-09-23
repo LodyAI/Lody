@@ -752,7 +752,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         <SessionRowLeadingSlot
           showMenuButton={hasMenuActions}
           menuLabel={contextMenuLabels.moreActions}
-          fadeClassName="group-hover/row:opacity-0"
+          fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
           revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
         />
         {showPinnedIcon && item.isPinned ? (
@@ -783,12 +783,9 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
           isWaitingPermission={item.isWaitingPermission}
           isWorking={item.isWorking}
           hasUnreadMessages={item.hasUnreadMessages}
-          fadeClassName="group-hover/row:opacity-0"
+          fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
           restIcon={
-            showPr ||
-            showMergeablePill ||
-            isMobile ||
-            item.sharing?.visibility === 'private' ? (
+            showPr || showMergeablePill || isMobile || item.sharing?.visibility === 'private' ? (
               <span
                 className={cn(
                   'flex select-none items-center gap-1.5 text-[11px] tabular-nums text-sidebar-foreground-muted/80',

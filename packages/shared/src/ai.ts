@@ -37,6 +37,7 @@ export const BUILTIN_AGENTS = [
   ...MANAGED_BUILTIN_RUNTIMES.map(({ agentType, displayName }) => ({ agentType, displayName })),
   { agentType: 'deepseek', displayName: 'DeepSeek Harness' },
   { agentType: 'bub', displayName: 'Bub' },
+  { agentType: 'dimcode', displayName: 'Dimcode' },
 ] as const;
 
 export type BuiltinAgent = (typeof BUILTIN_AGENTS)[number];
@@ -72,6 +73,7 @@ const BUILTIN_ACP_TITLE_OWNERSHIP: Record<BuiltinAgentType, 'none' | 'untagged' 
   // Bub's ACP server does not push an authoritative session title, so Lody
   // keeps running its isolated title agent.
   bub: 'none',
+  dimcode: 'none',
 };
 
 const builtinAcpTitleOwnership = (
@@ -135,7 +137,11 @@ export type BuiltinRuntimeOverrides = {
   claudeCodeExecutable?: string;
   kimiPath?: string;
   grokPath?: string;
+  piExtensions?: string[];
 };
+
+export const PI_EXTENSIONS_MAX_SELECTIONS = 32;
+export const PI_EXTENSION_PATH_MAX_LENGTH = 4096;
 
 export const isBuiltinRuntimeOverrides = (value: unknown): value is BuiltinRuntimeOverrides => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -146,13 +152,23 @@ export const isBuiltinRuntimeOverrides = (value: unknown): value is BuiltinRunti
     claudeCodeExecutable?: unknown;
     kimiPath?: unknown;
     grokPath?: unknown;
+    piExtensions?: unknown;
   };
   return (
     (record.codexPath === undefined || typeof record.codexPath === 'string') &&
     (record.claudeCodeExecutable === undefined ||
       typeof record.claudeCodeExecutable === 'string') &&
     (record.kimiPath === undefined || typeof record.kimiPath === 'string') &&
-    (record.grokPath === undefined || typeof record.grokPath === 'string')
+    (record.grokPath === undefined || typeof record.grokPath === 'string') &&
+    (record.piExtensions === undefined ||
+      (Array.isArray(record.piExtensions) &&
+        record.piExtensions.length <= PI_EXTENSIONS_MAX_SELECTIONS &&
+        record.piExtensions.every(
+          (entry) =>
+            typeof entry === 'string' &&
+            entry.trim().length > 0 &&
+            entry.length <= PI_EXTENSION_PATH_MAX_LENGTH
+        )))
   );
 };
 
@@ -160,8 +176,8 @@ export const hasBuiltinRuntimeOverrideValues = (
   runtimeOverrides: BuiltinRuntimeOverrides | undefined
 ): boolean =>
   !!runtimeOverrides &&
-  Object.values(runtimeOverrides).some(
-    (value) => typeof value === 'string' && value.trim().length > 0
+  Object.values(runtimeOverrides).some((value) =>
+    Array.isArray(value) ? value.length > 0 : typeof value === 'string' && value.trim().length > 0
   );
 
 export const getBuiltinRuntimeOverrideSourceVersionSuffix = (
@@ -435,9 +451,12 @@ export const getReadableAcpCapabilityCacheEntryForRuntimeOverrides = (
     return undefined;
   }
   const sourceVersionSuffix = getBuiltinRuntimeOverrideSourceVersionSuffix(runtimeOverrides);
-  return !sourceVersionSuffix || readableEntry.sourceVersion?.endsWith(sourceVersionSuffix) === true
-    ? readableEntry
-    : undefined;
+  const matches = sourceVersionSuffix
+    ? readableEntry.sourceVersion?.endsWith(sourceVersionSuffix) === true
+    : readableEntry.cliType !== 'builtin' ||
+      readableEntry.agentType !== 'pi' ||
+      !readableEntry.sourceVersion?.includes('+override:');
+  return matches ? readableEntry : undefined;
 };
 
 export const isAcpCapabilityCacheEntryCurrentForRuntimeOverrides = (
@@ -447,8 +466,9 @@ export const isAcpCapabilityCacheEntryCurrentForRuntimeOverrides = (
   if (!isAcpCapabilityCacheEntryCurrent(entry)) {
     return false;
   }
-  const sourceVersionSuffix = getBuiltinRuntimeOverrideSourceVersionSuffix(runtimeOverrides);
-  return !sourceVersionSuffix || entry.sourceVersion?.endsWith(sourceVersionSuffix) === true;
+  return (
+    getReadableAcpCapabilityCacheEntryForRuntimeOverrides(entry, runtimeOverrides) !== undefined
+  );
 };
 
 export const getAcpCapabilityCacheEntryAuthority = (
@@ -501,9 +521,10 @@ export const isManagedBuiltinAgentType = (
  * Builtins that may be created through the durable provider-setup queue.
  * Managed runtimes use it for download + verification; Bub uses the same queue
  * only to keep its user-installed command unpublished until a live probe passes.
+ * Dimcode uses the same verification path with its npx-managed package.
  */
 export const supportsBuiltinProviderSetup = (agentType: string): agentType is BuiltinAgentType =>
-  isManagedBuiltinAgentType(agentType) || agentType === 'bub';
+  isManagedBuiltinAgentType(agentType) || agentType === 'bub' || agentType === 'dimcode';
 
 export const getManagedBuiltinRuntimeByAgentType = (
   agentType: string
@@ -1685,15 +1706,11 @@ export type IssuePRMention = {
   number: number;
 };
 
-export type ACPSessionConfig = {
+export type ACPTurnConfig = {
   prompt: string;
   inputBlocks?: SessionInputBlock[];
   cliType: AgentConfigCliType;
   agentType: AgentType;
-  /** Launch spec for `cliType: 'custom'` agents; resolved from the agent config / session meta. */
-  customAcp?: CustomAcpLaunchSpec;
-  /** Advanced runtime binary override for builtin Claude/Codex agents. */
-  runtimeOverrides?: BuiltinRuntimeOverrides;
   modeId?: SessionMode['id'];
   modelId?: string;
   /** Config option values (configId → value) for setSessionConfigOption. */
@@ -1716,11 +1733,19 @@ export type ACPSessionConfig = {
   chainDepth?: number;
 };
 
+/** Provider launch fields belong only to the durable session config, never per-turn input. */
+export type ACPSessionConfig = ACPTurnConfig & {
+  /** Launch spec for `cliType: 'custom'` agents; resolved from the agent config / session meta. */
+  customAcp?: CustomAcpLaunchSpec;
+  /** Advanced runtime binary override for builtin Claude/Codex agents. */
+  runtimeOverrides?: BuiltinRuntimeOverrides;
+};
+
 /**
  * Persisted per-user-turn dispatch config.
  * Keep this looser than `ACPSessionConfig` so older docs and partial writes remain readable.
  */
-export type SessionTurnInputConfig = Partial<ACPSessionConfig> & {
+export type SessionTurnInputConfig = Partial<ACPTurnConfig> & {
   /** An accepted steer has no independently editable provider turn boundary. */
   _lodyDeliveryKind?: import('./message-schemas').SessionHistoryDeliveryKind;
 };

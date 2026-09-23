@@ -62,6 +62,12 @@ Parent instructions apply.
 - `lody_session_create_options` publishes valid run-config values per agent config and stays
   sparse by default (online Machines, one agent config, the current local project, no GitHub
   fetch), expanding only through explicit query inputs.
+- Machine liveness is THREE-state. `getOnlineMachineIds()` returning null means the presence room
+  could not be joined — status UNKNOWN, never offline. Block a dispatch or report `MACHINE_OFFLINE`
+  only for a definite `offline`; an unknown Machine proceeds and fails against its own deadline,
+  and a surface reporting liveness carries the state, not a boolean. Collapsing unknown to offline
+  refused healthy Machines and silently emptied candidate lists during a cold start or reconnect
+  backoff. Contract: `specs/loro-ephemeral-presence-channel.md`.
 - `session_list` defaults to 20 (maximum 100) and `session_history` to 10 (maximum 50 and 128 KiB);
   keep the MCP surface bounded though the CLI retains `session history --all`. `session_list`
   and `session_status_many` derive busy/idle from the same history, durable queue, presence, and

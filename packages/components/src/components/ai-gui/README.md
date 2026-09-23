@@ -8,12 +8,12 @@ the reasoning behind those rules.
 
 ## Ownership
 
-| Area      | Owner                                            | Contract                                                                          |
-| --------- | ------------------------------------------------ | --------------------------------------------------------------------------------- |
-| Stream    | `view.tsx`, `build-chat-stream-items.ts`         | Stable Virtua rows and scroll.                                                    |
-| User rows | `view.tsx`                                       | Multi-member sender metadata and desktop profile.                                 |
-| Turns     | `assistant-turn-render-blocks.ts`                | Activity groups and foldable segments.                                            |
-| Outline   | `conversation-outline-*`                         | Round ticks and navigation.                                                       |
+| Area                    | Owner                                            | Contract                                                                          |
+| ----------------------- | ------------------------------------------------ | --------------------------------------------------------------------------------- |
+| Stream                  | `view.tsx`, `build-chat-stream-items.ts`         | Stable Virtua rows and scroll.                                                    |
+| User rows               | `view.tsx`                                       | Multi-member sender metadata and desktop profile.                                 |
+| Turns                   | `assistant-turn-render-blocks.ts`                | Activity groups and foldable segments.                                            |
+| Outline                 | `conversation-outline-*`                         | Round ticks and navigation.                                                       |
 | Image sharing selection | [`message-selection.tsx`](message-selection.tsx) | Temporary message selection, drag rectangle, range modifiers, and edge scrolling. |
 
 - `conversation-outline-rail.tsx` renders one tick per round (a user turn plus its
@@ -27,9 +27,15 @@ the reasoning behind those rules.
   surface. Invariants live in
   [mermaid-diagram-rendering.md](mermaid-diagram-rendering.md).
 - `message-content-guards.ts` gates which shared `MessageContent` variants render.
-- `chat-failed-error-report.ts` / `chat-failed-detail-dialog.tsx` own raw error
-  extraction and its modal; `terminal-component.tsx` / `terminal-preview.ts` own
-  terminal output.
+- `chat-failed-error-report.ts` owns raw error extraction; `view.tsx`'s
+  `AgentNoticeBanner` renders warnings and failures, and
+  `build-chat-stream-items.ts` folds them onto the emitting turn. Invariants live
+  in [agent-notices.md](agent-notices.md). `chat-failed-detail-dialog.tsx` is the
+  retired modal, no longer reached from the conversation.
+  `terminal-component.tsx` / `terminal-preview.ts` own terminal output.
+- `conversation-outline-rail.tsx`, `conversation-outline-rail-geometry.ts`, and
+  `conversation-outline-arrival-intent.ts` own the reader-position rail.
+  Invariants live in [conversation-outline.md](conversation-outline.md).
 - `session-file-card.tsx`, `session-file-preview-dialog.tsx`, and
   [session-files-rendering.md](session-files-rendering.md) own attachment and
   image-preview rendering.
@@ -38,7 +44,8 @@ the reasoning behind those rules.
 
 `tests/build-chat-stream-items.test.ts`, `tests/conversation-outline*.test.ts`,
 `tests/user-message-sender-identity.test.tsx`, the `ExtremeConversation` story,
-`AssistantTurnAlignment.stories`, and the multiple-sender states in
+`AssistantTurnAlignment.stories`, `ConversationViewStream.OpenWithBackgroundFacts`
+(open, then release fact batches to check the visible tail), and the multiple-sender states in
 `SessionConversationPage.stories.tsx`.
 
 The assistant footer's duration — live and finished on desktop, and the leading
@@ -46,7 +53,9 @@ slot on mobile — is pinned by `tests/assistant-turn-action-inset.test.ts`,
 `tests/chat-virtual-rows-identity.test.ts`, and
 `tests/session-history-duration.test.ts`. The desktop live state is shown by
 `AssistantTurnAlignment.stories.tsx`; `MobileTurnDurationSlot.stories.tsx` shows
-the mobile live and finished states.
+the mobile live and finished states. `tests/agent-activity-row.test.tsx` covers
+live status placement above the subagent task summary, both with and without
+footer actions, and task-summary expansion.
 
 ## Why the rules read the way they do
 

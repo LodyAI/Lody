@@ -1,5 +1,95 @@
 import { expect, test } from '@playwright/test';
 
+for (const openWith of ['click', 'keyboard'] as const) {
+  test(`project search receives focus on ${openWith} and on reopening`, async ({ page }) => {
+    await page.goto('/iframe.html?id=chat-unifiedprojectselector--selected-private&viewMode=story');
+    const trigger = page.getByRole('button', { name: 'lody', exact: true });
+    const search = page.getByPlaceholder('Search projects', { exact: true });
+    for (let opening = 0; opening < 2; opening += 1) {
+      if (openWith === 'keyboard') {
+        await trigger.focus();
+        await page.keyboard.press('Enter');
+      } else {
+        await trigger.click();
+      }
+      await expect(search).toBeFocused();
+      await expect(search).toHaveValue('');
+      await page.getByRole('menuitem').first().hover();
+      await page.keyboard.type('loro-inspector');
+      await expect(search).toHaveValue('loro-inspector');
+      await expect(
+        page.getByRole('menuitem', { name: 'loro-inspector', exact: true })
+      ).toBeVisible();
+      await expect(page.getByRole('menuitem')).toHaveCount(4);
+      await page.keyboard.press('Escape');
+      await expect(search).toBeHidden();
+    }
+  });
+}
+
+for (const openWith of ['hover', 'click', 'keyboard'] as const) {
+  test(`model search receives focus on ${openWith} and on reopening`, async ({ page }) => {
+    await page.goto('/iframe.html?id=sessions-composerrunconfigmenu--model-search&viewMode=story');
+    const search = page.getByRole('textbox', { name: 'Search models', exact: true });
+    // The story opens the submenu for its preview. Start our interactions closed.
+    await expect(search).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(search).toBeHidden();
+    const trigger = page.getByRole('button', { name: 'Run configuration', exact: true });
+    const model = page.getByRole('menuitem', { name: /^Model/ });
+    for (let opening = 0; opening < 2; opening += 1) {
+      await trigger.click();
+      if (openWith === 'keyboard') {
+        await model.focus();
+        await page.keyboard.press('ArrowRight');
+      } else if (openWith === 'click') {
+        await model.click();
+      } else {
+        await model.hover();
+      }
+      await expect(search).toBeFocused();
+      if (openWith !== 'keyboard') {
+        // A real pointer keeps moving over the trigger after the submenu opens.
+        await model.hover({ position: { x: 12, y: 12 } });
+        if (openWith === 'click') await model.click({ position: { x: 12, y: 12 } });
+        await expect(search).toBeFocused();
+      }
+      await page.keyboard.type('54m');
+      await expect(search).toHaveValue('54m');
+      const match = page.getByRole('menuitemradio');
+      await expect(match).toHaveText(['5.4-mini']);
+      await page.keyboard.press('ArrowDown');
+      await expect(match).toBeFocused();
+      await page.keyboard.press('Escape');
+      await expect(search).toBeHidden();
+      await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+      await page.mouse.move(0, 0);
+    }
+  });
+}
+
+test.describe('model search on touch', () => {
+  test.use({ hasTouch: true });
+
+  test('opening the submenu does not autofocus until the field is tapped', async ({ page }) => {
+    await page.goto('/iframe.html?id=sessions-composerrunconfigmenu--model-search&viewMode=story');
+    const search = page.getByRole('textbox', { name: 'Search models', exact: true });
+    await expect(search).toBeVisible();
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Run configuration', exact: true }).tap();
+    const model = page.getByRole('menuitem', { name: /^Model/ });
+    await model.tap();
+    await expect(search).toBeVisible();
+    await expect(search).not.toBeFocused();
+    await model.tap();
+    await expect(search).not.toBeFocused();
+    await search.tap();
+    await page.keyboard.type('54m');
+    await expect(search).toHaveValue('54m');
+    await expect(page.getByRole('menuitemradio')).toHaveText(['5.4-mini']);
+  });
+});
+
 test('editing a sent message focuses its input with the caret at the end', async ({ page }) => {
   await page.goto('/iframe.html?id=ai-gui-usermessageeditor--from-message-edit&viewMode=story');
   await page.getByRole('button', { name: 'Edit message', exact: true }).click();
@@ -168,3 +258,120 @@ for (const platform of ['desktop', 'narrow-browser', 'wide-native'] as const) {
     await expect(input).not.toBeFocused();
   });
 }
+
+test.describe('attachment upload submission', () => {
+  for (const width of [390, 1280]) {
+    test.describe(`viewport ${width}`, () => {
+      test.use({ viewport: { width, height: 900 } });
+      for (const action of ['Enter', 'Meta+Shift+Enter', 'cancel', 'failure'] as const) {
+        test(`retains upload intent for ${action}`, async ({ page }) => {
+          let release!: (status: number) => void;
+          let started!: () => void;
+          const uploadStarted = new Promise<void>((resolve) => {
+            started = resolve;
+          });
+          const uploadResult = new Promise<number>((resolve) => {
+            release = resolve;
+          });
+          const image = {
+            type: 'image',
+            imageId: 'synthetic-browser-image',
+            fileName: 'sample.png',
+            mimeType: 'image/png',
+            sizeBytes: 68,
+            width: 1,
+            height: 1,
+          };
+          await page.route('**/session-images/upload', async (route) => {
+            if (route.request().method() === 'OPTIONS') {
+              await route.fulfill({
+                status: 204,
+                headers: {
+                  'access-control-allow-origin': '*',
+                  'access-control-allow-methods': 'POST',
+                  'access-control-allow-headers': 'authorization,content-type',
+                },
+              });
+              return;
+            }
+            started();
+            const status = await uploadResult;
+            await route.fulfill({
+              status,
+              headers: { 'access-control-allow-origin': '*' },
+              json: status === 200 ? { image } : { error: 'Synthetic upload failure' },
+            });
+          });
+          await page.addInitScript(() => {
+            (window as typeof window & { submissions: unknown[] }).submissions = [];
+            window.addEventListener('storybook:attachments-submitted', (event) => {
+              (window as typeof window & { submissions: unknown[] }).submissions.push(
+                (event as CustomEvent).detail
+              );
+            });
+          });
+          await page.goto(
+            '/iframe.html?id=sessions-sessionchatinputarea--uploading-attachments-pending-acceptance&viewMode=story'
+          );
+          const input = page.locator('textarea');
+          await input.fill('Inspect this image');
+          await page.locator('input[type="file"]').setInputFiles({
+            name: 'sample.png',
+            mimeType: 'image/png',
+            buffer: Buffer.from(
+              'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jR1sAAAAASUVORK5CYII=',
+              'base64'
+            ),
+          });
+          await uploadStarted;
+          await input.press(action === 'Meta+Shift+Enter' ? action : 'Enter');
+          await expect(input).toBeDisabled();
+          await expect(
+            page.getByRole('button', { name: 'Cancel send', exact: true })
+          ).toBeVisible();
+          const submissions = () =>
+            page.evaluate(() => (window as typeof window & { submissions: unknown[] }).submissions);
+          expect(await submissions()).toEqual([]);
+          if (action === 'cancel')
+            await page.getByRole('button', { name: 'Cancel send', exact: true }).click();
+          release(action === 'failure' ? 500 : 200);
+          if (action === 'cancel' || action === 'failure') await expect(input).toBeEnabled();
+          if (action === 'cancel')
+            await expect(
+              page.getByRole('img', { name: 'sample.png', exact: true })
+            ).not.toHaveClass(/grayscale/);
+          if (action === 'cancel' || action === 'failure') {
+            await expect(input).toHaveValue('Inspect this image');
+            expect(await submissions()).toEqual([]);
+          } else {
+            await expect.poll(submissions).toHaveLength(1);
+            await expect(
+              page.getByRole('button', { name: 'Cancel send', exact: true })
+            ).toHaveCount(0);
+            await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
+            await expect(
+              page.getByRole('button', { name: 'Run configuration', exact: true })
+            ).toBeDisabled();
+            await expect(input).toBeDisabled();
+            expect(await submissions()).toEqual([
+              {
+                blocks: [image, { type: 'text', text: 'Inspect this image' }],
+                ...(action === 'Meta+Shift+Enter'
+                  ? { options: { invertSubmitBehavior: true } }
+                  : {}),
+              },
+            ]);
+            await page.evaluate(() =>
+              window.dispatchEvent(new Event('storybook:accept-attachments'))
+            );
+            await expect(input).toBeEnabled();
+            await expect(input).toHaveValue('');
+            await expect(
+              page.getByRole('button', { name: 'Run configuration', exact: true })
+            ).toBeEnabled();
+          }
+        });
+      }
+    });
+  }
+});

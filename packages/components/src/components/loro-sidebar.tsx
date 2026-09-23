@@ -50,9 +50,11 @@ import {
   BookOpen,
   Bug,
   CircleHelp,
+  ClipboardList,
   Github,
   SquarePen,
   Link2,
+  ListFilter,
   MessageSquareMore,
   ChevronLeft,
   ChevronRight,
@@ -178,12 +180,15 @@ export interface LoroSidebarProps {
   activeNav?: LoroSidebarNavKey | null;
 
   topContent?: ReactNode;
-  /** Reserves the filter trigger's space in the first visible section header. */
-  desktopFilterPlaceholder?: ReactNode;
+  /** The filter trigger element rendered in-flow on the first visible section
+      header. Caller-owned so its open state survives remounting between slots. */
+  desktopFilterAction?: ReactNode;
   /**
    * In-flow content rendered after {@link sessionListProps} inside the scroll
    * viewport (workspace mode only). LoroAppSidebar uses this to place the Chats
    * section below the GitHub Worktrees list so Chats reads as the last section.
+   * When present without top or pinned content, that section owns the desktop
+   * filter action; the preceding list must not mount a second fallback action.
    */
   afterSessionListContent?: ReactNode;
   bottomFloatingContent?: ReactNode;
@@ -223,6 +228,9 @@ export interface LoroSidebarProps {
    * the visual contract aligned with `SessionList.isLoading` in Workspace mode.
    */
   updatedIsLoading?: boolean;
+  /** Whether Updated-mode rows show their project mark and name below the title. */
+  showUpdatedProjectNames?: boolean;
+  onShowUpdatedProjectNamesChange?: (next: boolean) => void;
   onOrganizeModeChange?: (mode: LoroSidebarOrganizeMode) => void;
   onChatScopeChange?: (scope: LoroSidebarChatScope) => void;
   onSelectUpdatedItem?: (id: string, tabSessionId?: string) => void;
@@ -305,12 +313,19 @@ const defaultLabels: LoroSidebarLabels = {
   workspaceSyncing: 'Syncing workspace…',
   filter: {
     triggerAriaLabel: 'Filter sidebar',
-    organizeHeading: 'Organize',
-    showHeading: 'Show',
+    organizeHeading: 'View',
+    showHeading: 'Tasks',
     organizeProject: 'Project',
     organizeUpdated: 'Updated',
+    updatedProjectNames: 'Show Project',
+    updatedProjectNamesUnavailable: 'Available in Updated view',
     showMyTasks: 'My Tasks',
     showAllTasks: 'All Tasks',
+    emptyMyTasks: 'No tasks match this view',
+    emptyMyTasksHint: 'Try showing every task in this workspace.',
+    emptyAllTasks: 'No tasks yet',
+    emptyAllTasksHint: 'Tasks in this workspace will appear here.',
+    showAllTasksAction: 'Show all tasks',
   },
   updated: {
     heading: 'Chats',
@@ -705,7 +720,7 @@ export const LoroSidebar = memo(function LoroSidebar({
   maxWidth = 420,
   activeNav = null,
   topContent,
-  desktopFilterPlaceholder,
+  desktopFilterAction,
   afterSessionListContent,
   bottomFloatingContent,
   repoSections = defaultRepoSections,
@@ -720,6 +735,8 @@ export const LoroSidebar = memo(function LoroSidebar({
   updatedBucketsCollapsed,
   updatedShowFullBuckets,
   updatedIsLoading = false,
+  showUpdatedProjectNames = true,
+  onShowUpdatedProjectNamesChange,
   onOrganizeModeChange,
   onChatScopeChange,
   onSelectUpdatedItem,
@@ -859,24 +876,68 @@ export const LoroSidebar = memo(function LoroSidebar({
     return null;
   }
 
-  // This instance never moves between section headers: only its same-sized
-  // placeholder moves. That keeps an open popover open across organize changes.
-  const desktopFilterNode = !isMobile ? (
-    <SidebarFilterPopover
-      organize={organizeMode}
-      scope={chatScope}
-      onOrganizeChange={onOrganizeModeChange}
-      onScopeChange={onChatScopeChange}
-      labels={mergedLabels.filter}
-      side="bottom"
-      align="end"
-      triggerClassName="h-5 w-5 [&_svg]:h-4 [&_svg]:w-4"
-    />
-  ) : null;
-  const sectionHeaderFilterPlaceholder = !isMobile
-    ? (desktopFilterPlaceholder ?? <span aria-hidden="true" className="block h-5 w-5" />)
+  // The filter trigger is a normal in-flow action on whichever section header
+  // is first — the row's items-center keeps it aligned, so no overlay or
+  // placeholder. The caller supplies the element with lifted open state so
+  // remounting the one instance at a new slot keeps an open popover open; the
+  // local fallback covers direct uses (e.g. stories) that do not pass one.
+  const sectionHeaderFilterAction = !isMobile
+    ? (desktopFilterAction ?? (
+        <SidebarFilterPopover
+          organize={organizeMode}
+          scope={chatScope}
+          onOrganizeChange={onOrganizeModeChange}
+          onScopeChange={onChatScopeChange}
+          showUpdatedProjectNames={showUpdatedProjectNames}
+          onShowUpdatedProjectNamesChange={onShowUpdatedProjectNamesChange}
+          labels={mergedLabels.filter}
+          side="right"
+          align="start"
+          triggerClassName="h-5 w-5 [&_svg]:h-4 [&_svg]:w-4"
+        />
+      ))
     : null;
   const hasPinnedItems = Boolean(pinnedItems?.length);
+  const isWorkspaceEmpty =
+    organizeMode === 'workspace' &&
+    !topContent &&
+    !hasPinnedItems &&
+    !afterSessionListContent &&
+    !sessionListProps?.isLoading;
+  const workspaceEmptyState = isWorkspaceEmpty ? (
+    <div
+      className="flex flex-col items-center px-6 pb-5 pt-7 text-center"
+      data-sidebar-empty-state={chatScope}
+    >
+      <div className="flex size-9 items-center justify-center rounded-xl bg-sidebar-accent text-sidebar-foreground-muted ring-1 ring-inset ring-sidebar-border/60">
+        {chatScope === 'my' ? (
+          <ListFilter className="size-4" strokeWidth={1.8} aria-hidden="true" />
+        ) : (
+          <ClipboardList className="size-4" strokeWidth={1.8} aria-hidden="true" />
+        )}
+      </div>
+      <p className="mt-3 max-w-[220px] text-[13px] font-medium leading-5 text-sidebar-foreground">
+        {chatScope === 'my' ? mergedLabels.filter.emptyMyTasks : mergedLabels.filter.emptyAllTasks}
+      </p>
+      <p className="mt-0.5 max-w-[220px] text-xs leading-[18px] text-sidebar-foreground-muted">
+        {chatScope === 'my'
+          ? mergedLabels.filter.emptyMyTasksHint
+          : mergedLabels.filter.emptyAllTasksHint}
+      </p>
+      {chatScope === 'my' && onChatScopeChange ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="mt-3 h-7 rounded-full border-sidebar-border bg-sidebar px-3 text-xs font-medium text-sidebar-foreground shadow-none hover:bg-sidebar-hover hover:text-sidebar-hover-foreground"
+          onClick={() => onChatScopeChange('team')}
+        >
+          <Users className="mr-1.5 size-3.5" strokeWidth={1.8} aria-hidden="true" />
+          {mergedLabels.filter.showAllTasksAction}
+        </Button>
+      ) : null}
+    </div>
+  ) : undefined;
   const workspaceIdentityStatus: WorkspaceIdentityStatus | null =
     connectionUiState && connectionUiState !== 'online'
       ? connectionUiState
@@ -909,7 +970,6 @@ export const LoroSidebar = memo(function LoroSidebar({
     workspaceSwitcherEnabled &&
       'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground focus-visible:outline-hidden focus-visible:bg-sidebar-hover'
   );
-  const currentWorkspace = workspaces.find((ws) => ws.id === currentWorkspaceId);
   const getPlanLabel = (planTier: LoroSidebarWorkspace['planTier']) =>
     planTier === 'enterprise'
       ? mergedLabels.planEnterprise
@@ -940,33 +1000,6 @@ export const LoroSidebar = memo(function LoroSidebar({
             {userEmail}
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
-          {currentWorkspace ? (
-            <>
-              <div className="flex min-w-0 items-center gap-2.5 px-2 py-2" data-current-workspace>
-                <WorkspaceAvatar
-                  workspace={{ name: currentWorkspace.name, logo: currentWorkspace.logo }}
-                  className="h-9 w-9 shrink-0 rounded-lg text-sm"
-                  fallbackClassName="rounded-lg"
-                />
-                <div className="flex min-w-0 flex-col gap-0.5">
-                  <span className="truncate text-[0.95em] font-medium leading-tight text-foreground">
-                    {currentWorkspace.name}
-                  </span>
-                  <span className="truncate text-xs leading-tight text-muted-foreground">
-                    {typeof currentWorkspace.memberCount === 'number'
-                      ? t('workspace.switcher.planAndMembers', {
-                          plan: getPlanLabel(currentWorkspace.planTier),
-                          count: currentWorkspace.memberCount,
-                        })
-                      : t('workspace.switcher.plan', {
-                          plan: getPlanLabel(currentWorkspace.planTier),
-                        })}
-                  </span>
-                </div>
-              </div>
-              <DropdownMenuSeparator />
-            </>
-          ) : null}
 
           {workspaces.length > 0 ? (
             <>
@@ -981,12 +1014,18 @@ export const LoroSidebar = memo(function LoroSidebar({
                 <TooltipProvider delayDuration={400}>
                   {workspaces.map((ws) => {
                     const workspaceSlug = ws.slug;
+                    // The avatar carries identity, so the check moves to the
+                    // row's trailing edge. ps-2/pe-8 replace the ps-8 selection
+                    // indent: the 20px avatar and the action rows' 20px icon
+                    // boxes share one leading column, and gap-1.5 lands every
+                    // label on the same text column.
                     const row = (
                       <DropdownMenuRadioItem
                         key={ws.id}
                         value={ws.id}
                         indicator="check"
-                        className="gap-2"
+                        indicatorSide="end"
+                        className="gap-1.5 ps-2 pe-8"
                         onClickCapture={(event) => {
                           if (!workspaceSlug || !isNewWindowClick(event)) return;
                           if (openDesktopWindow(undefined, workspaceSlug)) {
@@ -1000,7 +1039,21 @@ export const LoroSidebar = memo(function LoroSidebar({
                           className="h-5 w-5 shrink-0 text-[10px]"
                         />
                         <span className="min-w-0 truncate">{ws.name}</span>
-                        {ws.planTier ? (
+                        {ws.id === currentWorkspaceId ? (
+                          // The checked row is the current workspace — it
+                          // carries the richer plan/members line that used to
+                          // need a separate header card.
+                          <span className="ml-auto shrink-0 truncate text-[0.75em] text-muted-foreground">
+                            {typeof ws.memberCount === 'number'
+                              ? t('workspace.switcher.planAndMembers', {
+                                  plan: getPlanLabel(ws.planTier),
+                                  count: ws.memberCount,
+                                })
+                              : t('workspace.switcher.plan', {
+                                  plan: getPlanLabel(ws.planTier),
+                                })}
+                          </span>
+                        ) : ws.planTier ? (
                           <Badge
                             variant="secondary"
                             className="ml-auto shrink-0 border-transparent bg-foreground/[0.06] px-1.5 py-0 text-[10px] font-normal text-muted-foreground"
@@ -1050,16 +1103,24 @@ export const LoroSidebar = memo(function LoroSidebar({
             </>
           ) : null}
 
-          <DropdownMenuItem onSelect={() => onCreateWorkspaceClicked?.()}>
-            <Plus className="h-4 w-4" />
+          {/* 20px icon boxes match the radio rows' 20px avatars, so both row
+              kinds share one leading column and one text column. */}
+          <DropdownMenuItem className="gap-1.5" onSelect={() => onCreateWorkspaceClicked?.()}>
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+              <Plus className="h-4 w-4" />
+            </span>
             {mergedLabels.createWorkspace}
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => onInviteClicked?.()}>
-            <Users className="h-4 w-4" />
+          <DropdownMenuItem className="gap-1.5" onSelect={() => onInviteClicked?.()}>
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+              <Users className="h-4 w-4" />
+            </span>
             {mergedLabels.inviteMembers}
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => onLinkRepoClicked?.()}>
-            <Link2 className="h-4 w-4" />
+          <DropdownMenuItem className="gap-1.5" onSelect={() => onLinkRepoClicked?.()}>
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+              <Link2 className="h-4 w-4" />
+            </span>
             {mergedLabels.connectGithubRepo}
           </DropdownMenuItem>
         </DropdownMenuContent>
@@ -1233,11 +1294,6 @@ export const LoroSidebar = memo(function LoroSidebar({
           )}
         >
           <div className="relative">
-            {!isMobile && desktopFilterNode ? (
-              <div className="pointer-events-none absolute right-2 top-1 z-10 flex h-5 items-center">
-                <div className="pointer-events-auto flex">{desktopFilterNode}</div>
-              </div>
-            ) : null}
             {hasPinnedItems ? (
               <div className={cn('pt-1', pinnedSectionCollapsed ? 'pb-1' : 'pb-3')}>
                 <SidebarUpdatedSessionList
@@ -1245,6 +1301,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                   now={now}
                   isMobile={isMobile}
                   showPinnedIcon={false}
+                  showProjectContext={organizeMode === 'updated' && showUpdatedProjectNames}
                   selectedItemId={updatedSelectedItemId ?? null}
                   collapsedBuckets={pinnedSectionCollapsed ? PINNED_BUCKETS_COLLAPSED : undefined}
                   labels={{
@@ -1263,7 +1320,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                   onShareItemWithTeam={onShareUpdatedItemWithTeam}
                   onOpenPullRequest={onOpenUpdatedItemPullRequest}
                   getItemHref={getUpdatedItemHref}
-                  headerAction={sectionHeaderFilterPlaceholder ?? undefined}
+                  headerAction={sectionHeaderFilterAction ?? undefined}
                 />
               </div>
             ) : null}
@@ -1286,6 +1343,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     now={now}
                     isMobile={isMobile}
                     isLoading={updatedIsLoading}
+                    showProjectContext={showUpdatedProjectNames}
                     selectedItemId={updatedSelectedItemId ?? null}
                     labels={mergedLabels.updated}
                     collapsedBuckets={updatedBucketsCollapsed}
@@ -1302,7 +1360,7 @@ export const LoroSidebar = memo(function LoroSidebar({
                     onOpenPullRequest={onOpenUpdatedItemPullRequest}
                     getItemHref={getUpdatedItemHref}
                     headerAction={
-                      hasPinnedItems ? undefined : (sectionHeaderFilterPlaceholder ?? undefined)
+                      hasPinnedItems ? undefined : (sectionHeaderFilterAction ?? undefined)
                     }
                   />
                 </div>
@@ -1319,12 +1377,11 @@ export const LoroSidebar = memo(function LoroSidebar({
                   <SessionList
                     {...sessionListProps}
                     className={sessionListClassName}
+                    emptyState={workspaceEmptyState}
                     headerAction={
-                      topContent || hasPinnedItems
+                      topContent || hasPinnedItems || afterSessionListContent
                         ? sessionListProps.headerAction
-                        : (sessionListProps.headerAction ??
-                          sectionHeaderFilterPlaceholder ??
-                          undefined)
+                        : (sessionListProps.headerAction ?? sectionHeaderFilterAction ?? undefined)
                     }
                   />
                 ) : null}
@@ -1338,8 +1395,8 @@ export const LoroSidebar = memo(function LoroSidebar({
                     <div className="flex items-center gap-2 px-1 text-[0.9em] font-medium text-sidebar-foreground-muted">
                       <Github className="h-3.5 w-3.5" />
                       <span className="truncate">{section.repoFullName}</span>
-                      {sectionIndex === 0 && sectionHeaderFilterPlaceholder ? (
-                        <span className="ml-auto shrink-0">{sectionHeaderFilterPlaceholder}</span>
+                      {sectionIndex === 0 && sectionHeaderFilterAction ? (
+                        <span className="ml-auto shrink-0">{sectionHeaderFilterAction}</span>
                       ) : null}
                     </div>
 
@@ -1440,6 +1497,8 @@ export const LoroSidebar = memo(function LoroSidebar({
               scope={chatScope}
               onOrganizeChange={onOrganizeModeChange}
               onScopeChange={onChatScopeChange}
+              showUpdatedProjectNames={showUpdatedProjectNames}
+              onShowUpdatedProjectNamesChange={onShowUpdatedProjectNamesChange}
               labels={mergedLabels.filter}
             />
           ) : null}

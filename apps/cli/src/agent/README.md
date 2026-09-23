@@ -29,11 +29,16 @@ context/message-flow.md "Upstream".
   `newSession`/`loadSession` share `acp-session-start-gate.ts`.
 - `acp-session-start-gate.ts` — process-wide start semaphore used by
   `Session.createAgent`, `startLocalAcpAgent`, and history-catalog ACP spawn.
-- `setting.ts` — launch resolution for every agent kind.
+- `setting.ts` — launch resolution for every agent kind, including the pinned
+  `npx --prefer-offline -y dimcode@0.5.10 acp` builtin. Dimcode reuses the
+  profile-owned npm cache and startup recovery; credentials remain in its own
+  configuration or provider environment.
 - `deepseek-harness-runtime.ts` — Harness-home (`DSH_HOME`, then `~/.dsh`), atomic-config,
   and npx launch wrapper around the `packages/acp-extension-dsh` submodule. It converts
   the adapter entry to a file URL for Cordis ESM imports, including Windows drive paths,
-  while preset and session directories remain filesystem paths.
+  while preset and session directories remain filesystem paths. Its Windows bootstrap
+  suppresses child consoles inside npm and DSH, including the pinned native Job
+  runner; [compatibility scope and verification](../../../../.agents/notes/implemented/bug-fix/2026-09-22-dsh-windows-console-popups.md).
 - `managed-agent-runtime.ts` — pinned Codex/Claude Code/Grok native and Kimi Node-package
   `.tar.zst` artifacts, checksums, resumable downloads, the active installation profile's
   `agent-binaries` layout, and best-effort `bin` symlinks for complete native CLIs.
@@ -49,6 +54,14 @@ context/message-flow.md "Upstream".
 - `fixtures/` — synthetic test fixtures.
 
 ## Background
+
+### ACP file errors
+
+`fs/read_text_file` maps a missing local file to ACP resource-not-found (`-32002`).
+Other I/O errors propagate, and session validation runs before file access. Provider
+filesystem adapters translate that protocol error to their engine's native missing-file
+semantics. In particular, Kimi may enter Plan before a plan file exists; reading its
+status must retain the distinction between an absent file and an unreadable one.
 
 ### Grok permission handling
 
@@ -129,6 +142,16 @@ capabilities after editing the model catalog. An explicit `DEEPSEEK_BASE_URL` st
 the endpoint's `/models` list rather than local catalog additions. Harness JSONL roots are single-encoding
 stores: an empty or zstd root uses upstream's `zstd`, a raw-only legacy root keeps `none`,
 and a mixed root fails with both paths named.
+
+On Windows, both session and probe/title spawns resolve the selected npx shim from
+the final child PATH and execute its adjacent `node_modules/npm/bin/npx-cli.js`
+with Lody's Node. This keeps the full pinned closure out of `cmd.exe`, whose
+8191-character limit is smaller than the package argument list. Native executable
+shims remain direct launches; a script shim without the standard npm entry fails
+with an actionable error instead of falling through to another installation.
+Cache isolation, startup budgets, and retries still see the original npx command
+and arguments; conversion happens after those policies, on each spawn attempt.
+See the [Windows command-length fix](../../../../.agents/notes/implemented/bug-fix/2026-09-21-dsh-windows-command-length.md).
 
 ### Managed runtimes
 

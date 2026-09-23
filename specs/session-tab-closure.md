@@ -13,8 +13,8 @@ or a local new-conversation draft inside the same Session workspace.
 ## State and lifecycle
 
 `SessionMeta.isTabClosed?: boolean` is independent of `isArchived`. Missing means
-open. The main Session's flag affects only its conversation tab, never its children,
-sidebar row, running agent, pending work, terminal, or worktree. New close actions
+open. The main Session's flag closes only its conversation tab; children, sidebar row
+presence, running agent, pending work, terminal, and worktree remain intact. New close actions
 only write this flag; even persisted empty conversations are not deleted.
 
 The closed list includes `isTabClosed === true || isArchived === true`. This retains
@@ -23,6 +23,17 @@ conversation runs the existing restoration checks and containment rules, then cl
 the selected conversation's close flag. Root restoration includes direct children,
 preserves their independent close flags, and excludes opened-by descendants. A failed
 restore is visible and retryable. No bulk migration guesses the reason for an archive.
+
+Closed and archived conversations do not contribute unread indicators to the desktop
+sidebar, the mobile session list, tabs, parent summaries, project counts, or window
+badges. Existing closed conversations and later background output obey the same rule.
+The one surface that shows their unread state is the desktop top bar's
+closed-conversations list: its trigger shows an unread dot while any listed
+conversation has output newer than its `lastReadAt`, and that row shows the dot. Closing does not
+change `lastReadAt` or add another state: reopening resumes the timestamp comparison,
+and viewing the conversation sends the normal read receipt. Open children still
+contribute unread even when the main tab is closed. Working and permission indicators
+remain independent of unread suppression.
 
 ## Navigation and synchronization
 
@@ -45,8 +56,11 @@ It remains device-local, preserves existing input, retains the closed-list reope
 and does not deactivate a mobile viewer. Hidden
 conversations do not receive read receipts or composer commands. Input drafts remain
 local. Local unsent drafts, Side Chats, and file/tool panels retain their own lifecycle.
-The close accelerator closes the focused tab; closing the final draft returns to a
-fresh local draft. File/tool panels retain their existing close behavior.
+Explicit tab close on the final draft returns to a fresh local draft. The desktop
+close accelerator follows [window-close behavior](desktop-windows.md), including
+window close for a lone conversation/draft, and the opt-in
+[semantic targeting beta](semantic-action-targeting.md). File/tool panels retain
+their existing close lifecycle.
 
 ## Compatibility and evidence
 

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   GitHubFileTooLargeError,
+  githubCreatePRReviewComment,
   githubFetchCheckRuns,
   githubFetchFileAtCommit,
   githubFetchFileBytesAtCommit,
@@ -61,6 +62,60 @@ describe('GitHub PR live reads', () => {
       'reload',
       'reload',
     ]);
+  });
+});
+
+describe('githubCreatePRReviewComment', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("sends a line-anchored body that matches GitHub's line schema", async () => {
+    let sentBody: Record<string, unknown> | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+        sentBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        // GitHub rejects `subject_type` alongside `line` with a 422.
+        if ('subject_type' in sentBody && 'line' in sentBody) {
+          return new Response(JSON.stringify({ message: 'Invalid request.' }), { status: 422 });
+        }
+        return new Response(
+          JSON.stringify({
+            id: 7,
+            node_id: 'PRRC_7',
+            body: sentBody.body,
+            path: sentBody.path,
+            commit_id: sentBody.commit_id,
+            user: null,
+            author_association: 'OWNER',
+            created_at: '2026-09-21T00:00:00.000Z',
+            updated_at: '2026-09-21T00:00:00.000Z',
+            html_url: 'https://github.com/owner/repo/pull/42#discussion_r7',
+            line: sentBody.line,
+            side: sentBody.side,
+          }),
+          { status: 201 }
+        );
+      })
+    );
+
+    const comment = await githubCreatePRReviewComment('token', 'owner/repo', 42, {
+      body: 'Looks off',
+      path: 'src/a.ts',
+      commitId: 'head-sha',
+      line: 12,
+      side: 'RIGHT',
+    });
+
+    expect(sentBody).toEqual({
+      body: 'Looks off',
+      commit_id: 'head-sha',
+      path: 'src/a.ts',
+      line: 12,
+      side: 'RIGHT',
+    });
+    expect(comment).toMatchObject({ id: 7, path: 'src/a.ts', line: 12, subjectType: 'line' });
   });
 });
 

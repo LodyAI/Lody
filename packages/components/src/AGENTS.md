@@ -58,9 +58,10 @@ Performance comparisons must use the current full-Mirror baseline.
 
 ## Zen layout
 
-- `zenLayoutModeAtom` is a transient visibility override, never a persisted sidebar
-  preference. Entering or leaving Zen must not write `sidebarCollapsedAtom` or a
-  Session's persisted right-panel `open` state, so the exact pre-Zen layout restores.
+- Zen preserves sidebar preferences when hiding/restoring a visible layout.
+  If all available sidebars are already closed, its toggle reveals them instead.
+  The mounted desktop Session owns `zenRightPanelAtom` and clears it on unmount.
+  Behavior: [Zen layout](../../../specs/zen-layout.md).
 - An explicit request to show either sidebar exits Zen and reveals that sidebar. Use
   the shared layout-state actions for the navigation sidebar; every Session action
   that opens a viewer, Files, Changes, PR, Browser, or Side Chat must clear Zen.

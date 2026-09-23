@@ -40,6 +40,7 @@ import { Session } from '../src/session/session';
 import { SessionEditAndResendService } from '../src/session/session-edit-and-resend-service';
 import { AcpAuthenticationRequiredError, AgentClient } from '../src/agent/agent-client';
 import { AcpAuthenticationManager } from '../src/agent/acp-authentication';
+import * as piDiscovery from '../src/agent/pi-extensions';
 import { GitExecutableNotFoundError } from '../src/session/worktree/git-process-error';
 import { LodyOperationStore } from '../src/orchestration/operation-store';
 import { markAssistantTurnFinished } from '../src/lib/assistant-turn-finalize';
@@ -244,6 +245,44 @@ const createBaseDeps = (
 };
 
 describe('SessionExecutionService', () => {
+  it('scans the saved Pi profile and rejects missing or non-Pi providers', async () => {
+    const deps = createBaseDeps({});
+    let config: AgentConfigMeta | null = createLaunchConfig({
+      cliType: 'builtin',
+      agentType: 'pi',
+      env: { PI_CODING_AGENT_DIR: '/saved/profile' },
+    });
+    deps.workspaceDocument.getAgentConfigForMachineLaunch = async () => config;
+    const scan = vi
+      .spyOn(piDiscovery, 'discoverManagedPiExtensions')
+      .mockImplementation(async (env) => ({
+        version: 1,
+        agentDir: env?.PI_CODING_AGENT_DIR ?? '/default/profile',
+        extensions: [],
+        warnings: [],
+      }));
+    const service = new SessionExecutionService(deps);
+    try {
+      expect(await service.listMachinePiExtensions(capabilityConfigId)).toMatchObject({
+        success: true,
+        discovery: { agentDir: '/saved/profile' },
+      });
+      config = createLaunchConfig();
+      expect(await service.listMachinePiExtensions(capabilityConfigId)).toMatchObject({
+        success: false,
+      });
+      config = null;
+      expect(await service.listMachinePiExtensions(capabilityConfigId)).toMatchObject({
+        success: false,
+      });
+      expect(await service.listMachinePiExtensions()).toMatchObject({
+        success: true,
+        discovery: { agentDir: '/default/profile' },
+      });
+    } finally {
+      scan.mockRestore();
+    }
+  });
   it('cancels only the named native child and rejects a stale parent turn', async () => {
     const runningChildren = new Set(['child-1', 'child-2']);
     const sessionManager = {
@@ -5768,12 +5807,8 @@ describe('SessionExecutionService', () => {
       } as unknown as LoroDocumentManager,
       turnFinalization: {
         ...createBaseDeps({}).turnFinalization,
-        finalizeACPState: vi.fn(async (_sessionId, turnId, options) => {
-          history = markAssistantTurnFinished(history, {
-            turnId,
-            endedAt: 42,
-            settleContextCompactionAsFailed: options?.settleContextCompactionAsFailed,
-          });
+        finalizeACPState: vi.fn(async (_sessionId, turnId) => {
+          history = markAssistantTurnFinished(history, { turnId, endedAt: 42 });
         }),
       },
     });
@@ -6571,11 +6606,10 @@ describe('SessionExecutionService', () => {
       processMessageQueue: vi.fn(async () => {}),
     });
     vi.mocked(deps.turnFinalization.finalizeACPState).mockImplementation(
-      async (_sessionId, turnId, options) => {
+      async (_sessionId, turnId) => {
         history = markAssistantTurnFinished(history as SessionHistoryInput[], {
           turnId,
           endedAt: 42,
-          settleContextCompactionAsFailed: options?.settleContextCompactionAsFailed,
         }) as Array<Record<string, unknown>>;
         expect(history[0]).toMatchObject({ id: 'turn-prompt-cancel', status: 'canceled' });
       }
@@ -6932,11 +6966,10 @@ describe('SessionExecutionService', () => {
         buildAcpPromptBlocks: async ({ inputBlocks }) => inputBlocks as ContentBlock[],
       });
       vi.mocked(deps.turnFinalization.finalizeACPState).mockImplementation(
-        async (_sessionId, turnId, options) => {
+        async (_sessionId, turnId) => {
           history = markAssistantTurnFinished(history as SessionHistoryInput[], {
             turnId,
             endedAt: 42,
-            settleContextCompactionAsFailed: options?.settleContextCompactionAsFailed,
           }) as Array<Record<string, unknown>>;
         }
       );
@@ -6988,13 +7021,18 @@ describe('SessionExecutionService', () => {
           processingUserMsgId: undefined,
         });
         expect(service.getExecutionSnapshot(sessionId)).toMatchObject({ hasActiveTurn: true });
+        // The entry is already stamped finished here, so its compaction marker
+        // is settled with it — a still-spinning row on a finished turn is the
+        // state finalization exists to remove. A compaction that does reach a
+        // terminal update during the drain still lands: history merges tool
+        // calls by id, so the provider's own status wins afterwards.
         expect(history[1]).toMatchObject({
           id: `assistant:${userTurnId}`,
           finished: true,
           items: [
             expect.objectContaining({
               toolCallId: 'compact-cancel-drain',
-              status: 'in_progress',
+              status: 'failed',
             }),
           ],
         });
@@ -7146,8 +7184,7 @@ describe('SessionExecutionService', () => {
     expect(deps.turnFinalization.finalizeACPState).toHaveBeenCalledTimes(2);
     expect(deps.turnFinalization.finalizeACPState).toHaveBeenLastCalledWith(
       'session-prompt-cancel-resolved',
-      'assistant-prompt-cancel-resolved',
-      { settleContextCompactionAsFailed: true }
+      'assistant-prompt-cancel-resolved'
     );
     expect(deps.turnFinalization.notifySessionCompleted).not.toHaveBeenCalled();
     expect(deps.processMessageQueue).not.toHaveBeenCalled();

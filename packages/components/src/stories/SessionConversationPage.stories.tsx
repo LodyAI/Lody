@@ -1130,9 +1130,14 @@ function StoryComposer({
   );
 }
 
-function StoryShell({
+export function SessionConversationStoryHarness({
   state,
   frame,
+  embedded = false,
+  sessionTitle,
+  repoFullName,
+  branchName,
+  composerText,
   dropActive = false,
   showCapacityRetry = false,
   shareImage = false,
@@ -1141,6 +1146,11 @@ function StoryShell({
 }: {
   state: PageState;
   frame: DeviceFrame;
+  embedded?: boolean;
+  sessionTitle?: string;
+  repoFullName?: string;
+  branchName?: string;
+  composerText?: string;
   dropActive?: boolean;
   showCapacityRetry?: boolean;
   shareImage?: boolean;
@@ -1149,17 +1159,21 @@ function StoryShell({
 }) {
   const { t } = useTranslation();
   const [streamChunkCount, setStreamChunkCount] = useState(0);
-  const session = useMemo(
-    () => ({
-      ...buildSession(state, frame),
+  const session = useMemo(() => {
+    const baseSession = buildSession(state, frame);
+    return {
+      ...baseSession,
       ...(shareImage
         ? { title: 'Product list rendering performance' }
         : showCollaborators
           ? { title: 'Shared conversation' }
-          : {}),
-    }),
-    [frame, state, shareImage, showCollaborators]
-  );
+          : sessionTitle
+            ? { title: sessionTitle }
+            : {}),
+      ...(repoFullName ? { repoFullName } : {}),
+      ...(branchName ? { branchName } : {}),
+    };
+  }, [branchName, frame, repoFullName, sessionTitle, shareImage, showCollaborators, state]);
   const selection = useMessageSelection(session.id);
   const [preview, setPreview] = useState<ConversationMessage[] | null>(null);
   const [sentMessages, setSentMessages] = useState<SessionHistoryParsed[]>([]);
@@ -1382,15 +1396,17 @@ function StoryShell({
                 'text-foreground',
                 // Desktop uses a definite h-dvh (not min-h-dvh) so the frame's
                 // h-full resolves and the conversation fills the real height.
-                frame === 'mobile' || shareImage
-                  ? 'h-dvh w-full bg-background'
-                  : 'h-dvh bg-muted/35 p-4 sm:p-6'
+                embedded
+                  ? 'h-full min-h-0 w-full bg-background'
+                  : frame === 'mobile' || shareImage
+                    ? 'h-dvh w-full bg-background'
+                    : 'h-dvh bg-muted/35 p-4 sm:p-6'
               )}
             >
               <div
                 className={cn(
                   'overflow-hidden bg-background',
-                  shareImage ? 'h-full w-full' : frameClassName
+                  embedded || shareImage ? 'h-full w-full' : frameClassName
                 )}
                 style={
                   frame === 'mobile'
@@ -1494,7 +1510,7 @@ function StoryShell({
                                 initialInputText={
                                   shareImage
                                     ? 'Can we compare the profiler results next?'
-                                    : undefined
+                                    : composerText
                                 }
                                 onSendMessage={
                                   shareImage
@@ -1656,7 +1672,8 @@ const withDesktopViewport: Decorator = (Story) => {
 
 const meta = {
   title: 'Sessions/SessionConversationPage',
-  component: StoryShell,
+  component: SessionConversationStoryHarness,
+  excludeStories: ['SessionConversationStoryHarness'],
   parameters: {
     layout: 'fullscreen',
   },
@@ -1665,7 +1682,7 @@ const meta = {
     state: 'idle',
     frame: 'desktop',
   },
-} satisfies Meta<typeof StoryShell>;
+} satisfies Meta<typeof SessionConversationStoryHarness>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;

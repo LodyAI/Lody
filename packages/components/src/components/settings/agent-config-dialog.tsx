@@ -13,7 +13,10 @@ import {
   getStaticBuiltinAcpCapabilities,
   getBuiltinTitleGenerationDefaults,
   getRegistryAcpLaunchKind,
+  hasBuiltinRuntimeOverrideValues,
   machineSupportsProviderSetupProtocol,
+  machineSupportsPiExtensions,
+  type MachinePiExtensionsResponse,
   isManagedBuiltinAgentType,
   isAcpCapabilityCacheEntryCurrent,
   parseCustomAcpCommandLine,
@@ -78,6 +81,8 @@ import { EnvVarsTextarea, envVarsToText } from './env-vars-textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { AcpAuthenticationPanel } from './acp-authentication-panel';
 import { BubInstallGuide } from './bub-install-guide';
+import { CollapsibleSection } from './form-primitives';
+import { PiExtensionsField } from './pi-extensions-field';
 import { ProviderSetupRow } from './provider-setup-row';
 import {
   getAgentMetaByIdAtomFamily,
@@ -522,6 +527,16 @@ const BUILTIN_OPTIONS: AgentTypeOption[] = [
   },
   {
     kind: 'builtin',
+    value: 'builtin:dimcode',
+    label: 'Dimcode',
+    descriptionKey: 'settings.agent.dialog.option.dimcode.description',
+    descriptionDefault: 'Dimcode coding agent over ACP',
+    cliType: 'builtin',
+    agentType: 'dimcode',
+    searchKeys: 'dimcode dim dimagent acp',
+  },
+  {
+    kind: 'builtin',
     value: 'builtin:bub',
     label: 'Bub',
     descriptionKey: 'settings.agent.dialog.option.bub.description',
@@ -655,6 +670,10 @@ export type AgentConfigDialogProps = {
   machine: MachineViewMeta;
   onSubmit: (payload: AgentConfigSubmitPayload) => Promise<void>;
   onRefreshCapabilities: (args: RefreshArgs) => Promise<MachineAcpCapabilitiesRefreshResponse>;
+  onScanPiExtensions?: (args: {
+    machineId: MachineId;
+    configId?: AgentConfigId;
+  }) => Promise<MachinePiExtensionsResponse>;
   /** Check a registry binary or managed builtin runtime on the target machine. */
   onCheckBinaryStatus?: (
     args: BinaryActionArgs
@@ -928,6 +947,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     machine,
     onSubmit,
     onRefreshCapabilities,
+    onScanPiExtensions,
     onCheckBinaryStatus,
     onInstallBinary,
     onManagedRuntimeSelected,
@@ -944,14 +964,16 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const deleteSetup = useSetAtom(deleteProviderSetupAtom);
   // Creation observes the daemon-owned setup instead of launching a competing
   // capability probe. Once published, this draft edits the same provider id.
-  const [testingBubSetup, setTestingBubSetup] = useState(false);
-  const publishedBub =
-    testingBubSetup &&
+  const [testingBuiltinSetup, setTestingBuiltinSetup] = useState(false);
+  const publishedSetupConfig =
+    testingBuiltinSetup &&
     publishedConfig?.machineId === machine.id &&
     publishedConfig.cliType === 'builtin' &&
-    publishedConfig.agentType === 'bub';
-  const bubSetup = testingBubSetup ? setups.find((setup) => setup.id === agentConfigId) : undefined;
-  const waitingForBubSetup = testingBubSetup && !publishedBub;
+    (publishedConfig.agentType === 'bub' || publishedConfig.agentType === 'dimcode');
+  const builtinSetup = testingBuiltinSetup
+    ? setups.find((setup) => setup.id === agentConfigId)
+    : undefined;
+  const waitingForBuiltinSetup = testingBuiltinSetup && !publishedSetupConfig;
 
   const initialForm = useMemo<AgentConfigFormData>(() => {
     if (mode.kind === 'edit') {
@@ -1034,7 +1056,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
 
   useEffect(() => {
     if (open) {
-      setTestingBubSetup(false);
+      setTestingBuiltinSetup(false);
       setFormData(initialForm);
       setManuallyTested(false);
       setAuthRequired(false);
@@ -1080,15 +1102,17 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   // `bub acp` becomes an actionable "install Bub" prompt instead of a
   // provider that fails later on its first turn.
   const isBubBuiltin = formData.cliType === 'builtin' && formData.agentType === 'bub';
+  const isQueuedBuiltin =
+    isBubBuiltin || (formData.cliType === 'builtin' && formData.agentType === 'dimcode');
   const deepseekEndpointMode = getDeepSeekEndpointMode(formData);
   const isManagedBuiltin =
     formData.cliType === 'builtin' && isManagedBuiltinAgentType(formData.agentType);
   const builtinVerificationContext = `${machine.id}:${builtinVerificationRevision}`;
   const requiresBuiltinCreationVerification =
     mode.kind === 'create' &&
-    !publishedBub &&
+    !publishedSetupConfig &&
     !isPreset &&
-    (isManagedBuiltin || isDeepSeekBuiltin || isBubBuiltin);
+    (isManagedBuiltin || isDeepSeekBuiltin || isQueuedBuiltin);
   const builtinCreationVerified =
     !requiresBuiltinCreationVerification || verifiedBuiltinContext === builtinVerificationContext;
   const builtinCreationPending =
@@ -1190,10 +1214,13 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   // than passed in: every host already gives us the target machine, and a
   // per-caller flag can disagree with the machine it travels with.
   const supportsProviderSetup = machineSupportsProviderSetupProtocol(machine);
+  // providerSetup rows only launch the default managed runtime; any override
+  // (a custom path or selected Pi extensions) must take the live-probe path.
   const backgroundBuiltinSetup =
     supportsProviderSetup &&
     requiresBuiltinCreationVerification &&
-    (usesDefaultManagedRuntime || isBubBuiltin);
+    (usesDefaultManagedRuntime || isQueuedBuiltin) &&
+    !hasBuiltinRuntimeOverrideValues(formData.runtimeOverrides);
   const lastPersistedPayloadKeyRef = useRef<string | null>(null);
   const buildSubmitPayload = useCallback((): AgentConfigSubmitPayload => {
     let env = { ...formData.env };
@@ -1270,7 +1297,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const rawCapabilitiesReady = isCustom
     ? customReady
     : manuallyTested ||
-      publishedBub ||
+      publishedSetupConfig ||
       hasCachedCaps ||
       (hasStaticBuiltinCaps && !(formData.cliType === 'builtin' && formData.agentType === 'kimi'));
   const capabilitiesReady = rawCapabilitiesReady && !binaryStatusBlocksReady;
@@ -1449,6 +1476,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     })();
     return () => {
       cancelled = true;
+      setProbing(false);
     };
   }, [
     open,
@@ -1609,7 +1637,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   };
 
   const selectOption = (opt: AgentTypeOption) => {
-    if (testingBubSetup) return;
+    if (testingBuiltinSetup) return;
     titleDefaultsAppliedRef.current = false;
     setManuallyTested(false);
     setAuthRequired(false);
@@ -1738,7 +1766,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     if (!formData.agentType.trim())
       return t('agents.disableReason.missingAgentType', 'Please select an agent type');
     if (incompatibleHostMessage) return incompatibleHostMessage;
-    if (mode.kind === 'create' && isBubBuiltin && !supportsProviderSetup) {
+    if (mode.kind === 'create' && isQueuedBuiltin && !supportsProviderSetup) {
       return t(
         'settings.agent.setup.unsupportedTarget',
         'Update Lody on the target machine to finish this provider setup.'
@@ -1827,7 +1855,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   }, [onOpenChange, persistConfigBeforeMachineLaunch]);
 
   const submit = async () => {
-    if (disableReason || submitting || waitingForBubSetup) return;
+    if (disableReason || submitting || waitingForBuiltinSetup) return;
     if (
       requiresBuiltinCreationVerification &&
       !backgroundBuiltinSetup &&
@@ -1968,7 +1996,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
               key={opt.value}
               option={opt}
               selected={selectedOption?.value === opt.value}
-              disabled={mode.kind === 'edit' || testingBubSetup}
+              disabled={mode.kind === 'edit' || testingBuiltinSetup}
               chevron={isNarrowLayout}
               onSelect={() => selectOption(opt)}
             />
@@ -1981,7 +2009,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 key={opt.value}
                 option={opt}
                 selected={selectedOption?.value === opt.value}
-                disabled={mode.kind === 'edit' || testingBubSetup}
+                disabled={mode.kind === 'edit' || testingBuiltinSetup}
                 chevron={isNarrowLayout}
                 onSelect={() => selectOption(opt)}
               />
@@ -1995,7 +2023,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 key={opt.value}
                 option={opt}
                 selected={selectedOption?.value === opt.value}
-                disabled={mode.kind === 'edit' || testingBubSetup}
+                disabled={mode.kind === 'edit' || testingBuiltinSetup}
                 chevron={isNarrowLayout}
                 onSelect={() => selectOption(opt)}
               />
@@ -2009,7 +2037,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 key={opt.value}
                 option={opt}
                 selected={selectedOption?.value === opt.value}
-                disabled={mode.kind === 'edit' || testingBubSetup}
+                disabled={mode.kind === 'edit' || testingBuiltinSetup}
                 chevron={isNarrowLayout}
                 onSelect={() => selectOption(opt)}
               />
@@ -2064,21 +2092,21 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
             )}
           </div>
         </div>
-        {!waitingForBubSetup && (
+        {!waitingForBuiltinSetup && (
           <ProbeStatus
             isPreset={isPreset}
             probing={probing}
             probeError={probeError}
             ready={capabilitiesReady && !builtinNeedsCredentialCheck && !authRequired}
             showIdleAction={!isCustom}
-            disabled={isBubBuiltin && (!!disableReason || submitting)}
+            disabled={isQueuedBuiltin && (!!disableReason || submitting)}
             onRetry={() => {
               setProbeError(null);
-              if (isBubBuiltin && backgroundBuiltinSetup) {
+              if (isQueuedBuiltin && backgroundBuiltinSetup) {
                 if (disableReason || submitting) return;
-                setTestingBubSetup(true);
+                setTestingBuiltinSetup(true);
                 void persistConfigBeforeMachineLaunch().catch((error) => {
-                  setTestingBubSetup(false);
+                  setTestingBuiltinSetup(false);
                   setProbeError(error instanceof Error ? error.message : String(error));
                 });
                 return;
@@ -2096,10 +2124,10 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
       </header>
 
       <div ref={formScrollRef} className="scrollbar-pro min-h-0 flex-1 overflow-y-auto px-5 py-5">
-        {waitingForBubSetup &&
-          (bubSetup ? (
+        {waitingForBuiltinSetup &&
+          (builtinSetup ? (
             <ProviderSetupRow
-              setup={bubSetup}
+              setup={builtinSetup}
               machine={machine}
               onRetry={async (setup) => {
                 try {
@@ -2118,7 +2146,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   // new setup, or the daemon would cancel it again.
                   draftConfigIdRef.current = uuidv4() as AgentConfigId;
                   lastPersistedPayloadKeyRef.current = null;
-                  setTestingBubSetup(false);
+                  setTestingBuiltinSetup(false);
                 } catch (error) {
                   toast.error(
                     t('settings.agent.setup.deleteFailed', 'Could not delete provider setup')
@@ -2130,7 +2158,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           ) : (
             <Spinner className="h-4 w-4" />
           ))}
-        <div className="space-y-5" hidden={waitingForBubSetup}>
+        <div className="space-y-5" hidden={waitingForBuiltinSetup}>
           <Field
             htmlFor="agent-config-name"
             label={t('agents.configName', 'Name')}
@@ -2447,7 +2475,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           {!isPreset &&
             !acpProvidesSessionTitle &&
             (capabilitiesReady ? titleSelectors.length > 0 : true) && (
-              <Section
+              <CollapsibleSection
                 title={t('settings.agent.dialog.section.titleGen', 'Title generation')}
                 defaultOpen
                 disabled={!capabilitiesReady}
@@ -2477,10 +2505,10 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                     });
                   }}
                 />
-              </Section>
+              </CollapsibleSection>
             )}
 
-          <Section
+          <CollapsibleSection
             title={t('settings.agent.dialog.section.prompt', 'Custom prompt')}
             action={
               formData.prompt.trim().length > 0 ? (
@@ -2497,9 +2525,9 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
               )}
               rows={3}
             />
-          </Section>
+          </CollapsibleSection>
 
-          <Section
+          <CollapsibleSection
             title={
               activePreset || isDeepSeekBuiltin
                 ? t(
@@ -2550,7 +2578,38 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
               showLabel={false}
               rows={5}
             />
-          </Section>
+          </CollapsibleSection>
+
+          {formData.cliType === 'builtin' && formData.agentType === 'pi' && (
+            <PiExtensionsField
+              key={`${machine.id}:${agentConfigId}:${mode.kind === 'edit' ? (mode.config.env?.PI_CODING_AGENT_DIR ?? '') : ''}`}
+              value={formData.runtimeOverrides?.piExtensions ?? []}
+              supported={machineSupportsPiExtensions(machine)}
+              onScan={
+                onScanPiExtensions
+                  ? () =>
+                      onScanPiExtensions({
+                        machineId: machine.id,
+                        configId: mode.kind === 'edit' ? mode.config.id : undefined,
+                      })
+                  : undefined
+              }
+              onChange={(paths) => {
+                invalidateBuiltinVerification();
+                setFormData((prev) => {
+                  const runtimeOverrides = { ...prev.runtimeOverrides };
+                  if (paths.length) runtimeOverrides.piExtensions = paths;
+                  else delete runtimeOverrides.piExtensions;
+                  return {
+                    ...prev,
+                    runtimeOverrides: Object.keys(runtimeOverrides).length
+                      ? runtimeOverrides
+                      : undefined,
+                  };
+                });
+              }}
+            />
+          )}
         </div>
       </div>
 
@@ -2580,7 +2639,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   disabled={
                     !!disableReason ||
                     submitting ||
-                    waitingForBubSetup ||
+                    waitingForBuiltinSetup ||
                     (builtinCreationPending && !probeError)
                   }
                   size="sm"
@@ -2588,7 +2647,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   {(submitting || (builtinCreationPending && !authRequired && !probeError)) && (
                     <Spinner className="mr-2 h-4 w-4" />
                   )}
-                  {mode.kind === 'edit' || publishedBub
+                  {mode.kind === 'edit' || publishedSetupConfig
                     ? t('common.save', 'Save')
                     : t('common.create', 'Create')}
                 </Button>
@@ -3249,55 +3308,6 @@ function Field({
       {children}
       {hint && <p className="text-[11px] leading-snug text-muted-foreground">{hint}</p>}
     </div>
-  );
-}
-
-function Section({
-  title,
-  count,
-  children,
-  disabled,
-  disabledHint,
-  defaultOpen,
-  action,
-}: {
-  title: string;
-  count?: number;
-  children: ReactNode;
-  disabled?: boolean;
-  disabledHint?: string;
-  defaultOpen?: boolean;
-  action?: ReactNode;
-}) {
-  return (
-    <Collapsible defaultOpen={defaultOpen}>
-      <div className="flex h-9 items-center gap-1 rounded-md border border-border/60 bg-card/40 pr-1 hover:bg-card/70">
-        <CollapsibleTrigger asChild>
-          <button
-            type="button"
-            className="group flex h-full min-w-0 flex-1 items-center gap-2 rounded-md px-3 text-left text-sm font-normal text-foreground/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <ChevronDown className="h-3 w-3 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
-            <span className="min-w-0 truncate">{title}</span>
-            {typeof count === 'number' && count > 0 ? (
-              <span className="ml-auto rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground">
-                {count}
-              </span>
-            ) : null}
-          </button>
-        </CollapsibleTrigger>
-        {action}
-      </div>
-      <CollapsibleContent className="mt-2">
-        <div className="pl-1">
-          {disabled ? (
-            <p className="px-1 py-2 text-xs text-muted-foreground">{disabledHint}</p>
-          ) : (
-            children
-          )}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
   );
 }
 

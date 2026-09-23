@@ -23,6 +23,15 @@ export type ShortcutCommandId =
   | 'session.saveCurrentFile'
   | 'session.nextTab'
   | 'session.previousTab'
+  | 'session.switchToTab1'
+  | 'session.switchToTab2'
+  | 'session.switchToTab3'
+  | 'session.switchToTab4'
+  | 'session.switchToTab5'
+  | 'session.switchToTab6'
+  | 'session.switchToTab7'
+  | 'session.switchToTab8'
+  | 'session.switchToLastTab'
   | 'session.previousVisible'
   | 'session.nextVisible'
   | 'session.cycleMode'
@@ -70,8 +79,9 @@ export const COMMAND_SHORTCUTS: Record<ShortcutCommandId, CommandKeybindings> = 
   'session.copyUrl': ['Alt+Shift+c'],
   'session.renameCurrent': ['F2'],
   // ⌥N creates a new tab, or a new terminal when the terminal is focused (desktop).
-  // ⌘T is intentionally avoided — the browser claims it on web.
-  'session.newTabOrTerminal': ['Alt+n'],
+  // Desktop also gets the browser-convention ⌘T; on web the browser claims it,
+  // so it stays electron-only. ⌥N remains the primary binding shown in settings.
+  'session.newTabOrTerminal': ['Alt+n', electron('Mod+t')],
   // Open/close the terminal panel (desktop, local sessions only).
   'session.toggleTerminal': [electron('Ctrl+`'), electron('Mod+j')],
   'session.saveCurrentFile': ['Mod+s'],
@@ -83,6 +93,18 @@ export const COMMAND_SHORTCUTS: Record<ShortcutCommandId, CommandKeybindings> = 
   'session.previousTab': [electron('Mod+Shift+,')],
   'session.previousVisible': [electron('Mod+Shift+[')],
   'session.nextVisible': [electron('Mod+Shift+]')],
+  // Direct tab jumps use the browser convention: ⌘1–⌘8 select that conversation tab
+  // and ⌘9 selects the last one. Desktop only — on web the browser claims ⌘<digit>
+  // for its own tab strip.
+  'session.switchToTab1': [electron('Mod+1')],
+  'session.switchToTab2': [electron('Mod+2')],
+  'session.switchToTab3': [electron('Mod+3')],
+  'session.switchToTab4': [electron('Mod+4')],
+  'session.switchToTab5': [electron('Mod+5')],
+  'session.switchToTab6': [electron('Mod+6')],
+  'session.switchToTab7': [electron('Mod+7')],
+  'session.switchToTab8': [electron('Mod+8')],
+  'session.switchToLastTab': [electron('Mod+9')],
   // ⇧Tab cycles the agent mode while the composer is focused. The other cyclers ship
   // WITHOUT a default binding — they're rebindable from the keyboard settings page.
   'session.cycleMode': [whileComposerFocused('Shift+Tab')],

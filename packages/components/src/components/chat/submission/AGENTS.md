@@ -25,3 +25,9 @@
 - Automatic composer focus is desktop-only. Narrow mobile layouts and native
   shells (including wide iPads) must not focus on entry or submission completion,
   whether the submission succeeds or fails. Explicit user focus actions still work.
+
+- Attachment waits share the submission token through acceptance. Recheck its
+  lifetime after readiness; resolve routing from the current committed callback.
+  Visibility gates new intents; hiding a mounted composer preserves existing waits.
+  Render upload-wait versus dispatching actions from explicit state, never a mutable ref.
+  Disable composer config controls through acceptance; clear only unchanged draft fields.

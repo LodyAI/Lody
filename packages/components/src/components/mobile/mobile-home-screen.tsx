@@ -8,24 +8,28 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import {
   Archive,
   BellRing,
   CircleHelp,
   CircleCheckBig,
+  Check,
   Clock3,
-  Download,
+  Copy,
   FolderPlus,
   Folders,
   Github,
   LockKeyhole,
   MessageCircle,
   Monitor,
+  MonitorDown,
   MonitorSmartphone,
   Plus,
   Search,
   Settings,
+  Share2,
+  Terminal,
   X,
 } from 'lucide-react';
 import { Spinner } from '@/ui/spinner';
@@ -34,6 +38,8 @@ import { MdChat, MdComputer, MdFolderCopy } from 'react-icons/md';
 import { FaGithub } from 'react-icons/fa';
 import type { IconType } from 'react-icons';
 import { isIOSRuntimeEnvironment } from '@/lib/native-platform';
+import { writeTextToClipboard } from '@/lib/clipboard';
+import { getDownloadPageUrl } from '@/lib/lody-urls';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { cn } from '@/lib/utils';
 import { usePullToRefresh } from '@/hooks/use-pull-to-refresh';
@@ -124,17 +130,50 @@ export type MobileInboxItem = {
   actionLabel?: string;
 };
 
-/* Copy for the first-run hint shown on the Chat tab when the workspace
+/* Copy for the first-run guide shown on the Chat tab when the workspace
    has no machines AND no conversations yet — i.e. the user installed the
-   mobile app before ever launching the desktop client. The mobile app is
-   a thin client (the agent runs on the user's own computer), so we show a
-   short nudge to download + start the desktop client. Kept deliberately
-   minimal — one line + a button. */
+   mobile app before ever connecting a computer. The mobile app is a thin
+   client (agents run on the user's own machines), so the guide walks the
+   two real ways to connect one: a single CLI command on any machine, or
+   the desktop app on their computer. Every field is optional — defaults
+   keep the guide complete for hosts that only pass the original three
+   strings. */
 export type MobileHomeOnboardingLabels = {
   title?: string;
   description?: string;
-  /** Primary CTA — opens the Lody download page. */
-  downloadButton?: string;
+  /** Heading for the one-command path (CLI / SSH / server). */
+  commandHeading?: string;
+  /** The shell command rendered inside the copyable pill. */
+  command?: string;
+  /** Prerequisite + sign-in explanation shown under the command pill. */
+  commandHint?: string;
+  /** aria-label / tooltip for the command pill's copy action. */
+  copyCommandLabel?: string;
+  /** Feedback shown inside the pill after a successful copy — reused for
+     the download-link copy fallback. */
+
+  /** Native share-sheet action on the command card (sends the command +
+     download link); only rendered when the platform exposes
+     `navigator.share`. */
+  shareCommandLabel?: string;
+  /** Heading for the desktop-app path. */
+  desktopHeading?: string;
+  /** What the desktop app does once installed + signed in. */
+  desktopHint?: string;
+  /** Share-sheet chip on the desktop card, rendered only when the
+     platform exposes `navigator.share`. */
+  shareDownloadLabel?: string;
+  /** aria-label for the desktop card's URL pill — tapping it copies the
+     download link. The phone itself never opens the download page. */
+  copyDownloadLabel?: string;
+  /** Heading for the "what happens next" numbered steps. */
+  nextStepsHeading?: string;
+  /** Step 1 — the machine appears in this workspace. */
+  nextStepMachine?: string;
+  /** Step 2 — add a project folder on that machine. */
+  nextStepProject?: string;
+  /** Step 3 — configure an agent and dispatch the first task. */
+  nextStepAgent?: string;
 };
 
 export type MobileHomeLocalProject = {
@@ -451,11 +490,10 @@ export type MobileHomeScreenProps = {
   /** Fires when the standalone new-conversation chip in the bottom dock
      is tapped. Optional — when omitted the chip is not rendered. */
   onNewChat?: () => void;
-  /** Fires when the user taps "Download Lody" in the first-run onboarding
-     empty state (Chat tab, no machines + no chats). Typically opens the
-     localized download page in the external browser. When omitted the
-     onboarding still renders but the button is inert. */
-  onDownloadClient?: () => void;
+  /** Localized download-page URL carried by the onboarding's share/copy
+     actions — the payload a phone hands to a computer (the phone itself
+     never navigates to it). Defaults to the production download page. */
+  onboardingDownloadUrl?: string;
   /** When true, the Chat tab renders the *archived* conversations
      (instead of the active ones) and the content area is tinted with
      `bg-muted` to give the "everything here is archived" feel. The
@@ -1246,7 +1284,7 @@ export function MobileHomeScreen({
   onChatPermanentDelete,
   onSettingsOpen,
   onNewChat,
-  onDownloadClient,
+  onboardingDownloadUrl,
   showArchived = false,
   onShowArchivedToggle,
 }: MobileHomeScreenProps) {
@@ -1617,7 +1655,7 @@ export function MobileHomeScreen({
                 showChatOnboarding ? (
                   <MobileHomeOnboarding
                     labels={labels.onboarding ?? {}}
-                    onDownloadClient={onDownloadClient}
+                    downloadUrl={onboardingDownloadUrl}
                   />
                 ) : (
                   <ChatsFlatView
@@ -1649,7 +1687,6 @@ export function MobileHomeScreen({
               ) : null}
             </div>
           </div>
-
         </div>
 
         {/* Shared workspace tabbar (chat / projects) + the optional
@@ -2256,53 +2293,312 @@ function ChatsFlatView({
   );
 }
 
-/* Minimal first-run hint shown on the Chat tab of an empty workspace (no
-   machines + no conversations). The mobile app is a thin client over a
-   desktop/CLI host, so a brand-new user just needs a short nudge to go
-   install + start the desktop client — one icon, one line, one button.
+/* First-run guide shown on the Chat tab of an empty workspace (no machines
+   + no conversations). The mobile app is a thin client over the user's own
+   machines, so the only thing standing between a new user and their first
+   task is getting ONE machine connected. The guide offers the two real
+   paths — the `lody daemon start` one-liner on any machine (including a
+   headless server reached over SSH, whose printed sign-in link can be
+   opened right on this phone) and the desktop app on their computer —
+   then previews what happens once a machine comes online.
+
    Rendered inline (not a blocking modal) so the user can still switch
    workspaces / open settings underneath it. Pure presentational — copy via
-   `labels`, action via `onDownloadClient` — so i18n + Storybook live in the
-   caller. */
-function MobileHomeOnboarding({
+   `labels`, actions via `navigator.share` + the shared clipboard helper —
+   so i18n + Storybook live in the caller. The phone itself never opens
+   the download page: opening it here only re-pitches the mobile app the
+   user already installed, so the desktop card shares or copies the link
+   for the computer instead. */
+export function MobileHomeOnboarding({
   labels,
-  onDownloadClient,
+  downloadUrl,
 }: {
   labels: MobileHomeOnboardingLabels;
-  onDownloadClient?: () => void;
+  /** Localized download-page URL carried by the share/copy actions. */
+  downloadUrl?: string;
 }) {
+  const command = labels.command ?? 'npx lody daemon start';
+  const copyLabel = labels.copyCommandLabel ?? '复制命令';
+  const linkUrl = downloadUrl ?? getDownloadPageUrl(undefined);
+  /* The pill displays the URL without its scheme — `lody.ai/download` is
+     short enough to read and type on the computer; the copy value keeps
+     `https://` so a pasted link stays clickable. */
+  const linkDisplay = linkUrl.replace(/^https?:\/\//u, '');
+  const [copied, setCopied] = useState<'command' | 'link' | null>(null);
+  const copiedTimerRef = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    return () => window.clearTimeout(copiedTimerRef.current);
+  }, []);
+
+  /* The native share sheet is the phone → computer bridge: AirDrop hands
+     the link straight to a Mac's browser, Messages/Mail carry it to the
+     user's own machine. Capacitor WebViews may not expose it — copy to
+     clipboard remains the universal path. */
+  const canShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
+
+  async function copyText(text: string, kind: 'command' | 'link') {
+    if (!(await writeTextToClipboard(text))) return;
+    setCopied(kind);
+    window.clearTimeout(copiedTimerRef.current);
+    copiedTimerRef.current = window.setTimeout(() => setCopied(null), 2000);
+  }
+
+  function shareSetup() {
+    if (!canShare) return;
+    /* Single `text` field is the most portable payload: the receiver gets
+       both the command and the link regardless of which field the target
+       app reads. AbortError (dismissed sheet) is expected — swallow it. */
+    void navigator.share({ text: `${command}\n${linkUrl}` }).catch(() => {});
+  }
+
+  function shareDownload() {
+    if (!canShare) return;
+    /* A bare `url` renders as a rich link — AirDrop opens it straight in
+       the receiving Mac's browser. Same AbortError contract as above. */
+    void navigator.share({ url: linkUrl }).catch(() => {});
+  }
+
+  const nextSteps = [
+    labels.nextStepMachine ?? '它会自动出现在当前 workspace。',
+    labels.nextStepProject ?? '在「项目」里选择这台机器，添加一个文件夹。',
+    labels.nextStepAgent ?? '在「设置 → Agents」中配置 Agent，即可下发第一个任务。',
+  ];
+
   return (
-    <div className="px-5 pt-10">
-      {/* Wide enough that the one-line sub-copy doesn't wrap on a phone
-         (the title + button are short and stay centered regardless). */}
-      <div className="mx-auto flex max-w-xs flex-col items-center gap-4 text-center">
-        <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
-          <MonitorSmartphone className="h-6 w-6" strokeWidth={1.6} aria-hidden="true" />
-        </div>
-        <div className="space-y-1">
-          <p className="text-[0.95rem] font-medium text-foreground">
-            {labels.title ?? '在电脑上启动 Lody'}
-          </p>
-          {labels.description ? (
-            <p className="text-[0.8rem] leading-relaxed text-muted-foreground">
-              {labels.description}
+    <div className="px-4 pb-6 pt-8">
+      <div className="mx-auto flex max-w-sm flex-col gap-4">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
+            <MonitorSmartphone className="h-6 w-6" strokeWidth={1.6} aria-hidden="true" />
+          </div>
+          <div className="space-y-1">
+            <p className="text-[0.95rem] font-medium text-foreground">
+              {labels.title ?? '先连接一台机器'}
             </p>
-          ) : null}
+            {labels.description ? (
+              <p className="text-[0.8rem] leading-relaxed text-muted-foreground">
+                {labels.description}
+              </p>
+            ) : null}
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={() => onDownloadClient?.()}
-          className={cn(
-            'inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2',
-            'text-[0.85rem] font-medium text-primary-foreground',
-            'transition-transform active:scale-[0.98]'
+
+        {/* Path 1 — one command on any machine. The command is the most
+            transferable artifact a phone can hand to a terminal: type it,
+            paste it into an SSH client, or share it to the computer. */}
+        <section className="rounded-2xl border border-border/40 bg-card p-4">
+          <div className="flex items-center gap-2">
+            <Terminal
+              className="h-4 w-4 shrink-0 text-muted-foreground"
+              strokeWidth={1.8}
+              aria-hidden="true"
+            />
+            <p className="text-[0.85rem] font-medium text-foreground">
+              {labels.commandHeading ?? '一行命令，接入任意机器'}
+            </p>
+          </div>
+          <div className="mt-3 flex items-stretch gap-2">
+            <OnboardingArtifactPill
+              display={command}
+              ariaLabel={`${copyLabel}: ${command}`}
+              isCopied={copied === 'command'}
+              onCopy={() => void copyText(command, 'command')}
+            />
+            {canShare ? (
+              <OnboardingShareButton
+                label={labels.shareCommandLabel ?? '分享到电脑'}
+                onShare={shareSetup}
+              />
+            ) : null}
+          </div>
+          <p className="mt-2.5 text-[0.75rem] leading-relaxed text-muted-foreground">
+            {labels.commandHint ??
+              '在服务器、虚拟机或你的电脑上运行（需 Node.js 22.14+）。命令会发起登录；没有浏览器的机器会打印链接，用这台手机打开即可完成授权。'}
+          </p>
+        </section>
+
+        {/* Path 2 — the desktop app: friendlier on a personal computer and
+            needs no Node.js; signing in starts the bundled runtime. The share
+            sheet is the whole interaction — a URL wants a browser, and
+            AirDrop lands it there; no need to display the link itself. Only
+            when `navigator.share` is missing does the type/copy pill appear
+            as the fallback path. The phone never opens the page itself. */}
+        <section className="rounded-2xl border border-border/40 bg-card p-4">
+          <div className="flex items-center gap-2">
+            <MonitorDown
+              className="h-4 w-4 shrink-0 text-muted-foreground"
+              strokeWidth={1.8}
+              aria-hidden="true"
+            />
+            <p className="text-[0.85rem] font-medium text-foreground">
+              {labels.desktopHeading ?? '或者在电脑上装桌面端'}
+            </p>
+          </div>
+          {canShare ? (
+            <div className="mt-3 flex items-stretch gap-2">
+              <button
+                type="button"
+                onClick={shareDownload}
+                aria-label={labels.shareDownloadLabel ?? '发送到电脑'}
+                className={cn(
+                  'flex min-w-0 flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5',
+                  'text-[0.85rem] font-medium text-primary-foreground',
+                  'transition-transform motion-safe:active:scale-[0.98]'
+                )}
+              >
+                <Share2 className="h-4 w-4 shrink-0" strokeWidth={1.8} aria-hidden="true" />
+                {labels.shareDownloadLabel ?? '发送到电脑'}
+              </button>
+              {/* Trailing copy accelerator — same coupled layout as the
+                  command pill's share button: primary action leads, the
+                  quiet icon button is the fallback. */}
+              <button
+                type="button"
+                onClick={() => void copyText(linkUrl, 'link')}
+                aria-label={`${labels.copyDownloadLabel ?? '复制下载链接'}: ${linkUrl}`}
+                title={labels.copyDownloadLabel ?? '复制下载链接'}
+                data-copied={copied === 'link' ? 'true' : 'false'}
+                className={cn(
+                  'relative inline-flex w-10 shrink-0 items-center justify-center rounded-xl bg-muted/70',
+                  'text-muted-foreground transition active:bg-muted motion-safe:active:scale-90'
+                )}
+              >
+                <OnboardingCopiedIcon
+                  isCopied={copied === 'link'}
+                  className="h-4 w-4"
+                  strokeWidth={1.8}
+                />
+              </button>
+            </div>
+          ) : (
+            <div className="mt-3 flex items-stretch gap-2">
+              <OnboardingArtifactPill
+                display={linkDisplay}
+                ariaLabel={`${labels.copyDownloadLabel ?? '复制下载链接'}: ${linkUrl}`}
+                isCopied={copied === 'link'}
+                onCopy={() => void copyText(linkUrl, 'link')}
+              />
+            </div>
           )}
-        >
-          <Download className="h-4 w-4" strokeWidth={2} aria-hidden="true" />
-          {labels.downloadButton ?? '下载客户端'}
-        </button>
+          <p className="mt-2.5 text-[0.75rem] leading-relaxed text-muted-foreground">
+            {labels.desktopHint ?? '安装桌面端并登录，它会自动启动 Agent 运行环境。'}
+          </p>
+        </section>
+
+        {/* What happens after the machine connects — so the user knows the
+            flow continues on this phone. */}
+        <section className="px-1 pt-1">
+          <p className="text-[0.72rem] font-medium uppercase tracking-wide text-muted-foreground">
+            {labels.nextStepsHeading ?? '机器上线之后'}
+          </p>
+          <ol className="mt-2.5 space-y-2">
+            {nextSteps.map((step, index) => (
+              <li key={index} className="flex items-start gap-2.5">
+                <span className="mt-px flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full bg-muted text-[0.68rem] font-medium text-muted-foreground">
+                  {index + 1}
+                </span>
+                <span className="text-[0.78rem] leading-relaxed text-muted-foreground">{step}</span>
+              </li>
+            ))}
+          </ol>
+        </section>
       </div>
     </div>
+  );
+}
+
+/* The mono artifact pill is the guide's central element: it displays text
+   the user can simply TYPE on the other device (the command, the download
+   URL), so walking to the computer and typing it is the baseline path.
+   Tapping copies as a convenience — copy is the accelerator, not the
+   interaction model. */
+/* Copy feedback icon: Copy ↔ Check crossfades — the outgoing icon blurs and
+   shrinks out while the incoming one blurs in, so the eye reads one smooth
+   morph instead of two objects swapping. `popLayout` pops the exiting icon
+   out of flow so the swap never shifts layout. First mount renders idle
+   instantly; prefers-reduced-motion skips the animation entirely. */
+function OnboardingCopiedIcon({
+  isCopied,
+  className,
+  strokeWidth,
+}: {
+  isCopied: boolean;
+  className: string;
+  strokeWidth: number;
+}) {
+  const reduceMotion = useReducedMotion();
+  const icon = isCopied ? (
+    <Check className={className} strokeWidth={strokeWidth} aria-hidden="true" />
+  ) : (
+    <Copy className={className} strokeWidth={strokeWidth} aria-hidden="true" />
+  );
+  if (reduceMotion) {
+    return <span className="inline-flex">{icon}</span>;
+  }
+  return (
+    <AnimatePresence mode="popLayout" initial={false}>
+      <motion.span
+        key={isCopied ? 'copied' : 'idle'}
+        className="inline-flex"
+        initial={{ opacity: 0, scale: 0.7, filter: 'blur(2px)' }}
+        animate={{ opacity: 1, scale: 1, filter: 'blur(0px)' }}
+        exit={{ opacity: 0, scale: 0.7, filter: 'blur(2px)' }}
+        transition={{ duration: 0.18, ease: 'easeOut' }}
+      >
+        {icon}
+      </motion.span>
+    </AnimatePresence>
+  );
+}
+
+function OnboardingArtifactPill({
+  display,
+  ariaLabel,
+  isCopied,
+  onCopy,
+}: {
+  display: string;
+  ariaLabel: string;
+  isCopied: boolean;
+  onCopy: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onCopy}
+      aria-label={ariaLabel}
+      data-copied={isCopied ? 'true' : 'false'}
+      className={cn(
+        'flex min-w-0 flex-1 items-center gap-2 rounded-xl bg-muted/70 px-3 py-2.5 text-left',
+        'transition active:bg-muted motion-safe:active:scale-[0.98]'
+      )}
+    >
+      <code className="min-w-0 flex-1 font-mono text-[0.78rem] text-foreground">{display}</code>
+      <span className="relative inline-flex shrink-0 items-center text-muted-foreground">
+        <OnboardingCopiedIcon isCopied={isCopied} className="h-3.5 w-3.5" strokeWidth={2} />
+      </span>
+    </button>
+  );
+}
+
+/* Icon-only share affordance pinned to the artifact pill's trailing edge —
+   "this thing → send it". Quiet secondary styling: the typeable pill stays
+   the primary instruction, share is just the accelerator. Label is carried
+   by aria-label/title only, so it adds no visual weight. */
+function OnboardingShareButton({ label, onShare }: { label: string; onShare: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onShare}
+      aria-label={label}
+      title={label}
+      className={cn(
+        'inline-flex w-10 shrink-0 items-center justify-center rounded-xl bg-muted/70',
+        'text-muted-foreground transition active:bg-muted motion-safe:active:scale-90'
+      )}
+    >
+      <Share2 className="h-4 w-4" strokeWidth={1.8} aria-hidden="true" />
+    </button>
   );
 }
 

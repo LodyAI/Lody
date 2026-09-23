@@ -221,6 +221,67 @@ describe('LoroSidebar pinned section', () => {
     ).toBeTruthy();
   });
 
+  it('keeps the filter reachable when the workspace scope hides every section', () => {
+    const onChatScopeChange = vi.fn();
+    renderSidebar({
+      organizeMode: 'workspace',
+      chatScope: 'my',
+      pinnedItems: [],
+      topContent: undefined,
+      onChatScopeChange,
+      sessionListProps: {
+        sessions: [],
+        repos: [],
+      },
+    });
+
+    expect(container?.querySelectorAll('button[aria-label="Filter sidebar"]')).toHaveLength(1);
+    expect(container?.querySelector('[data-sidebar-empty-state="my"]')?.textContent).toContain(
+      'No tasks match this view'
+    );
+    const showAllButton = Array.from(container?.querySelectorAll('button') ?? []).find(
+      (button) => button.textContent === 'Show all tasks'
+    );
+    expect(showAllButton).toBeDefined();
+    flushSync(() => showAllButton?.click());
+    expect(onChatScopeChange).toHaveBeenCalledWith('team');
+  });
+
+  it('gives a genuinely empty All Tasks workspace its own neutral state', () => {
+    renderSidebar({
+      organizeMode: 'workspace',
+      chatScope: 'team',
+      pinnedItems: [],
+      topContent: undefined,
+      sessionListProps: {
+        sessions: [],
+        repos: [],
+      },
+    });
+
+    const emptyState = container?.querySelector('[data-sidebar-empty-state="team"]');
+    expect(emptyState?.textContent).toContain('No tasks yet');
+    expect(emptyState?.textContent).not.toContain('Show all tasks');
+  });
+
+  it('mounts one filter when Chats is the only visible Workspace section', () => {
+    const filterAction = <button aria-label="Filter sidebar" />;
+    renderSidebar({
+      organizeMode: 'workspace',
+      chatScope: 'my',
+      pinnedItems: [],
+      topContent: undefined,
+      desktopFilterAction: filterAction,
+      sessionListProps: {
+        sessions: [],
+        repos: [],
+      },
+      afterSessionListContent: <div>{filterAction}</div>,
+    });
+
+    expect(container?.querySelectorAll('button[aria-label="Filter sidebar"]')).toHaveLength(1);
+  });
+
   it('renders pinned conversations before the Updated section', () => {
     renderSidebar({
       organizeMode: 'updated',
@@ -242,6 +303,37 @@ describe('LoroSidebar pinned section', () => {
     expect(
       pinnedRow?.compareDocumentPosition(updatedRow as Node) & Node.DOCUMENT_POSITION_FOLLOWING
     ).toBeTruthy();
+    expect(
+      pinnedRow?.querySelector('[data-sidebar-updated-project="github"]')?.textContent
+    ).toContain('loro-dev/lody');
+    expect(
+      updatedRow?.querySelector('[data-sidebar-updated-project="chat"]')?.textContent
+    ).toContain('Chats');
+  });
+
+  it('does not show project context on pinned rows in Workspace mode', () => {
+    renderSidebar({ organizeMode: 'workspace' });
+    const pinnedRow = container?.querySelector('[data-sidebar-updated-id="pinned-session"]');
+    expect(pinnedRow).not.toBeNull();
+    expect(pinnedRow?.querySelector('[data-sidebar-updated-project]')).toBeNull();
+  });
+
+  it('hides project context throughout Updated mode when Project names is off', () => {
+    renderSidebar({
+      organizeMode: 'updated',
+      showUpdatedProjectNames: false,
+      updatedItems: [
+        {
+          id: 'updated-session',
+          kind: 'chat',
+          title: 'Recently updated conversation',
+          sectionLabel: 'Chats',
+          latestMessageAt: new Date('2026-07-14T09:00:00.000Z'),
+        },
+      ],
+    });
+
+    expect(container?.querySelector('[data-sidebar-updated-project]')).toBeNull();
   });
 
   it('collapses pinned conversations and keeps the folded chevron visible', () => {

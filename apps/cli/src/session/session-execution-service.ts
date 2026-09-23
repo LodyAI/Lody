@@ -23,6 +23,7 @@ import {
   type MachineAcpAuthenticateResponse,
   type MachineAcpAuthenticationProgressMessage,
   type MachineId,
+  type MachinePiExtensionsResponse,
   type MachinePingRequestValidated,
   type MachinePingResponse,
   type MachineLifecycleCapability,
@@ -92,6 +93,7 @@ import {
 } from '@/agent/managed-agent-runtime';
 import type { FetchAcpCapabilitiesOptions } from '@/agent/acp-capabilities';
 import { AcpAuthenticationRequiredError, type SteerOutcomeResult } from '@/agent/agent-client';
+import { discoverManagedPiExtensions } from '@/agent/pi-extensions';
 import type { GoalPromptControl } from '@/agent/goal-control';
 import {
   AcpAuthenticationManager,
@@ -185,11 +187,7 @@ const SILENT_TURN_FAILURE_MESSAGE =
   'new session if this conversation has grown too long.';
 
 type TurnFinalizationEffects = {
-  finalizeACPState: (
-    sessionId: SessionId,
-    turnId?: string,
-    options?: { settleContextCompactionAsFailed?: boolean }
-  ) => Promise<void>;
+  finalizeACPState: (sessionId: SessionId, turnId?: string) => Promise<void>;
   persistCodeCollabTurnDiffs?: (sessionId: SessionId, turnId: string) => Promise<boolean>;
   flushSessionUsage: (sessionId: SessionId) => Promise<void>;
   syncSessionBranchName: (sessionId: SessionId, session: ISession) => Promise<string | null>;
@@ -2429,9 +2427,7 @@ export class SessionExecutionService {
           options.sessionId,
           'Failed to settle context compaction after cancelled ACP prompt stopped',
           self.tryPromise(async () => {
-            await self.deps.turnFinalization.finalizeACPState(options.sessionId, options.turnId, {
-              settleContextCompactionAsFailed: true,
-            });
+            await self.deps.turnFinalization.finalizeACPState(options.sessionId, options.turnId);
             await self.persistTurnDiffsAndFlushUsage(options.sessionId, options.turnId);
           })
         );
@@ -2653,9 +2649,7 @@ export class SessionExecutionService {
     if (options.userTurnId) {
       await this.markTurnFailed(options.sessionId, options.sessionDoc, options.userTurnId);
     }
-    await this.handleTurnError(options.sessionId, options.sessionDoc, options.error, {
-      providerPromptSettled: options.runtime.promptStarted && !options.runtime.promptInFlight,
-    });
+    await this.handleTurnError(options.sessionId, options.sessionDoc, options.error);
     await options.onUnhandledError?.(options.error);
   }
 
@@ -2758,18 +2752,13 @@ export class SessionExecutionService {
   private async handleTurnError(
     sessionId: SessionId,
     sessionDoc: SessionDocument,
-    error?: unknown,
-    options?: { providerPromptSettled?: boolean }
+    error?: unknown
   ): Promise<void> {
     const acpError = error ? parseACPError(error) : null;
     const providerDisconnected = error ? isAgentDisconnectedError(error) : false;
     await this.deps.turnFinalization.finalizeACPState(
       sessionId,
-      this.currentTurnBySession.get(sessionId),
-      {
-        settleContextCompactionAsFailed:
-          options?.providerPromptSettled === true || acpError !== null || providerDisconnected,
-      }
+      this.currentTurnBySession.get(sessionId)
     );
     await this.persistCodeCollabTurnDiffsAfterACPFinalization(
       sessionId,
@@ -5555,7 +5544,6 @@ export class SessionExecutionService {
                   turnId,
                   endedAt: getServerNow(),
                   force: true,
-                  settleContextCompactionAsFailed: true,
                 });
 
                 await this.finalizeCancelledTurn({
@@ -5991,6 +5979,29 @@ export class SessionExecutionService {
       },
       options
     );
+  }
+
+  async listMachinePiExtensions(configId?: AgentConfigId): Promise<MachinePiExtensionsResponse> {
+    try {
+      let env: Record<string, string> | undefined;
+      if (configId !== undefined) {
+        const config = await this.deps.workspaceDocument.getAgentConfigForMachineLaunch(
+          configId,
+          this.deps.machineId
+        );
+        if (!config || config.cliType !== 'builtin' || config.agentType !== 'pi') {
+          return {
+            success: false,
+            error: 'Provider config is not a builtin Pi provider on this machine.',
+          };
+        }
+        env = config.env;
+      }
+      const discovery = await discoverManagedPiExtensions(env);
+      return { success: true, discovery };
+    } catch (error) {
+      return { success: false, error: formatErrorMessage(error) };
+    }
   }
 
   private async refreshMachineAcpCapabilitiesForConfig(
@@ -6512,9 +6523,13 @@ const computeAcpRefreshDedupeKey = (
   const customSerialized = customAcp ? serializeCustomAcpLaunchSpec(customAcp) : '';
   const runtimeOverrideSerialized = runtimeOverrides
     ? Object.entries(runtimeOverrides)
-        .filter(([, value]) => typeof value === 'string' && value.trim().length > 0)
+        .filter(([, value]) =>
+          Array.isArray(value)
+            ? value.length > 0
+            : typeof value === 'string' && value.trim().length > 0
+        )
         .sort(([a], [b]) => a.localeCompare(b))
-        .map(([key, value]) => `${key}=${value}`)
+        .map(([key, value]) => `${key}=${Array.isArray(value) ? JSON.stringify(value) : value}`)
         .join('\x01')
     : '';
   return `${configId}\x00${cliType}\x00${agentType}\x00${envSerialized}\x00${customSerialized}\x00${runtimeOverrideSerialized}`;

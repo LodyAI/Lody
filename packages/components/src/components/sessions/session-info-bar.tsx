@@ -212,7 +212,7 @@ export function SessionInfoBar({
   // context a chat-only Session has, so dropping the Browser action here would
   // leave no visible path from the report to the preview.
   // The bar owns the gap above the composer (the session composer skips its own
-  // spacer): 10px under the pill, none under a queue sheet (it sits on the
+  // spacer): 8px under the pill, none under a queue sheet (it sits on the
   // composer), and the plain 4px when there is nothing to show.
   if (!defaultKey && !onOpenBrowser && !syncing && !privateAccessStatus) {
     return queue ? (
@@ -287,7 +287,7 @@ export function SessionInfoBar({
     // Light: same fill and lift as the session composer. Dark: recessed input.
     <div
       className={cn(
-        'w-full shrink-0 bg-background pb-2.5',
+        'w-full shrink-0 bg-background pb-2',
         /* Gutter is on ConversationColumn (same as stream + composer).
            The native session drawer's transparent edge-back strip is z-30 and
            spans the body's left 48px. Elevating this band keeps the leading
@@ -301,7 +301,7 @@ export function SessionInfoBar({
         {queue ? <div className={QUEUE_SHEET_INSET_CLASS}>{queue}</div> : null}
         <div
           className={cn(
-            '@container flex h-8 w-full min-w-0 select-none items-center gap-1.5 rounded-md border-[0.5px] border-foreground/[0.10] bg-[hsl(var(--composer))] px-2.5 text-xs dark:border-input-border/45 dark:bg-input/70',
+            '@container flex h-8 w-full min-w-0 select-none items-center gap-1.5 rounded-lg border-[0.5px] border-foreground/[0.10] bg-[hsl(var(--composer))] px-2.5 text-xs dark:border-input-border/45 dark:bg-input/70',
             INFO_BAR_ELEVATION_CLASS,
             // With the queue sheet seated on top, clip the shadow's upward bleed
             // (its 1px spread) at the top edge only; sides and bottom keep it.

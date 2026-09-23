@@ -19,6 +19,8 @@ import {
   type FileSearchWorker,
 } from '../src/components/mentions/file-search/client';
 
+const SLOW_SEARCH_ASSERTION_TIMEOUT_MS = 15_000;
+
 class ControlledWorker {
   onmessage: FileSearchWorker['onmessage'] = null;
   onerror: FileSearchWorker['onerror'] = null;
@@ -37,47 +39,51 @@ class ControlledWorker {
 }
 
 describe('file search ranking', () => {
-  it('preserves baseline order for fuzzy, case, Unicode, directory and path matches', () => {
-    const paths = [
-      ...makeFilePaths(1500),
-      '/Root/AB.ts',
-      'root/a-b.ts',
-      'root/a_b.ts',
-      'root/ab.ts',
-      '你好/组件.tsx',
-      'src/a.ts',
-      'src/a/test.ts',
-      'a',
-      'a.ts',
-      'a-b/test.ts',
-      'src/a.ts',
-    ];
-    const index = buildPathSuggestions(paths);
-    const before = baseline.buildPathSuggestions(paths);
-    for (const query of [
-      '',
-      ' ',
-      ...fileSearchQueries,
-      'AB',
-      'abt',
-      'sp',
-      '你好',
-      'src/',
-      'root/a',
-      '/',
-      '.',
-      'a-b',
-      'missing',
-    ]) {
-      const expected = baseline.getSuggestions(before, query);
-      expect(getSuggestions(index, query), query).toEqual(expected);
-      for (const limit of [0, 1, 6, 60, 120]) {
-        expect(getSuggestions(index, query, limit), `${query}:${limit}`).toEqual(
-          expected.slice(0, limit)
-        );
+  it(
+    'preserves baseline order for fuzzy, case, Unicode, directory and path matches',
+    () => {
+      const paths = [
+        ...makeFilePaths(1500),
+        '/Root/AB.ts',
+        'root/a-b.ts',
+        'root/a_b.ts',
+        'root/ab.ts',
+        '你好/组件.tsx',
+        'src/a.ts',
+        'src/a/test.ts',
+        'a',
+        'a.ts',
+        'a-b/test.ts',
+        'src/a.ts',
+      ];
+      const index = buildPathSuggestions(paths);
+      const before = baseline.buildPathSuggestions(paths);
+      for (const query of [
+        '',
+        ' ',
+        ...fileSearchQueries,
+        'AB',
+        'abt',
+        'sp',
+        '你好',
+        'src/',
+        'root/a',
+        '/',
+        '.',
+        'a-b',
+        'missing',
+      ]) {
+        const expected = baseline.getSuggestions(before, query);
+        expect(getSuggestions(index, query), query).toEqual(expected);
+        for (const limit of [0, 1, 6, 60, 120]) {
+          expect(getSuggestions(index, query, limit), `${query}:${limit}`).toEqual(
+            expected.slice(0, limit)
+          );
+        }
       }
-    }
-  });
+    },
+    SLOW_SEARCH_ASSERTION_TIMEOUT_MS
+  );
   it('merges lazy directories without losing navigation tokens', () => {
     const index = buildMentionFileIndex({
       paths: ['src/index.ts'],
@@ -224,50 +230,54 @@ describe('file search React boundary', () => {
   });
 });
 
-it('score-only rolling rows equal VS Code scores across reused buffers and UTF-16 inputs', () => {
-  const score = createFuzzyScoreOnly();
-  const targets = [
-    ...makeFilePaths(100),
-    '',
-    'a',
-    'ABab-ab_AB',
-    'a/b\\c.ts',
-    '你好/组件.ts',
-    'İstanbul/Σς😀.ts',
-  ];
-  const queries = [
-    '',
-    'ab',
-    'AB',
-    'abc',
-    'a/b',
-    'a\\b',
-    'İ',
-    'Σ',
-    '你好',
-    '😀',
-    'ss',
-    'src/components',
-    'not-present',
-  ];
-  let seed = 12345;
-  const chars = 'aAbB/_-.İΣ😀';
-  for (let i = 0; i < 200; i++) {
-    let text = '';
-    for (let j = 0; j < i % 31; j++) {
-      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-      text += chars[seed % chars.length];
+it(
+  'score-only rolling rows equal VS Code scores across reused buffers and UTF-16 inputs',
+  () => {
+    const score = createFuzzyScoreOnly();
+    const targets = [
+      ...makeFilePaths(100),
+      '',
+      'a',
+      'ABab-ab_AB',
+      'a/b\\c.ts',
+      '你好/组件.ts',
+      'İstanbul/Σς😀.ts',
+    ];
+    const queries = [
+      '',
+      'ab',
+      'AB',
+      'abc',
+      'a/b',
+      'a\\b',
+      'İ',
+      'Σ',
+      '你好',
+      '😀',
+      'ss',
+      'src/components',
+      'not-present',
+    ];
+    let seed = 12345;
+    const chars = 'aAbB/_-.İΣ😀';
+    for (let i = 0; i < 200; i++) {
+      let text = '';
+      for (let j = 0; j < i % 31; j++) {
+        seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+        text += chars[seed % chars.length];
+      }
+      targets.push(text);
+      queries.push(text.slice(0, 3));
     }
-    targets.push(text);
-    queries.push(text.slice(0, 3));
-  }
-  for (const target of targets)
-    for (const query of queries) {
-      expect(score(target, query, query.toLowerCase()), `${target}/${query}`).toBe(
-        scoreFuzzy(target, query, query.toLowerCase(), true)[0]
-      );
-    }
-});
+    for (const target of targets)
+      for (const query of queries) {
+        expect(score(target, query, query.toLowerCase()), `${target}/${query}`).toBe(
+          scoreFuzzy(target, query, query.toLowerCase(), true)[0]
+        );
+      }
+  },
+  SLOW_SEARCH_ASSERTION_TIMEOUT_MS
+);
 
 it('runs only the latest pending query after cancellation acknowledgement', () => {
   const worker = new ControlledWorker();

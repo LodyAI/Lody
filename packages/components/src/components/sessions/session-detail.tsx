@@ -1,3 +1,4 @@
+import { windowPreparationAtom } from '@/lib/window-preparation';
 import { useEmptySessionDraft } from '@/hooks/use-empty-session-draft';
 import { sessionHasUnreadMessages } from '@/lib/session-read-receipt';
 import {
@@ -100,6 +101,7 @@ import {
   navigationSidebarHiddenAtom,
   showNavigationSidebarAtom,
   zenLayoutModeAtom,
+  zenRightPanelAtom,
 } from '@/atoms/layout-state';
 import {
   memo,
@@ -127,6 +129,7 @@ import {
   archivedChildSessionsAtomFamily,
   sideSessionsAtomFamily,
   docMetaCacheReadyAtom,
+  sessionMetaCacheSettledAtomFamily,
 } from '@/atoms/doc-meta';
 import { sessionLiveStatusAtomFamily } from '@/atoms/presence';
 import { SessionTabBar, type ViewerTabItem } from './session-tab-bar';
@@ -176,6 +179,8 @@ import {
 import { getAppShareUrl } from '@/lib/app-location';
 import { getCommandKeybindings, useCommand } from '@/lib/commands';
 import { useDesktopTabCloser } from '@/lib/desktop-tab-or-window-close';
+import { useSemanticActionRouter } from '@/lib/commands/use-semantic-action-router';
+import { semanticShortcutsFeatureEnabledAtom } from '@/atoms/settings';
 import { cn, getBasename } from '@/lib';
 
 import {
@@ -737,6 +742,7 @@ const SessionDetail = ({
 }) => {
   const { t } = useTranslation();
   const router = useRouter();
+  const preparingWindow = useAtomValue(windowPreparationAtom);
   const claimNavigationFocus = useComposerNavigationFocus(sessionId);
   const postHog = usePostHog();
   const isMobile = useIsMobile();
@@ -764,6 +770,8 @@ const SessionDetail = ({
   >(new Map());
   const sendingDraftIdsRef = useRef<Set<DraftSessionTab['id']>>(new Set());
   const desktopTabFocusRegionRef = useRef<SessionTabFocusRegion>('conversation');
+  const desktopActionRootRef = useRef<HTMLDivElement>(null);
+  const semanticShortcutsEnabled = useAtomValue(semanticShortcutsFeatureEnabledAtom);
   const initialTabState = getSessionDetailInitialTabState(sessionId, urlTab, {
     oneActiveSurface: isMobile,
   });
@@ -896,6 +904,7 @@ const SessionDetail = ({
   );
   const session = useAtomValue(sessionMetaAtom);
   const docMetaCacheReady = useAtomValue(docMetaCacheReadyAtom);
+  const docMetaCacheSettled = useAtomValue(sessionMetaCacheSettledAtomFamily(sessionId));
   const activeSession = session ?? null;
   const activeSessionSharing = useMemo(
     () => (showSessionSharing && activeSession ? resolveSessionSharing(activeSession) : null),
@@ -1592,7 +1601,7 @@ const SessionDetail = ({
   }, [sessionId]);
 
   useEffect(() => {
-    if (!activeSession || !currentWorkspaceId || !user?.id) return;
+    if (preparingWindow || !activeSession || !currentWorkspaceId || !user?.id) return;
     const externalHistory = activeSession.externalHistory;
     if (!shouldRefreshExternalHistoryOnOpen(externalHistory)) {
       return;
@@ -1660,6 +1669,7 @@ const SessionDetail = ({
     activeSession,
     currentWorkspaceId,
     externalHistoryRefreshBySessionId,
+    preparingWindow,
     localMachineId,
     runtime,
     sessionMachineSupportsLocalProjectHistoryRpc,
@@ -1671,11 +1681,7 @@ const SessionDetail = ({
   // Priority: waiting > working > unread > idle.
   const tabStatus = useMemo<TabStatus>(() => {
     if (!activeSession) return null;
-    const lastMessageAt =
-      typeof activeSession.lastMessageAt === 'number' ? activeSession.lastMessageAt : null;
-    const lastReadAt =
-      typeof activeSession.lastReadAt === 'number' ? activeSession.lastReadAt : null;
-    const hasUnread = lastMessageAt !== null && (lastReadAt === null || lastMessageAt > lastReadAt);
+    const hasUnread = sessionHasUnreadMessages(activeSession);
     const isWaiting = activeSessionLiveStatus?.type === 'requestPermission';
     // CLI-reported presence is the fact source for "working"; persistent goal
     // state and meta dispatch pointers do not imply a prompt is running.
@@ -3408,6 +3414,7 @@ const SessionDetail = ({
           rawPath: filePath,
           pathKind: options.pathKind ?? 'markdown-href',
           workspacePath: activeSessionWorkspacePath,
+          preserveWorktreePath: isElectronRenderer() && isActiveSessionLocalMachine,
           ...(options.startLine === undefined ? {} : { startLine: options.startLine }),
           ...(options.endLine === undefined ? {} : { endLine: options.endLine }),
         });
@@ -4106,6 +4113,21 @@ const SessionDetail = ({
     [activeTabSessionId, handleSessionTabSelect, orderedSessionTabIds]
   );
 
+  // ⌘1–⌘8 jump to that conversation tab, ⌘9 to the last one (index < 0) — the
+  // same ordered list next/previousTab steps through, so digit positions match
+  // what the tab strip shows.
+  const handleSwitchSessionTabToIndex = useCallback(
+    (index: number) => {
+      const targetIndex = index < 0 ? orderedSessionTabIds.length - 1 : index;
+      const nextTabId = orderedSessionTabIds[targetIndex];
+      if (!nextTabId || nextTabId === activeTabSessionId) {
+        return;
+      }
+      void handleSessionTabSelect(nextTabId);
+    },
+    [activeTabSessionId, handleSessionTabSelect, orderedSessionTabIds]
+  );
+
   useCommand({
     id: 'session.archiveCurrent',
     title: t('commands.session.archiveCurrent', 'Archive Current Chat'),
@@ -4171,6 +4193,16 @@ const SessionDetail = ({
   });
 
   const jotaiStore = useStore();
+  useLayoutEffect(() => {
+    if (isMobile) return undefined;
+    const panel = { open: isSidebarOpen, reveal: revealRightSidebar };
+    jotaiStore.set(zenRightPanelAtom, panel);
+    return () => {
+      if (jotaiStore.get(zenRightPanelAtom) === panel) {
+        jotaiStore.set(zenRightPanelAtom, null);
+      }
+    };
+  }, [isMobile, isSidebarOpen, jotaiStore, revealRightSidebar, sessionId]);
   useCommand({
     id: 'session.newTabOrTerminal',
     title: t('commands.session.newTabOrTerminal', 'New Tab or Terminal'),
@@ -4251,6 +4283,87 @@ const SessionDetail = ({
     keybindings: getCommandKeybindings('session.previousTab'),
     when: () => orderedSessionTabIds.length > 1,
     run: () => handleSwitchSessionTab(-1),
+  });
+
+  useCommand({
+    id: 'session.switchToTab1',
+    title: t('commands.session.switchToTab1', 'Switch to Tab 1'),
+    category: 'Navigation',
+    keybindings: getCommandKeybindings('session.switchToTab1'),
+    when: () => orderedSessionTabIds.length > 0,
+    run: () => handleSwitchSessionTabToIndex(0),
+  });
+
+  useCommand({
+    id: 'session.switchToTab2',
+    title: t('commands.session.switchToTab2', 'Switch to Tab 2'),
+    category: 'Navigation',
+    keybindings: getCommandKeybindings('session.switchToTab2'),
+    when: () => orderedSessionTabIds.length > 1,
+    run: () => handleSwitchSessionTabToIndex(1),
+  });
+
+  useCommand({
+    id: 'session.switchToTab3',
+    title: t('commands.session.switchToTab3', 'Switch to Tab 3'),
+    category: 'Navigation',
+    keybindings: getCommandKeybindings('session.switchToTab3'),
+    when: () => orderedSessionTabIds.length > 2,
+    run: () => handleSwitchSessionTabToIndex(2),
+  });
+
+  useCommand({
+    id: 'session.switchToTab4',
+    title: t('commands.session.switchToTab4', 'Switch to Tab 4'),
+    category: 'Navigation',
+    keybindings: getCommandKeybindings('session.switchToTab4'),
+    when: () => orderedSessionTabIds.length > 3,
+    run: () => handleSwitchSessionTabToIndex(3),
+  });
+
+  useCommand({
+    id: 'session.switchToTab5',
+    title: t('commands.session.switchToTab5', 'Switch to Tab 5'),
+    category: 'Navigation',
+    keybindings: getCommandKeybindings('session.switchToTab5'),
+    when: () => orderedSessionTabIds.length > 4,
+    run: () => handleSwitchSessionTabToIndex(4),
+  });
+
+  useCommand({
+    id: 'session.switchToTab6',
+    title: t('commands.session.switchToTab6', 'Switch to Tab 6'),
+    category: 'Navigation',
+    keybindings: getCommandKeybindings('session.switchToTab6'),
+    when: () => orderedSessionTabIds.length > 5,
+    run: () => handleSwitchSessionTabToIndex(5),
+  });
+
+  useCommand({
+    id: 'session.switchToTab7',
+    title: t('commands.session.switchToTab7', 'Switch to Tab 7'),
+    category: 'Navigation',
+    keybindings: getCommandKeybindings('session.switchToTab7'),
+    when: () => orderedSessionTabIds.length > 6,
+    run: () => handleSwitchSessionTabToIndex(6),
+  });
+
+  useCommand({
+    id: 'session.switchToTab8',
+    title: t('commands.session.switchToTab8', 'Switch to Tab 8'),
+    category: 'Navigation',
+    keybindings: getCommandKeybindings('session.switchToTab8'),
+    when: () => orderedSessionTabIds.length > 7,
+    run: () => handleSwitchSessionTabToIndex(7),
+  });
+
+  useCommand({
+    id: 'session.switchToLastTab',
+    title: t('commands.session.switchToLastTab', 'Switch to Last Tab'),
+    category: 'Navigation',
+    keybindings: getCommandKeybindings('session.switchToLastTab'),
+    when: () => orderedSessionTabIds.length > 0,
+    run: () => handleSwitchSessionTabToIndex(-1),
   });
 
   useEffect(() => {
@@ -4427,11 +4540,60 @@ const SessionDetail = ({
     ]
   );
 
+  const semanticCloseEnabled =
+    semanticShortcutsEnabled && isElectronRenderer() && !isMobile && Boolean(activeSession);
+  const semanticRouterRef = useSemanticActionRouter({
+    rootRef: desktopActionRootRef,
+    enabled: semanticCloseEnabled,
+    resetKey: sessionId,
+    defaultScopeId: 'conversation',
+    scopes: {
+      conversation: {
+        close: () => {
+          const target = getSessionTabCloseTarget({
+            focusRegion: 'conversation',
+            sidePanelOpen: false,
+            activeSidePanelTabId: null,
+            activeConversationTabId: activeTabSessionId,
+            parentConversationTabId: sessionId,
+            conversationTabCount: orderedSessionTabIds.length,
+          });
+          if (target?.kind === 'window') return 'unhandled';
+          if (target?.kind === 'conversation') void handleTabClose(target.tabId);
+          return 'handled';
+        },
+      },
+      'side-panel': {
+        close: () => {
+          if (activeSidePanelTabId) handleSidePanelTabClose(activeSidePanelTabId);
+          else setIsSidebarOpen(false);
+          return 'handled';
+        },
+      },
+    },
+  });
+  const previousSemanticPanelRef = useRef({ sessionId, visible: isSidebarVisible });
+  useLayoutEffect(() => {
+    const previous = previousSemanticPanelRef.current;
+    previousSemanticPanelRef.current = { sessionId, visible: isSidebarVisible };
+    if (
+      !semanticCloseEnabled ||
+      previous.sessionId !== sessionId ||
+      !previous.visible ||
+      isSidebarVisible
+    )
+      return;
+    desktopTabFocusRegionRef.current = 'conversation';
+    semanticRouterRef.current?.activate('conversation');
+    chatRefsMap.current.get(activeTabSessionId)?.focusInput();
+  }, [sessionId, isSidebarVisible, semanticCloseEnabled, activeTabSessionId, semanticRouterRef]);
+
   useDesktopTabCloser(
     () => {
+      if (semanticCloseEnabled) return semanticRouterRef.current?.dispatch('close') ?? 'handled';
       const target = resolveFocusedTabCloseTarget();
       if (!target) return 'handled';
-      if (target.kind === 'landing') {
+      if (target.kind === 'window') {
         return 'unhandled';
       }
       if (target.kind === 'side-panel') {
@@ -4510,7 +4672,6 @@ const SessionDetail = ({
           : (visibleChildSessions.find((s) => s.id === tabId) ?? null);
       const draft = meta ? null : (draftTabs.find((d) => d.id === tabId) ?? null);
       const lastMessageAt = typeof meta?.lastMessageAt === 'number' ? meta.lastMessageAt : null;
-      const lastReadAt = typeof meta?.lastReadAt === 'number' ? meta.lastReadAt : null;
       const liveStatus = meta != null ? (conversationLiveStatusMap[tabId] ?? null) : null;
       return {
         id: tabId,
@@ -4522,10 +4683,7 @@ const SessionDetail = ({
         main: tabId === sessionId,
         running: liveStatus != null,
         waitingPermission: liveStatus?.type === 'requestPermission',
-        unread:
-          meta != null &&
-          lastMessageAt !== null &&
-          (lastReadAt === null || lastMessageAt > lastReadAt),
+        unread: meta != null && sessionHasUnreadMessages(meta),
         lastActivityAt: lastMessageAt,
       };
     });
@@ -4680,7 +4838,7 @@ const SessionDetail = ({
   const sessionPresenceState = useMemo(() => {
     const base = resolveSessionDetailPresenceState({
       hasActiveSession: activeSession !== null,
-      docMetaCacheReady,
+      docMetaCacheReady: docMetaCacheSettled,
       runtimeInitializing,
       runtimeWorkspaceId: runtime?.workspaceId ?? null,
       currentWorkspaceId,
@@ -4699,9 +4857,9 @@ const SessionDetail = ({
     activeSession,
     controlConnectionState,
     currentWorkspaceId,
-    docMetaCacheReady,
     localProjectVisibilityLoading,
     machineVisibilityLoading,
+    docMetaCacheSettled,
     runtime?.workspaceId,
     runtimeInitializing,
     user?.id,
@@ -4765,7 +4923,11 @@ const SessionDetail = ({
   }
 
   if (sessionPresenceState === 'not-found') {
-    return <SessionNotFound onBack={handleBackToList} />;
+    return (
+      <div className="h-full" data-window-session-ready={sessionId}>
+        <SessionNotFound onBack={handleBackToList} />
+      </div>
+    );
   }
 
   if (!activeSession) {
@@ -6019,6 +6181,7 @@ const SessionDetail = ({
         // the sidebar header; the macOS row pad centers its controls on the
         // traffic-light centerline. Re-derive if the row or pill height changes.
         'h-11',
+        'group-data-[lody-action-active=true]/close-scope:shadow-[inset_0_-1px_0_var(--primary)]',
         macTrafficLightRowPadClass,
         isLeftSidebarHidden && hasMacOSTitlebarInset && 'pl-[4.5rem]',
         !isSidebarVisible && windowsCaptionPadClass
@@ -6178,7 +6341,8 @@ const SessionDetail = ({
   const desktopSecondaryPanel = (
     <div
       data-lody-session-tab-region="side-panel"
-      className="flex h-full min-w-0 flex-col overflow-hidden border-l border-border/70 bg-background"
+      data-lody-action-scope="side-panel"
+      className="group/close-scope flex h-full min-w-0 flex-col overflow-hidden border-l border-border/70 bg-background"
     >
       <SessionSidePanelTabBar
         tabs={sidePanelTabs}
@@ -6200,6 +6364,7 @@ const SessionDetail = ({
         endSlot={sidebarToggleButton}
         className={cn(
           'border-b border-border/50 bg-background',
+          'group-data-[lody-action-active=true]/close-scope:border-primary',
           // Right panel is never under the macOS traffic lights (top-left) —
           // it must not reserve the titlebar inset the left sidebar needs. It
           // still shares the traffic-light centerline with the main tab bar.
@@ -6234,6 +6399,7 @@ const SessionDetail = ({
 
   return (
     <div
+      ref={desktopActionRootRef}
       className="h-full"
       onPointerDownCapture={(event) =>
         handleDesktopTabRegionInteraction(event.target, event.currentTarget)

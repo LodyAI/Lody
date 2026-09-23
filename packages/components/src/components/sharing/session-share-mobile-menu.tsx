@@ -34,7 +34,7 @@ export function SessionShareMobileMenu({
                 {
                   id: 'public-share',
                   icon: <Share2 className="h-3.5 w-3.5" />,
-                  label: t('sharing.manager.title', 'Share conversation'),
+                  label: t('sharing.manager.title', 'Share'),
                   onClick: () => setSharing(true),
                 },
               ]

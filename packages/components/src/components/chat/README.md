@@ -27,7 +27,9 @@ reasoning behind those rules.
   opens a submenu; touch does not, so mobile pushes the panel onto the same
   surface with a back row.
 - **The 20-row picker cap.** The complete option set is unbounded; the cap keeps
-  the menu mountable while search still ranks over everything.
+  the menu mountable while search still ranks over everything. The project
+  picker uses `DropdownMenuSearchInput` for mount-owned autofocus and to route
+  typing back to search after pointer movement focuses a project row.
 - **Effective project access.** A project is only really shared when its machine
   is too, which is why the badge combines both bits instead of reading the raw
   project bit.

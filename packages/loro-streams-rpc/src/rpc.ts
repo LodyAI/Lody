@@ -36,6 +36,7 @@ import type {
   MachineAcpAuthenticateResponse,
   MachineAcpAuthenticationProgressMessage,
   MachineAcpCapabilitiesRefreshResponse,
+  MachinePiExtensionsResponse,
   RpcSecretEnvelope,
   RpcSecretPublicKey,
   PreviewTarget,
@@ -89,6 +90,7 @@ import {
   MachineAcpAuthenticateResponseSchema,
   MachineAcpAuthenticationProgressMessageSchema,
   MachineAcpCapabilitiesRefreshResponseSchema,
+  MachinePiExtensionsResponseSchema,
   RpcSecretEnvelopeSchema,
   PreviewTargetSchema,
   MachineBugReportResponseSchema,
@@ -183,6 +185,7 @@ export const LoroStreamsRpcMethodSchema = z.enum([
   'machine/acp-authenticate',
   'machine/acp-binary-status',
   'machine/acp-binary-install',
+  'machine/pi-extensions',
   'machine/bug-report',
   'code-collab/open-text',
   'code-collab/refresh-text',
@@ -349,6 +352,15 @@ export const LoroMachineAcpBinaryInstallRpcRequestSchema = BaseRpcRequestSchema.
   params: z
     .object({
       agentType: z.string().trim().min(1),
+    })
+    .strict(),
+}).strict();
+
+export const LoroMachinePiExtensionsRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('machine/pi-extensions'),
+  params: z
+    .object({
+      configId: AgentConfigIdSchema.optional(),
     })
     .strict(),
 }).strict();
@@ -613,6 +625,7 @@ export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroMachineAcpAuthenticateRpcRequestSchema,
   LoroMachineAcpBinaryStatusRpcRequestSchema,
   LoroMachineAcpBinaryInstallRpcRequestSchema,
+  LoroMachinePiExtensionsRpcRequestSchema,
   LoroMachineBugReportRpcRequestSchema,
   LoroCodeCollabV2OpenTextRpcRequestSchema,
   LoroCodeCollabV2RefreshTextRpcRequestSchema,
@@ -734,6 +747,9 @@ export type LoroMachineAcpBinaryStatusRpcRequest = z.infer<
 >;
 export type LoroMachineAcpBinaryInstallRpcRequest = z.infer<
   typeof LoroMachineAcpBinaryInstallRpcRequestSchema
+>;
+export type LoroMachinePiExtensionsRpcRequest = z.infer<
+  typeof LoroMachinePiExtensionsRpcRequestSchema
 >;
 export type LoroMachineBugReportRpcRequest = z.infer<typeof LoroMachineBugReportRpcRequestSchema>;
 export type LoroCodeCollabV2OpenTextRpcRequest = z.infer<
@@ -1468,6 +1484,7 @@ export type LoroMachineRpcResult =
   | MachineAcpBinaryStatusResponse
   | MachineAcpBinaryInstallResponse
   | MachineAcpBinaryProgressMessage
+  | MachinePiExtensionsResponse
   | MachineBugReportResponse
   | SessionCancelResponse
   | LoroSessionLiveStatusRpcResponse
@@ -1607,6 +1624,10 @@ const toLegacyRpcErrorResponse = (
       success: false,
       error: `${error.code}: ${error.message}`,
     };
+  }
+
+  if (method === 'machine/pi-extensions') {
+    return { success: false, error: error.message };
   }
 
   if (method === 'machine/bug-report') {
@@ -1856,6 +1877,10 @@ const parseRpcSuccessResult = async (
   if (response.method === 'machine/acp-binary-install') {
     const parsed = MachineAcpBinaryInstallResponseSchema.safeParse(response.result);
     return parsed.success ? (parsed.data as MachineAcpBinaryInstallResponse) : null;
+  }
+  if (response.method === 'machine/pi-extensions') {
+    const parsed = MachinePiExtensionsResponseSchema.safeParse(response.result);
+    return parsed.success ? (parsed.data as MachinePiExtensionsResponse) : null;
   }
   if (response.method === 'machine/bug-report') {
     const parsed = MachineBugReportResponseSchema.safeParse(response.result);
@@ -2690,6 +2715,19 @@ export class LoroStreamsMachineRpcClient {
     })) as MachineAcpBinaryInstallResponse | null;
   }
 
+  async requestMachinePiExtensions(options: {
+    configId?: AgentConfigId;
+    timeoutMs: number;
+  }): Promise<MachinePiExtensionsResponse | null> {
+    return (await this.sendRequest({
+      method: 'machine/pi-extensions',
+      timeoutMs: options.timeoutMs,
+      params: {
+        configId: options.configId,
+      },
+    })) as MachinePiExtensionsResponse | null;
+  }
+
   async requestMachineBugReport(options: {
     description: string;
     reporterUserId: string;
@@ -3235,6 +3273,13 @@ export class LoroStreamsMachineRpcClient {
           };
         }
       | {
+          method: 'machine/pi-extensions';
+          timeoutMs: number;
+          params: {
+            configId?: AgentConfigId;
+          };
+        }
+      | {
           method: 'machine/bug-report';
           timeoutMs: number;
           params: {
@@ -3606,6 +3651,9 @@ export class LoroStreamsMachineRpcClient {
           request = { ...envelope, method: args.method, params: args.params };
           break;
         case 'machine/acp-binary-install':
+          request = { ...envelope, method: args.method, params: args.params };
+          break;
+        case 'machine/pi-extensions':
           request = { ...envelope, method: args.method, params: args.params };
           break;
         case 'machine/bug-report':
