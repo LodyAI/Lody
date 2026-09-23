@@ -39,7 +39,6 @@ export interface ContextMenuContentProps extends Omit<
 }
 
 const styles = stylex.create({
-  positioner: { outlineStyle: 'none' },
   /** The area that answers a right click; it is the caller's own layout. */
   trigger: { display: 'contents' },
 });
@@ -81,7 +80,7 @@ export const ContextMenuContent = forwardRef<HTMLDivElement, ContextMenuContentP
         <BaseContextMenu.Positioner
           ref={ref}
           {...rest}
-          className={[stylex.props(styles.positioner).className, ...palette]
+          className={[stylex.props(surface.positioner).className, ...palette]
             .filter(Boolean)
             .join(' ')}
         >

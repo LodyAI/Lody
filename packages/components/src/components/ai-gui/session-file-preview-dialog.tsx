@@ -207,7 +207,7 @@ export function SessionFilePreviewDialog({
   const panelKey = useMemo(() => panelProps.file.fileId, [panelProps.file.fileId]);
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Content className="w-[calc(100vw-2rem)] max-w-3xl">
+      <Dialog.Content closeButton={false} className="w-[calc(100vw-2rem)] max-w-3xl">
         <SessionFilePreviewPanel key={panelKey} {...panelProps} />
       </Dialog.Content>
     </Dialog.Root>

@@ -17,6 +17,16 @@ import { popup } from './popup.tokens.stylex';
  * moves — the tick keeps saying which row is current.
  */
 export const surface = stylex.create({
+  /**
+   * The positioner carries no appearance, but it owns the stacking: a
+   * `position: fixed` element creates a stacking context, so a `z-index` on
+   * the popup inside it only orders the popup against its own siblings —
+   * against the page it counts as whatever the positioner counts as, which
+   * with no `z-index` is `auto`, and every positive `z-index` in the shell
+   * paints over it. The positioner is the element that stacks against the
+   * product shell, so it is the one that says so.
+   */
+  positioner: { outlineStyle: 'none', zIndex: z.popover },
   /** The floating rung: raised background and the popover shadow, together. */
   popup: {
     boxSizing: 'border-box',
@@ -45,8 +55,6 @@ export const surface = stylex.create({
     transitionProperty: 'opacity, transform',
     transitionDuration: duration.regular,
     transitionTimingFunction: ease.standard,
-    // The product shell stacks its own surfaces; a popup belongs above them.
-    zIndex: z.popover,
   },
   /**
    * A menu surface is not the width of what opened it.

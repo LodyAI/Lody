@@ -1181,7 +1181,10 @@ export function ChatComposer({
 
         return (
           <Dialog.Root open={previewPastedTextDraft !== null} onOpenChange={handlePastedTextOpenChange}>
-            <Dialog.Content className="flex h-[85vh] max-h-[85vh] max-w-3xl flex-col gap-0 overflow-hidden p-0">
+            <Dialog.Content
+              closeButton={false}
+              className="flex h-[85vh] max-h-[85vh] max-w-3xl flex-col gap-0 overflow-hidden p-0"
+            >
               {previewPastedTextDraft ? (
                 <>
                   <div className="flex items-center justify-between gap-3 border-b border-border/60 px-5 py-3">

@@ -110,3 +110,8 @@ documented split (`src/ui/AGENTS.md`), not a migration debt. Vaul drawer and
 the patched scroll area stay on their own dependencies until the package grows
 equivalents. Mobile surfaces were migrated by typecheck and the shared tests;
 no device pass ran.
+
+The real-Electron P0 smoke suite later caught the regressions unit tests
+could not — a popup `z-index` trapped inside its positioner's stacking
+context, dropped `closeButton={false}` flags, and per-level Escape. See
+[popup positioner stacking](../bug-fix/2026-09-23-popup-positioner-stacking.md).

@@ -116,8 +116,6 @@ const styles = stylex.create({
     height: field.iconSize,
     color: field.icon,
   },
-  /** The positioner carries no appearance; the popup inside it does. */
-  positioner: { outlineStyle: 'none' },
 });
 
 const sizeStyles = {
@@ -330,7 +328,7 @@ export const SelectContent = forwardRef<HTMLDivElement, SelectContentProps>(func
         alignItemWithTrigger={alignItemWithTrigger}
         sideOffset={sideOffset}
         positionMethod={strategy}
-        className={[stylex.props(styles.positioner).className, ...palette]
+        className={[stylex.props(surface.positioner).className, ...palette]
           .filter(Boolean)
           .join(' ')}
       >

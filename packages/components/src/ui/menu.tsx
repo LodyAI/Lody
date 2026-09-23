@@ -158,8 +158,12 @@ const MenuCheckboxItem = React.forwardRef<HTMLDivElement, MenuCheckboxItemProps>
   }
 );
 
+/* Picking one value answers the question the menu asked, so a radio row closes
+   * it — the way a native checkmark menu dismisses on selection. Base UI keeps
+   * checkable rows open (`closeOnClick` defaults false); a caller that wants
+   * the picker's menu to stay up states `closeOnClick={false}` itself. */
 const MenuRadioItem = React.forwardRef<HTMLDivElement, MenuRadioItemProps>(
-  function MenuRadioItem({ onClick, closeOnClick, ...props }, ref) {
+  function MenuRadioItem({ onClick, closeOnClick = true, ...props }, ref) {
     const markSelected = useMarkMenuItemSelected();
     return (
       <UiMenu.RadioItem

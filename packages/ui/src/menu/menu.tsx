@@ -114,11 +114,6 @@ export interface MenuSeparatorProps extends Omit<SeparatorBaseProps, 'className'
   className?: string;
 }
 
-const styles = stylex.create({
-  /** The positioner carries no appearance; the popup inside it does. */
-  positioner: { outlineStyle: 'none' },
-});
-
 /**
  * The row every part in this family renders: the leading box, the label that
  * takes the remaining width, the trailing metadata, and whatever the caller
@@ -233,7 +228,7 @@ export const MenuContent = forwardRef<HTMLDivElement, MenuContentProps>(function
         {...rest}
         sideOffset={sideOffset}
         positionMethod={strategy}
-        className={[stylex.props(styles.positioner).className, ...palette]
+        className={[stylex.props(surface.positioner).className, ...palette]
           .filter(Boolean)
           .join(' ')}
       >

@@ -9,8 +9,14 @@ import { tooltip } from './tooltip.tokens.stylex';
  * package no longer draws.
  */
 export const chip = stylex.create({
-  /** The positioner carries no appearance; the chip inside it does. */
-  positioner: { outlineStyle: 'none' },
+  /**
+   * The positioner carries no appearance, but it owns the stacking for the
+   * same reason a popup's does (`popup/surface.ts`): a `position: fixed`
+   * element is a stacking context, so the rung must be stated here, where it
+   * competes with the page — above every popup, since a tooltip can name a
+   * control that is itself inside one.
+   */
+  positioner: { outlineStyle: 'none', zIndex: z.tooltip },
   /**
    * The chip. It is the one floating thing that inverts rather than rising off
    * the page: the ladder puts a tooltip at `label` with `shadow.medium`, so
@@ -45,8 +51,6 @@ export const chip = stylex.create({
     transitionProperty: 'opacity, transform',
     transitionDuration: duration.fast,
     transitionTimingFunction: ease.standard,
-    // Above every popup: a tooltip can name a control that is itself inside one.
-    zIndex: z.tooltip,
   },
   /**
    * Both ends of the rise, measured against the anchor rather than the page,

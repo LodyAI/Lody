@@ -49,11 +49,6 @@ export interface PopoverHeaderProps {
   className?: string;
 }
 
-const styles = stylex.create({
-  /** The positioner carries no appearance; the popup inside it does. */
-  positioner: { outlineStyle: 'none' },
-});
-
 /**
  * The popover, assembled. Base UI splits it into a portal, a positioner and the
  * popup; every caller writes the same three, so this part writes them once and
@@ -85,7 +80,7 @@ export const PopoverContent = forwardRef<HTMLDivElement, PopoverContentProps>(
           {...rest}
           sideOffset={sideOffset}
           positionMethod={strategy}
-          className={[stylex.props(styles.positioner).className, ...palette]
+          className={[stylex.props(surface.positioner).className, ...palette]
             .filter(Boolean)
             .join(' ')}
         >

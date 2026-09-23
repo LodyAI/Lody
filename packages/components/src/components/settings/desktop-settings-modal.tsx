@@ -64,6 +64,7 @@ export function DesktopSettingsModal() {
     >
       <Dialog.Content
         noAnimation
+        closeButton={false}
         className="flex h-[min(90vh,950px)] w-[84vw] max-w-[1100px] flex-col gap-0 overflow-hidden p-0 sm:p-0"
       >
         <SettingsModalBody />

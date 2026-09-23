@@ -104,7 +104,6 @@ const styles = stylex.create({
   },
   /** The controls beside the input keep the shell's end padding off them. */
   shell: { gap: field.triggerGap },
-  positioner: { outlineStyle: 'none' },
 });
 
 const sizeStyles = {
@@ -338,7 +337,7 @@ export const ComboboxContent = forwardRef<HTMLDivElement, ComboboxContentProps>(
           {...rest}
           sideOffset={sideOffset}
           positionMethod={strategy}
-          className={[stylex.props(styles.positioner).className, ...palette]
+          className={[stylex.props(surface.positioner).className, ...palette]
             .filter(Boolean)
             .join(' ')}
         >

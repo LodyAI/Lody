@@ -91,3 +91,7 @@ progress 与 spinner。只要调用方不迁移，每个 Radix 文件就继续�
 包装层。`Spinner` 的双重身份是有文档的分工（`src/ui/AGENTS.md`），不是迁移债。
 Vaul drawer 与打过补丁的 scroll area 在包长出等价物之前维持原依赖。移动端界面
 只经 typecheck 与共享测试迁移，未做真机验证。
+
+随后真实 Electron 的 P0 smoke 抓到了单测抓不到的回归——弹层 `z-index` 被困在
+positioner 的层叠上下文里、`closeButton={false}` 丢失、Escape 逐层关闭。见
+[弹层 positioner 层叠](../bug-fix/2026-09-23-popup-positioner-stacking.zh.md)。
