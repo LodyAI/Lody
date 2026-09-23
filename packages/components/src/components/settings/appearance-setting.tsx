@@ -5,6 +5,7 @@ import { Monitor, Moon, SquareTerminal, Sun } from 'lucide-react';
 
 import {
   conversationFontSizeAtom,
+  fontLigaturesEnabledAtom,
   interfaceFontFamilyAtom,
   normalizeConversationFontSize,
   normalizeTerminalFontSize,
@@ -21,6 +22,7 @@ import { buildTerminalFontPreviewFamily } from '@/components/terminal/terminal-t
 import { useIsMobile } from '@/hooks/use-mobile';
 import { listSystemFontFamilies } from '@/lib/local-fonts';
 import { Input } from '@/ui/input';
+import { Switch } from '@/ui/switch';
 import { LanguageSelector } from '../../i18n';
 import { useTheme, type Theme } from '../../theme-provider';
 import { settingContainerClass } from '.';
@@ -47,6 +49,8 @@ export interface AppearanceSettingsViewProps {
   onSystemFontMenuOpen: () => void;
   terminalFontSize: number;
   onTerminalFontSizeChange: (value: number) => void;
+  fontLigaturesEnabled: boolean;
+  onFontLigaturesEnabledChange: (value: boolean) => void;
 }
 
 function buildSystemFontOptions(
@@ -86,6 +90,8 @@ export function AppearanceSettingsView({
   onSystemFontMenuOpen,
   terminalFontSize,
   onTerminalFontSizeChange,
+  fontLigaturesEnabled,
+  onFontLigaturesEnabledChange,
 }: AppearanceSettingsViewProps) {
   const { t } = useTranslation();
 
@@ -334,6 +340,23 @@ export function AppearanceSettingsView({
           </div>
         </CompactSection>
       ) : null}
+      {isElectron ? (
+        <CompactSection>
+          <CompactRow
+            label={t('settings.fontLigatures.label', 'Font ligatures')}
+            helper={t(
+              'settings.fontLigatures.helper',
+              'Applies to conversation code, tool output, and the Terminal preview.'
+            )}
+          >
+            <Switch
+              checked={fontLigaturesEnabled}
+              onCheckedChange={onFontLigaturesEnabledChange}
+              aria-label={t('settings.fontLigatures.label', 'Font ligatures')}
+            />
+          </CompactRow>
+        </CompactSection>
+      ) : null}
     </div>
   );
 }
@@ -344,6 +367,7 @@ function DesktopAppearanceSettings() {
   const [interfaceFontFamily, setInterfaceFontFamily] = useAtom(interfaceFontFamilyAtom);
   const [terminalFontFamily, setTerminalFontFamily] = useAtom(terminalFontFamilyAtom);
   const [terminalFontSize, setTerminalFontSize] = useAtom(terminalFontSizeAtom);
+  const [fontLigaturesEnabled, setFontLigaturesEnabled] = useAtom(fontLigaturesEnabledAtom);
   const [systemFontFamilies, setSystemFontFamilies] = useState<string[]>([]);
   const [systemFontLoadState, setSystemFontLoadState] = useState<SystemFontLoadState>('idle');
   const isElectron = typeof window !== 'undefined' && window.__LODY_ELECTRON__ === true;
@@ -400,6 +424,8 @@ function DesktopAppearanceSettings() {
       onSystemFontMenuOpen={handleSystemFontMenuOpen}
       terminalFontSize={terminalFontSize}
       onTerminalFontSizeChange={setTerminalFontSize}
+      fontLigaturesEnabled={fontLigaturesEnabled}
+      onFontLigaturesEnabledChange={setFontLigaturesEnabled}
     />
   );
 }

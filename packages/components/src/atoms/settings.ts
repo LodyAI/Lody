@@ -106,6 +106,24 @@ export const terminalFontSizeAtom = atom(
   }
 );
 
+export const DEFAULT_FONT_LIGATURES_ENABLED = true;
+
+export function normalizeFontLigaturesEnabled(value: unknown): boolean {
+  return typeof value === 'boolean' ? value : DEFAULT_FONT_LIGATURES_ENABLED;
+}
+
+const fontLigaturesEnabledStorageAtom = atomWithStorage<unknown>(
+  'lody-font-ligatures-enabled',
+  DEFAULT_FONT_LIGATURES_ENABLED
+);
+
+export const fontLigaturesEnabledAtom = atom(
+  (get) => normalizeFontLigaturesEnabled(get(fontLigaturesEnabledStorageAtom)),
+  (_get, set, nextValue: boolean) => {
+    set(fontLigaturesEnabledStorageAtom, nextValue);
+  }
+);
+
 // Desktop settings modal open state. On desktop (non-mobile) the settings UI is a
 // modal overlay driven by this atom instead of a full-page route. Mobile keeps the
 // route-based settings page and ignores this atom.

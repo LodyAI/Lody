@@ -22,6 +22,7 @@ function ControlledAppearanceSettings({ isElectron }: { isElectron: boolean }) {
   const [interfaceFontFamily, setInterfaceFontFamily] = useState('Inter');
   const [terminalFontFamily, setTerminalFontFamily] = useState('');
   const [terminalFontSize, setTerminalFontSize] = useState(13);
+  const [fontLigaturesEnabled, setFontLigaturesEnabled] = useState(true);
 
   return (
     <div className="mx-auto max-w-4xl p-6">
@@ -42,6 +43,8 @@ function ControlledAppearanceSettings({ isElectron }: { isElectron: boolean }) {
         onSystemFontMenuOpen={() => undefined}
         terminalFontSize={terminalFontSize}
         onTerminalFontSizeChange={setTerminalFontSize}
+        fontLigaturesEnabled={fontLigaturesEnabled}
+        onFontLigaturesEnabledChange={setFontLigaturesEnabled}
       />
     </div>
   );
