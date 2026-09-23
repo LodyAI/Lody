@@ -345,6 +345,64 @@ describe('useGitHubPrDetails target isolation', () => {
     ]);
   });
 
+  it("does not let a refresh join another view's poll that started before it", async () => {
+    vi.useFakeTimers();
+    const results: Array<UseGitHubPrDetailsResult | null> = [null, null];
+    const base: UseGitHubPrDetailsInput = {
+      workspaceId: 'workspace-1',
+      repoFullName: 'loro-dev/lody',
+      prNumber: 1,
+    };
+    container = document.createElement('div');
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        createElement(
+          TestCloudPlatformProvider,
+          null,
+          // The merging view is off screen, so only the other view polls.
+          createElement(Probe, {
+            input: { ...base, visible: false },
+            onResult: (result) => (results[0] = result),
+          }),
+          createElement(Probe, { input: base, onResult: (result) => (results[1] = result) })
+        )
+      );
+    });
+    for (let attempt = 0; attempt < 30 && !results.every((r) => r?.state === 'ready'); attempt++) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+    }
+
+    githubMocks.githubFetchPullRequestDetails.mockClear();
+    const beforeMerge = createDeferred<GitHubPullRequestDetails>();
+    const afterMerge = createDeferred<GitHubPullRequestDetails>();
+    githubMocks.githubFetchPullRequestDetails
+      .mockReturnValueOnce(beforeMerge.promise)
+      .mockReturnValueOnce(afterMerge.promise);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(15_000);
+    });
+    expect(githubMocks.githubFetchPullRequestDetails).toHaveBeenCalledTimes(1);
+
+    // The first view merges, then refreshes: that read must be its own.
+    let refreshed: Promise<GitHubPrDetailsData | null> | undefined;
+    await act(async () => {
+      refreshed = results[0]?.refresh();
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(githubMocks.githubFetchPullRequestDetails).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      afterMerge.resolve(createPullRequest(1, { title: 'After merge' }));
+      beforeMerge.resolve(createPullRequest(1, { title: 'Before merge' }));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect((await refreshed)?.pullRequest.title).toBe('After merge');
+  });
+
   it('bypasses the browser cache when manually refreshing an idle PR tab', async () => {
     const refreshedPullRequest = createPullRequest(1, {
       title: 'Refreshed pull request',

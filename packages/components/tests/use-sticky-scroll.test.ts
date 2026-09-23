@@ -994,6 +994,40 @@ describe('useStickyScroll Virtua adapter', () => {
       expect(latestResult?.isSticky).toBe(true);
     });
 
+    it('keeps holding the same message when rows are inserted above it', async () => {
+      const sessionId = 'session-anchor-retarget' as SessionId;
+      const fixture = await renderAnchoredFixture(sessionId);
+      expect(fixture.getScrollTop()).toBe(516);
+
+      // A row appears before the message: index 3 is now the row above it,
+      // and the message moved to index 4 at the same offset.
+      const vlist = createMockVirtualizerHandle(fixture.scrollElement);
+      vlist.getItemOffset.mockImplementation((index: number) => (index === 4 ? 516 : 416));
+      vlist.getItemSize.mockImplementation(() => 100);
+      await renderHarness({
+        sessionId,
+        vlist,
+        scrollElement: fixture.scrollElement,
+        itemCount: 5,
+        spacerElement: fixture.spacerElement,
+      });
+      await act(async () => {
+        latestResult?.retargetAnchor(4);
+        emitResize(fixture.contentElement);
+        await advanceAnimationFrames();
+      });
+      expect(fixture.getScrollTop()).toBe(516);
+      expect(fixture.spacerElement.style.height).toBe('276px');
+
+      // The message disappears: nothing is left to hold, so follow the end.
+      await act(async () => {
+        latestResult?.retargetAnchor(-1);
+        await advanceAnimationFrames();
+      });
+      expect(fixture.spacerElement.style.height).toBe('0px');
+      expect(latestResult?.isSticky).toBe(true);
+    });
+
     it('gives the reserved room up as the reader scrolls up, and never restores it', async () => {
       const fixture = await renderAnchoredFixture('session-anchor-scroll-up' as SessionId);
       expect(fixture.spacerElement.style.height).toBe('276px');

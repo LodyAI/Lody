@@ -128,7 +128,7 @@ export function fetchRepoFilePaths(
       return entry;
     })
     .finally(() => {
-      inFlight.delete(key);
+      if (inFlight.get(key) === request) inFlight.delete(key);
     });
   inFlight.set(key, request);
   return request;

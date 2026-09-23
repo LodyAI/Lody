@@ -1601,6 +1601,7 @@ export const SessionChatStreamView = forwardRef<
       isSticky,
       scrollToBottom: scrollStreamToBottom,
       anchorToRow,
+      retargetAnchor,
       initialScrollRestored,
       initialVirtualizerCache,
       persistVirtualizerCache,
@@ -1623,19 +1624,37 @@ export const SessionChatStreamView = forwardRef<
      * the layout effect of the commit that first contains the row.
      */
     const pendingAnchorMessageIdRef = useRef<string | null>(null);
+    /**
+     * The message currently held. The hook holds a Virtua index, so rows
+     * inserted or removed above it (the provenance row, a work group folding,
+     * a placeholder splitting) re-resolve the index from this id.
+     */
+    const anchoredMessageIdRef = useRef<string | null>(null);
+    const findMessageRowIndex = useCallback(
+      (messageId: string) => {
+        const rowIndex = virtualRows.findIndex(
+          (row) =>
+            row.type === 'standard' &&
+            row.item.type === 'message' &&
+            row.item.message.id === messageId
+        );
+        return rowIndex === -1 ? -1 : rowIndex + leadingRowCount;
+      },
+      [leadingRowCount, virtualRows]
+    );
     const resolvePendingAnchor = useCallback(() => {
       const messageId = pendingAnchorMessageIdRef.current;
-      if (messageId === null) return;
-      const rowIndex = virtualRows.findIndex(
-        (row) =>
-          row.type === 'standard' &&
-          row.item.type === 'message' &&
-          row.item.message.id === messageId
-      );
-      if (rowIndex === -1) return;
+      if (messageId === null) {
+        const anchored = anchoredMessageIdRef.current;
+        if (anchored !== null) retargetAnchor(findMessageRowIndex(anchored));
+        return;
+      }
+      const index = findMessageRowIndex(messageId);
+      if (index === -1) return;
       pendingAnchorMessageIdRef.current = null;
-      anchorToRow(rowIndex + leadingRowCount);
-    }, [anchorToRow, leadingRowCount, virtualRows]);
+      anchoredMessageIdRef.current = messageId;
+      anchorToRow(index);
+    }, [anchorToRow, findMessageRowIndex, retargetAnchor]);
     useLayoutEffect(resolvePendingAnchor, [resolvePendingAnchor]);
     const anchorMessage = useCallback(
       (messageId: string) => {
@@ -1646,6 +1665,7 @@ export const SessionChatStreamView = forwardRef<
     );
     const scrollToBottom = useCallback(() => {
       pendingAnchorMessageIdRef.current = null;
+      anchoredMessageIdRef.current = null;
       scrollStreamToBottom();
     }, [scrollStreamToBottom]);
     const selectableRows = useMemo(
