@@ -13,7 +13,8 @@ classified as disposable spares, and recover to the neutral warm route after a
 crash. Adoption now clears the spare identity and persists the real reload target
 before navigation. Reveal requires the matching target surface, and absence waits
 only for that Session's metadata projection. The five-second recovery fallback
-remains; this does not prefetch target data or eliminate opening latency.
+remains. Local-only windows now bootstrap from peer metadata and already loaded
+Session snapshots, and readable history no longer waits for authoritative sync.
 
 ## Decision and evidence
 
@@ -23,7 +24,7 @@ The [desktop window Spec](../../../../specs/desktop-windows.md) describes the re
 The renderer's former `innerText` check accepted Loading, sidebar text, and missing
 Session messages. It now waits for two frames containing the matching Session or
 workspace marker. A visible conversation emits its marker after its document is
-ready and synced; confirmed absence is also a valid terminal surface. Workspace
+ready with readable history, or synced when empty; confirmed absence is also a valid terminal surface. Workspace
 landing emits its marker when mounted. Recovery still becomes accessible after
 five seconds, including when navigation fails.
 
@@ -43,19 +44,33 @@ settlement gate was rejected because an unrelated failed or empty metadata read
 could leave a missing Session loading forever. Existing Sessions do not subscribe
 to pending-state churn; workspace chrome still uses bootstrap readiness.
 
-A fixed delay or checking translated Loading strings would only hide the race for
-some timings/languages. Explicit readiness preserves the existing neutral shell
-without coupling to text or changing cold-window behavior. It still costs a warm
-renderer and loads target data after claim.
+`local-window-bootstrap.ts` uses a workspace-scoped BroadcastChannel only in local
+mode. Each runtime responds with CRDT metadata and documents it already owns;
+requests never create stores, Mirrors, or extra daemon subscriptions. Metadata
+responses merge asynchronously through the Repo's normal Flock projection. A
+150 ms response window allows multiple peers to contribute metadata without
+blocking runtime creation. Session acquisition races peer state against the
+existing eager-sync disk cache; a miss cannot beat usable data. Snapshot payloads
+are capped at 16 MiB. Documents merge into the receiver's existing replica, so
+unsent edits survive; persistence and Streams cursors remain per renderer.
+Runtime disposal closes the channel and resolves pending requests. Missing,
+oversized, corrupt, or unavailable peer state falls back to normal synchronization.
+
+The neutral shell still costs a renderer, and this is not a guarantee of instant
+opening: it does not share React stores, preinitialize the target runtime, or
+remove layout and history projection costs. Cloud and dual-mode runtimes do not
+participate in peer sharing. Empty conversations still wait for sync before reveal.
 
 ## Verification and limits
 
 Deterministic tests exercise closing the original/adopted windows, recovery targets,
 replacement timeouts, queued/delayed metadata, target deletion during a read,
 unrelated failed/missing metadata, runtime replacement, target-specific reveal,
-consecutive frames, and the recovery deadline. All 34 tests in six focused suites
+consecutive frames, and the recovery deadline. Peer tests additionally verify metadata projection, history reuse, unsent-edit
+merging, workspace isolation, close/miss fallback, and racing a slow disk cache.
+All 37 tests in seven focused suites
 passed, as did components and Electron main/renderer typechecks. Changed-source
-lint has no errors (two pre-existing warnings in the conversation component).
+lint has no errors (pre-existing warnings in the runtime and conversation component).
 Real Electron visual acceptance remains unverified. E2E still disables the warm
 pool. This worktree reuses locally available dependencies; `pnpm check` stops at
 missing dependencies in `packages/ignore`. `docs check` reports 34 existing links

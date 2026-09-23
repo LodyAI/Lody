@@ -51,6 +51,9 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 - `create-workspace-runtime.ts` maintains one Repo view. `WorkspaceTargetRouter` owns
   target ownership and transport selection; do not restore a second writer or a
   proxy-authoring/write-intent mirror.
+- Local-only window bootstrap may exchange same-workspace CRDT snapshots from
+  already owned documents. Merge into the receiving Repo; never treat peer state
+  as authoritative sync or open stores solely to answer bootstrap requests.
 - Repo storage, durable Streams cursors, and eager-sync high-water state must use the
   same per-renderer cache namespace. A checkpoint must never be shared by independently
   persisted Repo views.
