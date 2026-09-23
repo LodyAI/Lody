@@ -1,11 +1,4 @@
-import {
-  forwardRef,
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  type ReactNode,
-} from 'react';
+import { forwardRef, memo, useCallback, useEffect, useMemo, type ReactNode } from 'react';
 import type {
   SessionFilePayload,
   SessionHistoryParsed,
@@ -65,6 +58,8 @@ export interface SessionChatStreamProps {
   /** Scrolls as the first conversation row (for example, Session provenance). */
   leadingContent?: ReactNode;
   emptyState?: ReactNode;
+  /** Last-row status, e.g. while a cached conversation catches up. */
+  trailingStatus?: ReactNode;
   onAtBottomChange?: (atBottom: boolean) => void;
   showScrollToLatest?: boolean;
   agentActivityLabel?: string | null;
@@ -153,6 +148,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
       className,
       leadingContent,
       emptyState,
+      trailingStatus,
       onAtBottomChange,
       showScrollToLatest = true,
       agentActivityLabel = null,
@@ -266,6 +262,7 @@ const SessionChatStreamImpl = forwardRef<SessionChatStreamHandle, SessionChatStr
         className={className}
         leadingContent={leadingContent}
         emptyState={emptyState}
+        trailingStatus={trailingStatus}
         onAtBottomChange={onAtBottomChange}
         showScrollToLatest={showScrollToLatest}
         renderMessageRow={renderMessageRow}

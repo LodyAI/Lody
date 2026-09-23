@@ -25,7 +25,10 @@ import {
   type WorkspaceLocationKind,
 } from './session-info-chips';
 import type { SessionStatusStripState } from './session-status-strip';
-import { SessionSyncingIndicator } from './session-syncing-indicator';
+import {
+  SessionSyncingIndicator,
+  type SessionSyncIndicatorVariant,
+} from './session-syncing-indicator';
 
 export type InfoBarItemKey = 'status' | 'goal' | 'schedule' | 'context';
 
@@ -71,6 +74,8 @@ export type SessionInfoBarProps = {
    *  bar's right edge. Not a cluster/stage item — it must never steal focus
    *  or relayout the canonical order. */
   syncing?: boolean;
+  /** Overrides `syncing` with a specific conversation content-sync state. */
+  syncStatus?: SessionSyncIndicatorVariant | null;
   /** Mobile native shell only: lift the bar above the session drawer's
    *  transparent z-30 left-edge swipe-back strip, which otherwise covers the
    *  leftmost ~48px of the row and swallows taps on the first chip. Same
@@ -136,6 +141,7 @@ export function SessionInfoBar({
   privateAccessStatus,
   diffStat,
   syncing = false,
+  syncStatus,
   protectFromEdgeBackZone = false,
   initialStage,
   queue,
@@ -214,7 +220,8 @@ export function SessionInfoBar({
   // The bar owns the gap above the composer (the session composer skips its own
   // spacer): 8px under the pill, none under a queue sheet (it sits on the
   // composer), and the plain 4px when there is nothing to show.
-  if (!defaultKey && !onOpenBrowser && !syncing && !privateAccessStatus) {
+  const ambientSync = syncStatus !== undefined ? syncStatus : syncing ? 'syncing' : null;
+  if (!defaultKey && !onOpenBrowser && !ambientSync && !privateAccessStatus) {
     return queue ? (
       <div className="w-full shrink-0 bg-background">
         <ConversationColumn>
@@ -352,9 +359,12 @@ export function SessionInfoBar({
               sync-only mode nothing else consumes the row's free space, so
               ml-auto keeps the spinner pinned right; with a stage present
               its flex-1 has already eaten the space (no-op). */}
-          {syncing ? (
+          {ambientSync ? (
             <span className="ml-auto inline-flex shrink-0 items-center">
-              <SessionSyncingIndicator labelClassName="hidden @[560px]:inline" />
+              <SessionSyncingIndicator
+                variant={ambientSync}
+                labelClassName="hidden @[560px]:inline"
+              />
             </span>
           ) : null}
         </div>
