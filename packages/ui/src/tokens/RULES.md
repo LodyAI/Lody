@@ -54,10 +54,11 @@ radio, switch or tab strip sits in all take the well: `wellBackground` under
 are material too, and they are all the same material — a column that mixes a
 recess with a raised or a flat field reads as two kinds of thing. The recess is
 shallow and lit from the same light as everything raised: a short shadow inside
-the top edge, one inner hairline, the light catching the lower lip. Its fill
-sits just under the surface — a little darker than the card, never a mid-gray,
-which read as a hole cut into it — and in Vesper it is darker than the page, so
-it still reads on the darkest ground.
+the top edge, one inner hairline, the light catching the lower lip. Its fill is
+a translucent darkening of whatever it sits on (`wellBackground` is ink or black
+at a few percent), so a field is the same small step under a card, a dialog or
+the page — never a fixed mid-gray, which read as a hole on white and as a deep
+black slot on a Vesper card.
 
 Never a border. One component token group, `field`, serves the whole family — input,
 textarea, checkbox, radio, switch and the Select and Combobox triggers — so a

@@ -215,5 +215,12 @@ which is contradictory light. The recess is now shallow and lit from above:
 `Combobox.Button` and the in-popup search stay; they read the well like every
 other field.
 
+The owner then found the Vesper recess too contrasty: a fixed 4.5% tuned against
+the darkest page made deep black slots on a 10% card. The fill is now a
+translucent darkening of whatever it sits on — ink at 5% in light (unchanged to
+the eye on white), black at 16% in Vesper, with a lighter top shadow — so a field
+is the same small step under every rung. The owner picked this (C) from three
+Vesper variants.
+
 Related: [token gallery](2026-09-09-ui-token-gallery.md),
 [call-site migration](2026-09-22-ui-radix-callsite-migration.md).

@@ -7,7 +7,7 @@ export const colors = stylex.defineVars({
   elevatedBackground: { default: 'hsl(0 0% 100%)', [DARK]: 'hsl(0 0% 8.6%)' },
   raisedBackground: { default: 'hsl(0 0% 100%)', [DARK]: 'hsl(0 0% 13.7%)' },
   secondaryBackground: { default: 'hsl(220 23% 97.5%)', [DARK]: 'hsl(0 0% 8.6%)' },
-  wellBackground: { default: 'hsl(220 14% 95%)', [DARK]: 'hsl(0 0% 4.5%)' },
+  wellBackground: { default: 'hsl(225 10% 11% / 0.05)', [DARK]: 'hsl(0 0% 0% / 0.16)' },
   label: { default: 'hsl(225 7% 11%)', [DARK]: 'hsl(0 0% 100%)' },
   secondaryLabel: { default: 'hsl(220 9% 46%)', [DARK]: 'hsl(0 0% 62.7%)' },
   tertiaryLabel: { default: 'hsl(220 8% 62%)', [DARK]: 'hsl(0 0% 45%)' },
@@ -43,7 +43,7 @@ export const shadow = stylex.defineVars({
     default:
       'inset 0 1px 1.5px hsl(225 10% 11% / 0.08), inset 0 0 0 1px hsl(225 10% 11% / 0.06), 0 1px 0 hsl(0 0% 100% / 0.8)',
     [DARK]:
-      'inset 0 1px 2px hsl(0 0% 0% / 0.6), inset 0 0 0 1px hsl(0 0% 100% / 0.06), 0 1px 0 hsl(0 0% 100% / 0.04)',
+      'inset 0 1px 2px hsl(0 0% 0% / 0.3), inset 0 0 0 1px hsl(0 0% 100% / 0.05), 0 1px 0 hsl(0 0% 100% / 0.04)',
   },
   raised: {
     default:
@@ -105,7 +105,7 @@ export const darkTheme = stylex.createTheme(colors, {
   elevatedBackground: 'hsl(0 0% 8.6%)',
   raisedBackground: 'hsl(0 0% 13.7%)',
   secondaryBackground: 'hsl(0 0% 8.6%)',
-  wellBackground: 'hsl(0 0% 4.5%)',
+  wellBackground: 'hsl(0 0% 0% / 0.16)',
   label: 'hsl(0 0% 100%)',
   secondaryLabel: 'hsl(0 0% 62.7%)',
   tertiaryLabel: 'hsl(0 0% 45%)',
@@ -132,7 +132,7 @@ export const lightTheme = stylex.createTheme(colors, {
   elevatedBackground: 'hsl(0 0% 100%)',
   raisedBackground: 'hsl(0 0% 100%)',
   secondaryBackground: 'hsl(220 23% 97.5%)',
-  wellBackground: 'hsl(220 14% 95%)',
+  wellBackground: 'hsl(225 10% 11% / 0.05)',
   label: 'hsl(225 7% 11%)',
   secondaryLabel: 'hsl(220 9% 46%)',
   tertiaryLabel: 'hsl(220 8% 62%)',
@@ -156,7 +156,7 @@ export const lightTheme = stylex.createTheme(colors, {
 
 export const darkShadowTheme = stylex.createTheme(shadow, {
   inset:
-    'inset 0 1px 2px hsl(0 0% 0% / 0.6), inset 0 0 0 1px hsl(0 0% 100% / 0.06), 0 1px 0 hsl(0 0% 100% / 0.04)',
+    'inset 0 1px 2px hsl(0 0% 0% / 0.3), inset 0 0 0 1px hsl(0 0% 100% / 0.05), 0 1px 0 hsl(0 0% 100% / 0.04)',
   raised:
     'inset 0 1px 0 hsl(0 0% 100% / 0.08), 0 0 0 0.5px hsl(0 0% 0% / 0.7), 0 1px 2px hsl(0 0% 0% / 0.5)',
   inkEdge: 'inset 0 1px 0 hsl(0 0% 100% / 0.55), 0 1px 2px hsl(0 0% 0% / 0.5)',
