@@ -18,6 +18,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { InteractionArmedProvider, useInteractionArm } from '@/ui/interaction-arm';
 import {
   MessageSelectionContext,
   MessageSelectionOverlay,
@@ -478,14 +479,20 @@ const NativeSelectionRowsContext = createContext<{
 function ConversationVirtualRow({ index, ...props }: CustomItemComponentProps) {
   const { rows, leading, held } = useContext(NativeSelectionRowsContext);
   const row = rows[index - leading];
+  // Row tooltips, popovers and context menus mount on the first hover or focus
+  // (see `ui/interaction-arm.tsx`): they were over a third of a switch's mounts.
+  const { armed, armHandlers } = useInteractionArm();
   return (
     <NativeTextSelectionHoldContext.Provider value={!!row && held.has(row.turnId)}>
-      <div
-        {...props}
-        data-virtual-index={index}
-        data-conversation-row-key={row?.key}
-        data-conversation-turn-id={row?.turnId}
-      />
+      <InteractionArmedProvider value={armed}>
+        <div
+          {...props}
+          {...armHandlers}
+          data-virtual-index={index}
+          data-conversation-row-key={row?.key}
+          data-conversation-turn-id={row?.turnId}
+        />
+      </InteractionArmedProvider>
     </NativeTextSelectionHoldContext.Provider>
   );
 }

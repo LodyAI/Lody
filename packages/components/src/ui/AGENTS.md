@@ -54,6 +54,10 @@ strings on i18n rather than the registry's inline English.
   box. Default is `7` so the rings sit 4px apart; `3` welds the two surfaces together.
 - Tooltips (`ui/tooltip.tsx`) use a `0.5px` border and
   `0 0.5px 1px 1px rgba(0,0,0,0.04)`. Do not restore a 1px border.
+- `Tooltip`, `Popover` and `ContextMenu` render only their trigger inside an unarmed
+  `useInteractionArm` boundary (conversation rows) and mount on the first hover or focus.
+  Keep that path when wrapping them: an owner-opened overlay still mounts, and a boundary
+  armed by focus hands it back to the same trigger (`ui/interaction-arm.tsx`).
 - Overlay list hover (menus, command palette, mention, select) is
   `bg-foreground/[0.05]` in light and `bg-white/[0.10]` in dark. Do not use
   `--hover` on popovers — it is sized for the page/sidebar and vanishes on the
