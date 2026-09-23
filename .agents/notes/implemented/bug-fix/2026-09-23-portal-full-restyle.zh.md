@@ -100,6 +100,18 @@ Translation: current
     （`getSessionMentionItems`）并只记录一次。slug 缓存按插入顺序保留前 200 条，很少是最近的会话；未改动。
   - Markdown 解析在 Streamdown 内部每次挂载都会重复（每次切换约 1.6ms）；缓存它需要给库打补丁，未采用。
 
+- **行内浮层。** 按区域统计挂载数，每次切换约 78% 的挂载在对话行中，其中三分之一是只在交互时才有用的
+  Tooltip、Popover 和右键菜单。`Tooltip`、`Popover` 和 `ContextMenu` 现在在未激活的 `useInteractionArm`
+  边界（每个对话行一个）内只渲染触发元素，在首次指针进入或聚焦时激活（`ui/interaction-arm.tsx`）；触屏设备立即挂载。
+  每次切换的行挂载从约 944 个组件降到约 702 个。在同两个对话之间切换 20 次的 A/B 测得主线程时间少约 7%
+  （有噪声；约每次切换 5-8ms）。
+
+- **Machine Flock 新鲜度。** 每个 Machine Flock 行的使用方在每次挂载时（有远端追平时两次）都要把 Flock 版本与其
+  投影物化时的版本比较，方式是导出并编码整个 version vector：每次切换约 5ms。每次导入和本地写入都会产生
+  Flock 事件（Machine Flock 未开启自动防抖），因此版本改为应用侧的变更戳：每个 Flock 句柄在打开时建立一个订阅，
+  每个事件从全局序列取一个新数字。戳相同即行未变；重新打开的 Flock 不会重复旧的戳。loro-repo 的 meta
+  持久化在每次落盘时仍读取 meta 版本（每次切换约 3.4ms）：那里它同时是增量导出的书签。
+
 ## 未决
 
 Konsta 的 `theme.css` 仍会导入全部 Konsta 样式；目前只证实这一条工具类有影响。还没有自动检查拒绝

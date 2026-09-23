@@ -128,6 +128,23 @@ Measured in the same production build and workspace (9k nodes):
   - Markdown parsing is repeated per mount inside Streamdown (~1.6ms per switch); caching it
     would need a patch to the library, not taken.
 
+- **Row overlays.** A mount census by region put ~78% of a switch's mounts in the
+  conversation rows, a third of them tooltips, popovers and context menus that only matter on
+  interaction. `Tooltip`, `Popover` and `ContextMenu` now render only their trigger inside an
+  unarmed `useInteractionArm` boundary, one per conversation row, which arms on the first
+  pointer entry or focus (`ui/interaction-arm.tsx`); touch devices mount eagerly. Row mounts
+  fell from ~944 to ~702 components per switch. An A/B over 20 switches between the same two
+  conversations measured ~7% less main-thread time (noisy; about 5-8ms per switch).
+
+- **Machine Flock freshness.** Each Machine Flock row consumer compared the Flock's version with
+  the version its projection was materialized at, on every mount (twice with remote catch-up),
+  by exporting and encoding the whole version vector: ~5ms per switch. Every import and local
+  write emits a Flock event (Machine Flocks have no auto-debounce), so the version is now an
+  application-side change stamp: one subscription per Flock handle, opened with the handle,
+  takes a new number from a global sequence on each event. Equal stamps mean unchanged rows;
+  a reopened Flock never repeats a stamp. The loro-repo meta persister still reads the meta
+  version on each flush (~3.4ms per switch): there it is also the incremental-export bookmark.
+
 ## Open
 
 Konsta's `theme.css` still imports all Konsta styles; only this utility was shown to matter. No
