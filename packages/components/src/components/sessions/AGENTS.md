@@ -16,7 +16,7 @@ Parent rules apply. Read each heading’s linked context before edits.
   may replace the current choice with a neighbour or local draft. Close writes
   `isTabClosed`, never archive or delete.
   Reopening archives restores lifecycle first.
-- Cmd/Ctrl+W ownership: [command rules](../../lib/commands/AGENTS.md); lone conversation closes window.
+- Cmd/Ctrl+W ownership: [command rules](../../lib/commands/AGENTS.md).
 - `Change owner` writes the OWNER `SessionMeta.userId`, never sharing/visibility;
   they stay separate actions.
 
