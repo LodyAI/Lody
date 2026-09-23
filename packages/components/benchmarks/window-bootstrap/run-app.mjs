@@ -12,6 +12,9 @@ const appPath = resolve(root, '../../apps/electron');
 const require = createRequire(join(appPath, 'package.json'));
 const electron = require('electron').trim();
 const repeats = Number(process.argv[2] ?? 10);
+const rounds = Number(process.argv[4] ?? 1500);
+if (!Number.isInteger(rounds) || rounds < 1 || rounds > 10000)
+  throw new Error('Rounds must be between 1 and 10000');
 if (!Number.isInteger(repeats) || repeats < 1 || repeats > 100)
   throw new Error('Repeats must be between 1 and 100');
 await readFile(join(appPath, 'out/main/index.js'));
@@ -47,7 +50,7 @@ try {
   });
   const fixture = createRequire(join(root, 'package.json'))(join(buildDir, 'fixture.cjs'));
   const binary = fixture
-    .buildSessionDoc(fixture.buildFixtureHistory(1500))
+    .buildSessionDoc(fixture.buildFixtureHistory(rounds))
     .export({ mode: 'snapshot' });
   const fixturePath = join(artifacts, 'fixture.b64');
   await writeFile(fixturePath, Buffer.from(binary).toString('base64'));
@@ -63,6 +66,7 @@ try {
     PROBE_FIXTURE: fixturePath,
     PROBE_VARIANT: process.argv[3] ?? 'current',
     PROBE_REPEATS: String(repeats),
+    PROBE_ROUNDS: String(rounds),
   };
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.LODY_E2E;

@@ -18,7 +18,8 @@ snapshots with independent persistence/cursors. Benchmarking exposed an uncondit
 The local spare now starts workspace initialization before a claim and retains it
 across matching navigation. Real desktop probes found a hidden virtual-list viewport
 after the old readiness signal; presentation now also waits for scroll restoration.
-The measured opening path remains about one second, with no demonstrated speedup.
+Cold snapshot adoption and preloaded layout code reduced the measured 3,000-entry
+opening median from 1,139 ms to 431 ms; 100 entries still take 257 ms.
 
 ## Decision and evidence
 
@@ -46,7 +47,10 @@ bootstrap ahead of the click without writing route context or mounting a Session
 The effective workspace keys remain stable on a matching claim, retaining both a
 ready runtime and initialization still in flight. Missing local identity waits;
 ordinary neutral windows and cloud runtimes retain route-driven initialization.
-Target-specific history hydration and painting still occur after selection.
+The spare also loads workspace layout code without mounting it. A resolved component
+renders directly; passing an already fulfilled Promise through React.lazy still
+caused an initial suspension. The component choice stays stable across rerenders
+to preserve mounted layout state. Target history and painting follow selection.
 
 `window-state.ts` owns product registration and close cleanup. Claimed windows can
 become the main fallback and survive closing the original. Only the current spare
@@ -72,11 +76,15 @@ peers report absence. The 150 ms deadline remains for a peer that disappears or
 stops responding after inventory. Missing Web Locks support disables Session peer
 requests. Payloads are capped at 16 MiB; disposal closes channels and resolves waits.
 
-Snapshots merge into the existing document before constructing its history reader;
-unsent edits remain intact. A measured alternative that imported into an already
-initialized reader removed waiting but replayed bulk-import events through its
-projection, greatly increasing large-history cost, so it was rejected. No second
-UI store, Mirror, daemon connection, or shared persistence/cursor is introduced.
+Cold Session snapshots merge with any persisted edits inside the storage load,
+before Repo subscribes. The candidate must be saved durably before adoption:
+Repo assumes storage-loaded versions are already persisted, so returning a
+non-durable seed could let a cursor outrun its document. A failed import/save keeps
+the original document and falls back to the normal live merge. Already-owned
+documents always merge in place, preserving identity, edits and subscribers.
+History readers initialize afterward. Importing into an initialized reader was
+rejected because it replayed bulk history through the projection. No second UI
+store, Mirror, daemon connection, or shared persistence/cursor is introduced.
 Cloud and dual-mode runtimes do not participate in peer sharing.
 
 ## Verification and limits
@@ -85,7 +93,10 @@ The provider, renderer readiness, stream rendering and sticky-scroll suites pass
 48 deterministic tests. They cover pre-route initialization, ready/in-flight claim
 reuse, scope disposal, mismatched stream identity, and hydrated but hidden content.
 The earlier 39 component and nine shared IPC cases cover adoption, metadata races
-and snapshot exchange. Components and Electron typechecks pass.
+and snapshot exchange. Components and Electron typechecks pass. The current bootstrap, layout, runtime,
+metadata recovery, reveal and lifecycle run passes 47 tests. Added cases exercise durable
+cold adoption, blocked/failed saves, persisted and live edits, corrupt snapshots,
+and layout preload without mounting or losing state.
 
 The [benchmark](../../../../packages/components/benchmarks/window-bootstrap/README.md)
 separates data-path, synthetic-DOM and real desktop measurements. The real desktop
@@ -97,7 +108,12 @@ its Repo and Session metadata before claim, with no runtime recreation at claim.
 The sequential comparison measured 820.30 ms median before runtime preinitialization
 (five samples), 1,057.22 ms afterward (ten), and 1,139.32 ms with the visible-stream
 fix in the reproducible runner (five). These timings start at target IPC dispatch,
-not physical input. They do not demonstrate faster opening. A prior corrected run
+not physical input. Preinitialization alone did not improve opening. Cold adoption
+then reduced the median to 700.14 ms; layout preloading reduced it to 430.77 ms
+(424.24–463.15 ms, five samples), 62% below the visible-stream baseline. The same
+path with 100 entries measured 256.56 ms (248.05–261.43 ms, five samples). CPU
+profiles identified bulk Repo import and the initial layout suspension as costs.
+A prior corrected run
 included a 2,708.94 ms outlier; samples are too small for stable tail estimates.
 The initial baseline probe crashed; the replacement run completed.
 
@@ -105,7 +121,8 @@ The preinitialization-only capture had chrome but no visible message body despit
 hydrated history. The corrected first-show captures contain the synthetic answer;
 all eight captures per corrected run passed, including three discarded warmups.
 This validates the previously omitted React/scroll boundary; the earlier 152.39 ms
-synthetic-DOM measurement did not exercise it. Remaining opening latency is unresolved.
+synthetic-DOM measurement did not exercise it. All optimized runs also passed the
+first-show checks. Opening is faster but still perceptible; this is not a zero-delay guarantee.
 The CLI artifact was reused rather than rebuilt from this checkout. Root `pnpm check`
 still stops at missing `packages/ignore` dependencies; `docs check` reports existing
 links into absent ACP submodules. The PR remains draft.

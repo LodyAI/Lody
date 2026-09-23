@@ -1,5 +1,5 @@
-import type { LoroRepo } from 'loro-repo';
-import type { LoroDoc } from 'loro-crdt';
+import type { LoroRepo, StorageAdapter } from 'loro-repo';
+import { LoroDoc } from 'loro-crdt';
 
 const MAX_SNAPSHOT_BYTES = 16 * 1024 * 1024;
 const PEER_WAIT_MS = 150;
@@ -142,4 +142,66 @@ export async function readSessionBootstrapSnapshot(
   readPeer: () => Promise<Uint8Array | undefined>
 ): Promise<Uint8Array | undefined> {
   return (await readCache().catch(() => undefined)) ?? (await readPeer().catch(() => undefined));
+}
+
+/** Seed cold replicas before Repo subscribes, avoiding a full-history import diff. */
+export function createSessionSnapshotLoader(storage: Pick<StorageAdapter, 'loadDoc' | 'save'>) {
+  const pending = new Map<
+    string,
+    { snapshot: Promise<Uint8Array | undefined>; loaded?: LoroDoc }
+  >();
+  const loadDoc = storage.loadDoc;
+  storage.loadDoc = async (room) => {
+    const persisted = await loadDoc.call(storage, room);
+    const request = pending.get(room);
+    if (!request) return persisted;
+    const snapshot = await request.snapshot;
+    if (!snapshot) return persisted;
+    try {
+      // This candidate is not yet owned by Repo. Keep the original available if
+      // cache import/persistence fails; a live replica is never replaced.
+      const seeded = LoroDoc.fromSnapshot(
+        persisted ? persisted.export({ mode: 'snapshot' }) : snapshot
+      );
+      if (persisted) seeded.import(snapshot);
+      // Repo treats storage-loaded versions as durable. Save the merged state
+      // before adoption so a later cursor cannot outrun its document.
+      await storage.save({
+        type: 'doc-snapshot',
+        docId: room,
+        snapshot: seeded.export({ mode: 'snapshot' }),
+      });
+      request.loaded = seeded;
+      return seeded;
+    } catch {
+      return persisted;
+    }
+  };
+  return async (
+    repo: Pick<LoroRepo, 'openPersistedDoc'>,
+    room: string,
+    readSnapshot: () => Promise<Uint8Array | undefined>
+  ) => {
+    const request: { snapshot: Promise<Uint8Array | undefined>; loaded?: LoroDoc } = {
+      snapshot: Promise.resolve()
+        .then(readSnapshot)
+        .catch(() => undefined),
+    };
+    pending.set(room, request);
+    try {
+      const handle = await repo.openPersistedDoc(room);
+      const snapshot = await request.snapshot;
+      if (snapshot && request.loaded !== handle.doc) {
+        try {
+          // Already-owned replicas keep their identity, edits and subscribers.
+          handle.doc.import(snapshot);
+        } catch {
+          // Foreground sync repairs unusable bootstrap state.
+        }
+      }
+      return handle;
+    } finally {
+      if (pending.get(room) === request) pending.delete(room);
+    }
+  };
 }

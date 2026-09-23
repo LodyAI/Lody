@@ -1,4 +1,8 @@
-import { createLocalWindowBootstrap, readSessionBootstrapSnapshot } from './local-window-bootstrap';
+import {
+  createLocalWindowBootstrap,
+  createSessionSnapshotLoader,
+  readSessionBootstrapSnapshot,
+} from './local-window-bootstrap';
 import { jotaiStore } from '@/lib/utils';
 import { desktopWindowId } from '@/lib/desktop-window';
 import { navigationSidebarHiddenAtom } from '@/atoms/layout-state';
@@ -412,10 +416,10 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   let resolveRoomTransportsImpl:
     | ((room: WorkspaceTransportRoom) => WorkspaceTransportRoute)
     | null = null;
+  const repoStorage = new IndexedDBStorageAdaptor({ dbName: cacheIdentity.repoDbName });
+  const openSessionWithSnapshot = createSessionSnapshotLoader(repoStorage);
   const repo = await LoroRepo.create({
-    storageAdapter: new IndexedDBStorageAdaptor({
-      dbName: cacheIdentity.repoDbName,
-    }),
+    storageAdapter: repoStorage,
     metaDebounceCommitMs: 0,
     resolveRoomTransports: (room) =>
       resolveRoomTransportsImpl?.(room) ?? { transportIds: ['cloud'] },
@@ -3732,31 +3736,22 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
   const createSessionStore = async (sessionId: SessionId): Promise<SessionDocStore> => {
     const roomId = getSessionRoomId(sessionId);
 
-    // Open persisted doc immediately - this reads from local IndexedDB
-    // and does NOT require transport/workspaceId
-    const persistedDoc = await repo.openPersistedDoc(roomId);
-    const sessionDoc = persistedDoc.doc as LoroDoc;
-
-    // Only an actual store consumer materializes a prefetched snapshot. Import
-    // merges with this replica's unsent user edits; never replace its document.
-    const cached = await readSessionBootstrapSnapshot(
-      () =>
-        withTimeout(
-          readEagerSyncSnapshot(eagerSyncScope, roomId).then(async (entry) =>
-            entry ? new Uint8Array(await entry.snapshot.arrayBuffer()) : undefined
+    // Merge bootstrap state before Repo adopts a cold document and before its
+    // history reader subscribes. Existing live documents retain their identity.
+    const persistedDoc = await openSessionWithSnapshot(repo, roomId, () =>
+      readSessionBootstrapSnapshot(
+        () =>
+          withTimeout(
+            readEagerSyncSnapshot(eagerSyncScope, roomId).then(async (entry) =>
+              entry ? new Uint8Array(await entry.snapshot.arrayBuffer()) : undefined
+            ),
+            1_500,
+            'Eager-sync cache read timed out'
           ),
-          1_500,
-          'Eager-sync cache read timed out'
-        ),
-      () => windowBootstrap?.readDocument(roomId) ?? Promise.resolve(undefined)
+        () => windowBootstrap?.readDocument(roomId) ?? Promise.resolve(undefined)
+      )
     );
-    if (cached) {
-      try {
-        sessionDoc.import(cached);
-      } catch {
-        /* Foreground sync repairs a bad cache. */
-      }
-    }
+    const sessionDoc = persistedDoc.doc as LoroDoc;
 
     const {
       mirror,

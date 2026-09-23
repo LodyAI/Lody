@@ -13,6 +13,8 @@ for (const name of [
   if (!process.env[name]) throw new Error('Missing isolated probe configuration: ' + name);
 }
 const repeats = Number(process.env.PROBE_REPEATS ?? 10);
+const rounds = Number(process.env.PROBE_ROUNDS ?? 1500);
+const answer = 'Answer for round ' + (rounds - 1) + '.';
 const records = [];
 const log = (x) => {
   records.push(x);
@@ -23,6 +25,12 @@ app.on('browser-window-created', (_createdEvent, win) => {
   win.__created = performance.now();
   const wc = win.webContents;
   const send = wc.send.bind(wc);
+  const show = win.show.bind(win);
+  win.show = () => {
+    if (win.__claim)
+      log({ kind: 'native-show-start', id: win.id, afterClaimMs: performance.now() - win.__claim });
+    return show();
+  };
   wc.send = (channel, ...args) => {
     if (channel === 'app.windowTarget') {
       win.__claim = performance.now();
@@ -38,6 +46,8 @@ app.on('browser-window-created', (_createdEvent, win) => {
   };
   wc.on('ipc-message', (_, channel) => {
     if (channel === 'app.windowReady') win.__shellReady = true;
+    if (channel === 'app.windowContentReady' && win.__claim)
+      log({ kind: 'content-ready', id: win.id, afterClaimMs: performance.now() - win.__claim });
   });
   wc.on('console-message', (_, level, message) => {
     if (message.startsWith('RuntimeProvider:'))
@@ -48,7 +58,7 @@ app.on('browser-window-created', (_createdEvent, win) => {
     const claimToShowMs = performance.now() - win.__claim;
     const capture = wc.capturePage();
     const state = await wc.executeJavaScript(
-      `({ready:!!document.querySelector('[data-window-session-ready]'),answer:document.body.innerText.includes('Answer for round 1499.'),loading:document.body.innerText.includes('Loading'),missing:document.body.innerText.includes('Session not found'),streamVisible:(()=>{const e=document.querySelector('[data-message-selection-scroll]');return !!e && getComputedStyle(e).visibility==='visible'})()})`
+      `({ready:!!document.querySelector('[data-window-session-ready]'),answer:document.body.innerText.includes(${JSON.stringify(answer)}),loading:document.body.innerText.includes('Loading'),missing:document.body.innerText.includes('Session not found'),streamVisible:(()=>{const e=document.querySelector('[data-message-selection-scroll]');return !!e && getComputedStyle(e).visibility==='visible'})()})`
     );
     const screenshot = output + '-' + win.id + '.png';
     fs.writeFileSync(screenshot, (await capture).toPNG());
@@ -89,13 +99,13 @@ app.whenReady().then(async () => {
  const sessionId='session-conversation-view-fixture';const room='session-'+sessionId;
  const handle=await repo.acquireDoc(room);window.__syntheticSession=handle;
  handle.doc.import(Uint8Array.from(atob(${JSON.stringify(binary)}),x=>x.charCodeAt(0)));
- await repo.upsertDocMeta(room,{id:sessionId,machineId:machine.id,userId:machine.ownerUserId,createdAt:new Date().toISOString(),lastMessageAt:Date.now(),title:'Warm window benchmark — synthetic 3000 entries',status:'idle',cliType:'builtin',agentType:'claude',isArchived:false});
+ await repo.upsertDocMeta(room,{id:sessionId,machineId:machine.id,userId:machine.ownerUserId,createdAt:new Date().toISOString(),lastMessageAt:Date.now(),title:'Warm window benchmark — synthetic ${rounds * 2} entries',status:'idle',cliType:'builtin',agentType:'claude',isArchived:false});
  await repo.flush();location.hash='/local/sessions/'+sessionId;
  })()`);
     await waitFor(
       () =>
         source.webContents.executeJavaScript(
-          `!!document.querySelector('[data-window-session-ready]') && document.body.innerText.includes('Answer for round 1499.')`
+          `!!document.querySelector('[data-window-session-ready]') && document.body.innerText.includes(${JSON.stringify(answer)})`
         ),
       'source conversation'
     );
@@ -119,6 +129,11 @@ app.whenReady().then(async () => {
       const prepared = await spare.webContents.executeJavaScript(
         `(async()=>({repo:!!window.repo,metadata:window.repo?(await window.repo.listDoc()).some(x=>x.docId==='session-session-conversation-view-fixture'):false}))()`
       );
+      if (process.env.PROBE_CPU_PROFILE === '1') {
+        spare.webContents.debugger.attach('1.3');
+        await spare.webContents.debugger.sendCommand('Profiler.enable');
+        await spare.webContents.debugger.sendCommand('Profiler.start');
+      }
       const shown = new Promise((resolve, reject) => {
         running = { resolve, reject };
       });
@@ -139,6 +154,11 @@ app.whenReady().then(async () => {
       )
         throw new Error('First show did not contain visible conversation content');
       if (row.id !== spare.id) throw new Error('Did not claim expected spare');
+      if (process.env.PROBE_CPU_PROFILE === '1') {
+        const { profile } = await spare.webContents.debugger.sendCommand('Profiler.stop');
+        fs.writeFileSync(output + '-' + spare.id + '.cpuprofile', JSON.stringify(profile));
+        spare.webContents.debugger.detach();
+      }
       results.push({
         ...row,
         prepared,
@@ -154,7 +174,7 @@ app.whenReady().then(async () => {
       JSON.stringify(
         {
           variant: process.env.PROBE_VARIANT,
-          entries: 3000,
+          entries: rounds * 2,
           spareMinimumAgeMs: 1500,
           source: 'real desktop renderer / synthetic CRDT fixture / bundled CLI',
           results,

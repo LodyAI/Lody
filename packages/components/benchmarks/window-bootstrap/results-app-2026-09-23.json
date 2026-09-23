@@ -1,6 +1,6 @@
 {
   "date": "2026-09-23",
-  "boundary": "Real desktop React renderer and native show, synthetic 3000-entry conversation, bundled CLI 0.93.3. Timing starts at target IPC dispatch, not physical click. Sequential runs; no stable tail estimate.",
+  "boundary": "Real desktop React renderer and native show, synthetic conversation (3000 entries unless specified), bundled CLI 0.93.3. Timing starts at target IPC dispatch, not physical click. Sequential runs; no stable tail estimate.",
   "spareMinimumAgeMs": 1500,
   "discardedWarmupsPerRun": 3,
   "baseline": "36f4b382 runtime-provider only; remaining renderer source at cdb83f53",
@@ -592,6 +592,399 @@
         "runtimeProviderSha256": "805b81429d4bde42beb62cf66aa65ab37a058add071dd65cac4d2420ea5497bc",
         "rendererIndexSha256": "3d382b5368142d9643b179f698986284a7ce3212dc4da99596c30882f9cfbd40"
       }
+    },
+    "coldStorage": {
+      "n": 5,
+      "entries": 3000,
+      "medianMs": 700.1365409999999,
+      "minMs": 689.7563329999975,
+      "maxMs": 719.286583000001,
+      "source": "6e6aa9a0 plus cold snapshot adoption",
+      "rendererIndexSha256": "4a1b378a078109aea5dd4ab837d6f3eff4046627988a2bac76d330b82b22fa8d",
+      "samples": [
+        {
+          "claimToShowMs": 767.0059999999994,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": true
+        },
+        {
+          "claimToShowMs": 692.3670419999999,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": true
+        },
+        {
+          "claimToShowMs": 718.9130829999995,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": true
+        },
+        {
+          "claimToShowMs": 700.1365409999999,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 692.6045410000006,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 711.4786249999997,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 719.286583000001,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 689.7563329999975,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        }
+      ]
+    },
+    "preloadedLayout": {
+      "n": 5,
+      "entries": 3000,
+      "medianMs": 430.7665829999987,
+      "minMs": 424.24033300000156,
+      "maxMs": 463.1495410000007,
+      "source": "6e6aa9a0 plus cold snapshot adoption and preloaded layout",
+      "rendererIndexSha256": "3670875e29cfb1a18f756a9747ab35e3cff67e048590f8b32b9949828ca06a0f",
+      "samples": [
+        {
+          "claimToShowMs": 474.6429590000007,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": true
+        },
+        {
+          "claimToShowMs": 422.9154589999998,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": true
+        },
+        {
+          "claimToShowMs": 430.0589579999996,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": true
+        },
+        {
+          "claimToShowMs": 428.36049999999886,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 430.7665829999987,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 463.1495410000007,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 435.41970800000126,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 424.24033300000156,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        }
+      ]
+    },
+    "preloadedLayoutShort": {
+      "n": 5,
+      "entries": 100,
+      "medianMs": 256.5621250000004,
+      "minMs": 248.04883400000108,
+      "maxMs": 261.432417,
+      "source": "6e6aa9a0 plus cold snapshot adoption and preloaded layout",
+      "rendererIndexSha256": "3670875e29cfb1a18f756a9747ab35e3cff67e048590f8b32b9949828ca06a0f",
+      "samples": [
+        {
+          "claimToShowMs": 256.31674999999996,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": true
+        },
+        {
+          "claimToShowMs": 251.93724999999995,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": true
+        },
+        {
+          "claimToShowMs": 270.33758300000045,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": true
+        },
+        {
+          "claimToShowMs": 257.3730829999986,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 255.65650000000096,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 256.5621250000004,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 248.04883400000108,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        },
+        {
+          "claimToShowMs": 261.432417,
+          "state": {
+            "ready": true,
+            "answer": true,
+            "loading": false,
+            "missing": false,
+            "streamVisible": true
+          },
+          "prepared": {
+            "repo": true,
+            "metadata": true
+          },
+          "warmup": false
+        }
+      ]
     }
   },
   "limitations": [

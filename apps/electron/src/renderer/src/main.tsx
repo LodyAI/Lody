@@ -1,4 +1,5 @@
 import { waitForTargetContentPainted } from './warm-window-reveal'
+import { preloadMainLayout } from '@lody/components/components/preloaded-main-layout'
 import {
   isSessionWindow,
   isWarmWindow,
@@ -199,6 +200,11 @@ try {
     history: usesHashHistory ? createHashHistory() : undefined
   })
   installWarmWindowBinding(router)
+  if (isWarmWindow()) {
+    void preloadMainLayout().catch((error) => {
+      console.warn('[Lody] Warm workspace layout preload failed', error)
+    })
+  }
   if (isSessionWindow() && !sessionStorage.getItem('lody:windowFocusConsumed')) {
     const sessionId = router.history.location.pathname.split('/sessions/')[1]?.split('/')[0]
     if (sessionId) {
