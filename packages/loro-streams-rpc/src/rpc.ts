@@ -44,6 +44,7 @@ import type {
   MachinePingResponse,
   MachineRestartResponse,
   MachineStatusResponse,
+  MachinePreviewControlResponse,
   MachineUpgradeResponse,
   SessionCancelResponse,
   SessionGoalAction,
@@ -94,6 +95,7 @@ import {
   MachinePingResponseSchema,
   MachineRestartResponseSchema,
   MachineStatusResponseSchema,
+  MachinePreviewControlResponseSchema,
   MachineUpgradeResponseSchema,
   SessionCancelResponseSchema,
   SessionPreparationCancelSpecSchema,
@@ -172,6 +174,7 @@ export const normalizeLoroGatewayBaseUrl = (baseUrl?: string | null): string => 
 
 export const LoroStreamsRpcMethodSchema = z.enum([
   'machine/status',
+  'machine/preview-control',
   'machine/ping',
   'machine/restart',
   'machine/upgrade',
@@ -237,6 +240,11 @@ const BaseRpcRequestSchema = z
 
 export const LoroMachineStatusRpcRequestSchema = BaseRpcRequestSchema.extend({
   method: z.literal('machine/status'),
+  params: z.object({}).strict(),
+}).strict();
+
+export const LoroMachinePreviewControlRpcRequestSchema = BaseRpcRequestSchema.extend({
+  method: z.literal('machine/preview-control'),
   params: z.object({}).strict(),
 }).strict();
 
@@ -596,6 +604,7 @@ export const LoroLocalProjectControlRpcRequestSchema = BaseRpcRequestSchema.exte
 
 export const LoroStreamsRpcRequestSchema = z.discriminatedUnion('method', [
   LoroMachineStatusRpcRequestSchema,
+  LoroMachinePreviewControlRpcRequestSchema,
   LoroMachinePingRpcRequestSchema,
   LoroMachineRestartRpcRequestSchema,
   LoroMachineUpgradeRpcRequestSchema,
@@ -1446,6 +1455,7 @@ const base64UrlToBytes = (value: string): Uint8Array => {
 
 export type LoroMachineRpcResult =
   | MachineStatusResponse
+  | MachinePreviewControlResponse
   | MachinePingResponse
   | MachineRestartResponse
   | MachineUpgradeResponse
@@ -1501,6 +1511,15 @@ const toLegacyRpcErrorResponse = (
   dispatchContext?: { sessionId: string; userTurnId: string },
   preparationContext?: { preparationId: string; sessionId: string }
 ): LoroMachineRpcResult => {
+  if (method === 'machine/preview-control') {
+    return {
+      type: 'machine/preview-control_response',
+      machineId: machineId as MachinePreviewControlResponse['machineId'],
+      success: false,
+      error: `${error.code}: ${error.message}`,
+    };
+  }
+
   if (method === 'machine/status') {
     return {
       type: 'machine/status_response',
@@ -1804,6 +1823,11 @@ const parseRpcSuccessResult = async (
   if (response.method === 'machine/status') {
     const parsed = MachineStatusResponseSchema.safeParse(response.result);
     return parsed.success ? (parsed.data as MachineStatusResponse) : null;
+  }
+
+  if (response.method === 'machine/preview-control') {
+    const parsed = MachinePreviewControlResponseSchema.safeParse(response.result);
+    return parsed.success ? (parsed.data as MachinePreviewControlResponse) : null;
   }
   if (response.method === 'machine/ping') {
     const parsed = MachinePingResponseSchema.safeParse(response.result);
@@ -2424,6 +2448,16 @@ export class LoroStreamsMachineRpcClient {
       timeoutMs: options?.timeoutMs ?? 30_000,
       params: {},
     })) as MachineStatusResponse | null;
+  }
+
+  async requestPreviewControl(options?: {
+    timeoutMs?: number;
+  }): Promise<MachinePreviewControlResponse | null> {
+    return (await this.sendRequest({
+      method: 'machine/preview-control',
+      timeoutMs: options?.timeoutMs ?? 15_000,
+      params: {},
+    })) as MachinePreviewControlResponse | null;
   }
 
   async requestMachinePing(options: {
@@ -3125,7 +3159,7 @@ export class LoroStreamsMachineRpcClient {
   private async sendRequest(
     args:
       | {
-          method: 'machine/status';
+          method: 'machine/status' | 'machine/preview-control';
           timeoutMs: number;
           params: {};
         }
@@ -3550,6 +3584,7 @@ export class LoroStreamsMachineRpcClient {
       let request: LoroStreamsRpcRequest;
       switch (args.method) {
         case 'machine/status':
+        case 'machine/preview-control':
           request = { ...envelope, method: args.method, params: {} };
           break;
         case 'machine/ping':

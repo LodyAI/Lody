@@ -3132,13 +3132,17 @@ export class MessageHandler {
         rpcVersion: LORO_STREAMS_RPC_VERSION,
         retentionSeconds: LORO_STREAMS_RPC_RETENTION_SECONDS,
         now: getServerNow,
-        getMachineStatus: async () => ({
-          ...(await this.executionService.getMachineStatus({
+        getMachineStatus: async () =>
+          await this.executionService.getMachineStatus({
             type: 'machine/status',
             machineId: this.machineId,
             workspaceId: this.workspaceId,
-          })),
-          previewControlNonce: this.previewService.controlAuthority.runtimeNonce,
+          }),
+        getPreviewControl: async () => ({
+          type: 'machine/preview-control_response',
+          machineId: this.machineId,
+          success: true,
+          runtimeNonce: this.previewService.controlAuthority.runtimeNonce,
         }),
         pingMachine: async ({ requestId }) =>
           await this.executionService.pingMachine({

@@ -21,6 +21,11 @@ Share 创建或复用该 Session 唯一的远端 endpoint，并复制带 capabil
 同源 Origin 或无 token 的 Referer 不构成授权。链接持有者不能创建、恢复或改变
 隧道目标；这些控制操作仅允许已鉴权且有该 Session 操作权限的用户执行。
 
+远端控制要求机器声明 `previewControl` 协议能力 v1。独立的
+`machine/preview-control` 握手提供签名控制证明所需的 runtime nonce，
+不授予访问权限，也不创建入口。通用 `machine/status` 响应保持不变，避免
+破坏旧客户端；不支持该能力的机器明确要求升级，不回退旧 Preview。
+
 仅允许精确 localhost 或 literal loopback 目标，请求始终绑定已授权 origin。
 探测和实际转发使用同一 literal loopback 地址，保留已授权的 Host 与 TLS 身份；
 环境中的 DNS 或 HTTP 代理设置不能改变本地目标流量的去向。

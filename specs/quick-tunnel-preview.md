@@ -26,6 +26,12 @@ matching Origin or a tokenless Referer is not authorization. A link holder canno
 create, restore, or retarget a tunnel. Only an authenticated authorized Session
 user can perform those control operations.
 
+Remote control requires the machine's `previewControl` protocol capability v1.
+A dedicated `machine/preview-control` handshake supplies the runtime nonce used
+by signed control proofs; it does not grant access or create an endpoint.
+Keep the general `machine/status` response unchanged for older clients. Machines
+without the capability require an upgrade, not a legacy Preview fallback.
+
 Only exact localhost or literal loopback targets are allowed. Requests remain
 bound to the approved origin. Probe and forwarding use the same literal loopback
 address, preserving the approved Host and TLS identity; ambient DNS or HTTP proxy

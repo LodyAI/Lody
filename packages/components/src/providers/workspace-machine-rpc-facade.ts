@@ -9,6 +9,7 @@ import {
   getServerNow,
   machineSupportsLocalFileResourcesProtocol,
   machineSupportsSubagentCancellation,
+  machineSupportsPreviewControlProtocol,
   type MachineProtocolCapabilities,
   type CodeCollabV2Error,
   type CodeCollabV2FileIndexRequest,
@@ -886,11 +887,20 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
     requesterUserId: string,
     operation: PreviewControlOperation
   ) => {
+    if (
+      !machineSupportsPreviewControlProtocol({
+        protocolCapabilities: await deps.getMachineProtocolCapabilities(machineId),
+      })
+    ) {
+      throw new Error('Update this machine to manage remote previews.');
+    }
     const status = await (
       await getMachineRpcClient(machineId)
-    ).requestMachineStatus({ timeoutMs: 15_000 });
-    if (!status?.success || !status.previewControlNonce)
-      throw new Error('The machine did not provide preview control authorization.');
+    ).requestPreviewControl({ timeoutMs: 15_000 });
+    if (!status?.success || !status.runtimeNonce)
+      throw new Error(
+        status?.error ?? 'The machine did not provide preview control authorization.'
+      );
     return mintPreviewControlProof(
       {
         workspaceId,
@@ -898,7 +908,7 @@ export function createWorkspaceMachineRpcFacade(deps: WorkspaceMachineRpcFacadeD
         sessionId,
         requesterUserId,
         operation,
-        runtimeNonce: status.previewControlNonce,
+        runtimeNonce: status.runtimeNonce,
         requestId: crypto.randomUUID(),
       },
       deps.getSessionToken?.() ?? null

@@ -116,6 +116,89 @@ const createFakeStreamClient = () => {
 };
 
 describe('LoroStreamsMachineRpcServer', () => {
+  it.each(['available', 'unavailable', 'throws', 'invalid nonce'] as const)(
+    'isolates the %s preview handshake from the legacy machine status response',
+    async (scenario) => {
+      const requests = createFakeStreamClient();
+      const responses = createFakeStreamClient();
+      const forward =
+        (destination: ReturnType<typeof createFakeStreamClient>) =>
+        async (_streamId: string, value: unknown) => {
+          destination.pushBatch({ messages: [value], nextOffset: '1', upToDate: true });
+          return '1';
+        };
+      const machineId = 'machine-1' as MachineId;
+      const status: MachineStatusResponse = {
+        type: 'machine/status_response',
+        machineId,
+        success: true,
+        resources: {
+          totalMemoryGB: 16,
+          usedMemoryGB: 8,
+          freeMemoryGB: 8,
+          totalCpus: 8,
+          cpuUsagePercent: 25,
+        },
+      };
+      const server = new LoroStreamsMachineRpcServer({
+        logger: createSilentLogger(),
+        workspaceId: 'workspace-1' as WorkspaceId,
+        machineId,
+        streamClient: { ...requests.streamClient, appendJson: forward(responses) },
+        getMachineStatus: async () => status,
+        getPreviewControl:
+          scenario === 'unavailable'
+            ? undefined
+            : async () => {
+                if (scenario === 'throws') throw new Error('preview service stopped');
+                return {
+                  type: 'machine/preview-control_response',
+                  machineId,
+                  success: true,
+                  runtimeNonce: scenario === 'invalid nonce' ? 'invalid' : previewProof.runtimeNonce,
+                };
+              },
+        refreshMachineAcpCapabilities: vi.fn(),
+      });
+      const client = new LoroStreamsMachineRpcClient({
+        workspaceId: 'workspace-1',
+        machineId,
+        streamClient: { ...responses.streamClient, appendJson: forward(requests) },
+      });
+      await server.start();
+      try {
+        const result = await client.requestPreviewControl();
+        if (scenario === 'available') {
+          expect(result).toEqual({
+            type: 'machine/preview-control_response',
+            machineId,
+            success: true,
+            runtimeNonce: previewProof.runtimeNonce,
+          });
+        } else {
+          expect(result).toEqual({
+            type: 'machine/preview-control_response',
+            machineId,
+            success: false,
+            error: expect.stringContaining(
+              scenario === 'unavailable'
+                ? 'method_unavailable'
+                : scenario === 'throws'
+                  ? 'preview service stopped'
+                  : 'invalid_result'
+            ),
+          });
+        }
+        // The strict status parser and exact payload stay compatible with older clients,
+        // even when Preview is supported or its handler fails.
+        await expect(client.requestMachineStatus()).resolves.toEqual(status);
+      } finally {
+        client.stop();
+        server.stop();
+      }
+    }
+  );
+
   it('carries preview status and exact endpoint renewal through the client/server contract', async () => {
     const requests = createFakeStreamClient();
     const responses = createFakeStreamClient();

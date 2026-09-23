@@ -247,12 +247,19 @@ export interface MachineLifecycleCapability {
 
 // Machine Status Response (Machine -> Server -> Client)
 export interface MachineStatusResponse {
-  previewControlNonce?: string;
   type: 'machine/status_response';
   machineId: MachineId;
   success: boolean;
   resources?: MachineResourceInfo;
   lifecycle?: MachineLifecycleCapability;
+  error?: string;
+}
+
+export interface MachinePreviewControlResponse {
+  type: 'machine/preview-control_response';
+  machineId: MachineId;
+  success: boolean;
+  runtimeNonce?: string;
   error?: string;
 }
 

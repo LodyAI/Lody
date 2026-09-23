@@ -1083,12 +1083,21 @@ export const MachineLifecycleCapabilitySchema = z
 
 export const MachineStatusResponseSchema = z
   .object({
-    previewControlNonce: z.string().uuid().optional(),
     type: z.literal('machine/status_response'),
     machineId: MachineIdSchema,
     success: z.boolean(),
     resources: MachineResourceInfoSchema.optional(),
     lifecycle: MachineLifecycleCapabilitySchema.optional(),
+    error: z.string().optional(),
+  })
+  .strict();
+
+export const MachinePreviewControlResponseSchema = z
+  .object({
+    type: z.literal('machine/preview-control_response'),
+    machineId: MachineIdSchema,
+    success: z.boolean(),
+    runtimeNonce: z.string().uuid().optional(),
     error: z.string().optional(),
   })
   .strict();

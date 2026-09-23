@@ -17,6 +17,13 @@ capability，远端闲置一小时后由 Browser 引导用户显式恢复。实�
 
 ## 决策与进度
 
+PR 审阅发现混合版本回归：向 `machine/status` 添加 `previewControlNonce`
+会使旧客户端的严格校验拒绝本来有效的状态响应，实际返回 `invalid_result`，
+而非评论所述的超时。通用响应保持原样，nonce 改由独立
+`machine/preview-control` 获取，以共享的 `previewControl: 1` 能力检查为前提。
+不支持时要求升级，本地控制与签名证明校验保持不变。这是保护通用协议，
+不是保留旧 Preview 传输。
+
 目标架构不保留薄 Worker、兼容 reader、旧域名映射或自动回退，见
 [契约草案](../../../../specs/quick-tunnel-preview.zh.md)。通用工具已拆到
 `preview-http.ts`，本机代理的全局解锁已删除：成功导航之后的每次请求仍需凭据。

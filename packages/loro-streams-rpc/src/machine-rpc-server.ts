@@ -31,6 +31,7 @@ import type {
   MachinePingResponse,
   MachineRestartResponse,
   MachineStatusResponse,
+  MachinePreviewControlResponse,
   MachineUpgradeResponse,
   PreviewTarget,
   PreviewTargetApproval,
@@ -114,6 +115,7 @@ const DEFAULT_MAX_CONCURRENT_REQUESTS = 16;
 const DEFAULT_MAX_CONCURRENT_CONTROL_REQUESTS = 4;
 const CONTROL_METHODS: ReadonlySet<string> = new Set([
   'machine/status',
+  'machine/preview-control',
   'machine/ping',
   'machine/restart',
   'machine/upgrade',
@@ -292,6 +294,7 @@ type RpcServerDeps = {
    */
   maxConcurrentRequests?: number;
   getMachineStatus: () => Promise<MachineStatusResponse>;
+  getPreviewControl?: () => Promise<MachinePreviewControlResponse>;
   pingMachine?: (args: { requestId: string }) => Promise<MachinePingResponse>;
   restartMachine?: (args: {
     requesterUserId: string;
@@ -764,6 +767,18 @@ export class LoroStreamsMachineRpcServer {
       switch (request.method) {
         case 'machine/status': {
           const response = await this.deps.getMachineStatus();
+          await this.appendResultResponse(request.replyTo, request.id, request.method, response);
+          return;
+        }
+        case 'machine/preview-control': {
+          if (!this.deps.getPreviewControl) {
+            await this.appendErrorResponse(request.replyTo, request.id, request.method, {
+              code: LORO_STREAMS_RPC_ERROR_CODES.methodUnavailable,
+              message: 'Preview control is not available on this machine.',
+            });
+            return;
+          }
+          const response = await this.deps.getPreviewControl();
           await this.appendResultResponse(request.replyTo, request.id, request.method, response);
           return;
         }
@@ -1633,6 +1648,7 @@ export class LoroStreamsMachineRpcServer {
     method: LoroStreamsRpcMethod,
     result:
       | MachineStatusResponse
+      | MachinePreviewControlResponse
       | MachinePingResponse
       | MachineAcpCapabilitiesRefreshResponse
       | MachineAcpAuthenticateResponse

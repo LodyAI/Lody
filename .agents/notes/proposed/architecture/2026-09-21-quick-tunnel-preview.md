@@ -19,6 +19,14 @@ behavior and real-network performance remain acceptance gates, not assumed benef
 
 ## Decisions and progress
 
+PR review identified a mixed-version regression: adding `previewControlNonce`
+to `machine/status` makes older strict clients reject otherwise valid status
+responses. They return `invalid_result`, not the timeout originally described
+in the review. Keep that general response unchanged and fetch the nonce through
+`machine/preview-control`, gated by the shared `previewControl: 1` capability.
+Missing support requires an upgrade; local control and signed-proof validation
+remain unchanged. This preserves the general protocol, not the old Preview transport.
+
 No thin Worker, compatibility reader, old-domain mapping, or automatic fallback is
 retained in the target architecture. See the [draft contract](../../../../specs/quick-tunnel-preview.md).
 The transport-independent helpers now live in `preview-http.ts`. The local proxy's
