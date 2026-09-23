@@ -286,10 +286,7 @@ import {
 import { SessionPin } from './session-pin';
 import { SessionPinContext, type SessionPinContextValue } from './session-pin-context';
 import { SessionSyncingIndicator } from './session-syncing-indicator';
-import {
-  ConversationLoadingNewerRow,
-  ConversationSkeleton,
-} from '@/components/ai-gui/conversation-sync-placeholders';
+import { ConversationSkeleton } from '@/components/ai-gui/conversation-sync-placeholders';
 import { useDisplayedContentSyncState } from '@/hooks/use-displayed-content-sync-state';
 import { resolveSessionContentSyncState } from '@/lib/session-content-sync-state';
 import { ChildTabEmptyState } from './child-tab-empty-state';
@@ -2547,7 +2544,7 @@ export const SessionChatInterface = memo(
     );
 
     // How current the shown conversation is: a skeleton while nothing is cached,
-    // "Updating" plus a last-row note while a cached copy catches up. "Caught up"
+    // "Updating" in the info bar while a cached copy catches up. "Caught up"
     // is sticky per open, so later sync blips (live output) stay quiet.
     const contentCaughtUpRef = useRef({ sessionId: session.id, caughtUp: false });
     if (contentCaughtUpRef.current.sessionId !== session.id) {
@@ -6056,11 +6053,6 @@ export const SessionChatInterface = memo(
                               className="h-full"
                               leadingContent={openedByConversationStart}
                               emptyState={chatStreamEmptyState}
-                              trailingStatus={
-                                contentSyncState === 'catching-up' ? (
-                                  <ConversationLoadingNewerRow />
-                                ) : null
-                              }
                               agentActivityLabel={agentActivityLabel}
                               agentActivityTone={agentActivityTone}
                               agentActivityShimmer={agentActivityShimmer}

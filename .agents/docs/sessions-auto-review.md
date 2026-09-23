@@ -43,5 +43,5 @@ this page is the full text of the rules summarised there.
   The header `SessionSyncingIndicator` only covers active catch-up
   (`isSyncingRoomSyncState`) behind a ~400ms `useDelayedFlag`. The conversation's own
   loading states (`lib/session-content-sync-state.ts`: skeleton while nothing is
-  cached, "Updating" plus a last-row note while a saved copy first catches up) follow
+  cached, "Updating" in the info bar while a saved copy first catches up) follow
   the same rule and never cover a degraded connection.

@@ -28,8 +28,8 @@ for, and never move unless the user or the arrival of new output asks it to.
 - **Queued or steering messages** sent while the agent is working do not move the view.
 - **Loading.** A conversation that has messages but nothing on this device yet shows a
   skeleton of messages in place of a blank pane. A saved copy is shown at once; while
-  this open is still catching up with the server, the info bar says "Updating" and the
-  last row says newer messages are loading. Routine opens that catch up quickly show
+  this open is still catching up with the server, the info bar says "Updating". Nothing
+  is added to the conversation itself. Routine opens that catch up quickly show
   neither (a status must persist briefly before it appears, and stays long enough not
   to flash). A lost connection is not announced here: reconnecting is automatic.
 - **Opening** reveals the conversation only once it can be shown at its restored

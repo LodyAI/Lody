@@ -509,12 +509,6 @@ export interface SessionChatStreamViewProps {
   /** Scrolls as the first conversation row (for example, Session provenance). */
   leadingContent?: ReactNode;
   emptyState?: ReactNode;
-  /**
-   * Status shown as the conversation's last row (e.g. "Loading newer messages"
-   * while a cached copy catches up). A Virtua row, so follow mode and the
-   * measurement observers account for it appearing and disappearing.
-   */
-  trailingStatus?: ReactNode;
   onAtBottomChange?: (atBottom: boolean) => void;
   showScrollToLatest?: boolean;
   sendMessage?: (message: ClientToServer) => void;
@@ -1357,7 +1351,6 @@ export const SessionChatStreamView = forwardRef<
       className,
       leadingContent,
       emptyState,
-      trailingStatus,
       onAtBottomChange,
       showScrollToLatest = true,
       sendMessage,
@@ -1612,11 +1605,7 @@ export const SessionChatStreamView = forwardRef<
       hasVirtualizedRows,
       // `leadingContent` is a real first Virtua row, so it counts here — sticky
       // scroll otherwise targets an index short of the true bottom.
-      itemCount:
-        virtualRows.length +
-        leadingRowCount +
-        (shouldShowAgentActivityRow ? 1 : 0) +
-        (trailingStatus == null ? 0 : 1),
+      itemCount: virtualRows.length + leadingRowCount + (shouldShowAgentActivityRow ? 1 : 0),
       onAtBottomChange,
       suppressAutoScrollRef: autoScrollSuppressedRef,
     });
@@ -2202,11 +2191,6 @@ export const SessionChatStreamView = forwardRef<
                         message={liveAgentActivityMessage}
                         conversationFontSize={conversationFontSize}
                       />
-                    </div>
-                  )}
-                  {trailingStatus == null ? null : (
-                    <div className="shrink-0" data-conversation-trailing-status="">
-                      {trailingStatus}
                     </div>
                   )}
                 </Virtualizer>

@@ -1,7 +1,6 @@
 import { useTranslation } from 'react-i18next';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { Skeleton } from '@/ui/skeleton';
-import { Spinner } from '@/ui/spinner';
 
 /** Alternating user bubble / reply lines, sized like a real exchange. */
 const SKELETON_TURNS = [
@@ -36,24 +35,6 @@ export function ConversationSkeleton() {
           </div>
         </div>
       ))}
-    </ConversationColumn>
-  );
-}
-
-/**
- * The last row of a cached conversation that is still catching up: newer
- * messages land right here, where a reader following the end is looking.
- */
-export function ConversationLoadingNewerRow() {
-  const { t } = useTranslation();
-  return (
-    <ConversationColumn
-      className="flex items-center gap-2 py-2 text-xs text-muted-foreground"
-      role="status"
-      data-conversation-loading-newer=""
-    >
-      <Spinner className="h-3 w-3" aria-hidden="true" />
-      <span>{t('sessions.contentSync.loadingNewer', 'Loading newer messages')}</span>
     </ConversationColumn>
   );
 }
