@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Globe2, ShieldAlert } from 'lucide-react';
-import { Spinner } from '@/ui/spinner';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import {
@@ -24,7 +22,6 @@ import {
 import { activeWorkspaceRuntimeAtom, userAtom } from '@/atoms';
 import { getMachineMetaByIdAtomFamily } from '@/atoms/machines';
 import { machineOnlineStatusAtomFamily } from '@/atoms/presence';
-import { Button } from '@/ui/button';
 import { toast } from 'sonner';
 import { writeTextToClipboard } from '@/lib/clipboard';
 import { isElectronRenderer } from '@/lib/electron';
@@ -32,7 +29,6 @@ import { getPublicBrowserBridge } from '@/lib/electron-ipc-client';
 import { useSessionDoc } from '@/hooks/use-session-doc';
 import { hasUsableManagedPreviewUrl } from '@/lib/managed-preview-connection';
 import { buildManagedViewerUrl, samePreviewTargetOrigin } from '@/lib/session-browser-url';
-import { cn } from '@/lib/utils';
 import { ManagedPreviewSurface } from './managed-preview-surface';
 import { PublicBrowserSurface } from './public-browser-surface';
 import {
@@ -41,8 +37,7 @@ import {
   type SessionBrowserNavigationHistory,
 } from './session-browser-resume-state';
 import { clearManagedPreviewFrame } from './managed-preview-frame-cache';
-import { SessionBrowserToolbar } from './session-browser-toolbar';
-import { PreviewConnectionStatus } from './preview-connection-status';
+import { SessionBrowserPanelView, type ManagedNavigationPhase } from './session-browser-panel-view';
 
 type SessionBrowserPanelProps = {
   session: SessionMeta;
@@ -59,8 +54,6 @@ type SessionBrowserPanelProps = {
 type EffectivePreviewState = {
   connection?: PreviewConnection;
 };
-
-type ManagedNavigationPhase = 'resolving-machine' | 'opening-local' | 'creating-tunnel';
 
 type PublicBrowserNavigationRequest = { id: number; url: string };
 
@@ -1093,81 +1086,44 @@ function SessionBrowserPanelController({
   };
 
   return (
-    <div className={cn('flex h-full min-h-0 flex-col bg-background', className)}>
-      <SessionBrowserToolbar
-        leadingSlot={leadingSlot}
-        focusAddress={active && currentAddress === null}
-        address={address}
-        remoteMachineName={
-          machinePlane === 'cloud' ? sessionMachine?.name?.trim() || session.machineId : undefined
-        }
-        canGoBack={canGoBack}
-        canGoForward={canGoForward}
-        loading={loading}
-        annotationEnabled={annotationEnabled}
-        annotationAvailable={annotationAvailable}
-        sharing={sharing}
-        shareAvailable={currentAddress !== null}
-        hasShareUrl={currentAddress?.engine === 'managed-preview' && !!activeShareUrl}
-        busy={navigationBusy}
-        onAddressChange={setAddress}
-        onRestoreAddress={() => setAddress(currentAddress?.logicalUrl ?? suggestedAddress)}
-        onNavigate={navigate}
-        onBack={handleBack}
-        onForward={handleForward}
-        onReload={handleReload}
-        onStop={handleStop}
-        onToggleAnnotation={() => setAnnotationEnabled((current) => !current)}
-        onShare={() => void handleShare()}
-        onStopSharing={() => void stopSharing()}
-      />
-      {machinePlane === 'cloud' && (
-        <p className="border-b border-border px-3 py-1 text-[11px] text-muted-foreground">
-          {t(
-            'sessions.browser.connection.enterConsent',
-            'For localhost on {{machine}}, Enter authorizes remote sharing. Anyone with the link can access it.',
-            { machine: sessionMachine?.name?.trim() || session.machineId }
-          )}
-        </p>
-      )}
-      {currentAddress?.engine === 'managed-preview' && (
-        <PreviewConnectionStatus {...previewStatusProps} />
-      )}
-      {error ? (
-        <div
-          role="alert"
-          className="flex items-start gap-2 border-b border-destructive/30 bg-destructive/8 px-3 py-2 text-xs text-destructive"
-        >
-          <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span className="min-w-0 break-words">{error}</span>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="ml-auto h-6 px-2"
-            onClick={() => setError(null)}
-          >
-            {t('common.dismiss', 'Dismiss')}
-          </Button>
-        </div>
-      ) : null}
-
-      {managedNavigationPhase ? (
-        <div
-          role="status"
-          aria-live="polite"
-          className="flex min-h-0 flex-1 items-center justify-center gap-2 bg-background text-sm text-muted-foreground"
-        >
-          <Spinner className="h-4 w-4" aria-hidden />
-          <span>
-            {managedNavigationPhase === 'resolving-machine'
-              ? t('sessions.browser.resolvingMachine', 'Resolving the session machine…')
-              : managedNavigationPhase === 'creating-tunnel'
-                ? t('sessions.browser.creatingTunnel', 'Establishing a secure preview connection…')
-                : t('sessions.browser.openingLocal', 'Opening the local preview…')}
-          </span>
-        </div>
-      ) : currentAddress?.engine === 'public-web' ? (
+    <SessionBrowserPanelView
+      className={className}
+      toolbar={{
+        leadingSlot: leadingSlot,
+        focusAddress: active && currentAddress === null,
+        address: address,
+        remoteMachineName:
+          machinePlane === 'cloud' ? sessionMachine?.name?.trim() || session.machineId : undefined,
+        canGoBack: canGoBack,
+        canGoForward: canGoForward,
+        loading: loading,
+        annotationEnabled: annotationEnabled,
+        annotationAvailable: annotationAvailable,
+        sharing: sharing,
+        shareAvailable: currentAddress !== null,
+        hasShareUrl: currentAddress?.engine === 'managed-preview' && !!activeShareUrl,
+        busy: navigationBusy,
+        onAddressChange: setAddress,
+        onRestoreAddress: () => setAddress(currentAddress?.logicalUrl ?? suggestedAddress),
+        onNavigate: navigate,
+        onBack: handleBack,
+        onForward: handleForward,
+        onReload: handleReload,
+        onStop: handleStop,
+        onToggleAnnotation: () => setAnnotationEnabled((current) => !current),
+        onShare: () => void handleShare(),
+        onStopSharing: () => void stopSharing(),
+      }}
+      remoteMachineName={
+        machinePlane === 'cloud' ? sessionMachine?.name?.trim() || session.machineId : undefined
+      }
+      previewStatus={currentAddress?.engine === 'managed-preview' ? previewStatusProps : undefined}
+      error={error}
+      onDismissError={() => setError(null)}
+      navigationPhase={managedNavigationPhase}
+      suggestedAddress={suggestedAddress}
+    >
+      {currentAddress?.engine === 'public-web' ? (
         <PublicBrowserSurface
           browserId={`session-browser-${session.id}`}
           navigationRequest={publicNavigationRequest}
@@ -1175,8 +1131,6 @@ function SessionBrowserPanelController({
           onStateChange={handlePublicState}
           onNavigationRequestConsumed={handlePublicNavigationRequestConsumed}
         />
-      ) : currentAddress?.engine === 'managed-preview' && !viewerUrl ? (
-        <PreviewConnectionStatus {...previewStatusProps} placeholder />
       ) : currentAddress?.engine === 'managed-preview' && viewerUrl ? (
         <ManagedPreviewSurface
           session={session}
@@ -1193,23 +1147,7 @@ function SessionBrowserPanelController({
           onAddVisualAnnotationToChat={onAddVisualAnnotationToChat}
           onToggleVisualAnnotationInChat={onToggleVisualAnnotationInChat}
         />
-      ) : (
-        // An empty Browser is ambiguous on its own: the user cannot tell whether
-        // the agent never reported a dev server, or the panel is broken. Say which.
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 bg-background px-6 text-center">
-          <Globe2 className="h-7 w-7 text-muted-foreground/60" aria-hidden />
-          <p className="max-w-xs text-xs text-muted-foreground">
-            {suggestedAddress
-              ? t('sessions.browser.emptyWithCandidate', 'Press Enter to open {{url}}', {
-                  url: suggestedAddress,
-                })
-              : t(
-                  'sessions.browser.emptyNoCandidate',
-                  'No preview address reported yet. Enter a URL above, or ask the agent to report its dev server.'
-                )}
-          </p>
-        </div>
-      )}
-    </div>
+      ) : null}
+    </SessionBrowserPanelView>
   );
 }

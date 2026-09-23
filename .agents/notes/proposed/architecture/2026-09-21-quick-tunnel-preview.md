@@ -250,6 +250,27 @@ fixture now closes its own child promise rather than the last-created child.
 These results establish the local regression boundary, not real-network performance
 or additional Windows/packaged-Electron acceptance.
 
+## Storybook state coverage (2026-09-23)
+
+Browser presentation now has one owner, `SessionBrowserPanelView`, consumed by the
+production controller and 34 state stories; 12 controller stories exercise real
+navigation handlers against synthetic RPC data. This avoids copying product UI or
+requiring a live tunnel for visual review. The extraction keeps controller state,
+authorization and endpoint lifetime unchanged. Coverage includes local/remote
+sharing, creation/checking, every distinct closed/failed presentation, restore and
+its unavailable reasons, page loading, annotation toolbar state, history, diagnostics,
+public-browser unavailability, narrow layout, dark mode and Chinese.
+
+The real Managed Preview surface displays inert fixture HTML for active-page stories.
+That verifies presentation, not remote credentials, native Electron content, annotation
+messaging or Cloudflare connectivity. The original 31 controller/surface tests pass.
+All 46 stories passed the browser sweep, which captures each story and checks completion,
+browser errors and recovery controls; real keyboard Enter is tested separately from
+Storybook's form-submit play helpers. The static Storybook build passed with an 8 GB
+Node heap (4 GB exhausted the heap). Resolved font-package directories are explicitly
+allowed by Storybook's dev server for embedded pnpm installs; the private repo is not
+added to its filesystem allowlist.
+
 Deployed control integration, artifact publication, actual iframe/WS credentials,
 real-network health behavior and broad acceptance checks remain required. This record stays proposed until implementation and
 evidence cover the full contract.

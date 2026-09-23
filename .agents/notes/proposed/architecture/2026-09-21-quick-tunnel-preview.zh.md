@@ -195,4 +195,21 @@ Mobile 前端与 Electron production-mode bundle
 child promise，而非最后创建的 child。这些结果只证明本地回归边界，不证明实网性能，
 也未增加 Windows 或打包 Electron 的验收证据。
 
+## Storybook 状态覆盖（2026-09-23）
+
+浏览器展示统一由 `SessionBrowserPanelView` 负责，生产控制器与 34 个状态 story
+共同使用；另有 12 个控制器 story 通过合成 RPC 数据执行真实导航处理函数。
+这样既不复制产品 UI，也不依赖真实隧道完成视觉审阅。提取不改变控制器状态、
+授权与端点生命周期。覆盖本地/远端分享、创建/查询、各类有区别的关闭/失败展示、
+恢复及其不可用原因、页面加载、标注工具栏状态、历史导航、诊断信息、公共浏览器
+不可用、窄屏、深色与中文。
+
+已连接状态由真实 Managed Preview surface 显示不执行脚本的 HTML fixture。
+这验证展示，不验证远端凭据、Electron 原生网页、标注消息或 Cloudflare 连通性。
+原有 31 项控制器/surface 测试通过。46 个 story 全部通过浏览器巡检，逐一截图并
+检查执行完成、浏览器错误与恢复按钮；真实键盘 Enter 与 Storybook 表单提交
+play helper 分开验证。静态 Storybook 构建在 8 GB Node 堆限制下通过（4 GB 内存不足）。
+为支持嵌套 pnpm 安装，Storybook 开发服务
+明确允许两个解析后的字体包目录，不把私有仓库加入文件系统允许列表。
+
 部署后的控制联调、制品发布、真实 iframe/WS 凭据、实网健康行为与全面验收仍需完成。完整契约落实并有证据之前，本记录维持 proposed。
