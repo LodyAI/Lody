@@ -2276,6 +2276,8 @@ function ChatsFlatView({
            single busy project owns the screen — the whole reason the cap
            exists. The in-project list deliberately does not pass this. */
         capGroupPreviews
+        /* Home unmounts under Settings; keep folded groups folded on return. */
+        bucketStateKey={archived ? 'home:archived' : 'home'}
         /* Active list is flat — no "全部对话" section label. Only the
            archived surface keeps a heading so the mode is obvious. */
         flatHeading={archived ? (labels.archivedChatsHeading ?? '归档对话') : undefined}
