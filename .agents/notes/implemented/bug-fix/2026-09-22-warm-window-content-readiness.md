@@ -2,7 +2,7 @@
 
 Status: implemented
 Translation: current
-PR: [#885](https://github.com/LodyAI/Lody/pull/885)
+PR: [#885](https://github.com/LodyAI/Lody/pull/885), [#914](https://github.com/LodyAI/Lody/pull/914)
 
 [中文](2026-09-22-warm-window-content-readiness.zh.md)
 
@@ -73,5 +73,6 @@ passed, as did components and Electron main/renderer typechecks. Changed-source
 lint has no errors (pre-existing warnings in the runtime and conversation component).
 Real Electron visual acceptance remains unverified. E2E still disables the warm
 pool. This worktree reuses locally available dependencies; `pnpm check` stops at
-missing dependencies in `packages/ignore`. `docs check` reports 34 existing links
+missing dependencies in `packages/ignore`; `check:public-boundary` cannot resolve
+uninitialized ACP submodules. `docs check` reports 34 existing links
 into absent ACP submodules, none in the changed documents.

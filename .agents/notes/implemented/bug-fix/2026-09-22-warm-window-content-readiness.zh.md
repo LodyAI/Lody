@@ -2,7 +2,7 @@
 
 Status: implemented
 Translation: current
-PR: [#885](https://github.com/LodyAI/Lody/pull/885)
+PR: [#885](https://github.com/LodyAI/Lody/pull/885), [#914](https://github.com/LodyAI/Lody/pull/914)
 
 [English](2026-09-22-warm-window-content-readiness.md)
 
@@ -53,4 +53,4 @@ Runtime 提供 CRDT 元数据及自身已经持有的会话文档；请求不创
 以及慢磁盘缓存竞争。七个定向测试套件共 37 项通过，components 与 Electron 主进程／renderer 类型检查通过。
 修改源码的 lint 无错误，Runtime 与对话组件有既有警告。尚未完成真实 Electron 视觉验收，
 E2E 仍禁用预热池。本工作树复用本机已有依赖；`pnpm check` 在 `packages/ignore`
-依赖缺失处停止。`docs check` 报告 34 条指向缺失 ACP 子模块的既有链接错误，修改文档不在其中。
+依赖缺失处停止；`check:public-boundary` 无法解析未初始化的 ACP 子模块。`docs check` 报告 34 条指向缺失 ACP 子模块的既有链接错误，修改文档不在其中。
