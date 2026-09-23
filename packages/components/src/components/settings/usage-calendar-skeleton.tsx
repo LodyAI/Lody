@@ -273,7 +273,7 @@ function WeekDotsSkeleton() {
         <div className="flex flex-col gap-[3px]">
           {Array.from({ length: 7 }, (_, dayIndex) => (
             <div key={dayIndex} className={HOUR_COLUMNS_CLASS}>
-              {Array.from({ length: 24 }, (_, hour) => {
+              {Array.from({ length: 24 }, (_cell, hour) => {
                 const size = weekDotSize(dayIndex, hour);
                 return (
                   <div
