@@ -121,3 +121,7 @@ public-boundary checks also report unresolved ACP submodules. Documentation chec
 retain existing submodule link failures. Native menu delivery and native view focus
 ordering still require full product validation; cross-origin Managed Preview
 keyboard input remains outside the beta. No approval or measured usability benefit is claimed.
+
+## Pull request
+
+[Draft PR #912](https://github.com/LodyAI/Lody/pull/912) targets `main`.

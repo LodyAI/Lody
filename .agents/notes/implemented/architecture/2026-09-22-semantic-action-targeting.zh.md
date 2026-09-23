@@ -94,3 +94,7 @@ workspace 依赖图。
 完整仓库检查受缺失的 workspace/子模块依赖阻塞，public-boundary 检查也报告未解析的
 ACP 子模块。文档检查保留已有子模块断链。原生菜单派发和原生视图焦点顺序仍需完整
 产品验证；跨域 Managed Preview 键盘输入不属于本 Beta。没有声称已获 Spec 批准或测得可用性收益。
+
+## Pull request
+
+[Draft PR #912](https://github.com/LodyAI/Lody/pull/912) 的目标分支是 `main`。
