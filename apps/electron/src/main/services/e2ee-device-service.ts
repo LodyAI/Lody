@@ -93,7 +93,7 @@ export class E2eeDeviceService {
               )
             )
           }
-          return yield* (create ? store.create : store.load)
+          return yield* create ? store.create : store.load
         }).pipe(Effect.provide(layer))
       )
       const signingPublicKey = Buffer.from(

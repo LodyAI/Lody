@@ -11,6 +11,7 @@ import {
   type ContentScope,
 } from '../src/content';
 import { contentRuntimeLayer } from '../src/platform/content';
+import { ContentCrypto } from '../src/ports/content';
 import { inspectContentFrame } from '../src/pure/content-frame';
 import { openContent, sealContent } from '../src/workflows/content';
 import { fromHex, toHex } from '../src/wire';
@@ -457,6 +458,28 @@ describe('signed content envelope', () => {
     expect(decoder.decode((await Effect.runPromise(opening)).plaintext)).toBe('hello');
     expect(decoder.decode((await Effect.runPromise(opening)).plaintext)).toBe('hello');
     expect(decoder.decode((await cipher().open(scope, epochKey, second)).plaintext)).toBe('hello');
+  });
+
+  it('reuses the derivation Service Effect without consuming its captured input', async () => {
+    const layer = contentRuntimeLayer({ authorize: () => alicePublic }, globalThis.crypto);
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const service = yield* ContentCrypto;
+        const header = { ...scope, ...author, messageId: '01'.repeat(16) };
+        const input = new Uint8Array(epochKey);
+        const task = service.derive(input, header);
+        input.fill(0);
+        const expected = yield* service.derive(epochKey, header);
+        const first = yield* task;
+        const second = yield* task;
+        expect(first).toEqual(expected);
+        expect(second).toEqual(expected);
+        first.fill(0);
+        expect(second).toEqual(expected);
+        const concurrent = yield* Effect.all([task, task], { concurrency: 'unbounded' });
+        expect(concurrent).toEqual([expected, expected]);
+      }).pipe(Effect.provide(layer))
+    );
   });
 
   it('seals the same Effect concurrently without sharing wiped working buffers', async () => {

@@ -68,15 +68,16 @@ export function contentCryptoLayer(
         catch: (error) => error,
       }).pipe(Effect.catchAll(contentFailure)),
     derive: (epochKey, header: ContentHeader) => {
-      const owned = new Uint8Array(epochKey);
+      const snapshot = new Uint8Array(epochKey);
       const info = contentKeyInfo(header);
       if (Either.isLeft(info)) {
-        owned.fill(0);
+        snapshot.fill(0);
         return Effect.fail(info.left);
       }
       const infoBytes = info.right;
       return Effect.tryPromise({
         try: async () => {
+          const owned = new Uint8Array(snapshot);
           try {
             const material = await platform.subtle.importKey('raw', owned, 'HKDF', false, [
               'deriveBits',

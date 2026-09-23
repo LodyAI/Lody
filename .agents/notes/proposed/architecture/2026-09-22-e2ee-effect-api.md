@@ -82,6 +82,22 @@ scenarios or protocol acceptance requirements.
 
 ## Work log (append only)
 
+### 2026-09-23 — Integrator acceptance follow-up
+
+- Re-ran root `pnpm check` on b878752c: it stopped in Electron typecheck with
+  TS6138 for the unused LedgerClient pointCache property. Removed the unused
+  property while retaining the compatibility constructor argument. Electron's
+  node typecheck now passes; this is not yet a full root pass.
+- Audited below the repaired content workflow: ContentCrypto.derive still wiped
+  a closure-owned key after its first run. The Service now snapshots input once
+  and allocates a separate working copy per execution. Added direct Service
+  repeat/concurrent tests, caller mutation isolation and output independence.
+  Content suite 17/17 passes. No protocol or stored-format changes.
+- Four-class old/new benchmarks and full active-consumer architecture audit remain
+  open. In particular, an identity-store Service wrapping old Promise algorithms
+  is not by itself evidence those algorithms are thin platform implementations.
+  P0–P4 acceptance remains unproven; unrelated research/config files are preserved.
+
 ### 2026-09-22 — Start
 
 - HEAD matches the plan. Preserve unrelated untracked research and Agent configs.

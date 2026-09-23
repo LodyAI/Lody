@@ -87,7 +87,7 @@ export class LedgerClient {
     anchor: Hash,
     private readonly store: LedgerStore,
     private readonly stream: LedgerStream,
-    private readonly pointCache?: SigningPointCache
+    _pointCache?: SigningPointCache
   ) {
     if (!(anchor instanceof Uint8Array)) fail('canonical');
     if (genesisRecord !== null && !(genesisRecord instanceof Uint8Array)) fail('canonical');

@@ -65,6 +65,18 @@ Translation: current
 
 ## 工作日志（追加）
 
+### 2026-09-23 — 接入者验收跟进
+
+- 在 b878752c 重跑根 `pnpm check`，停在 Electron 类型检查：LedgerClient 的
+  pointCache 属性未使用（TS6138）。移除无用属性，保留兼容构造参数；Electron
+  node 类型检查恢复通过，但尚非根检查全通过。
+- 向下检查已修复内容 workflow：ContentCrypto.derive 仍在首轮后清零闭包密钥。
+  现于构造时保存输入快照，每次执行分配独立工作副本。新增直接 Service 重复/并发
+  执行、调用者修改隔离、输出互不影响测试；内容测试 17/17 通过。未改协议或存储格式。
+- 四类新旧基准、全部现役消费者架构审计仍开放。尤其是将旧 Promise 算法包装成
+  identity-store Service，本身不能证明算法已经是薄 platform 实现。
+  P0–P4 尚未通过验收；无关研究和配置文件原样保留。
+
 ### 2026-09-22 — 开始
 
 - HEAD 与计划基线一致；现有未跟踪的研究文档、Agent 配置原样保留。
