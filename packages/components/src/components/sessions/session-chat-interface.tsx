@@ -5906,7 +5906,7 @@ export const SessionChatInterface = memo(
 
     return (
       <PrLinkProvider prUrl={latestPr?.url} onOpenPrTab={prLinkHandler}>
-        {isVisible && sessionDocReady && sessionDocSynced && (
+        {isVisible && sessionDocReady && (sessionHistoryLength > 0 || sessionDocSynced) && (
           <span hidden data-window-session-ready={session.id} />
         )}
         <SessionConversationPage

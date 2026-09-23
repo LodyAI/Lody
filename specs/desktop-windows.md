@@ -28,7 +28,11 @@ Workspace windows retain full navigation. Navigation, draft tabs, and panel stat
 are independent per window.
 
 The optional developer window warm-up prepares the shell, not target Session data.
-Keep its neutral cover until the target conversation has loaded and synced, the
+Local-only windows reuse same-workspace peer metadata and already loaded Session
+snapshots without sharing persistence or sync cursors. Snapshot import merges local
+edits; authoritative synchronization continues independently.
+Keep its neutral cover until the target conversation has readable history (or an
+empty conversation has synced), the
 workspace landing is mounted, or absence is confirmed after the target Session’s
 metadata projection settles. Unrelated metadata failures must not block that decision. Loading text and sidebar content are not readiness signals. The cover
 expires after five seconds so slow/offline/error states retain their recovery UI;
