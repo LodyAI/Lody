@@ -36,7 +36,7 @@ import {
   resolveSessionFileActionAvailability,
   type SessionFileErrorActions,
 } from '@/lib/session-file-actions';
-import { resolveLocalWorkspaceFilePath } from '@/lib/session-local-file-path';
+import { isAbsoluteFilePath, resolveLocalWorkspaceFilePath } from '@/lib/session-local-file-path';
 import { resolveSessionFileOpenTarget } from '@/lib/session-file-open-target';
 import {
   resolveSessionLocalProjectRootPath,
@@ -67,13 +67,23 @@ export type SessionFileLocalHostActionSet = {
   readonly editor: { readonly label: string; readonly open: (filePath: string) => void } | null;
 };
 
-export type SessionFileMenuItemId = 'copy-path' | 'open-in-editor' | 'reveal' | 'download';
+export type SessionFileMenuItemId =
+  | 'copy-relative-path'
+  | 'copy-absolute-path'
+  | 'open-in-editor'
+  | 'reveal'
+  | 'download';
 
 export type SessionFileMenuItem = {
   readonly id: SessionFileMenuItemId;
   readonly label: string;
   readonly icon: ComponentType<SVGProps<SVGSVGElement> & { size?: string | number }>;
   readonly run: (filePath: string) => void;
+  /**
+   * Hides an action the given path cannot support instead of letting it fail.
+   * Omitted means the action is always offered.
+   */
+  readonly isAvailable?: (filePath: string) => boolean;
 };
 
 /** A context-menu row owned by an agent-written Markdown file link. */
@@ -300,11 +310,8 @@ export function useSessionFileActions({
     [localMachineId, session?.id, session?.machineId, t, workspacePath]
   );
 
-  const copyPath = useCallback(
-    (filePath: string) => {
-      // The machine path is what the user asked for; the workspace-relative
-      // path is what remains when that machine's rows have not synced.
-      const target = resolveHostPath(filePath) ?? filePath.trim();
+  const writePathToClipboard = useCallback(
+    (target: string) => {
       if (!target) return;
       void (async () => {
         const copied = await writeTextToClipboard(target);
@@ -315,7 +322,51 @@ export function useSessionFileActions({
         }
       })();
     },
-    [resolveHostPath, t]
+    [t]
+  );
+
+  /**
+   * The absolute path of a file, when the surface can know it: the machine path
+   * built from the owning workspace root, or the path itself when it already is
+   * absolute. Workspace-relative paths stay unresolved until that root lands.
+   */
+  const resolveAbsoluteFilePath = useCallback(
+    (filePath: string): string | null => {
+      const trimmed = filePath.trim();
+      if (!trimmed) return null;
+      return resolveHostPath(trimmed) ?? (isAbsoluteFilePath(trimmed) ? trimmed : null);
+    },
+    [resolveHostPath]
+  );
+
+  /**
+   * Copy the path as the viewer/tree holds it. Absolute external artifacts have
+   * no workspace-relative form, so the menu hides this item for them.
+   */
+  const copyRelativePath = useCallback(
+    (filePath: string) => {
+      writePathToClipboard(filePath.trim());
+    },
+    [writePathToClipboard]
+  );
+
+  const copyAbsolutePath = useCallback(
+    (filePath: string) => {
+      const target = resolveAbsoluteFilePath(filePath);
+      if (target) writePathToClipboard(target);
+    },
+    [resolveAbsoluteFilePath, writePathToClipboard]
+  );
+
+  const copyPath = useCallback(
+    (filePath: string) => {
+      // Copy works anywhere: the absolute machine path when it resolves, else
+      // the path the caller holds. The file-error card and Markdown-link menu
+      // keep this single action; the tree and side panel expose the explicit
+      // relative/absolute pair instead.
+      writePathToClipboard(resolveHostPath(filePath) ?? filePath.trim());
+    },
+    [resolveHostPath, writePathToClipboard]
   );
 
   const runEditorAction = useCallback(
@@ -687,10 +738,18 @@ export function useSessionFileActions({
     if (!session) return [];
     const items: SessionFileMenuItem[] = [
       {
-        id: 'copy-path',
-        label: t('sessions.fileViewer.copyPath', 'Copy file path'),
+        id: 'copy-relative-path',
+        label: t('sessions.fileViewer.copyRelativePath', 'Copy relative path'),
         icon: Copy,
-        run: copyPath,
+        run: copyRelativePath,
+        isAvailable: (filePath) => !isAbsoluteFilePath(filePath),
+      },
+      {
+        id: 'copy-absolute-path',
+        label: t('sessions.fileViewer.copyAbsolutePath', 'Copy absolute path'),
+        icon: Copy,
+        run: copyAbsolutePath,
+        isAvailable: (filePath) => resolveAbsoluteFilePath(filePath) !== null,
       },
     ];
     if (localHost?.editor) {
@@ -721,7 +780,16 @@ export function useSessionFileActions({
       });
     }
     return items;
-  }, [copyPath, download, localHost, nativeShell, session, t]);
+  }, [
+    copyAbsolutePath,
+    copyRelativePath,
+    download,
+    localHost,
+    nativeShell,
+    resolveAbsoluteFilePath,
+    session,
+    t,
+  ]);
 
   return {
     resolveHostPath,
