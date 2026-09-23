@@ -93,6 +93,7 @@ export const disclosureSurface = stylex.create({
     height: 'var(--active-tab-height)',
     translate: 'var(--active-tab-left) var(--active-tab-top)',
     backgroundColor: disclosure.indicator,
+    backgroundImage: disclosure.indicatorSheen,
     boxShadow: disclosure.indicatorShadow,
     cornerShape: corner.shape,
     transitionProperty: 'translate, width',

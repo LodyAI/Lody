@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import { colors, shadow } from '../tokens/colors.stylex';
+import { colors, shadow, sheen } from '../tokens/colors.stylex';
 import { radius, space, text } from '../tokens/scales.stylex';
 
 /**
@@ -35,6 +35,7 @@ export const disclosure = stylex.defineVars({
   trackRadiusMedium: radius.medium,
   indicator: colors.raisedBackground,
   indicatorShadow: shadow.raised,
+  indicatorSheen: sheen.raised,
   tabPaddingX: space[3],
   // A glyph and its label inside one tab; the gap a Button already uses.
   tabGap: '6px',
@@ -78,6 +79,7 @@ export const disclosurePaletteTheme = stylex.createTheme(disclosure, {
   trackWell: shadow.inset,
   indicator: colors.raisedBackground,
   indicatorShadow: shadow.raised,
+  indicatorSheen: sheen.raised,
   tabLabel: colors.secondaryLabel,
   tabActiveLabel: colors.label,
   label: colors.label,

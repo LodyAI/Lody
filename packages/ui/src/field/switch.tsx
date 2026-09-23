@@ -35,6 +35,7 @@ const styles = stylex.create({
     height: field.switchThumbSize,
     borderRadius: radius.full,
     backgroundColor: field.thumb,
+    backgroundImage: field.thumbSheen,
     boxShadow: field.thumbShadow,
     transform: 'translateX(0)',
     transitionProperty: 'transform',

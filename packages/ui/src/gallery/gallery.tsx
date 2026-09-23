@@ -71,7 +71,7 @@ import { table as tableTokens } from '../table/table.tokens.stylex';
 import { chip } from '../tooltip/chip';
 import { Tooltip } from '../tooltip/tooltip';
 import { tooltip as tooltipTokens } from '../tooltip/tooltip.tokens.stylex';
-import { colors, shadow } from '../tokens/colors.stylex';
+import { colors, shadow, sheen } from '../tokens/colors.stylex';
 import { control, corner, duration, ease, radius, space, text, z } from '../tokens/scales.stylex';
 import {
   Board,
@@ -530,6 +530,7 @@ const styles = stylex.create({
     borderRadius: radius.medium,
     cornerShape: corner.round,
     backgroundColor: button.secondaryBackground,
+    backgroundImage: button.secondarySheen,
     boxShadow: `${button.secondaryShadow}, 0 0 0 ${button.ringWidth} ${button.ring}`,
     color: colors.label,
     fontSize: text.subheadlineSize,
@@ -614,14 +615,16 @@ const SHADOWS = [
     box: shadow.raised,
     fill: colors.raisedBackground,
     ink: false,
-    note: 'pressable',
+    note: 'pressable: a hairline, a contact shadow and a short lift',
+    sheen: sheen.raised,
   },
   {
     name: 'shadow.inkEdge',
     box: shadow.inkEdge,
     fill: colors.label,
     ink: true,
-    note: 'top highlight on ink fills',
+    note: 'top highlight and contact shadow on ink fills',
+    sheen: sheen.ink,
   },
   {
     name: 'shadow.card',
@@ -650,6 +653,26 @@ const SHADOWS = [
     fill: colors.elevatedBackground,
     ink: false,
     note: 'dialogs and drawers',
+  },
+];
+
+/** The fall-off of the light over a raised fill, laid over it as an image. */
+const SHEENS = [
+  {
+    name: 'sheen.raised',
+    box: shadow.raised,
+    fill: colors.raisedBackground,
+    ink: false,
+    note: 'a raised fill, a few percent darker at its foot',
+    sheen: sheen.raised,
+  },
+  {
+    name: 'sheen.ink',
+    box: shadow.inkEdge,
+    fill: colors.label,
+    ink: true,
+    note: 'an ink or tone fill, brighter at its top',
+    sheen: sheen.ink,
   },
 ];
 
@@ -1070,12 +1093,14 @@ function ShadowChip({
   fill,
   ink,
   note,
+  sheen: image,
 }: {
   name: string;
   box: string;
   fill: string;
   ink: boolean;
   note: string;
+  sheen?: string;
 }) {
   const { ref, value } = useMeasured<HTMLDivElement>('box-shadow');
   return (
@@ -1085,7 +1110,8 @@ function ShadowChip({
         {...stylex.props(
           styles.shadowChip,
           dyn.raised(fill, box),
-          ink && dyn.ink(fill, colors.background)
+          ink && dyn.ink(fill, colors.background),
+          image != null && dyn.sheen(image)
         )}
       />
     </Sample>
@@ -3741,10 +3767,16 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
         </PaletteSplit>
       </Section>
 
-      <Section title="Shadows" rule="Strength by rung. Dark palettes add an inset top highlight.">
+      <Section
+        title="Shadows"
+        rule="Strength by rung, light from above. Every lifted edge is a hairline, a tight contact shadow and a short, negatively spread lift rather than one soft cloud: the cloud is what reads as grime. Dark palettes add an inset top highlight and draw the hairline in light. A sheen is the light's fall-off over a raised fill, a few percent at most, and a press drops it."
+      >
         <PaletteSplit palettes={palettes}>
           <Grid>
             {SHADOWS.map((token) => (
+              <ShadowChip key={token.name} {...token} />
+            ))}
+            {SHEENS.map((token) => (
               <ShadowChip key={token.name} {...token} />
             ))}
           </Grid>
@@ -4081,6 +4113,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               box={field.checkedEdge}
               fill={field.checkedFill}
               ink
+              sheen={field.checkedSheen}
               note="the ink highlight a checked control carries"
             />
             <ShadowChip
@@ -4088,7 +4121,24 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               box={field.thumbShadow}
               fill={field.thumb}
               ink={false}
+              sheen={field.thumbSheen}
               note="the thumb is raised on both tracks"
+            />
+            <ShadowChip
+              name="field.checkedSheen"
+              box={field.checkedEdge}
+              fill={field.checkedFill}
+              ink
+              sheen={field.checkedSheen}
+              note="the light falling off a checked fill"
+            />
+            <ShadowChip
+              name="field.thumbSheen"
+              box={field.thumbShadow}
+              fill={field.thumb}
+              ink={false}
+              sheen={field.thumbSheen}
+              note="the light falling off the thumb"
             />
           </Grid>
         </PaletteSplit>
@@ -4412,7 +4462,16 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
               box={disclosureTokens.indicatorShadow}
               fill={disclosureTokens.indicator}
               ink={false}
+              sheen={disclosureTokens.indicatorSheen}
               note="the selected tab, raised"
+            />
+            <ShadowChip
+              name="disclosure.indicatorSheen"
+              box={disclosureTokens.indicatorShadow}
+              fill={disclosureTokens.indicator}
+              ink={false}
+              sheen={disclosureTokens.indicatorSheen}
+              note="the light falling off the pill"
             />
           </Grid>
         </PaletteSplit>

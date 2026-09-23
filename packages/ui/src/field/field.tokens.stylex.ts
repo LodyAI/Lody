@@ -1,5 +1,5 @@
 import * as stylex from '@stylexjs/stylex';
-import { colors, shadow } from '../tokens/colors.stylex';
+import { colors, shadow, sheen } from '../tokens/colors.stylex';
 import { control, radius, space, text } from '../tokens/scales.stylex';
 
 /**
@@ -63,10 +63,12 @@ export const field = stylex.defineVars({
   checkedFill: colors.accent,
   checkedMark: colors.background,
   checkedEdge: shadow.inkEdge,
+  checkedSheen: sheen.ink,
   // The switch thumb is raised on both tracks: it reads against the well when
   // the switch is off and against the accent fill when it is on.
   thumb: colors.raisedBackground,
   thumbShadow: shadow.raised,
+  thumbSheen: sheen.raised,
 });
 
 /**
@@ -88,6 +90,8 @@ export const fieldPaletteTheme = stylex.createTheme(field, {
   checkedFill: colors.accent,
   checkedMark: colors.background,
   checkedEdge: shadow.inkEdge,
+  checkedSheen: sheen.ink,
   thumb: colors.raisedBackground,
   thumbShadow: shadow.raised,
+  thumbSheen: sheen.raised,
 });

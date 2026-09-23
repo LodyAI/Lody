@@ -15,7 +15,7 @@ import { toggle } from '../src/toggle/toggle.tokens.stylex';
 import { tooltip } from '../src/tooltip/tooltip.tokens.stylex';
 import { surface } from '../src/popup/surface';
 import { forcedThemeClassNames } from '../src/theme/theme';
-import { colors, shadow } from '../src/tokens/colors.stylex';
+import { colors, shadow, sheen } from '../src/tokens/colors.stylex';
 import { control, duration, radius, space, text, z } from '../src/tokens/scales.stylex';
 
 /** StyleX adds bookkeeping keys to the runtime token objects. */
@@ -26,12 +26,15 @@ function tokenNames(tokens: object): string[] {
 const board = renderToStaticMarkup(<UiGallery />);
 
 describe('UiGallery', () => {
-  test('names every colour and shadow token', () => {
+  test('names every colour, shadow and sheen token', () => {
     for (const name of tokenNames(colors)) {
       expect(board, `colour token ${name} is missing from the board`).toContain(`>${name}<`);
     }
     for (const name of tokenNames(shadow)) {
       expect(board, `shadow token ${name} is missing from the board`).toContain(`>shadow.${name}<`);
+    }
+    for (const name of tokenNames(sheen)) {
+      expect(board, `sheen token ${name} is missing from the board`).toContain(`>sheen.${name}<`);
     }
   });
 

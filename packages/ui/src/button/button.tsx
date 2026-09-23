@@ -23,6 +23,7 @@ export interface ButtonProps extends Omit<BaseProps, 'className'> {
 
 const PRESS = { transform: 'translateY(1px)' };
 const RING = `0 0 0 ${button.ringWidth} ${button.ring}`;
+const PRESSED_EDGE = `0 0 0 0.5px ${button.pressedEdge}, inset 0 1px 1px ${button.pressedEdge}`;
 
 const styles = stylex.create({
   base: {
@@ -110,6 +111,7 @@ const styles = stylex.create({
       default: button.primaryBackground,
       ':hover': `color-mix(in oklab, ${button.primaryBackground}, ${button.primaryLabel} 12%)`,
     },
+    backgroundImage: { default: button.primarySheen, ':active': 'none' },
     color: button.primaryLabel,
     boxShadow: {
       default: button.primaryEdge,
@@ -123,11 +125,14 @@ const styles = stylex.create({
       default: button.secondaryBackground,
       ':hover': `color-mix(in oklab, ${button.secondaryBackground}, ${colors.label} 4%)`,
     },
+    backgroundImage: { default: button.secondarySheen, ':active': 'none' },
     color: colors.label,
     boxShadow: {
       default: button.secondaryShadow,
       ':focus-visible': `${button.secondaryShadow}, ${RING}`,
-      ':active': 'none',
+      // Pressed flush: the lift goes and the edge stays, sunk by one hair, so
+      // a white button on a white card does not vanish under the finger.
+      ':active': PRESSED_EDGE,
     },
     transform: { default: 'none', ':active': PRESS.transform },
   },
@@ -141,10 +146,11 @@ const styles = stylex.create({
       default: colors.destructive,
       ':hover': `color-mix(in oklab, ${colors.destructive}, ${colors.label} 10%)`,
     },
+    backgroundImage: { default: button.primarySheen, ':active': 'none' },
     color: colors.onDestructive,
     boxShadow: {
-      default: 'inset 0 1px 0 hsl(0 0% 100% / 0.2)',
-      ':focus-visible': `inset 0 1px 0 hsl(0 0% 100% / 0.2), ${RING}`,
+      default: button.primaryEdge,
+      ':focus-visible': `${button.primaryEdge}, ${RING}`,
       ':active': 'none',
     },
     transform: { default: 'none', ':active': PRESS.transform },

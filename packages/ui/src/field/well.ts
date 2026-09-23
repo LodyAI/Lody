@@ -179,6 +179,7 @@ export const well = stylex.create({
   /** Stored state: the ink fill and its top highlight in place of the well. */
   checked: {
     backgroundColor: field.checkedFill,
+    backgroundImage: field.checkedSheen,
     boxShadow: { default: field.checkedEdge, ':focus-visible': `${field.checkedEdge}, ${RING}` },
   },
   /** The invalid ring on that ink edge, at rest and while focused. */

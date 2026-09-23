@@ -1,7 +1,8 @@
 # Token usage rules
 
 Construction: depth without lines. No border token exists. Surfaces separate by
-luminance step and shadow; controls are wells (sunken) or raised.
+luminance step and shadow; controls are wells (sunken) or raised. The material is
+flat with one light above it: see [Material](#material).
 
 ## Elevation ladder
 
@@ -21,9 +22,11 @@ One rung per component. The rung fixes background and shadow together.
 - `separator`: next row. Dividers between list and table rows only. Never
   around a surface, never under a header.
 - well: you can put something here. `wellBackground` + `shadow.inset`.
-- raised: you can press this. `raisedBackground` + `shadow.raised`. Primary and
-  destructive buttons are raised with `shadow.inkEdge` as their top highlight.
-- shadow: above the page. Strength by rung.
+- raised: you can press this. `raisedBackground` + `shadow.raised` +
+  `sheen.raised`. Primary and destructive buttons are raised with
+  `shadow.inkEdge` and `sheen.ink`: a top highlight and a contact shadow.
+- shadow: above the page. Strength by rung, and always a hairline, a contact
+  shadow and a lift — never one soft cloud.
 - ring: attention here. A 2px `box-shadow` composed with the control's own
   shadow, tight to it, no offset, no glow. `accent` on focus, `destructive` on
   invalid. Not an `outline`: the product shell resets outlines with `!important`.
@@ -50,16 +53,16 @@ textarea, checkbox, radio, switch and the Select and Combobox triggers — so a
 state has one colour in one place instead of one per component. The lists those
 triggers open are on the floating rung and read `popup` instead; see below.
 
-| state       | what it is                                                                     |
-| ----------- | ------------------------------------------------------------------------------ |
-| rest        | `field.background` and `field.well`; the value in `field.value`                |
-| placeholder | `field.placeholder`, the hint colour; it is a prompt, not a label              |
-| focus       | 2px `field.ring` (accent), tight to the control, no offset                     |
-| invalid     | 2px `field.invalidRing` (destructive), at rest and while focused               |
-| disabled    | 45% opacity on the control; the label and help dim with it                     |
+| state       | what it is                                                                        |
+| ----------- | --------------------------------------------------------------------------------- |
+| rest        | `field.background` and `field.well`; the value in `field.value`                   |
+| placeholder | `field.placeholder`, the hint colour; it is a prompt, not a label                 |
+| focus       | 2px `field.ring` (accent), tight to the control, no offset                        |
+| invalid     | 2px `field.invalidRing` (destructive), at rest and while focused                  |
+| disabled    | 45% opacity on the control; the label and help dim with it                        |
 | checked, on | accent: `field.checkedFill` under `field.checkedMark`, `field.checkedEdge` on top |
-| mixed       | the checked appearance with the dash, and it announces `mixed`                 |
-| selected    | the tick, and a quiet fill on the row that is current, not on the control      |
+| mixed       | the checked appearance with the dash, and it announces `mixed`                    |
+| selected    | the tick, and a quiet fill on the row that is current, not on the control         |
 
 A checkbox and a radio are the "16px things" the corner rule names: a
 `field.boxSize` box at `radius.mini`, round for a radio. A switch is a
@@ -110,10 +113,10 @@ tick keeps saying which row is current when it lands there.
 
 Both fills are derived from the rung rather than taken from `hoverFill` and
 `selectedFill`, which this table names for a row but which were tuned against
-the page and card rungs at 100% lightness. Measured on the floating rung,
-`hoverFill` lands 2/255 from `raisedBackground` in the light palette and
-`selectedFill` resolves to exactly `raisedBackground` in the dark one, so one
-state is invisible in each. Mixing `raisedBackground` toward `label` steps away
+the page and card rungs. Measured on the floating rung, `selectedFill` resolves
+to exactly `raisedBackground` in the dark palette, so that state is invisible
+there — and while the light floating rung was gray, `hoverFill` landed 2/255
+from it too. A derivation keeps working whatever the rung's value is. Mixing `raisedBackground` toward `label` steps away
 from the surface in both directions at once, which is the derivation `Button`
 already uses for a secondary button's hover.
 
@@ -731,6 +734,38 @@ group is how a surface tells what is inside it what it is standing on; StyleX
 has no descendant selector, and unlike one this also reaches a cap a caller
 wrapped in something of their own.
 
+## Material
+
+Flat, with a light above it. Nothing here is a picture of a material: no grain,
+no noise, no gloss, no reflection, no deep groove. What is physical is the logic
+of the light, and it takes four rules.
+
+- **Raised catches the light.** A thing you can press is at least as light as
+  what it rests on, never a mid-gray on a gray: in Lody Light `raisedBackground`
+  is white, the same white as the card and modal rungs, so a secondary button,
+  a switch thumb and a tab's pill read by their edge and their lift rather than
+  by a fill. A gray raised part under a soft shadow is what reads as grime.
+- **An edge is crisp; a lift is short.** Every lifted shadow is three layers: a
+  0.5px hairline, a contact shadow within 1–2px, and a lift whose negative
+  spread keeps it under the object instead of haloing round it. Dark palettes
+  draw the hairline in light (`white` at 6–10%) and keep the inset top highlight,
+  because a dark shadow does not read on a near-black page.
+- **A well is recessed, not outlined.** `shadow.inset` is a 1px shadow from the
+  top edge and a faint inner hairline; it never gains a bottom lip or a groove.
+- **Light falls off down a raised face.** `sheen.raised` and `sheen.ink` are that
+  fall-off as a `background-image` over the fill, a few percent at most, so a
+  hover that changes the fill keeps it. A press drops it: a thing pressed flush
+  faces the light no more than the surface around it.
+
+| token          | on                                                  |
+| -------------- | --------------------------------------------------- |
+| `sheen.raised` | secondary button, switch thumb, tab indicator       |
+| `sheen.ink`    | primary and destructive button, checked box / radio |
+
+A secondary button pressed keeps its hairline and gains a one-hair inset rather
+than dropping every edge: on the white card rung it is otherwise white on white
+under the finger.
+
 ## Corners
 
 - `corner.shape` (squircle) on every radius except `radius.full`. Round fallback
@@ -754,6 +789,7 @@ wrapped in something of their own.
 
 ## Motion
 
-- Press: `translateY(1px)` and drop `shadow.inkEdge`, `duration.fast`.
+- Press: `translateY(1px)`, drop the lift and the sheen, `duration.fast`. Ink
+  and tone fills drop `shadow.inkEdge`; a secondary keeps its hairline.
 - Rise: popups from 4px below at opacity 0, `duration.regular`.
 - Colors and fills cross-fade at `duration.fast`. One easing: `ease.standard`.
