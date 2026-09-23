@@ -196,6 +196,25 @@ const styles = stylex.create({
   },
   ringAccent: { outlineColor: colors.accent },
   ringDestructive: { outlineColor: colors.destructive },
+  leadingEmoji: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    height: '100%',
+    padding: 0,
+    borderWidth: 0,
+    borderRadius: '6px',
+    backgroundColor: {
+      default: 'transparent',
+      ':hover': `color-mix(in oklab, transparent, ${colors.label} 6%)`,
+    },
+    boxShadow: 'none',
+    outlineStyle: 'none',
+    fontSize: text.bodySize,
+    lineHeight: 1,
+    cursor: 'pointer',
+  },
   shadowChip: {
     height: '64px',
     borderRadius: radius.medium,
@@ -1084,6 +1103,19 @@ function PlusGlyph() {
     >
       <path d="M8 3.5v9M3.5 8h9" />
     </svg>
+  );
+}
+
+/**
+ * What a surface puts in an Input's leading slot when the slot is pressable: it
+ * fills the square, draws no edge — the well rings on `:focus-within` — and
+ * answers the pointer with a fill mixed toward the ink.
+ */
+function LeadingEmoji() {
+  return (
+    <button type="button" aria-label="Emoji" {...stylex.props(styles.leadingEmoji)}>
+      <span aria-hidden="true">🔍</span>
+    </button>
   );
 }
 
@@ -4017,13 +4049,25 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
 
       <Section
         title="Field · sizes and Textarea"
-        rule="28 / 32 / 36, the same ladder as Button, with radius small at 28 and medium at 32 and 36. Textarea is the same well at the medium radius and grows downward."
+        rule="28 / 32 / 36, the same ladder as Button, with radius small at 28 and medium at 32 and 36. Textarea is the same well at the medium radius and grows downward. What a value belongs with — an emoji before a name, the / before a command — goes in the leading slot inside the same well, a square the well’s height less its inset, rather than beside it as a second control with a second edge."
       >
         <PaletteSplit palettes={palettes}>
           <Rows>
             {FIELD_SIZES.map((entry) => (
               <FieldSizeRow key={entry.size} {...entry} />
             ))}
+            <FieldRow legend="input · leading">
+              <Field.Root name="role">
+                <Field.Label>Role</Field.Label>
+                <Input size="large" leading={<LeadingEmoji />} defaultValue="Code Reviewer" />
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend="input · leading text">
+              <Field.Root name="command">
+                <Field.Label>Slash command</Field.Label>
+                <Input size="large" leading="/" placeholder="review-pr" />
+              </Field.Root>
+            </FieldRow>
             <FieldRow legend="textarea">
               <Field.Root name="summary">
                 <Field.Label>What should the agent do?</Field.Label>

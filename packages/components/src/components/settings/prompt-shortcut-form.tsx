@@ -157,60 +157,63 @@ export function PromptShortcutForm({
             editor. The command carries its `/` so what is typed is what shows. */}
         <div className="space-y-1.5">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <EmojiField
-                value={value.emoji ?? ''}
-                defaultEmoji={DEFAULT_PROMPT_SHORTCUT_EMOJI}
-                onChange={(emoji) =>
-                  setValue((previous) => ({
-                    ...previous,
-                    ...(normalizeShortcutEmoji(emoji)
-                      ? { emoji: normalizeShortcutEmoji(emoji) }
-                      : { emoji: undefined }),
-                  }))
-                }
-              />
-              <Input
-                id="shortcut-name"
-                autoComplete="off"
-                aria-label={t('settings.promptShortcuts.name', 'Name')}
-                placeholder={t('settings.promptShortcuts.name', 'Name')}
-                className="h-9 min-w-0 flex-1 text-sm"
-                value={value.name}
-                maxLength={PROMPT_SHORTCUT_LIMITS.name}
-                required
-                disabled={saving}
-                onChange={(event) => {
-                  const name = event.target.value;
-                  setValue((previous) => ({
-                    ...previous,
-                    name,
-                    slug: slugTouched ? previous.slug : slugify(name),
-                  }));
-                }}
-              />
-            </div>
-            <div className="flex h-9 min-w-0 items-center gap-1 rounded-md border border-input-border bg-input-field px-2 focus-within:ring-1 focus-within:ring-ring sm:w-56">
-              <span aria-hidden="true" className="font-mono text-sm text-muted-foreground">
-                /
-              </span>
-              <Input
-                id="shortcut-slug"
-                autoComplete="off"
-                aria-label={t('settings.promptShortcuts.command', 'Slash command')}
-                placeholder={t('settings.promptShortcuts.commandPlaceholder', 'review-pr')}
-                className="h-7 min-w-0 flex-1 border-0 bg-transparent px-0 font-mono text-sm shadow-none focus-visible:ring-0"
-                value={value.slug}
-                maxLength={PROMPT_SHORTCUT_LIMITS.slug}
-                pattern="[a-z0-9][a-z0-9-]*"
-                required
-                disabled={saving}
-                onChange={(event) => {
-                  setSlugTouched(true);
-                  setValue((previous) => ({ ...previous, slug: slugify(event.target.value) }));
-                }}
-              />
-            </div>
+            <Input
+              id="shortcut-name"
+              size="large"
+              autoComplete="off"
+              aria-label={t('settings.promptShortcuts.name', 'Name')}
+              placeholder={t('settings.promptShortcuts.name', 'Name')}
+              className="min-w-0 flex-1"
+              leading={
+                <EmojiField
+                  value={value.emoji ?? ''}
+                  defaultEmoji={DEFAULT_PROMPT_SHORTCUT_EMOJI}
+                  onChange={(emoji) =>
+                    setValue((previous) => ({
+                      ...previous,
+                      ...(normalizeShortcutEmoji(emoji)
+                        ? { emoji: normalizeShortcutEmoji(emoji) }
+                        : { emoji: undefined }),
+                    }))
+                  }
+                />
+              }
+              value={value.name}
+              maxLength={PROMPT_SHORTCUT_LIMITS.name}
+              required
+              disabled={saving}
+              onChange={(event) => {
+                const name = event.target.value;
+                setValue((previous) => ({
+                  ...previous,
+                  name,
+                  slug: slugTouched ? previous.slug : slugify(name),
+                }));
+              }}
+            />
+            <Input
+              id="shortcut-slug"
+              size="large"
+              autoComplete="off"
+              aria-label={t('settings.promptShortcuts.command', 'Slash command')}
+              placeholder={t('settings.promptShortcuts.commandPlaceholder', 'review-pr')}
+              className="min-w-0 sm:w-56"
+              inputClassName="font-mono"
+              leading={
+                <span aria-hidden="true" className="font-mono">
+                  /
+                </span>
+              }
+              value={value.slug}
+              maxLength={PROMPT_SHORTCUT_LIMITS.slug}
+              pattern="[a-z0-9][a-z0-9-]*"
+              required
+              disabled={saving}
+              onChange={(event) => {
+                setSlugTouched(true);
+                setValue((previous) => ({ ...previous, slug: slugify(event.target.value) }));
+              }}
+            />
           </div>
           <Input
             id="shortcut-description"
@@ -220,7 +223,7 @@ export function PromptShortcutForm({
               'settings.promptShortcuts.descriptionPlaceholder',
               'Description — shown in the / menu'
             )}
-            className="h-9 text-sm"
+            size="large"
             value={value.description ?? ''}
             maxLength={PROMPT_SHORTCUT_LIMITS.description}
             disabled={saving}

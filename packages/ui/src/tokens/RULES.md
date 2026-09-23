@@ -64,6 +64,13 @@ triggers open are on the floating rung and read `popup` instead; see below.
 | mixed       | the checked appearance with the dash, and it announces `mixed`                    |
 | selected    | the tick, and a quiet fill on the row that is current, not on the control         |
 
+**What belongs with a value is inside its well.** An emoji before a name or the
+`/` before a command goes in `Input`'s `leading` slot, not beside the control:
+two controls side by side are two edges and two rings for one fact. The slot is a
+square the well's height less a 4px inset, at the well's radius less that inset.
+A pressable glyph fills it and draws no edge, because the well rings on
+`:focus-within`; a character is centred in it in `field.icon`.
+
 A checkbox and a radio are the "16px things" the corner rule names: a
 `field.boxSize` box at `radius.mini`, round for a radio. A switch is a
 `field.switchWidth` by `field.switchHeight` track at `radius.full` holding a

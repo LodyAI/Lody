@@ -107,24 +107,24 @@ export function AgentRoleForm({
         {/* The Role's own label, shown as itself rather than inside a titled
             card: an emoji and a name need no section heading to be read. */}
         <div className="space-y-1.5">
-          <div className="flex items-center gap-2">
-            <EmojiField
-              value={value.emoji}
-              defaultEmoji={DEFAULT_AGENT_ROLE_EMOJI}
-              onChange={(emoji) => update({ emoji })}
-            />
-            <Input
-              id={`${fieldId}-name`}
-              autoComplete="off"
-              aria-label={t('settings.agentRoles.form.name')}
-              className="h-9 min-w-0 flex-1 text-sm"
-              maxLength={AGENT_ROLE_NAME_MAX_LENGTH}
-              placeholder={t('settings.agentRoles.form.name')}
-              aria-invalid={hasError('name_required') || undefined}
-              value={value.name}
-              onChange={(event) => update({ name: event.target.value })}
-            />
-          </div>
+          <Input
+            id={`${fieldId}-name`}
+            size="large"
+            autoComplete="off"
+            aria-label={t('settings.agentRoles.form.name')}
+            leading={
+              <EmojiField
+                value={value.emoji}
+                defaultEmoji={DEFAULT_AGENT_ROLE_EMOJI}
+                onChange={(emoji) => update({ emoji })}
+              />
+            }
+            maxLength={AGENT_ROLE_NAME_MAX_LENGTH}
+            placeholder={t('settings.agentRoles.form.name')}
+            aria-invalid={hasError('name_required') || undefined}
+            value={value.name}
+            onChange={(event) => update({ name: event.target.value })}
+          />
           {hasError('name_taken') ? (
             <FormMessage tone="error">{t('settings.agentRoles.errors.nameTaken')}</FormMessage>
           ) : null}

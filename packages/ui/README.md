@@ -146,6 +146,24 @@ is a glance, not a setting, and a surface that could set it could persist "show
 me the password". `className` lands on the shell, which is the control, and
 `inputClassName` on the value inside it.
 
+`Input` takes the same shell when something belongs with the value: a Role's
+emoji before its name, the `/` before a command. `leading` puts it inside the
+well at its start rather than beside it as a second control with a second edge.
+The slot is a square as tall as the well less its 4px inset, so a pressable
+glyph fills it and a character is centred where the value's padding would be.
+Whatever goes there states no edge of its own, because the well rings on
+`:focus-within`. As with `PasswordInput`, `className` then lands on the shell and
+`inputClassName` on the value.
+
+```tsx
+<Input
+  size="large"
+  aria-label={t('settings.agentRoles.form.name')}
+  leading={<EmojiField value={emoji} onChange={setEmoji} />}
+/>
+<Input size="large" leading="/" inputClassName="font-mono" />
+```
+
 A `Menu` is that same floating surface with commands on it. It is also the
 dropdown menu: Base UI has no separate part for one, so a second name would be a
 second thing to keep in step. A menu is opened by whatever the surface already

@@ -183,6 +183,53 @@ describe('Input and Textarea', () => {
     expect(cls.endsWith(' w-64')).toBe(true);
     expect(cls.split(' ').length).toBeGreaterThan(5);
   });
+
+  test('a leading part shares the well with the value, and the label still reaches it', () => {
+    const html = renderToStaticMarkup(
+      <Field.Root>
+        <Field.Label>Name</Field.Label>
+        <Input leading={<span data-glyph="">🔍</span>} placeholder="Code Reviewer" />
+      </Field.Root>
+    );
+    // One control: the shell is the well, and the glyph comes before the value
+    // inside it rather than standing beside it as a second edge.
+    const shell = /<div\b[^>]*data-size="medium"[^>]*>([\s\S]*)<\/div>/.exec(html)?.[1] ?? '';
+    expect(shell.indexOf('data-glyph')).toBeGreaterThan(-1);
+    expect(shell.indexOf('data-glyph')).toBeLessThan(shell.indexOf('<input'));
+    const labelFor = /<label\b[^>]*for="([^"]*)"/.exec(html)?.[1];
+    const inputId = /<input\b[^>]*id="([^"]*)"/.exec(html)?.[1];
+    expect(labelFor).toBeTruthy();
+    expect(inputId).toBe(labelFor);
+  });
+
+  test('an invalid field with a leading part rings the shell, not the value in it', () => {
+    // Field.Root renders a <div> of its own first; the shell is the one carrying the size.
+    const shellOf = (html: string) =>
+      (
+        /class="([^"]*)"/.exec(/<div\b[^>]*data-size="[^"]*"[^>]*>/.exec(html)?.[0] ?? '')?.[1] ??
+        ''
+      )
+        .split(' ')
+        .filter(Boolean);
+    const resting = renderToStaticMarkup(<Input leading="/" />);
+    const invalid = renderToStaticMarkup(
+      <Field.Root invalid>
+        <Input leading="/" />
+      </Field.Root>
+    );
+    const added = shellOf(invalid).filter((name) => !shellOf(resting).includes(name));
+    expect(added.length).toBeGreaterThan(0);
+    expect(classesOf(invalid, 'input')).toEqual(classesOf(resting, 'input'));
+  });
+
+  test('with a leading part, className lands on the shell and inputClassName on the value', () => {
+    const html = renderToStaticMarkup(
+      <Input leading="/" className="w-56" inputClassName="font-mono" />
+    );
+    expect(classesOf(html, 'div')).toContain('w-56');
+    expect(classesOf(html, 'div')).not.toContain('font-mono');
+    expect(classesOf(html, 'input')).toContain('font-mono');
+  });
 });
 
 describe('field tokens', () => {

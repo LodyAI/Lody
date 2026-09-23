@@ -125,5 +125,25 @@ settings test files (90 tests) pass and the components typecheck is clean.
 Verification was visual, in both palettes, on the study story; no human
 sign-off yet.
 
+## Presentation: what belongs with a value is inside its well
+
+The owner's next point was that some of what felt wrong was the form of
+presentation rather than the material. The Agent Role and Prompt Shortcut
+editors put an emoji picker and a name field side by side, as two controls with
+two edges and two focus rings. The emoji and the name are one label, though, so
+they should be one control. The shortcut's `/command` field showed the same
+thing from the other side: a hand-built Tailwind box (its own border, fill and
+ring) held a `/` beside a bare `Input`.
+
+`Input` gains a `leading` slot, built from the input's own `render` the way
+`PasswordInput` builds its shell. The input stays the field's one control, so
+a `Field.Label` still points at it and validity rings the shell. The slot is a
+square the well's height less a 4px inset, so a pressable emoji fills it and a
+`/` is centred where the value's padding would be. `EmojiField` became that
+pressable part: it has no edge, and it hovers with a fill mixed toward the ink.
+Both editors now use the slot, and the hand-built slash box is gone.
+`test/field.test.tsx` pins the label association, the ring on the shell, and
+where `className` and `inputClassName` land.
+
 Related: [token gallery](2026-09-09-ui-token-gallery.md),
 [call-site migration](2026-09-22-ui-radix-callsite-migration.md).

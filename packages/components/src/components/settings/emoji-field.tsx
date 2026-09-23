@@ -14,6 +14,12 @@ const EmojiPickerPanel = lazy(() => import('./emoji-picker-panel'));
  * unfinished form — so the button shows the default glyph and clicking it is a
  * change, the way a Notion page icon works.
  *
+ * It lives in the name field's `leading` slot, not beside it: the emoji and the
+ * name are one label, so they are one control with one edge and one ring. The
+ * trigger therefore draws no edge of its own — the well rings on
+ * `:focus-within` — and fills the slot, which is already the well's height less
+ * its inset, at the well's radius less that inset.
+ *
  * Shared by every settings editor that has one, so an Agent Role and a Prompt
  * Shortcut cannot end up with two different emoji controls.
  */
@@ -40,14 +46,18 @@ export function EmojiField({
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger render={<button
-          ref={triggerRef}
-          type="button"
-          aria-label={t('settings.emoji.label', 'Emoji')}
-          className="flex h-9 w-11 shrink-0 items-center justify-center rounded-md border border-input-border bg-input-field text-lg leading-none transition-colors hover:bg-hover/60 focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
-        >
-          <span aria-hidden="true">{value || defaultEmoji}</span>
-        </button>}/>
+      <Popover.Trigger
+        render={
+          <button
+            ref={triggerRef}
+            type="button"
+            aria-label={t('settings.emoji.label', 'Emoji')}
+            className="flex h-full w-full shrink-0 items-center justify-center rounded-md text-base leading-none shadow-none outline-hidden transition-colors hover:bg-foreground/[0.06] focus-visible:bg-foreground/[0.06] data-[popup-open]:bg-foreground/[0.06]"
+          >
+            <span aria-hidden="true">{value || defaultEmoji}</span>
+          </button>
+        }
+      />
       <Popover.Content
         align="start"
         className="w-fit p-0"
