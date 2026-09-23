@@ -93,6 +93,7 @@ import {
   SessionRowOpenedByMenuItems,
   SidebarListSkeleton,
   buildSessionRowOpenedByTreeSlot,
+  SIDEBAR_ROW_LIST_CLASS,
 } from '@/components/sidebar-row-shared';
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
 import type { SessionSharingState } from '@/lib/session-sharing';
@@ -770,7 +771,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
       </div>
 
       {!group.collapsed && (
-        <div className="flex flex-col gap-px">
+        <div className={SIDEBAR_ROW_LIST_CLASS}>
           {visibleNodes.map((node) => {
             const session = node.item;
             const openerSessionId = normalizeSessionRowId(session.openedBySessionId);

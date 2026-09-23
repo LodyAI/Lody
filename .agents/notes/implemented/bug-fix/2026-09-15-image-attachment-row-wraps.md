@@ -40,7 +40,7 @@ tiles per line now follows the container.
 ## Verification
 
 - `pnpm --filter @lody/components typecheck` passes (after `pnpm --filter lody
-  prepare:acp-adapters`, which the workspace needs for the ACP submodule types).
+prepare:acp-adapters`, which the workspace needs for the ACP submodule types).
 - `pnpm lint:fast` reports no errors; Prettier ran on both changed files.
 - `ImageGroupBubble.stories.tsx` gains the thirteen-image agent and user cases. Its fetch mock also
   had to be repaired: the pattern expected `/api/session-images/…`, but

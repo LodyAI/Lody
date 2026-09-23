@@ -50,6 +50,10 @@ mobile surfaces. Background for the rules below:
   app. Keep `#root` off `<body>`'s tail (`lib/body-tail-sentinel.ts`, mounted by
   `routes/__root.tsx`). Rationale:
   [portal restyle note](../../.agents/notes/implemented/bug-fix/2026-09-23-portal-full-restyle.md).
+- Sidebar session-row lists use `SIDEBAR_ROW_LIST_CLASS` (`content-visibility: auto`,
+  which also applies paint containment): a row must draw inside its own box (inset
+  focus rings; connectors inside the leading slot). Recursive GitHub trees go through
+  `lib/repo-file-paths-cache.ts`, never a direct `githubFetchFilePaths` per search.
 
 ## Rules shared by callers
 

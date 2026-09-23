@@ -18,7 +18,7 @@ credential-free detail, which the login page shows and main logs and reports.
 
 `@better-auth/electron` 1.5.5 stores the session cookie jar encrypted with
 `safeStorage` under `better-auth.cookie` in `userData/config.json`. Its fetch
-plugin's `init` decrypts that value before *every* request, including the
+plugin's `init` decrypts that value before _every_ request, including the
 unauthenticated `/electron/token` exchange, and does not catch the exception. On
 Windows, `safeStorage` uses a DPAPI-protected key held in the profile's `Local State`
 file. If that key changes, `decryptString` throws on every call. This happens when

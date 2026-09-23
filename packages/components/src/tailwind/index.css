@@ -12,6 +12,18 @@
    unanchored `:last-child … ::after` selectors make every portal open/close
    restyle the whole app (~25ms per popover on a large workspace). */
 
+/* Sidebar session-row lists: skip style, layout and paint for rows scrolled out
+   of view. `auto` remembers each row's last rendered height; 50px is only the
+   estimate for rows never on screen (two-line repo rows are 54px, child and
+   chat rows 30-36px), kept close so the scrollbar barely moves as rows render.
+   See SIDEBAR_ROW_LIST_CLASS. */
+@utility sidebar-row-list {
+  & > * {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 50px;
+  }
+}
+
 @custom-variant dark (&:where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *)));
 
 @theme inline {
@@ -2084,12 +2096,7 @@ pre,
   width: 60%;
   content: '';
   pointer-events: none;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    hsl(var(--background) / 0.78),
-    transparent
-  );
+  background: linear-gradient(90deg, transparent, hsl(var(--background) / 0.78), transparent);
   transform: translateX(-100%);
   animation: agent-shimmer-sweep 2.2s linear infinite;
   will-change: transform;

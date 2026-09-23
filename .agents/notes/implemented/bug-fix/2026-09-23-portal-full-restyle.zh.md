@@ -45,8 +45,27 @@ Translation: current
 未采用"把弹层渲染到专用容器"作为主修复：Radix focus guard 总是直接插在 `<body>` 上，而且每个弹层
 调用点都要加 container 参数。既然已无任何引用，也无需覆写 Konsta 的工具类。
 
+## 后续削减
+
+同一生产构建、同一工作区（9k 节点）下测得：
+
+- **侧边栏 DOM。** 9,070 个节点中有 8,473 个来自一个 "Chats" 分组：它挂载了全部 244 行，可见的只有
+  12 行。行列表现使用 `content-visibility: auto`（`sidebar-row-list`），一次全应用样式和布局计算从
+  25ms 降到 10.6ms。暂不采用 JS 虚拟化：侧边栏的键盘导航、活动行滚动和分组排序都依赖已挂载的行。
+  固有尺寸估计值（50px）让首次渲染过程中的滚动高度误差保持在 2% 以内。
+- **GitHub 文件树。** `GitHubRepoFileProvider.searchFiles` 每次搜索都下载完整递归树（本仓库 1.7MB）。
+  现由 `lib/repo-file-paths-cache.ts` 与 @ 提及搜索共用一份按分支区分的内存/IndexedDB 缓存，每个键同时
+  只有一个请求。
+- **PR 读取。** 每个 `useGitHubPrDetails` 实例只对自己的请求去重，信息栏和 PR 标签页会把同一 PR 请求
+  两次。相同读取现在在模块级共享。
+- **空闲滚动。** 原生选区的滚动处理在没有选中时也会在每次滚动读取 `Selection` 并强制同步 React 刷新，
+  现在直接返回。吸底逻辑的 `scrollHeight` 读取保留：它是绘制前的修正，每次切换约 14ms，且主要是该帧
+  本来就要做的布局。
+- **doc-meta。** 同时完成的完整元数据读取按微任务合并为一次缓存写入，而不是每个文档一次；元数据对象
+  未变的列表项保持同一引用；值比较改为遍历 JSON，而不是序列化。
+
 ## 未决
 
 Konsta 的 `theme.css` 仍会导入全部 Konsta 样式；目前只证实这一条工具类有影响。还没有自动检查拒绝
-编译后 CSS 中未锚定的位置选择器。开发构建的 Safari 录制中看到的 doc-meta 重算在生产构建里不是主因，
-本次未改动。相关滚动工作：[对话跟随模式](../architecture/2026-09-23-conversation-follow-modes.md)。
+编译后 CSS 中未锚定的位置选择器。doc-meta 列表已变便宜（见上），但每次缓存更新仍以 O(会话数) 推导
+全部列表。侧边栏仍在 React 中渲染每一行，只是浏览器跳过了渲染工作。相关滚动工作：[对话跟随模式](../architecture/2026-09-23-conversation-follow-modes.md)。

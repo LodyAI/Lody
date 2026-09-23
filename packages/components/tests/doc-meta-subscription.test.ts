@@ -300,6 +300,69 @@ describe('docMetaSubscriptionAtom', () => {
     }
   });
 
+  it('writes metadata reads that resolve together once, and keeps unchanged list entries', async () => {
+    const ids = ['batch-a', 'batch-b', 'batch-c'] as SessionId[];
+    const snapshots = new Map(
+      ids.map((id, index) => [
+        getSessionRoomId(id),
+        {
+          meta: {
+            id,
+            title: `Session ${index}`,
+            createdAt: `2026-08-1${index}T00:00:00.000Z`,
+            isArchived: false,
+          },
+        } as Record<string, unknown> | undefined,
+      ])
+    );
+    const repo = new CompatRepoDouble([], snapshots);
+    const store = createStore();
+    const unmount = store.sub(docMetaSubscriptionAtom, () => {});
+    try {
+      store.set(runtimeAtom, createRuntime(repo as unknown as LoroRepo));
+      await flush();
+
+      let cacheWrites = 0;
+      const unsubscribeCache = store.sub(sessionMetaCacheAtom, () => {
+        cacheWrites += 1;
+      });
+      for (const id of ids) {
+        repo.emit({
+          kind: 'doc-existence-changed',
+          docId: getSessionRoomId(id),
+          from: 'missing',
+          to: 'active',
+          by: 'live',
+        });
+      }
+      await flush();
+      await flush();
+      unsubscribeCache();
+
+      expect(cacheWrites).toBe(1);
+      const before = store.get(sessionListAtom);
+      expect(before.map((session) => session.id).sort()).toEqual([...ids].sort());
+
+      repo.emit({
+        kind: 'doc-metadata',
+        docId: getSessionRoomId(ids[0]!),
+        patch: { title: 'Renamed' },
+        by: 'live',
+      });
+      await flush();
+      const after = store.get(sessionListAtom);
+      expect(after).not.toBe(before);
+      for (const id of ids.slice(1)) {
+        expect(after.find((session) => session.id === id)).toBe(
+          before.find((session) => session.id === id)
+        );
+      }
+      expect(after.find((session) => session.id === ids[0])?.title).toBe('Renamed');
+    } finally {
+      unmount();
+    }
+  });
+
   it('observes archive updates that land while the bootstrap snapshot is being read', async () => {
     const sessionId = 'archived-during-bootstrap' as SessionId;
     const docId = getSessionRoomId(sessionId);

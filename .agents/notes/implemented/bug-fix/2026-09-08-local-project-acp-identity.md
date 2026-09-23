@@ -99,15 +99,15 @@ test retries were disabled so an incidental pass could not be mistaken for evide
 ./node_modules/.bin/vitest run --no-file-parallelism --retry=0 src/__tests__/CodexACPAgent/worktree-project.test.ts
 ```
 
-| Variant | Result | Decision |
-| --- | --- | --- |
-| Original baseline | 13 passed | Control |
-| Remove the pending Map with its get/set/finally and return the project lookup directly | 13 passed | Delete the cache |
-| Remove the local `thread.projectId` write-back after the native update | 13 passed | Delete the write-back |
-| Skip realpath on the input path | 1 failed: a directory alias produces a different project identity | Keep |
-| Query only the first page of projects | 1 failed: an already registered project on a later page is not reused | Keep |
-| Drop the guard for an existing project on resume | 1 failed: it tries to rewrite existing user ownership | Keep |
-| Delete the cache and the local write-back together | 13 passed | Adopt; the module goes from 98 to 87 lines |
+| Variant                                                                                | Result                                                                | Decision                                   |
+| -------------------------------------------------------------------------------------- | --------------------------------------------------------------------- | ------------------------------------------ |
+| Original baseline                                                                      | 13 passed                                                             | Control                                    |
+| Remove the pending Map with its get/set/finally and return the project lookup directly | 13 passed                                                             | Delete the cache                           |
+| Remove the local `thread.projectId` write-back after the native update                 | 13 passed                                                             | Delete the write-back                      |
+| Skip realpath on the input path                                                        | 1 failed: a directory alias produces a different project identity     | Keep                                       |
+| Query only the first page of projects                                                  | 1 failed: an already registered project on a later page is not reused | Keep                                       |
+| Drop the guard for an existing project on resume                                       | 1 failed: it tries to rewrite existing user ownership                 | Keep                                       |
+| Delete the cache and the local write-back together                                     | 13 passed                                                             | Adopt; the module goes from 98 to 87 lines |
 
 The cache only merged simultaneous lookups inside one adapter process; the native deterministic
 idempotencyKey is what owns cross-process project identity. Removing the cache may increase the number

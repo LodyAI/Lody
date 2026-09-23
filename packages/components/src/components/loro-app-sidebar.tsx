@@ -200,6 +200,7 @@ import {
   SessionRowOpenedByMenuItems,
   buildSessionRowOpenedByTreeSlot,
   type SessionRowOpenedByTreeSlot,
+  SIDEBAR_ROW_LIST_CLASS,
 } from '@/components/sidebar-row-shared';
 import {
   buildOpenedBySessionTree,
@@ -1383,7 +1384,7 @@ export const LocalProjectItem = memo(function LocalProjectItem({
           child of the space-y parent would still add its gap, so expanding an
           empty folder would nudge everything below it. */}
       {!collapsed && sessionNodes.length > 0 ? (
-        <div className="flex flex-col gap-px">
+        <div className={SIDEBAR_ROW_LIST_CLASS}>
           {sessionNodes.map((node) => {
             const session = node.item;
             const activity = getEffectiveSessionActivitySummary(

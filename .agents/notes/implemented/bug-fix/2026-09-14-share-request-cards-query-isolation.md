@@ -95,4 +95,3 @@ This is why the reported crash could have been repeating unnoticed, which in tur
 is why no conclusion about the backend failure's determinism can be drawn from
 the crash report's render trace: that trace is emitted above the boundary, so it
 looks identical whether or not the subtree beneath was crashing.
-
