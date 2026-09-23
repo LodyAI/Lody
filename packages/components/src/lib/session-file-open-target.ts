@@ -17,6 +17,8 @@ export type SessionFileOpenTargetInput = {
   readonly rawPath: string;
   readonly pathKind: SessionFileOpenPathKind;
   readonly workspacePath?: string | null;
+  /** Same-machine Electron opens must not reroot another worktree into this one. */
+  readonly preserveWorktreePath?: boolean;
   /** An anchor the caller already has, rather than one encoded in the path. */
   readonly startLine?: number;
   readonly endLine?: number;
@@ -60,7 +62,11 @@ export function resolveSessionFileOpenTarget(
     };
   }
 
-  const normalizedPath = normalizeMarkdownAgentFilePath(input.rawPath, input.workspacePath);
+  const normalizedPath = normalizeMarkdownAgentFilePath(
+    input.rawPath,
+    input.workspacePath,
+    input.preserveWorktreePath
+  );
   const parsedTarget = parseMarkdownAgentFileHref(normalizedPath);
   const startLine = input.startLine ?? parsedTarget?.startLine;
   const endLine = input.endLine ?? parsedTarget?.endLine;

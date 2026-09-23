@@ -594,6 +594,31 @@ export const WorkspaceSyncing: Story = {
   },
 };
 
+/** My Tasks removed every Workspace section; the recovery action switches to All Tasks. */
+export const FilteredWorkspaceEmpty: Story = {
+  name: 'Workspace · filtered empty',
+  render: (args) => <StoryLayout {...args} />,
+  args: {
+    ...Default.args!,
+    chatScope: 'my',
+    pinnedItems: [],
+    sessionListProps: {
+      sessions: [],
+      repos: [],
+    },
+  },
+};
+
+/** All Tasks is selected, but the workspace genuinely has no tasks yet. */
+export const WorkspaceEmpty: Story = {
+  name: 'Workspace · empty',
+  render: (args) => <StoryLayout {...args} />,
+  args: {
+    ...FilteredWorkspaceEmpty.args!,
+    chatScope: 'team',
+  },
+};
+
 export const ElectronAlwaysVisibleCollapseToggle: Story = {
   render: (args) => <WithProjectsLayout {...args} />,
   args: {

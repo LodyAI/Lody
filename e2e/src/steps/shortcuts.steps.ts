@@ -33,3 +33,22 @@ When('第二个 renderer 重新加载', async function (this: LodyWorld) {
 Then('第二个窗口中的用户改绑仍按相同的物理键生效', async function (this: LodyWorld) {
   await this.shortcutPage!.expectOnlyUserBindingTogglesSidebarInSecondaryRenderer();
 });
+
+When('用户用新建标签页快捷键新建两个草稿标签页', async function (this: LodyWorld) {
+  await this.shortcutPage!.openDraftSessionTabsWithShortcut(2);
+});
+
+When('用户按下切换到第 {int} 个标签页的快捷键', async function (this: LodyWorld, position: number) {
+  await this.shortcutPage!.pressSessionTabDigit(position);
+});
+
+When('用户按下切换到最后一个标签页的快捷键', async function (this: LodyWorld) {
+  await this.shortcutPage!.pressSessionTabDigit(9);
+});
+
+Then(
+  '会话标签栏的第 {int} 个标签页处于激活状态',
+  async function (this: LodyWorld, position: number) {
+    await this.shortcutPage!.expectActiveSessionTabPosition(position);
+  }
+);

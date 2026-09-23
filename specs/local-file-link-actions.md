@@ -10,6 +10,13 @@ open it in the session's right-side preview. The inline link uses blue text and
 a matching file-type icon, without a pill background or border. Hover and keyboard
 focus remain visible, and line references retain their existing navigation behavior.
 
+When Electron opens a conversation on its own machine, file links may preview any
+readable regular local file, including files outside the session workspace and in
+another worktree. Worktree prefixes must not redirect these links into the current
+workspace. This applies to both Markdown links and tool file entries. External
+files remain readonly, and genuinely missing files still show a not-found error.
+Remote preview authorization remains restricted to its existing allowed roots.
+
 For a binary file without an inline viewer, the preview explains that it cannot
 render the file in the shared rounded notice card, with full-width stacked actions
 and Copy file path. On Electron with the session running on this machine, it offers

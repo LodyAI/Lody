@@ -497,6 +497,7 @@ export interface SessionChatStreamViewProps {
    * this into the hydrated window.
    */
   onVisibleTurnRangeChange?: (range: VisibleTurnRange) => void;
+  onRetainedTurnIdsChange?: (ids: ReadonlySet<string>) => void;
   /** The outline hovered a round with no preview yet; hydrate it so one appears. */
   onOutlinePreviewRound?: (turnIndex: number) => void;
   className?: string;
@@ -1373,6 +1374,7 @@ export const SessionChatStreamView = forwardRef<
       suppressStickyAutoScrollRef,
       outlineOverlayRoot,
       onVisibleTurnRangeChange,
+      onRetainedTurnIdsChange,
       onOutlinePreviewRound,
     },
     ref
@@ -1627,11 +1629,13 @@ export const SessionChatStreamView = forwardRef<
         selectionLayoutsRef.current = new Map(selectionLayoutsRef.current).set(id, layout);
         return layout;
       },
-      onChange: () => {
+      onChange: (ids) => {
+        onRetainedTurnIdsChange?.(ids);
         if (nativeTextSelectionActiveRef.current) pendingOutlineJumpRef.current = null;
         setSelectionVersion((version) => version + 1);
       },
       onRelease: () => {
+        onRetainedTurnIdsChange?.(new Set());
         selectionLayoutsRef.current = new Map();
       },
       onCopyUnavailable: () =>
@@ -6580,7 +6584,9 @@ const ToolCallCard = memo(function ToolCallCard({
   const isFilePathClickable = Boolean(filePath && onFilePathClick);
   const triggerFilePathClick = () => {
     if (filePath && onFilePathClick) {
-      onFilePathClick(normalizeWorktreePath(filePath));
+      // Display shortening must not change the file's identity. The owning
+      // session decides whether a host path needs portable-worktree mapping.
+      onFilePathClick(filePath);
     }
   };
   const handleFilePathClick = (event: ReactMouseEvent<HTMLSpanElement>) => {

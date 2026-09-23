@@ -85,12 +85,13 @@ Parent rules apply. Read each heading’s linked context before edits.
 
 ## [Live status and dispatch](../../../../../.agents/docs/sessions-live-status.md)
 
-- Live working/waiting UI uses presence, never `SessionMeta.status`,
-  `lastRunningSeen`, or the CLI dispatch pointers.
-- The only frontend-derived activity state is the dispatched-but-not-started
-  window; anchor on the turn's durable timestamp and stop at 30s.
-- Without presence, queue behind unfinished turns; never relight Working UI.
-- Busy composer: no authoritative steer support means regular Queue.
+- Presence owns Working/Waiting UI, never `SessionMeta.status`,
+  `lastRunningSeen`, or CLI dispatch pointers.
+- Only derived activity: dispatched-but-not-started; anchor on the durable turn
+  timestamp and stop at 30s.
+- No presence: queue behind unfinished turns; never relight Working UI.
+- Busy composer without authoritative steer support uses Queue.
+- Uploads: [contract](../../../../../specs/composer-send-during-upload.md).
 
 ## [Composer info bar](../../../../../.agents/docs/sessions-info-bar.md)
 

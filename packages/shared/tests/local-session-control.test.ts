@@ -54,15 +54,15 @@ describe('local session control node validators', () => {
     expect(isLocalSessionControlRequestCjs(request)).toBe(true);
   });
 
-  it('accepts builtin Bub sessions in TS and CJS validators', () => {
+  it.each(['bub', 'dimcode'])('accepts builtin %s in TS and CJS', (agentType) => {
     const request = {
       type: 'session/create',
-      sessionId: 'session-bub',
+      sessionId: 'session-builtin',
       machineId: 'machine-1',
       workspaceId: 'workspace-1',
       acpSessionConfig: {
         cliType: 'builtin',
-        agentType: 'bub',
+        agentType,
         prompt: 'hello',
       },
       userId: 'user-1',

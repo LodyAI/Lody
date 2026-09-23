@@ -197,6 +197,24 @@ describe('resolveBuiltinACPSetting', () => {
     }
   });
 
+  it('resolves Dimcode to a pinned npx ACP launch understood by cache recovery', async () => {
+    for (const extraArgs of [undefined, ['--verbose']]) {
+      const input = { cliType: 'builtin' as const, agentType: 'dimcode', extraArgs };
+      const launch = await resolveACPProcessLaunchAsync(input);
+      expect(launch).toEqual({
+        command: 'npx',
+        args: ['--prefer-offline', '-y', 'dimcode@0.5.10', 'acp', ...(extraArgs ?? [])],
+        capabilitySourceVersion: getAcpCapabilitySourceVersion(input),
+      });
+      expect(parseNpxPackageSpecFromArgs(launch.args)).toEqual({
+        name: 'dimcode',
+        version: '0.5.10',
+      });
+      expect(launch.capabilitySourceVersion).toBe('builtin-dimcode:0.5.10');
+    }
+    expect(() => resolveBuiltinACPSetting('dimcode')).toThrow(/resolveACPProcessLaunchAsync/);
+  });
+
   it('launches Bub through the user-installed `bub acp` command', async () => {
     await expect(
       resolveACPProcessLaunchAsync({

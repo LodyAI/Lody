@@ -1509,6 +1509,11 @@ const SortableLocalProjectItem = memo(
     localProjectItemPropsEqual(prev, next)
 );
 
+export const hasWorkspaceSidebarTopContent = (
+  localProjectSectionCount: number,
+  showGithubWorktrees: boolean
+): boolean => localProjectSectionCount > 0 || showGithubWorktrees;
+
 export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   const { t, i18n } = useTranslation();
   const router = useRouter();
@@ -2543,6 +2548,17 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       ),
       showMyTasks: t('sessions.sidebar.my', 'My Tasks'),
       showAllTasks: t('sessions.sidebar.team', 'All Tasks'),
+      emptyMyTasks: t('sidebar.filter.emptyMyTasks', 'No tasks match this view'),
+      emptyMyTasksHint: t(
+        'sidebar.filter.emptyMyTasksHint',
+        'Try showing every task in this workspace.'
+      ),
+      emptyAllTasks: t('sidebar.filter.emptyAllTasks', 'No tasks yet'),
+      emptyAllTasksHint: t(
+        'sidebar.filter.emptyAllTasksHint',
+        'Tasks in this workspace will appear here.'
+      ),
+      showAllTasksAction: t('sidebar.filter.showAllTasks', 'Show all tasks'),
     }),
     [t]
   );
@@ -3010,7 +3026,10 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
   ]);
 
   const githubWorktreesLabel = useMemo(() => t('sidebar.githubWorktrees', 'GitHub Worktrees'), [t]);
-  const sidebarTopContent = (
+  const sidebarTopContent = hasWorkspaceSidebarTopContent(
+    localProjectSections.length,
+    showGithubWorktrees
+  ) ? (
     // Sections carry their own bottom margin: 12px expanded (wider than the
     // 10px between repo groups and the 2-4px between a section header and its
     // content, so headers bind to the list below them), 4px collapsed so a
@@ -3032,7 +3051,7 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
         />
       ) : null}
     </div>
-  );
+  ) : null;
 
   // Chats renders after the GitHub Worktrees list so it reads as the last
   // section in Workspace mode.

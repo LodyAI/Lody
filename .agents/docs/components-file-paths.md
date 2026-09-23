@@ -25,6 +25,13 @@ that may encode spaces, line positions, or an absolute host root. Treating both
 as links changes valid filenames: `report%20v2.md` becomes a different path,
 `2024:30.txt` loses its tail, and `fixtures/worktrees/<uuid>/case.txt` gets rerooted.
 
+For same-machine Electron opens, Markdown normalization only relativizes paths
+under the known session workspace; it preserves other worktree roots. The portable
+worktree-prefix fallback would otherwise turn an existing local artifact into a
+missing or different file in the current workspace. Preview and Markdown menus
+use this same option. Tool file entries shorten labels only and pass the original
+path to the owning session's open handler.
+
 The machine can also resolve a different case or Unicode spelling than requested.
 The returned spelling becomes the save identity, while a viewer keeps requesting
 its original spelling because the file index never learns that resolution.

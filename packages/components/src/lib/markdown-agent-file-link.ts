@@ -173,7 +173,8 @@ export function isMarkdownAgentFileHref(href: string | undefined): href is strin
 
 export function normalizeMarkdownAgentFilePath(
   href: string,
-  localProjectRootPath?: string | null
+  localProjectRootPath?: string | null,
+  preserveWorktreePath = false
 ): string {
   const parsedTarget = parseMarkdownAgentFileHref(href);
   const normalizedHref = decodeMarkdownFilePath(
@@ -206,7 +207,7 @@ export function normalizeMarkdownAgentFilePath(
     }
   }
 
-  if (normalizedFilePath === normalizedHref) {
+  if (normalizedFilePath === normalizedHref && !preserveWorktreePath) {
     normalizedFilePath = normalizeWorktreePath(normalizedHref);
   }
 

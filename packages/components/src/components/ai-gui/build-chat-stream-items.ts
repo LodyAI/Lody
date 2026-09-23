@@ -164,10 +164,12 @@ function mergeableNoticeTargetIndex(
   return previousIndex;
 }
 
+/** Cache residency does not grant render ownership; static readers may render every body. */
 export function buildChatStreamItems(
   view: ConversationView | null,
   sessionId: SessionId,
-  previousCache?: BuildChatStreamItemsCache
+  previousCache?: BuildChatStreamItemsCache,
+  shouldRenderTurn: (index: number) => boolean = () => true
 ): BuildChatStreamItemsResult {
   const items: ChatStreamItem[] = [];
   const seenIds = new Set<string>();
@@ -193,17 +195,15 @@ export function buildChatStreamItems(
     if (!row) continue;
     const entry = view.turn(turnIndex);
 
-    if (!entry) {
-      if (row.role === 'user') lastUserInputConfig = undefined;
+    // A leased predecessor supplies configuration even when its body is offscreen.
+    if (row.role === 'user') lastUserInputConfig = entry?.inputConfig;
+
+    if (!entry || !shouldRenderTurn(turnIndex)) {
       if (isEmptyAssistantIndexRow(row)) continue;
       if (seenIds.has(row.id)) continue;
       seenIds.add(row.id);
       items.push(placeholderItemFor(row, turnIndex));
       continue;
-    }
-
-    if (entry.role === 'user') {
-      lastUserInputConfig = entry.inputConfig;
     }
 
     const expectedInputConfig =

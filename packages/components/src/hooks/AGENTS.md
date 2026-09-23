@@ -4,11 +4,11 @@ Parent AGENTS apply. Edit `AGENTS.md`, not its `CLAUDE.md` symlink. Background: 
 
 ## Conversation scrolling
 
-- Reveal after the first window loads and Virtua measures and positions its rows.
-  Initial range reports cannot redirect its lease. Projection
-  refreshes preserve reveal and reading-window state by `factSource ?? view`; a new
-  source resets both. Restore before paint; hydration re-anchors only while following,
-  using DOM extent, not evictable indices.
+- Only viewport/tail/selection render bodies; other reads keep placeholders.
+- Reveal when data and measured destination agree; ignore early range reports.
+  Reapply cached offsets until reveal; navigation supersedes them.
+  Key readiness/window by `factSource ?? view`; new sources reset both.
+  Restore before paint; hydration follows DOM extent only with the follow lock.
 - Correct content measurements in ResizeObserver before paint, even with unchanged
   row counts; no RAF deferral. Correct Virtua spacer-height commits in MutationObserver
   before deferred resize delivery. Observe spacer height and mounted row geometry
