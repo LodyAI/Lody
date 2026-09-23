@@ -47,7 +47,14 @@ One rung per component. The rung fixes background and shadow together.
 
 ## Fields
 
-A control is the well rung: `wellBackground` plus `shadow.inset`, never a
+**Typed into is sunken; pressed is raised.** A control a person types into —
+input, textarea, a Combobox's field, a number — is the well rung, and so are the
+tracks a checkbox, radio or switch sits in. A Select's trigger is pressed to
+open a list, so it is raised like a secondary Button (`field.triggerBackground`,
+`field.triggerEdge`, `field.triggerSheen`). A sunken trigger on a raised card
+read as a hole cut into it beside buttons standing up from it.
+
+A typed control is the well rung: `wellBackground` plus `shadow.inset`, never a
 border. One component token group, `field`, serves the whole family — input,
 textarea, checkbox, radio, switch and the Select and Combobox triggers — so a
 state has one colour in one place instead of one per component. The lists those

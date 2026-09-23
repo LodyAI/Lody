@@ -67,7 +67,34 @@ export interface SelectSeparatorProps extends Omit<SeparatorBaseProps, 'classNam
   className?: string;
 }
 
+const RING = `0 0 0 ${field.ringWidth} ${field.ring}`;
+const INVALID_RING = `0 0 0 ${field.ringWidth} ${field.invalidRing}`;
+
 const styles = stylex.create({
+  /**
+   * Pressed, not typed into: the raised rung a secondary Button takes, over the
+   * well base it shares with the family for size, type, ring and disabled. A
+   * sunken trigger read as a hole cut into the card it sits on, beside buttons
+   * that stood up from it; a thing a person presses stands up.
+   */
+  raised: {
+    backgroundColor: {
+      default: field.triggerBackground,
+      ':hover': `color-mix(in oklab, ${field.triggerBackground}, ${field.value} 4%)`,
+    },
+    backgroundImage: field.triggerSheen,
+    boxShadow: {
+      default: field.triggerEdge,
+      ':focus-visible': `${field.triggerEdge}, ${RING}`,
+    },
+    transitionProperty: 'background-color, box-shadow, opacity',
+  },
+  raisedInvalid: {
+    boxShadow: {
+      default: `${field.triggerEdge}, ${INVALID_RING}`,
+      ':focus-visible': `${field.triggerEdge}, ${INVALID_RING}`,
+    },
+  },
   trigger: {
     display: 'flex',
     alignItems: 'center',
@@ -126,7 +153,7 @@ const sizeStyles = {
 };
 
 /**
- * The trigger: a control on the well rung that happens to open a list. It reads
+ * The trigger: a raised control in the field family that opens a list. It reads
  * validity and disabled from `Field.Root` the way every control in this family
  * does, and renders the chevron itself so a caller never draws one.
  */
@@ -171,9 +198,10 @@ export const SelectTrigger = forwardRef<HTMLButtonElement, SelectTriggerProps>(
           appendClassName(
             stylex.props(
               well.base,
+              styles.raised,
               styles.trigger,
               sizeStyles[size],
-              isInvalid(state.valid, ariaInvalid) && well.invalid
+              isInvalid(state.valid, ariaInvalid) && styles.raisedInvalid
             ).className,
             className
           )

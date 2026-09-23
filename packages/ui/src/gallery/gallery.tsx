@@ -4238,7 +4238,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
 
       <Section
         title="Select · trigger and list"
-        rule="A trigger is a control on the well rung, so it takes the field family's size ladder, ring, invalid ring and disabled opacity; the list it opens is on the floating rung and reads the popup group instead. A row states two facts: selected is the row that holds the value, highlighted is where the keyboard or the pointer is, and the highlight wins the fill because it is the one that moves. The open list below is a stand-in built from the same rules the popup applies, because a board cannot show a popup without covering what is under it."
+        rule="A trigger is pressed, not typed into, so it is raised — a secondary Button's fill, edge and sheen — while taking the field family's size ladder, ring, invalid ring and disabled opacity; the list it opens is on the floating rung and reads the popup group instead. A row states two facts: selected is the row that holds the value, highlighted is where the keyboard or the pointer is, and the highlight wins the fill because it is the one that moves. The open list below is a stand-in built from the same rules the popup applies, because a board cannot show a popup without covering what is under it."
       >
         <PaletteSplit palettes={palettes}>
           <Rows>
@@ -4270,6 +4270,26 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
             {POPUP_COLORS.map((token) => (
               <Swatch key={token.name} {...token} />
             ))}
+            <Swatch
+              name="field.triggerBackground"
+              value={field.triggerBackground}
+              note="the trigger is raised, not a well"
+            />
+            <ShadowChip
+              name="field.triggerEdge"
+              box={field.triggerEdge}
+              fill={field.triggerBackground}
+              ink={false}
+              note="a trigger's edge and lift"
+            />
+            <ShadowChip
+              name="field.triggerSheen"
+              box={field.triggerEdge}
+              fill={field.triggerBackground}
+              ink={false}
+              sheen={field.triggerSheen}
+              note="the light falling off it"
+            />
             <ShadowChip
               name="popup.shadow"
               box={popup.shadow}
