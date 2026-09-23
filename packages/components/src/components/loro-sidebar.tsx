@@ -891,8 +891,8 @@ export const LoroSidebar = memo(function LoroSidebar({
           showUpdatedProjectNames={showUpdatedProjectNames}
           onShowUpdatedProjectNamesChange={onShowUpdatedProjectNamesChange}
           labels={mergedLabels.filter}
-          side="bottom"
-          align="end"
+          side="right"
+          align="start"
           triggerClassName="h-5 w-5 [&_svg]:h-4 [&_svg]:w-4"
         />
       ))

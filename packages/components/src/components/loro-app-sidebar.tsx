@@ -2579,8 +2579,8 @@ export function LoroAppSidebar({ className }: LoroAppSidebarProps) {
       labels={filterLabels}
       open={sidebarFilterOpen}
       onOpenChange={setSidebarFilterOpen}
-      side="bottom"
-      align="end"
+      side="right"
+      align="start"
       triggerClassName="h-5 w-5 [&_svg]:h-4 [&_svg]:w-4"
     />
   ) : null;

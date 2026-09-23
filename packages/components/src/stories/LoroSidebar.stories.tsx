@@ -1332,8 +1332,8 @@ function WithProjectsLayout(args: Parameters<typeof LoroSidebar>[0]) {
     <SidebarFilterPopover
       organize="workspace"
       scope="my"
-      side="bottom"
-      align="end"
+      side="right"
+      align="start"
       triggerClassName="h-5 w-5 [&_svg]:h-4 [&_svg]:w-4"
     />
   );
