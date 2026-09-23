@@ -9,6 +9,7 @@ import type {
   ElectronLoginState,
   ElectronLocalSessionControlResponseEvent,
   ElectronPublicBrowserState,
+  ElectronPublicBrowserInteraction,
   ElectronUpdaterState,
   ElectronWindowTarget,
   GlobalShortcutTriggeredPayload,
@@ -27,6 +28,7 @@ export type IpcPushMap = {
   'cli.state': ElectronCliState;
   'updater.state': ElectronUpdaterState;
   'publicBrowser.state': ElectronPublicBrowserState;
+  'publicBrowser.interaction': ElectronPublicBrowserInteraction;
   'sessionControl.response': ElectronLocalSessionControlResponseEvent;
   'app.deepLink': string;
   'auth.loginState': ElectronLoginState;
@@ -58,6 +60,7 @@ export const IPC_PUSH_CHANNELS = {
   cliState: 'cli.state',
   updaterState: 'updater.state',
   publicBrowserState: 'publicBrowser.state',
+  publicBrowserInteraction: 'publicBrowser.interaction',
   sessionControlResponse: 'sessionControl.response',
   appDeepLink: 'app.deepLink',
   authLoginState: 'auth.loginState',

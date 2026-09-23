@@ -8,6 +8,9 @@ import { isElectronRenderer } from '@/lib/electron';
 import { getPublicBrowserBridge } from '@/lib/electron-ipc-client';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import { cn } from '@/lib/utils';
+import { useAtomValue } from 'jotai';
+import { semanticShortcutsFeatureEnabledAtom } from '@/atoms/settings';
+import { reportSemanticActionInteraction } from '@/lib/commands/semantic-action-router';
 
 type PublicBrowserSurfaceProps = {
   browserId: string;
@@ -55,6 +58,16 @@ export function PublicBrowserSurface({
   );
   const electron = isElectronRenderer();
   const nativeViewVisible = active && !blockingOverlayOpen;
+  const semanticShortcutsEnabled = useAtomValue(semanticShortcutsFeatureEnabledAtom);
+
+  useEffect(() => {
+    if (!nativeViewVisible || !semanticShortcutsEnabled || !bridge) return undefined;
+    return bridge.onInteraction((event) => {
+      if (event.browserId === browserId && hostRef.current) {
+        reportSemanticActionInteraction(hostRef.current, event.source);
+      }
+    });
+  }, [bridge, browserId, nativeViewVisible, semanticShortcutsEnabled]);
 
   useEffect(() => {
     if (!electron) return undefined;
@@ -166,20 +179,42 @@ export function PublicBrowserSurface({
      timestamp) became an unbounded setVisible/render spin. A failed attempt
      records the error and waits for the next real visibility change instead
      of retrying itself. */
-  const lastRequestedVisibilityRef = useRef<{ browserId: string; visible: boolean } | null>(null);
+  const lastRequestedVisibilityRef = useRef<{
+    browserId: string;
+    visible: boolean;
+    trackInteraction: boolean;
+  } | null>(null);
   useEffect(() => {
     if (!electron || !bridge || !createdRef.current) return;
     const targetVisible = nativeViewVisible && !localError;
     const last = lastRequestedVisibilityRef.current;
-    if (last && last.browserId === browserId && last.visible === targetVisible) return;
-    lastRequestedVisibilityRef.current = { browserId, visible: targetVisible };
-    void bridge.setVisible(browserId, targetVisible).then(
+    if (
+      last &&
+      last.browserId === browserId &&
+      last.visible === targetVisible &&
+      last.trackInteraction === semanticShortcutsEnabled
+    )
+      return;
+    lastRequestedVisibilityRef.current = {
+      browserId,
+      visible: targetVisible,
+      trackInteraction: semanticShortcutsEnabled,
+    };
+    void bridge.setVisible(browserId, targetVisible, semanticShortcutsEnabled).then(
       (result) => {
         if (!result.ok) setLocalError(result.error);
       },
       (error: unknown) => setLocalError(formatBridgeError(error))
     );
-  }, [bridge, browserId, electron, localError, nativeViewVisible]);
+  }, [
+    bridge,
+    browserId,
+    electron,
+    localError,
+    nativeViewVisible,
+    semanticShortcutsEnabled,
+    surfaceReady,
+  ]);
 
   useEffect(() => {
     const requestId = navigationRequest?.id ?? null;

@@ -67,8 +67,8 @@ this page is the full text of the rules summarised there.
   support; keep it visible but disabled when that conversation's machine is explicitly offline. That
   offline rule lives ONLY in `getSideChatLauncherState` — the shared fork entry point stays
   offline-clickable per `docs/acp-session-fork.md` §3.2.
-  Right-panel selection, collapse, route changes, and component cleanup must never delete it. Only its
-  explicit tab `X` terminates the ACP runtime and then permanently deletes the Session doc; if either
+  Right-panel selection, collapse, route changes, and component cleanup must never delete it. Only explicit
+  tab close (× or the native close action) terminates the ACP runtime and then permanently deletes the Session doc; if either
   step fails, keep the tab so the user can retry. This doc cleanup supplies the exact side Session id
   and does not wait for the global metadata cache. Parent-session permanent deletion instead
   discovers direct `parentSessionId` children and requires the complete metadata cache before it
