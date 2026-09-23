@@ -1,3 +1,4 @@
+import { handleWindowContentReady } from './window-target'
 import { enableRendererHangStacks } from './renderer-hang-diagnostics'
 import {
   registerLocalFileResourceScheme,
@@ -346,6 +347,10 @@ if (hasSingleInstanceLock) {
     // enabled, session-windows primes the spare after an auxiliary request so
     // ordinary single-window sessions never pay an idle renderer cost.
     ipcMain.on(IPC_SEND_CHANNELS.appWindowReady, (event) => handleWindowWarmReady(event.sender.id))
+    ipcMain.on(IPC_SEND_CHANNELS.appWindowContentReady, (event, target) => {
+      if (event.senderFrame === event.sender.mainFrame)
+        handleWindowContentReady(event.sender.id, target)
+    })
     console.info('[Electron] Initial desktop surface selected', {
       initialPath,
       hideWindowOnAutoLaunch

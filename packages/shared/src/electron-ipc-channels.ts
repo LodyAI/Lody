@@ -48,6 +48,7 @@ export type IpcSendMap = {
   'loro.subscribe': null;
   'cli.subscribe': null;
   'app.windowReady': null;
+  'app.windowContentReady': ElectronWindowTarget;
 };
 
 export const IPC_PUSH_CHANNELS = {
@@ -79,6 +80,7 @@ export const IPC_SEND_CHANNELS = {
   loroSubscribe: 'loro.subscribe',
   cliSubscribe: 'cli.subscribe',
   appWindowReady: 'app.windowReady',
+  appWindowContentReady: 'app.windowContentReady',
 } as const satisfies { [K: string]: keyof IpcSendMap };
 
 const PUSH_CHANNEL_VALUES: readonly string[] = Object.values(IPC_PUSH_CHANNELS);

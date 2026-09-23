@@ -5914,9 +5914,11 @@ export const SessionChatInterface = memo(
 
     return (
       <PrLinkProvider prUrl={latestPr?.url} onOpenPrTab={prLinkHandler}>
-        {isVisible && sessionDocReady && (sessionHistoryLength > 0 || sessionDocSynced) && (
-          <span hidden data-window-session-ready={session.id} />
-        )}
+        {isVisible &&
+          sessionDocReady &&
+          (sessionHistory.length > 0 || (sessionHistoryLength === 0 && sessionDocSynced)) && (
+            <span hidden data-window-session-ready={session.id} />
+          )}
         <SessionConversationPage
           className={className}
           dropActive={imageDropZone.isActive || sessionMentionOverlay}

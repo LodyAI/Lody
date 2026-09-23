@@ -3,52 +3,70 @@
 Run from `packages/components`:
 
 ```sh
-node benchmarks/window-bootstrap/run.mjs 50 > /tmp/window-bootstrap.json
+node benchmarks/window-bootstrap/run.mjs 30 > /tmp/window-bootstrap.json
+node benchmarks/window-bootstrap/run.mjs 1 --native > /tmp/window-presentation.json
 ```
 
-Requires the workspace's components dependencies and Electron installation. The
-runner launches two isolated Electron renderers with a temporary profile and
-removes its build/profile after exit. It never reads product user data. Histories
-come from the existing synthetic conversation fixture.
+Requires components dependencies and Electron. The runner uses two isolated
+renderers and a temporary profile, deletes its build/profile afterward, and never
+reads product user data. Histories use the existing synthetic conversation fixture.
 
-The source renderer owns a real Repo and Session document. The receiver exercises
-production BroadcastChannel bootstrap, IndexedDB snapshot reads, CRDT import, and
-the production conversation reader through a lease for the last 30 entries.
-`before` reproduces the previous cache-only acquisition; `after` invokes the new
-peer/cache race. Both use the same history reader. This is a data-path benchmark,
-not two full application builds or a click-to-visible-window measurement.
+## Boundaries
 
-The clock starts immediately before cache acquisition and includes import and
-history projection. Repo creation, route initialization, authoritative daemon
-synchronization, React rendering, layout, and paint are excluded. Peer metadata
-exchange runs concurrently but is not separately timed. Both native windows stay hidden with background throttling disabled.
-Each scenario has three discarded warmups, alternating before/after ordering,
-and the requested number of measured samples. There are no injected delays.
+The source owns a real Repo and Session document. The receiver exercises production
+BroadcastChannel, Web Locks, IndexedDB, CRDT import and the conversation reader
+through a lease for its last 30 entries. `before` reproduces cache-only acquisition;
+`fixed` uses the current disk-first, live-peer-aware bootstrap. Both use the same
+reader. This is a data-path comparison, not two full application builds.
 
-## Measured result — 2026-09-23
+Acquisition starts immediately before cache access. `readableMs` includes import
+and history projection; `syncReadyMs` ends once the foreground store can start
+normal synchronization. No daemon is contacted. Repo creation, route initialization,
+authoritative synchronization, React rendering/layout and paint are excluded. Peer
+metadata exchange is concurrent and not separately timed. Both native windows are
+hidden with background throttling disabled. Each scenario discards three warmups,
+alternates variant order and records the requested sample count without injected
+delays. Source hashes accompany results.
 
-[Machine-readable summary](results-2026-09-23.json) records the production revision,
-environment, sample counts, medians and P95. This confirmation run used 50 samples
-per variant/scenario/size on Apple M4 Max, macOS arm64, Electron 39.5.1 / Chromium
-142. An initial 20-sample run also reproduced the approximately 151 ms miss penalty.
+`--native` runs the production main presentation and renderer readiness helpers.
+It requests a 3,000-entry peer snapshot, projects the last 30 rows into a synthetic
+DOM surface, signals readiness after two frames, and checks/captures the first
+native `show`. Its `claimToShowMs` begins at `presentWindowTarget`, not at a user
+click. The screenshot path is returned in JSON. This verifies hidden preparation
+and presentation ordering; it does not validate the full Lody React interface.
 
-| History entries | Disk hit: before / after median | Peer only: after median | Disk hit: before / after P95 |
+## Corrected measurement — 2026-09-23
+
+[Corrected results](results-fixed-2026-09-23.json): 30 samples per variant/scenario/size,
+Apple M4 Max, macOS arm64, Electron 39.5.1 / Chromium 142.
+
+| Entries | Disk hit: before / fixed median | Peer only: fixed median | Disk hit: before / fixed P95 |
 | --- | --- | --- | --- |
-| 100 | 3.40 / 3.45 ms | 3.10 ms | 4.40 / 4.30 ms |
-| 1,000 | 14.05 / 14.20 ms | 14.95 ms | 30.10 / 21.10 ms |
-| 3,000 | 39.95 / 40.60 ms | 42.40 ms | 69.20 / 354.20 ms |
+| 100 | 4.20 / 4.50 ms | 4.40 ms | 4.70 / 8.40 ms |
+| 1,000 | 16.15 / 16.40 ms | 17.50 ms | 29.00 / 32.60 ms |
+| 3,000 | 39.55 / 39.50 ms | 41.80 ms | 71.60 / 60.70 ms |
 
-These values end at readable history. In the peer-only scenario, the old path
-returns no history and must synchronize with the daemon; that downstream time is
-not measured, so no speedup percentage is defensible.
+The table ends at readable history. In the peer-only scenario the baseline has no
+history and needs unmeasured daemon synchronization; no overall speedup percentage
+is claimed. Disk-hit medians remain approximately equal, without unnecessary peer
+exports. Samples are too small to establish a stable tail distribution.
 
-When neither cache nor peer has data, the old path reaches synchronization
-fallback in 0.50–0.65 ms median. The new path takes 151.50–151.60 ms because store
-creation awaits the peer request deadline. Neither variant has readable history
-at that point. This is a reproducible regression, not a successful faster open.
+With neither data source available, corrected acquisition takes 0.20 ms median and
+the store is ready to synchronize in 0.20–0.30 ms. There is no unconditional peer
+response deadline on that path. Live peers explicitly replying that a document is
+absent are separately covered by deterministic tests. An inventoried peer that
+subsequently stalls or exits still has a 150 ms bounded timeout.
 
-The disk-hit medians provide no evidence of improvement. The large-history P95
-also regresses in the confirmation run; its cause has not been profiled, and these
-small samples do not establish a stable tail distribution. Peer reuse demonstrates
-a local route to readable history, but does not establish end-to-end improvement.
-The miss penalty remains unresolved in the measured product revision.
+The native probe recorded 152.39 ms from claim to first show. The window was hidden
+before content, and its first shown capture contained all 30 projected rows. This
+single synthetic sample is not an application opening-time distribution.
+
+## Earlier regression
+
+[Original results](results-2026-09-23.json) retain the 50-sample measurement of the
+previous parallel peer/cache race. Its missing-cache path waited 151.50–151.60 ms
+before fallback, versus 0.50–0.65 ms for cache-only acquisition. Large-history P95
+also regressed in that run. The correction checks live peers, accepts negative
+replies, and reads disk before requesting exports. Snapshots still import before
+constructing the reader: moving bulk import after reader initialization caused
+expensive projection replay in an exploratory run and was rejected.

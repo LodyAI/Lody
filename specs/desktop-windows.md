@@ -31,12 +31,17 @@ The optional developer window warm-up prepares the shell, not target Session dat
 Local-only windows reuse same-workspace peer metadata and already loaded Session
 snapshots without sharing persistence or sync cursors. Snapshot import merges local
 edits; authoritative synchronization continues independently.
-Keep its neutral cover until the target conversation has readable history (or an
-empty conversation has synced), the
-workspace landing is mounted, or absence is confirmed after the target Session’s
-metadata projection settles. Unrelated metadata failures must not block that decision. Loading text and sidebar content are not readiness signals. The cover
-expires after five seconds so slow/offline/error states retain their recovery UI;
-this fallback is not a promise of completed loading or instant opening.
+A claimed warm window stays natively hidden until the matching target has painted:
+conversation history must be hydrated (an empty conversation must be synced), the
+workspace landing mounted, or absence confirmed after that Session's metadata
+projection settles. Unrelated metadata failures must not block the decision.
+Loading/sidebar text and an index-only history count are not readiness signals.
+There is no opaque renderer cover. Main reveals the recovery UI after five seconds
+if readiness never arrives; this is not a completed-load signal or an instant-open
+guarantee. Keep rendering unthrottled while hidden preparation runs, then restore
+the previous policy. Prepare the replacement spare only after the claimed window
+is shown. Measure click-to-show separately from whether the first visible frame
+contains content.
 Once claimed, the window follows ordinary product-window lifetime rules and remains
 open when other windows close. Crash recovery reloads its bound target, never the
 neutral warm route. Closing it must not cancel a replacement spare's timeout.

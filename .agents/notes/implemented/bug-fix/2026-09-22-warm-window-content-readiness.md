@@ -8,83 +8,80 @@ PR: [#885](https://github.com/LodyAI/Lody/pull/885), [#914](https://github.com/L
 
 ## Abstract
 
-Claimed warm windows could expose Loading or transient Session Not Found, remain
-classified as disposable spares, and recover to the neutral warm route after a
-crash. Adoption now clears the spare identity and persists the real reload target
-before navigation. Reveal requires the matching target surface, and absence waits
-only for that Session's metadata projection. The five-second recovery fallback
-remains. Local-only windows now bootstrap from peer metadata and already loaded
-Session snapshots, and readable history no longer waits for authoritative sync.
-Benchmarking found no disk-hit median improvement and a reproducible 151 ms
-cache/peer-miss penalty; overall opening-time improvement remains unproven.
+Claimed warm windows exposed Loading or transient Session Not Found, retained spare
+identity, and recovered to the neutral route after a crash. Adoption now preserves
+the real identity and reload target. The native window remains hidden until its
+matching content is painted, without a blank renderer cover; preparation still
+contributes to click-to-show time. Local windows reuse metadata and loaded Session
+snapshots with independent persistence/cursors. Benchmarking exposed an unconditional
+151 ms miss penalty, now removed by checking live peers and accepting negative replies.
+Full application click-to-show latency remains unverified.
 
 ## Decision and evidence
 
-This corrects adoption and reveal following the
-[window prewarming decision](../feature/2026-09-18-desktop-window-prewarming.md).
-The [desktop window Spec](../../../../specs/desktop-windows.md) describes the result.
-The renderer's former `innerText` check accepted Loading, sidebar text, and missing
-Session messages. It now waits for two frames containing the matching Session or
-workspace marker. A visible conversation emits its marker after its document is
-ready with readable history, or synced when empty; confirmed absence is also a valid terminal surface. Workspace
-landing emits its marker when mounted. Recovery still becomes accessible after
-five seconds, including when navigation fails.
+This corrects the [window prewarming decision](../feature/2026-09-18-desktop-window-prewarming.md).
+The [desktop window Spec](../../../../specs/desktop-windows.md) owns the resulting intent.
 
-`window-target.ts` adopts a spare before sending its navigation event: it clears
-main's warm marker and updates the recovery destination using the same path builder
-as cold windows. `window-state.ts` owns registration and close cleanup, so an adopted
-window can become the main fallback and survives closing the previous main window.
-Only the current spare's close callback clears its readiness timer; a previously
-claimed window cannot cancel its replacement's timeout.
+`window-target.ts` clears spare identity and saves the real reload target before
+sending navigation. It temporarily disables background throttling so a hidden
+renderer can prepare and paint. Main accepts `app.windowContentReady` only from the
+claimed WebContents and for its matching workspace/Session, then restores throttling
+and shows/focuses the native window. Renderer readiness requires two frames with
+the target marker; a conversation marker requires hydrated history, not merely an
+index count. An empty conversation still waits for sync. The old opaque cover was
+removed: it hid Loading by displaying a blank window and did not reduce work.
+Main's independent five-second deadline exposes recovery UI if navigation/rendering
+fails. This fallback is not a content-ready acknowledgement. Closing the window
+cancels pending presentation; replacement prewarming begins after show to avoid
+competing with target preparation.
 
-`doc-meta.ts` keeps bootstrap readiness separate from per-Session projection
-settlement. Queued events, the latest full metadata read, and unresolved/failed
-reads block absence only for their own Session. Later events can retry reads;
-deletion clears unresolved work and stops waiting for obsolete reads. Runtime
-disposal clears pending markers and fences late completions. A workspace-global
-settlement gate was rejected because an unrelated failed or empty metadata read
-could leave a missing Session loading forever. Existing Sessions do not subscribe
-to pending-state churn; workspace chrome still uses bootstrap readiness.
+`window-state.ts` owns product registration and close cleanup. Claimed windows can
+become the main fallback and survive closing the original. Only the current spare
+owns its shell-readiness timer, so closing an older claimed window cannot cancel
+its replacement's timeout.
 
-`local-window-bootstrap.ts` uses a workspace-scoped BroadcastChannel only in local
-mode. Each runtime responds with CRDT metadata and documents it already owns;
-requests never create stores, Mirrors, or extra daemon subscriptions. Metadata
-responses merge asynchronously through the Repo's normal Flock projection. A
-150 ms response window allows multiple peers to contribute metadata without
-blocking runtime creation. Session acquisition races peer state against the
-existing eager-sync disk cache; a miss cannot beat usable data. Snapshot payloads
-are capped at 16 MiB. Documents merge into the receiver's existing replica, so
-unsent edits survive; persistence and Streams cursors remain per renderer.
-Runtime disposal closes the channel and resolves pending requests. Missing,
-oversized, corrupt, or unavailable peer state falls back to normal synchronization.
+`doc-meta.ts` separates bootstrap readiness from per-Session projection settlement.
+Queued events, the latest full read, and unresolved/failed reads block absence only
+for their target. Deletion cancels obsolete waiting; runtime disposal fences late
+results. Workspace-global waiting was rejected because unrelated failures could
+leave a missing Session loading forever. Existing Sessions do not subscribe to
+pending-state churn; workspace chrome retains bootstrap readiness.
 
-The neutral shell still costs a renderer, and this is not a guarantee of instant
-opening: it does not share React stores, preinitialize the target runtime, or
-remove layout and history projection costs. Cloud and dual-mode runtimes do not
-participate in peer sharing. Empty conversations still wait for sync before reveal.
+`local-window-bootstrap.ts` exchanges CRDT metadata and already owned Session
+snapshots over a workspace-scoped BroadcastChannel in local-only mode. Metadata
+merges asynchronously through normal Repo/Flock projection. Each runtime holds a
+uniquely named Web Lock for its lifetime; the inventory identifies live peers
+without persistent membership or heartbeats and disappears on renderer exit.
+Session startup checks disk first, avoiding unnecessary exports on every peer when
+cache data exists. On a miss, it requests only inventoried peers. No peers means
+immediate fallback; explicit negative replies finish the request once all listed
+peers report absence. The 150 ms deadline remains for a peer that disappears or
+stops responding after inventory. Missing Web Locks support disables Session peer
+requests. Payloads are capped at 16 MiB; disposal closes channels and resolves waits.
+
+Snapshots merge into the existing document before constructing its history reader;
+unsent edits remain intact. A measured alternative that imported into an already
+initialized reader removed waiting but replayed bulk-import events through its
+projection, greatly increasing large-history cost, so it was rejected. No second
+UI store, Mirror, daemon connection, or shared persistence/cursor is introduced.
+Cloud and dual-mode runtimes do not participate in peer sharing.
 
 ## Verification and limits
 
-Deterministic tests exercise closing the original/adopted windows, recovery targets,
-replacement timeouts, queued/delayed metadata, target deletion during a read,
-unrelated failed/missing metadata, runtime replacement, target-specific reveal,
-consecutive frames, and the recovery deadline. Peer tests additionally verify metadata projection, history reuse, unsent-edit
-merging, workspace isolation, close/miss fallback, and racing a slow disk cache.
-All 37 tests in seven focused suites
-passed, as did components and Electron main/renderer typechecks. Changed-source
-lint has no errors (pre-existing warnings in the runtime and conversation component).
-The [Electron data-path benchmark](../../../../packages/components/benchmarks/window-bootstrap/README.md)
-uses two real renderers, native BroadcastChannel and IndexedDB, synthetic CRDT
-history, and the production history reader. A 50-sample confirmation run found
-near-equal disk-hit medians, peer-only readable history in 3.1–42.4 ms for
-100–3,000 entries, and a stable approximately 151 ms extra wait when both sources
-miss. Large-history tail latency also regressed in that run; the cause is
-unprofiled. The miss penalty remains unresolved: acquisition waits for the peer
-deadline before the foreground store can begin normal synchronization. These
-results do not justify an overall performance-win claim.
+39 deterministic component tests plus nine shared IPC tests cover adoption,
+recovery, matching-sender/target reveal, hidden preparation, timeout/close cleanup,
+replacement timing, metadata races, CRDT reuse/merge, peer absence and cache selection.
+Components and Electron typechecks pass. Changed helper/benchmark lint is clean.
 
-Real Electron visual acceptance remains unverified. E2E still disables the warm
-pool. This worktree reuses locally available dependencies; `pnpm check` stops at
-missing dependencies in `packages/ignore`; `check:public-boundary` cannot resolve
-uninitialized ACP submodules. `docs check` reports 34 existing links
-into absent ACP submodules, none in the changed documents.
+The [benchmark](../../../../packages/components/benchmarks/window-bootstrap/README.md)
+retains the original regression and the corrected measurements. It uses two real
+Electron renderers, native BroadcastChannel/Web Locks/IndexedDB, synthetic CRDT
+history, and the production reader. A native presentation probe runs production
+main/renderer readiness code and captures the first shown synthetic surface with
+30 readable rows. This verifies the presentation ordering, not the full Lody React
+interface. Click-to-show and data-readiness measurements must not be conflated.
+
+Real application visual acceptance remains unverified; E2E disables the warm pool
+and this checkout lacks complete desktop/CLI build artifacts and ACP submodules.
+`pnpm check` stops at missing `packages/ignore` dependencies. `check:public-boundary`
+and `docs check` report existing references to those absent submodules.

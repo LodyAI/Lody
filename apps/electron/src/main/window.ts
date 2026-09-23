@@ -438,7 +438,7 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
   window.on('leave-full-screen', sendFullscreenState)
 
   window.on('ready-to-show', () => {
-    // A warm spare stays hidden until it is claimed for a concrete target.
+    // Warm windows are shown by the target-content readiness handshake.
     if (options.warm) {
       return
     }

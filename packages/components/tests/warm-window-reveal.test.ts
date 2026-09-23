@@ -28,7 +28,7 @@ describe('warm window reveal', () => {
     expect(revealed).toBe(true);
   });
 
-  it('reveals the matching workspace and leaves recovery reachable after the deadline', () => {
+  it('signals the matching workspace but never labels a timeout as ready', () => {
     vi.useFakeTimers();
     const root = document.createElement('div');
     root.innerHTML = '<div data-window-workspace-ready="work"></div>';
@@ -47,6 +47,6 @@ describe('warm window reveal', () => {
     vi.advanceTimersByTime(4992);
     expect(revealed).toBe(false);
     vi.advanceTimersByTime(32);
-    expect(revealed).toBe(true);
+    expect(revealed).toBe(false);
   });
 });

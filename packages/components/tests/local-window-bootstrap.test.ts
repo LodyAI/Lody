@@ -3,12 +3,24 @@ import { LoroRepo } from 'loro-repo';
 import { LoroDoc } from 'loro-crdt';
 import {
   createLocalWindowBootstrap,
-  firstAvailableSnapshot,
+  readSessionBootstrapSnapshot,
 } from '../src/providers/local-window-bootstrap';
 
 function channelFactory() {
   const channels = new Set<{ name: string; onmessage: BroadcastChannel['onmessage'] }>();
-  return (name: string) => {
+  const registry = new Map<string, Set<string>>();
+  const createRegistry = (scope: string, id: string) => {
+    const peers = registry.get(scope) ?? new Set<string>();
+    registry.set(scope, peers);
+    peers.add(id);
+    return {
+      peers: async () => [...peers].filter((peer) => peer !== id),
+      close: () => {
+        peers.delete(id);
+      },
+    };
+  };
+  const createChannel = (name: string) => {
     const channel = {
       name,
       onmessage: null as BroadcastChannel['onmessage'],
@@ -29,6 +41,7 @@ function channelFactory() {
     channels.add(channel);
     return channel;
   };
+  return { createChannel, createRegistry };
 }
 
 afterEach(() => vi.useRealTimers());
@@ -36,7 +49,7 @@ afterEach(() => vi.useRealTimers());
 describe('local window bootstrap', () => {
   it('reuses metadata and loaded history while merging independent edits', async () => {
     vi.useFakeTimers();
-    const createChannel = channelFactory();
+    const { createChannel, createRegistry } = channelFactory();
     const source = await LoroRepo.create({});
     const target = await LoroRepo.create({});
     const doc = new LoroDoc();
@@ -47,7 +60,8 @@ describe('local window bootstrap', () => {
       source,
       'workspace',
       new Map([['session:test', doc]]),
-      createChannel
+      createChannel,
+      createRegistry
     );
     const projected = new Promise<void>((resolve) => {
       const watch = target.watch((event) => {
@@ -57,7 +71,20 @@ describe('local window bootstrap', () => {
         }
       });
     });
-    const receiver = createLocalWindowBootstrap(target, 'workspace', new Map(), createChannel);
+    const empty = createLocalWindowBootstrap(
+      target,
+      'workspace',
+      new Map(),
+      createChannel,
+      createRegistry
+    );
+    const receiver = createLocalWindowBootstrap(
+      target,
+      'workspace',
+      new Map(),
+      createChannel,
+      createRegistry
+    );
     await projected;
     expect((await target.getDocMeta('session:test'))?.meta).toMatchObject({
       title: 'Existing conversation',
@@ -70,6 +97,7 @@ describe('local window bootstrap', () => {
     expect(local.getText('history').toString()).toBe('already loaded');
     expect(local.getMap('draft').get('text')).toBe('unsent edit');
     owner.close();
+    empty.close();
     receiver.close();
     await source.destroy();
     await target.destroy();
@@ -77,7 +105,7 @@ describe('local window bootstrap', () => {
 
   it('isolates workspaces and resolves misses and pending requests on close', async () => {
     vi.useFakeTimers();
-    const createChannel = channelFactory();
+    const { createChannel, createRegistry } = channelFactory();
     const repo = await LoroRepo.create({});
     const doc = new LoroDoc();
     doc.getText('history').insert(0, 'private');
@@ -86,11 +114,17 @@ describe('local window bootstrap', () => {
       repo,
       'one',
       new Map([['session:test', doc]]),
-      createChannel
+      createChannel,
+      createRegistry
     );
-    const receiver = createLocalWindowBootstrap(repo, 'two', new Map(), createChannel);
+    const receiver = createLocalWindowBootstrap(
+      repo,
+      'two',
+      new Map(),
+      createChannel,
+      createRegistry
+    );
     const missing = receiver.readDocument('session:test');
-    await vi.advanceTimersByTimeAsync(150);
     expect(await missing).toBeUndefined();
     const pending = receiver.readDocument('session:test');
     receiver.close();
@@ -100,19 +134,53 @@ describe('local window bootstrap', () => {
     await repo.destroy();
   });
 
-  it('does not wait for a slow disk cache or let a cache miss discard peer state', async () => {
-    const snapshot = new Uint8Array([1, 2, 3]);
+  it('falls through immediately when live peers do not own the requested document', async () => {
+    vi.useFakeTimers();
+    const { createChannel, createRegistry } = channelFactory();
+    const repo = await LoroRepo.create({});
+    const owner = createLocalWindowBootstrap(
+      repo,
+      'workspace',
+      new Map(),
+      createChannel,
+      createRegistry
+    );
+    const receiver = createLocalWindowBootstrap(
+      repo,
+      'workspace',
+      new Map(),
+      createChannel,
+      createRegistry
+    );
+    expect(await receiver.readDocument('session:missing')).toBeUndefined();
+    owner.close();
+    expect(await receiver.readDocument('session:closed-peer')).toBeUndefined();
+    receiver.close();
+    await repo.destroy();
+  });
+
+  it('uses the disk snapshot before peer state and tolerates disk failure', async () => {
+    const disk = new Uint8Array([1]);
+    const peer = new Uint8Array([2]);
     expect(
-      await firstAvailableSnapshot([new Promise(() => {}), Promise.resolve(snapshot)])
-    ).toEqual(snapshot);
+      await readSessionBootstrapSnapshot(
+        async () => disk,
+        async () => peer
+      )
+    ).toEqual(disk);
     expect(
-      await firstAvailableSnapshot([Promise.resolve(undefined), Promise.resolve(snapshot)])
-    ).toEqual(snapshot);
+      await readSessionBootstrapSnapshot(
+        async () => {
+          throw new Error('broken cache');
+        },
+        async () => peer
+      )
+    ).toEqual(peer);
     expect(
-      await firstAvailableSnapshot([
-        Promise.resolve(undefined),
-        Promise.reject(new Error('cache unavailable')),
-      ])
+      await readSessionBootstrapSnapshot(
+        async () => undefined,
+        async () => undefined
+      )
     ).toBeUndefined();
   });
 });

@@ -1,8 +1,9 @@
+import { waitForTargetContentPainted } from '../../../../apps/electron/src/renderer/src/warm-window-reveal';
 import { LoroRepo } from 'loro-repo';
 import { LoroDoc } from 'loro-crdt';
 import {
   createLocalWindowBootstrap,
-  firstAvailableSnapshot,
+  readSessionBootstrapSnapshot,
 } from '../../src/providers/local-window-bootstrap';
 import {
   readEagerSyncSnapshot,
@@ -38,13 +39,14 @@ export async function seed(rounds: number) {
   return { entries: rounds * 2, bytes: snapshot.byteLength };
 }
 export async function sample(
-  variant: 'before' | 'after',
+  variant: 'before' | 'fixed',
   scenario: 'disk-hit' | 'peer-hit' | 'miss',
-  entries: number
+  entries: number,
+  paint = false
 ) {
   const repo = await LoroRepo.create({});
   const target =
-    variant === 'after'
+    variant !== 'before'
       ? createLocalWindowBootstrap(repo, scenario === 'miss' ? 'absent' : 'bench', new Map())
       : undefined;
   const doc = new LoroDoc();
@@ -53,40 +55,77 @@ export async function sample(
     async (entry) => (entry ? new Uint8Array(await entry.snapshot.arrayBuffer()) : undefined)
   );
   const snapshot =
-    variant === 'after'
-      ? await firstAvailableSnapshot([target!.readDocument(room), disk])
+    variant === 'fixed'
+      ? await readSessionBootstrapSnapshot(
+          () => disk,
+          () => target!.readDocument(room)
+        )
       : await disk;
   const acquiredMs = performance.now() - start;
+  if (snapshot) doc.import(snapshot);
+  const activeSession = createConversationSession(doc, {
+    sessionId: FIXTURE_SESSION_ID,
+    tailKeep: 0,
+    scheduleIdle: () => () => {},
+  });
+  const syncReadyMs = performance.now() - start;
   let readableMs: number | null = null;
   if (snapshot) {
-    doc.import(snapshot);
-    const session = createConversationSession(doc, {
-      sessionId: FIXTURE_SESSION_ID,
-      tailKeep: 0,
-      scheduleIdle: () => () => {},
-    });
     try {
-      if (session.history.turnCount !== entries)
+      if (activeSession.history.turnCount !== entries)
         await new Promise<void>((resolve) => {
-          const unsubscribe = session.history.subscribe((event) => {
-            if (event.kind === 'structure') {
+          const unsubscribe = activeSession.history.subscribe((event) => {
+            if (event.kind === 'structure' && activeSession.history.turnCount === entries) {
               unsubscribe();
               resolve();
             }
           });
         });
-      const lease = session.history.acquireRange(Math.max(0, entries - 30), entries);
+      const lease = activeSession.history.acquireRange(Math.max(0, entries - 30), entries);
       await lease.ready;
-      if (session.history.turnCount !== entries || !session.history.turn(entries - 1))
+      if (activeSession.history.turnCount !== entries || !activeSession.history.turn(entries - 1))
         throw new Error('Missing readable history');
+      if (paint) {
+        const main = document.createElement('main');
+        const title = document.createElement('h1');
+        title.textContent = 'Synthetic conversation — ready before show';
+        main.append(title);
+        for (let index = Math.max(0, entries - 30); index < entries; index++) {
+          const row = document.createElement('p');
+          const turn = activeSession.history.turn(index);
+          row.textContent = JSON.stringify(turn);
+          main.append(row);
+        }
+        document.body.replaceChildren(main);
+        document.body.style.cssText =
+          'background:#16181d;color:#e4e8ef;font:14px sans-serif;padding:24px';
+      }
       readableMs = performance.now() - start;
       lease.release();
     } finally {
-      session.dispose();
+      activeSession.dispose();
     }
   }
+  if (!snapshot) activeSession.dispose();
   await disk;
   target?.close();
   await repo.destroy();
-  return { acquiredMs, readableMs };
+  return { acquiredMs, readableMs, syncReadyMs: syncReadyMs ?? acquiredMs };
+}
+
+export function installNativeRevealProbe() {
+  const { ipcRenderer } = require('electron');
+  ipcRenderer.on(
+    'app.windowTarget',
+    async (_event: unknown, target: { workspace: string; sessionId: string }) => {
+      await sample('fixed', 'peer-hit', 3000, true);
+      const marker = document.createElement('span');
+      marker.hidden = true;
+      marker.setAttribute('data-window-session-ready', target.sessionId);
+      document.body.append(marker);
+      waitForTargetContentPainted(document.body, target, () =>
+        ipcRenderer.send('app.windowContentReady', target)
+      );
+    }
+  );
 }

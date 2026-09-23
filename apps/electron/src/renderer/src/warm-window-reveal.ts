@@ -12,13 +12,12 @@ export function waitForTargetContentPainted(
       (element) => element.getAttribute(attribute) === value
     )
     stableFrames = hasContent ? stableFrames + 1 : 0
-    // Readiness comes from the target surface, never from loading/sidebar text.
-    // Bound the cover so offline, navigation, and fatal-error recovery stay usable.
-    if (stableFrames >= 2 || performance.now() - startedAt >= 5000) {
+    // Main owns the recovery deadline; timeout is not a content-ready signal.
+    if (stableFrames >= 2) {
       onTargetPainted()
       return
     }
-    requestAnimationFrame(check)
+    if (performance.now() - startedAt < 5000) requestAnimationFrame(check)
   }
   requestAnimationFrame(check)
 }

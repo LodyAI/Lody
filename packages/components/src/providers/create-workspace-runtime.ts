@@ -1,4 +1,4 @@
-import { createLocalWindowBootstrap, firstAvailableSnapshot } from './local-window-bootstrap';
+import { createLocalWindowBootstrap, readSessionBootstrapSnapshot } from './local-window-bootstrap';
 import { jotaiStore } from '@/lib/utils';
 import { desktopWindowId } from '@/lib/desktop-window';
 import { navigationSidebarHiddenAtom } from '@/atoms/layout-state';
@@ -3739,21 +3739,22 @@ export async function createWorkspaceRuntime(deps: RuntimeDeps): Promise<Workspa
 
     // Only an actual store consumer materializes a prefetched snapshot. Import
     // merges with this replica's unsent user edits; never replace its document.
-    const cached = await firstAvailableSnapshot([
-      windowBootstrap?.readDocument(roomId) ?? Promise.resolve(undefined),
-      withTimeout(
-        readEagerSyncSnapshot(eagerSyncScope, roomId).then(async (entry) =>
-          entry ? new Uint8Array(await entry.snapshot.arrayBuffer()) : undefined
+    const cached = await readSessionBootstrapSnapshot(
+      () =>
+        withTimeout(
+          readEagerSyncSnapshot(eagerSyncScope, roomId).then(async (entry) =>
+            entry ? new Uint8Array(await entry.snapshot.arrayBuffer()) : undefined
+          ),
+          1_500,
+          'Eager-sync cache read timed out'
         ),
-        1_500,
-        'Eager-sync cache read timed out'
-      ),
-    ]);
+      () => windowBootstrap?.readDocument(roomId) ?? Promise.resolve(undefined)
+    );
     if (cached) {
       try {
         sessionDoc.import(cached);
       } catch {
-        // A rebuildable cache must not prevent normal foreground synchronization.
+        /* Foreground sync repairs a bad cache. */
       }
     }
 

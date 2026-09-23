@@ -14,7 +14,7 @@ import {
 /**
  * Keeps one hidden auxiliary renderer booted and ready for reuse when the
  * developer-only experiment is enabled. Opening an auxiliary window claims
- * the spare and immediately primes a replacement, so the second and later
+ * the spare and primes a replacement after it is shown, so the second and later
  * windows skip the full renderer cold boot.
  *
  * The pool is disabled for E2E (the harness counts and inspects windows) and
@@ -151,7 +151,7 @@ export function claimWarmWindow(target: ElectronWindowTarget): BrowserWindow | n
 
   bindMainWindowTarget(window, target)
   warmClaimCount++
-  scheduleWindowWarmUp()
+  window.once('show', scheduleWindowWarmUp)
   return window
 }
 

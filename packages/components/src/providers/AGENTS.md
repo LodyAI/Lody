@@ -54,6 +54,10 @@ Replacement contract: [shared rules](../../../shared/AGENTS.md#session-history).
 - Local-only window bootstrap may exchange same-workspace CRDT snapshots from
   already owned documents. Merge into the receiving Repo; never treat peer state
   as authoritative sync or open stores solely to answer bootstrap requests.
+  Check disk before requesting peer exports; Web Locks inventory bounds requests
+  to live runtimes, and negative replies must release missing-document waits.
+  Import startup snapshots before constructing the history reader to avoid replaying
+  bulk-import events through an already initialized projection.
 - Repo storage, durable Streams cursors, and eager-sync high-water state must use the
   same per-renderer cache namespace. A checkpoint must never be shared by independently
   persisted Repo views.
