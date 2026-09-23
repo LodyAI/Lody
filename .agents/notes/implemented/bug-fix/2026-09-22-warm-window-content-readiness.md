@@ -15,6 +15,8 @@ before navigation. Reveal requires the matching target surface, and absence wait
 only for that Session's metadata projection. The five-second recovery fallback
 remains. Local-only windows now bootstrap from peer metadata and already loaded
 Session snapshots, and readable history no longer waits for authoritative sync.
+Benchmarking found no disk-hit median improvement and a reproducible 151 ms
+cache/peer-miss penalty; overall opening-time improvement remains unproven.
 
 ## Decision and evidence
 
@@ -71,6 +73,16 @@ merging, workspace isolation, close/miss fallback, and racing a slow disk cache.
 All 37 tests in seven focused suites
 passed, as did components and Electron main/renderer typechecks. Changed-source
 lint has no errors (pre-existing warnings in the runtime and conversation component).
+The [Electron data-path benchmark](../../../../packages/components/benchmarks/window-bootstrap/README.md)
+uses two real renderers, native BroadcastChannel and IndexedDB, synthetic CRDT
+history, and the production history reader. A 50-sample confirmation run found
+near-equal disk-hit medians, peer-only readable history in 3.1–42.4 ms for
+100–3,000 entries, and a stable approximately 151 ms extra wait when both sources
+miss. Large-history tail latency also regressed in that run; the cause is
+unprofiled. The miss penalty remains unresolved: acquisition waits for the peer
+deadline before the foreground store can begin normal synchronization. These
+results do not justify an overall performance-win claim.
+
 Real Electron visual acceptance remains unverified. E2E still disables the warm
 pool. This worktree reuses locally available dependencies; `pnpm check` stops at
 missing dependencies in `packages/ignore`; `check:public-boundary` cannot resolve
