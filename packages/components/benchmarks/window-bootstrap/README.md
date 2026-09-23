@@ -5,6 +5,8 @@ Run from `packages/components`:
 ```sh
 node benchmarks/window-bootstrap/run.mjs 30 > /tmp/window-bootstrap.json
 node benchmarks/window-bootstrap/run.mjs 1 --native > /tmp/window-presentation.json
+# Requires a built desktop and resources/cli, all from a known revision:
+node benchmarks/window-bootstrap/run-app.mjs 5 current > /tmp/window-app.log 2>&1
 ```
 
 Requires components dependencies and Electron. The runner uses two isolated
@@ -60,6 +62,46 @@ subsequently stalls or exits still has a 150 ms bounded timeout.
 The native probe recorded 152.39 ms from claim to first show. The window was hidden
 before content, and its first shown capture contained all 30 projected rows. This
 single synthetic sample is not an application opening-time distribution.
+
+## Real desktop verification — 2026-09-23
+
+`run-app.mjs` runs the built desktop with fresh, isolated user data and a short
+Unix-socket data directory. It imports the synthetic fixture into the source Repo,
+opens it in the real conversation UI, enables the production warm pool, and claims
+successive spares through `app.openWindow`. Each spare has at least 1.5 seconds of
+preparation before measurement; this lead time is outside the timed interval.
+The probe captures each native `show`, checks the matching marker, actual stream
+visibility and final synthetic answer, and closes the window normally. Three
+warmups are discarded. Logs, screenshots, results and build hashes remain under
+the printed `/tmp/lody-app-bench-*` directory; no product profile is used.
+The timer starts at `app.windowTarget` dispatch, so it excludes physical input and
+source-window IPC dispatch. It includes target React rendering and initial scroll.
+
+[Recorded comparison](results-app-2026-09-23.json) used the same bundled CLI 0.93.3
+with current desktop source. Only the runtime-provider change was removed for the
+baseline. Runs were sequential with separate fresh profiles, not alternating trials.
+
+| Renderer | Samples | Median claim to show | Range |
+| --- | --- | --- | --- |
+| Before workspace preinitialization | 5 | 820.30 ms | 812.81–848.28 ms |
+| With workspace preinitialization | 10 | 1,057.22 ms | 1,038.96–1,356.23 ms |
+| With preinitialization and visible-stream readiness | 5 | 1,140.84 ms | 1,102.16–2,708.94 ms |
+| Repeated with committed real-app runner | 5 | 1,139.32 ms | 1,118.41–1,162.37 ms |
+
+Preinitialization worked: every sampled spare already had its Repo and target
+metadata before claim, and claim did not recreate its runtime. **This measurement
+does not establish a latency improvement.** It also exposed a readiness bug: the
+[preinitialization-only capture](app-first-show-hidden.png) contained chrome but no
+visible conversation, even though history and the old marker were present. The
+virtual list deliberately hid its viewport until initial scroll restoration.
+The corrected gate waits for that stream to become visible; the
+[corrected first-show capture](app-first-show-visible.png) contains the answer.
+All eight captures in each corrected run passed the visible-stream check, including
+warmups.
+The earlier 152.39 ms synthetic-DOM probe did not exercise this React lifecycle.
+Opening latency remains unresolved. One earlier baseline process crashed before
+completion and was excluded; its replacement run completed. These small samples
+and the outlier cannot establish a stable tail distribution.
 
 ## Earlier regression
 

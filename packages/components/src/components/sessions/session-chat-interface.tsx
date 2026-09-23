@@ -5917,7 +5917,11 @@ export const SessionChatInterface = memo(
         {isVisible &&
           sessionDocReady &&
           (sessionHistory.length > 0 || (sessionHistoryLength === 0 && sessionDocSynced)) && (
-            <span hidden data-window-session-ready={session.id} />
+            <span
+              hidden
+              data-window-session-ready={session.id}
+              data-window-requires-stream={sessionHistoryLength > 0 ? 'true' : undefined}
+            />
           )}
         <SessionConversationPage
           className={className}

@@ -5,6 +5,24 @@ import { waitForTargetContentPainted } from '../../../apps/electron/src/renderer
 afterEach(() => vi.useRealTimers());
 
 describe('warm window reveal', () => {
+  it('waits for the matching stream to finish hydration and initial scroll restoration', () => {
+    vi.useFakeTimers();
+    const root = document.createElement('div');
+    root.innerHTML =
+      '<span data-window-session-ready="target" data-window-requires-stream="true"></span><div data-window-session-stream-ready="other"></div>';
+    let revealed = false;
+    waitForTargetContentPainted(root, { workspace: 'work', sessionId: 'target' }, () => {
+      revealed = true;
+    });
+    vi.advanceTimersByTime(100);
+    expect(revealed).toBe(false);
+    root.lastElementChild!.setAttribute('data-window-session-stream-ready', 'target');
+    vi.advanceTimersToNextFrame();
+    expect(revealed).toBe(false);
+    vi.advanceTimersToNextFrame();
+    expect(revealed).toBe(true);
+  });
+
   it('ignores loading, sidebar text, and other sessions until the target commits twice', () => {
     vi.useFakeTimers();
     const root = document.createElement('div');

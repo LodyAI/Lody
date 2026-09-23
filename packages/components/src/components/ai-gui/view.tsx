@@ -1981,6 +1981,7 @@ export const SessionChatStreamView = forwardRef<
             >
               <div
                 className="flex h-full flex-col overflow-y-auto"
+                data-window-session-stream-ready={initialWindowReady ? sessionId : undefined}
                 style={{ paddingTop: 'calc(var(--conversation-top-inset, 0px) + 1.5rem)' }}
               >
                 {leadingContent == null ? null : (
@@ -2022,6 +2023,9 @@ export const SessionChatStreamView = forwardRef<
             <div
               ref={scrollContainerRef}
               data-message-selection-scroll=""
+              data-window-session-stream-ready={
+                initialWindowReady && initialScrollRestored ? sessionId : undefined
+              }
               // Keep x overflow explicit: overflow-y:auto otherwise computes
               // the untouched x axis to auto too, letting any wide row pan the
               // entire conversation instead of its own nested scroller.

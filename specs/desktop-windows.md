@@ -37,7 +37,9 @@ edits; authoritative synchronization continues independently.
 A claimed warm window stays natively hidden until the matching target has painted:
 conversation history must be hydrated (an empty conversation must be synced), the
 workspace landing mounted, or absence confirmed after that Session's metadata
-projection settles. Unrelated metadata failures must not block the decision.
+projection settles. Nonempty conversations must also finish virtual-list hydration
+and initial scroll restoration, so a CSS-hidden message viewport cannot authorize
+presentation. Unrelated metadata failures must not block the decision.
 Loading/sidebar text and an index-only history count are not readiness signals.
 There is no opaque renderer cover. Main reveals the recovery UI after five seconds
 if readiness never arrives; this is not a completed-load signal or an instant-open

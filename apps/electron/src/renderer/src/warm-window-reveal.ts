@@ -9,7 +9,12 @@ export function waitForTargetContentPainted(
   const value = target.sessionId ?? target.workspace
   const check = () => {
     const hasContent = Array.from(rootElement.querySelectorAll(`[${attribute}]`)).some(
-      (element) => element.getAttribute(attribute) === value
+      (element) =>
+        element.getAttribute(attribute) === value &&
+        (element.getAttribute('data-window-requires-stream') !== 'true' ||
+          Array.from(rootElement.querySelectorAll('[data-window-session-stream-ready]')).some(
+            (stream) => stream.getAttribute('data-window-session-stream-ready') === value
+          ))
     )
     stableFrames = hasContent ? stableFrames + 1 : 0
     // Main owns the recovery deadline; timeout is not a content-ready signal.

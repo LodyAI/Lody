@@ -16,7 +16,9 @@ contributes to click-to-show time. Local windows reuse metadata and loaded Sessi
 snapshots with independent persistence/cursors. Benchmarking exposed an unconditional
 151 ms miss penalty, now removed by checking live peers and accepting negative replies.
 The local spare now starts workspace initialization before a claim and retains it
-across matching navigation. Full application click-to-show latency remains unverified.
+across matching navigation. Real desktop probes found a hidden virtual-list viewport
+after the old readiness signal; presentation now also waits for scroll restoration.
+The measured opening path remains about one second, with no demonstrated speedup.
 
 ## Decision and evidence
 
@@ -29,7 +31,9 @@ renderer can prepare and paint. Main accepts `app.windowContentReady` only from 
 claimed WebContents and for its matching workspace/Session, then restores throttling
 and shows/focuses the native window. Renderer readiness requires two frames with
 the target marker; a conversation marker requires hydrated history, not merely an
-index count. An empty conversation still waits for sync. The old opaque cover was
+index count. The stream separately signals its visible state after hydration and
+initial scroll restoration; the native reveal requires both signals for populated
+history. An empty conversation still waits for sync. The old opaque cover was
 removed: it hid Loading by displaying a blank window and did not reduce work.
 Main's independent five-second deadline exposes recovery UI if navigation/rendering
 fails. This fallback is not a content-ready acknowledgement. Closing the window
@@ -77,23 +81,31 @@ Cloud and dual-mode runtimes do not participate in peer sharing.
 
 ## Verification and limits
 
-46 deterministic component tests plus nine shared IPC tests cover adoption,
-recovery, matching-sender/target reveal, hidden preparation, timeout/close cleanup,
-replacement timing, metadata races, CRDT reuse/merge, peer absence and cache selection.
-Provider lifecycle coverage verifies preparation before routing, retention across
-ready/in-flight claims, scope replacement, identity gating, and disposal.
-Components and Electron typechecks pass. Changed helper/benchmark lint is clean.
+The provider, renderer readiness, stream rendering and sticky-scroll suites pass
+48 deterministic tests. They cover pre-route initialization, ready/in-flight claim
+reuse, scope disposal, mismatched stream identity, and hydrated but hidden content.
+The earlier 39 component and nine shared IPC cases cover adoption, metadata races
+and snapshot exchange. Components and Electron typechecks pass.
 
 The [benchmark](../../../../packages/components/benchmarks/window-bootstrap/README.md)
-retains the original regression and the corrected measurements. It uses two real
-Electron renderers, native BroadcastChannel/Web Locks/IndexedDB, synthetic CRDT
-history, and the production reader. A native presentation probe runs production
-main/renderer readiness code and captures the first shown synthetic surface with
-30 readable rows. This verifies the presentation ordering, not the full Lody React
-interface. Those recorded timings predate workspace runtime preinitialization;
-they do not measure its latency benefit. Click-to-show and data-readiness measurements must not be conflated.
+separates data-path, synthetic-DOM and real desktop measurements. The real desktop
+probe uses a fresh profile, the current React renderer, an existing bundled CLI
+0.93.3 and a synthetic 3,000-entry conversation. It records native show, captures
+the surface, and checks actual stream visibility. Every preinitialized spare had
+its Repo and Session metadata before claim, with no runtime recreation at claim.
 
-Real application visual acceptance remains unverified; E2E disables the warm pool
-and this checkout lacks complete desktop/CLI build artifacts and ACP submodules.
-`pnpm check` stops at missing `packages/ignore` dependencies. `check:public-boundary`
-and `docs check` report existing references to those absent submodules.
+The sequential comparison measured 820.30 ms median before runtime preinitialization
+(five samples), 1,057.22 ms afterward (ten), and 1,139.32 ms with the visible-stream
+fix in the reproducible runner (five). These timings start at target IPC dispatch,
+not physical input. They do not demonstrate faster opening. A prior corrected run
+included a 2,708.94 ms outlier; samples are too small for stable tail estimates.
+The initial baseline probe crashed; the replacement run completed.
+
+The preinitialization-only capture had chrome but no visible message body despite
+hydrated history. The corrected first-show captures contain the synthetic answer;
+all eight captures per corrected run passed, including three discarded warmups.
+This validates the previously omitted React/scroll boundary; the earlier 152.39 ms
+synthetic-DOM measurement did not exercise it. Remaining opening latency is unresolved.
+The CLI artifact was reused rather than rebuilt from this checkout. Root `pnpm check`
+still stops at missing `packages/ignore` dependencies; `docs check` reports existing
+links into absent ACP submodules. The PR remains draft.
