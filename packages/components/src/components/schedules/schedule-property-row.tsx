@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { SETTINGS_ROW_CARD_CLASS } from '@/components/settings/compact-layout';
 import { cn } from '@/lib/utils';
 
 /**
@@ -9,12 +10,14 @@ import { cn } from '@/lib/utils';
  * than as two unrelated forms. Rows appear only when they apply, which is what
  * keeps the surface short without hiding anything behind a mode switch.
  */
-export const scheduleCardClass =
-  'divide-y divide-border/60 overflow-hidden rounded-lg border border-border/70 bg-card/40';
+export const scheduleCardClass = cn(
+  SETTINGS_ROW_CARD_CLASS,
+  'divide-y divide-border/60 overflow-hidden'
+);
 
 /** Right-aligned ghost control, matching the property-row triggers elsewhere. */
 export const ghostValueClass =
-  'flex h-8 min-w-0 max-w-full items-center justify-end gap-1.5 rounded-md bg-transparent px-2 text-[13px] text-foreground transition-colors hover:bg-hover focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:bg-hover';
+  'flex h-8 min-w-0 max-w-full items-center justify-end gap-1.5 rounded-md bg-transparent px-2 text-[1em] font-normal text-foreground transition-colors hover:bg-foreground/[0.05] dark:hover:bg-white/[0.08] focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 data-[state=open]:bg-foreground/[0.05] dark:data-[state=open]:bg-white/[0.08]';
 
 export const ghostSelectTriggerClass = cn(
   ghostValueClass,
@@ -33,9 +36,7 @@ export function ScheduleSection({
   return (
     <section className="flex flex-col gap-1.5">
       <div className="flex min-h-5 items-center gap-2 px-1">
-        <h2 className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
-          {title}
-        </h2>
+        <h2 className="text-[0.75em] font-normal text-muted-foreground">{title}</h2>
         {action ? <div className="ml-auto">{action}</div> : null}
       </div>
       <div className={scheduleCardClass}>{children}</div>
@@ -80,7 +81,7 @@ export function PropertyRow({
     >
       <span
         className={cn(
-          'min-w-0 truncate text-[13px] text-muted-foreground',
+          'min-w-0 truncate text-[1em] text-muted-foreground',
           align === 'start' && 'sm:pt-2'
         )}
       >
@@ -88,7 +89,9 @@ export function PropertyRow({
       </span>
       <div className="flex min-w-0 flex-col items-end gap-0.5">
         <div className="flex min-w-0 max-w-full flex-wrap items-center justify-end">{children}</div>
-        {hint ? <p className="text-right text-xs text-muted-foreground/80">{hint}</p> : null}
+        {hint ? (
+          <p className="text-right text-[0.8em] leading-tight text-muted-foreground">{hint}</p>
+        ) : null}
       </div>
     </div>
   );
@@ -105,7 +108,7 @@ export function PropertyRow({
 export function PropertyRowWide({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-1 py-1.5 pl-3 pr-1 sm:grid sm:grid-cols-[minmax(0,auto)_minmax(0,1fr)] sm:items-center sm:gap-3">
-      <span className="min-w-0 truncate text-[13px] text-muted-foreground">{label}</span>
+      <span className="min-w-0 truncate text-[1em] text-muted-foreground">{label}</span>
       <div className="flex min-w-0 justify-end [&>*]:min-w-0 [&>*]:max-w-full">{children}</div>
     </div>
   );

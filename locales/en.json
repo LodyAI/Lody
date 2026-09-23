@@ -4126,6 +4126,7 @@
   "schedules.repeat.unsupportedHint": "This rule was created with an older version and can no longer be edited here. Replace it to change it.",
   "schedules.requireMonthDay": "Choose at least one day of the month.",
   "schedules.summary.unsupported": "Advanced rule ({{rule}})",
+  "schedules.whereItRuns": "Where it runs",
   "schedules.sendTo": "Send to",
   "schedules.destination.newSession": "New chat each run",
   "schedules.destination.ownSession": "One chat for this task",

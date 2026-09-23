@@ -127,14 +127,14 @@ export function ScheduleDestinationRows({
                   <button
                     type="button"
                     disabled={disabled}
-                    className="shrink-0 px-1.5 text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:opacity-50"
+                    className="shrink-0 px-1.5 text-[0.8em] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:opacity-50"
                     onClick={() => onChange({ kind: 'own_session', epoch: value.epoch + 1 })}
                   >
                     {t('schedules.destination.startNewChat', 'Start a new chat')}
                   </button>
                 </div>
               ) : (
-                <span className="text-[13px] text-muted-foreground">
+                <span className="text-[0.9em] text-muted-foreground">
                   {t('schedules.destination.notCreatedYet', 'Not created yet')}
                 </span>
               )}
@@ -226,7 +226,7 @@ function SessionPicker({
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate">{session.title}</span>
                   {session.detail ? (
-                    <span className="truncate text-[11px] text-muted-foreground">
+                    <span className="truncate text-[0.85em] text-muted-foreground">
                       {session.detail}
                     </span>
                   ) : null}

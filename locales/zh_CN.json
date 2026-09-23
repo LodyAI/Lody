@@ -4126,6 +4126,7 @@
   "schedules.repeat.unsupportedHint": "这条规则由旧版本创建，这里已无法编辑。如需更改请替换。",
   "schedules.requireMonthDay": "请至少选择一个日期。",
   "schedules.summary.unsupported": "高级规则（{{rule}}）",
+  "schedules.whereItRuns": "执行位置",
   "schedules.sendTo": "发送到",
   "schedules.destination.newSession": "每次新建对话",
   "schedules.destination.ownSession": "固定一个对话",

@@ -95,3 +95,10 @@
   weekday toggles truncate the label away, and a hugging label track let a long
   translated label eat the row. `EditorInNarrowPanel` is the story that catches
   all three.
+- Follows the app chrome rules in `src/ui/AGENTS.md`: sizes are `em` of
+  `--ui-font-size` (editor rows 1em, list rows 0.9em, hints 0.8em, section
+  labels 0.75em sentence case), weight stays `font-normal`, edges are 0.5px.
+  Cards reuse `SETTINGS_ROW_CARD_CLASS` inside `data-settings-surface`, which
+  lifts them to the popover fill in light themes; without it `--card` is gray
+  and a grouped card reads as disabled. `em` compounds, so size leaves, not
+  containers, and never put a 0.75em child inside a 0.9em row.

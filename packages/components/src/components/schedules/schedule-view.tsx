@@ -68,7 +68,7 @@ function StatusPill({ status }: { status: ScheduleStatus }) {
   return (
     <span
       className={cn(
-        'inline-flex shrink-0 items-center whitespace-nowrap rounded-full border px-1.5 py-px text-[11px] font-medium',
+        'inline-flex shrink-0 items-center whitespace-nowrap rounded-full border-[0.5px] px-1.5 py-px text-[0.85em] font-normal leading-tight',
         status.tone === 'attention' && 'border-status-warning/40 text-status-warning',
         status.tone === 'progress' && 'border-status-info/40 text-status-info',
         status.tone === 'muted' && 'border-border text-muted-foreground'
@@ -130,7 +130,7 @@ function ScheduleListRow({
     <div
       className={cn(
         listGridClass,
-        'group relative items-center gap-y-0.5 border-b border-border/60 px-4 py-2.5 text-[13px] transition-colors hover:bg-hover sm:gap-y-0'
+        'group relative items-center gap-y-0.5 border-b-[0.5px] border-border px-4 py-2.5 text-[0.9em] transition-colors hover:bg-hover sm:gap-y-0'
       )}
     >
       <button
@@ -142,7 +142,7 @@ function ScheduleListRow({
             action buttons stay above it and keep their own clicks. */}
         <span className="absolute inset-0" aria-hidden="true" />
         <span className="flex min-w-0 items-center gap-2">
-          <span className="truncate font-medium">{row.title}</span>
+          <span className="truncate font-normal">{row.title}</span>
           <span className="sm:hidden">
             <StatusPill status={status} />
           </span>
@@ -206,7 +206,7 @@ function ScheduleListRow({
         {/* The machine is what separates two same-named Agents, and two
             chat-only schedules that would otherwise read identically. */}
         <span
-          className="truncate text-[11px] text-muted-foreground/70"
+          className="truncate text-[0.85em] text-muted-foreground/70"
           title={`${context?.machine ?? row.machineId} · ${project}`}
         >
           {context?.machine ?? row.machineId}
@@ -289,13 +289,15 @@ export function ScheduleListView({
     <TooltipProvider>
       <section className="flex h-full min-h-0 flex-col">
         <header className="flex shrink-0 items-center gap-2 px-4 py-3">
-          <h1 className="mr-auto text-sm font-medium">{t('schedules.title', 'Schedules')}</h1>
+          <h1 className="mr-auto text-[1em] font-normal text-foreground">
+            {t('schedules.title', 'Schedules')}
+          </h1>
           <div className="relative w-40 sm:w-56">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               aria-label={t('schedules.search', 'Search schedules')}
               placeholder={t('schedules.search', 'Search schedules')}
-              className="h-8 pl-8 text-[13px]"
+              className="h-8 pl-8 text-[0.9em] font-normal"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
             />
@@ -316,7 +318,7 @@ export function ScheduleListView({
           <div
             className={cn(
               listGridClass,
-              'hidden shrink-0 border-y bg-muted/20 px-4 py-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground sm:grid'
+              'hidden shrink-0 border-b-[0.5px] border-border px-4 py-1.5 text-[0.75em] font-normal text-muted-foreground sm:grid'
             )}
           >
             <span>{t('schedules.column.name', 'Name')}</span>
@@ -334,7 +336,7 @@ export function ScheduleListView({
               {[0, 1, 2].map((index) => (
                 <div
                   key={index}
-                  className="flex items-center gap-3 border-b border-border/60 px-4 py-3"
+                  className="flex items-center gap-3 border-b-[0.5px] border-border px-4 py-3"
                 >
                   <Skeleton className="h-3.5 w-48" />
                   <Skeleton className="ml-auto h-3.5 w-24" />
@@ -343,20 +345,20 @@ export function ScheduleListView({
               ))}
             </div>
           ) : error ? (
-            <p className="px-4 py-8 text-sm text-destructive" role="alert">
+            <p className="px-4 py-8 text-[1em] text-destructive" role="alert">
               {t('schedules.loadError', 'Schedules could not be loaded.')}
             </p>
           ) : filtered.length === 0 ? (
             <div className="mx-auto flex max-w-sm flex-col items-center gap-2 px-6 py-16 text-center">
               <CalendarClock className="size-5 text-muted-foreground" aria-hidden="true" />
-              <p className="text-sm font-medium">
+              <p className="text-[1em] font-normal">
                 {query
                   ? t('schedules.noMatches', 'No schedules match your search')
                   : t('schedules.empty', 'No schedules yet')}
               </p>
               {query ? null : (
                 <>
-                  <p className="text-[13px] text-muted-foreground">
+                  <p className="text-[0.9em] text-muted-foreground">
                     {t(
                       'schedules.emptyHelp',
                       'Choose a prompt and a time. Your machine will start a new chat for each run.'
@@ -474,6 +476,8 @@ export function ScheduleForm({
 
   return (
     <form
+      // Light themes lift the grouped cards to the popover fill, like settings.
+      data-settings-surface=""
       className="mx-auto flex w-full max-w-2xl flex-col gap-5 px-4 py-5 sm:px-6"
       onSubmit={(event) => {
         event.preventDefault();
@@ -486,7 +490,7 @@ export function ScheduleForm({
           maxLength={200}
           aria-label={t('schedules.name', 'Name')}
           placeholder={t('schedules.namePlaceholder', 'Name this scheduled task')}
-          className="h-auto border-0 bg-transparent px-0 py-0.5 text-base font-semibold shadow-none placeholder:font-normal placeholder:text-muted-foreground/70 focus-visible:ring-0"
+          className="h-auto border-0 bg-transparent px-0 py-0.5 text-[1.1em] font-normal shadow-none placeholder:font-normal placeholder:text-muted-foreground/70 focus-visible:ring-0"
           value={value.title}
           onChange={(event) => setValue({ ...value, title: event.target.value })}
         />
@@ -498,7 +502,7 @@ export function ScheduleForm({
             'schedules.promptPlaceholder',
             'What should the agent do on every run? For example: review yesterday’s commits and summarise anything that looks risky.'
           )}
-          className="min-h-16 resize-y border-0 bg-transparent px-0 text-[13px] leading-relaxed shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0"
+          className="min-h-16 resize-y border-0 bg-transparent px-0 text-[0.9em] leading-relaxed shadow-none placeholder:text-muted-foreground/70 focus-visible:ring-0"
           value={value.prompt}
           onChange={(event) => setValue({ ...value, prompt: event.target.value })}
         />
@@ -510,7 +514,7 @@ export function ScheduleForm({
           <div
             role="radiogroup"
             aria-label={t('schedules.trigger.label', 'Trigger')}
-            className="flex rounded-md bg-muted/60 p-0.5"
+            className="flex rounded-md bg-foreground/[0.05] p-0.5 dark:bg-white/[0.06]"
           >
             {(['timed', 'manual'] as const).map((option) => (
               <button
@@ -520,9 +524,9 @@ export function ScheduleForm({
                 aria-checked={mode === option}
                 onClick={() => setMode(option)}
                 className={cn(
-                  'rounded-[5px] px-2 py-0.5 text-[11px] font-medium transition-colors',
+                  'rounded-[5px] px-2 py-0.5 text-[0.8em] font-normal transition-colors',
                   mode === option
-                    ? 'bg-background text-foreground shadow-xs'
+                    ? 'bg-background text-foreground shadow-[0_0_0_0.5px_hsl(var(--border)),0_1px_1px_rgba(0,0,0,0.04)] dark:bg-white/[0.12] dark:shadow-none'
                     : 'text-muted-foreground hover:text-foreground'
                 )}
               >
@@ -535,7 +539,7 @@ export function ScheduleForm({
         }
       >
         {mode === 'manual' ? (
-          <p className="px-3 py-2.5 text-[13px] text-muted-foreground">
+          <p className="px-3 py-2.5 text-[0.9em] text-muted-foreground">
             {t(
               'schedules.trigger.manualHelp',
               'Runs only when you press Run. Keep the prompt and target ready for whenever you need it.'
@@ -545,7 +549,7 @@ export function ScheduleForm({
           <>
             <ScheduleRecurrenceEditor value={recurrence} onChange={setRecurrence} now={now} />
             <div
-              className="bg-muted/25 px-3 py-2 text-xs text-muted-foreground"
+              className="px-3 py-2 text-[0.8em] text-muted-foreground"
               aria-live="polite"
               aria-atomic="true"
             >
@@ -555,9 +559,7 @@ export function ScheduleForm({
                 </span>
               ) : resolved.times?.length ? (
                 <>
-                  <span className="font-medium text-foreground/80">
-                    {t('schedules.nextRuns', 'Next runs')}
-                  </span>
+                  <span className="text-foreground/80">{t('schedules.nextRuns', 'Next runs')}</span>
                   <span className="ml-2">
                     {resolved.times
                       .slice(0, 3)
@@ -575,21 +577,26 @@ export function ScheduleForm({
       </ScheduleSection>
 
       {runConfig ? (
-        <ScheduleSection title={t('schedules.sendTo', 'Send to')}>{runConfig}</ScheduleSection>
+        <ScheduleSection title={t('schedules.whereItRuns', 'Where it runs')}>
+          {runConfig}
+        </ScheduleSection>
       ) : null}
 
       {error ? (
-        <p className="text-sm text-destructive" role="alert">
+        <p className="text-[1em] text-destructive" role="alert">
           {error}
         </p>
       ) : null}
 
-      <div className="flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-end sm:justify-between">
+      <div className="flex flex-col gap-3 border-t-[0.5px] border-border pt-4 sm:flex-row sm:items-end sm:justify-between">
         <div id={requirementsId} aria-live="polite" aria-atomic="true" className="min-w-0 flex-1">
           {blockers.length > 0 ? (
             <ul className="space-y-1">
               {blockers.map((reason, index) => (
-                <li key={reason} className="flex items-start gap-1.5 text-xs text-muted-foreground">
+                <li
+                  key={reason}
+                  className="flex items-start gap-1.5 text-[0.8em] text-muted-foreground"
+                >
                   <AlertCircle
                     className={cn(
                       'mt-px size-3.5 shrink-0 text-status-warning',

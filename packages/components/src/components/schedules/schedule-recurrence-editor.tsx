@@ -54,7 +54,7 @@ function TimeZoneField({
           type="button"
           aria-label={label}
           disabled={disabled}
-          className={cn(ghostValueClass, 'h-7 px-1.5 text-xs text-muted-foreground')}
+          className={cn(ghostValueClass, 'h-7 px-1.5 text-[0.8em] text-muted-foreground')}
         >
           <Globe className="size-3 shrink-0 opacity-60" />
           <span className="truncate">{value}</span>
@@ -125,10 +125,10 @@ function DayToggles({
               )
             }
             className={cn(
-              'size-7 rounded-md text-xs font-medium transition-colors disabled:opacity-50',
+              'size-7 rounded-md text-[0.8em] font-normal tabular-nums transition-colors disabled:opacity-50',
               on
                 ? 'bg-primary text-primary-foreground'
-                : 'bg-muted/60 text-muted-foreground hover:bg-hover hover:text-foreground'
+                : 'bg-foreground/[0.04] text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground dark:bg-white/[0.05] dark:hover:bg-white/[0.10]'
             )}
           >
             {option.short}
@@ -212,13 +212,13 @@ export function ScheduleRecurrenceEditor({
         )}
       >
         <div className="flex items-center gap-2">
-          <span className="truncate text-[13px] text-muted-foreground">
+          <span className="truncate text-[0.9em] text-muted-foreground">
             {describeRecurrence(value, t, i18n.language)}
           </span>
           <button
             type="button"
             disabled={disabled}
-            className="shrink-0 text-[13px] text-primary underline-offset-2 hover:underline disabled:opacity-50"
+            className="shrink-0 text-[0.9em] text-primary underline-offset-2 hover:underline disabled:opacity-50"
             onClick={() => onChange(changeScheduleRecurrenceKind(value, 'daily', now))}
           >
             {t('schedules.repeat.replace', 'Replace')}

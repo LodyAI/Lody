@@ -32,6 +32,8 @@ import {
   type ProposalConversation,
   type ProposalTargetProblem,
 } from './schedule-proposal-target';
+import { SETTINGS_ROW_CARD_CLASS } from '@/components/settings/compact-layout';
+import { cn } from '@/lib/utils';
 import { collectScheduleSaveBlockers } from './schedule-save-blockers';
 
 export type ScheduleProposalNoticeProps = {
@@ -241,7 +243,10 @@ export function ScheduleProposalNotice({
 
   if (meta.outcome === 'created') {
     return (
-      <div className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
+      <div
+        data-settings-surface=""
+        className="flex items-center gap-2 rounded-lg border-[0.5px] border-border bg-card px-3 py-2 text-[0.9em] text-muted-foreground shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.03)] dark:border-transparent dark:bg-foreground/[0.04] dark:shadow-none"
+      >
         <CalendarClock className="size-3.5" />
         <span>{t('schedules.proposal.created', 'Scheduled task created')}</span>
         <span className="min-w-0 flex-1 truncate text-foreground">{meta.title}</span>
@@ -255,7 +260,7 @@ export function ScheduleProposalNotice({
   }
   if (meta.outcome === 'dismissed') {
     return (
-      <div className="flex items-center gap-2 rounded-md border border-border/60 px-3 py-2 text-xs text-muted-foreground">
+      <div className="flex items-center gap-2 rounded-lg border-[0.5px] border-border px-3 py-2 text-[0.9em] text-muted-foreground dark:border-foreground/10">
         <CalendarClock className="size-3.5" />
         <span>{t('schedules.proposal.dismissed', 'Proposal ignored')}</span>
         <span className="min-w-0 flex-1 truncate line-through">{meta.title}</span>
@@ -313,8 +318,11 @@ export function ScheduleProposalNotice({
   ];
 
   return (
-    <div className="flex flex-col gap-2 rounded-md border border-border bg-card p-3">
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+    <div
+      data-settings-surface=""
+      className={cn(SETTINGS_ROW_CARD_CLASS, 'flex flex-col gap-2.5 p-3')}
+    >
+      <div className="flex items-center gap-2 text-[0.8em] text-muted-foreground">
         <CalendarClock className="size-3.5" />
         <span>{t('schedules.proposal.title', 'Schedule this task?')}</span>
         {meta.proposedBy?.name ? (
@@ -323,11 +331,11 @@ export function ScheduleProposalNotice({
           </span>
         ) : null}
       </div>
-      <p className="text-sm font-medium">{meta.title}</p>
-      <div className="max-h-40 overflow-y-auto rounded border border-border/60 p-2">
+      <p className="text-[1em] font-normal">{meta.title}</p>
+      <div className="max-h-40 overflow-y-auto rounded-md bg-foreground/[0.03] px-2.5 py-2 dark:bg-white/[0.04]">
         <MarkdownRenderer text={meta.prompt} size="sm" />
       </div>
-      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-0.5 text-xs">
+      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-[0.9em]">
         {rows.map(([label, value]) => (
           <div key={label} className="contents">
             <dt className="text-muted-foreground">{label}</dt>
@@ -336,7 +344,7 @@ export function ScheduleProposalNotice({
         ))}
       </dl>
       {reasons.length ? (
-        <ul className="space-y-0.5 text-xs text-status-warning" aria-live="polite">
+        <ul className="space-y-0.5 text-[0.9em] text-status-warning" aria-live="polite">
           {reasons.map((reason) => (
             <li key={reason}>{reason}</li>
           ))}

@@ -64,7 +64,7 @@ import {
   newScheduleFormValue,
   type ScheduleFormValue,
 } from './schedule-view';
-import { PropertyRow, PropertyRowWide } from './schedule-property-row';
+import { PropertyRow, PropertyRowWide, scheduleCardClass } from './schedule-property-row';
 import { collectScheduleSaveBlockers } from './schedule-save-blockers';
 import { ScheduleDestinationRows, type PickableSession } from './schedule-destination-rows';
 
@@ -173,7 +173,7 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
     },
   });
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background">
+    <div className="flex h-full min-h-0 flex-col bg-background" data-settings-surface="">
       {mobile ? (
         scheduleId ? (
           <Button className="self-start m-2" variant="ghost" onClick={() => open()}>
@@ -183,12 +183,12 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
         ) : null
       ) : (
         <nav
-          className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b px-2 py-1.5"
+          className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b-[0.5px] border-border px-2 py-1.5"
           aria-label={t('schedules.tabs', 'Schedule tabs')}
         >
           <Button
             size="sm"
-            className="h-7 shrink-0 px-2 text-[13px] font-normal"
+            className="h-7 shrink-0 px-2 text-[0.9em] font-normal"
             variant={!scheduleId ? 'secondary' : 'ghost'}
             onClick={() => open()}
           >
@@ -205,7 +205,7 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
               <Button
                 size="sm"
                 variant="ghost"
-                className="h-7 max-w-40 px-2 text-[13px] font-normal hover:bg-transparent"
+                className="h-7 max-w-40 px-2 text-[0.9em] font-normal hover:bg-transparent"
                 onClick={() => open(id)}
               >
                 <span className="truncate">
@@ -258,7 +258,7 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
         </DialogContent>
       </Dialog>
       {error ? (
-        <p className="px-5 py-2 text-sm text-destructive" role="alert">
+        <p className="px-5 py-2 text-[1em] text-destructive" role="alert">
           {error}
         </p>
       ) : null}
@@ -305,23 +305,23 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
         <p className="p-5">{t('schedules.notFound', 'This schedule is unavailable or deleted.')}</p>
       ) : (
         <div className="min-h-0 flex-1 overflow-auto">
-          <div className="sticky top-0 z-10 flex flex-wrap items-center gap-1.5 border-b bg-background/95 px-4 py-2 backdrop-blur">
+          <div className="sticky top-0 z-10 flex flex-wrap items-center gap-1.5 border-b-[0.5px] border-border bg-background/95 px-4 py-2 backdrop-blur">
             {row.enabled ? (
-              <span className="mr-auto text-[13px] text-muted-foreground">
+              <span className="mr-auto text-[0.9em] text-muted-foreground">
                 {t(
                   'schedules.pauseHelp',
                   'Pausing stops future runs. Cancel already submitted Sessions separately.'
                 )}
               </span>
             ) : (
-              <span className="mr-auto rounded-full border px-2 py-px text-[11px] font-medium text-muted-foreground">
+              <span className="mr-auto rounded-full border-[0.5px] px-2 py-px text-[0.75em] font-normal text-muted-foreground">
                 {t('schedules.paused', 'Paused')}
               </span>
             )}
             <Button
               size="sm"
               variant="ghost"
-              className="h-7 px-2 text-[13px]"
+              className="h-7 px-2 text-[0.9em]"
               disabled={row.enabled ? !isOwner : !canManage}
               onClick={() => toggle(row)}
             >
@@ -331,7 +331,7 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
             <Button
               size="sm"
               variant="ghost"
-              className="h-7 px-2 text-[13px]"
+              className="h-7 px-2 text-[0.9em]"
               disabled={!canManage}
               onClick={() =>
                 setConfirmation({
@@ -360,7 +360,7 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
             <Button
               size="sm"
               variant="ghost"
-              className="h-7 px-2 text-[13px] text-muted-foreground hover:text-destructive"
+              className="h-7 px-2 text-[0.9em] text-muted-foreground hover:text-destructive"
               disabled={!isOwner}
               onClick={() =>
                 void mutate(async () => {
@@ -378,7 +378,7 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
             </Button>
           </div>
           {!canManage ? (
-            <p className="mx-auto max-w-2xl px-4 pt-4 text-[13px] text-muted-foreground sm:px-6">
+            <p className="mx-auto max-w-2xl px-4 pt-4 text-[0.9em] text-muted-foreground sm:px-6">
               {t(
                 'schedules.readOnly',
                 'Only the owner can edit this schedule, using a machine with Schedule support.'
@@ -389,7 +389,7 @@ function SchedulesContent({ scheduleId }: { scheduleId?: string }) {
             .filter((r) => r === matchingScheduleRuntime(row, registry.runtimes) && r.blockedCode)
             .map((r) => (
               <p
-                className="mx-auto mt-4 flex max-w-2xl items-start gap-2 rounded-lg border border-status-warning/40 px-3 py-2 text-[13px] sm:px-4"
+                className="mx-auto mt-4 flex max-w-2xl items-start gap-2 rounded-lg border-[0.5px] border-status-warning/40 px-3 py-2 text-[0.9em] sm:px-4"
                 key={r.machineId}
               >
                 <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-status-warning" />
@@ -678,7 +678,7 @@ function ScheduleEditor({
             </PropertyRow>
           ) : null}
           {!project && destination.kind === 'new_session' ? (
-            <p className="px-3 py-2 text-xs text-muted-foreground">
+            <p className="px-3 py-2 text-[0.8em] text-muted-foreground">
               {t(
                 'schedules.chatOnlyHelp',
                 'Without a project each run is a plain chat with the Agent — no repository is checked out.'
@@ -702,15 +702,15 @@ function ScheduleSessionHistory({ scheduleId }: { scheduleId: string }) {
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return (
     <section className="mx-auto w-full max-w-2xl px-4 pb-8 sm:px-6">
-      <h2 className="mb-1.5 px-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
+      <h2 className="mb-1.5 px-1 text-[0.75em] font-normal text-muted-foreground">
         {t('schedules.history', 'Run history')}
       </h2>
       {linked.length === 0 ? (
-        <p className="rounded-lg border border-border/70 bg-card/40 px-3 py-3 text-[13px] text-muted-foreground">
+        <p className={cn(scheduleCardClass, 'px-3 py-3 text-[0.9em] text-muted-foreground')}>
           {t('schedules.noRuns', 'No Sessions have been created yet.')}
         </p>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-border/70 bg-card/40">
+        <div className={scheduleCardClass}>
           {linked.slice(0, 100).map((s) => (
             <ScheduleHistoryRow
               key={s.id}
@@ -736,18 +736,18 @@ function ScheduleHistoryRow({ session: s, onOpen }: { session: SessionMeta; onOp
   return (
     <button
       key={s.id}
-      className="flex w-full items-center gap-3 border-b border-border/60 px-3 py-2 text-left text-[13px] transition-colors first:rounded-t-lg last:rounded-b-lg last:border-b-0 hover:bg-hover"
+      className="flex w-full items-center gap-3 px-3 py-2 text-left text-[0.9em] transition-colors hover:bg-foreground/[0.03] dark:hover:bg-white/[0.04]"
       onClick={onOpen}
     >
       <span className="min-w-0 flex-1 truncate">
         {s.title || t('schedules.openRun', 'Open run')}
       </span>
-      <span className="shrink-0 text-xs text-muted-foreground">
+      <span className="shrink-0 text-[0.85em] text-muted-foreground">
         {liveStatus
           ? t(`schedules.sessionState.${liveStatus.type}`, liveStatus.type)
           : t('schedules.sessionState.inactive', 'Inactive')}
       </span>
-      <time className="shrink-0 text-xs tabular-nums text-muted-foreground">
+      <time className="shrink-0 text-[0.85em] tabular-nums text-muted-foreground">
         {new Date(s.createdAt).toLocaleString(undefined, {
           dateStyle: 'short',
           timeStyle: 'short',
