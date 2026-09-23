@@ -26,15 +26,19 @@ describe('builtin Kimi shared contract', () => {
   it('provides stable modes without pretending to know account-specific models', () => {
     const capabilities = getStaticBuiltinAcpCapabilities('builtin', 'kimi');
 
-    expect(capabilities?.modes.map((mode) => mode.id)).toEqual([
+    expect(capabilities?.modes.map((mode) => mode.id)).toEqual(['default', 'plan', 'auto', 'yolo']);
+    expect(capabilities?.models).toEqual([]);
+    expect(capabilities?.configOptions.map((option) => option.id)).toEqual([
+      'permission_mode',
+      'plan_mode',
+    ]);
+    expect(capabilities?.configOptions[0]?.currentValue).toBe('auto');
+    expect(capabilities?.configOptions[0]?.category).toBe('_permission');
+    expect(capabilities?.configOptions[0]?.options.map((option) => option.value)).toEqual([
       'default',
-      'plan',
       'auto',
       'yolo',
     ]);
-    expect(capabilities?.models).toEqual([]);
-    expect(capabilities?.configOptions.map((option) => option.id)).toEqual(['mode']);
-    expect(capabilities?.configOptions[0]?.currentValue).toBe('auto');
     expect(classifyPermissionModeFace('yolo')).toEqual({
       kind: 'full-access',
       tone: 'warning',

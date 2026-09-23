@@ -168,6 +168,7 @@ function Harness({
       onUpgrade={() => {}}
       onSwitchInterval={() => {}}
       switchIntervalPending={switchIntervalPending}
+      onPaymentMethod={() => {}}
       onCancelSubscription={() => {}}
       onResumeSubscription={() => {}}
       onRedeemCode={() => {}}

@@ -73,6 +73,7 @@ describe('sidebar navigation model', () => {
                 machineId: 'machine',
                 localProjectId: 'project',
                 collapsed: false,
+                showFull: false,
                 sessions: [{ id: 'local-new' }, { id: 'local-old' }],
               },
             ],
@@ -149,6 +150,7 @@ describe('sidebar navigation model', () => {
                 machineId: 'machine',
                 localProjectId: 'hidden-project',
                 collapsed: false,
+                showFull: false,
                 sessions: [{ id: 'hidden-local' }],
               },
             ],
@@ -177,6 +179,48 @@ describe('sidebar navigation model', () => {
       updated: { items: updatedItems, collapsed: true, showFull: true },
     });
     expect(sessionIds(updatedCollapsed)).toEqual(['pinned']);
+  });
+
+  it('matches the local-project preview and expanded list', () => {
+    const localSessions = Array.from({ length: 7 }, (_, index) => ({
+      id: `local-${index}`,
+      rootRankMs: 7 - index,
+    }));
+    const localProject = {
+      machineId: 'machine',
+      localProjectId: 'project',
+      collapsed: false,
+      showFull: false,
+      sessions: localSessions,
+    };
+
+    const preview = buildSidebarNavigationItems({
+      ...baseOptions,
+      workspace: {
+        ...baseOptions.workspace,
+        localSections: [{ collapsed: false, projects: [localProject] }],
+      },
+    });
+    expect(sessionIds(preview)).toEqual(['local-0', 'local-1', 'local-2', 'local-3', 'local-4']);
+    expect(preview.at(-1)).toEqual({
+      kind: 'show-more',
+      groupKey: 'local-project:machine:project',
+      expanded: false,
+    });
+
+    const expanded = buildSidebarNavigationItems({
+      ...baseOptions,
+      workspace: {
+        ...baseOptions.workspace,
+        localSections: [{ collapsed: false, projects: [{ ...localProject, showFull: true }] }],
+      },
+    });
+    expect(sessionIds(expanded)).toEqual(localSessions.map((session) => session.id));
+    expect(expanded.at(-1)).toEqual({
+      kind: 'show-more',
+      groupKey: 'local-project:machine:project',
+      expanded: true,
+    });
   });
 });
 

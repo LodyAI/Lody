@@ -120,6 +120,10 @@ export function AgentRoleEditorDialog({
           configId: selectedAgentConfig.id,
           cliType: selectedAgentConfig.cliType,
           agentType: selectedAgentConfig.agentType,
+          // A Role pins its model: the effort ladder must follow the model
+          // being edited, not the probe-time current one, so the picker and
+          // the compatibility check agree on the same ladder.
+          selectedModelId: editor?.value.modelId ?? null,
           runtimeOverrides: selectedAgentConfig.runtimeOverrides,
           machine: selectedMachineId ? (machines.get(selectedMachineId) ?? null) : null,
         }
@@ -218,7 +222,7 @@ export function AgentRoleEditorDialog({
         )}
       >
         <header className="shrink-0 border-b border-border/60 px-5 py-3 pr-12">
-          <DialogTitle className="text-sm font-semibold">
+          <DialogTitle className="text-sm font-normal">
             {editor?.mode === 'edit'
               ? t('settings.agentRoles.editTitle')
               : t('settings.agentRoles.addTitle')}

@@ -97,12 +97,40 @@ export function deriveRepoIdFromGitHubRepo(repo: string): RepoId {
 }
 
 /**
- * Normalize a filesystem path to use forward slashes (for URI compatibility).
- * On Windows `os.homedir()` returns `C:\Users\...`; this converts backslashes
- * to forward slashes so the result is safe for `vscode://file/...` URIs.
+ * Normalize a filesystem path to use forward slashes, so the segment joining below
+ * has a single separator to reason about. Callers that hand the result back to a
+ * host (`fs`, `spawn`, an error message, a launcher argv) restore the host's own
+ * separator with `toHostSeparators`; URI builders normalize to `/` themselves.
  */
 function normalizePath(p: string): string {
   return p.replace(/\\/g, '/');
+}
+
+const WINDOWS_ROOTED_PATH_RE = /^[A-Za-z]:[\\/]/;
+
+/**
+ * Whether a stored host path was produced on Windows.
+ *
+ * The shape of the value decides, never `process.platform`: these builders run in the
+ * renderer against a `dotlodyPath` that the Flock carries from whichever machine owns
+ * the session, so a Windows desktop routinely builds paths for a Linux machine and a
+ * Linux browser builds paths for a Windows one.
+ */
+function isWindowsStyleHostPath(hostPath: string): boolean {
+  return WINDOWS_ROOTED_PATH_RE.test(hostPath) || hostPath.includes('\\');
+}
+
+/**
+ * Re-apply `hostPath`'s separator to a `/`-joined path derived from it.
+ *
+ * Without this a Windows machine's worktree and chat paths surface as
+ * `C:/Users/x/.lody/...` while every path the CLI builds with `path.join` (local
+ * project roots, the chat workdir the daemon actually creates) is `C:\Users\x\...`.
+ * The two spellings name one directory but never compare equal, and the mixed form
+ * is what the user sees in the workspace path, path launchers and workdir errors.
+ */
+function toHostSeparators(joined: string, hostPath: string): string {
+  return isWindowsStyleHostPath(hostPath) ? joined.replace(/\//g, '\\') : joined;
 }
 
 function normalizeLocalProjectPathForRepoId(p: string): string {
@@ -200,21 +228,29 @@ function sha256Hex(value: string): string {
 
 /**
  * Base directory for all Lody repositories on the host.
- * Returns `<homeDir>/.lody/repos`.
+ * Returns `<homeDir>/.lody/repos`, in the separator style of `homeDir` itself.
+ *
+ * Carries the same caveat as `getLodyDotlodyPath`: the literal `.lody` is a fallback
+ * for a machine with no published `dotlodyPath` row, not the installation's real data
+ * root. Node callers have `getLodyDataDir()` and must use it.
  *
  * @param homeDir - The user's home directory (e.g. from `os.homedir()`).
  *   Required because this module is browser-compatible and cannot access Node.js `os`.
  */
 export function getLodyReposBaseDir(homeDir: string): string {
-  return `${normalizePath(homeDir)}/.lody/repos`;
+  return getLodyReposBaseDirFromDotlodyPath(getLodyDotlodyPath(homeDir));
 }
 
 /**
  * Host path for the machine-wide Lody data directory.
- * Returns `<homeDir>/.lody`.
+ * Returns `<homeDir>/.lody`, in the separator style of `homeDir` itself.
+ *
+ * Only a fallback for a machine that has not published its `dotlodyPath` row yet:
+ * being browser-safe, it cannot see `LODY_DATA_DIR` or the OSS `.lody-oss` profile,
+ * both of which the published row honors. Prefer the published row when present.
  */
 export function getLodyDotlodyPath(homeDir: string): string {
-  return `${normalizePath(homeDir)}/.lody`;
+  return toHostSeparators(`${normalizePath(homeDir)}/.lody`, homeDir);
 }
 
 function normalizeDotlodyPath(dotlodyPath: string): string {
@@ -227,10 +263,10 @@ function normalizeDotlodyPath(dotlodyPath: string): string {
 
 /**
  * Base directory for all Lody repositories from a stored machine `.lody` path.
- * Returns `<dotlodyPath>/repos`.
+ * Returns `<dotlodyPath>/repos`, in the separator style of `dotlodyPath` itself.
  */
 export function getLodyReposBaseDirFromDotlodyPath(dotlodyPath: string): string {
-  return `${normalizeDotlodyPath(dotlodyPath)}/repos`;
+  return toHostSeparators(`${normalizeDotlodyPath(dotlodyPath)}/repos`, dotlodyPath);
 }
 
 /**
@@ -254,7 +290,7 @@ export function getWorktreeHostPath(
 ): string {
   assertSafeSessionId(sessionId);
   if (homeDir) {
-    return `${getLodyReposBaseDir(homeDir)}/${repoId}/worktrees/${sessionId}`;
+    return getWorktreeHostPathFromDotlodyPath(repoId, sessionId, getLodyDotlodyPath(homeDir));
   }
   // Fallback: use ~ as placeholder (useful for display / protocol URIs)
   return `~/.lody/repos/${repoId}/worktrees/${sessionId}`;
@@ -269,7 +305,10 @@ export function getWorktreeHostPathFromDotlodyPath(
   dotlodyPath: string
 ): string {
   assertSafeSessionId(sessionId);
-  return `${getLodyReposBaseDirFromDotlodyPath(dotlodyPath)}/${repoId}/worktrees/${sessionId}`;
+  return toHostSeparators(
+    `${normalizeDotlodyPath(dotlodyPath)}/repos/${repoId}/worktrees/${sessionId}`,
+    dotlodyPath
+  );
 }
 
 /**
@@ -280,7 +319,7 @@ export function getDefaultSessionWorkdirFromDotlodyPath(
   sessionId: SessionId
 ): string {
   assertSafeSessionId(sessionId);
-  return `${normalizeDotlodyPath(dotlodyPath)}/chats/${sessionId}`;
+  return toHostSeparators(`${normalizeDotlodyPath(dotlodyPath)}/chats/${sessionId}`, dotlodyPath);
 }
 
 /** Derive a stable repoId for a local project by hashing its absolute root path. */

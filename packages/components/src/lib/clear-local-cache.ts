@@ -16,14 +16,22 @@
  *   the install — auth token, preferences, cookies, all IndexedDB databases, all
  *   Cache Storage entries, service workers. The escape hatch for a user wedged on
  *   a crash loop that survives reloads (e.g. a poisoned sign-in state).
+ *
+ * On the desktop the same two levels can also be armed from outside the app with
+ * `lody app reset-cache`, for a renderer too wedged to click either. That request
+ * reaches the boot path below through the Electron main process instead of the
+ * flag; see `apps/electron/src/main/services/local-reset-service.ts`.
  */
 
 import { LORO_STREAMS_TOKEN_STORAGE_KEY_PREFIX } from '@lody/shared';
 import { workspaceInfoCache } from './local-storage-cache';
 import { EAGER_SYNC_HIGH_WATER_DB_NAME } from './eager-sync-high-water-cache';
+import { EAGER_SYNC_CACHE_DB } from '../providers/eager-sync-snapshot-cache';
 import { replaceAppWindowLocation } from './app-location';
 import { getRegisteredAuthClient } from './auth-client-singleton';
 import { getIpcServices } from './electron-ipc-client';
+import { isWarmWindow } from './desktop-window';
+import { PROMPT_SHORTCUT_DATA_PREFIX } from './prompt-shortcut-storage';
 
 /**
  * Prefix for the per-workspace meta remote-cursor startup-bypass marker.
@@ -43,6 +51,7 @@ export type PendingLocalClearMode = 'cache' | 'hard';
 /** IndexedDB databases created with static names (not suffixed per workspace). */
 const KNOWN_INDEXEDDB_NAMES = [
   EAGER_SYNC_HIGH_WATER_DB_NAME,
+  EAGER_SYNC_CACHE_DB,
   'lody:repo-file-paths',
   'lody:repo-issues-prs',
   'lody:github-pr-cache',
@@ -85,6 +94,9 @@ function knownWorkspaceDatabaseNames(): string[] {
  * added cache key that is missing here merely survives one clear (safe),
  * whereas a preference key missing from an allowlist would be wiped (unsafe).
  * When adding a `lody:*` localStorage cache, add its key or prefix here.
+ * `lody:session-share-secret:v1:*` is deliberately excluded: these are device-local
+ * credentials that cannot be recovered from the server. Only a hard reset clears
+ * them; an ordinary cache repair must not force every share link to be reset.
  */
 const LOCAL_STORAGE_CACHE_KEYS = [
   // slug → workspaceId/name map (`local-storage-cache.ts`). Read by
@@ -93,6 +105,7 @@ const LOCAL_STORAGE_CACHE_KEYS = [
   'lody:workspaceInfo',
   'lody:githubReposCache',
   'lody:githubBranchesCache',
+  'lody:usageDayDetails',
   // Cached current-user snapshot (`auth-bootstrap.ts`); the auth token itself
   // is deliberately kept — a cache clear does not sign the user out.
   'lody:auth-bootstrap',
@@ -188,7 +201,13 @@ export async function clearAllLodyLocalCache(extraNames: string[] = []): Promise
       // `indexedDB.databases()` is unsupported (e.g. Firefox) — fall back to the
       // known static names plus any per-workspace names the caller passed.
     }
-    await Promise.all([...names].map(deleteDatabaseBestEffort));
+    // A Shortcut outbox may contain the only copy of an offline save. Only the
+    // explicitly destructive hard reset below may remove these databases.
+    await Promise.all(
+      [...names]
+        .filter((name) => !name.startsWith(PROMPT_SHORTCUT_DATA_PREFIX))
+        .map(deleteDatabaseBestEffort)
+    );
   }
 
   if (typeof caches !== 'undefined') {
@@ -381,6 +400,34 @@ export function readPendingLocalClearMode(): PendingLocalClearMode | null {
   return null;
 }
 
+/** Cap on how long boot waits for the desktop to answer whether a reset is armed. */
+const NATIVE_PENDING_CLEAR_TIMEOUT_MS = 2000;
+
+/**
+ * Ask the desktop whether `lody app reset-cache` armed a clear for this launch.
+ *
+ * A user whose renderer is wedged cannot press Settings → Clear cache, so the CLI
+ * arms it out of band and the Electron main process reports it here — once, so a
+ * later reload of the same window does not repeat the clear. Bounded because this
+ * runs on every desktop boot: a main process that never answers must delay the
+ * first render, not prevent it. Web and mobile have no bridge and skip it.
+ */
+async function readNativePendingClearMode(): Promise<PendingLocalClearMode | null> {
+  const services = getIpcServices();
+  if (!services) return null;
+  try {
+    return await Promise.race([
+      services.app.consumePendingLocalClear(),
+      new Promise<null>((resolve) => {
+        setTimeout(() => resolve(null), NATIVE_PENDING_CLEAR_TIMEOUT_MS);
+      }),
+    ]);
+  } catch (error) {
+    console.warn('[Lody] failed to read a CLI-armed cache clear', error);
+    return null;
+  }
+}
+
 // One clear per page load, shared by every caller. `AppInitializer` kicks it off
 // so a user wedged before any workspace exists (e.g. stuck signing in) still
 // gets the wipe, while `RuntimeProvider` awaits the same promise so the repo DB
@@ -388,8 +435,9 @@ export function readPendingLocalClearMode(): PendingLocalClearMode | null {
 let bootClearPromise: Promise<PendingLocalClearMode | null> | null = null;
 
 async function runPendingClearOnBoot(): Promise<PendingLocalClearMode | null> {
-  const mode = readPendingLocalClearMode();
+  const mode = readPendingLocalClearMode() ?? (await readNativePendingClearMode());
   if (!mode) return null;
+  await getIpcServices()?.app.prepareCacheClear();
 
   try {
     if (mode === 'hard') {
@@ -418,11 +466,18 @@ async function runPendingClearOnBoot(): Promise<PendingLocalClearMode | null> {
  *   cached yet.
  */
 export async function maybeClearLodyCacheOnBoot(extraNames: string[] = []): Promise<void> {
+  // The hidden warm spare boots the same providers; it must never consume a
+  // clear armed for the window the user will actually see.
+  if (isWarmWindow()) return;
   bootClearPromise ??= runPendingClearOnBoot();
   const mode = await bootClearPromise;
   // Nothing was pending, or this caller has no extra databases to contribute.
   if (!mode || extraNames.length === 0) return;
-  await Promise.all(extraNames.map(deleteDatabaseBestEffort));
+  await Promise.all(
+    extraNames
+      .filter((name) => mode === 'hard' || !name.startsWith(PROMPT_SHORTCUT_DATA_PREFIX))
+      .map(deleteDatabaseBestEffort)
+  );
 }
 
 /** Test-only: forget the per-page-load memo so each case starts clean. */

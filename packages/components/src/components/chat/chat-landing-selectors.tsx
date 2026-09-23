@@ -1,15 +1,7 @@
 import { useMemo } from 'react';
 import type { ReactNode } from 'react';
-import {
-  ShieldCheck,
-  Compass,
-  GitBranch,
-  Loader2,
-  PenLine,
-  ShieldOff,
-  Eye,
-  Monitor,
-} from 'lucide-react';
+import { ShieldCheck, Compass, GitBranch, PenLine, ShieldOff, Eye, Monitor } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { AcpSessionSelect, OptionSelector, type AcpSessionSelectOption } from '@/components/shared';
 import type { OptionSelectorOption } from '@/components/shared/option-selector';
 import type {
@@ -24,6 +16,7 @@ import { useOnlineMachines } from '@/hooks/use-online-machines';
 export type ChatLandingTone = 'light' | 'dark';
 
 const modeIconClassName = 'h-3.5 w-3.5';
+const MODE_ICON_STROKE_WIDTH = 1.5;
 
 /**
  * Shared icon size for agent config logos in compact selectors.
@@ -38,15 +31,15 @@ export const agentIconClassName = 'h-3 w-3 shrink-0 opacity-80';
 export const getModeIcon = (modeId: string | null): ReactNode => {
   switch (modeId) {
     case 'plan':
-      return <Compass className={modeIconClassName} />;
+      return <Compass className={modeIconClassName} strokeWidth={MODE_ICON_STROKE_WIDTH} />;
     case 'acceptEdits':
-      return <PenLine className={modeIconClassName} />;
+      return <PenLine className={modeIconClassName} strokeWidth={MODE_ICON_STROKE_WIDTH} />;
     case 'dontAsk':
-      return <ShieldOff className={modeIconClassName} />;
+      return <ShieldOff className={modeIconClassName} strokeWidth={MODE_ICON_STROKE_WIDTH} />;
     case 'read-only':
-      return <Eye className={modeIconClassName} />;
+      return <Eye className={modeIconClassName} strokeWidth={MODE_ICON_STROKE_WIDTH} />;
     default:
-      return <ShieldCheck className={modeIconClassName} />;
+      return <ShieldCheck className={modeIconClassName} strokeWidth={MODE_ICON_STROKE_WIDTH} />;
   }
 };
 
@@ -55,7 +48,7 @@ export const getModeIcon = (modeId: string | null): ReactNode => {
  */
 export const getSelectorTagClassName = (_tone: ChatLandingTone): string => {
   return cn(
-    'w-auto h-6 px-2 gap-1 rounded-[4px] [&_span]:text-xs [&_span]:leading-tight',
+    'w-auto h-6 px-2 gap-1 rounded-[4px] [&_span]:text-[0.9em] [&_span]:leading-tight',
     'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
   );
 };
@@ -65,7 +58,7 @@ export const getSelectorTagClassName = (_tone: ChatLandingTone): string => {
  */
 export const getCompactSelectorTagClassName = (_tone: ChatLandingTone): string => {
   return cn(
-    'w-auto h-6 px-2 gap-1 rounded-[4px] border [&_span]:text-xs [&_span]:leading-tight',
+    'w-auto h-6 px-2 gap-1 rounded-[4px] border [&_span]:text-[0.9em] [&_span]:leading-tight',
     'border-input-border/70 bg-input/80 text-muted-foreground hover:bg-muted/60 hover:text-foreground'
   );
 };
@@ -246,7 +239,7 @@ export function BranchSelector({
       renderTriggerValue={(option) => (
         <>
           {loading ? (
-            <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+            <Spinner className="h-4 w-4 shrink-0" />
           ) : (
             <GitBranch className="h-4 w-4 shrink-0" />
           )}
@@ -259,7 +252,7 @@ export function BranchSelector({
         <div className="flex min-w-0 flex-col">
           <span className="whitespace-normal break-words leading-snug">{option.label}</span>
           {option.description && (
-            <span className="line-clamp-2 text-xs text-muted-foreground">{option.description}</span>
+            <span className="line-clamp-2 text-[0.8em] text-muted-foreground">{option.description}</span>
           )}
         </div>
       )}
@@ -333,7 +326,7 @@ export function MachineSelector({
       renderTriggerValue={(option) => (
         <div className="flex min-w-0 items-center gap-1.5" title={option?.label}>
           {loading ? (
-            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin opacity-70" />
+            <Spinner className="h-3.5 w-3.5 shrink-0 opacity-70" />
           ) : (
             <Monitor className="h-3.5 w-3.5 shrink-0 opacity-70" />
           )}

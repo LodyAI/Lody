@@ -3,12 +3,13 @@ import type { SidebarOrganizeMode } from '@/atoms/sidebar-state';
 import {
   buildGroups,
   getVisibleSessionGroupRows,
+  MAX_VISIBLE_SESSIONS,
   sessionGroupOverflowsPreview,
   type SessionRowGroup,
   type SessionListRepoState,
   type SessionListRow,
 } from '@/components/session-list';
-import { buildOpenedBySessionTree } from '@/lib/session-opened-by-tree';
+import { buildOpenedBySessionTree, countOpenedByTreeRoots } from '@/lib/session-opened-by-tree';
 import {
   getVisibleUpdatedItems,
   sortUpdatedItems,
@@ -20,6 +21,7 @@ type SidebarNavigationLocalProject = {
   machineId: string;
   localProjectId: string;
   collapsed: boolean;
+  showFull: boolean;
   sessions: Array<{
     id: string;
     /** Sidebar row to nest under; resolved by the sidebar (child Tab → root). */
@@ -28,6 +30,10 @@ type SidebarNavigationLocalProject = {
     rootRankMs?: number;
   }>;
 };
+
+export function getLocalProjectSessionGroupKey(machineId: string, localProjectId: string): string {
+  return `local-project:${machineId}:${localProjectId}`;
+}
 
 export type SidebarNavigationLocalSection = {
   collapsed: boolean;
@@ -86,7 +92,7 @@ function emitLocalSections(
   for (const section of sections) {
     if (section.collapsed) continue;
     for (const project of section.projects) {
-      const projectKey = `${project.machineId}:${project.localProjectId}`;
+      const projectKey = getLocalProjectSessionGroupKey(project.machineId, project.localProjectId);
       items.push({
         kind: 'local-project',
         machineId: project.machineId,
@@ -101,9 +107,18 @@ function emitLocalSections(
         getOpenedBySessionId: (session) => session.openedByRowSessionId ?? null,
         isCollapsed: (openerId) => collapsedOpenedBySessions[openerId] === true,
         rootRank: (session) => session.rootRankMs ?? 0,
+        ...(project.showFull ? {} : { maxRoots: MAX_VISIBLE_SESSIONS }),
       });
       for (const node of nodes) {
         items.push({ kind: 'session', sessionId: node.item.id, groupKey: projectKey });
+      }
+      if (
+        countOpenedByTreeRoots(project.sessions, {
+          getId: (session) => session.id,
+          getOpenedBySessionId: (session) => session.openedByRowSessionId ?? null,
+        }) > MAX_VISIBLE_SESSIONS
+      ) {
+        items.push({ kind: 'show-more', groupKey: projectKey, expanded: project.showFull });
       }
     }
   }

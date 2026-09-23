@@ -7,11 +7,11 @@ import {
   ChevronRight,
   CircleHelp,
   Folder,
-  Loader2,
   LockKeyhole,
   MonitorCog,
   Users,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import type { AgentConfigMeta, MachineId } from '@lody/shared';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { localMachineIdAtom } from '@/atoms/local-probe';
@@ -160,9 +160,9 @@ export function AccountMachinesOverviewView({
   return (
     <TooltipProvider delayDuration={250}>
       <section className="mx-3 overflow-hidden rounded-xl border border-border/60 bg-card/60 md:mx-0 md:rounded-lg">
-        <header className="flex items-start justify-between gap-3 border-b border-border/60 bg-muted/30 px-3 py-2.5">
+        <header className="flex items-start justify-between gap-3 border-b border-border/60 dark:bg-muted/30 px-3 py-2.5">
           <div className="min-w-0">
-            <h2 className="text-xs font-semibold text-muted-foreground">
+            <h2 className="text-xs font-normal text-muted-foreground">
               {t('settings.account.machines.title', 'My machines')}
             </h2>
             <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground/85">
@@ -193,7 +193,7 @@ export function AccountMachinesOverviewView({
           </Tooltip>
         </header>
 
-        <div className="hidden cursor-default select-none grid-cols-[minmax(180px,1fr)_100px_180px_140px_32px] items-center gap-3 border-b border-border/50 px-3 py-1.5 text-[10px] font-medium text-muted-foreground/70 md:grid">
+        <div className="hidden cursor-default select-none grid-cols-[minmax(180px,1fr)_100px_180px_140px_32px] items-center gap-3 border-b border-border/50 px-3 py-1.5 text-[10px] font-normal text-muted-foreground/70 md:grid">
           <span>{t('settings.account.machines.machineColumn', 'Machine')}</span>
           <span>{t('settings.account.machines.accessColumn', 'Access')}</span>
           <span>{t('settings.account.machines.agentsColumn', 'Agents')}</span>
@@ -203,7 +203,7 @@ export function AccountMachinesOverviewView({
 
         {loading && items.length === 0 ? (
           <div className="flex items-center justify-center gap-2 px-3 py-8 text-xs text-muted-foreground">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <Spinner className="h-3.5 w-3.5" />
             {t('workspace.machines.loadingVisibility', 'Loading machines')}
           </div>
         ) : items.length === 0 ? (
@@ -231,14 +231,14 @@ export function AccountMachinesOverviewView({
                         <button
                           type="button"
                           onClick={() => onManageMachine(item.id)}
-                          className="min-w-0 truncate rounded-sm text-start text-sm font-medium text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          className="min-w-0 truncate rounded-sm text-start text-sm font-normal text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         >
                           {item.name}
                         </button>
                         {item.id === currentMachineId ? (
                           <Badge
                             variant="secondary"
-                            className="shrink-0 px-1.5 py-0 text-[10px] font-medium text-muted-foreground"
+                            className="shrink-0 px-1.5 py-0 text-[10px] font-normal text-muted-foreground"
                           >
                             {t('settings.account.machines.localMachine', 'This machine')}
                           </Badge>
@@ -269,7 +269,7 @@ export function AccountMachinesOverviewView({
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="h-8 justify-between gap-2 bg-foreground/[0.04] px-2 text-xs hover:bg-foreground/[0.08]"
+                    className="h-8 justify-between gap-2 bg-foreground/[0.04] px-2 text-xs font-normal hover:bg-foreground/[0.08]"
                     onClick={() => toggleDirectories(item.id)}
                     aria-expanded={expanded}
                   >
@@ -345,7 +345,7 @@ export function AccountMachinesOverviewView({
                               strokeWidth={1.75}
                             />
                             <span className="min-w-0 flex-1">
-                              <span className="block truncate text-xs font-medium text-foreground">
+                              <span className="block truncate text-xs font-normal text-foreground">
                                 {directory.name}
                               </span>
                               <span className="block truncate font-mono text-[10px] text-muted-foreground">
@@ -388,7 +388,7 @@ function AgentStackButton({ agents, onClick }: { agents: AgentConfigMeta[]; onCl
           type="button"
           variant="ghost"
           size="sm"
-          className="h-8 min-w-0 justify-between gap-2 bg-foreground/[0.04] px-2 hover:bg-foreground/[0.08]"
+          className="h-8 min-w-0 justify-between gap-2 bg-foreground/[0.04] px-2 font-normal hover:bg-foreground/[0.08]"
           onClick={onClick}
           aria-label={t('settings.account.machines.configureAgents', 'Configure Agents')}
         >
@@ -414,7 +414,7 @@ function AgentStackButton({ agents, onClick }: { agents: AgentConfigMeta[]; onCl
               ))
             )}
             {hiddenCount > 0 ? (
-              <span className="flex h-6 min-w-6 items-center justify-center rounded-full border-2 border-card bg-muted px-1 text-[9px] font-medium text-muted-foreground">
+              <span className="flex h-6 min-w-6 items-center justify-center rounded-full border-2 border-card bg-muted px-1 text-[9px] font-normal text-muted-foreground">
                 +{hiddenCount}
               </span>
             ) : null}
@@ -425,7 +425,7 @@ function AgentStackButton({ agents, onClick }: { agents: AgentConfigMeta[]; onCl
         </Button>
       </TooltipTrigger>
       <TooltipContent className="max-w-64">
-        <p className="font-medium">
+        <p className="font-normal">
           {t('settings.account.machines.configureAgents', 'Configure Agents')}
         </p>
         <p className="mt-0.5 text-muted-foreground">

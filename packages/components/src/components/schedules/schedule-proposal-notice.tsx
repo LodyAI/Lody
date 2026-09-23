@@ -80,7 +80,7 @@ export function ScheduleProposalNotice({
     if (!runtime) return;
     let cancelled = false;
     void runtime
-      .withSessionStore(sessionId, (store) => store.getState().history)
+      .withSessionStore(sessionId, (store) => store.sessionData.history.readAll())
       .then((history) => {
         if (cancelled) return;
         const config = resolveSessionConversationConfig(history);
@@ -137,18 +137,19 @@ export function ScheduleProposalNotice({
   const writeOutcome = useCallback(
     async (next: ScheduleProposalMeta) => {
       if (!runtime) return;
-      const entry = await runtime.withSessionStore(sessionId, (store) =>
-        store.getState().history.find((item) => item.id === entryId)
+      const read = await runtime.withSessionStore(sessionId, (store) =>
+        store.sessionData.history.readTurn(entryId)
       );
-      if (!entry) return;
+      if (read.state !== 'ready') return;
+      const entry = read.turn;
       const items = Array.isArray(entry.items) ? [...(entry.items as unknown[])] : [];
       const item = items[itemIndex];
       if (!item || typeof item !== 'object') return;
       items[itemIndex] = { ...(item as Record<string, unknown>), meta: next };
-      await runtime.writer.updateSessionHistory(sessionId, entryId, {
-        ...(entry as unknown as Record<string, unknown>),
-        items,
-      });
+      const nextEntry = { ...entry, items } as unknown as Parameters<
+        typeof runtime.writer.updateSessionHistory
+      >[2];
+      await runtime.writer.updateSessionHistory(sessionId, entryId, nextEntry);
     },
     [entryId, itemIndex, runtime, sessionId]
   );
@@ -171,9 +172,8 @@ export function ScheduleProposalNotice({
       try {
         // Re-resolve from history at click time, so a mode changed since the
         // card rendered is the one that gets persisted.
-        const history = await runtime.withSessionStore(
-          sessionId,
-          (store) => store.getState().history
+        const history = await runtime.withSessionStore(sessionId, (store) =>
+          store.sessionData.history.readAll()
         );
         const latest = resolveSessionConversationConfig(history);
         const final = resolveScheduleProposalTarget({

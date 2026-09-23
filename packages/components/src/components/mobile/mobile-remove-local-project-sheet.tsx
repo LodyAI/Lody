@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { LocalProjectWorktreeCleanupPreflightResult } from '@lody/shared';
 import { useTranslation } from 'react-i18next';
-import { Loader2, X } from 'lucide-react';
+import { X } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
 import { Button } from '@/ui/button';
@@ -281,7 +282,7 @@ export function MobileRemoveLocalProjectSheet({
             >
               {isRemoving ? (
                 <>
-                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  <Spinner className="mr-1.5 h-3.5 w-3.5" />
                   {t('common.processing', 'Processing...')}
                 </>
               ) : (

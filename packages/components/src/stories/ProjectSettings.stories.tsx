@@ -9,10 +9,12 @@ import {
 } from '@lody/shared';
 import {
   ProjectSettingsView,
+  type AddableProjectMachine,
   type ProjectSettingsSection,
   type ProjectSettingsRow,
   type GithubProjectSettingsSection,
 } from '@/components/settings/project-settings';
+import { SettingsStoryProviders } from './settings-story-shell';
 
 const machineLocal = 'machine-local' as MachineId;
 const machineRemote = 'machine-remote' as MachineId;
@@ -43,6 +45,7 @@ function makeRow(
       createdAtMs: 1,
     },
     sharedWithTeam,
+    conversationCount: sharedWithTeam ? 12 : 3,
     isUpdating: false,
     canUpdateSharing: true,
     worktreeSetup: emptySetup,
@@ -88,6 +91,7 @@ const baseSections: ProjectSettingsSection[] = [
   {
     machineId: machineLocal,
     machineName: 'MacBook Pro',
+    sharedWithTeam: true,
     rows: [
       makeRow(
         'machine-local:project-lody',
@@ -110,6 +114,7 @@ const baseSections: ProjectSettingsSection[] = [
   {
     machineId: machineRemote,
     machineName: 'Workstation',
+    sharedWithTeam: false,
     rows: [
       makeRow(
         'machine-remote:project-cli',
@@ -148,25 +153,39 @@ const baseGithubSections: GithubProjectSettingsSection[] = [
   },
 ];
 
+const baseAddableMachines: AddableProjectMachine[] = [
+  { machineId: machineLocal, machineName: 'MacBook Pro', online: true },
+  { machineId: machineRemote, machineName: 'Workstation', online: false },
+];
+
 function StoryWrapper({
   sections = baseSections,
   githubSections = baseGithubSections,
+  addableMachines = baseAddableMachines,
   isLoading = false,
+  canRemove = false,
+  pendingKey = null,
+  initialProjectKey = null,
 }: {
   sections?: ProjectSettingsSection[];
   githubSections?: GithubProjectSettingsSection[];
+  addableMachines?: AddableProjectMachine[];
   isLoading?: boolean;
+  canRemove?: boolean;
+  pendingKey?: string | null;
+  initialProjectKey?: string | null;
 }) {
   const [currentSections, setCurrentSections] = useState(sections);
   const [currentGithubSections, setCurrentGithubSections] = useState(githubSections);
 
   return (
-    <div className="mx-auto max-w-4xl p-4">
+    <div className="mx-auto h-[min(90vh,950px)] max-w-[1100px] overflow-hidden rounded-xl border border-border bg-background p-4">
       <ProjectSettingsView
         sections={currentSections}
         githubSections={currentGithubSections}
         isLoading={isLoading}
         githubProjectsLoading={false}
+        initialProjectKey={initialProjectKey}
         onSharedWithTeamChange={async (row, sharedWithTeam) => {
           setCurrentSections((prev) =>
             prev.map((section) => ({
@@ -177,12 +196,27 @@ function StoryWrapper({
             }))
           );
         }}
-        onAddLocalProject={() => {
-          console.info('Add local project');
+        addableMachines={addableMachines}
+        onAddLocalProject={(machineId) => {
+          console.info('Add folder', machineId ?? '(choose a machine)');
         }}
         onAddGitHubProject={() => {
           console.info('Add GitHub project');
         }}
+        onOpenGitHubSettings={() => {
+          console.info('Open GitHub settings');
+        }}
+        canRemoveLocalProject={canRemove ? () => true : undefined}
+        onRequestRemoveLocalProject={
+          canRemove
+            ? (row) => {
+                console.info('Remove project', row.project.name);
+              }
+            : undefined
+        }
+        localProjectRemovalStateByKey={
+          pendingKey ? new Map([[pendingKey, 'waiting_for_device']]) : undefined
+        }
         onSyncHistory={async (row, provider) => {
           setCurrentSections((prev) =>
             prev.map((section) => ({
@@ -407,8 +441,15 @@ const meta = {
   title: 'Settings/ProjectSettings',
   component: StoryWrapper,
   parameters: {
-    layout: 'padded',
+    layout: 'fullscreen',
   },
+  decorators: [
+    (Story) => (
+      <SettingsStoryProviders capabilities={['teamSharing']}>
+        <Story />
+      </SettingsStoryProviders>
+    ),
+  ],
   tags: ['autodocs'],
 } satisfies Meta<typeof StoryWrapper>;
 
@@ -423,12 +464,47 @@ export const SingleMachine: Story = {
   },
 };
 
+export const InitialHistorySync: Story = {
+  args: {
+    sections: [
+      {
+        ...baseSections[0]!,
+        rows: [baseSections[0]!.rows[0]!],
+      },
+    ],
+    githubSections: [],
+    initialProjectKey: 'machine-local:project-lody',
+  },
+};
+
+export const SyncedEmptyHistory: Story = {
+  args: {
+    sections: [
+      {
+        ...baseSections[0]!,
+        rows: [
+          updateHistoryImportState(baseSections[0]!.rows[0]!, storyProviders[0]!, (state) => ({
+            ...state,
+            catalog: {
+              listed: 0,
+              lastListedAt: 0,
+              sessions: [],
+            },
+          })),
+        ],
+      },
+    ],
+    githubSections: [],
+  },
+};
+
 export const ManyProjects: Story = {
   args: {
     sections: [
       {
         machineId: machineLocal,
         machineName: 'MacBook Pro',
+        sharedWithTeam: true,
         rows: [
           makeRow('machine-local:p1', machineLocal, 'MacBook Pro', 'Lody', '/repo/lody', true),
           makeRow(
@@ -453,6 +529,7 @@ export const ManyProjects: Story = {
       {
         machineId: machineRemote,
         machineName: 'Workstation',
+        sharedWithTeam: false,
         rows: [
           makeRow(
             'machine-remote:p1',
@@ -479,11 +556,78 @@ export const ManyProjects: Story = {
 export const Empty: Story = {
   args: {
     sections: [],
+    addableMachines: [],
+  },
+};
+
+/** A machine the user can add to but that has no project yet still gets a pill
+    and an in-place add action. */
+export const MachineWithoutProjects: Story = {
+  args: {
+    sections: [],
+    githubSections: [],
+    addableMachines: [baseAddableMachines[0]!],
   },
 };
 
 export const Loading: Story = {
   args: {
     isLoading: true,
+  },
+};
+
+export const DangerZoneVisible: Story = {
+  args: {
+    canRemove: true,
+    initialProjectKey: 'machine-local:project-lody',
+  },
+};
+
+export const PendingRemoval: Story = {
+  args: {
+    canRemove: true,
+    pendingKey: 'machine-local:project-lody',
+  },
+};
+
+export const ManyMachines: Story = {
+  args: {
+    canRemove: true,
+    addableMachines: [
+      ...baseAddableMachines,
+      {
+        machineId: 'machine-bonjour' as MachineId,
+        machineName: 'zx MacBook-Pro.local',
+        online: true,
+      },
+      {
+        machineId: 'machine-studio' as MachineId,
+        machineName: 'Studio.local',
+        online: false,
+      },
+      {
+        machineId: 'machine-mini' as MachineId,
+        machineName: 'Mac-mini.local',
+        online: true,
+      },
+    ],
+    sections: [
+      ...baseSections,
+      {
+        machineId: 'machine-bonjour' as MachineId,
+        machineName: 'zx MacBook-Pro.local',
+        sharedWithTeam: false,
+        rows: [
+          makeRow(
+            'machine-bonjour:lody',
+            'machine-bonjour' as MachineId,
+            'zx MacBook-Pro.local',
+            'lody',
+            '/Users/zx/Code/lody',
+            false
+          ),
+        ],
+      },
+    ],
   },
 };

@@ -1,3 +1,4 @@
+import { resolveActiveAssistantTurnIdFromIndex } from '@/lib/conversation-view';
 import { useCallback, useEffect, useMemo } from 'react';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
@@ -10,7 +11,6 @@ import {
   getServerNow,
   isActiveSessionStatus,
   machineFlockKeys,
-  resolveActiveAssistantTurnId,
   type LocalProjectId,
   type LocalProjectMeta,
   type LocalProjectWorktreeCleanupPreflightResult,
@@ -150,7 +150,7 @@ export function useRemoveLocalProject() {
             const sessionId = session.id as SessionId;
             const activeAssistantTurnId = await runtime.withSessionStore(
               sessionId,
-              (sessionStore) => resolveActiveAssistantTurnId(sessionStore.getState().history)
+              (sessionStore) => resolveActiveAssistantTurnIdFromIndex(sessionStore.history)
             );
             if (!activeAssistantTurnId) return;
             await requestSessionCancel(sessionId, activeAssistantTurnId);
@@ -234,6 +234,18 @@ export function useRemoveLocalProject() {
 }
 
 const localProjectRemovalResultNotificationsInFlight = new Set<string>();
+// Keep completed projects suppressed while the durable command row is being
+// acknowledged and removed. The row is the source of truth for the eventual
+// success toast, so a stale landing selection must not race it with an access
+// error during that handoff.
+const localProjectRemovalCompletionSuppressionKeys = new Set<string>();
+
+export function isLocalProjectRemovalCompletionSuppressed(
+  machineId: MachineId | string,
+  localProjectId: LocalProjectId | string
+): boolean {
+  return localProjectRemovalCompletionSuppressionKeys.has(`${machineId}:${localProjectId}`);
+}
 
 /** Show and acknowledge durable cleanup results without treating them as pending removal. */
 export function useLocalProjectRemovalResultNotifications(
@@ -247,12 +259,16 @@ export function useLocalProjectRemovalResultNotifications(
 
   useEffect(() => {
     if (!runtime) return;
+    const completedCommandKeys = new Set<string>();
     for (const [machineId, rows] of rowsByMachineId) {
       for (const [localProjectId, command] of getMachineFlockDeleteLocalProjectEntries(rows)) {
         if (command.status !== 'completed' || !command.cleanupResult) continue;
+        const completionKey = `${machineId}:${localProjectId}`;
+        completedCommandKeys.add(completionKey);
         const notificationKey = `${machineId}:${localProjectId}:${command.requestedAt}`;
         if (localProjectRemovalResultNotificationsInFlight.has(notificationKey)) continue;
         localProjectRemovalResultNotificationsInFlight.add(notificationKey);
+        localProjectRemovalCompletionSuppressionKeys.add(completionKey);
         void (async () => {
           try {
             await runtime.writer.flockRowDelete(
@@ -282,6 +298,11 @@ export function useLocalProjectRemovalResultNotifications(
             localProjectRemovalResultNotificationsInFlight.delete(notificationKey);
           }
         })();
+      }
+    }
+    for (const completionKey of localProjectRemovalCompletionSuppressionKeys) {
+      if (!completedCommandKeys.has(completionKey)) {
+        localProjectRemovalCompletionSuppressionKeys.delete(completionKey);
       }
     }
   }, [rowsByMachineId, runtime, t]);

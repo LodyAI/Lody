@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { LoroDoc } from 'loro-crdt';
+import { withHistoryPort } from '../../../tests/history-port-fixture';
 import { Mirror } from 'loro-mirror';
 import {
   ScheduleDefinitionSchema,
@@ -60,14 +61,14 @@ describe('Schedule to ordinary Session handoff', () => {
             );
           }
           const mirror = docs.get(id)!;
-          return {
-            getHistory: async () => mirror.getState().history,
+          return withHistoryPort({
+            getHistory: () => mirror.getState().history,
             updateHistory: async (
               update: (history: SessionHistoryInput[]) => SessionHistoryInput[]
             ) => {
               mirror.setState({ ...mirror.getState(), history: update(mirror.getState().history) });
             },
-          };
+          });
         },
       } as unknown as LoroDocumentManager;
       const document: ScheduleDocument = {

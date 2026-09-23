@@ -1,0 +1,23 @@
+---
+title: '20260919-0.97.1'
+version: 0.97.1
+date: 2026-09-19
+description: Polish the desktop interface, tabs, and queue, and fix steering, Windows sign-in recovery, and more.
+---
+
+Version 0.97.1
+
+### 🐛 Fixes & Improvements
+
+- Fix the agent being force-stopped about 5 seconds after a guide message was sent to the built-in Claude.
+- Fix desktop sign-in failing on Windows when the system credential store can no longer be decrypted (for example after a machine is restored under a new account): it now recovers automatically and reports a clearer reason on failure.
+- Restore the built-in Devin runtime.
+- When closing several tabs in a row, the remaining tabs keep their width so the next close button stays under the cursor (as in Chromium).
+- Closing a tab that never had a message now deletes it instead of leaving an invisible session behind; closing a tab no longer shows a toast, and a lone tab no longer shows a close button.
+- While an agent works, the conversation shows a shimmering activity label with the elapsed time.
+- After a message Operation completes, it shows which Session it reached and presents the result as a received-reply card; open the full reply in a dialog.
+- A background task's full command can be opened in a dialog.
+- The workspace switcher header shows the current workspace.
+- Queued messages sit flush against the composer, and their images open in the image viewer.
+- Edited files without line stats are now labeled instead of showing an empty stat.
+- Desktop polish: macOS top bar aligned with the traffic lights, light-mode code block contrast, hover and settings surface layering, sidebar project group layout, the in-conversation find bar, and multi-line code sized to match the conversation body.

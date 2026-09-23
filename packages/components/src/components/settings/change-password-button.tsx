@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { toast } from 'sonner';
 import { validateNewPassword } from '@lody/shared';
 import { Button } from '@/ui/button';
@@ -157,7 +158,7 @@ export function ChangePasswordButton({
       <Button
         variant="ghost"
         size="sm"
-        className="bg-foreground/[0.06] hover:bg-foreground/[0.1]"
+        className="bg-foreground/[0.06] font-normal hover:bg-foreground/[0.1]"
         disabled={disabled}
         onClick={() => setOpen(true)}
       >
@@ -280,9 +281,7 @@ export function ChangePasswordButton({
                       }}
                       disabled={!currentPassword || isVerifying}
                     >
-                      {isVerifying ? (
-                        <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                      ) : null}
+                      {isVerifying ? <Spinner className="mr-1.5 h-3.5 w-3.5" /> : null}
                       {t('settings.profile.password.continueButton')}
                     </Button>
                   </>
@@ -299,7 +298,7 @@ export function ChangePasswordButton({
                       }}
                       disabled={isSubmitting || !newPassword || !confirmPassword}
                     >
-                      {isSubmitting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+                      {isSubmitting ? <Spinner className="mr-1.5 h-3.5 w-3.5" /> : null}
                       {t('settings.profile.password.submitButton')}
                     </Button>
                   </>
@@ -330,7 +329,7 @@ export function ChangePasswordButton({
                   }}
                   disabled={isSubmitting}
                 >
-                  {isSubmitting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+                  {isSubmitting ? <Spinner className="mr-1.5 h-3.5 w-3.5" /> : null}
                   {t('settings.profile.password.setupSubmitButton')}
                 </Button>
               </DialogFooter>

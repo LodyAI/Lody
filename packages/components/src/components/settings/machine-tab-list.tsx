@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useId, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronRight, ListFilter, LockKeyhole, Users } from 'lucide-react';
 import { type MachineId, type MachineViewMeta } from '@lody/shared';
@@ -16,6 +16,7 @@ import {
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/ui/tooltip';
 import { UserAvatar } from '@/components/user-avatar';
+import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 
 export type MachineTabListVariant = 'compact' | 'detailed';
 
@@ -60,13 +61,22 @@ export function MachineTabList({
   ownerByUserId,
 }: MachineTabListProps) {
   const { t } = useTranslation();
+  const scopeId = useId();
+  const handleItemFocus = useCallback(
+    (item: HTMLElement) => {
+      const machineId = item.dataset.settingsMachineId?.trim();
+      if (machineId) onSelect(machineId as MachineId);
+    },
+    [onSelect]
+  );
+  useListKeyboardNavigation({ onItemFocus: handleItemFocus, scopeId });
   const hiddenByFilter = Math.max(0, totalBeforeFilter - items.length);
 
   return (
     <TooltipProvider delayDuration={250}>
-      <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
+      <FocusScope id={scopeId} className="flex h-full min-h-0 w-full min-w-0 flex-col">
         <div className="flex items-center justify-between gap-2 px-2 pb-2">
-          <p className="min-w-0 truncate text-xs font-semibold text-muted-foreground">
+          <p className="min-w-0 truncate text-xs font-normal text-muted-foreground">
             {t('workspace.machines.title', 'Machines')}
           </p>
           {showFilter ? (
@@ -121,7 +131,7 @@ export function MachineTabList({
             </div>
           )}
         </div>
-      </div>
+      </FocusScope>
     </TooltipProvider>
   );
 }
@@ -152,7 +162,7 @@ export function MachineListFilterButton({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44">
-        <DropdownMenuLabel className="font-medium text-muted-foreground">
+        <DropdownMenuLabel className="font-normal text-muted-foreground">
           {t('settings.agent.machineTabs.filter.label', 'Filter machines')}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
@@ -189,12 +199,16 @@ function MachineTab({
     <li className="min-w-0">
       <button
         type="button"
+        aria-current={isSelected ? 'true' : undefined}
+        data-id={`machine:${item.machine.id}`}
+        data-scope-item="row"
+        data-settings-machine-id={item.machine.id}
         onClick={onSelect}
         aria-pressed={isSelected}
         className={cn(
           'group flex w-full min-w-0 items-center gap-2 rounded-md border border-transparent px-2 py-2 text-left text-sm transition-colors',
           isSelected
-            ? 'border-border bg-hover/70 font-medium text-foreground'
+            ? 'border-border bg-hover/70 font-normal text-foreground'
             : 'text-foreground/90 hover:bg-hover/40'
         )}
       >
@@ -246,6 +260,10 @@ function DetailedMachineTab({
     <li className="min-w-0">
       <button
         type="button"
+        aria-current={isSelected ? 'true' : undefined}
+        data-id={`machine:${item.machine.id}`}
+        data-scope-item="row"
+        data-settings-machine-id={item.machine.id}
         onClick={onSelect}
         aria-pressed={isSelected}
         className={cn(
@@ -264,7 +282,7 @@ function DetailedMachineTab({
         />
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex min-w-0 items-center gap-2">
-            <span className="min-w-0 truncate text-sm font-semibold">
+            <span className="min-w-0 truncate text-sm font-normal">
               {item.machine.name || item.machine.id}
             </span>
             {showOwner ? (
@@ -276,7 +294,7 @@ function DetailedMachineTab({
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
             <span
               className={cn(
-                'font-medium',
+                'font-normal',
                 item.isOnline ? 'text-status-success' : 'text-muted-foreground'
               )}
             >
@@ -370,7 +388,7 @@ function MachineAccessStatus({ sharedWithTeam }: { sharedWithTeam: boolean }) {
         </span>
       </TooltipTrigger>
       <TooltipContent side="right" className="max-w-64 leading-relaxed">
-        <p className="font-medium">{label}</p>
+        <p className="font-normal">{label}</p>
         <p className="mt-0.5 text-muted-foreground">{description}</p>
       </TooltipContent>
     </Tooltip>

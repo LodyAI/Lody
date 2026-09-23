@@ -12,13 +12,13 @@ import {
   GitBranch,
   GitPullRequest,
   Link2,
-  Loader2,
   LockKeyhole,
   Pencil,
   Pin,
   PinOff,
   Users,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
@@ -31,7 +31,6 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/ui/context-menu';
-import { Skeleton } from '@/ui/skeleton';
 import { SwipeActionRow } from '@/components/shared/swipe-action-row';
 import {
   SessionPrIcon,
@@ -39,6 +38,7 @@ import {
   SessionRowLeadingSlot,
   SidebarRowArchiveButton,
   SidebarRowEndSlot,
+  SidebarListSkeleton,
   SidebarSectionHeader,
   type SidebarRowKind,
 } from '@/components/sidebar-row-shared';
@@ -137,34 +137,6 @@ export type SidebarUpdatedContextMenuLabels = {
  */
 function HeaderActionRow({ action }: { action: ReactNode }) {
   return <div className="flex h-7 shrink-0 items-center justify-end">{action}</div>;
-}
-
-function SidebarUpdatedTaskListSkeleton({ className }: { className?: string }) {
-  // Three buckets each with a header and a couple of rows; matches the
-  // TaskListSkeleton density so the two organize modes look the same when
-  // the session list is still loading.
-  const bucketRows: string[][] = [
-    ['w-[68%]', 'w-[58%]', 'w-[74%]'],
-    ['w-[60%]', 'w-[52%]'],
-  ];
-  return (
-    <div className={cn('flex flex-col gap-4', className)}>
-      {bucketRows.map((rows, bucketIndex) => (
-        <div key={bucketIndex} className="space-y-2">
-          <Skeleton className="h-3 w-16" />
-          <div className="space-y-2 rounded-lg border border-border/50 p-2">
-            {rows.map((width, rowIndex) => (
-              <div key={rowIndex} className="flex items-center gap-2 px-1 py-1.5">
-                <Skeleton className="h-7 w-7 rounded-md" />
-                <Skeleton className={cn('h-3', width)} />
-                <Skeleton className="ml-auto h-3 w-10" />
-              </div>
-            ))}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
 }
 
 function parseGitHubPrNumber(url: string): number | null {
@@ -406,7 +378,11 @@ export const SidebarUpdatedTaskList = memo(function SidebarUpdatedTaskList({
     return (
       <div className="flex flex-col">
         {headerAction ? <HeaderActionRow action={headerAction} /> : null}
-        <SidebarUpdatedTaskListSkeleton className={className} />
+        <SidebarListSkeleton
+          className={className}
+          showHeaderIcon={false}
+          sectionClassName="mb-4 last:mb-0"
+        />
       </div>
     );
   }
@@ -660,8 +636,6 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       Boolean(shareMenuState) ||
       Boolean(branchName) ||
       (showPr && Boolean(onOpenPullRequest)));
-  const titleFontClassName = item.isPinned ? 'font-normal' : 'font-medium';
-
   const handlePrOpen =
     onOpenPullRequest && prUrl
       ? () =>
@@ -696,30 +670,34 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
       className={cn(
         'min-w-0 w-full truncate bg-transparent outline-hidden',
         'border border-sidebar-ring/40 rounded-sm px-1 -mx-1',
-        'text-sm',
-        titleFontClassName
+        'text-sm font-normal'
       )}
     />
   ) : (
     <span
       className={cn(
-        'min-w-0 flex-1 truncate',
-        titleFontClassName,
+        'min-w-0 flex-1 truncate font-normal',
         showSelectedState
           ? 'text-sidebar-selection-foreground'
-          : 'text-sidebar-foreground dark:text-sidebar-foreground/75 group-hover/row:text-sidebar-hover-foreground'
+          : 'text-sidebar-foreground group-hover/row:text-sidebar-hover-foreground'
       )}
     >
       {item.title}
     </span>
   );
 
+  const [rowMenuOpen, setRowMenuOpen] = useState(false);
+
   const row = (
     <div
       role={!useAnchor && onSelect ? 'button' : undefined}
       tabIndex={!useAnchor && onSelect ? 0 : undefined}
+      aria-current={selected ? 'page' : undefined}
+      data-id={`updated:${item.id}`}
+      data-scope-item="row"
       data-sidebar-updated-id={item.id}
       data-sidebar-updated-kind={item.kind}
+      data-menu-open={rowMenuOpen ? '' : undefined}
       className={cn(
         // Named group ('row') so the archive hover-reveal scopes to the hovered row
         // only. The bucket wrapper above also uses an (unnamed) `group` for its
@@ -730,9 +708,9 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         !showSelectedState &&
           onSelect &&
           !isMobile &&
-          'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
+          'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground data-[menu-open]:bg-sidebar-hover data-[menu-open]:text-sidebar-hover-foreground',
         showSelectedState &&
-          'border-sidebar-foreground/10 bg-sidebar-foreground/10 text-sidebar-foreground hover:bg-sidebar-foreground/10',
+          'bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection',
         // Keyboard-only focus ring — see TaskList: plain :focus-within also
         // matches after mouse clicks via the overlay <a> and left a permanent
         // inset ring on the selected row.
@@ -772,13 +750,10 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
 
       <div className="flex w-full min-w-0 items-center gap-1.5 text-sm">
         <SessionRowLeadingSlot
-          isWaitingPermission={item.isWaitingPermission}
-          isWorking={item.isWorking}
-          hasUnreadMessages={item.hasUnreadMessages}
           showMenuButton={hasMenuActions}
           menuLabel={contextMenuLabels.moreActions}
-          fadeClassName="group-hover/row:opacity-0"
-          revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto"
+          fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
+          revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
         />
         {showPinnedIcon && item.isPinned ? (
           <Pin
@@ -803,15 +778,14 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         >
           {titleNode}
         </div>
-        {/* Keep PR at the right edge, with All Changes totals immediately before it. */}
+        {/* Keep PR at the right edge. Line totals stay in the hover card. */}
         <SidebarRowEndSlot
-          fadeClassName="group-hover/row:opacity-0"
+          isWaitingPermission={item.isWaitingPermission}
+          isWorking={item.isWorking}
+          hasUnreadMessages={item.hasUnreadMessages}
+          fadeClassName="group-hover/row:opacity-0 group-data-[menu-open]/row:opacity-0"
           restIcon={
-            showPr ||
-            hasChanges ||
-            showMergeablePill ||
-            isMobile ||
-            item.sharing?.visibility === 'private' ? (
+            showPr || showMergeablePill || isMobile || item.sharing?.visibility === 'private' ? (
               <span
                 className={cn(
                   'flex select-none items-center gap-1.5 text-[11px] tabular-nums text-sidebar-foreground-muted/80',
@@ -819,14 +793,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                 )}
               >
                 {isMobile ? <span>{relativeTime}</span> : null}
-                {showMergeablePill ? (
-                  <SessionMergeablePill />
-                ) : hasChanges && !isMergeable ? (
-                  <span className="flex items-center gap-1">
-                    <span className="text-code-added">+{addedLines}</span>
-                    <span className="text-code-removed">-{deletedLines}</span>
-                  </span>
-                ) : null}
+                {showMergeablePill ? <SessionMergeablePill /> : null}
                 {showPr ? <SessionPrIcon prStatus={prStatus} prCiState={item.prCiState} /> : null}
                 {item.sharing ? <SessionSharingIndicator state={item.sharing} /> : null}
               </span>
@@ -838,7 +805,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                 label={archiveTooltipLabel}
                 confirmLabel={archiveConfirmLabel}
                 onConfirm={() => onArchive?.(item.id)}
-                revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto"
+                revealClassName="group-hover/row:opacity-100 group-hover/row:pointer-events-auto group-data-[menu-open]/row:opacity-100 group-data-[menu-open]/row:pointer-events-auto"
               />
             ) : undefined
           }
@@ -877,7 +844,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
   }
 
   const menuRow = hasMenuActions ? (
-    <ContextMenu>
+    <ContextMenu onOpenChange={setRowMenuOpen}>
       <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
       <ContextMenuContent className="min-w-[180px]">
         {handlePrOpen ? (
@@ -946,7 +913,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
             {shareMenuState === 'share' ? (
               <Users />
             ) : shareMenuState === 'loading' ? (
-              <Loader2 className="animate-spin" />
+              <Spinner />
             ) : (
               <LockKeyhole />
             )}

@@ -20,10 +20,23 @@ import {
   useState,
 } from 'react';
 import {
+  MessageSelectionContext,
+  MessageSelectionOverlay,
+  MessageSelectionRow,
+} from './message-selection';
+import {
   ZoomableImageViewer,
   type ImagePreviewPortalAnchorRef,
 } from '@/components/shared/zoomable-image-viewer';
 import { useIsMessageSendingVisible } from './message-send-status-context';
+import {
+  CONVERSATION_OVERSCAN,
+  NativeTextSelectionHoldContext,
+  useSelectionStableValue,
+  useConversationTextSelection,
+  type SelectableConversationRow,
+} from '@/hooks/use-conversation-text-selection';
+import type { ConversationView } from '@/lib/conversation-view';
 import {
   getCopyTextFromMessageItems,
   getTextContentFromMessageItems,
@@ -34,7 +47,7 @@ import {
 import { useAtomValue } from 'jotai';
 import { getRpcDeliveredTurnKey, rpcDeliveredTurnsAtom } from '@/atoms/session-dispatch-delivery';
 import { selectAtom } from 'jotai/utils';
-import { Virtualizer, type VirtualizerHandle } from 'virtua';
+import { Virtualizer, type VirtualizerHandle, type CustomItemComponentProps } from 'virtua';
 import {
   type AgentConfigCliType,
   type ChatFailedCode,
@@ -55,7 +68,9 @@ import {
   type WorkspaceId,
   getSessionLaunchConfigLegacyFields,
   getSessionRoomId,
-  isManagedBuiltinAgentType,
+  machineSupportsAcpProtocolAuthentication,
+  supportsAuthenticationWhenRequired,
+  usesAcpProtocolAuthentication,
   type CommentReferencePayload,
   type VisualAnnotationReferencePayload,
   sanitizeGoalObjective,
@@ -70,15 +85,18 @@ import { VisualAnnotationReferenceCard } from './visual-annotation-reference-car
 import { currentWorkspaceIdAtom } from '@/atoms';
 import { getAgentMetaByIdAtomFamily } from '@/atoms/agents';
 import { sessionMetaAtomFamily } from '@/atoms/doc-meta';
-import { authTokenAtom } from '@/atoms/runtime';
+import { authTokenAtom, runtimeAtom } from '@/atoms/runtime';
+import { machineSupportsSubagentCancellation } from '@lody/shared';
 import { useStickyScroll } from '@/hooks/use-sticky-scroll';
 import { buildResendInputBlocks, isUndeliveredUserTurnEntry } from '@/lib/undelivered-user-turn';
 import { ConversationOutlineRail } from './conversation-outline-rail';
 import { useLatestRef } from '@/hooks/use-latest-ref';
 import { observeResizeOnAnimationFrame } from '@/lib/resize-observer';
 import {
+  OUTLINE_MIN_USER_ROUNDS,
   buildConversationOutline,
   buildOutlineAnchors,
+  countUserDrivenRounds,
   resolveActiveOutlineIndex,
   reuseConversationOutline,
   reuseOutlineAnchors,
@@ -87,11 +105,13 @@ import {
 } from '@/lib/conversation-outline';
 import {
   AlertCircle,
+  CircleX,
   ArrowDown,
   BookOpen,
   Brain,
   BrushCleaning,
   Check,
+  X,
   CheckCircle2,
   ChevronRight,
   Circle,
@@ -116,9 +136,11 @@ import {
   PinOff,
   Wrench,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { MarkdownRenderer } from './markdown-renderer';
 import { CarbonInProgress } from '@/components/icons/carbon-in-progress';
 import { getGoalStatusPresentation } from '@/lib/session-goal-status';
+import { detectToolCallJsonText } from '@/lib/tool-call-json-text';
 import { FileIcon } from '@/components/icons/file-icons';
 import { AnthropicIcon } from '@/components/icons/anthropic-icon';
 import { OpenAIIcon } from '@/components/icons/openai-icon';
@@ -141,14 +163,34 @@ import {
   type AssistantTurnRenderBlock,
 } from './assistant-turn-render-blocks';
 import { SubagentTaskPanel, collectSubagentTasks } from './subagent-task-panel';
+import { SessionReadonlyContext } from './session-readonly-context';
 import { UserMessageEditor } from './user-message-editor';
+import { resolvePermissionRecord } from './permission-record';
+import {
+  hasSeparatePlanItem,
+  hasUnansweredPlanApproval,
+  resolvePlanExitMarkdown,
+} from './plan-surface';
+import {
+  CONVERSATION_PANEL_BODY_CLASS,
+  CONVERSATION_PANEL_FRAME_CLASS,
+  CONVERSATION_PANEL_HEADER_CLASS,
+  CONVERSATION_PANEL_HEADER_RULE_CLASS,
+  CONVERSATION_PANEL_TITLE_CLASS,
+} from './conversation-panel';
 import { TerminalComponent } from './terminal-component';
 import { prepareTerminalOutputBlocksPreview } from './terminal-preview';
 import { type DurationUnitLabels, formatDurationCompact } from '@/lib/format-duration';
-import { resolveSessionHistoryDurationMs } from '@/lib/session-history-duration';
+import {
+  resolveLiveSessionHistoryDurationMs,
+  resolveSessionHistoryDurationMs,
+} from '@/lib/session-history-duration';
 import { cn } from '@/lib/utils';
 import { ConversationColumn } from '@/components/shared/conversation-column';
-import { SessionRelationCard } from '@/components/shared/session-relation-card';
+import type { TurnIndexRow } from '@/lib/conversation-view';
+import { TurnPlaceholderRow } from './turn-placeholder-row';
+import { CreatedSessionOperationCard } from './created-session-operation-card';
+import { OperationReplyCard } from './operation-reply-card';
 import type { SessionNavigationTarget } from '@/lib/session-navigation';
 import { AcpAuthenticationPanel } from '@/components/settings/acp-authentication-panel';
 import { formatConversationTimestamp } from '@/lib/format-conversation-timestamp';
@@ -167,10 +209,6 @@ import {
   AlertDialogTitle,
 } from '@/ui/alert-dialog';
 import { Button } from '@/ui/button';
-import {
-  AgentActivityIndicator,
-  type AgentActivityTone,
-} from '@/components/shared/agent-activity-indicator';
 import { stripRecommended } from '@/components/shared/acp-selector-options';
 import { DiffViewer } from '@/ui/diff-viewer/diff-viewer';
 import { Skeleton } from '@/ui/skeleton';
@@ -188,7 +226,6 @@ import type {
   MessageTextSpan,
   SessionFilePayload,
   ScheduleProposalMeta,
-  TaskProposalMeta,
 } from '@lody/shared';
 import { MessageTextWithChips } from '@/components/mentions/message-text-chips';
 import { isNativeIOSAppShell } from '@/lib/native-platform';
@@ -200,14 +237,11 @@ import { toast } from 'sonner';
 import { SessionPlanBar } from '@/components/sessions/session-plan-bar';
 import { ContainerQueryProvider } from './container-query-provider';
 import { usePermissionResponse } from '@/hooks/use-permission-response';
-import { usePlanModeExitApprovalNotifier } from '@/hooks/use-plan-mode-exit-approval';
-import { TaskProposalNotice } from '@/components/tasks/task-proposal-notice';
 import { ScheduleProposalNotice } from '@/components/schedules/schedule-proposal-notice';
-import { schedulesFeatureEnabledAtom, tasksFeatureEnabledAtom } from '@/atoms/settings';
+import { schedulesFeatureEnabledAtom } from '@/atoms/settings';
 import { shouldRenderSystemRowItem } from './message-content-guards';
 import { getChatFailedDiagnosticCopy } from './chat-failed-diagnostic-copy';
 import { extractReadableChatFailedMessage } from './chat-failed-error-report';
-import { ChatFailedDetailDialog } from './chat-failed-detail-dialog';
 import { DEFAULT_CONVERSATION_FONT_SIZE, type ConversationFontSize } from '@/atoms/settings';
 import {
   conversationMonoFontSizeStyle,
@@ -216,6 +250,7 @@ import {
 } from './conversation-font-size-classes';
 import { useSessionPin } from '@/components/sessions/session-pin-context';
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useStableNow } from '@/hooks/use-stable-now';
 import {
   SEARCH_HIGHLIGHT_CONTAINER_ACTIVE_CLASS_NAME,
   SEARCH_HIGHLIGHT_CONTAINER_MATCHED_CLASS_NAME,
@@ -250,6 +285,11 @@ interface BubbleExpandState {
   expandedByIndex: Record<number, boolean>;
   planOpen: boolean;
 }
+export type SelectionTurnLayout = {
+  finished: boolean;
+  expandState: BubbleExpandState;
+  activeSearchBlockId: string | null;
+};
 type SearchContainerProps = ComponentPropsWithoutRef<'div'> & {
   'data-search-block-id'?: string;
   'data-search-result-id'?: string;
@@ -289,10 +329,22 @@ export interface SessionMessageItem {
   type: 'message';
   sessionId: SessionId;
   message: SessionHistoryParsed;
+  /** Absolute position of the turn in the conversation (`ConversationView` index). */
+  turnIndex: number;
 }
 
 export interface EmptySessionItem {
   type: 'empty';
+}
+
+/**
+ * A turn the view has not hydrated: renders as `TurnPlaceholderRow` under the
+ * turn's id so hydration swaps content beneath a stable Virtua key.
+ */
+export interface PlaceholderSessionItem {
+  type: 'placeholder';
+  row: TurnIndexRow;
+  turnIndex: number;
 }
 
 export type MessageFileDiffEntriesByTurn = Readonly<
@@ -310,7 +362,7 @@ const OUTLINE_JUMP_TOLERANCE_PX = 2;
  */
 const OUTLINE_JUMP_MAX_CORRECTIONS = 3;
 
-export type ChatStreamItem = SessionMessageItem | EmptySessionItem;
+export type ChatStreamItem = SessionMessageItem | EmptySessionItem | PlaceholderSessionItem;
 
 type AssistantVirtualContent =
   | { kind: 'plan' }
@@ -335,7 +387,13 @@ type AssistantVirtualContent =
       isThinking: boolean;
     }
   | { kind: 'subagent_tasks' }
-  | { kind: 'footer'; showDuration: boolean };
+  | {
+      kind: 'footer';
+      showDuration: boolean;
+      /** The turn is the conversation's last one and has not ended, so an
+       *  available streaming copy action stays visibly active. */
+      isLive: boolean;
+    };
 
 type AssistantChatVirtualRow = {
   type: 'assistant';
@@ -351,11 +409,21 @@ type AssistantChatVirtualRow = {
 type StandardChatVirtualRow = {
   type: 'standard';
   key: string;
+  /** Absolute turn index (the `empty` item uses its list position). */
   messageIndex: number;
-  item: ChatStreamItem;
+  item: SessionMessageItem | EmptySessionItem;
 };
 
-type ChatVirtualRow = AssistantChatVirtualRow | StandardChatVirtualRow;
+type PlaceholderChatVirtualRow = {
+  type: 'placeholder';
+  key: string;
+  messageIndex: number;
+  item: PlaceholderSessionItem;
+};
+
+type ChatVirtualRow = AssistantChatVirtualRow | StandardChatVirtualRow | PlaceholderChatVirtualRow;
+
+/** One row per placeholder item, identity-stable while the item is. */
 
 export interface SessionChatStreamHandle {
   scrollToBottom: () => void;
@@ -380,6 +448,18 @@ export interface AssistantMessageAction {
   tone?: 'default' | 'accent';
 }
 
+export interface CapacityRetryControl {
+  noticeId: string;
+  retryInSeconds: number | null;
+  retryRemainingRatio: number | null;
+  pending: boolean;
+  canRetry: boolean;
+  autoRetryEnabled: boolean;
+  autoRetryExhausted: boolean;
+  retry: () => void;
+  stopAutoRetry: () => void;
+}
+
 // Exported for focused message/action binding tests.
 export const resolveAssistantMessageActions = (
   messageId: string,
@@ -389,9 +469,44 @@ export const resolveAssistantMessageActions = (
 
 export type GoalCommand = SessionGoalCommand;
 
+export type VisibleTurnRange = { from: number; to: number };
+
+/** Exposes row identity at the measurement boundary without inspecting message DOM. */
+const NativeSelectionRowsContext = createContext<{
+  rows: readonly SelectableConversationRow[];
+  leading: number;
+  held: ReadonlySet<string>;
+}>({ rows: [], leading: 0, held: new Set() });
+function ConversationVirtualRow({ index, ...props }: CustomItemComponentProps) {
+  const { rows, leading, held } = useContext(NativeSelectionRowsContext);
+  const row = rows[index - leading];
+  return (
+    <NativeTextSelectionHoldContext.Provider value={!!row && held.has(row.turnId)}>
+      <div
+        {...props}
+        data-virtual-index={index}
+        data-conversation-row-key={row?.key}
+        data-conversation-turn-id={row?.turnId}
+      />
+    </NativeTextSelectionHoldContext.Provider>
+  );
+}
+
 export interface SessionChatStreamViewProps {
+  /** Optional for static readers; the connected stream supplies its windowed history. */
+  conversationView?: ConversationView | null;
+  initialWindowReady?: boolean;
   items: ChatStreamItem[];
   sessionId: SessionId;
+  /**
+   * Reports the turn indexes currently inside the viewport (`[from, to)`), on
+   * scroll and after the initial position restore. The connected stream turns
+   * this into the hydrated window.
+   */
+  onVisibleTurnRangeChange?: (range: VisibleTurnRange) => void;
+  onRetainedTurnIdsChange?: (ids: ReadonlySet<string>) => void;
+  /** The outline hovered a round with no preview yet; hydrate it so one appears. */
+  onOutlinePreviewRound?: (turnIndex: number) => void;
   className?: string;
   /** Scrolls as the first conversation row (for example, Session provenance). */
   leadingContent?: ReactNode;
@@ -409,12 +524,15 @@ export interface SessionChatStreamViewProps {
   messageFileDiffEntriesByTurn?: MessageFileDiffEntriesByTurn;
   assistantActions?: AssistantMessageAction[];
   assistantActionsMessageId?: string | null;
+  onCopyContext?: (messageId: string) => void;
   onForkLastAssistant?: (turnId: string, destination?: SessionForkDestination) => void;
   forkWorktreeAvailability?: SessionForkWorktreeAvailability;
   onForkWorktreeMenuOpen?: () => void;
   forkingAssistantMessageId?: string | null;
   agentActivityLabel?: string | null;
   agentActivityTone?: AgentActivityTone;
+  /** The status is live work (not waiting on the user): shimmer it. */
+  agentActivityShimmer?: boolean;
   conversationFontSize?: ConversationFontSize;
   /** Skips one auto-follow caused by the session composer changing height. */
   skipNextViewportResizeAutoScrollRef?: MutableRefObject<boolean>;
@@ -427,32 +545,83 @@ export interface SessionChatStreamViewProps {
   suppressStickyAutoScrollRef?: React.RefObject<boolean>;
 }
 
-const SessionChatActionContext = createContext<{
+/* Exported so the turn footer can be driven through its real gate in tests: an
+   UNFINISHED turn renders its action bar only when a copy-context handler
+   exists, which is exactly the state whose leading duration slot this file
+   fills. */
+export const SessionChatActionContext = createContext<{
   sendMessage?: (message: ClientToServer) => void;
   openHtmlFile?: (file: SessionFilePayload) => boolean;
+  copyContext?: (messageId: string) => void;
 }>({});
 const SessionImagePreviewContext = createContext<{
   openImagePreview: (imageKey: string) => void;
 } | null>(null);
 
-const AgentActivityRow = ({
+/** Live work reads in the process tone; waiting on the user in the warning tone. */
+export type AgentActivityTone = 'primary' | 'warning';
+
+/**
+ * The live status at the bottom of the conversation ("Thinking", "Working",
+ * startup and permission states). It reads as the next collapsed activity-group
+ * label (same rail, type and tone) and shimmers while work is in progress;
+ * when the live turn already ends in a collapsed group, that label shimmers
+ * instead and this row is not rendered.
+ */
+export const AgentActivityRow = ({
   label,
   tone = 'primary',
-}: {
-  label: string;
-  tone?: AgentActivityTone;
+  shimmer,
+  message,
+  conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
+}: AgentActivityStatusProps & {
+  conversationFontSize?: ConversationFontSize;
 }) => {
   return (
-    <ConversationColumn className="flex items-start -mt-2 pb-1.5 pt-0.5">
-      <div className="flex h-6 items-center">
-        <AgentActivityIndicator
-          label={label}
-          tone={tone}
-          displaySize={14}
-          labelClassName="text-[12.5px] font-medium leading-snug"
-        />
+    <ConversationColumn className="pb-2 sm:pb-3" data-agent-activity-row="">
+      <div className="max-w-[800px]" style={conversationTextFontSizeStyle(conversationFontSize)}>
+        <AgentActivityStatus label={label} tone={tone} shimmer={shimmer} message={message} />
       </div>
     </ConversationColumn>
+  );
+};
+
+type AgentActivityStatusProps = {
+  label: string;
+  tone?: AgentActivityTone;
+  shimmer: boolean;
+  /** The live turn the status belongs to: its running duration joins the label. */
+  message?: LiveActivityMessage | null;
+};
+
+/** The status label itself, shaped like a collapsed activity-group label. */
+const AgentActivityStatus = ({
+  label,
+  tone = 'primary',
+  shimmer,
+  message,
+}: AgentActivityStatusProps) => {
+  const isMobile = useIsMobile();
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      data-agent-activity-status=""
+      className={cn(
+        'flex w-full items-center py-0.5 text-muted-foreground',
+        isMobile ? 'gap-1.5 pr-1' : 'px-[4px]'
+      )}
+    >
+      <span
+        className={cn(
+          ACTIVITY_GROUP_LABEL_CLASS(isMobile),
+          tone === 'warning' && 'text-status-warning',
+          shimmer && 'agent-shimmer'
+        )}
+      >
+        {message ? <LiveActivityLabel label={label} message={message} /> : label}
+      </span>
+    </div>
   );
 };
 
@@ -749,6 +918,9 @@ const shouldRenderAssistantFooter = ({
   showDuration: boolean;
 }): boolean => {
   if ((assistantActions?.length ?? 0) > 0) return true;
+  // The run config (model, mode, options) is recorded when the turn opens, so
+  // its info button is available while the reply is still streaming.
+  if (hasAssistantTurnConfigInfo(message)) return true;
   if (message.finished !== true) return false;
   const visibleContentItems = renderEntries.map((entry) => entry.content);
   return (
@@ -793,6 +965,7 @@ const getAssistantTurnLayout = (message: SessionHistoryParsed): AssistantTurnLay
 // each streamed token re-allocates every row, the shallow prop compare fails
 // for the whole mounted window, and long sessions freeze the renderer.
 type AssistantTurnRowsCacheEntry = {
+  selectionLayout?: SelectionTurnLayout;
   rows: AssistantChatVirtualRow[];
   messageIndex: number;
   isLastAssistantMessage: boolean;
@@ -800,6 +973,7 @@ type AssistantTurnRowsCacheEntry = {
   scopedAssistantActions: AssistantMessageAction[] | undefined;
   activeSearchBlockId: string | null | undefined;
   expansionVersion: number;
+  copyContextAvailable: boolean;
 };
 const assistantTurnRowsCache = new WeakMap<SessionMessageItem, AssistantTurnRowsCacheEntry>();
 
@@ -812,7 +986,10 @@ export const buildChatVirtualRows = ({
   assistantActionsMessageId,
   activeSearchBlockId,
   expansionVersion,
+  copyContextAvailable = false,
+  selectionLayouts,
 }: {
+  selectionLayouts?: ReadonlyMap<string, SelectionTurnLayout>;
   items: ChatStreamItem[];
   lastAssistantMessageId: string | null;
   messageFileDiffEntriesByTurn?: MessageFileDiffEntriesByTurn;
@@ -820,16 +997,28 @@ export const buildChatVirtualRows = ({
   assistantActionsMessageId?: string | null;
   activeSearchBlockId?: string | null;
   expansionVersion: number;
+  copyContextAvailable?: boolean;
 }): ChatVirtualRow[] => {
   const rows: ChatVirtualRow[] = [];
 
-  for (let messageIndex = 0; messageIndex < items.length; messageIndex += 1) {
-    const item = items[messageIndex];
-    if (!item) continue;
-    if (item.type !== 'message' || item.message.role !== 'assistant') {
+  for (let position = 0; position < items.length; position += 1) {
+    const item = items[position];
+    // Empty presentation must not seed Virtua's size cache for the first row.
+    if (!item || item.type === 'empty') continue;
+    if (item.type === 'placeholder') {
+      // No per-row cache: `TurnPlaceholderRow` is memoized on `item.row`, which
+      // `buildChatStreamItems` already keeps stable, so the row object is never
+      // compared by identity (unlike an assistant row, which is passed whole).
+      rows.push({ type: 'placeholder', key: item.row.id, messageIndex: item.turnIndex, item });
+      continue;
+    }
+    // Rows speak in absolute turn indexes so outline anchors and scroll
+    // targets are independent of which turns happen to be hydrated.
+    const messageIndex = item.turnIndex;
+    if (item.message.role !== 'assistant') {
       rows.push({
         type: 'standard',
-        key: item.type === 'message' ? item.message.id : `empty-${messageIndex}`,
+        key: item.message.id,
         messageIndex,
         item,
       });
@@ -847,14 +1036,20 @@ export const buildChatVirtualRows = ({
       assistantActionsMessageId,
       assistantActions
     );
+    const selectionLayout = selectionLayouts?.get(message.id);
+    const selectionSearchBlockId = selectionLayout
+      ? selectionLayout.activeSearchBlockId
+      : activeSearchBlockId;
     const cachedRows = assistantTurnRowsCache.get(item);
     if (
       cachedRows &&
+      cachedRows.selectionLayout === selectionLayout &&
       cachedRows.messageIndex === messageIndex &&
       cachedRows.isLastAssistantMessage === isLastAssistantMessage &&
       cachedRows.fileDiffs === fileDiffs &&
       cachedRows.scopedAssistantActions === scopedAssistantActions &&
       cachedRows.activeSearchBlockId === activeSearchBlockId &&
+      cachedRows.copyContextAvailable === copyContextAvailable &&
       cachedRows.expansionVersion === expansionVersion
     ) {
       rows.push(...cachedRows.rows);
@@ -862,7 +1057,7 @@ export const buildChatVirtualRows = ({
     }
 
     const { blocks, segments, entries, subagentTasks } = getAssistantTurnLayout(message);
-    const cachedState = getExpandState(message.id);
+    const cachedState = selectionLayout?.expandState ?? getExpandState(message.id);
     const cachedExpansion = cachedState.expandedGroups;
     // Collapse into a "Worked for …" summary ONLY when the turn both finished and
     // produced a genuine final answer to show. `hasVisibleFinalContent` = there is at
@@ -877,7 +1072,7 @@ export const buildChatVirtualRows = ({
     //
     // Evaluated PER SEGMENT: a plan-approval turn has two regions and each needs
     // its own verdict, or the implementation would fold into the plan's row.
-    const isTurnFinished = message.finished === true;
+    const isTurnFinished = selectionLayout?.finished ?? message.finished === true;
     // Subagent tasks are message-scoped, so they ride the LAST segment.
     const lastSegmentIndex = segments.length - 1;
     const assistantRows: AssistantChatVirtualRow[] = [];
@@ -916,7 +1111,7 @@ export const buildChatVirtualRows = ({
       const isSearchExpanded = assistantGroupHasActiveSearch(
         message.id,
         block.entries,
-        activeSearchBlockId
+        selectionSearchBlockId
       );
       const expanded = isSearchExpanded || cachedExpansion[block.key] === true;
       const isActive =
@@ -928,6 +1123,11 @@ export const buildChatVirtualRows = ({
         (lastEntry.content.type === 'thought' || lastEntry.content.kind === 'think')
       );
 
+      const toolEntries = block.entries.filter(
+        (entry) => isAssistantToolCallActivityEntry(entry) && entry.content.kind !== 'think'
+      );
+      if (toolEntries.length === 0) return;
+
       target.push({
         type: 'assistant',
         key: `assistant:${message.id}:${block.key}:header`,
@@ -938,7 +1138,7 @@ export const buildChatVirtualRows = ({
         isLastRowForMessage: false,
       });
       if (expanded) {
-        for (const entry of block.entries) {
+        for (const entry of toolEntries) {
           const entrySuffix =
             entry.content.type === 'tool_call' ? entry.content.toolCallId : 'thought';
           target.push({
@@ -951,8 +1151,8 @@ export const buildChatVirtualRows = ({
               kind: 'activity_detail',
               entry,
               groupKey: block.key,
-              showThoughtLabel: block.entries.length > 1,
-              isThinking: isThinking && entry === lastEntry,
+              showThoughtLabel: false,
+              isThinking: false,
             },
             isWorkedDetail,
             isLastRowForMessage: false,
@@ -1014,7 +1214,7 @@ export const buildChatVirtualRows = ({
       const isWorkedSearchExpanded = assistantGroupHasActiveSearch(
         message.id,
         workedSearchEntries,
-        activeSearchBlockId
+        selectionSearchBlockId
       );
       const isWorkedGroupExpanded =
         shouldUseWorkedGroup &&
@@ -1090,6 +1290,7 @@ export const buildChatVirtualRows = ({
 
     const showDurationInFooter = !anySegmentUsesWorkedGroup;
     if (
+      copyContextAvailable ||
       shouldRenderAssistantFooter({
         message,
         renderEntries: entries,
@@ -1103,7 +1304,11 @@ export const buildChatVirtualRows = ({
         key: `assistant:${message.id}:footer`,
         messageIndex,
         item,
-        content: { kind: 'footer', showDuration: showDurationInFooter },
+        content: {
+          kind: 'footer',
+          showDuration: showDurationInFooter,
+          isLive: isLastAssistantMessage && message.finished !== true,
+        },
         isLastRowForMessage: false,
       });
     }
@@ -1111,6 +1316,7 @@ export const buildChatVirtualRows = ({
     const lastRow = assistantRows[assistantRows.length - 1];
     if (lastRow) lastRow.isLastRowForMessage = true;
     assistantTurnRowsCache.set(item, {
+      selectionLayout,
       rows: assistantRows,
       messageIndex,
       isLastAssistantMessage,
@@ -1118,6 +1324,7 @@ export const buildChatVirtualRows = ({
       scopedAssistantActions,
       activeSearchBlockId,
       expansionVersion,
+      copyContextAvailable,
     });
     rows.push(...assistantRows);
   }
@@ -1143,6 +1350,8 @@ export const SessionChatStreamView = forwardRef<
     {
       items,
       sessionId,
+      conversationView,
+      initialWindowReady = true,
       className,
       leadingContent,
       emptyState,
@@ -1159,29 +1368,47 @@ export const SessionChatStreamView = forwardRef<
       assistantActions,
       assistantActionsMessageId = null,
       onForkLastAssistant,
+      onCopyContext,
       forkWorktreeAvailability = 'hidden',
       onForkWorktreeMenuOpen,
       forkingAssistantMessageId,
       agentActivityLabel = null,
       agentActivityTone = 'primary',
+      // Waiting on the user (warning tone) is not work in progress.
+      agentActivityShimmer = agentActivityTone !== 'warning',
       conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
       skipNextViewportResizeAutoScrollRef,
       suppressStickyAutoScrollRef,
       outlineOverlayRoot,
+      onVisibleTurnRangeChange,
+      onRetainedTurnIdsChange,
+      onOutlinePreviewRound,
     },
     ref
   ) => {
     const vlistRef = useRef<VirtualizerHandle>(null);
+    const messageSelection = useContext(MessageSelectionContext);
+    const nativeTextSelectionActiveRef = useRef(false);
+    const selectionLayoutsRef = useRef(new Map<string, SelectionTurnLayout>());
+    const [, setSelectionVersion] = useState(0);
     const scrollRootRef = useRef<HTMLDivElement>(null);
     const { t } = useTranslation();
     const search = useSessionSearch();
     const activeSearchBlockId = search?.activeBlockId ?? null;
     const shouldShowAgentActivity = Boolean(agentActivityLabel);
+    const liveAgentActivityMessage = useMemo(
+      () =>
+        items.find(
+          (item): item is SessionMessageItem =>
+            item.type === 'message' &&
+            item.message.id === lastAssistantMessageId &&
+            item.message.role === 'assistant' &&
+            item.message.finished !== true
+        )?.message ?? null,
+      [items, lastAssistantMessageId]
+    );
     const [assistantExpansionVersion, setAssistantExpansionVersion] = useState(0);
     const [hoveredAssistantMessageId, setHoveredAssistantMessageId] = useState<string | null>(null);
-    const pendingExpandedGroupRowKeyRef = useRef<string | null>(null);
-    const groupExpansionAutoScrollSuppressedRef = useRef(false);
-    const releaseGroupExpansionSuppressionRef = useRef(false);
     /**
      * An outline jump in flight. Declared here, beside the other suppression
      * state, because `autoScrollSuppressedRef` below reads it — see
@@ -1198,13 +1425,14 @@ export const SessionChatStreamView = forwardRef<
       () => ({
         get current() {
           return (
-            groupExpansionAutoScrollSuppressedRef.current ||
+            nativeTextSelectionActiveRef.current ||
+            messageSelection !== null ||
             pendingOutlineJumpRef.current !== null ||
             Boolean(suppressStickyAutoScrollRef?.current)
           );
         },
       }),
-      [suppressStickyAutoScrollRef]
+      [suppressStickyAutoScrollRef, messageSelection]
     );
     const handleAssistantGroupExpandedChange = useCallback(
       (messageId: string, groupKey: string, expanded: boolean) => {
@@ -1216,10 +1444,10 @@ export const SessionChatStreamView = forwardRef<
             [groupKey]: expanded,
           },
         });
-        if (expanded) {
-          pendingExpandedGroupRowKeyRef.current = `assistant:${messageId}:${groupKey}:header`;
-          groupExpansionAutoScrollSuppressedRef.current = true;
-        }
+        // Toggling must not scroll: the header stays where the reader clicked
+        // and the rows open or fold beneath it. useStickyScroll keeps a
+        // non-following reader from being pulled to the end by the commit's
+        // observer deliveries; a reader following the tail is left there.
         setAssistantExpansionVersion((version) => version + 1);
       },
       []
@@ -1234,10 +1462,6 @@ export const SessionChatStreamView = forwardRef<
             [segmentKey]: expanded,
           },
         });
-        if (expanded) {
-          pendingExpandedGroupRowKeyRef.current = `assistant:${messageId}:${segmentKey}:worked-header`;
-          groupExpansionAutoScrollSuppressedRef.current = true;
-        }
         setAssistantExpansionVersion((version) => version + 1);
       },
       []
@@ -1249,6 +1473,8 @@ export const SessionChatStreamView = forwardRef<
       });
     }, []);
 
+    const copyContextAvailable = onCopyContext !== undefined;
+    const selectionLayouts = selectionLayoutsRef.current;
     const virtualRows = useMemo(() => {
       // Expansion lives in the module cache so virtualized child rows retain
       // their state after unmounting; this counter is its React invalidation
@@ -1261,16 +1487,60 @@ export const SessionChatStreamView = forwardRef<
         assistantActionsMessageId,
         activeSearchBlockId,
         expansionVersion: assistantExpansionVersion,
+        copyContextAvailable,
+        selectionLayouts,
       });
     }, [
+      selectionLayouts,
       activeSearchBlockId,
       assistantActions,
       assistantActionsMessageId,
       assistantExpansionVersion,
+      copyContextAvailable,
       items,
       lastAssistantMessageId,
       messageFileDiffEntriesByTurn,
     ]);
+    // While work is in progress, a live turn whose bottom (past its footer) is
+    // a collapsed activity group carries the status itself: that label
+    // shimmers and no separate status row is added below it.
+    const liveGroupHeaderRowKey = useMemo(() => {
+      if (!agentActivityLabel || !agentActivityShimmer) return null;
+      for (let index = virtualRows.length - 1; index >= 0; index -= 1) {
+        const row = virtualRows[index];
+        if (row?.type !== 'assistant') return null;
+        if (row.content.kind === 'footer') continue;
+        return row.item.message.finished !== true &&
+          row.content.kind === 'activity_group_header' &&
+          !row.content.expanded
+          ? row.key
+          : null;
+      }
+      return null;
+    }, [agentActivityLabel, agentActivityShimmer, virtualRows]);
+    // Keep status above the task summary, with or without footer actions.
+    // Other live turns put it in the footer or in a separate trailing row.
+    const liveStatusRowKey = useMemo(() => {
+      if (!agentActivityLabel || liveGroupHeaderRowKey !== null) return null;
+      const last = virtualRows[virtualRows.length - 1];
+      if (last?.type !== 'assistant' || last.item.message.finished === true) return null;
+      const footerKey = last.content.kind === 'footer' ? last.key : null;
+      const contentRow = footerKey ? virtualRows[virtualRows.length - 2] : last;
+      return contentRow?.type === 'assistant' &&
+        contentRow.item === last.item &&
+        contentRow.content.kind === 'subagent_tasks'
+        ? contentRow.key
+        : footerKey;
+    }, [agentActivityLabel, liveGroupHeaderRowKey, virtualRows]);
+    const liveTurnStatus = useMemo<AgentActivityStatusProps | null>(
+      () =>
+        agentActivityLabel
+          ? { label: agentActivityLabel, tone: agentActivityTone, shimmer: agentActivityShimmer }
+          : null,
+      [agentActivityLabel, agentActivityShimmer, agentActivityTone]
+    );
+    const shouldShowAgentActivityRow =
+      shouldShowAgentActivity && liveGroupHeaderRowKey === null && liveStatusRowKey === null;
     const leadingRowCount = leadingContent == null ? 0 : 1;
 
     /**
@@ -1290,7 +1560,7 @@ export const SessionChatStreamView = forwardRef<
      * `resolveActiveOutlineIndex` reads positions back out of. Without the
      * `offset` compensation a jump settles a padding's worth low, and the
      * outline rail then reports the round BEFORE the one that was asked for.
-     * (`scrollViewportToRealBottom` compensates the bottom padding the same way.)
+     * Bottom following uses the DOM extent, which already includes padding.
      */
     const scrollRowToTop = useCallback(
       (rowIndex: number, smooth = false) => {
@@ -1303,24 +1573,11 @@ export const SessionChatStreamView = forwardRef<
       [leadingRowCount]
     );
 
-    useLayoutEffect(() => {
-      const rowKey = pendingExpandedGroupRowKeyRef.current;
-      if (!rowKey) return undefined;
-
-      const rowIndex = virtualRows.findIndex((row) => row.key === rowKey);
-      if (rowIndex === -1) {
-        pendingExpandedGroupRowKeyRef.current = null;
-        groupExpansionAutoScrollSuppressedRef.current = false;
-        return undefined;
-      }
-
-      pendingExpandedGroupRowKeyRef.current = null;
-      // Descendant layout effects run before this parent effect, so Virtua has
-      // committed and measured the expanded row set when this call runs.
-      scrollRowToTop(rowIndex);
-      releaseGroupExpansionSuppressionRef.current = true;
-      return undefined;
-    }, [scrollRowToTop, virtualRows]);
+    // Whether this render reaches the virtualized branch below. A session whose
+    // document is still being acquired renders the empty sentinel and returns
+    // before `Virtualizer` mounts, yet every hook above that return has already
+    // run — including the one that reads the stored row measurements.
+    const hasVirtualizedRows = virtualRows.length > 0;
 
     const {
       scrollRef: scrollContainerRef,
@@ -1328,26 +1585,82 @@ export const SessionChatStreamView = forwardRef<
       isSticky,
       scrollToBottom,
       initialScrollRestored,
+      initialVirtualizerCache,
+      persistVirtualizerCache,
       handleScroll,
     } = useStickyScroll({
       sessionId,
+      initialContentReady: initialWindowReady,
       vlistRef,
+      hasVirtualizedRows,
       // `leadingContent` is a real first Virtua row, so it counts here — sticky
       // scroll otherwise targets an index short of the true bottom.
-      itemCount: virtualRows.length + leadingRowCount + (shouldShowAgentActivity ? 1 : 0),
+      itemCount: virtualRows.length + leadingRowCount + (shouldShowAgentActivityRow ? 1 : 0),
       onAtBottomChange,
       skipNextViewportResizeAutoScrollRef,
       suppressAutoScrollRef: autoScrollSuppressedRef,
     });
-
-    // useStickyScroll's layout effect runs before this one in hook order and
-    // consumes the suppression for the expansion commit. Release it at the end
-    // of that same commit instead of guessing when Virtua settles with a timer.
-    useLayoutEffect(() => {
-      if (!releaseGroupExpansionSuppressionRef.current) return;
-      releaseGroupExpansionSuppressionRef.current = false;
-      groupExpansionAutoScrollSuppressedRef.current = false;
+    const selectableRows = useMemo(
+      () =>
+        virtualRows.map((row) => ({
+          key: row.key,
+          turnId:
+            row.type === 'placeholder'
+              ? row.item.row.id
+              : row.item.type === 'message'
+                ? row.item.message.id
+                : row.key,
+          turnIndex: row.messageIndex,
+          ready: row.type !== 'placeholder',
+        })),
+      [virtualRows]
+    );
+    const nativeTextSelection = useConversationTextSelection({
+      sessionId,
+      view: conversationView,
+      viewport: scrollViewportElement,
+      virtualizer: vlistRef,
+      rows: selectableRows,
+      leadingRowCount,
+      activeRef: nativeTextSelectionActiveRef,
+      captureTurn: (id) => {
+        const item = items.find(
+          (candidate) => candidate.type === 'message' && candidate.message.id === id
+        );
+        if (item?.type !== 'message') return undefined;
+        const layout = {
+          finished: item.message.finished === true,
+          expandState: getExpandState(id),
+          activeSearchBlockId,
+        };
+        selectionLayoutsRef.current = new Map(selectionLayoutsRef.current).set(id, layout);
+        return layout;
+      },
+      onChange: (ids) => {
+        onRetainedTurnIdsChange?.(ids);
+        if (nativeTextSelectionActiveRef.current) pendingOutlineJumpRef.current = null;
+        setSelectionVersion((version) => version + 1);
+      },
+      onRelease: () => {
+        onRetainedTurnIdsChange?.(new Set());
+        selectionLayoutsRef.current = new Map();
+      },
+      onCopyUnavailable: () =>
+        toast.error(
+          t(
+            'sessions.selectionCopyUnavailable',
+            'The selected text is still loading or could not be loaded. Wait and try copying again.'
+          )
+        ),
     });
+    const nativeSelectionRows = useMemo(
+      () => ({
+        rows: selectableRows,
+        leading: leadingRowCount,
+        held: new Set(nativeTextSelection.holds.keys()),
+      }),
+      [selectableRows, leadingRowCount, nativeTextSelection.holds]
+    );
 
     // ---- Outline rail ------------------------------------------------------
     // The left table of contents. Everything here is derived from `items` and
@@ -1367,6 +1680,13 @@ export const SessionChatStreamView = forwardRef<
       previousOutlineRef.current = next;
       return next;
     }, [items]);
+    // Below the threshold a table of contents decorates rather than navigates,
+    // so the rail — and its arrival-intent listeners — stays unmounted until
+    // the conversation is long enough to need one.
+    const showOutlineRail = useMemo(
+      () => countUserDrivenRounds(outlineEntries) >= OUTLINE_MIN_USER_ROUNDS,
+      [outlineEntries]
+    );
     const previousAnchorsRef = useRef<readonly ConversationOutlineAnchor[] | undefined>(undefined);
     const outlineAnchors = useMemo(() => {
       // `virtualRows` is rebuilt per delta, so this runs at token rate too;
@@ -1476,6 +1796,8 @@ export const SessionChatStreamView = forwardRef<
     );
 
     const handleStreamScrollEnd = useCallback(() => {
+      // Scrolling measured more rows; keep them for the next open.
+      persistVirtualizerCache();
       const pending = pendingOutlineJumpRef.current;
       if (!pending) return;
       if (
@@ -1493,7 +1815,7 @@ export const SessionChatStreamView = forwardRef<
         attempts: pending.attempts + 1,
       };
       scrollRowToTop(pending.rowIndex);
-    }, [outlineJumpDrift, scrollRowToTop]);
+    }, [outlineJumpDrift, persistVirtualizerCache, scrollRowToTop]);
 
     // Any real input abandons the correction: a reader who starts scrolling
     // must never be yanked back by a jump they have already moved on from.
@@ -1518,18 +1840,65 @@ export const SessionChatStreamView = forwardRef<
     // message while the list sits at its start. setState with an unchanged
     // boolean bails out, so per-scroll-event updates are effectively free.
     const [isScrolledFromTop, setIsScrolledFromTop] = useState(false);
+
+    // Which turns are in the viewport, from Virtua's own index math; the only
+    // input the hydration window has. Read through refs so a report never
+    // re-creates the scroll handler, and deduplicated so a settled viewport
+    // stops producing updates.
+    const virtualRowsRef = useLatestRef(virtualRows);
+    const onVisibleTurnRangeChangeRef = useLatestRef(onVisibleTurnRangeChange);
+    const lastVisibleRangeRef = useRef<VisibleTurnRange | null>(null);
+    const reportVisibleTurnRange = useCallback(() => {
+      const vlist = vlistRef.current;
+      const report = onVisibleTurnRangeChangeRef.current;
+      if (!vlist || !report) return;
+      const rows = virtualRowsRef.current;
+      if (rows.length === 0) return;
+      const clampRow = (index: number) => Math.max(0, Math.min(rows.length - 1, index));
+      const startRow = clampRow(vlist.findItemIndex(vlist.scrollOffset) - leadingRowCount);
+      const endRow = clampRow(
+        vlist.findItemIndex(vlist.scrollOffset + vlist.viewportSize) - leadingRowCount
+      );
+      const from = rows[startRow]?.messageIndex;
+      const to = rows[endRow]?.messageIndex;
+      if (from === undefined || to === undefined) return;
+      const next = { from: Math.min(from, to), to: Math.max(from, to) + 1 };
+      const last = lastVisibleRangeRef.current;
+      if (last && last.from === next.from && last.to === next.to) return;
+      lastVisibleRangeRef.current = next;
+      report(next);
+    }, [leadingRowCount, onVisibleTurnRangeChangeRef, virtualRowsRef]);
+    useEffect(() => {
+      if (!initialScrollRestored) return;
+      reportVisibleTurnRange();
+    }, [initialScrollRestored, reportVisibleTurnRange, virtualRows.length]);
+
     const handleStreamScroll = useCallback(
       (offset: number) => {
         handleScroll(offset);
         setIsScrolledFromTop(offset > 0);
         syncActiveOutlineIndex();
+        reportVisibleTurnRange();
       },
-      [handleScroll, syncActiveOutlineIndex]
+      [handleScroll, reportVisibleTurnRange, syncActiveOutlineIndex]
+    );
+
+    const handleOutlinePreview = useCallback(
+      (outlineIndex: number) => {
+        const entry = outlineEntries[outlineIndex];
+        if (!entry || entry.preview) return;
+        onOutlinePreviewRound?.(entry.messageIndex);
+      },
+      [onOutlinePreviewRound, outlineEntries]
     );
 
     const scrollToIndex = useCallback(
       (messageIndex: number, smooth?: boolean) => {
-        const messageItem = items[messageIndex];
+        // `messageIndex` is an absolute turn index; a placeholder row exists for
+        // every non-hydrated turn, so a target is always addressable.
+        const messageItem = items.find(
+          (candidate) => candidate.type === 'message' && candidate.turnIndex === messageIndex
+        );
         let virtualIndex = -1;
         if (messageItem?.type === 'message' && activeSearchBlockId) {
           const prefix = getMessageItemPrefix(messageItem.message.id, 0).slice(0, -1);
@@ -1599,14 +1968,17 @@ export const SessionChatStreamView = forwardRef<
     );
     const chatActionContextValue = useMemo(
       () => ({
+        copyContext: onCopyContext,
         ...(sendMessage ? { sendMessage } : {}),
         ...(onOpenHtmlFile ? { openHtmlFile: onOpenHtmlFile } : {}),
       }),
-      [onOpenHtmlFile, sendMessage]
+      [onCopyContext, onOpenHtmlFile, sendMessage]
     );
     const hasOnlyEmptyItem = items.length === 1 && items[0]?.type === 'empty';
 
-    if ((!items.length || (hasOnlyEmptyItem && emptyState)) && leadingContent == null) {
+    // A non-null leading Fragment may render no DOM. Keep the entire empty
+    // state outside Virtua even then, and mount it only with real messages.
+    if (!items.length || hasOnlyEmptyItem) {
       return (
         <SessionChatActionContext.Provider value={chatActionContextValue}>
           <SessionImagePreviewContext.Provider value={imagePreviewContextValue}>
@@ -1614,11 +1986,34 @@ export const SessionChatStreamView = forwardRef<
               ref={scrollRootRef}
               className={cn('relative bg-background', className)}
             >
-              {emptyState ?? (
-                <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                  No messages yet
+              <div
+                className="flex h-full flex-col overflow-y-auto"
+                data-window-session-stream-ready={initialWindowReady ? sessionId : undefined}
+                style={{ paddingTop: 'calc(var(--conversation-top-inset, 0px) + 1.5rem)' }}
+              >
+                {leadingContent == null ? null : (
+                  <div className="shrink-0" data-conversation-leading-content="">
+                    {leadingContent}
+                  </div>
+                )}
+                {agentActivityLabel && (
+                  <div className="shrink-0 pt-2">
+                    <AgentActivityRow
+                      label={agentActivityLabel}
+                      tone={agentActivityTone}
+                      shimmer={agentActivityShimmer}
+                      conversationFontSize={conversationFontSize}
+                    />
+                  </div>
+                )}
+                <div className="min-h-0 flex-1">
+                  {emptyState ?? (
+                    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                      {noMessagesLabel}
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
             </ContainerQueryProvider>
           </SessionImagePreviewContext.Provider>
         </SessionChatActionContext.Provider>
@@ -1634,16 +2029,21 @@ export const SessionChatStreamView = forwardRef<
           >
             <div
               ref={scrollContainerRef}
+              data-message-selection-scroll=""
+              data-window-session-stream-ready={
+                initialWindowReady && initialScrollRestored ? sessionId : undefined
+              }
               // Keep x overflow explicit: overflow-y:auto otherwise computes
               // the untouched x axis to auto too, letting any wide row pan the
               // entire conversation instead of its own nested scroller.
-              className="chat-scrollbar h-full overflow-x-hidden py-5 sm:py-6"
+              className="chat-scrollbar relative h-full overflow-x-hidden py-5 sm:py-6"
               // Mobile session page floats a frosted header over the list;
               // `--conversation-top-inset` (set by session-detail's mobile
               // branch) pads the scroll content so the first message clears the
               // header at rest while later content scrolls under it and blurs.
               // Unset elsewhere → falls back to py-6's 1.5rem, a no-op.
               style={{
+                visibility: initialWindowReady && initialScrollRestored ? 'visible' : 'hidden',
                 display: 'block',
                 overflowY: 'auto',
                 contain: 'strict',
@@ -1652,76 +2052,112 @@ export const SessionChatStreamView = forwardRef<
                 paddingTop: 'calc(var(--conversation-top-inset, 0px) + 1.5rem)',
               }}
             >
-              <Virtualizer
-                ref={vlistRef}
-                shift={false}
-                onScroll={handleStreamScroll}
-                onScrollEnd={handleStreamScrollEnd}
-                // Pre-render extra items outside the viewport to reduce blank areas
-                // during fast scrolling (especially on mobile). This is 4x Virtua's
-                // default (200px) — generous, but deliberately not the previous 2000px:
-                // an oversized buffer keeps a huge set of still-resizing rows mounted,
-                // which widens the window where Virtua's offsets are mid-recompute and
-                // rows can transiently overlap. 800 keeps ~2 viewports of headroom.
-                bufferSize={800}
-              >
-                {leadingContent == null ? null : (
-                  <div data-conversation-leading-content="">{leadingContent}</div>
-                )}
-                {virtualRows.map((row) => {
-                  if (row.type === 'standard') {
-                    // Standard rows are only ever system or user messages
-                    // (assistant turns are flattened into `assistant` rows below),
-                    // so they carry no per-turn file diffs or last-assistant
-                    // quick actions.
-                    return (
-                      <ChatItem
-                        key={row.key}
-                        item={row.item}
-                        renderMessageRow={renderMessageRow}
-                        noMessagesLabel={noMessagesLabel}
-                        emptyState={emptyState}
-                      />
-                    );
-                  }
+              <NativeSelectionRowsContext.Provider value={nativeSelectionRows}>
+                <Virtualizer
+                  ref={vlistRef}
+                  item={ConversationVirtualRow}
+                  // Row heights measured the last time this session was open, so
+                  // the first layout is the real one instead of an estimate that
+                  // has to be corrected before the conversation can be shown.
+                  cache={initialVirtualizerCache}
+                  shift={false}
+                  onScroll={handleStreamScroll}
+                  onScrollEnd={handleStreamScrollEnd}
+                  // Pre-render extra items outside the viewport to reduce blank areas
+                  // during fast scrolling (especially on mobile). This is 4x Virtua's
+                  // default (200px) — generous, but deliberately not the previous 2000px:
+                  // an oversized buffer keeps a huge set of still-resizing rows mounted,
+                  // which widens the window where Virtua's offsets are mid-recompute and
+                  // rows can transiently overlap. 800 keeps ~2 viewports of headroom.
+                  bufferSize={CONVERSATION_OVERSCAN}
+                  keepMounted={nativeTextSelection.keepMounted}
+                >
+                  {leadingContent == null ? null : (
+                    <div data-conversation-leading-content="">{leadingContent}</div>
+                  )}
+                  {virtualRows.map((row, rowIndex) => {
+                    if (row.type === 'placeholder') {
+                      return <TurnPlaceholderRow key={row.key} row={row.item.row} />;
+                    }
+                    if (row.type === 'standard') {
+                      // Standard rows are only ever system or user messages
+                      // (assistant turns are flattened into `assistant` rows below),
+                      // so they carry no per-turn file diffs or last-assistant
+                      // quick actions.
+                      return (
+                        <MessageSelectionRow
+                          key={row.key}
+                          id={row.item.type === 'message' ? row.item.message.id : undefined}
+                          first
+                        >
+                          <ChatItem
+                            item={row.item}
+                            renderMessageRow={renderMessageRow}
+                            noMessagesLabel={noMessagesLabel}
+                            emptyState={emptyState}
+                          />
+                        </MessageSelectionRow>
+                      );
+                    }
 
-                  const canForkAssistantMessage =
-                    row.item.message.finished === true &&
-                    (row.item.message.id === lastCompletedAssistantMessageId ||
-                      Boolean(row.item.message.acpTurnId));
-                  const fileDiffOverride =
-                    messageFileDiffEntriesByTurn === undefined
-                      ? undefined
-                      : (messageFileDiffEntriesByTurn[row.item.message.id] ??
-                        EMPTY_EDITED_FILE_ENTRIES);
-                  return (
-                    <AssistantChatItem
-                      key={row.key}
-                      row={row}
-                      fileDiffOverride={fileDiffOverride}
-                      assistantActions={resolveAssistantMessageActions(
-                        row.item.message.id,
-                        assistantActionsMessageId,
-                        assistantActions
-                      )}
-                      onFork={canForkAssistantMessage ? onForkLastAssistant : undefined}
-                      forkWorktreeAvailability={forkWorktreeAvailability}
-                      onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
-                      isForking={forkingAssistantMessageId === row.item.message.id}
-                      onFileDiffClick={onFileDiffClick}
-                      onFilePathClick={onFilePathClick}
-                      onGroupExpandedChange={handleAssistantGroupExpandedChange}
-                      onWorkedGroupExpandedChange={handleAssistantWorkedGroupExpandedChange}
-                      isTurnHovered={hoveredAssistantMessageId === row.item.message.id}
-                      onTurnHoverChange={handleAssistantTurnHoverChange}
-                      conversationFontSize={conversationFontSize}
-                    />
-                  );
-                })}
-                {shouldShowAgentActivity && agentActivityLabel && (
-                  <AgentActivityRow label={agentActivityLabel} tone={agentActivityTone} />
-                )}
-              </Virtualizer>
+                    const canForkAssistantMessage =
+                      row.item.message.finished === true &&
+                      (row.item.message.id === lastCompletedAssistantMessageId ||
+                        Boolean(row.item.message.acpTurnId));
+                    const fileDiffOverride =
+                      messageFileDiffEntriesByTurn === undefined
+                        ? undefined
+                        : (messageFileDiffEntriesByTurn[row.item.message.id] ??
+                          EMPTY_EDITED_FILE_ENTRIES);
+                    return (
+                      <MessageSelectionRow
+                        key={row.key}
+                        id={row.item.message.id}
+                        first={virtualRows[rowIndex - 1]?.messageIndex !== row.messageIndex}
+                      >
+                        <AssistantChatItem
+                          row={row}
+                          fileDiffOverride={fileDiffOverride}
+                          assistantActions={resolveAssistantMessageActions(
+                            row.item.message.id,
+                            assistantActionsMessageId,
+                            assistantActions
+                          )}
+                          onFork={canForkAssistantMessage ? onForkLastAssistant : undefined}
+                          forkWorktreeAvailability={forkWorktreeAvailability}
+                          onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
+                          isForking={forkingAssistantMessageId === row.item.message.id}
+                          onFileDiffClick={onFileDiffClick}
+                          onFilePathClick={onFilePathClick}
+                          onGroupExpandedChange={handleAssistantGroupExpandedChange}
+                          onWorkedGroupExpandedChange={handleAssistantWorkedGroupExpandedChange}
+                          isTurnHovered={hoveredAssistantMessageId === row.item.message.id}
+                          onTurnHoverChange={handleAssistantTurnHoverChange}
+                          conversationFontSize={conversationFontSize}
+                          shimmerGroupHeader={row.key === liveGroupHeaderRowKey}
+                          liveStatus={row.key === liveStatusRowKey ? liveTurnStatus : null}
+                          liveStatusFollowsSurface={
+                            row.key === liveStatusRowKey &&
+                            assistantRowPaintsSurface(virtualRows[rowIndex - 1])
+                          }
+                        />
+                      </MessageSelectionRow>
+                    );
+                  })}
+                  {shouldShowAgentActivityRow && agentActivityLabel && (
+                    <div className="shrink-0 pt-1" data-agent-activity-row-spacer="">
+                      <AgentActivityRow
+                        label={agentActivityLabel}
+                        tone={agentActivityTone}
+                        shimmer={agentActivityShimmer}
+                        message={liveAgentActivityMessage}
+                        conversationFontSize={conversationFontSize}
+                      />
+                    </div>
+                  )}
+                </Virtualizer>
+              </NativeSelectionRowsContext.Provider>
+              <MessageSelectionOverlay />
             </div>
             {/* Top fade into the bg-background canvas above (desktop only),
                 hinting that the conversation continues past the top edge. */}
@@ -1734,11 +2170,12 @@ export const SessionChatStreamView = forwardRef<
                 takes the content element from that div's `firstElementChild`.
                 Touch has no hover, so mobile is excluded rather than shipped
                 without its preview card. */}
-            {isMobile ? null : (
+            {isMobile || !showOutlineRail ? null : (
               <ConversationOutlineRail
                 entries={outlineEntries}
                 activeIndex={activeOutlineIndex}
                 onJumpToRound={handleOutlineJump}
+                onPreviewRound={handleOutlinePreview}
                 overlayRoot={outlineOverlayRoot}
                 enableArrivalIntent
               />
@@ -1751,7 +2188,7 @@ export const SessionChatStreamView = forwardRef<
                   <Button
                     variant="secondary"
                     size="icon"
-                    className="pointer-events-auto rounded-full border border-border/70 shadow-lg"
+                    className="pointer-events-auto rounded-full border-[0.5px] border-border bg-white text-foreground shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.04)] hover:bg-white dark:bg-secondary dark:text-secondary-foreground dark:shadow-none"
                     onClick={scrollToBottom}
                     aria-label={t('sessions.scrollToLatest')}
                   >
@@ -1785,9 +2222,11 @@ export const MessageRowView = memo(function MessageRowView({
   message,
   sessionId,
   user,
+  showSenderIdentity = false,
   onNavigateSession,
   onEdit,
   onResendUndelivered,
+  capacityRetry,
   conversationFontSize = DEFAULT_CONVERSATION_FONT_SIZE,
 }: {
   message: SessionHistoryParsed;
@@ -1795,7 +2234,9 @@ export const MessageRowView = memo(function MessageRowView({
   onNavigateSession?: (target: SessionNavigationTarget) => void;
   onEdit?: (message: SessionHistoryParsed, text: string) => Promise<boolean>;
   onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
+  capacityRetry?: CapacityRetryControl;
   user?: SessionChatUser;
+  showSenderIdentity?: boolean;
   conversationFontSize?: ConversationFontSize;
 }) {
   const { i18n } = useTranslation();
@@ -1815,6 +2256,7 @@ export const MessageRowView = memo(function MessageRowView({
         message={message}
         sessionId={sessionId}
         onNavigateSession={onNavigateSession}
+        capacityRetry={capacityRetry}
       />
     );
   }
@@ -1825,6 +2267,7 @@ export const MessageRowView = memo(function MessageRowView({
         message={message}
         sessionId={sessionId}
         user={user}
+        showSenderIdentity={showSenderIdentity}
         timestampLabel={timestampLabel}
         hasWideContent={hasWideContent}
         conversationFontSize={conversationFontSize}
@@ -1847,15 +2290,16 @@ const SystemMessageRowView = ({
   message,
   sessionId,
   onNavigateSession,
+  capacityRetry,
 }: {
   message: SessionHistoryParsed;
   sessionId: SessionId;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
+  capacityRetry?: CapacityRetryControl;
 }) => {
-  const tasksEnabled = useAtomValue(tasksFeatureEnabledAtom);
   const schedulesEnabled = useAtomValue(schedulesFeatureEnabledAtom);
   const systemItems = message.items.flatMap((item, itemIndex) =>
-    shouldRenderSystemRowItem(item, tasksEnabled, schedulesEnabled) ? [{ item, itemIndex }] : []
+    shouldRenderSystemRowItem(item, schedulesEnabled) ? [{ item, itemIndex }] : []
   );
 
   if (systemItems.length === 0) {
@@ -1865,15 +2309,7 @@ const SystemMessageRowView = ({
   return (
     <div className="flex flex-col gap-2">
       {systemItems.map(({ item, itemIndex }) =>
-        item.type === 'system_notice' && item.name === 'task_proposal' ? (
-          <TaskProposalNotice
-            key={`task-proposal-${itemIndex}`}
-            meta={(item.meta ?? { proposalId: '', title: '' }) as TaskProposalMeta}
-            sessionId={sessionId}
-            entryId={message.id}
-            itemIndex={itemIndex}
-          />
-        ) : item.type === 'system_notice' && item.name === 'schedule_proposal' && item.meta ? (
+        item.type === 'system_notice' && item.name === 'schedule_proposal' && item.meta ? (
           <ScheduleProposalNotice
             key={`schedule-proposal-${itemIndex}`}
             meta={item.meta as ScheduleProposalMeta}
@@ -1887,12 +2323,29 @@ const SystemMessageRowView = ({
             notice={item}
             sessionId={sessionId}
             onNavigateSession={onNavigateSession}
+            capacityRetry={capacityRetry}
           />
         ) : item.type === 'worktree_script' ? (
           <WorktreeScriptNoticeView
             key={`worktree-script-${item.phase}-${itemIndex}`}
             script={item}
           />
+        ) : item.type === 'operation_progress' ? (
+          <div
+            key={item.operationId}
+            className="flex flex-col gap-2"
+            data-session-create-progress=""
+          >
+            {item.items.map((target) => (
+              <CreatedSessionOperationCard
+                key={target.target.sessionId}
+                sessionId={target.target.sessionId}
+                fallbackTitle={target.label}
+                status={target.status}
+                onNavigateSession={onNavigateSession}
+              />
+            ))}
+          </div>
         ) : (
           <OperationCompletionView
             key={`${item.deliveryId}-${itemIndex}`}
@@ -1902,37 +2355,6 @@ const SystemMessageRowView = ({
         )
       )}
     </div>
-  );
-};
-
-const selectSessionTitle = (session: SessionMeta | null | undefined): string | null =>
-  session?.title?.trim() || null;
-
-const CreatedSessionOperationCard = ({
-  sessionId,
-  fallbackTitle,
-  onNavigateSession,
-}: {
-  sessionId: SessionId;
-  fallbackTitle?: string;
-  onNavigateSession?: (target: SessionNavigationTarget) => void;
-}) => {
-  const { t } = useTranslation();
-  const titleAtom = useMemo(
-    () => selectAtom(sessionMetaAtomFamily(getSessionRoomId(sessionId)), selectSessionTitle),
-    [sessionId]
-  );
-  const liveTitle = useAtomValue(titleAtom);
-  const title = liveTitle || fallbackTitle?.trim() || t('sessions.untitled', 'Untitled session');
-
-  return (
-    <SessionRelationCard
-      relation="opened"
-      label={t('sessions.openedBy.createdSession', 'Session created')}
-      sessionTitle={title}
-      actionLabel={t('sessions.openedBy.viewSession', 'View session')}
-      onAction={onNavigateSession ? () => onNavigateSession({ sessionId }) : undefined}
-    />
   );
 };
 
@@ -1950,99 +2372,149 @@ const OperationCompletionView = ({
       : completion.completion.type === 'cancelled'
         ? (completion.completion.partial?.items ?? [])
         : [];
-  const succeeded = resultItems.filter((item) => item.status === 'succeeded').length;
-  const failed = resultItems.filter((item) => item.status === 'failed').length;
-  const cancelled = resultItems.filter((item) => item.status === 'cancelled').length;
   const failedCompletion = completion.completion.type === 'error';
   const cancelledCompletion = completion.completion.type === 'cancelled';
   const StatusIcon = failedCompletion ? AlertCircle : cancelledCompletion ? Circle : CheckCircle2;
-  const createdSessions =
+  const createsSessions =
     completion.operationKind === 'session_create' ||
-    completion.operationKind === 'session_create_many'
-      ? resultItems.flatMap((item) =>
-          item.status === 'succeeded'
-            ? [
-                {
-                  sessionId: item.target.sessionId,
-                  fallbackTitle: item.label,
-                },
-              ]
-            : []
-        )
-      : [];
-
-  if (createdSessions.length > 0) {
-    return (
-      <div className="flex flex-col gap-2" data-session-create-completion="">
-        {createdSessions.map((created) => (
-          <CreatedSessionOperationCard
-            key={created.sessionId}
-            sessionId={created.sessionId}
-            fallbackTitle={created.fallbackTitle}
-            onNavigateSession={onNavigateSession}
-          />
-        ))}
-        {failedCompletion || cancelledCompletion || failed > 0 || cancelled > 0 ? (
-          <div className="px-1 text-xs text-muted-foreground">
-            {failedCompletion
-              ? t('orchestration.operationFailed', { id: completion.operationId })
-              : cancelledCompletion
-                ? t('orchestration.operationCancelled', { id: completion.operationId })
-                : t('orchestration.operationItemSummary', {
-                    total: resultItems.length,
-                    succeeded,
-                    failed,
-                    cancelled,
-                  })}
-          </div>
-        ) : null}
-        {completion.continuation?.status === 'not_started' ? (
-          <div className="px-1 text-xs text-muted-foreground">
-            {t('orchestration.continuationNotStarted')}
-          </div>
-        ) : null}
-      </div>
-    );
-  }
+    completion.operationKind === 'session_create_many';
+  // A create Operation that published progress already shows each target as a
+  // live card above; repeating them here would duplicate every Session.
+  const targetCards = createsSessions && completion.progressMessageId ? [] : resultItems;
+  const cards = targetCards.flatMap((item) =>
+    item.target
+      ? [
+          {
+            sessionId: item.target.sessionId,
+            fallbackTitle: item.label,
+            status: item.status === 'active' ? ('running' as const) : item.status,
+            // The reply preview (or the failure) says what happened at a glance;
+            // the card itself opens the Session for the rest.
+            reply: item.status === 'succeeded' ? item.output?.text : undefined,
+            error: item.status === 'failed' ? item.error.message : undefined,
+            detail:
+              item.status === 'succeeded'
+                ? summarizeOperationOutput(item.output?.text)
+                : item.status === 'failed'
+                  ? item.error.message
+                  : undefined,
+          },
+        ]
+      : []
+  );
+  const untargetedProblems = targetCards.flatMap((item) =>
+    !item.target && (item.status === 'failed' || item.status === 'cancelled')
+      ? [
+          {
+            label: item.label,
+            message:
+              item.status === 'failed'
+                ? item.error.message
+                : t('sessions.openedBy.status.cancelled', 'Cancelled'),
+          },
+        ]
+      : []
+  );
+  const continuationNotice = completion.continuation
+    ? t(
+        completion.continuation.status === 'uncertain'
+          ? 'orchestration.continuationUncertain'
+          : 'orchestration.continuationNotStarted'
+      )
+    : null;
+  // The status card carries only what the cards cannot: a whole-Operation
+  // failure or cancellation, targetless failures, the continuation outcome, or
+  // the plain outcome when there is no Session to show.
+  const showStatusCard =
+    cards.length === 0 ||
+    failedCompletion ||
+    cancelledCompletion ||
+    untargetedProblems.length > 0 ||
+    continuationNotice !== null;
 
   return (
-    <div className="border-border/70 bg-muted/30 flex items-start gap-2 border-y px-3 py-2 text-sm">
-      <StatusIcon
-        className={cn(
-          'mt-0.5 h-4 w-4 shrink-0',
-          failedCompletion ? 'text-destructive' : 'text-muted-foreground'
-        )}
-        aria-hidden="true"
-      />
-      <div className="min-w-0">
-        <div className="font-medium">
-          {t(
-            failedCompletion
-              ? 'orchestration.operationFailed'
-              : cancelledCompletion
-                ? 'orchestration.operationCancelled'
-                : 'orchestration.operationCompleted',
-            { id: completion.operationId }
-          )}
+    <div
+      className="flex flex-col gap-2"
+      data-operation-completion={completion.operationKind}
+      {...(createsSessions && cards.length > 0 ? { 'data-session-create-completion': '' } : {})}
+    >
+      {cards.map((card) =>
+        createsSessions ? (
+          <CreatedSessionOperationCard
+            key={card.sessionId}
+            sessionId={card.sessionId}
+            fallbackTitle={card.fallbackTitle}
+            status={card.status}
+            detail={card.detail}
+            onNavigateSession={onNavigateSession}
+          />
+        ) : (
+          // A message Operation reads from the sender's side: the target replied.
+          <OperationReplyCard
+            key={card.sessionId}
+            sessionId={card.sessionId}
+            fallbackTitle={card.fallbackTitle}
+            onNavigateSession={onNavigateSession}
+            {...(card.status === 'succeeded'
+              ? { status: 'succeeded' as const, reply: card.reply }
+              : card.status === 'failed'
+                ? { status: 'failed' as const, error: card.error ?? '' }
+                : card.status === 'cancelled'
+                  ? { status: 'cancelled' as const }
+                  : { status: 'running' as const })}
+          />
+        )
+      )}
+      {showStatusCard ? (
+        <div
+          className="flex items-start gap-2.5 rounded-lg border border-border/70 bg-muted/25 px-3 py-2.5 text-sm"
+          title={completion.operationId}
+        >
+          <StatusIcon
+            className={cn(
+              'mt-0.5 h-4 w-4 shrink-0',
+              failedCompletion ? 'text-destructive' : 'text-muted-foreground'
+            )}
+            aria-hidden="true"
+          />
+          <div className="min-w-0 flex-1">
+            <div className="font-medium text-foreground">
+              {t(
+                failedCompletion
+                  ? 'orchestration.operationFailed'
+                  : cancelledCompletion
+                    ? 'orchestration.operationCancelled'
+                    : 'orchestration.operationCompleted'
+              )}
+            </div>
+            {completion.completion.type === 'error' ? (
+              <div className="mt-0.5 break-words text-xs text-muted-foreground">
+                {completion.completion.error.message}
+              </div>
+            ) : null}
+            {untargetedProblems.map((problem, index) => (
+              <div
+                key={`${problem.label ?? 'item'}-${index}`}
+                className="mt-0.5 break-words text-xs text-muted-foreground"
+              >
+                {problem.label ? `${problem.label}: ${problem.message}` : problem.message}
+              </div>
+            ))}
+            {continuationNotice ? (
+              <div className="mt-0.5 text-xs text-muted-foreground">{continuationNotice}</div>
+            ) : null}
+          </div>
         </div>
-        {resultItems.length > 0 ? (
-          <div className="text-muted-foreground mt-0.5">
-            {t('orchestration.operationItemSummary', {
-              total: resultItems.length,
-              succeeded,
-              failed,
-              cancelled,
-            })}
-          </div>
-        ) : null}
-        {completion.continuation?.status === 'not_started' ? (
-          <div className="text-muted-foreground mt-0.5">
-            {t('orchestration.continuationNotStarted')}
-          </div>
-        ) : null}
-      </div>
+      ) : null}
     </div>
   );
+};
+
+/** One readable line from a reply preview: collapsed whitespace, capped length. */
+const summarizeOperationOutput = (text: string | undefined): string | undefined => {
+  const collapsed = text?.replace(/\s+/g, ' ').trim();
+  if (!collapsed) return undefined;
+  return collapsed.length > 240 ? `${collapsed.slice(0, 240)}…` : collapsed;
 };
 
 const DashedNoticeRule = () => (
@@ -2058,22 +2530,120 @@ const DashedNoticeRule = () => (
 /**
  * Renders a single system notice as a divider with tooltip
  */
+/**
+ * The one banner an agent notice takes, whatever its tone.
+ *
+ * Shaped like a fenced code block — the conversation already embeds those, so a
+ * filled, hairline-ringed block reads as part of the prose rather than as chrome
+ * dropped on top of it.
+ *
+ * Always open and the full width of the column. A notice is a short aside, so
+ * hiding it behind a disclosure asked for a click to read two lines, and a
+ * fit-content card left a ragged right edge against the column's otherwise
+ * straight rail.
+ *
+ * Tone is carried by the glyph and the leading sentence: amber is warning and
+ * red is failure, by convention, over a ~6% fill that stays out of the way.
+ */
+const AgentNoticeBanner = ({
+  tone,
+  label,
+  detail,
+  action,
+}: {
+  tone: 'error' | 'warning' | 'muted';
+  label: string;
+  detail?: string;
+  action?: ReactNode;
+}) => {
+  // Error is a cross, warning a triangle, muted an info circle — an octagon
+  // with an exclamation inside still read as "notice" at 14px.
+  const Icon = tone === 'error' ? CircleX : tone === 'warning' ? TriangleAlert : AlertCircle;
+
+  // `--status-warning` resolves to a brown (24.9 58.9% 41%) in this theme and
+  // reads as neither warning nor anything else at 14px, so warning uses amber —
+  // the convention; failure keeps the semantic `--destructive`.
+  const accentClass =
+    tone === 'error'
+      ? 'text-destructive'
+      : tone === 'warning'
+        ? 'text-amber-600 dark:text-amber-400'
+        : 'text-muted-foreground';
+
+  // The surface keeps the tone but at a fraction of its saturation: the colour
+  // is mixed toward the neutral border rather than merely faded, so the card
+  // still reads as "warning" or "failure" at a glance without a vivid slab
+  // competing with the answer it comments on.
+  const toneColor =
+    tone === 'error'
+      ? 'hsl(var(--destructive))'
+      : tone === 'warning'
+        ? 'rgb(245 158 11)'
+        : 'hsl(var(--muted-foreground))';
+  // A hairline: Chromium rounds a 0.5px BORDER up to 1px at any DPR, so every
+  // `border-[0.5px]` in the app actually paints 1px. `ui/AGENTS.md` settled on
+  // this same shadow ring for menus.
+  const ringColor = `color-mix(in srgb, ${toneColor} 14%, hsl(var(--border)))`;
+  const fillColor = `color-mix(in srgb, ${toneColor} 3.5%, transparent)`;
+
+  return (
+    <div
+      style={{ boxShadow: `0 0 0 0.5px ${ringColor}`, background: fillColor }}
+      className="w-full overflow-hidden rounded-lg"
+    >
+      {/* Header and body read as one continuous band. The detail is a sibling
+          of the header rather than a child of the column beside the glyph:
+          hanging it off the label indented every line past the icon, which cost
+          width the card does not have. An action rides the header's trailing
+          edge so a retry stays on the same line as the message it answers. */}
+      <div className="flex items-center gap-2 px-2 py-1.5">
+        <Icon className={cn('h-3.5 w-3.5 shrink-0', accentClass)} aria-hidden="true" />
+        <span className={cn('min-w-0 text-xs font-medium leading-4', accentClass)}>{label}</span>
+        {action ? <div className="ml-auto shrink-0">{action}</div> : null}
+      </div>
+      {detail ? (
+        <div className="px-2 pb-1.5">
+          <span className="block min-w-0 whitespace-pre-wrap break-words text-xs leading-5 text-muted-foreground">
+            {detail}
+          </span>
+        </div>
+      ) : null}
+    </div>
+  );
+};
+
 const SystemNoticeView = ({
   notice,
   sessionId,
   onNavigateSession,
+  capacityRetry,
+  inTurn = false,
 }: {
   notice: Extract<MessageContent, { type: 'system_notice' }>;
   sessionId: SessionId;
   onNavigateSession?: (target: SessionNavigationTarget) => void;
+  capacityRetry?: CapacityRetryControl;
+  /**
+   * The notice was folded onto the turn that emitted it, so it is already on
+   * the turn's content rail. A system ROW indents itself to sit apart from the
+   * conversation; inside a turn that same indent is just a broken left edge.
+   */
+  inTurn?: boolean;
 }) => {
   const { t } = useTranslation();
 
   switch (notice.name) {
     case 'chat_failed':
-      return <ChatFailedNoticeView notice={notice} sessionId={sessionId} />;
+      return (
+        <ChatFailedNoticeView
+          notice={notice}
+          sessionId={sessionId}
+          capacityRetry={capacityRetry}
+          inTurn={inTurn}
+        />
+      );
     case 'agent_warning':
-      return <AgentWarningNoticeView notice={notice} />;
+      return <AgentWarningNoticeView notice={notice} inTurn={inTurn} />;
     case 'resume_from_external_chat_history':
       break;
     case 'session_fork_origin': {
@@ -2186,15 +2756,31 @@ const SystemNoticeView = ({
 const ChatFailedNoticeView = ({
   notice,
   sessionId,
+  capacityRetry,
+  inTurn = false,
 }: {
   notice: Extract<MessageContent, { type: 'system_notice' }>;
   sessionId: SessionId;
+  capacityRetry?: CapacityRetryControl;
+  inTurn?: boolean;
 }) => {
   const { t } = useTranslation();
   const sessionMeta = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId)));
   const agentConfig = useAtomValue(getAgentMetaByIdAtomFamily(sessionMeta?.agentConfigId));
   const sessionLaunch = getSessionLaunchConfigLegacyFields(sessionMeta);
-  const [detailOpen, setDetailOpen] = useState(false);
+  const sessionMachineMeta = useAtomValue(getMachineMetaByIdAtomFamily(sessionMeta?.machineId));
+  // The ACP `authenticate` exchange runs entirely on the daemon, so a machine
+  // that predates it answers "Authentication is not supported": offering a
+  // sign-in button there would only ever fail. Builtin providers keep their
+  // long-standing login flow and need no negotiation.
+  const canAuthenticateSessionAgent =
+    !!sessionMeta &&
+    supportsAuthenticationWhenRequired({
+      cliType: sessionMeta.cliType,
+      agentType: sessionMeta.agentType,
+    }) &&
+    (!usesAcpProtocolAuthentication(sessionMeta.cliType) ||
+      machineSupportsAcpProtocolAuthentication(sessionMachineMeta));
 
   const meta = notice.meta as
     | {
@@ -2272,6 +2858,11 @@ const ChatFailedNoticeView = ({
           'sessions.systemNotices.chatFailed.acpUpstreamApiError',
           'Upstream API error — you can retry your message'
         );
+      case 'acp_provider_overloaded':
+        return t(
+          'sessions.systemNotices.chatFailed.acpProviderOverloaded',
+          'Selected model is at capacity. Please try a different model.'
+        );
       case 'acp_session_storage_incompatible':
         return t(
           'sessions.systemNotices.chatFailed.acpSessionStorageIncompatible',
@@ -2315,78 +2906,92 @@ const ChatFailedNoticeView = ({
     const extracted = extractReadableChatFailedMessage(rawMessage);
     return extracted !== reasonMessage ? extracted : undefined;
   })();
-  // The raw error only lives behind the modal, so open it whenever there is a
-  // raw message at all — even one whose readable extract equals the title, the
-  // full payload (stack, upstream JSON) is still worth reading and copying.
+  // Unfold whenever there is a raw message at all: even one whose readable
+  // extract equals the title, the full payload (stack, upstream JSON) is worth
+  // reading.
   const hasDetail = Boolean(rawMessage && rawMessage.trim() !== reasonMessage);
+  const isProviderOverloaded = meta?.reason === 'acp_provider_overloaded';
 
-  const noticeBody = (
-    <>
-      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-      <span className="flex min-w-0 flex-col items-start">
-        <span className="break-words text-left text-xs font-medium leading-5">{reasonMessage}</span>
-        {actionMessage ? (
-          <span className="max-w-xl break-words text-left text-xs font-normal leading-5 text-muted-foreground">
-            {actionMessage}
-          </span>
-        ) : null}
-        {hasDetail ? (
-          <span className="mt-0.5 inline-flex items-center gap-0.5 text-xs font-normal leading-5 text-destructive/80 underline underline-offset-2">
-            {t('sessions.systemNotices.chatFailed.viewDetails', 'View details')}
-            <ChevronRight className="h-3 w-3" aria-hidden="true" />
-          </span>
-        ) : null}
-      </span>
-    </>
+  const retryInSeconds = capacityRetry?.retryInSeconds ?? null;
+  const isRetryCountdown = retryInSeconds !== null;
+  const stopAutoRetryLabel = t(
+    'sessions.systemNotices.chatFailed.stopAutoRetry',
+    'Stop auto-retry'
   );
+  const retryAction =
+    isProviderOverloaded && capacityRetry ? (
+      <button
+        type="button"
+        aria-label={isRetryCountdown ? stopAutoRetryLabel : undefined}
+        className="group relative isolate inline-grid h-7 shrink-0 place-items-center overflow-hidden rounded-full bg-muted-foreground/[0.04] px-2.5 text-xs font-normal tabular-nums text-foreground/80 transition-colors hover:bg-muted-foreground/[0.07] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+        disabled={capacityRetry.pending || !capacityRetry.canRetry}
+        onClick={isRetryCountdown ? capacityRetry.stopAutoRetry : capacityRetry.retry}
+      >
+        {capacityRetry.retryRemainingRatio !== null ? (
+          <span
+            aria-hidden="true"
+            className="absolute inset-y-0 left-0 -z-10 bg-muted-foreground/[0.08] transition-[width] duration-300 ease-linear"
+            style={{ width: `${capacityRetry.retryRemainingRatio * 100}%` }}
+          />
+        ) : null}
+        {isRetryCountdown ? (
+          <>
+            <span className="relative z-10 col-start-1 row-start-1 group-hover:invisible group-focus-visible:invisible [@media(hover:none)]:invisible">
+              {t('sessions.systemNotices.chatFailed.retryIn', 'Retry in {{seconds}}s', {
+                seconds: retryInSeconds,
+              })}
+            </span>
+            <span className="invisible relative z-10 col-start-1 row-start-1 group-hover:visible group-focus-visible:visible [@media(hover:none)]:visible">
+              {stopAutoRetryLabel}
+            </span>
+          </>
+        ) : (
+          <span className="relative z-10">
+            {capacityRetry.pending
+              ? t('sessions.systemNotices.chatFailed.retrying', 'Retrying…')
+              : capacityRetry.autoRetryExhausted
+                ? t('sessions.systemNotices.chatFailed.retryAgain', 'Retry again')
+                : capacityRetry.autoRetryEnabled
+                  ? t('sessions.systemNotices.chatFailed.retryNow', 'Retry now')
+                  : t(
+                      'sessions.systemNotices.chatFailed.retryAndEnableAuto',
+                      'Retry and auto-retry'
+                    )}
+          </span>
+        )}
+      </button>
+    ) : null;
 
-  const rowClassName = cn(
-    'flex w-fit max-w-full items-start gap-2 rounded-md px-2 py-1 text-left text-destructive',
-    'hover:bg-destructive/10 focus-visible:bg-destructive/10 focus-visible:outline-none'
+  // Same banner as the agent warning; only the tone and the "more" path differ.
+  // A raw provider payload is a document, so it opens the report dialog instead
+  // of unfolding, and the clipboard gets the untouched text.
+  const noticeRow = (
+    <AgentNoticeBanner
+      tone={isProviderOverloaded ? 'muted' : 'error'}
+      label={reasonMessage}
+      // The readable extract first, then the untouched payload behind it.
+      detail={
+        [actionMessage, detailMessage, hasDetail ? rawMessage : null]
+          .filter((part, index, all) => Boolean(part) && all.indexOf(part) === index)
+          .join('\n\n') || undefined
+      }
+      action={retryAction}
+    />
   );
 
   return (
-    <div className="space-y-2 py-1 @[640px]:pl-3">
-      {/* Tapping the notice opens a modal instead of a hover tooltip: a tooltip
-          is unreachable on touch devices, which left mobile users with no way to
-          read or copy the actual agent error. */}
-      <div role="alert" className="w-fit max-w-full">
-        {hasDetail ? (
-          <button
-            type="button"
-            aria-haspopup="dialog"
-            className={cn(rowClassName, 'cursor-pointer')}
-            onClick={() => setDetailOpen(true)}
-          >
-            {noticeBody}
-          </button>
-        ) : (
-          <div className={rowClassName}>{noticeBody}</div>
-        )}
-      </div>
-      {hasDetail ? (
-        <ChatFailedDetailDialog
-          open={detailOpen}
-          onOpenChange={setDetailOpen}
-          title={reasonMessage}
-          action={actionMessage}
-          summary={detailMessage}
-          reason={meta?.reason}
-          code={meta?.code}
-          message={rawMessage}
-          sessionId={sessionId}
-          agentType={sessionMeta?.agentType}
-          machineId={sessionMeta?.machineId}
-        />
-      ) : null}
-      {meta?.reason === 'acp_auth_required' &&
-      sessionMeta?.cliType === 'builtin' &&
-      isManagedBuiltinAgentType(sessionMeta.agentType) ? (
+    <div className={cn('space-y-2 py-1', !inTurn && '@[640px]:pl-3')}>
+      {/* The full provider payload unfolds inside the banner itself, so there
+          is no dialog to open and nothing to reach only by hover — which is
+          what made the old tooltip unusable on touch in the first place. */}
+      <div role="alert">{noticeRow}</div>
+      {meta?.reason === 'acp_auth_required' && sessionMeta && canAuthenticateSessionAgent ? (
         <AcpAuthenticationPanel
           machineId={sessionMeta.machineId}
           configId={sessionMeta.agentConfigId}
           cliType={sessionMeta.cliType}
           agentType={sessionMeta.agentType}
+          providerName={agentConfig?.name}
           customAcp={agentConfig?.customAcp ?? sessionLaunch?.customAcp}
           runtimeOverrides={agentConfig?.runtimeOverrides ?? sessionLaunch?.runtimeOverrides}
           env={agentConfig?.env ?? sessionLaunch?.env}
@@ -2399,31 +3004,44 @@ const ChatFailedNoticeView = ({
 
 const AgentWarningNoticeView = ({
   notice,
+  inTurn = false,
 }: {
   notice: Extract<MessageContent, { type: 'system_notice' }>;
+  inTurn?: boolean;
 }) => {
-  const { t } = useTranslation();
   const meta = notice.meta as { message?: string; source?: string } | undefined;
   if (!meta?.message) {
     return null;
   }
 
+  return <AgentWarningNoticeBody message={meta.message} inTurn={inTurn} />;
+};
+
+/**
+ * One line by default, opened on demand.
+ *
+ * A warning IS genuine status, so it keeps a colour — but only on the triangle.
+ * A filled, tinted, tint-bordered box made an amber slab of a conversation whose
+ * own language is a compact transparent timeline where even execute calls are
+ * not cards. And the message is arbitrary agent text: left expanded it can run
+ * for paragraphs between two turns, which is why it collapses to its first line
+ * and the reader opens it if it matters.
+ */
+const AgentWarningNoticeBody = ({
+  message,
+  inTurn = false,
+}: {
+  message: string;
+  inTurn?: boolean;
+}) => {
+  const { t } = useTranslation();
   return (
-    <div className="py-1 @[640px]:pl-3">
-      <div
-        role="alert"
-        className="flex w-fit max-w-full items-start gap-2 rounded-md border border-status-warning/30 bg-status-warning/10 px-2.5 py-1.5"
-      >
-        <TriangleAlert className="mt-0.5 h-4 w-4 shrink-0 text-status-warning" aria-hidden="true" />
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <span className="text-xs font-medium leading-4 text-status-warning">
-            {t('sessions.systemNotices.agentWarning.title', 'Agent warning')}
-          </span>
-          <span className="min-w-0 whitespace-pre-wrap break-words text-xs leading-5 text-muted-foreground">
-            {meta.message}
-          </span>
-        </div>
-      </div>
+    <div className={cn('py-1', !inTurn && '@[640px]:pl-3')} role="alert">
+      <AgentNoticeBanner
+        tone="warning"
+        label={t('sessions.systemNotices.agentWarning.title', 'Agent warning')}
+        detail={message}
+      />
     </div>
   );
 };
@@ -2494,7 +3112,7 @@ const WorktreeScriptNoticeView = ({
             {title}
           </span>
           {isRunning ? (
-            <Loader2 className="h-3 w-3 flex-none shrink-0 animate-spin text-muted-foreground" />
+            <Spinner className="h-3 w-3 flex-none shrink-0 text-muted-foreground" />
           ) : null}
         </Fragment>
       }
@@ -2560,6 +3178,7 @@ const UserMessageRowView = ({
   message,
   sessionId,
   user,
+  showSenderIdentity,
   timestampLabel,
   hasWideContent,
   conversationFontSize,
@@ -2569,6 +3188,7 @@ const UserMessageRowView = ({
   message: SessionHistoryParsed;
   sessionId: SessionId;
   user?: SessionChatUser;
+  showSenderIdentity: boolean;
   timestampLabel: string;
   hasWideContent: boolean;
   conversationFontSize: ConversationFontSize;
@@ -2576,6 +3196,7 @@ const UserMessageRowView = ({
   onResendUndelivered?: (userTurnId: string, inputBlocks: SessionInputBlock[]) => Promise<boolean>;
 }) => {
   const { t } = useTranslation();
+  const { copyContext } = useContext(SessionChatActionContext);
   const isMobile = useIsMobile();
   // The RPC fast-path ACK overlays "delivered" before the entry's CRDT status
   // flip syncs back (the machine may run the whole turn before it can see the
@@ -2583,6 +3204,10 @@ const UserMessageRowView = ({
   const rpcDeliveredTurns = useAtomValue(rpcDeliveredTurnsAtom);
   const rpcDelivered = rpcDeliveredTurns.has(getRpcDeliveredTurnKey(sessionId, message.id));
   const isPendingApply = message.status === 'pending_apply' && !rpcDelivered;
+  const isDeliveryUnknown = message.status === 'delivery_unknown';
+  const recoveryLabel = isDeliveryUnknown
+    ? t('sessions.messageStatus.deliveryUnknown', 'Application unknown')
+    : t('sessions.messageStatus.notDelivered', 'Not delivered');
   const isDelivered = !isPendingApply && (isSessionHistoryDelivered(message) || rpcDelivered);
   // Missing-history recovery negatively acknowledged this exact turn
   // (`SessionMeta.lastMissingHistoryUserMsgId`): the entry is visible but kept
@@ -2597,7 +3222,7 @@ const UserMessageRowView = ({
   );
   const pinCtx = useSessionPin();
   const showSendingSpinner =
-    useIsMessageSendingVisible(message.id) && !isDelivered && !isUndelivered;
+    useIsMessageSendingVisible(message.id) && !isDelivered && !isUndelivered && !isDeliveryUnknown;
 
   const hasTextContent = hasTextContentFromMessageItems(message.items);
   const [didCopy, setDidCopy] = useState(false);
@@ -2673,31 +3298,44 @@ const UserMessageRowView = ({
   return (
     <div className={cn('flex w-full flex-row-reverse', isMobile ? 'gap-2 pl-7' : 'gap-2.5')}>
       <div className="mt-0.5 shrink-0 text-muted-foreground">
-        <UserAvatar user={user} className={cn(isMobile ? 'h-7 w-7' : 'h-8 w-8')} showIcon />
+        <UserMessageAuthorAvatar user={user} isMobile={isMobile} showProfile={showSenderIdentity} />
       </div>
       <div
         className={cn(
           'group/usermsg flex min-w-0 flex-1 flex-col items-end text-left',
-          isMobile ? 'max-w-[min(100%,28rem)] gap-1' : 'max-w-[80%] gap-1.5 sm:max-w-[70%]'
+          isMobile
+            ? 'max-w-[min(100%,28rem)] gap-1'
+            : 'max-w-full gap-1.5 @[520px]:max-w-[80%] @[720px]:max-w-[70%]'
         )}
       >
-        <div className="flex flex-row-reverse items-center gap-1.5 text-[11px] text-muted-foreground">
+        <div
+          className="flex flex-row-reverse items-center gap-1.5 text-[11px] text-muted-foreground"
+          data-testid="user-message-metadata"
+        >
+          {showSenderIdentity && user?.name ? (
+            <span className="max-w-40 truncate font-medium" title={user.name}>
+              {user.name}
+            </span>
+          ) : null}
           {timestampLabel ? <span className="tabular-nums">{timestampLabel}</span> : null}
-          {isUndelivered ? (
+          {isUndelivered || isDeliveryUnknown ? (
             onResendUndelivered ? (
               <button
                 type="button"
                 className="inline-flex items-center gap-1 rounded-sm text-destructive underline-offset-2 transition-colors hover:text-destructive/80 hover:underline"
-                aria-label={t('sessions.resendUndelivered.action', 'Resend message')}
                 onClick={() => setResendDialogOpen(true)}
+                aria-label={recoveryLabel}
               >
                 <AlertCircle className="h-3.5 w-3.5" strokeWidth={2} />
-                {!isMobile ? t('sessions.messageStatus.notDelivered', 'Not delivered') : null}
+                {!isMobile ? recoveryLabel : null}
               </button>
             ) : (
-              <span className="inline-flex items-center gap-1 text-destructive">
+              <span
+                className="inline-flex items-center gap-1 text-destructive"
+                title={recoveryLabel}
+              >
                 <AlertCircle className="h-3.5 w-3.5" strokeWidth={2} />
-                {!isMobile ? t('sessions.messageStatus.notDelivered', 'Not delivered') : null}
+                {!isMobile ? recoveryLabel : null}
               </span>
             )
           ) : isPendingApply ? (
@@ -2732,7 +3370,7 @@ const UserMessageRowView = ({
                 honors overflow-wrap here so it doesn't repro there — hence "only sometimes". */}
             <div className={cn('relative min-w-0 max-w-full', isEditing ? 'w-full' : 'w-fit')}>
               {showSendingSpinner && (
-                <Loader2 className="absolute bottom-[13px] right-full mr-1.5 h-4 w-4 animate-spin text-muted-foreground" />
+                <Spinner className="absolute bottom-[13px] right-full mr-1.5 hidden h-4 w-4 text-muted-foreground @[520px]:block" />
               )}
               <div
                 className={cn(
@@ -2773,8 +3411,19 @@ const UserMessageRowView = ({
         </div>
         {/* While editing, the row's own actions (edit/pin/copy) would compete with
             the editor's Cancel / Save & resend — hide them until it closes. */}
-        {hasTextContent && !isEditing ? (
+        {(hasTextContent || copyContext) && !isEditing ? (
           <div className="flex gap-0.5">
+            {copyContext && (
+              <AssistantForkButton
+                turnId={message.id}
+                worktreeAvailability="hidden"
+                className={cn(
+                  'transition-opacity',
+                  !isMobile &&
+                    'opacity-0 group-hover/usermsg:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100'
+                )}
+              />
+            )}
             {onEdit ? (
               <TooltipProvider>
                 <Tooltip delayDuration={500}>
@@ -2864,6 +3513,7 @@ const UserMessageRowView = ({
       </div>
       {onResendUndelivered ? (
         <ResendUndeliveredDialog
+          deliveryUnknown={isDeliveryUnknown}
           open={resendDialogOpen}
           onOpenChange={setResendDialogOpen}
           isResending={isResending}
@@ -2876,6 +3526,67 @@ const UserMessageRowView = ({
   );
 };
 
+function UserMessageAuthorAvatar({
+  user,
+  isMobile,
+  showProfile,
+}: {
+  user?: SessionChatUser;
+  isMobile: boolean;
+  showProfile: boolean;
+}) {
+  const { t } = useTranslation();
+  const displayName = user?.name?.trim() || user?.email?.trim();
+  const avatar = (
+    <UserAvatar user={user} className={cn(isMobile ? 'h-7 w-7' : 'h-8 w-8')} showIcon />
+  );
+
+  if (isMobile || !showProfile || !displayName) {
+    return avatar;
+  }
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="block rounded-full outline-hidden ring-offset-background transition-opacity hover:opacity-85 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+          aria-label={t('sessions.openSenderProfile', 'View profile for {{name}}', {
+            name: displayName,
+          })}
+        >
+          {avatar}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent
+        side="left"
+        align="start"
+        sideOffset={10}
+        className="w-72 overflow-hidden p-0"
+        aria-label={t('sessions.senderProfile', 'Sender profile')}
+      >
+        <div className="flex items-center gap-3.5 p-4">
+          <UserAvatar
+            user={user}
+            className="h-16 w-16 shrink-0 text-xl"
+            fallbackClassName="bg-primary/10 text-primary"
+          />
+          <div className="min-w-0">
+            <div className="truncate text-sm font-semibold text-foreground">
+              {user?.name?.trim() || displayName}
+            </div>
+            {user?.email ? (
+              <div className="mt-1 truncate text-xs text-muted-foreground" title={user.email}>
+                {user.email}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 /**
  * Confirmation dialog behind the "Not delivered" label: resends the
  * undelivered turn's exact content as a NEW message (the old turn is never
@@ -2886,11 +3597,13 @@ const ResendUndeliveredDialog = ({
   onOpenChange,
   isResending,
   onConfirm,
+  deliveryUnknown = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   isResending: boolean;
   onConfirm: () => void;
+  deliveryUnknown?: boolean;
 }) => {
   const { t } = useTranslation();
   return (
@@ -2898,13 +3611,20 @@ const ResendUndeliveredDialog = ({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            {t('sessions.resendUndelivered.title', 'Message not delivered')}
+            {deliveryUnknown
+              ? t('sessions.messageStatus.deliveryUnknown', 'Application unknown')
+              : t('sessions.resendUndelivered.title', 'Message not delivered')}
           </AlertDialogTitle>
           <AlertDialogDescription>
-            {t(
-              'sessions.resendUndelivered.description',
-              'This message never reached the agent, so it did not run. Resend the same content as a new message?'
-            )}
+            {deliveryUnknown
+              ? t(
+                  'sessions.resendUndelivered.unknownDescription',
+                  'The agent may already have applied this guidance. Sending it as a new message could repeat work. Send again?'
+                )
+              : t(
+                  'sessions.resendUndelivered.description',
+                  'This message never reached the agent, so it did not run. Resend the same content as a new message?'
+                )}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -2912,7 +3632,7 @@ const ResendUndeliveredDialog = ({
             {t('common.cancel', 'Cancel')}
           </AlertDialogCancel>
           <AlertDialogAction disabled={isResending} onClick={onConfirm}>
-            {isResending ? <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} /> : null}
+            {isResending ? <Spinner className="h-3.5 w-3.5" strokeWidth={2} /> : null}
             {t('sessions.resendUndelivered.action', 'Resend message')}
           </AlertDialogAction>
         </AlertDialogFooter>
@@ -2980,7 +3700,9 @@ const AssistantTurnConfigInfoButton = ({
                 type="button"
                 className={cn(
                   'inline-flex shrink-0 items-center justify-center rounded-sm',
-                  'text-muted-foreground/80 transition-colors',
+                  /* Rest tone matches every other icon in the turn; hover is
+                     what brightens. */
+                  'text-muted-foreground transition-colors',
                   'hover:bg-hover/50 hover:text-foreground',
                   'focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
                   className
@@ -3038,9 +3760,12 @@ const AssistantTurnConfigInfoButton = ({
    step under it — one size, one color so the stack reads as one list. */
 const ACTIVITY_PROCESS_TEXT_CLASS = 'text-[12.5px] font-medium leading-snug text-muted-foreground';
 const ACTIVITY_PROCESS_ICON_CLASS = 'h-3.5 w-3.5 shrink-0 text-muted-foreground';
-const ACTIVITY_STEP_ICON_CLASS = cn(ACTIVITY_PROCESS_ICON_CLASS, 'mt-0.5 opacity-90');
+/* One tone for every icon in a turn — see `ACTIVITY_PROCESS_ICON_CLASS`. Only
+   the optical nudge is local; no per-icon opacity. */
+const ACTIVITY_STEP_ICON_CLASS = cn(ACTIVITY_PROCESS_ICON_CLASS, 'mt-0.5');
+/* Match the prose's fixed 4px inset, independent of the root font size. */
 const ACTIVITY_STEP_BUTTON_CLASS = cn(
-  'min-h-7 items-start rounded-md px-1 py-1 hover:bg-hover/40',
+  'min-h-7 items-start rounded-md px-[4px] py-1 hover:bg-hover/40',
   ACTIVITY_PROCESS_TEXT_CLASS
 );
 const ACTIVITY_STEP_TITLE_CLASS = cn('min-w-0 flex-1', ACTIVITY_PROCESS_TEXT_CLASS);
@@ -3051,26 +3776,127 @@ const ACTIVITY_STEP_BODY_CLASS =
   '[&_:is(h1,h2,h3,h4,h5,h6):first-child]:!mt-0 ' +
   '[&_p]:!mb-1 [&_p:last-child]:!mb-0 [&_li:not(:first-child)]:!mt-0.5';
 
+/* The collapsed activity group's label type; the live status row reuses it so
+   "Working" reads as the next group label, not a separate widget. */
+const ACTIVITY_GROUP_LABEL_CLASS = (isMobile: boolean) =>
+  cn(
+    'min-w-0',
+    isMobile
+      ? cn('flex-1', ACTIVITY_PROCESS_TEXT_CLASS)
+      : 'text-[length:var(--markdown-body-font-size,1em)] font-normal leading-[1.75]'
+  );
+
+/** Last intended rotate after a click. Survives Virtua remounting the row. */
+const pendingDisclosureRotate = new Map<string, boolean>();
+
+function ProcessDisclosureButton({
+  id,
+  label,
+  expanded,
+  onExpandedChange,
+  shimmer = false,
+  liveMessage,
+}: {
+  id: string;
+  label: string;
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
+  /** The group is the live bottom of a working turn: its label shimmers. */
+  shimmer?: boolean;
+  /** Set while the label carries the live status: it shows the running duration. */
+  liveMessage?: LiveActivityMessage;
+}) {
+  const isMobile = useIsMobile();
+  const chevronRef = useRef<HTMLSpanElement>(null);
+
+  const applyRotate = (next: boolean, animate: boolean) => {
+    const el = chevronRef.current;
+    if (!el) return;
+    el.style.transition = animate ? 'transform 200ms ease-out' : 'none';
+    el.style.transform = next ? 'rotate(90deg)' : 'rotate(0deg)';
+  };
+
+  useLayoutEffect(() => {
+    const pending = pendingDisclosureRotate.get(id);
+    const target = expanded ? 'rotate(90deg)' : 'rotate(0deg)';
+    if (pending === expanded) {
+      pendingDisclosureRotate.delete(id);
+      if (chevronRef.current?.style.transform === target) return undefined;
+      applyRotate(!expanded, false);
+      const frame = requestAnimationFrame(() => applyRotate(expanded, true));
+      return () => cancelAnimationFrame(frame);
+    }
+    applyRotate(expanded, false);
+    return undefined;
+  }, [id, expanded]);
+
+  const chevron = (
+    <span
+      className={cn(
+        'inline-flex flex-none shrink-0 origin-center text-muted-foreground',
+        !isMobile &&
+          'opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100'
+      )}
+    >
+      <span ref={chevronRef} className="inline-flex origin-center">
+        <ChevronRight className={isMobile ? ACTIVITY_PROCESS_ICON_CLASS : 'h-[1em] w-[1em]'} />
+      </span>
+    </span>
+  );
+  const title = (
+    <span className={cn(ACTIVITY_GROUP_LABEL_CLASS(isMobile), shimmer && 'agent-shimmer')}>
+      {liveMessage ? <LiveActivityLabel label={label} message={liveMessage} /> : label}
+    </span>
+  );
+  return (
+    <button
+      type="button"
+      className={cn(
+        'group flex w-full items-center py-0.5 text-left',
+        isMobile
+          ? cn('gap-1.5 rounded-md pr-1 hover:bg-hover/40', ACTIVITY_PROCESS_TEXT_CLASS)
+          : 'justify-start gap-0.5 px-[4px] text-muted-foreground'
+      )}
+      onClick={() => {
+        const next = !expanded;
+        pendingDisclosureRotate.set(id, next);
+        applyRotate(next, true);
+        onExpandedChange(next);
+      }}
+      aria-expanded={expanded}
+    >
+      {isMobile ? (
+        <>
+          {chevron}
+          {title}
+        </>
+      ) : (
+        <>
+          {title}
+          {chevron}
+        </>
+      )}
+    </button>
+  );
+}
+
 const ActivityGroupHeader = ({
+  id,
   summary,
   expanded,
-  isThinking,
   onExpandedChange,
+  shimmer,
+  liveMessage,
 }: {
+  id: string;
   summary: AssistantActivitySummary;
   expanded: boolean;
-  isThinking: boolean;
   onExpandedChange: (expanded: boolean) => void;
+  shimmer?: boolean;
+  liveMessage?: LiveActivityMessage;
 }) => {
   const { t } = useTranslation();
   const parts: string[] = [];
-  if (summary.hasThought) {
-    parts.push(
-      isThinking
-        ? t('sessions.toolActivity.thinking', 'Thinking…')
-        : t('sessions.toolActivity.thought', 'Thought')
-    );
-  }
   if (summary.commandCount > 0) {
     parts.push(t('sessions.toolActivity.commands', { count: summary.commandCount }));
   }
@@ -3089,35 +3915,27 @@ const ActivityGroupHeader = ({
   if (summary.otherCount > 0) {
     parts.push(t('sessions.toolActivity.tools', { count: summary.otherCount }));
   }
+  const label = parts.join(' · ');
+  if (!label) return null;
   return (
-    <button
-      type="button"
-      /* pl-0 so the chevron’s left edge lines up with the body text
-         under this group (shared process-rail content box). */
-      className={cn(
-        'group flex w-full items-center gap-1.5 rounded-md py-1 pl-0 pr-1 text-left transition-colors hover:bg-hover/40',
-        ACTIVITY_PROCESS_TEXT_CLASS
-      )}
-      onClick={() => onExpandedChange(!expanded)}
-      aria-expanded={expanded}
-    >
-      <ChevronRight
-        className={cn(
-          ACTIVITY_PROCESS_ICON_CLASS,
-          'flex-none transition-transform duration-200',
-          expanded && 'rotate-90'
-        )}
-      />
-      <span className={cn('min-w-0 flex-1', ACTIVITY_PROCESS_TEXT_CLASS)}>{parts.join(' · ')}</span>
-    </button>
+    <ProcessDisclosureButton
+      id={id}
+      label={label}
+      expanded={expanded}
+      onExpandedChange={onExpandedChange}
+      shimmer={shimmer}
+      liveMessage={liveMessage}
+    />
   );
 };
 
 const WorkedGroupHeader = ({
+  id,
   durationMs,
   expanded,
   onExpandedChange,
 }: {
+  id: string;
   durationMs: number | null;
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
@@ -3147,29 +3965,12 @@ const WorkedGroupHeader = ({
     : t('sessions.finishedWorking', 'Finished working');
 
   return (
-    <button
-      type="button"
-      className={cn(
-        'group flex w-full items-center gap-1 rounded-md py-0.5 text-left transition-colors',
-        /* Quieter than the answer body so process chrome does not compete. */
-        'text-muted-foreground hover:bg-hover/40 hover:text-foreground',
-        /* No leading pad: this chevron shares the turn's left rail with
-           `ActivityGroupHeader` and the answer prose. */
-        'sm:gap-1.5 sm:pr-1'
-      )}
-      onClick={() => onExpandedChange(!expanded)}
-      aria-expanded={expanded}
-    >
-      <ChevronRight
-        className={cn(
-          'h-3.5 w-3.5 flex-none shrink-0 opacity-60 transition-transform duration-200 group-hover:opacity-100',
-          expanded && 'rotate-90'
-        )}
-      />
-      <span className="min-w-0 flex-1 text-[12.5px] font-medium leading-tight tracking-tight">
-        {label}
-      </span>
-    </button>
+    <ProcessDisclosureButton
+      id={id}
+      label={label}
+      expanded={expanded}
+      onExpandedChange={onExpandedChange}
+    />
   );
 };
 
@@ -3186,7 +3987,8 @@ function ActivityProcessStep({
   return (
     <div
       className={cn(
-        'flex w-full min-h-7 items-start gap-1.5 px-1 py-1',
+        /* Keep the leading icon on the same inset as tool steps and prose. */
+        'flex w-full min-h-7 items-start gap-1.5 px-[4px] py-1',
         ACTIVITY_PROCESS_TEXT_CLASS,
         className
       )}
@@ -3254,14 +4056,73 @@ const AssistantToolCallVirtualRow = memo(
     prev.fontSize === next.fontSize
 );
 
-const AssistantSubagentTasksRow = ({ message }: { message: SessionHistoryParsed }) => {
+const AssistantSubagentTasksRow = ({
+  message,
+  sessionId,
+}: {
+  message: SessionHistoryParsed;
+  sessionId: SessionId;
+}) => {
   const tasks = useMemo(() => collectSubagentTasks(message.items), [message.items]);
-  return <SubagentTaskPanel tasks={tasks} />;
+  const runtime = useAtomValue(runtimeAtom);
+  const session = useAtomValue(sessionMetaAtomFamily(getSessionRoomId(sessionId)));
+  const machine = useAtomValue(getMachineMetaByIdAtomFamily(session?.machineId));
+  const { t } = useTranslation();
+  const onCancel =
+    runtime && session?.machineId && machineSupportsSubagentCancellation(machine)
+      ? async (taskId: string) => {
+          const response = await runtime.requestSessionCancel(
+            session.machineId,
+            sessionId,
+            message.id,
+            {
+              subagentTaskId: taskId,
+              timeoutMs: 30_000,
+            }
+          );
+          if (!response?.success)
+            throw new Error(response?.error || t('sessions.subagentTasks.cancelFailed'));
+        }
+      : undefined;
+  return <SubagentTaskPanel tasks={tasks} onCancel={onCancel} />;
 };
+
+/**
+ * Does this top-level block paint a surface (card, attachment, plan) rather than
+ * flow as prose? Surfaces are separate objects and take `cardSiblingGap`; prose
+ * takes the tighter `turnSiblingGap` because its leading already separates it.
+ */
+const CARD_CONTENT_TYPES = new Set<MessageContent['type']>([
+  'tool_call',
+  'proposed_plan',
+  'plan',
+  'image',
+  'image_group',
+  'file',
+]);
+
+const isCardContentBlock = (block: AssistantTurnRenderBlock): boolean =>
+  block.kind === 'content' && CARD_CONTENT_TYPES.has(block.entry.content.type);
 
 const isAssistantToolCallActivityEntry = (
   entry: AssistantActivityRenderItem
 ): entry is AssistantToolCallRenderItem => entry.content.type === 'tool_call';
+
+/** Whether a live status below this row needs the same gap used between cards. */
+const assistantRowPaintsSurface = (row: ChatVirtualRow | undefined): boolean => {
+  if (row?.type !== 'assistant') return false;
+  switch (row.content.kind) {
+    case 'plan':
+    case 'subagent_tasks':
+      return true;
+    case 'content':
+      return isCardContentBlock(row.content.block);
+    case 'activity_detail':
+      return isAssistantToolCallActivityEntry(row.content.entry);
+    default:
+      return false;
+  }
+};
 
 // All props are primitives, so plain memo() keeps finished thoughts inside a
 // still-streaming turn from re-rendering on every delta.
@@ -3322,50 +4183,120 @@ const AssistantThoughtVirtualRow = memo(function AssistantThoughtVirtualRow({
  */
 export const MOBILE_TURN_ACTION_LEADING_INSET_PX = 48;
 
+/**
+ * The live counterpart of the mobile footer's "Worked for {duration}" label.
+ * The live duration belongs in the active status itself (for example,
+ * "Exploring (Worked for 35s)") rather than in a separate desktop footer row.
+ * Mobile retains the explanatory label in its reserved action slot.
+ *
+ * While the turn runs, that leading slot used to stand empty — the slot is
+ * reserved unconditionally (it is what pushes the copy button clear of the
+ * back-swipe strip), so an in-flight turn showed two icons floating beside a
+ * blank gutter. It now counts up from the turn's own `timestamp`, which is the
+ * same anchor the finished label resolves from, so for a turn with no permission
+ * wait the number stops at the end rather than jumping.
+ *
+ * KNOWN GAP: a turn that DID wait on permission steps down at finalization by
+ * the length of that wait. The CLI accumulates the wait in its transient store
+ * and writes `permissionWaitMs` onto the entry only through `finish-assistant`,
+ * so while the turn is live the field is absent here and the live number
+ * includes the user's own thinking time. Closing it needs the live wait state
+ * published from the machine; see the note linked from `README.md`.
+ *
+ * Its own leaf component so that the tick re-renders this span alone: the
+ * shared `useStableNow` ticker is subscribed here, never by the footer (which
+ * every visible turn mounts) or by a finished turn (which has nothing to tick).
+ */
+/** Sample period for the live label; see the comment at its `useStableNow` call. */
+const LIVE_TURN_DURATION_SAMPLE_MS = 300;
+
+const LiveTurnDurationLabel = ({
+  message,
+}: {
+  message: Pick<SessionHistoryParsed, 'timestamp' | 'permissionWaitMs'>;
+}) => {
+  const { t } = useTranslation();
+  /* Sampled faster than it is displayed. The shared ticker's phase is set by
+     whoever mounts first, not by this turn's start, so a 1s sample lands up to
+     a full second away from the instant the elapsed span crosses a whole second
+     — the digit would change at a visibly arbitrary moment and read as stale.
+     Sampling at 300ms bounds that error to 300ms; the rendered string still
+     changes once a second, so the extra samples cost a leaf re-render each and
+     no DOM write. */
+  const now = useStableNow(LIVE_TURN_DURATION_SAMPLE_MS);
+  const durationMs = resolveLiveSessionHistoryDurationMs(message, now.getTime());
+  if (durationMs === null) return null;
+  const duration = formatDurationCompact(durationMs, {
+    hour: t('time.unitShort.hour', 'h'),
+    minute: t('time.unitShort.minute', 'm'),
+    second: t('time.unitShort.second', 's'),
+  });
+  if (!duration) return null;
+  return <>{t('sessions.workedFor', { duration, defaultValue: 'Worked for {{duration}}' })}</>;
+};
+
+type LiveActivityMessage = Pick<SessionHistoryParsed, 'timestamp' | 'permissionWaitMs'>;
+
+/**
+ * A live status label with the turn's running duration, e.g. "Exploring
+ * (Worked for 35s)". Only this text re-renders on each tick.
+ */
+const LiveActivityLabel = ({ label, message }: { label: string; message: LiveActivityMessage }) => {
+  const { t } = useTranslation();
+  const now = useStableNow(LIVE_TURN_DURATION_SAMPLE_MS);
+  const durationMs = resolveLiveSessionHistoryDurationMs(message, now.getTime());
+  const duration =
+    durationMs === null
+      ? ''
+      : formatDurationCompact(durationMs, {
+          hour: t('time.unitShort.hour', 'h'),
+          minute: t('time.unitShort.minute', 'm'),
+          second: t('time.unitShort.second', 's'),
+        });
+  if (!duration) return <>{label}</>;
+  return (
+    <>
+      {t('sessions.activityWithDuration', {
+        label,
+        duration,
+        defaultValue: '{{label}} (Worked for {{duration}})',
+      })}
+    </>
+  );
+};
+
 const AssistantForkButton = ({
   turnId,
+  className,
   isForking,
   worktreeAvailability,
   onFork,
   onWorktreeMenuOpen,
 }: {
   turnId: string;
+  className?: string;
   isForking?: boolean;
   worktreeAvailability: SessionForkWorktreeAvailability;
-  onFork: (turnId: string, destination?: SessionForkDestination) => void;
+  onFork?: (turnId: string, destination?: SessionForkDestination) => void;
   onWorktreeMenuOpen?: () => void;
 }) => {
   const { t } = useTranslation();
   const [menuOpen, setMenuOpen] = useState(false);
-  const offerWorktree = worktreeAvailability !== 'hidden';
+  const { copyContext } = useContext(SessionChatActionContext);
   const button = (
     <Button
       type="button"
       variant="ghost"
       size="icon"
-      className="h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground"
-      onClick={offerWorktree ? undefined : () => onFork(turnId, 'shared')}
-      disabled={isForking}
+      className={cn(
+        'h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground',
+        className
+      )}
       aria-label={t('sessions.forkSession', 'Fork session')}
     >
-      {isForking ? (
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-      ) : (
-        <GitFork className="h-3.5 w-3.5" />
-      )}
+      {isForking ? <Spinner className="h-3.5 w-3.5" /> : <GitFork className="h-3.5 w-3.5" />}
     </Button>
   );
-
-  if (!offerWorktree) {
-    return (
-      <TooltipProvider>
-        <Tooltip delayDuration={500}>
-          <TooltipTrigger asChild>{button}</TooltipTrigger>
-          <TooltipContent>{t('sessions.forkSession', 'Fork session')}</TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-    );
-  }
 
   return (
     <SessionForkDestinationPopover
@@ -3375,21 +4306,23 @@ const AssistantForkButton = ({
         if (open) onWorktreeMenuOpen?.();
       }}
       worktreeAvailability={worktreeAvailability}
-      disabled={isForking}
-      onSelect={(destination) => onFork(turnId, destination)}
+      nativeForkAvailable={!!onFork && !isForking}
+      onCopyContext={copyContext ? () => copyContext(turnId) : undefined}
+      onSelect={(destination) => onFork?.(turnId, destination)}
     >
       {button}
     </SessionForkDestinationPopover>
   );
 };
 
-const AssistantTurnFooter = ({
+export const AssistantTurnFooter = ({
   message,
   sessionId,
   fileDiffOverride,
   assistantActions,
   onFileDiffClick,
   showDuration,
+  isLive = false,
   isTurnHovered,
   onFork,
   forkWorktreeAvailability = 'hidden',
@@ -3402,6 +4335,8 @@ const AssistantTurnFooter = ({
   assistantActions?: AssistantMessageAction[];
   onFileDiffClick?: (turnId: string, filePath: string) => void;
   showDuration: boolean;
+  /** This turn is the live one: its duration slot counts up. */
+  isLive?: boolean;
   isTurnHovered: boolean;
   onFork?: (turnId: string, destination?: SessionForkDestination) => void;
   forkWorktreeAvailability?: SessionForkWorktreeAvailability;
@@ -3409,6 +4344,7 @@ const AssistantTurnFooter = ({
   isForking?: boolean;
 }) => {
   const { t, i18n } = useTranslation();
+  const { copyContext } = useContext(SessionChatActionContext);
   const isMobile = useIsMobile();
   const [didCopy, setDidCopy] = useState(false);
   const textContent = useMemo(() => {
@@ -3428,6 +4364,7 @@ const AssistantTurnFooter = ({
   const durationLabel =
     durationMs === null ? '' : formatDurationCompact(durationMs, durationUnitLabels);
   const showFinishedMetadata = message.finished === true;
+  const showStreamingContextCopy = !showFinishedMetadata && !!copyContext;
   /* Mobile: no completion timestamp — model meta + Worked-for already carry
      enough chrome; the stamp only adds a second clock under the answer. */
   const completionTimestampLabel = isMobile
@@ -3452,7 +4389,7 @@ const AssistantTurnFooter = ({
     completionTimestampLabel.length > 0 ||
     (durationLabel.length > 0 && (isMobile || showDuration)) ||
     hasTurnConfigInfo;
-  const showActionBar = hasActionBarContent || onFork !== undefined;
+  const showActionBar = hasActionBarContent || onFork !== undefined || !!copyContext;
 
   const handleCopy = useCallback(async () => {
     if (!hasCopyableText) return;
@@ -3484,13 +4421,13 @@ const AssistantTurnFooter = ({
           }
         />
       ) : null}
-      {showFinishedMetadata && showActionBar ? (
+      {(showFinishedMetadata || !!copyContext || hasTurnConfigInfo) && showActionBar ? (
         <div
           className={cn(
             'flex flex-wrap items-center justify-start text-[11px] text-muted-foreground',
             isMobile ? 'min-h-6 gap-1' : 'min-h-7 gap-2',
             !isMobile && 'opacity-0 transition-opacity duration-150 focus-within:opacity-100',
-            !isMobile && isTurnHovered && 'opacity-100'
+            !isMobile && (isTurnHovered || (showFinishedMetadata && isForking)) && 'opacity-100'
           )}
           data-assistant-turn-actions
         >
@@ -3508,20 +4445,40 @@ const AssistantTurnFooter = ({
               className="shrink-0 tabular-nums"
               style={{ minWidth: MOBILE_TURN_ACTION_LEADING_INSET_PX }}
             >
-              {mobileDurationLabel}
+              {showFinishedMetadata ? (
+                mobileDurationLabel
+              ) : isLive ? (
+                <LiveTurnDurationLabel message={message} />
+              ) : (
+                ''
+              )}
             </span>
           ) : null}
-          {/* Icon buttons are 28px boxes around 14px glyphs, so their own 7px of
-             interior padding would push the glyph 7px inside the answer text
-             above. Pull the cluster back by that padding so the outermost glyph
-             sits on the text's edge (and the inner one keeps the row gap to the
-             timestamp). Keep it on the cluster, not the row: when no buttons
-             render, the timestamp must stay on the plain gutter. Mobile pulls
-             only the trailing edge — its leading glyph aligns to the duration
-             label, not to the answer text. */}
-          {hasCopyableText || hasTurnConfigInfo || onFork ? (
-            <div className={cn('flex items-center gap-0.5', isMobile ? '-mr-[7px]' : '-mx-[7px]')}>
-              {hasCopyableText ? (
+          {/* Keep the leading button inside the column; only the trailing hover
+             area bleeds into the metadata gap. Mobile retains its leading slot. */}
+          {hasCopyableText || hasTurnConfigInfo || onFork || copyContext ? (
+            <div className="flex items-center gap-0.5 -mr-[7px]">
+              {showStreamingContextCopy ? (
+                <TooltipProvider>
+                  <Tooltip delayDuration={500}>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground"
+                        onClick={() => copyContext?.(message.id)}
+                        aria-label={t('sessions.copyContextMarkdown', 'Copy context as Markdown')}
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {t('sessions.copyContextMarkdown', 'Copy context as Markdown')}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ) : showFinishedMetadata && hasCopyableText ? (
                 <TooltipProvider>
                   <Tooltip delayDuration={500}>
                     <TooltipTrigger asChild>
@@ -3550,7 +4507,8 @@ const AssistantTurnFooter = ({
                   </Tooltip>
                 </TooltipProvider>
               ) : null}
-              {/* The turn config lives below the output on every layout. */}
+              {/* The turn config lives below the output on every layout, and is
+                  known from the moment the turn opens: no need to wait for it to end. */}
               {hasTurnConfigInfo ? (
                 <AssistantTurnConfigInfoButton
                   message={message}
@@ -3558,21 +4516,22 @@ const AssistantTurnFooter = ({
                   className="h-7 w-7"
                 />
               ) : null}
-              {onFork ? (
+              {showFinishedMetadata && (onFork || copyContext) ? (
                 <AssistantForkButton
                   turnId={message.id}
+                  className="mr-2"
                   isForking={isForking}
                   worktreeAvailability={forkWorktreeAvailability}
-                  onFork={onFork}
+                  onFork={showFinishedMetadata ? onFork : undefined}
                   onWorktreeMenuOpen={onForkWorktreeMenuOpen}
                 />
               ) : null}
             </div>
           ) : null}
-          {completionTimestampLabel ? (
+          {showFinishedMetadata && completionTimestampLabel ? (
             <span className="tabular-nums">{completionTimestampLabel}</span>
           ) : null}
-          {!isMobile && showDuration && durationLabel ? (
+          {showFinishedMetadata && !isMobile && showDuration && durationLabel ? (
             <>
               {completionTimestampLabel ? <span aria-hidden="true">·</span> : null}
               <span className="font-mono tabular-nums">{durationLabel}</span>
@@ -3644,6 +4603,12 @@ interface AssistantChatItemProps {
   isTurnHovered: boolean;
   onTurnHoverChange: (messageId: string, hovered: boolean) => void;
   conversationFontSize: ConversationFontSize;
+  /** This row is the live turn's collapsed bottom group: shimmer its label. */
+  shimmerGroupHeader?: boolean;
+  /** This row is the live turn's footer: the status sits above its actions. */
+  liveStatus?: AgentActivityStatusProps | null;
+  /** A bordered/card row above the status needs the wider object gap. */
+  liveStatusFollowsSurface?: boolean;
 }
 
 // Rows for unchanged turns are reference-stable via `assistantTurnRowsCache`,
@@ -3686,13 +4651,21 @@ const areAssistantVirtualContentsEqual = (
         a.isThinking === b.isThinking
       );
     case 'footer':
-      return b.kind === 'footer' && a.showDuration === b.showDuration;
+      /* `isLive` must be compared: when a newer turn displaces an abandoned
+         unfinished one, the displaced turn's rebuilt row is identical except
+         for this flag, and skipping the re-render would leave its counter
+         running next to the new turn's — exactly the one-row bound the flag
+         exists to enforce. */
+      return b.kind === 'footer' && a.showDuration === b.showDuration && a.isLive === b.isLive;
     default:
       return false;
   }
 };
 
-const areAssistantChatVirtualRowsEqual = (
+/* Exported for `tests/chat-virtual-rows-identity.test.ts`: the memo's equality is
+   the thing under test, and driving it through real rebuilt rows is a stronger
+   check than restating the comparison over hand-built content. */
+export const areAssistantChatVirtualRowsEqual = (
   a: AssistantChatVirtualRow,
   b: AssistantChatVirtualRow
 ): boolean =>
@@ -3722,7 +4695,12 @@ const areAssistantChatItemPropsEqual = (
   prev.isForking === next.isForking &&
   prev.isTurnHovered === next.isTurnHovered &&
   prev.onTurnHoverChange === next.onTurnHoverChange &&
-  prev.conversationFontSize === next.conversationFontSize;
+  prev.conversationFontSize === next.conversationFontSize &&
+  prev.shimmerGroupHeader === next.shimmerGroupHeader &&
+  prev.liveStatusFollowsSurface === next.liveStatusFollowsSurface &&
+  prev.liveStatus?.label === next.liveStatus?.label &&
+  prev.liveStatus?.tone === next.liveStatus?.tone &&
+  prev.liveStatus?.shimmer === next.liveStatus?.shimmer;
 
 const AssistantChatItem = memo(function AssistantChatItem({
   row,
@@ -3739,14 +4717,12 @@ const AssistantChatItem = memo(function AssistantChatItem({
   isTurnHovered,
   onTurnHoverChange,
   conversationFontSize,
+  shimmerGroupHeader = false,
+  liveStatus = null,
+  liveStatusFollowsSurface = false,
 }: AssistantChatItemProps) {
   const message = row.item.message;
   const { content } = row;
-  const fileDiffsForTurn = fileDiffOverride ?? message.fileDiff ?? EMPTY_EDITED_FILE_ENTRIES;
-  const coveredFilePaths = useMemo(
-    () => (message.finished === true ? buildCoveredFilePathSet(fileDiffsForTurn) : undefined),
-    [fileDiffsForTurn, message.finished]
-  );
   const handleMouseLeave = (event: ReactMouseEvent<HTMLDivElement>) => {
     const nextTurn =
       event.relatedTarget instanceof Element
@@ -3771,6 +4747,7 @@ const AssistantChatItem = memo(function AssistantChatItem({
       case 'worked_group_header':
         return (
           <WorkedGroupHeader
+            id={`${message.id}:${content.segmentKey}:worked`}
             durationMs={content.durationMs}
             expanded={content.expanded}
             onExpandedChange={(expanded) =>
@@ -3786,64 +4763,86 @@ const AssistantChatItem = memo(function AssistantChatItem({
           isStreaming: message.finished !== true,
           onFilePathClick,
           conversationFontSize,
-          coveredFilePaths,
+          planAwaitingDecision: hasUnansweredPlanApproval(message.items),
+          planRenderedSeparately: hasSeparatePlanItem(message.items),
         });
       }
       case 'activity_group_header':
         return (
           <ActivityGroupHeader
+            id={`${message.id}:${content.block.key}`}
             summary={content.block.summary}
             expanded={content.expanded}
-            isThinking={content.isThinking}
             onExpandedChange={(expanded) =>
               onGroupExpandedChange(message.id, content.block.key, expanded)
             }
+            shimmer={shimmerGroupHeader}
+            liveMessage={shimmerGroupHeader ? message : undefined}
           />
         );
       case 'activity_detail': {
         const { entry } = content;
-        /* Indent under the group header so steps read as children. */
-        return (
-          <div className="pl-3 sm:pl-3.5">
-            {isAssistantToolCallActivityEntry(entry) ? (
-              <AssistantToolCallVirtualRow
-                sessionId={row.item.sessionId}
-                messageId={message.id}
-                entry={entry}
-                onFilePathClick={onFilePathClick}
-                fontSize={conversationFontSize}
-              />
-            ) : (
-              <AssistantThoughtVirtualRow
-                messageId={message.id}
-                itemIndex={entry.itemIndex}
-                text={entry.content.text}
-                showLabel={content.showThoughtLabel}
-                isThinking={content.isThinking}
-                isStreaming={message.finished !== true}
-                fontSize={conversationFontSize}
-              />
-            )}
-          </div>
+        /* No indent: expanding a region must not shift its contents off the
+           rail. The disclosure chevron and the group header carry the
+           hierarchy — see `cardSiblingGap` above and `ai-gui/AGENTS.md`. */
+        return isAssistantToolCallActivityEntry(entry) ? (
+          <AssistantToolCallVirtualRow
+            sessionId={row.item.sessionId}
+            messageId={message.id}
+            entry={entry}
+            onFilePathClick={onFilePathClick}
+            fontSize={conversationFontSize}
+          />
+        ) : (
+          <AssistantThoughtVirtualRow
+            messageId={message.id}
+            itemIndex={entry.itemIndex}
+            text={entry.content.text}
+            showLabel={content.showThoughtLabel}
+            isThinking={content.isThinking}
+            isStreaming={message.finished !== true}
+            fontSize={conversationFontSize}
+          />
         );
       }
       case 'subagent_tasks':
-        return <AssistantSubagentTasksRow message={message} />;
+        return (
+          <>
+            {liveStatus ? (
+              <div className="pb-2">
+                <AgentActivityStatus {...liveStatus} message={message} />
+              </div>
+            ) : null}
+            <AssistantSubagentTasksRow message={message} sessionId={row.item.sessionId} />
+          </>
+        );
       case 'footer':
         return (
-          <AssistantTurnFooter
-            message={message}
-            sessionId={row.item.sessionId}
-            fileDiffOverride={fileDiffOverride}
-            assistantActions={assistantActions}
-            onFileDiffClick={onFileDiffClick}
-            showDuration={content.showDuration}
-            isTurnHovered={isTurnHovered}
-            onFork={onFork}
-            forkWorktreeAvailability={forkWorktreeAvailability}
-            onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
-            isForking={isForking}
-          />
+          <>
+            {/* Inside the turn, above its copy/fork actions: the status reads as
+                the turn's next step rather than something after it. The footer
+                row itself suppresses top padding, so restore the normal prose
+                gap or the wider surface gap used after a bordered card. */}
+            {liveStatus ? (
+              <div className={cn('pb-1.5', liveStatusFollowsSurface ? 'pt-3' : 'pt-1')}>
+                <AgentActivityStatus {...liveStatus} message={message} />
+              </div>
+            ) : null}
+            <AssistantTurnFooter
+              message={message}
+              sessionId={row.item.sessionId}
+              fileDiffOverride={fileDiffOverride}
+              assistantActions={assistantActions}
+              onFileDiffClick={onFileDiffClick}
+              showDuration={content.showDuration}
+              isLive={content.isLive}
+              isTurnHovered={isTurnHovered}
+              onFork={onFork}
+              forkWorktreeAvailability={forkWorktreeAvailability}
+              onForkWorktreeMenuOpen={onForkWorktreeMenuOpen}
+              isForking={isForking}
+            />
+          </>
         );
       default:
         return null;
@@ -3855,16 +4854,24 @@ const AssistantChatItem = memo(function AssistantChatItem({
      answer so edited-files is not double-spaced by line-height + pt-1. */
   const turnSiblingGap = 'pt-1 pb-0';
   const processSiblingGap = 'pt-0.5 pb-0.5';
+  /* A row that paints a surface needs a real gap, not the prose gap. `pt-1`
+     left cards 4-8px apart while their own padding was 10-12px, so the space
+     BETWEEN objects read tighter than the space inside one and the turn
+     collapsed into a stack of bordered strips. Prose keeps `pt-1`: its line
+     leading already supplies the separation. */
+  const cardSiblingGap = 'pt-3 pb-0';
   const verticalClass = (() => {
     if (isWorkedDetail) {
       return processSiblingGap;
     }
     switch (content.kind) {
+      case 'content':
+        return isCardContentBlock(content.block) ? cardSiblingGap : turnSiblingGap;
+      case 'plan':
+        return cardSiblingGap;
       case 'worked_group_header':
       case 'activity_group_header':
-      case 'content':
       case 'subagent_tasks':
-      case 'plan':
         return turnSiblingGap;
       case 'footer':
         /* No top pad: answer markdown already has leading below the last line.
@@ -3904,8 +4911,9 @@ const AssistantChatItem = memo(function AssistantChatItem({
         <div
           className={cn(
             'max-w-[800px] break-words',
-            /* Same inset the old process rail used, without the border. */
-            isWorkedDetail && 'pl-2.5 sm:pl-3',
+            /* A folded region's contents stay on the rail: expanding "Worked
+               for 12s" must reveal rows, not shift them right. Tone below is
+               what separates process from answer. */
             /* L4 result: full contrast. Process: muted so answer pops. */
             isFinalAnswer || content.kind === 'footer'
               ? 'text-foreground'
@@ -3940,6 +4948,7 @@ const UserChatBubble = ({
   conversationFontSize: ConversationFontSize;
   variant?: 'full' | 'attachments';
 }) => {
+  message = { ...message, items: useSelectionStableValue(message.items) };
   if (!message.items.length) {
     return variant === 'attachments' ? null : (
       <span className="text-xs text-muted-foreground">No Message</span>
@@ -4017,17 +5026,18 @@ const UserChatBubble = ({
     if (group.kind === 'images') {
       const hasSingleImage = group.images.length === 1;
       return (
-        <div key={group.key} className="flex w-full justify-end px-2 pt-1">
+        <div key={group.key} className={cn(IMAGE_ATTACHMENT_ROW_CLASS, 'justify-end px-2 pt-1')}>
           {hasSingleImage ? (
             <UserImageBlock entry={group.images[0]!.entry} variant="full" />
           ) : (
-            <div className="grid max-w-[32rem] grid-cols-2 gap-2">
-              {group.images.map(({ entry }, index) => (
-                <div key={`image-${entry.imageId}-${index}`} className="shrink-0">
-                  <UserImageBlock entry={entry} variant="thumbnail" thumbnailSize="large" />
-                </div>
-              ))}
-            </div>
+            group.images.map(({ entry }, index) => (
+              <UserImageBlock
+                key={`image-${entry.imageId}-${index}`}
+                entry={entry}
+                variant="thumbnail"
+                thumbnailSize="large"
+              />
+            ))
           )}
         </div>
       );
@@ -4107,21 +5117,6 @@ const formatJsonValue = (value: unknown) => {
   }
 };
 
-const buildCoveredFilePathSet = (
-  files: readonly AssistantEditedFileEntry[] | undefined
-): ReadonlySet<string> | undefined => {
-  if (!files || files.length === 0) return undefined;
-  const keys = new Set<string>();
-  for (const file of files) {
-    if (!file.filePath) continue;
-    const normalized = file.filePath.replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase();
-    keys.add(normalized);
-    const base = normalized.split('/').pop();
-    if (base) keys.add(base);
-  }
-  return keys.size > 0 ? keys : undefined;
-};
-
 const renderAssistantContent = (
   content: MessageContent,
   sessionId: SessionId,
@@ -4131,7 +5126,10 @@ const renderAssistantContent = (
     isStreaming?: boolean;
     onFilePathClick?: (filePath: string) => void;
     conversationFontSize?: ConversationFontSize;
-    coveredFilePaths?: ReadonlySet<string>;
+    /** This turn's plan approval is still unanswered — see `PlanPanel`. */
+    planAwaitingDecision?: boolean;
+    /** This turn renders the plan as its own row, so the card must not repeat it. */
+    planRenderedSeparately?: boolean;
   }
 ) => {
   const messageId = options?.messageId ?? 'assistant';
@@ -4146,13 +5144,12 @@ const renderAssistantContent = (
           size={conversationFontSize}
           isStreaming={options?.isStreaming}
           onFilePathClick={options?.onFilePathClick}
-          coveredFilePaths={options?.coveredFilePaths}
           searchBlockId={getTextSearchBlockId(messageId, itemIndex)}
         />
       );
     case 'image':
       return (
-        <div className="flex w-full px-2 pt-1">
+        <div className="flex w-full">
           <UserImageBlock
             entry={createSessionImageGalleryEntry({
               sessionId,
@@ -4195,12 +5192,29 @@ const renderAssistantContent = (
           itemIndex={itemIndex}
           onFilePathClick={options?.onFilePathClick}
           fontSize={conversationFontSize}
+          awaitingDecision={options?.planAwaitingDecision}
         />
       );
     case 'goal':
       return <GoalBlock goal={content} />;
     case 'tool_call':
-      return (
+      /* The plan-approval card has no title of its own to show: the plan is
+         right above it (Codex's `proposed_plan`, moved next to its approval) or
+         inside it (Claude's `content`), and "Implement this plan?" directly over
+         "Yes, implement this plan" asked and answered the same question twice.
+         What is left is the decision. */
+      return content.kind === 'switch_mode' ? (
+        <PlanExitBlock
+          sessionId={sessionId}
+          toolCall={content}
+          onFilePathClick={options?.onFilePathClick}
+          fontSize={conversationFontSize}
+          messageId={messageId}
+          itemIndex={itemIndex}
+          awaitingDecision={options?.planAwaitingDecision}
+          planRenderedSeparately={options?.planRenderedSeparately}
+        />
+      ) : (
         <ToolCallCard
           sessionId={sessionId}
           toolCall={content}
@@ -4210,6 +5224,11 @@ const renderAssistantContent = (
       );
     case 'available_commands':
       return null;
+    // A warning/failure the stream folded back onto its emitting turn. Only the
+    // agent's own notices arrive here; `buildChatStreamItems` leaves every other
+    // kind on its own system row, where `SystemMessageItems` renders it.
+    case 'system_notice':
+      return <SystemNoticeView notice={content} sessionId={sessionId} inTurn />;
     default:
       return null;
   }
@@ -4221,6 +5240,16 @@ const IMAGE_INLINE_PREVIEW_MAX_WIDTH = 768;
 
 export type ImageBubbleAlign = 'start' | 'end';
 type ImageThumbnailSize = 'compact' | 'large';
+
+/**
+ * A group of image attachments is ONE wrapping row, never a fixed column count.
+ * The thumbnails are fixed squares, so a `grid-cols-2` parked thirteen of them
+ * in a two-wide tower that used a quarter of the conversation column and scrolled
+ * for screens; wrapping lays them along the width the column actually has and
+ * keeps the turn readable. The row fills its parent and the tiles hug the side
+ * the speaker is on, so a short group still reads as that speaker's attachment.
+ */
+const IMAGE_ATTACHMENT_ROW_CLASS = 'flex w-full flex-wrap gap-2';
 
 /**
  * Hook to manage blob URLs for image gallery entries.
@@ -4347,7 +5376,16 @@ const ImagePreviewDialog = ({
   );
 };
 
-const UserImageBlock = ({
+const UserImageBlock = (props: Parameters<typeof WorkspaceUserImageBlock>[0]) => {
+  const readonly = useContext(SessionReadonlyContext);
+  return readonly ? (
+    <>{readonly.renderImage(props.entry)}</>
+  ) : (
+    <WorkspaceUserImageBlock {...props} />
+  );
+};
+
+const WorkspaceUserImageBlock = ({
   entry,
   onPreviewRequest,
   variant = 'full',
@@ -4447,8 +5485,14 @@ const UserImageBlock = ({
     <div
       ref={previewPortalAnchorRef}
       className={cn(
-        'overflow-hidden rounded-lg border border-border/70 bg-muted/20',
-        isThumbnail ? thumbnailFrameClass : 'inline-flex max-w-full flex-col'
+        /* 12px: the shared radius of every top-level conversation card (file
+           card, proposed plan, permission record). An 8px frame beside them
+           read as a different family of object. */
+        'overflow-hidden rounded-xl border border-border/70 bg-muted/20',
+        /* `shrink-0`: a thumbnail is a fixed square inside the wrapping
+           attachment row (`IMAGE_ATTACHMENT_ROW_CLASS`). Without it the last
+           tile of an over-long line squeezes instead of wrapping. */
+        isThumbnail ? `${thumbnailFrameClass} shrink-0` : 'inline-flex max-w-full flex-col'
       )}
     >
       {isThumbnailLoading && (
@@ -4531,8 +5575,11 @@ export const ImageGroupBubble = ({
   const sessionImagePreview = useContext(SessionImagePreviewContext);
   const previewPortalAnchorRef = useRef<HTMLDivElement>(null);
   const [localActiveImageKey, setLocalActiveImageKey] = useState<string | null>(null);
-  const justifyClass = align === 'end' ? 'justify-end' : 'justify-start';
-  const gridMaxWidthClass = thumbnailSize === 'large' ? 'max-w-[32rem]' : 'max-w-[26rem]';
+  /* An assistant attachment (`align="start"`) is a top-level row on the turn's
+     left rail: no horizontal pad (the gutter belongs to `ConversationColumn`)
+     and no top pad (the row gap belongs to `cardSiblingGap`). The user's own
+     attachments keep hugging the right edge exactly as they did. */
+  const rowClass = align === 'end' ? 'justify-end px-2 pt-1' : 'justify-start';
   const entries = useMemo(
     () =>
       content.images.map((image, imageIndex) =>
@@ -4562,7 +5609,7 @@ export const ImageGroupBubble = ({
 
     return (
       <>
-        <div ref={previewPortalAnchorRef} className={cn('flex w-full px-2 pt-1', justifyClass)}>
+        <div ref={previewPortalAnchorRef} className={cn('flex w-full', rowClass)}>
           <UserImageBlock entry={entry} onPreviewRequest={handlePreviewRequest} variant="full" />
         </div>
         {!sessionImagePreview ? (
@@ -4585,18 +5632,16 @@ export const ImageGroupBubble = ({
 
   return (
     <>
-      <div ref={previewPortalAnchorRef} className={cn('flex w-full px-2 pt-1', justifyClass)}>
-        <div className={cn('grid grid-cols-2 gap-2', gridMaxWidthClass)}>
-          {entries.map((entry, index) => (
-            <UserImageBlock
-              key={`${entry.imageId}-${index}`}
-              entry={entry}
-              onPreviewRequest={handlePreviewRequest}
-              variant="thumbnail"
-              thumbnailSize={thumbnailSize}
-            />
-          ))}
-        </div>
+      <div ref={previewPortalAnchorRef} className={cn(IMAGE_ATTACHMENT_ROW_CLASS, rowClass)}>
+        {entries.map((entry, index) => (
+          <UserImageBlock
+            key={`${entry.imageId}-${index}`}
+            entry={entry}
+            onPreviewRequest={handlePreviewRequest}
+            variant="thumbnail"
+            thumbnailSize={thumbnailSize}
+          />
+        ))}
       </div>
       {!sessionImagePreview ? (
         <ImagePreviewDialog
@@ -4623,7 +5668,16 @@ export const ImageGroupBubble = ({
  * one list (decision #3) at the call site; this component handles however many
  * it is handed.
  */
-export const SessionFileGroup = ({
+export const SessionFileGroup = (props: Parameters<typeof WorkspaceSessionFileGroup>[0]) => {
+  const readonly = useContext(SessionReadonlyContext);
+  return readonly ? (
+    <>{readonly.renderFiles(props.files, props.sessionId)}</>
+  ) : (
+    <WorkspaceSessionFileGroup {...props} />
+  );
+};
+
+const WorkspaceSessionFileGroup = ({
   files,
   sessionId,
   align = 'start',
@@ -4918,15 +5972,12 @@ export const MarkdownBlock = memo(function MarkdownBlock({
   size = DEFAULT_CONVERSATION_FONT_SIZE,
   isStreaming = false,
   onFilePathClick,
-  coveredFilePaths,
   searchBlockId,
 }: {
   text: string;
   size?: ConversationFontSize;
   isStreaming?: boolean;
   onFilePathClick?: (filePath: string) => void;
-  /** Paths already shown in the turn edited-files footer (dedupe chips). */
-  coveredFilePaths?: ReadonlySet<string>;
   searchBlockId?: string;
 }) {
   const handleAgentFileLinkClick = useStableCallback((href: string) => {
@@ -4942,7 +5993,6 @@ export const MarkdownBlock = memo(function MarkdownBlock({
       size={size}
       isStreaming={isStreaming}
       onAgentFileLinkClick={onFilePathClick ? handleAgentFileLinkClick : undefined}
-      coveredFilePaths={coveredFilePaths}
       searchBlockId={searchBlockId}
     />
   );
@@ -4977,7 +6027,7 @@ const UserPlainTextBlock = ({
 
   return (
     <div className="flex max-w-full justify-end sm:pl-2">
-      <div className="min-w-0 max-w-full rounded-[1.15rem] border border-foreground/[0.08] bg-foreground/[0.05] px-3.5 py-2 sm:rounded-2xl sm:px-4 sm:py-2.5">
+      <div className="min-w-0 max-w-full rounded-[1.15rem] bg-foreground/[0.05] px-3.5 py-2 sm:rounded-2xl sm:px-4 sm:py-2.5">
         <div
           className={cn(
             // overflow-wrap:anywhere (not break-words) is load-bearing: only `anywhere`
@@ -5087,7 +6137,7 @@ const CollapsibleCard = ({
           {canToggle && showDisclosureIcon ? (
             <ChevronRight
               className={cn(
-                'h-3.5 w-3.5 flex-none shrink-0 text-current opacity-70 transition-all duration-200 ease-out group-hover:opacity-100',
+                'h-3.5 w-3.5 flex-none shrink-0 text-current transition-transform duration-200 ease-out',
                 isExpanded ? 'rotate-90' : ''
               )}
             />
@@ -5171,26 +6221,36 @@ const PlanBlock = ({
   </div>
 );
 
-export const ProposedPlanBlock = ({
-  plan,
+/**
+ * The ONE plan surface. Every agent's plan reaches it, whatever carrier the
+ * adapter used (`plan-surface.ts`): Codex's separate `proposed_plan` item and
+ * Claude's / Kimi's card-carried `content` render the same panel, clamp the
+ * same way, and open the same way while a decision is pending. Rendering the
+ * card-carried ones as bare markdown was why a Claude plan looked nothing like
+ * a Codex one.
+ */
+const PlanPanel = ({
+  markdown,
+  searchBlockId,
   messageId,
   itemIndex,
   onFilePathClick,
   fontSize = DEFAULT_CONVERSATION_FONT_SIZE,
+  awaitingDecision = false,
+  isStreaming = false,
 }: {
-  plan: ProposedPlanMessage;
+  markdown: string;
+  searchBlockId: string;
   messageId: string;
   itemIndex: number;
   onFilePathClick?: (filePath: string) => void;
   fontSize?: ConversationFontSize;
+  /** The approval below this plan is still unanswered. */
+  awaitingDecision?: boolean;
+  /** The plan is still being written. */
+  isStreaming?: boolean;
 }) => {
-  const searchBlockId = getProposedPlanSearchBlockId(messageId, itemIndex);
-  const statusLabel =
-    plan.status === 'delta'
-      ? 'Drafting'
-      : plan.status === 'completed'
-        ? 'Ready for review'
-        : 'Cleared';
+  const plan = { markdown, status: isStreaming ? ('delta' as const) : ('completed' as const) };
   const handleAgentFileLinkClick = useCallback(
     (href: string) => {
       onFilePathClick?.(href);
@@ -5205,60 +6265,147 @@ export const ProposedPlanBlock = ({
     window.setTimeout(() => setDidCopy(false), 1200);
   }, [plan.markdown]);
 
+  /* A plan is long by nature and it now sits near the TOP of its turn, above the
+     work it produced — unclamped it would push everything that happened after it
+     off the screen. So it clamps ONCE IT IS HISTORY. While the plan is still
+     being written, or while its approval is unanswered, it opens in full: a
+     reader asked to approve or reject has to see the whole thing, and hiding
+     two thirds of it behind a chevron is the one moment that is unacceptable.
+     Collapsing then happens on the next render after the decision, never under
+     the reader who just made it (`useState` keeps the mounted value).
+     The toggle only appears when there is actually more to show, so a
+     three-line plan keeps no chrome. */
+  const defaultExpanded = awaitingDecision || plan.status === 'delta';
+  const cachedExpanded = getExpandState(messageId).expandedByIndex[itemIndex];
+  const [expanded, setExpandedState] = useState(cachedExpanded ?? defaultExpanded);
+  // Persisted so Virtua unmounting the row while it scrolls away does not throw
+  // away a reader's manual expansion.
+  const setExpanded = useCallback(
+    (next: boolean) => {
+      setExpandedState(next);
+      const cached = getExpandState(messageId);
+      setExpandState(messageId, {
+        ...cached,
+        expandedByIndex: { ...cached.expandedByIndex, [itemIndex]: next },
+      });
+    },
+    [itemIndex, messageId]
+  );
+  const [overflows, setOverflows] = useState(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const searchState = useSessionSearchBlockPrefix(searchBlockId);
+  const forceOpen = searchState.hasActive;
+  const isOpen = expanded || forceOpen;
+  useEffect(() => {
+    const element = bodyRef.current;
+    if (!element) return undefined;
+    const check = () => setOverflows(element.scrollHeight > element.clientHeight + 1);
+    check();
+    return observeResizeOnAnimationFrame(element, check);
+  }, [plan.markdown, isOpen]);
+
   if (!plan.markdown.trim()) {
     return null;
   }
 
+  /* The plan is the same kind of object as the command block and the tool
+     output beside it, so it wears the same panel: lighter header, plain body,
+     no accent. The tinted border/fill made one ordinary panel in the turn look
+     like the turn's alert, and the status pill restated what the surrounding
+     turn already shows (a drafting plan is visibly still growing). */
   return (
-    <div className="space-y-2 rounded-xl border border-primary/20 bg-primary/[0.035] p-3 shadow-xs">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex min-w-0 items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          <FileText className="h-4 w-4 text-primary/80" />
-          <span>Proposed Plan</span>
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <span
-            className={cn(
-              'shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide',
-              plan.status === 'completed'
-                ? 'border-status-success/30 bg-status-success/[0.08] text-status-success'
-                : 'border-border/60 bg-background/60 text-muted-foreground'
-            )}
-          >
-            {statusLabel}
-          </span>
-          <TooltipProvider>
-            <Tooltip delayDuration={500}>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-muted-foreground hover:bg-hover hover:text-foreground"
-                  onClick={() => {
-                    void handleCopy();
-                  }}
-                  aria-label="Copy plan"
-                >
-                  {didCopy ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>{didCopy ? 'Copied' : 'Copy plan'}</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        </div>
+    <div className={CONVERSATION_PANEL_FRAME_CLASS}>
+      <div className={cn(CONVERSATION_PANEL_HEADER_CLASS, CONVERSATION_PANEL_HEADER_RULE_CLASS)}>
+        {/* The whole header toggles, matching `TerminalComponent`. The chevron is
+            the affordance; it only exists when the body is actually clipped. */}
+        <button
+          type="button"
+          className="-my-1 -ml-1 flex min-w-0 flex-1 items-center gap-2 rounded py-1 pl-1 text-left"
+          onClick={overflows || isOpen ? () => setExpanded(!isOpen) : undefined}
+          aria-expanded={overflows || isOpen ? isOpen : undefined}
+          disabled={!overflows && !isOpen}
+        >
+          {overflows || isOpen ? (
+            <ChevronRight
+              className={cn(
+                'h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-200',
+                isOpen && 'rotate-90'
+              )}
+            />
+          ) : (
+            <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          )}
+          <span className={CONVERSATION_PANEL_TITLE_CLASS}>Proposed Plan</span>
+        </button>
+        <TooltipProvider>
+          <Tooltip delayDuration={500}>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="-mr-1 h-6 w-6 shrink-0 text-muted-foreground hover:bg-hover hover:text-foreground"
+                onClick={() => {
+                  void handleCopy();
+                }}
+                aria-label="Copy plan"
+              >
+                {didCopy ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>{didCopy ? 'Copied' : 'Copy plan'}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </div>
-      <div className="rounded-lg bg-background/55 px-2 py-1.5">
-        <MarkdownRenderer
-          text={plan.markdown}
-          size={fontSize}
-          onAgentFileLinkClick={onFilePathClick ? handleAgentFileLinkClick : undefined}
-          searchBlockId={searchBlockId}
-        />
+      <div className="relative">
+        <div
+          ref={bodyRef}
+          className={cn(CONVERSATION_PANEL_BODY_CLASS, !isOpen && 'max-h-56 overflow-hidden')}
+        >
+          <MarkdownRenderer
+            text={plan.markdown}
+            size={fontSize}
+            onAgentFileLinkClick={onFilePathClick ? handleAgentFileLinkClick : undefined}
+            searchBlockId={searchBlockId}
+          />
+        </div>
+        {!isOpen && overflows ? (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-background/95 to-transparent"
+          />
+        ) : null}
       </div>
     </div>
   );
 };
+
+export const ProposedPlanBlock = ({
+  plan,
+  messageId,
+  itemIndex,
+  onFilePathClick,
+  fontSize = DEFAULT_CONVERSATION_FONT_SIZE,
+  awaitingDecision = false,
+}: {
+  plan: ProposedPlanMessage;
+  messageId: string;
+  itemIndex: number;
+  onFilePathClick?: (filePath: string) => void;
+  fontSize?: ConversationFontSize;
+  awaitingDecision?: boolean;
+}) => (
+  <PlanPanel
+    markdown={plan.markdown}
+    searchBlockId={getProposedPlanSearchBlockId(messageId, itemIndex)}
+    messageId={messageId}
+    itemIndex={itemIndex}
+    onFilePathClick={onFilePathClick}
+    fontSize={fontSize}
+    awaitingDecision={awaitingDecision}
+    isStreaming={plan.status === 'delta'}
+  />
+);
 
 // Inline marker so the user can locate where the goal entered the timeline.
 // Rich controls and metrics live in the sticky `SessionGoalBanner`.
@@ -5382,10 +6529,8 @@ const ToolCallCard = memo(function ToolCallCard({
     if (toolCall.status !== 'pending' && toolCall.status !== 'in_progress') return null;
     return (
       <div className="flex min-h-7 items-center gap-2 py-1 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden="true" />
-        <span>
-          {t('sessions.activity.codexRetrying', 'Connection interrupted, Codex is retrying')}
-        </span>
+        <Spinner className="h-4 w-4 shrink-0" aria-hidden="true" />
+        <span>{t('sessions.activity.retrying', 'Retrying…')}</span>
       </div>
     );
   }
@@ -5394,10 +6539,7 @@ const ToolCallCard = memo(function ToolCallCard({
     const StatusIcon = isCompacting ? Loader2 : toolCall.status === 'failed' ? AlertCircle : Check;
     return (
       <div className="flex min-h-7 items-center gap-2 py-1 text-sm text-muted-foreground">
-        <StatusIcon
-          className={cn('h-4 w-4 shrink-0', isCompacting && 'animate-spin')}
-          aria-hidden="true"
-        />
+        <Spinner icon={StatusIcon} spinning={isCompacting} className="h-4 w-4" aria-hidden="true" />
         <span>
           {isCompacting
             ? t('sessions.activity.compactingContext', 'Compacting context')
@@ -5428,7 +6570,11 @@ const ToolCallCard = memo(function ToolCallCard({
 
   const hasOutput = Boolean(toolCall.rawOutput);
   const hasContent = Boolean(contentBlocks?.length);
-  const hasPermission = Boolean(toolCall.permissionRequest);
+  /* A cancelled request records nothing, so it must not count towards the body:
+     otherwise the card stays collapsible and opens onto empty padding. */
+  const hasPermission =
+    Boolean(toolCall.permissionRequest) &&
+    toolCall.permissionRequest?.outcome?.outcome !== 'cancelled';
   const hasDetails = hasOutput || hasContent || hasPermission;
 
   const title = toolCall.title
@@ -5452,7 +6598,9 @@ const ToolCallCard = memo(function ToolCallCard({
   const isFilePathClickable = Boolean(filePath && onFilePathClick);
   const triggerFilePathClick = () => {
     if (filePath && onFilePathClick) {
-      onFilePathClick(normalizeWorktreePath(filePath));
+      // Display shortening must not change the file's identity. The owning
+      // session decides whether a host path needs portable-worktree mapping.
+      onFilePathClick(filePath);
     }
   };
   const handleFilePathClick = (event: ReactMouseEvent<HTMLSpanElement>) => {
@@ -5493,9 +6641,7 @@ const ToolCallCard = memo(function ToolCallCard({
 
   const terminalTitleDefault = terminalTitleFromContent ?? title;
   const displayTitle = isTerminalExecuteToolCall ? terminalTitleDefault : title;
-  const runningIndicator = isRunning ? (
-    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-  ) : null;
+  const runningIndicator = isRunning ? <Spinner className="h-4 w-4 text-muted-foreground" /> : null;
 
   const renderContentBlocks = () => {
     if (!contentBlocks?.length) return null;
@@ -5584,9 +6730,16 @@ const ToolCallCard = memo(function ToolCallCard({
       }
 
       nodes.push(
+        /* Inside a folded activity row the block needs its own surface to read as
+           output. At top level the only tool call that gets here is the plan-exit
+           `switch_mode` card, whose content is the plan prose itself — boxing it
+           there stacked a near-invisible frame above the permission card and made
+           one row look like three unrelated objects. Space groups it instead. */
         <div
           key={`${block.type}-${index}`}
-          className="rounded-lg border border-border/60 bg-muted/20 p-2.5"
+          className={cn(
+            isActivityRow && cn(CONVERSATION_PANEL_FRAME_CLASS, CONVERSATION_PANEL_BODY_CLASS)
+          )}
         >
           <ToolCallContentRenderer
             block={block}
@@ -5617,22 +6770,31 @@ const ToolCallCard = memo(function ToolCallCard({
           ? ACTIVITY_STEP_BUTTON_CLASS
           : isTerminalExecuteToolCall
             ? 'rounded-none bg-muted/70 px-3 py-1.5 text-foreground hover:bg-muted/90'
-            : undefined
+            : /* A top-level tool call (the plan-approval `switch_mode` card) is a
+                 SIBLING of the worked headers and the answer prose, so it starts
+                 on the turn's left rail. `CollapsibleCard`'s default `px-1` put
+                 its title 4px right of every chevron in the same column — and 8px
+                 right of its own `px-0` body. */
+              'px-0'
       }
       bodyClassName={cn(
-        isActivityRow ? 'space-y-1.5 pb-1.5 pl-7 pr-1' : 'space-y-3 px-0',
-        !isActivityRow && (isTerminalExecuteToolCall ? 'border-t border-border/60 pb-0' : 'pb-1')
+        /* An expanded body starts on the rail, like every other collapsible
+           region in a turn. It still needs air under the title — they were 0px
+           apart — but not an indent. */
+        isActivityRow
+          ? 'space-y-1.5 px-0 pb-1.5 pt-1'
+          : isTerminalExecuteToolCall
+            ? /* Bordered card: the body is full-bleed to its own frame. */
+              'space-y-3 border-t border-border/60 px-0 pb-0'
+            : 'space-y-2.5 px-0 pb-1 pt-1.5'
       )}
       right={runningIndicator}
       left={
         <div
           className={cn(
             'flex min-w-0 flex-1 items-start gap-1.5',
-            isActivityRow
-              ? titleColorClass
-              : isTerminalExecuteToolCall
-                ? null
-                : titleColorClass + ' ml-1'
+            /* No leading margin: see `buttonClassName` — the rail is shared. */
+            isTerminalExecuteToolCall ? null : titleColorClass
           )}
         >
           <KindIcon className={kindIconClass} />
@@ -5714,13 +6876,18 @@ const ToolCallCard = memo(function ToolCallCard({
               fontSize={fontSize}
             />
           ) : hasOutput ? (
-            <div className="space-y-1">
-              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Output
+            <div className={CONVERSATION_PANEL_FRAME_CLASS}>
+              <div
+                className={cn(
+                  CONVERSATION_PANEL_HEADER_CLASS,
+                  CONVERSATION_PANEL_HEADER_RULE_CLASS
+                )}
+              >
+                <span className={CONVERSATION_PANEL_TITLE_CLASS}>Output</span>
               </div>
               <pre
                 className={cn(
-                  'rounded-md bg-muted/40 p-2',
+                  CONVERSATION_PANEL_BODY_CLASS,
                   inlineOutput ? 'overflow-x-auto' : 'max-h-60 overflow-auto'
                 )}
                 style={conversationMonoFontSizeStyle(fontSize)}
@@ -5881,15 +7048,31 @@ const StandardToolContentBlock = ({
   onFilePathClick?: (filePath: string) => void;
   fontSize: ConversationFontSize;
 }) => {
+  const readonly = useContext(SessionReadonlyContext);
   switch (content.type) {
-    case 'text':
+    case 'text': {
+      // Raw tool input arrives as serialized JSON text; keep it out of the
+      // Markdown pipeline so single-`$` math cannot eat fragments like `$(...)`.
+      const jsonText = detectToolCallJsonText(content.text);
+      if (jsonText !== null) {
+        return (
+          <pre
+            className={cn(CONVERSATION_PANEL_BODY_CLASS, 'max-h-60 overflow-auto')}
+            style={conversationMonoFontSizeStyle(fontSize)}
+          >
+            {jsonText}
+          </pre>
+        );
+      }
       return (
         <MarkdownBlock text={content.text} size={fontSize} onFilePathClick={onFilePathClick} />
       );
+    }
     case 'image': {
-      const src = content.uri
-        ? sanitizeToolContentHref(content.uri)
-        : buildSafeBase64DataUrl(content.mimeType, content.data);
+      const src =
+        content.uri && !readonly
+          ? sanitizeToolContentHref(content.uri)
+          : buildSafeBase64DataUrl(content.mimeType, content.data);
       if (!src) return null;
       return (
         <div className="space-y-2">
@@ -5915,7 +7098,7 @@ const StandardToolContentBlock = ({
       );
     }
     case 'resource_link': {
-      const href = sanitizeToolContentHref(content.uri);
+      const href = readonly ? undefined : sanitizeToolContentHref(content.uri);
       if (!href) {
         return (
           <div
@@ -5950,7 +7133,7 @@ const StandardToolContentBlock = ({
           />
         );
       }
-      const href = sanitizeToolContentHref(content.resource.uri);
+      const href = readonly ? undefined : sanitizeToolContentHref(content.resource.uri);
       if (!href) return null;
       return (
         <div className="space-y-2">
@@ -5972,16 +7155,71 @@ const StandardToolContentBlock = ({
   }
 };
 
-const PermissionRequestBlock = ({
+/**
+ * A plan exit (`switch_mode`) renders as the DECISION, nothing else.
+ *
+ * Claude's `ExitPlanMode` carries the plan as a `content` text block, so that
+ * still renders here; Codex puts the plan in `rawInput` (never displayed) and
+ * emits a separate `proposed_plan`, which `buildAssistantMessageRenderItems`
+ * moves directly above this row. Either way the reader gets plan-then-decision,
+ * with no title restating the question the outcome already answers.
+ */
+const PlanExitBlock = ({
   toolCall,
   sessionId,
+  fontSize,
+  onFilePathClick,
+  messageId,
+  itemIndex,
+  awaitingDecision = false,
+  planRenderedSeparately = false,
 }: {
   toolCall: ToolCallMessage;
   sessionId: SessionId;
+  fontSize: ConversationFontSize;
+  onFilePathClick?: (filePath: string) => void;
+  messageId: string;
+  itemIndex: number;
+  awaitingDecision?: boolean;
+  /** The turn renders the plan as its own `proposed_plan` row (Codex). */
+  planRenderedSeparately?: boolean;
 }) => {
+  /* Claude and Kimi carry the plan in the card; Codex renders it as its own row
+     just above. Take it from the card only when nobody else is showing it, or
+     the plan prints twice. */
+  const carriedMarkdown = planRenderedSeparately ? null : resolvePlanExitMarkdown(toolCall);
+  return (
+    <div className="space-y-2">
+      {carriedMarkdown ? (
+        <PlanPanel
+          markdown={carriedMarkdown}
+          searchBlockId={getProposedPlanSearchBlockId(messageId, itemIndex)}
+          messageId={messageId}
+          itemIndex={itemIndex}
+          onFilePathClick={onFilePathClick}
+          fontSize={fontSize}
+          awaitingDecision={awaitingDecision}
+        />
+      ) : null}
+      <PermissionRequestBlock sessionId={sessionId} toolCall={toolCall} collapseByDefault />
+    </div>
+  );
+};
+
+const PermissionRequestBlock = ({
+  toolCall,
+  sessionId,
+  collapseByDefault = false,
+}: {
+  toolCall: ToolCallMessage;
+  sessionId: SessionId;
+  /** Keep a duplicated in-conversation request compact when the composer owns the active action. */
+  collapseByDefault?: boolean;
+}) => {
+  const readonly = useContext(SessionReadonlyContext);
   const permission = toolCall.permissionRequest;
+  const { t } = useTranslation();
   const { respondToPermission, isReady } = usePermissionResponse();
-  const notifyPlanExitApproved = usePlanModeExitApprovalNotifier(sessionId);
   const [pendingOptionId, setPendingOptionId] = useState<string | null>(null);
 
   const askQuestionMeta = useMemo(
@@ -6000,6 +7238,14 @@ const PermissionRequestBlock = ({
     return null;
   }
 
+  if (readonly && !permission.outcome) {
+    return (
+      <div className="text-sm text-muted-foreground">
+        {t('sharing.permissionPending', 'Waiting for the author')}
+      </div>
+    );
+  }
+
   if (askQuestionMeta && readonlyAnswers) {
     return (
       <AskUserQuestionCard
@@ -6013,6 +7259,37 @@ const PermissionRequestBlock = ({
     permission.outcome?.outcome === 'selected' ? permission.outcome.optionId : undefined;
   const isResolved = Boolean(permission.outcome);
   const isCancelled = permission.outcome?.outcome === 'cancelled';
+  const record = resolvePermissionRecord(permission);
+
+  // `ToolCallCard` also drops the body for a withdrawn request, so this is the
+  // second gate rather than the only one.
+  if (record.kind === 'withdrawn') {
+    return null;
+  }
+
+  if (record.kind === 'settled') {
+    const label =
+      record.optionName ??
+      (record.allowed
+        ? t('sessions.permissionApproved', 'Permission Approved')
+        : t('sessions.permissionDenied', 'Permission Denied'));
+    const OutcomeIcon = record.allowed ? Check : X;
+    return (
+      <div
+        className={cn('flex min-h-7 w-full items-start gap-1.5 py-1', ACTIVITY_PROCESS_TEXT_CLASS)}
+      >
+        {/* Check vs cross already carries approved-vs-denied, so the icon keeps
+            the turn's one icon tone instead of introducing a hue no other icon
+            in the row has. */}
+        <OutcomeIcon className={ACTIVITY_STEP_ICON_CLASS} aria-hidden="true" />
+        {/* Truncated like every other process row: an `allow_always` name runs
+            to a full sentence, and the record must stay one line. */}
+        <span className="min-w-0 flex-1 truncate" title={label}>
+          {label}
+        </span>
+      </div>
+    );
+  }
 
   const handleSelect = async (optionId: string) => {
     if (isResolved || isCancelled || !isReady) {
@@ -6024,7 +7301,6 @@ const PermissionRequestBlock = ({
         outcome: 'selected',
         optionId,
       });
-      notifyPlanExitApproved(toolCall, permission.options, optionId);
     } catch (error) {
       console.error('Failed to respond to permission request:', error);
       setPendingOptionId(null);
@@ -6034,12 +7310,15 @@ const PermissionRequestBlock = ({
   return (
     <PermissionRequestCard
       options={permission.options}
+      defaultCollapsed={collapseByDefault}
       isResolved={isResolved}
       isCancelled={isCancelled}
       isReady={isReady}
       pendingOptionId={pendingOptionId}
       selectedOptionId={selectedOptionId}
-      className="ml-4 w-[calc(100%-1rem)] max-w-[43rem]"
+      /* On the rail with the rest of its tool call's body. A private `ml-4`
+         used to put it 16px right of its own siblings. */
+      className="w-full max-w-[43rem]"
       onSelect={(optionId) => {
         void handleSelect(optionId);
       }}
@@ -6061,15 +7340,14 @@ const StructuredObject = ({
   fontSize?: ConversationFontSize;
 }) => {
   return (
-    <div className={cn('space-y-1', dense && 'space-y-0.5')}>
-      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {label}
+    <div className={CONVERSATION_PANEL_FRAME_CLASS}>
+      <div className={cn(CONVERSATION_PANEL_HEADER_CLASS, CONVERSATION_PANEL_HEADER_RULE_CLASS)}>
+        <span className={CONVERSATION_PANEL_TITLE_CLASS}>{label}</span>
       </div>
       <pre
         className={cn(
-          'rounded-md bg-muted/40',
-          unbounded ? 'overflow-x-auto' : 'max-h-60 overflow-auto',
-          dense ? 'p-2' : 'p-3'
+          CONVERSATION_PANEL_BODY_CLASS,
+          unbounded ? 'overflow-x-auto' : 'max-h-60 overflow-auto'
         )}
         style={
           dense ? conversationMonoFontSizeStyle(fontSize) : conversationTextFontSizeStyle(fontSize)

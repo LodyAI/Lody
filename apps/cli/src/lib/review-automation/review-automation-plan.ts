@@ -15,8 +15,7 @@ import {
  * Pure policy for auto review and merge.
  *
  * Every gate that can spend tokens, write to GitHub, or merge lives here so it
- * can be tested without a daemon, a repository, or an agent — the same split
- * `task-automation-plan.ts` uses.
+ * can be tested without a daemon, a repository, or an agent.
  *
  * The states are all "waiting for" states, which is what makes a pass safely
  * repeatable: re-running the planner against unchanged facts returns `wait`
@@ -123,8 +122,7 @@ const isTerminalPlanState = (state: ReviewRunState): boolean =>
 const isHumanOnlyBlocker = (blocker: AutoMergeBlocker): boolean =>
   blocker === 'protected_path' || blocker === 'human_review_pending' || blocker === 'disputed';
 
-const describeBlockers = (blockers: readonly AutoMergeBlocker[]): string =>
-  blockers.join(', ');
+const describeBlockers = (blockers: readonly AutoMergeBlocker[]): string => blockers.join(', ');
 
 export const planReviewStep = (facts: ReviewPlanFacts): ReviewAction => {
   // A human taking the wheel outranks every other consideration, including a

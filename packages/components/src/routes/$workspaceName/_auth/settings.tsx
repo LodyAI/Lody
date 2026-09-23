@@ -52,23 +52,20 @@ export function SettingsLayoutComponent() {
     [activeTabId]
   );
 
-  // Mobile machine detail views (URL has ?machine=<id>) swap the settings
-  // header for a back-only bar that returns to the machine list.
+  // The mobile Machines detail view (URL has ?machine=<id>) swaps the settings
+  // header for a back-only bar that returns to the machine list. Agents uses
+  // the same query parameter as an inline selector and remains a single page.
   const locationSearch = location.search as Record<string, unknown>;
   const hasAgentConfigMachineParam =
     typeof locationSearch.machine === 'string' && locationSearch.machine.length > 0;
   const isMobileMachineDetail =
-    isMobile &&
-    (activeTabId === 'agents' || activeTabId === 'machines') &&
-    hasAgentConfigMachineParam;
+    isMobile && activeTabId === 'machines' && hasAgentConfigMachineParam;
+  const settingsFrom = (location.search as { from?: string }).from;
 
   const handleBack = useCallback(() => {
     if (isMobileMachineDetail) {
       void navigate({
-        to:
-          activeTabId === 'agents'
-            ? '/$workspaceName/settings/agents'
-            : '/$workspaceName/settings/machines',
+        to: '/$workspaceName/settings/machines',
         params: { workspaceName },
         search: (prev) => ({ ...prev, machine: undefined }),
         replace: true,
@@ -79,9 +76,10 @@ export function SettingsLayoutComponent() {
     const destination = getSettingsBackDestination({
       isMobile,
       settingsListPage,
+      from: settingsFrom,
     });
 
-    if (destination === 'settings-list') {
+    if (destination.kind === 'settings-list') {
       void navigate({
         to: '/$workspaceName/settings',
         params: { workspaceName },
@@ -91,16 +89,20 @@ export function SettingsLayoutComponent() {
       return;
     }
 
-    // Settings exits back to the new session landing instead of browser history.
+    if (destination.kind === 'source') {
+      void navigate({ to: destination.to });
+      return;
+    }
+
+    // A direct settings entry has no source to restore.
     void navigate({
       to: '/$workspaceName/chat',
       params: { workspaceName },
     });
-  }, [activeTabId, isMobile, isMobileMachineDetail, navigate, settingsListPage, workspaceName]);
+  }, [isMobile, isMobileMachineDetail, navigate, settingsFrom, settingsListPage, workspaceName]);
 
   // Close (exit) settings entirely — back to where it was opened from (the `from` search
   // param, preserved across tabs) or the chat landing. Used by ⌘, (toggle) and Esc.
-  const settingsFrom = (location.search as { from?: string }).from;
   const handleCloseSettings = useCallback(() => {
     const closeTo = resolveSettingsCloseTo(settingsFrom);
     if (closeTo) {
@@ -122,9 +124,7 @@ export function SettingsLayoutComponent() {
     if (isMobile) return;
     setSettingsModalTab(activeTabId ?? SETTINGS_DEFAULT_TAB);
     setSettingsMachineTarget(
-      typeof locationSearch.machine === 'string'
-        ? (locationSearch.machine as MachineId)
-        : null
+      typeof locationSearch.machine === 'string' ? (locationSearch.machine as MachineId) : null
     );
     setSettingsProjectTarget(
       typeof locationSearch.project === 'string' ? locationSearch.project : null
@@ -175,8 +175,8 @@ export function SettingsLayoutComponent() {
   const mobileTitle = settingsListPage
     ? t('settings.title')
     : activeTab
-    ? t(activeTab.labelKey)
-    : t('settings.title');
+      ? t(activeTab.labelKey)
+      : t('settings.title');
 
   /* Workspace tabbar (本地 / GitHub / Chat / 设置) navigates back to the
      chat landing for the first three tabs; the 设置 tab is a no-op

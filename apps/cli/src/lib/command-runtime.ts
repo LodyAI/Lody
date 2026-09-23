@@ -32,7 +32,20 @@ import { getLogger, rootLogger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
 import { findWorkspacesBySelector, formatWorkspaceCandidate } from '@/lib/workspace-selector';
 import { listAliveRoomIds } from '@/lib/loro/repo-existence';
-import { createCloudBillingPort, createCloudStreamsTokenPort } from '@/lib/cloud-cli-port';
+import {
+  createCloudBillingPort,
+  createCloudStreamsTokenPort,
+  createCloudSessionSharingPort,
+} from '@/lib/cloud-cli-port';
+import { getCliPlatformKind } from '@/lib/cli-platform';
+import type { CloudSessionSharingPort } from '@lody/platform';
+
+export function getCommandSessionSharingPort(): CloudSessionSharingPort | null {
+  if (getCliPlatformKind() !== 'cloud') return null;
+  const auth = getAuthContextOrThrow('mcp-sharing');
+  if (!LODY_AUTH_URL) throw new Error('Cloud sharing is not configured');
+  return createCloudSessionSharingPort({ token: auth.token, authBaseUrl: LODY_AUTH_URL });
+}
 
 export { listAliveRoomIds } from '@/lib/loro/repo-existence';
 
@@ -276,6 +289,13 @@ function buildOfflineHint(error: unknown): WorkspaceSyncUnavailableError {
   });
 }
 
+function buildPrewriteSyncError(error: unknown): WorkspaceSyncUnavailableError {
+  return new WorkspaceSyncUnavailableError({
+    message: `${formatErrorMessage(error)} Retry after checking network connectivity; no changes were written.`,
+    cause: error,
+  });
+}
+
 export async function syncWorkspaceMetaForRead(
   manager: Pick<LoroDocumentManager, 'syncMetaOrThrow'>,
   reason: string
@@ -283,7 +303,7 @@ export async function syncWorkspaceMetaForRead(
   try {
     await manager.syncMetaOrThrow({ reason });
   } catch (error) {
-    throw buildOfflineHint(error);
+    throw reason.endsWith(':prewrite') ? buildPrewriteSyncError(error) : buildOfflineHint(error);
   }
 }
 

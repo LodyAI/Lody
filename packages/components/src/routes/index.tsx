@@ -2,6 +2,7 @@ import { createFileRoute, Navigate } from '@tanstack/react-router';
 import { useTranslation } from 'react-i18next';
 import { useOrganization } from '@/hooks/useOrganization';
 import { getPreferredWorkspaceSlug, readPreferredWorkspaceSlug } from '@/lib/workspace';
+import { isWarmWindow } from '@/lib/desktop-window';
 import { RouteMessage } from '@/components/route-message';
 import { useEffect, useState } from 'react';
 import { useStableSession } from '@/hooks/useStableSession';
@@ -19,6 +20,9 @@ export const Route = createFileRoute('/')({
 });
 
 export function HomeRoute() {
+  // The spare stays natively hidden on `/` while RuntimeProvider prepares the
+  // local workspace. Target UI mounts only after the window is claimed.
+  if (isWarmWindow()) return null;
   // Local (open-source) platform: no login route exists. Land straight on the
   // single implicit workspace once the CLI has provisioned it.
   if (isLocalAppPlatform()) {
@@ -113,6 +117,8 @@ function AuthedHomeRoute() {
     organizations,
     organizationsLoading,
     error: organizationsError,
+    refetchOrganizations,
+    refetchActiveOrganization,
   } = useOrganization();
   const [orgSettled, setOrgSettled] = useState(!organizationsLoading);
 
@@ -134,6 +140,10 @@ function AuthedHomeRoute() {
       <RouteMessage
         title={t('workspace.route.loadingWorkspacesErrorTitle')}
         description={t('workspace.route.loadingWorkspacesErrorDescription')}
+        onRetry={() => {
+          void refetchOrganizations();
+          void refetchActiveOrganization();
+        }}
       />
     );
   }

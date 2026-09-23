@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { FileIcon } from '@/components/icons/file-icons';
 import { cn } from '@/lib/utils';
 
 export type AssistantEditedFileEntry = {
@@ -55,16 +54,28 @@ const splitFilePath = (filePath: string): { directory: string; name: string } =>
   };
 };
 
-const DiffStats = ({ add, del }: { add?: number; del?: number }) => (
-  <span className="ml-auto flex shrink-0 items-center gap-1.5 font-mono text-[11px] tabular-nums">
-    <span className={add === undefined ? 'text-muted-foreground/60' : 'text-code-added'}>
-      +{add ?? '—'}
+const DiffStats = ({ add, del }: { add?: number; del?: number }) => {
+  const { t } = useTranslation();
+
+  if (add === 0 && del === 0) {
+    return (
+      <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">
+        {t('sessions.editedFiles.changed', 'Changed')}
+      </span>
+    );
+  }
+
+  return (
+    <span className="ml-auto flex shrink-0 items-center gap-1.5 font-mono text-[11px] tabular-nums">
+      <span className={add === undefined ? 'text-muted-foreground/60' : 'text-code-added'}>
+        +{add ?? '—'}
+      </span>
+      <span className={del === undefined ? 'text-muted-foreground/60' : 'text-code-removed'}>
+        -{del ?? '—'}
+      </span>
     </span>
-    <span className={del === undefined ? 'text-muted-foreground/60' : 'text-code-removed'}>
-      -{del ?? '—'}
-    </span>
-  </span>
-);
+  );
+};
 
 export function AssistantEditedFiles({ files, onFileClick, className }: AssistantEditedFilesProps) {
   const { t } = useTranslation();
@@ -92,11 +103,11 @@ export function AssistantEditedFiles({ files, onFileClick, className }: Assistan
 
   return (
     <div className={cn('w-full text-left', className)}>
-      <div className="overflow-hidden rounded-xl border border-border/50 bg-muted/15">
+      <div className="overflow-hidden rounded-xl border border-border bg-background">
         {/* Multi-file only: summary bar. Single-file cards skip it so we
             don't stack "Edited 1 file" on top of the lone file row. */}
         {!isSingleFile ? (
-          <div className="flex min-h-8 items-center gap-3 px-2.5 py-1.5">
+          <div className="flex min-h-8 items-center gap-3 bg-muted/30 px-2.5 py-1.5">
             <span className="min-w-0 flex-1 text-xs font-medium text-foreground/80">
               {t('sessions.editedFiles.summary', {
                 count: uniqueFiles.length,
@@ -108,19 +119,18 @@ export function AssistantEditedFiles({ files, onFileClick, className }: Assistan
         ) : null}
         <div
           className={cn(
-            'divide-y divide-border/40',
-            !isSingleFile && 'border-t border-border/40'
+            'divide-y divide-border/70',
+            !isSingleFile && 'border-t border-border/70'
           )}
         >
           {visibleFiles.map((file) => {
             const { directory, name } = splitFilePath(file.filePath);
             const content = (
               <>
-                <FileIcon filePath={file.filePath} className="size-3.5 shrink-0" />
-                <span className="min-w-0 flex-1 truncate font-mono leading-5">
-                  <span className="text-xs font-medium text-foreground/90">{name}</span>
+                <span className="min-w-0 flex-1 truncate text-[length:var(--markdown-body-font-size,1em)] leading-[1.75]">
+                  <span className="text-foreground/90">{name}</span>
                   {directory ? (
-                    <span className="ml-1.5 text-[11px] text-muted-foreground/70">{directory}</span>
+                    <span className="ml-1.5 text-muted-foreground/70">{directory}</span>
                   ) : null}
                 </span>
                 <DiffStats add={file.add} del={file.del} />
@@ -154,7 +164,7 @@ export function AssistantEditedFiles({ files, onFileClick, className }: Assistan
         {hiddenFileCount > 0 ? (
           <button
             type="button"
-            className="flex h-8 w-full items-center justify-center gap-1 border-t border-border/40 px-2.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-hover/45 hover:text-foreground focus-visible:bg-hover/45 focus-visible:text-foreground focus-visible:outline-none"
+            className="flex h-8 w-full items-center justify-center gap-1 border-t border-border/70 px-2.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-hover/45 hover:text-foreground focus-visible:bg-hover/45 focus-visible:text-foreground focus-visible:outline-none"
             aria-expanded={expanded}
             onClick={() => setExpanded((value) => !value)}
           >

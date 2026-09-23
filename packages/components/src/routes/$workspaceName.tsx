@@ -13,6 +13,8 @@ import {
 import { useWorkspaceContextAtoms } from '@/hooks/use-workspace-context-atoms';
 import { getAppCurrentPathWithSearch } from '@/lib/app-location';
 import {
+  clearWorkspaceAccessDenied,
+  recordWorkspaceAccessDenied,
   resolveOptimisticWorkspaceRouteGuard,
   resolveWorkspaceAccessDeniedFallback,
 } from '@/lib/workspace-route-guard';
@@ -173,9 +175,22 @@ function CloudWorkspaceGuardRoute() {
   // Establish the workspace-context atoms (slug + id) from the URL param.
   useWorkspaceContextAtoms(workspaceName, access);
 
+  // A confirmed membership clears this slug from the denied-fallback memory,
+  // so a re-invite restores automatic fallback TO this workspace.
+  useEffect(() => {
+    if (access?.status === 'member') {
+      clearWorkspaceAccessDenied(workspaceName);
+    }
+  }, [access?.status, workspaceName]);
+
   const renderWorkspaceAccessDeniedFallback = () => {
     clearLastAppRoutePathIfWorkspaceMatch(workspaceName);
     clearPreferredWorkspaceSlugIfMatch(workspaceName);
+    /* Both callers gate on a DEFINITIVE denial (`not_found` / `not_member`),
+       so recording here cannot poison the set with transient errors. The set
+       is what keeps a stale org list from bouncing between two denied
+       workspaces forever — see `resolveWorkspaceAccessDeniedFallback`. */
+    recordWorkspaceAccessDenied(workspaceName);
     const fallback = resolveWorkspaceAccessDeniedFallback({
       workspaceName,
       organizations,

@@ -152,4 +152,41 @@ describe('resolveWorkspaceAccessDeniedFallback', () => {
       })
     ).toEqual({ kind: 'wait' });
   });
+
+  it('never offers a slug that was itself denied (A↔B redirect alternation regression)', () => {
+    /* A user removed from BOTH workspaces while the cached org list still
+       names both: /A falls back to B, /B must NOT fall back to A — that
+       alternation remounted the whole workspace subtree per hop until React's
+       nested-update limit (#185). Exhausted fallbacks wait instead. */
+    const organizations = [{ slug: 'alpha' }, { slug: 'beta' }];
+    expect(
+      resolveWorkspaceAccessDeniedFallback({
+        workspaceName: 'alpha',
+        organizations,
+        activeOrganization: null,
+        deniedSlugs: new Set(),
+      })
+    ).toEqual({ kind: 'workspace', slug: 'beta' });
+    expect(
+      resolveWorkspaceAccessDeniedFallback({
+        workspaceName: 'beta',
+        organizations,
+        activeOrganization: { slug: 'alpha' },
+        preferredWorkspaceSlug: 'alpha',
+        deniedSlugs: new Set(['alpha']),
+      })
+    ).toEqual({ kind: 'wait' });
+  });
+
+  it('denied slugs beat the preferred and active fallbacks too', () => {
+    expect(
+      resolveWorkspaceAccessDeniedFallback({
+        workspaceName: 'gamma',
+        organizations: [{ slug: 'alpha' }, { slug: 'beta' }, { slug: 'gamma' }],
+        activeOrganization: { slug: 'alpha' },
+        preferredWorkspaceSlug: 'alpha',
+        deniedSlugs: new Set(['alpha']),
+      })
+    ).toEqual({ kind: 'workspace', slug: 'beta' });
+  });
 });

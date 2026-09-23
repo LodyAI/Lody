@@ -6,6 +6,7 @@ const running: SubagentTask[] = [
     type: 'subagent_task',
     event: 'task_progress',
     taskId: 'task-1',
+    taskKind: 'subagent',
     status: 'in_progress',
     subagentType: 'Explore',
     description: 'Find codex capability refresh logic',
@@ -97,6 +98,32 @@ const many: SubagentTask[] = Array.from({ length: 16 }, (_, index) => ({
   usage: { totalTokens: 4200 + index * 350, toolUses: 2 + (index % 5) },
 }));
 
+/** Claude's background Bash tasks: the row shows the command, a click shows all of it. */
+const backgroundCommands: SubagentTask[] = [
+  {
+    type: 'subagent_task',
+    event: 'task_started',
+    taskId: 'bash-1',
+    taskType: 'local_bash',
+    isBackgrounded: true,
+    status: 'in_progress',
+    description:
+      'agent-browser set viewport 1280 860 2>&1\nagent-browser open "http://localhost:6019/iframe.html?id=settings-devicesdesktoplayout--own-shared-machine" 2>&1\nagent-browser wait 2500 2>&1\nagent-browser screenshot /tmp/devices-own-shared.png 2>&1',
+  },
+  {
+    type: 'subagent_task',
+    event: 'task_notification',
+    taskId: 'bash-2',
+    taskType: 'local_bash',
+    isBackgrounded: true,
+    status: 'completed',
+    startedAtEpochSeconds: 1_789_000_000,
+    endedAtEpochSeconds: 1_789_000_042,
+    description: 'git push -u origin refactor/optimize-machine-settings-ui 2>&1',
+    summary: 'git push -u origin refactor/optimize-machine-settings-ui 2>&1',
+  },
+];
+
 const meta = {
   title: 'Sessions/SubagentTaskPanel',
   component: SubagentTaskPanel,
@@ -115,7 +142,16 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const Running: Story = { args: { tasks: running } };
+export const CancellationError: Story = {
+  args: {
+    tasks: running,
+    onCancel: async () => {
+      throw new Error('Agent disconnected');
+    },
+  },
+};
 export const Completed: Story = { args: { tasks: completed } };
 export const Mixed: Story = { args: { tasks: mixed } };
 export const SingleRunning: Story = { args: { tasks: [running[0] as SubagentTask] } };
 export const ManyCompleted: Story = { args: { tasks: many } };
+export const BackgroundCommands: Story = { args: { tasks: backgroundCommands } };

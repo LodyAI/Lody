@@ -6,6 +6,10 @@ export type QueryLocalFonts = () => Promise<readonly LocalFontMetadata[]>;
 
 export const INTERFACE_FONT_CSS_VARIABLE = '--lody-interface-font-family';
 
+export function isSymbolFontFamily(family: string): boolean {
+  return /^(?:Webdings|Wingdings(?:\s*[23])?|Symbol|Zapf\s*Dingbats)$/i.test(family.trim());
+}
+
 function quoteCssFontFamily(fontFamily: string): string {
   return `"${fontFamily.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
 }
@@ -47,7 +51,7 @@ export async function listSystemFontFamilies(
 
   for (const font of fonts) {
     const family = font.family.trim();
-    if (!family) continue;
+    if (!family || isSymbolFontFamily(family)) continue;
     const key = family.toLowerCase();
     if (!families.has(key)) families.set(key, family);
   }

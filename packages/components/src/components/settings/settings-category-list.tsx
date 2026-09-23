@@ -1,3 +1,4 @@
+import { useCallback, useId } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Bug, ChevronRight } from 'lucide-react';
 import { Card, CardContent } from '@/ui/card';
@@ -14,6 +15,7 @@ import {
   type SettingsSectionId,
 } from './settings-tabs';
 import { SettingsAccountEntry } from './settings-account-entry';
+import { FocusScope, useListKeyboardNavigation } from '@/ui/focus-scope';
 
 type SettingsCategoryListProps = {
   workspaceName?: string;
@@ -53,6 +55,7 @@ const SETTINGS_SECTIONS: Array<{
 
 export function SettingsCategoryList({ workspaceName }: SettingsCategoryListProps) {
   const { t } = useTranslation();
+  const scopeId = useId();
   const navigate = useNavigate();
   const workspaceSlug = useAtomValue(currentWorkspaceSlugAtom);
   const setBugReportDialogOpen = useSetAtom(bugReportDialogOpenAtom);
@@ -66,22 +69,39 @@ export function SettingsCategoryList({ workspaceName }: SettingsCategoryListProp
   const isNativeApp = isNativeAppShell();
   const accountTab = visibleTabs.find((tab) => tab.section === 'account') ?? null;
 
-  const openCategory = (category: SettingsTabConfig) => {
-    if (!resolvedWorkspaceName) return;
-    void navigate({
-      to: category.path,
-      params: { workspaceName: resolvedWorkspaceName },
-      search: (prev) => prev,
-    });
-  };
+  const openCategory = useCallback(
+    (category: SettingsTabConfig) => {
+      if (!resolvedWorkspaceName) return;
+      void navigate({
+        to: category.path,
+        params: { workspaceName: resolvedWorkspaceName },
+        search: (prev) => prev,
+      });
+    },
+    [navigate, resolvedWorkspaceName]
+  );
+  const handleItemFocus = useCallback(
+    (item: HTMLElement) => {
+      const tabId = item.dataset.settingsTabId?.trim();
+      const category = visibleTabs.find((tab) => tab.id === tabId);
+      if (category) openCategory(category);
+    },
+    [openCategory, visibleTabs]
+  );
+  useListKeyboardNavigation({ onItemFocus: handleItemFocus, scopeId });
 
   if (!resolvedWorkspaceName) return null;
 
   return (
-    <div className="flex min-h-full flex-col pb-6 pt-3">
+    <FocusScope id={scopeId} className="flex min-h-full flex-col pb-6 pt-3">
       <div className="flex flex-col gap-5">
         {accountTab ? (
-          <div className="mx-3">
+          <div
+            className="mx-3"
+            data-id="settings:account"
+            data-scope-item="row"
+            data-settings-tab-id={accountTab.id}
+          >
             <SettingsAccountEntry user={user} mobile onSelect={() => openCategory(accountTab)} />
           </div>
         ) : null}
@@ -92,7 +112,7 @@ export function SettingsCategoryList({ workspaceName }: SettingsCategoryListProp
           if (sectionTabs.length === 0) return null;
           return (
             <section key={section.id} aria-label={t(section.headingKey, section.defaultHeading)}>
-              <h2 className="px-5 pb-1.5 text-[0.82rem] font-semibold text-muted-foreground">
+              <h2 className="px-5 pb-1.5 text-[0.82rem] font-normal text-muted-foreground">
                 {t(section.headingKey, section.defaultHeading)}
               </h2>
               <div className="mx-3 overflow-hidden rounded-2xl border border-border/60 bg-card">
@@ -124,7 +144,7 @@ export function SettingsCategoryList({ workspaceName }: SettingsCategoryListProp
           />
         </div>
       )}
-    </div>
+    </FocusScope>
   );
 }
 
@@ -145,6 +165,9 @@ function SettingsCategoryRow({
   return (
     <button
       type="button"
+      data-id={`settings:${tab.id}`}
+      data-scope-item="row"
+      data-settings-tab-id={tab.id}
       onClick={onSelect}
       className={cn(
         'block w-full text-left transition-colors active:bg-muted/40',
@@ -160,7 +183,7 @@ function SettingsCategoryRow({
           <Icon className="h-[1.05rem] w-[1.05rem] text-primary" aria-hidden="true" />
         </div>
         <div className="min-w-0 flex-1">
-          <h3 className="truncate text-[0.95rem] font-medium text-foreground">{label}</h3>
+          <h3 className="truncate text-[0.95rem] font-normal text-foreground">{label}</h3>
           <p className="mt-0.5 truncate text-[0.78rem] text-muted-foreground">{description}</p>
         </div>
         <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" aria-hidden="true" />
@@ -184,6 +207,8 @@ function SettingsActionRow({
     <div className="mx-3 overflow-hidden rounded-2xl border border-border/60 bg-card">
       <button
         type="button"
+        data-id="settings:report-bug"
+        data-scope-item="row"
         onClick={onSelect}
         className="block w-full text-left transition-colors active:bg-muted/40"
       >
@@ -192,7 +217,7 @@ function SettingsActionRow({
             <Icon className="h-[1.05rem] w-[1.05rem] text-primary" aria-hidden="true" />
           </div>
           <div className="min-w-0 flex-1">
-            <h3 className="truncate text-[0.95rem] font-medium text-foreground">{label}</h3>
+            <h3 className="truncate text-[0.95rem] font-normal text-foreground">{label}</h3>
             <p className="mt-0.5 truncate text-[0.78rem] text-muted-foreground">{description}</p>
           </div>
         </div>
@@ -242,7 +267,7 @@ export function SettingsCategoryGrid() {
                     </div>
 
                     <div>
-                      <h3 className="font-semibold text-lg mb-1">{category.label}</h3>
+                      <h3 className="font-normal text-lg mb-1">{category.label}</h3>
                       <p className="text-sm text-muted-foreground">{category.description}</p>
                     </div>
                   </div>

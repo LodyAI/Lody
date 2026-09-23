@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { useState } from 'react';
-import { fn } from 'storybook/test';
+import { fn, userEvent, within } from 'storybook/test';
 
 import {
   MobileChatList,
@@ -231,17 +231,86 @@ const openedByChats: MobileConversationItem[] = [
   ...baseChats,
 ];
 
+/* The clutter the preview cap exists for: one busy worktree with twelve
+   Sessions, then two other worktrees that a flat list would push below the
+   fold. `busy-9` is an opener with two opened Sessions — expand the bucket and
+   its group arrives intact, because the cap counts TOP-LEVEL rows rather than
+   rendered ones. */
+const overflowingChats: MobileConversationItem[] = [
+  ...Array.from({ length: 12 }, (_, index): MobileConversationItem => ({
+    id: `busy-${index}`,
+    title: `修复 presence 分片 #${index + 1}`,
+    kind: 'local',
+    branchName: `fix/presence-shard-${index + 1}`,
+    latestMessageAt: now - (index + 1) * 0.4 * hour,
+    ageLabel: `${(index + 1) * 24}m`,
+    machineId: 'zx-macbook',
+    projectKey: 'zx-macbook:lody-main',
+    projectLabel: 'lody (main)',
+    ...(index === 0 ? { isWorking: true } : {}),
+  })),
+  {
+    id: 'busy-9-opened-a',
+    title: '子会话:分片回归测试',
+    kind: 'local',
+    latestMessageAt: now - 4.2 * hour,
+    ageLabel: '4h',
+    machineId: 'zx-macbook',
+    projectKey: 'zx-macbook:lody-main',
+    projectLabel: 'lody (main)',
+    openedBySessionId: 'busy-9',
+    openedByRowSessionId: 'busy-9',
+  },
+  {
+    id: 'busy-9-opened-b',
+    title: '子会话:补 changelog',
+    kind: 'local',
+    latestMessageAt: now - 4.4 * hour,
+    ageLabel: '4h',
+    machineId: 'zx-macbook',
+    projectKey: 'zx-macbook:lody-main',
+    projectLabel: 'lody (main)',
+    openedBySessionId: 'busy-9',
+    openedByRowSessionId: 'busy-9',
+  },
+  ...Array.from({ length: 3 }, (_, index): MobileConversationItem => ({
+    id: `wt-review-${index}`,
+    title: `评审 worktree 里的改动 #${index + 1}`,
+    kind: 'local',
+    branchName: `review/${index + 1}`,
+    latestMessageAt: now - (6 + index) * hour,
+    ageLabel: `${6 + index}h`,
+    machineId: 'zx-macbook',
+    projectKey: 'zx-macbook:lody-review',
+    projectLabel: 'lody (review worktree)',
+  })),
+  {
+    id: 'wt-docs-0',
+    title: '文档站改版',
+    kind: 'local',
+    branchName: 'docs/site-refresh',
+    latestMessageAt: now - 20 * hour,
+    ageLabel: '20h',
+    machineId: 'zx-macbook',
+    projectKey: 'zx-macbook:lody-docs',
+    projectLabel: 'lody (docs worktree)',
+  },
+];
+
 function StoryShell({
   groupBy,
   rowActions,
   flatHeading,
   archived = false,
+  capGroupPreviews = false,
   chats: chatsOverride,
 }: {
   groupBy: MobileChatGroupBy;
   rowActions?: MobileChatListRowActions;
   flatHeading?: string;
   archived?: boolean;
+  /** Mirrors the workspace home list, which caps each bucket's preview. */
+  capGroupPreviews?: boolean;
   /** Story-only dataset override; defaults to the shared mixed list. */
   chats?: MobileConversationItem[];
 }) {
@@ -274,6 +343,7 @@ function StoryShell({
           groupBy={groupBy}
           flatHeading={flatHeading}
           archived={archived}
+          capGroupPreviews={capGroupPreviews}
           groupLabels={{
             chat: 'Chat',
             local: 'Local',
@@ -356,6 +426,27 @@ export const OpenedBySessionsGroupedByDate: Story = {
 
 export const GroupByDate: Story = {
   args: { groupBy: 'date' },
+};
+
+/* Group preview cap — the state this exists for. Three worktrees on the same
+   project plus a long-running one: without the cap the first bucket's twelve
+   rows push every other worktree off the screen. Each bucket previews five
+   top-level rows and ends in "Show all (N)". */
+export const GroupPreviewOverflow: Story = {
+  args: { groupBy: 'project', chats: overflowingChats, capGroupPreviews: true },
+};
+
+/* One bucket expanded past the cap: the toggle reads "Show less" and stays
+   pinned to the tail of the bucket it belongs to. Collapsing it scrolls the
+   toggle back into view rather than dropping the user somewhere else in the
+   list. */
+export const GroupPreviewExpanded: Story = {
+  args: { groupBy: 'project', chats: overflowingChats, capGroupPreviews: true },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const [toggle] = await canvas.findAllByRole('button', { name: /Show all/i });
+    await userEvent.click(toggle!);
+  },
 };
 
 export const WithSwipeActions: Story = {

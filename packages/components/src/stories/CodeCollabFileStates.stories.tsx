@@ -4,6 +4,7 @@ import { useMemo } from 'react';
 import { fn } from 'storybook/test';
 import { FileTreeView } from '@/components/sessions/components/file-tree-view';
 import { SessionFileContentView } from '@/components/sessions/session-file-content-view';
+import { SessionFileErrorState } from '@/components/sessions/session-file-error-state';
 import {
   createFakeSessionFileProvider,
   type SessionFileProviderEntry,
@@ -351,6 +352,37 @@ function UnsupportedEncodingStory() {
   );
 }
 
+// Copying the path works on every platform; handing the file to the OS needs
+// the Electron bridge AND the file's machine to be this one. Storybook has no
+// bridge, so the story passes the same callbacks by hand.
+function FileErrorActionsStory({
+  openTarget,
+}: {
+  readonly openTarget?: 'browser' | 'default-app';
+}) {
+  return (
+    <div className="w-[420px] rounded-md border border-border bg-background p-4">
+      <SessionFileErrorState
+        message="Text too large"
+        reason="text-too-large"
+        fileActions={{
+          onCopyPath: fn(),
+          ...(openTarget
+            ? {
+                localHost: {
+                  openTarget,
+                  revealLabel: 'Show in Finder',
+                  onOpen: fn(),
+                  onReveal: fn(),
+                },
+              }
+            : {}),
+        }}
+      />
+    </div>
+  );
+}
+
 const meta = {
   title: 'Sessions/CodeCollabFileStates',
   component: FileTreeStateMatrixStory,
@@ -428,4 +460,43 @@ export const UnsupportedEncoding: StoryObj<typeof UnsupportedEncodingStory> = {
     },
   },
   render: () => <UnsupportedEncodingStory />,
+};
+
+export const TooLargeWithLocalHostActions: StoryObj<typeof FileErrorActionsStory> = {
+  parameters: {
+    layout: 'centered',
+    docs: {
+      description: {
+        story:
+          'A too-large file on this machine, in the desktop app: the card keeps its explanation and adds every way to read it anyway. Keyboard: all three buttons are in Tab order, Enter/Space activate them.',
+      },
+    },
+  },
+  render: () => <FileErrorActionsStory openTarget="default-app" />,
+};
+
+export const TooLargeHtmlWithLocalHostActions: StoryObj<typeof FileErrorActionsStory> = {
+  parameters: {
+    layout: 'centered',
+    docs: {
+      description: {
+        story:
+          'The same card for an HTML file, where the OS default handler really is a browser and the button says so.',
+      },
+    },
+  },
+  render: () => <FileErrorActionsStory openTarget="browser" />,
+};
+
+export const TooLargeOnAnotherMachine: StoryObj<typeof FileErrorActionsStory> = {
+  parameters: {
+    layout: 'centered',
+    docs: {
+      description: {
+        story:
+          'The same file in a browser tab, or on a session whose machine is not this one. Nothing here can open it, so the card offers the path and says nothing it cannot do.',
+      },
+    },
+  },
+  render: () => <FileErrorActionsStory />,
 };

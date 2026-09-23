@@ -25,6 +25,7 @@ import {
   type SessionMeta,
   type WorkspaceId,
 } from '@lody/shared';
+import { readSessionHistory } from '@lody/shared/session-data';
 import type { AuthContext } from '../command-runtime';
 import type { LoroDocumentManager } from '../loro/doc';
 import type { WorkspaceSummary } from '../workspace';
@@ -69,7 +70,7 @@ export async function executeScheduleCommand(
       throw new Error('Schedule tools require the invoking Session owner');
     const session = await manager.getOrCreateSessionDoc(requesterSessionId);
     await sync(session.roomId);
-    const history = await session.getHistory();
+    const history = readSessionHistory(session.sessionData.history);
     const assistant = [...history].reverse().find((entry) => entry.role === 'assistant');
     const turn = history.find(
       (entry) =>
@@ -229,7 +230,7 @@ export async function executeScheduleCommand(
         );
     }
     if (!localOnly) {
-      const { buildProjectOptions } = await import('../task-automation/task-automation-start');
+      const { buildProjectOptions } = await import('./schedule-project-options');
       await validateSessionCreateOptions({
         auth,
         workspace: context.workspace,
@@ -278,26 +279,20 @@ export async function executeScheduleCommand(
     const session = await manager.getOrCreateSessionDoc(requesterSessionId);
     const entryId = `schedule-paused-${command.requestId}`;
     const title = (await repository.read(id))?.definition.title ?? id;
-    await session.updateHistory((history) =>
-      history.some((entry) => entry.id === entryId)
-        ? history
-        : [
-            ...history,
-            {
-              id: entryId,
-              role: 'system',
-              timestamp: new Date(now).toISOString(),
-              items: [
-                {
-                  type: 'text',
-                  text: `Paused scheduled task: ${title}. Future runs stop after the owner machine syncs. Already submitted Sessions continue.`,
-                },
-              ],
-              fileDiff: [],
-              finished: true,
-            },
-          ]
-    );
+    if (!readSessionHistory(session.sessionData.history).some((entry) => entry.id === entryId))
+      await session.sessionData.commands.appendTurn({
+        id: entryId,
+        role: 'system',
+        timestamp: new Date(now).toISOString(),
+        items: [
+          {
+            type: 'text',
+            text: `Paused scheduled task: ${title}. Future runs stop after the owner machine syncs. Already submitted Sessions continue.`,
+          },
+        ],
+        fileDiff: [],
+        finished: true,
+      });
     await manager.repo.flush();
     if (!localOnly && !(await session.waitUntilSynced()))
       throw new Error('Pause saved; notification sync pending. Retry with the same requestId.');

@@ -193,33 +193,20 @@ describe('loro streams auth helpers', () => {
     );
   });
 
-  it('does not fail a successful token fetch when persistent cache auth lookup fails', async () => {
-    let authTokenCalls = 0;
-    const fetchImpl = vi.fn(
-      async () =>
-        new Response(JSON.stringify({ token: 'jwt-1', expiresIn: 900 }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        })
-    );
-
+  it('fails closed when the current login cannot be resolved', async () => {
+    let available = true;
     const provider = createLoroStreamsTokenProvider({
       endpoint: 'https://convex.example.com/api/loro-streams/token',
       workspaceId: 'workspace-1',
-      authToken: async () => {
-        authTokenCalls++;
-        if (authTokenCalls <= 2) {
-          return 'raw-token';
-        }
-        throw new Error('session unavailable');
+      authToken: () => {
+        if (!available) throw new Error('session unavailable');
+        return 'auth';
       },
-      fetchImpl,
+      fetchImpl: async () => new Response(JSON.stringify({ token: 'jwt', expiresIn: 900 })),
     });
-
-    await expect(provider.getToken()).resolves.toBe('jwt-1');
-    await expect(provider.getToken()).resolves.toBe('jwt-1');
-
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(await provider.getToken()).toBe('jwt');
+    available = false;
+    await expect(provider.getToken()).rejects.toThrow('session unavailable');
   });
 
   it('invalidate() forces a fresh token fetch on the next getToken() call', async () => {
@@ -290,7 +277,7 @@ describe('loro streams auth helpers', () => {
         headers: { 'Content-Type': 'application/json' },
       })
     );
-    await expect(tokenPromise1).resolves.toBe('stale-jwt');
+    await expect(tokenPromise1).rejects.toThrow('superseded');
 
     // Resolve the fresh fetch
     freshResolve(
@@ -480,7 +467,7 @@ describe('loro streams auth helpers', () => {
   });
 
   it('reads an encrypted cached token from localStorage on initialization and avoids fetching', async () => {
-    const storageKey = `${LORO_STREAMS_TOKEN_STORAGE_KEY_PREFIX}:workspace-1`;
+    const storageKey = `${LORO_STREAMS_TOKEN_STORAGE_KEY_PREFIX}:${JSON.stringify(['https://convex.example.com/api/loro-streams/token', 'workspace-1'])}`;
     const firstFetchImpl = vi.fn(
       async () =>
         new Response(
@@ -554,7 +541,7 @@ describe('loro streams auth helpers', () => {
   });
 
   it('writes fetched tokens to localStorage without storing plaintext JWTs', async () => {
-    const storageKey = `${LORO_STREAMS_TOKEN_STORAGE_KEY_PREFIX}:workspace-1`;
+    const storageKey = `${LORO_STREAMS_TOKEN_STORAGE_KEY_PREFIX}:${JSON.stringify(['https://convex.example.com/api/loro-streams/token', 'workspace-1'])}`;
     const fetchImpl = vi.fn(
       async () =>
         new Response(
@@ -592,7 +579,7 @@ describe('loro streams auth helpers', () => {
   });
 
   it('ignores an encrypted cache when the auth token changes and fetches a fresh JWT', async () => {
-    const storageKey = `${LORO_STREAMS_TOKEN_STORAGE_KEY_PREFIX}:workspace-1`;
+    const storageKey = `${LORO_STREAMS_TOKEN_STORAGE_KEY_PREFIX}:${JSON.stringify(['https://convex.example.com/api/loro-streams/token', 'workspace-1'])}`;
     const firstProvider = createLoroStreamsTokenProvider({
       endpoint: 'https://convex.example.com/api/loro-streams/token',
       workspaceId: 'workspace-1',
@@ -629,7 +616,7 @@ describe('loro streams auth helpers', () => {
   });
 
   it('replaces legacy plaintext localStorage cache entries with encrypted cache entries', async () => {
-    const storageKey = `${LORO_STREAMS_TOKEN_STORAGE_KEY_PREFIX}:workspace-1`;
+    const storageKey = `${LORO_STREAMS_TOKEN_STORAGE_KEY_PREFIX}:${JSON.stringify(['https://convex.example.com/api/loro-streams/token', 'workspace-1'])}`;
     localStorageMock.setItem(
       storageKey,
       JSON.stringify({
@@ -693,5 +680,389 @@ describe('loro streams auth helpers', () => {
 
     await expect(secondProvider.getToken()).resolves.toBe('jwt-fresh');
     expect(secondFetchImpl).toHaveBeenCalledTimes(1);
+  });
+  it('coalesces staggered unauthorized calls and ignores late failures on a shared callback', async () => {
+    let finish!: (response: Response) => void;
+    let started!: () => void;
+    const refreshStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let requests = 0;
+    const provider = createLoroStreamsTokenProvider({
+      endpoint: 'https://convex.example.com/api/loro-streams/token',
+      workspaceId: 'workspace-1',
+      authToken: 'auth',
+      fetchImpl: async (_url, init) => {
+        requests++;
+        if (requests === 1) return new Response(JSON.stringify({ token: 'old', expiresIn: 900 }));
+        expect(JSON.parse(String(init?.body)).rejectedToken).toBe('old');
+        started();
+        return new Promise<Response>((resolve) => {
+          finish = resolve;
+        });
+      },
+    });
+    const auth = provider.createAuthCallback();
+    expect(await auth()).toBe('old');
+    const first = auth({ reason: 'unauthorized', previousToken: 'old' });
+    await refreshStarted;
+    const rest = Array.from({ length: 19 }, () =>
+      auth({ reason: 'unauthorized', previousToken: 'old' })
+    );
+    finish(new Response(JSON.stringify({ token: 'new', expiresIn: 900 })));
+    expect(await Promise.all([first, ...rest])).toEqual(Array(20).fill('new'));
+    expect(await auth({ reason: 'unauthorized', previousToken: 'old' })).toBe('new');
+    expect(await provider.getToken()).toBe('new');
+    expect(requests).toBe(2);
+  });
+
+  it('does not return a cached token across login changes or logout', async () => {
+    let login: string | null = 'alice';
+    const provider = createLoroStreamsTokenProvider({
+      endpoint: 'https://convex.example.com/api/loro-streams/token',
+      workspaceId: 'workspace-1',
+      authToken: () => login,
+      fetchImpl: async (_url, init) =>
+        new Response(
+          JSON.stringify({
+            token: String(init?.headers && (init.headers as Record<string, string>).Authorization),
+            expiresIn: 900,
+          })
+        ),
+    });
+    expect(await provider.getToken()).toBe('Bearer alice');
+    login = 'bob';
+    expect(await provider.getToken()).toBe('Bearer bob');
+    login = null;
+    expect(await provider.createAuthCallback()()).toBeUndefined();
+  });
+
+  it('rejects an old login response after a new login has populated the cache', async () => {
+    let login = 'alice';
+    let finish!: (response: Response) => void;
+    let started!: () => void;
+    const requestStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const provider = createLoroStreamsTokenProvider({
+      endpoint: 'https://convex.example.com/api/loro-streams/token',
+      workspaceId: 'workspace-1',
+      authToken: () => login,
+      fetchImpl: async (_url, init) => {
+        if (new Headers(init?.headers).get('Authorization') === 'Bearer alice') {
+          started();
+          return new Promise<Response>((resolve) => {
+            finish = resolve;
+          });
+        }
+        return new Response(JSON.stringify({ token: 'bob-token', expiresIn: 900 }));
+      },
+    });
+    const old = provider.getToken();
+    await requestStarted;
+    login = 'bob';
+    expect(await provider.getToken()).toBe('bob-token');
+    finish(new Response(JSON.stringify({ token: 'alice-token', expiresIn: 900 })));
+    await expect(old).rejects.toThrow('superseded');
+    expect(await provider.getToken()).toBe('bob-token');
+  });
+
+  it('does not hydrate a token issued by another endpoint or workspace', async () => {
+    const make = (endpoint: string, workspaceId: string) =>
+      createLoroStreamsTokenProvider({
+        endpoint,
+        workspaceId,
+        authToken: 'same-auth',
+        fetchImpl: async () =>
+          new Response(JSON.stringify({ token: endpoint + workspaceId, expiresIn: 900 })),
+      });
+    expect(await make('https://one.example', 'a').getToken()).toBe('https://one.examplea');
+    expect(await make('https://two.example', 'a').getToken()).toBe('https://two.examplea');
+    expect(await make('https://one.example', 'b').getToken()).toBe('https://one.exampleb');
+  });
+
+  it('fences publication when login changes between async validation and its continuation', async () => {
+    Object.defineProperty(globalThis, 'localStorage', { value: undefined, configurable: true });
+    let login = 'alice';
+    let resolutions = 0;
+    let newer: Promise<unknown> | undefined;
+    const provider = createLoroStreamsTokenProvider({
+      endpoint: 'https://convex.example.com/api/loro-streams/token',
+      workspaceId: 'workspace-1',
+      authToken: () => {
+        const captured = login;
+        if (++resolutions === 5)
+          queueMicrotask(() => {
+            login = 'bob';
+            newer = provider.getToken().catch((error) => error);
+          });
+        return captured;
+      },
+      fetchImpl: async (_url, init) =>
+        new Headers(init?.headers).get('Authorization') === 'Bearer alice'
+          ? new Response(JSON.stringify({ token: 'alice-token', expiresIn: 900 }))
+          : new Response('', { status: 500 }),
+    });
+    await expect(provider.getToken()).rejects.toThrow('superseded');
+    await newer;
+    await expect(provider.getToken()).rejects.toThrow('status=500');
+  });
+  it('does not republish a rejected JWT when unauthorized joins an earlier refresh', async () => {
+    // The expiry-driven refresh below is sent before any rejection is known, so
+    // its body cannot carry `rejectedToken`. An issuer that keeps handing back
+    // its cached version would otherwise reinstate the token the gateway just
+    // rejected, and clear the marker that would have told the issuer about it.
+    const bodies: Array<{ workspaceId: string; rejectedToken?: string }> = [];
+    let release!: () => void;
+    let started!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const refreshStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    // Armed explicitly rather than by counting calls, so inserting a request
+    // cannot silently move which one is held open.
+    let armed = false;
+    const provider = createLoroStreamsTokenProvider({
+      endpoint: 'https://convex.example.com/api/loro-streams/token',
+      workspaceId: 'workspace-1',
+      authToken: 'raw-token',
+      refreshSkewMs: 5_000,
+      fetchImpl: async (_url, init) => {
+        const body = JSON.parse(String(init?.body)) as {
+          workspaceId: string;
+          rejectedToken?: string;
+        };
+        bodies.push(body);
+        if (armed) {
+          armed = false;
+          started();
+          await gate;
+        }
+        return new Response(
+          JSON.stringify({
+            token: body.rejectedToken === 'jwt-1' ? 'jwt-2' : 'jwt-1',
+            expiresIn: 60,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      },
+    });
+
+    const auth = provider.createAuthCallback();
+    expect(await auth({ reason: 'request' })).toBe('jwt-1');
+    vi.advanceTimersByTime(56_000);
+    armed = true;
+    const expiryRefresh = auth({ reason: 'request' });
+    await refreshStarted;
+
+    // Twenty streams report the rejection while that refresh is still open.
+    const rejections = Array.from({ length: 20 }, () =>
+      auth({ reason: 'unauthorized', previousToken: 'jwt-1' })
+    );
+    release();
+
+    expect(await expiryRefresh).toBe('jwt-2');
+    expect(await Promise.all(rejections)).toEqual(Array(20).fill('jwt-2'));
+    // The fan-out costs exactly one extra round trip, and only that one carries
+    // the rejection: single-flight is preserved.
+    expect(bodies).toEqual([
+      { workspaceId: 'workspace-1' },
+      { workspaceId: 'workspace-1' },
+      { workspaceId: 'workspace-1', rejectedToken: 'jwt-1' },
+    ]);
+    expect(await provider.getToken()).toBe('jwt-2');
+
+    // The persistent cache must hold the replacement, never the rejected JWT:
+    // a fresh provider on the same credential hydrates without any network.
+    const hydratedFetch = vi.fn();
+    const hydrated = createLoroStreamsTokenProvider({
+      endpoint: 'https://convex.example.com/api/loro-streams/token',
+      workspaceId: 'workspace-1',
+      authToken: 'raw-token',
+      refreshSkewMs: 5_000,
+      fetchImpl: hydratedFetch,
+    });
+    expect(await hydrated.getToken()).toBe('jwt-2');
+    expect(hydratedFetch).not.toHaveBeenCalled();
+  });
+
+  it('keeps the rejection marker and the cache clean when the issuer ignores rejectedToken', async () => {
+    const storageKey = `${LORO_STREAMS_TOKEN_STORAGE_KEY_PREFIX}:${JSON.stringify(['https://convex.example.com/api/loro-streams/token', 'workspace-1'])}`;
+    const bodies: Array<{ workspaceId: string; rejectedToken?: string }> = [];
+    const provider = createLoroStreamsTokenProvider({
+      endpoint: 'https://convex.example.com/api/loro-streams/token',
+      workspaceId: 'workspace-1',
+      authToken: 'raw-token',
+      fetchImpl: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)) as { workspaceId: string });
+        return new Response(JSON.stringify({ token: 'jwt-stuck', expiresIn: 900 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+    });
+
+    const auth = provider.createAuthCallback();
+    expect(await auth({ reason: 'request' })).toBe('jwt-stuck');
+    expect(localStorageMock.getItem(storageKey)).not.toBeNull();
+
+    // An older issuer ignores the field and returns the rejected version again.
+    expect(await auth({ reason: 'unauthorized', previousToken: 'jwt-stuck' })).toBe('jwt-stuck');
+    expect(bodies).toHaveLength(2);
+    expect(bodies.at(-1)).toEqual({ workspaceId: 'workspace-1', rejectedToken: 'jwt-stuck' });
+    // A rejected JWT must not outlive this process in the persistent cache: a
+    // fresh provider would hydrate it with no marker left to suppress it.
+    expect(localStorageMock.getItem(storageKey)).toBeNull();
+
+    // The marker keeps travelling until the issuer honours it; retrying stays
+    // bounded at one request per reported rejection.
+    expect(await auth({ reason: 'unauthorized', previousToken: 'jwt-stuck' })).toBe('jwt-stuck');
+    expect(bodies).toHaveLength(3);
+    expect(bodies.at(-1)).toEqual({ workspaceId: 'workspace-1', rejectedToken: 'jwt-stuck' });
+    expect(localStorageMock.getItem(storageKey)).toBeNull();
+  });
+  it('does not persist a JWT rejected while its encrypted write was in flight', async () => {
+    // Encryption is several async WebCrypto calls, and `reset('unauthorized')`
+    // keeps the generation, so the generation fence cannot see a rejection that
+    // lands inside that window. Without a marker re-check at `setItem` time the
+    // rejected JWT is written back after the invalidation already removed it.
+    const storageKey = `${LORO_STREAMS_TOKEN_STORAGE_KEY_PREFIX}:${JSON.stringify(['https://convex.example.com/api/loro-streams/token', 'workspace-1'])}`;
+    const subtle = globalThis.crypto.subtle;
+    const realEncrypt = subtle.encrypt.bind(subtle);
+    let releaseEncrypt!: () => void;
+    let encryptStarted!: () => void;
+    const encrypting = new Promise<void>((resolve) => {
+      encryptStarted = resolve;
+    });
+    const encryptGate = new Promise<void>((resolve) => {
+      releaseEncrypt = resolve;
+    });
+    let armed = false;
+    const encryptSpy = vi
+      .spyOn(subtle, 'encrypt')
+      .mockImplementation(async (algorithm: never, key: never, data: never) => {
+        if (armed) {
+          armed = false;
+          encryptStarted();
+          await encryptGate;
+        }
+        return realEncrypt(algorithm, key, data);
+      });
+
+    try {
+      const bodies: Array<{ workspaceId: string; rejectedToken?: string }> = [];
+      const provider = createLoroStreamsTokenProvider({
+        endpoint: 'https://convex.example.com/api/loro-streams/token',
+        workspaceId: 'workspace-1',
+        authToken: 'raw-token',
+        fetchImpl: async (_url, init) => {
+          const body = JSON.parse(String(init?.body)) as {
+            workspaceId: string;
+            rejectedToken?: string;
+          };
+          bodies.push(body);
+          return new Response(
+            JSON.stringify({
+              token: body.rejectedToken === 'jwt-1' ? 'jwt-2' : 'jwt-1',
+              expiresIn: 900,
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          );
+        },
+      });
+
+      const auth = provider.createAuthCallback();
+      // jwt-1 is genuinely published, so a stream can legitimately hold it.
+      expect(await auth({ reason: 'request' })).toBe('jwt-1');
+
+      // An expiry refresh gets the issuer's cached jwt-1 back; hold its write open.
+      vi.advanceTimersByTime(880_000);
+      armed = true;
+      const refresh = auth({ reason: 'request' });
+      await encrypting;
+      // Only now does the stream holding jwt-1 report the gateway's 401.
+      const rejected = auth({ reason: 'unauthorized', previousToken: 'jwt-1' });
+      releaseEncrypt();
+      await refresh;
+      await rejected;
+
+      expect(localStorageMock.getItem(storageKey)).toBeNull();
+      // The marker survived, so the next refresh still delivers the rejection
+      // and the provider recovers within one further round trip.
+      expect(await auth({ reason: 'unauthorized', previousToken: 'jwt-1' })).toBe('jwt-2');
+      expect(bodies.at(-1)).toEqual({ workspaceId: 'workspace-1', rejectedToken: 'jwt-1' });
+    } finally {
+      encryptSpy.mockRestore();
+    }
+  });
+
+  it('keeps a failed rejection-carrying retry retryable and preserves the marker', async () => {
+    const bodies: Array<{ workspaceId: string; rejectedToken?: string }> = [];
+    let release!: () => void;
+    let started!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const refreshStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    let armed = false;
+    let failRetry = true;
+    const provider = createLoroStreamsTokenProvider({
+      endpoint: 'https://convex.example.com/api/loro-streams/token',
+      workspaceId: 'workspace-1',
+      authToken: 'raw-token',
+      refreshSkewMs: 5_000,
+      fetchImpl: async (_url, init) => {
+        const body = JSON.parse(String(init?.body)) as {
+          workspaceId: string;
+          rejectedToken?: string;
+        };
+        bodies.push(body);
+        if (armed) {
+          armed = false;
+          started();
+          await gate;
+        }
+        if (body.rejectedToken === undefined) {
+          return new Response(JSON.stringify({ token: 'jwt-1', expiresIn: 60 }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (failRetry) {
+          failRetry = false;
+          return new Response('', { status: 500 });
+        }
+        return new Response(JSON.stringify({ token: 'jwt-2', expiresIn: 900 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+    });
+
+    const auth = provider.createAuthCallback();
+    expect(await auth({ reason: 'request' })).toBe('jwt-1');
+    vi.advanceTimersByTime(56_000);
+    armed = true;
+    const expiryRefresh = auth({ reason: 'request' });
+    await refreshStarted;
+    const rejections = [
+      auth({ reason: 'unauthorized', previousToken: 'jwt-1' }),
+      auth({ reason: 'unauthorized', previousToken: 'jwt-1' }),
+    ];
+    release();
+
+    // A transient failure on the retry stays a transient failure for every
+    // joined caller: it must not be converted into a fatal auth rejection.
+    await expect(expiryRefresh).rejects.toThrow('status=500');
+    for (const pending of rejections) {
+      await expect(pending).rejects.toThrow('status=500');
+    }
+    // The marker is not lost by the failure; the next attempt still carries it.
+    expect(await auth({ reason: 'unauthorized', previousToken: 'jwt-1' })).toBe('jwt-2');
+    expect(bodies.at(-1)).toEqual({ workspaceId: 'workspace-1', rejectedToken: 'jwt-1' });
   });
 });

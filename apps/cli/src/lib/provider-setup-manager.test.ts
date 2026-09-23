@@ -60,7 +60,10 @@ const setupId = 'setup-1' as AgentConfigId;
 const machineId = 'machine-1' as MachineId;
 const workspaceId = 'workspace-1' as WorkspaceId;
 
-function createSetup(status: ProviderSetupStatus = 'queued'): ProviderSetupTask {
+function createSetup(
+  status: ProviderSetupStatus = 'queued',
+  configOverrides: Partial<ProviderSetupTask['config']> = {}
+): ProviderSetupTask {
   return {
     v: 1,
     id: setupId,
@@ -74,6 +77,7 @@ function createSetup(status: ProviderSetupStatus = 'queued'): ProviderSetupTask 
       agentType: 'codex',
       env: {},
       prompt: '',
+      ...configOverrides,
     },
     status,
     attempt: 1,
@@ -170,6 +174,72 @@ describe('ProviderSetupManager', () => {
     expect(finalSnapshot).toContain(JSON.stringify(machineFlockKeys.agentConfig(setupId)));
     expect(finalSnapshot).not.toContain(JSON.stringify(machineFlockKeys.providerSetup(setupId)));
     expect(harness.execution.refreshMachineAcpCapabilities).toHaveBeenCalledTimes(1);
+    harness.manager.stop();
+  });
+
+  it.each(['bub', 'dimcode'])('verifies %s without managed downloads', async (agentType) => {
+    const harness = createHarness({
+      getMachineAcpBinaryStatus: async () => {
+        throw new Error('Non-managed builtin must not enter managed runtime preparation');
+      },
+      installMachineAcpBinary: async () => {
+        throw new Error('Non-managed builtin must not enter managed runtime installation');
+      },
+      refreshMachineAcpCapabilities: vi.fn(async () => ({
+        type: 'machine/acp-capabilities-refresh_response' as const,
+        machineId,
+        configId: setupId,
+        cliType: 'builtin' as const,
+        agentType,
+        success: true,
+        modes: [],
+        models: [],
+      })),
+    });
+    seedSetup(harness.flock, createSetup('queued', { name: 'Bub', agentType }));
+
+    await harness.manager.kick();
+
+    expect(readState(harness.flock).config?.agentType).toBe(agentType);
+    expect(readState(harness.flock).setup).toBeUndefined();
+    harness.manager.stop();
+  });
+
+  it.each([
+    ['bub', 'spawn bub ENOENT', 'runtime-unavailable'],
+    [
+      'bub',
+      "Failed to load plugin 'acp-server': No module named 'bub_acp_server'; No such command 'acp'",
+      'runtime-unavailable',
+    ],
+    ['bub', 'ACP handshake timed out', 'verification-failed'],
+    ['dimcode', 'npm package could not be installed', 'verification-failed'],
+    [
+      'dimcode',
+      'Authentication required: Provider credentials are required',
+      'verification-failed',
+    ],
+  ] as const)('keeps failed %s probes unpublished: %s', async (agentType, error, failureCode) => {
+    const harness = createHarness({
+      refreshMachineAcpCapabilities: vi.fn(async () => ({
+        type: 'machine/acp-capabilities-refresh_response' as const,
+        machineId,
+        configId: setupId,
+        cliType: 'builtin' as const,
+        agentType,
+        success: false,
+        error,
+      })),
+    });
+    seedSetup(harness.flock, createSetup('queued', { name: agentType, agentType }));
+
+    await harness.manager.kick();
+
+    expect(readState(harness.flock).config).toBeUndefined();
+    expect(readState(harness.flock).setup).toMatchObject({
+      status: 'failed',
+      failureCode,
+    });
     harness.manager.stop();
   });
 

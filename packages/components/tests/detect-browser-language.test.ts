@@ -3,12 +3,20 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { detectBrowserLanguage } from '../src/i18n';
 
-type GlobalWindow = typeof window & { __LODY_ELECTRON__?: boolean };
+type GlobalWindow = typeof window & {
+  __LODY_ELECTRON__?: true;
+  __LODY_PLATFORM__?: {
+    os: string;
+    homeDir: string;
+    preferredSystemLanguages?: readonly string[];
+  };
+};
 
 afterEach(() => {
   vi.unstubAllGlobals();
   const w = window as GlobalWindow;
   delete w.__LODY_ELECTRON__;
+  delete w.__LODY_PLATFORM__;
 });
 
 function setLanguages(languages: string[] | undefined, language?: string) {
@@ -86,9 +94,29 @@ describe('detectBrowserLanguage', () => {
     expect(detectBrowserLanguage()).toBe('zh_CN');
   });
 
-  it('returns null in the Electron shell', () => {
+  it.each([
+    ['macOS', 'darwin', 'zh-Hans-CN'],
+    ['Windows', 'win32', 'zh-CN'],
+    ['Linux', 'linux', 'zh_CN'],
+  ])('uses the %s system language passed by Electron main', (_label, os, language) => {
+    setLanguages(['en-US'], 'en-US');
+    const electronWindow = window as GlobalWindow;
+    electronWindow.__LODY_ELECTRON__ = true;
+    electronWindow.__LODY_PLATFORM__ = {
+      os,
+      homeDir: '/home/test',
+      preferredSystemLanguages: [language, 'en-US'],
+    };
+
+    expect(detectBrowserLanguage()).toBe('zh_CN');
+  });
+
+  it('does not fall back to Chromium locale packs when Electron system languages are absent', () => {
     setLanguages(['zh-CN'], 'zh-CN');
-    (window as GlobalWindow).__LODY_ELECTRON__ = true;
+    const electronWindow = window as GlobalWindow;
+    electronWindow.__LODY_ELECTRON__ = true;
+    electronWindow.__LODY_PLATFORM__ = { os: 'linux', homeDir: '/home/test' };
+
     expect(detectBrowserLanguage()).toBeNull();
   });
 });

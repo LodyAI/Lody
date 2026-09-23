@@ -1,11 +1,17 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
 import { AnimatePresence, motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, ExternalLink, Github, Loader2, Mail } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ExternalLink, Github, Mail } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { usePostHog } from '@posthog/react';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import isEmail from 'validator/lib/isEmail';
-import { electronDeepLinkSignInInProgressAtom } from '@/atoms';
+import {
+  electronLoginErrorAtom,
+  electronLoginErrorDetailAtom,
+  electronLoginPhaseAtom,
+  nativeSignInInProgressAtom,
+} from '@/atoms';
 import { Button } from '@/ui/button';
 import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
@@ -15,13 +21,16 @@ import { setLoginHintCookie } from '@/lib/login-hint-cookie';
 import { formatPasswordValidationFailure, validateNewPassword } from '@/lib/password-validation';
 import { LoadingPlaceholder } from '@/components/loading-placeholder';
 import { useStableSession } from '@/hooks/useStableSession';
+import { hasUsableSessionUser } from '@/hooks/stable-session-state';
 import {
+  buildElectronRedirectUrl,
   buildElectronWebLoginCallbackUrl,
   clearElectronAuthorizationCode,
   type ElectronOAuthQuery,
   readElectronAuthorizationCode,
-  redirectToElectronWithAuthorizationCode,
+  redirectToElectronDeepLink,
 } from '@/lib/electron-oauth';
+import { signOutWithoutRedirect } from '@/lib/auth';
 import { useAuthClient } from '../providers/convex-provider';
 import {
   getAppCurrentPathWithSearch,
@@ -35,6 +44,7 @@ import { runNativeOAuthSignIn } from '@/lib/native-oauth';
 import { syncNativeAuthSession } from '@/lib/native-auth-session-sync';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { isElectronRenderer as isElectronRendererRuntime } from '@/lib/electron';
+import { WindowDragStrip } from '@/ui/window-drag-region';
 import { getAuthResponseError } from '@/lib/auth-response';
 import { buildEmailVerificationCallbackUrl } from '@/lib/email-verification-callback';
 import { buildEmailSignInInput } from '@/lib/email-sign-in';
@@ -566,13 +576,35 @@ export function LoginPage({
   const [isEmailSubmitting, setIsEmailSubmitting] = useState(false);
   const [isResendingVerification, setIsResendingVerification] = useState(false);
   const [isOpeningElectronBrowser, setIsOpeningElectronBrowser] = useState(false);
-  // Set the instant the browser hands the auth token back via the `lody://auth/
-  // callback#token=…` deep link (detected centrally in DesktopDeepLinkRouter), so
-  // the desktop login shows a "signing in" spinner while better-auth exchanges
-  // the token for a session.
-  const isCompletingElectronSignIn = useAtomValue(electronDeepLinkSignInInProgressAtom);
+  // Browser-side desktop handoff (`/login?client_id=electron&…`). The page never
+  // bridges the browser session on its own: signing out of the desktop leaves
+  // this browser signed in as the previous account, so an automatic transfer
+  // would mint an authorization code for the account the user is trying to
+  // leave, with no way back. The user picks the account, then this holds the
+  // `lody://auth/callback#token=…` URL that both the automatic navigation and
+  // the visible fallback link use.
+  const [electronHandoffUrl, setElectronHandoffUrl] = useState<string | null>(null);
+  const [isPreparingElectronHandoff, setIsPreparingElectronHandoff] = useState(false);
+  const [isSwitchingElectronAccount, setIsSwitchingElectronAccount] = useState(false);
+  // A sign-out that did not reach the server leaves this browser authenticated
+  // as the account the user asked to leave, and the session cookie is exactly
+  // what the next transfer would hand to the desktop app. Block the handoff
+  // until a switch succeeds (or the session goes away on its own) rather than
+  // silently offering the old account again.
+  const [hasFailedElectronAccountSwitch, setHasFailedElectronAccountSwitch] = useState(false);
+  // Bumped when the user chooses another account. A transfer started for the
+  // previous account can still be in flight (or its `better-auth.electron`
+  // cookie still set), and must not produce a handoff link afterwards.
+  const electronAccountGenerationRef = useRef(0);
+  const autoOpenedElectronHandoffRef = useRef<string | null>(null);
+  // Main owns the callback exchange; restored snapshots also recover progress
+  // when this renderer mounts after the browser has returned.
+  const electronLoginPhase = useAtomValue(electronLoginPhaseAtom);
+  const electronLoginError = useAtomValue(electronLoginErrorAtom);
+  const electronLoginErrorDetail = useAtomValue(electronLoginErrorDetailAtom);
+  const isCompletingElectronSignIn = electronLoginPhase === 'exchanging';
+  const setNativeSignInInProgress = useSetAtom(nativeSignInInProgressAtom);
   const [providerContentWidth, setProviderContentWidth] = useState<number | null>(null);
-  const hasAutoElectronBridgeAttemptedRef = useRef(false);
   const providerLabelMeasureRef = useRef<HTMLDivElement | null>(null);
   const emailInputRef = useRef<HTMLInputElement | null>(null);
   const loginViewedRef = useRef(false);
@@ -591,7 +623,21 @@ export function LoginPage({
   const privacyUrl = new URL(isChinese ? '/zh/privacy' : '/privacy', legalLinksOrigin).toString();
   const emailAuthCallbackURL = getEmailAuthCallbackURL(electronOAuthQuery);
   const isNativeApp = isNativeAppShell();
-  const { data: session, hasLocalToken, hasRawUser, isPending, isRetrying } = useStableSession();
+  const {
+    data: session,
+    hasLocalToken,
+    hasRawUser,
+    isPending,
+    isRetrying,
+    error: sessionError,
+    confirmedUnauthenticated,
+  } = useStableSession();
+  const canRedirectAuthenticatedUser = hasUsableSessionUser({
+    hasRawUser,
+    isRetrying,
+    hasError: sessionError !== null,
+    confirmedUnauthenticated,
+  });
   const loginSurface = isElectronOAuthFlow
     ? 'electron_browser_callback'
     : isNativeApp
@@ -603,12 +649,36 @@ export function LoginPage({
     getAppWindowSearchParams().get('expired') === '1'
       ? t('login.sessionExpired', 'Login expired. Please sign in again.')
       : '';
-  const effectiveError = error || expiredMessage;
+  const desktopLoginError =
+    isElectronRendererLogin && electronLoginError
+      ? t(`login.desktopErrors.${electronLoginError}`)
+      : '';
+  const effectiveError = error || desktopLoginError || expiredMessage;
+  // The category message says what to do; the detail is what support needs.
+  const effectiveErrorDetail =
+    !error && desktopLoginError && electronLoginErrorDetail
+      ? t('login.desktopErrors.detail', { detail: electronLoginErrorDetail })
+      : '';
   const isAnyLoading =
     loadingProvider !== null ||
     isEmailSubmitting ||
     isResendingVerification ||
-    isOpeningElectronBrowser;
+    isOpeningElectronBrowser ||
+    isPreparingElectronHandoff ||
+    isSwitchingElectronAccount;
+  // The browser page opened by the desktop app shows which account it would
+  // hand over before handing anything over.
+  const isElectronBrowserHandoff = isElectronOAuthFlow && canRedirectAuthenticatedUser;
+  const electronHandoffAccountLabel = (() => {
+    const user = session?.user as { email?: unknown; name?: unknown } | undefined;
+    if (typeof user?.email === 'string' && user.email.length > 0) {
+      return user.email;
+    }
+    if (typeof user?.name === 'string' && user.name.length > 0) {
+      return user.name;
+    }
+    return '';
+  })();
   const isButtonsDisabled = isAnyLoading || (hasLocalToken && (isPending || isRetrying));
   const providerCount = isElectronRendererLogin ? 1 : PROVIDER_CONFIG.length;
   const getProviderLabel = (provider: SocialProvider) => {
@@ -656,7 +726,7 @@ export function LoginPage({
   // client signal; the authoritative value comes from better-auth (spec §3.5).
   const oauthSucceededFiredRef = useRef(false);
   useEffect(() => {
-    if (!hasRawUser || oauthSucceededFiredRef.current) {
+    if (!canRedirectAuthenticatedUser || oauthSucceededFiredRef.current) {
       return;
     }
     const pending = readAndClearPendingOAuth();
@@ -677,7 +747,7 @@ export function LoginPage({
       is_new_user: inferIsNewUser(sessionUser),
       oauth_round_trip_ms: Date.now() - pending.started_at_ms,
     });
-  }, [hasRawUser, isElectronRenderer, postHog, session]);
+  }, [canRedirectAuthenticatedUser, isElectronRenderer, postHog, session]);
 
   useLayoutEffect(() => {
     const labelContainer = providerLabelMeasureRef.current;
@@ -802,6 +872,11 @@ export function LoginPage({
       const normalizedEmail = trimmedEmail.toLowerCase();
       const emailAuthClient = authClient as AuthClientWithEmailPassword;
       setIsEmailSubmitting(true);
+      const shouldFenceNativeSignIn = isNativeApp && emailAuthMode === 'sign-in';
+      let keepNativeSignInFence = false;
+      if (shouldFenceNativeSignIn) {
+        setNativeSignInInProgress(true);
+      }
 
       try {
         if (emailAuthMode === 'sign-in') {
@@ -858,10 +933,12 @@ export function LoginPage({
           }
           if (electronOAuthQuery) {
             replaceAppWindowLocation(emailAuthCallbackURL);
+            keepNativeSignInFence = true;
             return;
           }
           setLoginHintCookie(true);
           replaceLocation(getRedirectTarget());
+          keepNativeSignInFence = true;
           return;
         }
 
@@ -927,6 +1004,9 @@ export function LoginPage({
             : t('login.emailAuthFailed', 'Email authentication failed. Please try again.')
         );
       } finally {
+        if (shouldFenceNativeSignIn && !keepNativeSignInFence) {
+          setNativeSignInInProgress(false);
+        }
         setIsEmailSubmitting(false);
       }
     },
@@ -944,6 +1024,7 @@ export function LoginPage({
       postHog,
       replaceLocation,
       sendVerificationEmail,
+      setNativeSignInInProgress,
       t,
     ]
   );
@@ -1004,6 +1085,10 @@ export function LoginPage({
       });
       // Persist a marker so the post-redirect return can fire oauth_succeeded.
       writePendingOAuth({ provider, login_surface: loginSurface, started_at_ms: Date.now() });
+      let keepNativeSignInFence = false;
+      if (isNativeApp) {
+        setNativeSignInInProgress(true);
+      }
 
       try {
         if (electronOAuthQuery) {
@@ -1059,6 +1144,7 @@ export function LoginPage({
             });
             setLoginHintCookie(true);
             replaceLocation(getRedirectTarget());
+            keepNativeSignInFence = true;
           }
           return;
         }
@@ -1079,6 +1165,9 @@ export function LoginPage({
         });
         console.error(`${provider} login error:`, err);
       } finally {
+        if (isNativeApp && !keepNativeSignInFence) {
+          setNativeSignInInProgress(false);
+        }
         setLoadingProvider(null);
       }
     },
@@ -1090,6 +1179,7 @@ export function LoginPage({
       loginSurface,
       postHog,
       replaceLocation,
+      setNativeSignInInProgress,
       t,
     ]
   );
@@ -1126,6 +1216,11 @@ export function LoginPage({
     if (!electronOAuthQuery) {
       return;
     }
+    if (hasFailedElectronAccountSwitch) {
+      // The last switch did not sign this browser out, so a transfer here would
+      // hand over the account the user tried to leave.
+      return;
+    }
 
     const transferUser = (authClient as AuthClientWithElectronTransfer).electron?.transferUser;
     if (typeof transferUser !== 'function') {
@@ -1138,8 +1233,16 @@ export function LoginPage({
       return;
     }
 
+    // Everything after the await belongs to the account signed in right now.
+    const generation = electronAccountGenerationRef.current;
+    const isCurrentAccount = () => electronAccountGenerationRef.current === generation;
+
     setError('');
-    setLoadingProvider('github');
+    setElectronHandoffUrl(null);
+    setIsPreparingElectronHandoff(true);
+    // Drop any authorization code left in the cookie by an earlier transfer, so
+    // the fallback read below can only pick up the code this call minted.
+    clearElectronAuthorizationCode();
     capturePostHogEvent(postHog, 'auth/electron_session_transfer_started', {
       login_surface: loginSurface,
       launch_mode: detectAppLaunchMode(isElectronRenderer),
@@ -1153,6 +1256,16 @@ export function LoginPage({
       });
       const authorizationCode =
         result?.data?.electron_authorization_code ?? readElectronAuthorizationCode();
+      clearElectronAuthorizationCode();
+      if (!isCurrentAccount()) {
+        logElectronOAuthDebug('login page discarded transferUser result after account switch');
+        capturePostHogEvent(postHog, 'auth/electron_session_transfer_discarded', {
+          login_surface: loginSurface,
+          launch_mode: detectAppLaunchMode(isElectronRenderer),
+          discard_reason: 'account_switched',
+        });
+        return;
+      }
       if (!authorizationCode) {
         throw new Error('Missing Electron authorization code');
       }
@@ -1160,13 +1273,16 @@ export function LoginPage({
       logElectronOAuthDebug('login page received electron authorization code from transferUser', {
         authorizationCodeLength: authorizationCode.length,
       });
-      clearElectronAuthorizationCode();
       capturePostHogEvent(postHog, 'auth/electron_session_transfer_succeeded', {
         login_surface: loginSurface,
         launch_mode: detectAppLaunchMode(isElectronRenderer),
       });
-      redirectToElectronWithAuthorizationCode(authorizationCode, electronOAuthQuery.state);
+      setElectronHandoffUrl(buildElectronRedirectUrl(authorizationCode, electronOAuthQuery.state));
     } catch (err) {
+      if (!isCurrentAccount()) {
+        logElectronOAuthDebug('login page ignored transferUser failure after account switch');
+        return;
+      }
       setError(t('login.loginFailed', 'Login failed. Please try again.'));
       capturePostHogEvent(postHog, 'auth/electron_session_transfer_failed', {
         login_surface: loginSurface,
@@ -1180,9 +1296,71 @@ export function LoginPage({
         error: err instanceof Error ? err.message : String(err),
       });
     } finally {
-      setLoadingProvider(null);
+      if (isCurrentAccount()) {
+        setIsPreparingElectronHandoff(false);
+      }
     }
-  }, [authClient, electronOAuthQuery, isElectronRenderer, loginSurface, postHog, t]);
+  }, [
+    authClient,
+    electronOAuthQuery,
+    hasFailedElectronAccountSwitch,
+    isElectronRenderer,
+    loginSurface,
+    postHog,
+    t,
+  ]);
+
+  // Signing out here is the only way to hand the desktop app a different
+  // account, and runs only on this explicit choice. The URL keeps this attempt's
+  // `state`/`code_challenge`, so the desktop app's pending PKCE request still
+  // matches after the next sign-in.
+  const handleSwitchElectronAccount = useCallback(async () => {
+    electronAccountGenerationRef.current += 1;
+    autoOpenedElectronHandoffRef.current = null;
+    setElectronHandoffUrl(null);
+    setIsPreparingElectronHandoff(false);
+    setError('');
+    setHasFailedElectronAccountSwitch(false);
+    clearElectronAuthorizationCode();
+    setIsSwitchingElectronAccount(true);
+    capturePostHogEvent(postHog, 'auth/electron_switch_account_started', {
+      login_surface: loginSurface,
+      launch_mode: detectAppLaunchMode(isElectronRenderer),
+    });
+
+    // Only a confirmed sign-out releases the handoff: on failure this browser is
+    // still authenticated as the previous account, so say so and keep the
+    // transfer blocked until a retry succeeds.
+    const reportSwitchFailure = (reason: string, message?: string) => {
+      setHasFailedElectronAccountSwitch(true);
+      setError(
+        t(
+          'login.desktopHandoff.switchFailed',
+          'Could not sign out of this browser. It is still signed in as the account above — try again.'
+        )
+      );
+      capturePostHogEvent(postHog, 'auth/electron_switch_account_failed', {
+        login_surface: loginSurface,
+        launch_mode: detectAppLaunchMode(isElectronRenderer),
+        failure_reason: reason,
+        error_message: message,
+      });
+    };
+
+    try {
+      const outcome = await signOutWithoutRedirect(authClient);
+      if (!outcome.ok) {
+        reportSwitchFailure('sign_out_rejected', outcome.error.message);
+      }
+    } catch (err) {
+      // `signOutWithoutRedirect` reports failures rather than throwing; this
+      // covers a local-state clear that threw before the request was made.
+      reportSwitchFailure('sign_out_threw', err instanceof Error ? err.message : String(err));
+      console.error('Electron handoff account switch error:', err);
+    } finally {
+      setIsSwitchingElectronAccount(false);
+    }
+  }, [authClient, isElectronRenderer, loginSurface, postHog, t]);
 
   const handleLegalLinkClick = useCallback(
     async (event: React.MouseEvent<HTMLAnchorElement>, url: string) => {
@@ -1196,30 +1374,23 @@ export function LoginPage({
     [isNativeApp]
   );
 
+  // Attempt the `lody://` navigation from an effect rather than inline in the
+  // transfer handler: the fallback link has to be painted before the attempt,
+  // because a browser that refuses the custom scheme gives no callback and the
+  // link is then the only way forward. Whether any given browser accepts this
+  // automatic attempt is not something this page can determine.
   useEffect(() => {
-    if (!isElectronOAuthFlow || !hasRawUser) {
+    if (!electronHandoffUrl) {
       return;
     }
-    if (hasAutoElectronBridgeAttemptedRef.current) {
+    if (autoOpenedElectronHandoffRef.current === electronHandoffUrl) {
       return;
     }
-    hasAutoElectronBridgeAttemptedRef.current = true;
-    void handleElectronSessionTransfer();
-  }, [handleElectronSessionTransfer, hasRawUser, isElectronOAuthFlow]);
+    autoOpenedElectronHandoffRef.current = electronHandoffUrl;
+    redirectToElectronDeepLink(electronHandoffUrl);
+  }, [electronHandoffUrl]);
 
-  if (isElectronOAuthFlow && hasRawUser && !error) {
-    return (
-      <LoadingPlaceholder
-        title={t('login.redirectingToDesktop', 'Redirecting to desktop app')}
-        description={t(
-          'login.desktopSessionTransfer',
-          'Using your current web session to continue desktop sign-in.'
-        )}
-      />
-    );
-  }
-
-  if (hasRawUser && !isElectronOAuthFlow) {
+  if (canRedirectAuthenticatedUser && !isElectronOAuthFlow) {
     return (
       <BrowserRedirect
         to={getRedirectTarget()}
@@ -1481,7 +1652,7 @@ export function LoginPage({
           <Button type="submit" className="mt-1 h-10 w-full" disabled={isButtonsDisabled}>
             {isEmailSubmitting ? (
               <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <Spinner className="mr-2 h-4 w-4" />
                 {submitLabel}
               </>
             ) : (
@@ -1581,10 +1752,12 @@ export function LoginPage({
         />
       </Button>
       <p className="text-center text-xs leading-5 text-muted-foreground">
-        {t(
-          'login.desktopBrowserHint',
-          'Your browser will return you to Lody Desktop after sign-in.'
-        )}
+        {electronLoginPhase === 'waiting'
+          ? t('login.desktopWaiting')
+          : t(
+              'login.desktopBrowserHint',
+              'Your browser will return you to Lody Desktop after sign-in.'
+            )}
       </p>
       {isDevElectronEmailPasswordLoginEnabled ? (
         <Button
@@ -1608,8 +1781,86 @@ export function LoginPage({
     </motion.div>
   );
 
+  const renderElectronBrowserHandoffPanel = () => (
+    <motion.div
+      key="electron-handoff"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={VIEW_TRANSITION}
+      className="flex flex-col gap-3"
+    >
+      {electronHandoffAccountLabel ? (
+        <div className="rounded-lg border border-border/60 bg-muted/40 px-3 py-2 text-center">
+          <div className="text-[11px] uppercase tracking-[0.12em] text-muted-foreground/80">
+            {t('login.desktopHandoff.signedInAs', 'This browser is signed in as')}
+          </div>
+          <div
+            className="truncate text-sm font-medium text-foreground"
+            title={electronHandoffAccountLabel}
+          >
+            {electronHandoffAccountLabel}
+          </div>
+        </div>
+      ) : null}
+
+      {electronHandoffUrl ? (
+        <Button asChild className="h-10 w-full">
+          {/* A real link: the automatic navigation may be refused, and this is
+              then the user's way to open the desktop app. */}
+          <a href={electronHandoffUrl} data-electron-handoff-link>
+            <SocialLoginButtonContent
+              icon={<ExternalLink />}
+              label={t('login.desktopHandoff.openApp', 'Open Lody Desktop')}
+              width={null}
+            />
+          </a>
+        </Button>
+      ) : (
+        <Button
+          type="button"
+          onClick={() => void handleElectronSessionTransfer()}
+          className="h-10 w-full"
+          disabled={isButtonsDisabled || hasFailedElectronAccountSwitch}
+        >
+          {isPreparingElectronHandoff ? (
+            <>
+              <Spinner className="mr-2 h-4 w-4" />
+              {t('login.desktopHandoff.preparing', 'Preparing desktop sign-in...')}
+            </>
+          ) : (
+            <SocialLoginButtonContent
+              icon={<ArrowRight />}
+              label={t('login.desktopHandoff.continue', 'Continue with this account')}
+              width={null}
+            />
+          )}
+        </Button>
+      )}
+
+      {/* Deliberately not gated on `isButtonsDisabled`: a transfer in flight for
+          the wrong account is exactly when the user needs this way out, and its
+          late result is discarded by the account generation. */}
+      <Button
+        type="button"
+        variant="outline"
+        onClick={() => void handleSwitchElectronAccount()}
+        className="h-10 w-full"
+        disabled={isSwitchingElectronAccount}
+      >
+        {isSwitchingElectronAccount
+          ? t('login.desktopHandoff.switching', 'Signing out of this browser...')
+          : t('login.desktopHandoff.switchAccount', 'Use a different account')}
+      </Button>
+    </motion.div>
+  );
+
   const isEmailVerificationSent = view === 'email' && emailAuthStatus === 'verification-sent';
   const headerTitle = (() => {
+    if (isElectronBrowserHandoff) {
+      return electronHandoffUrl
+        ? t('login.redirectingToDesktop', 'Redirecting to desktop app')
+        : t('login.desktopHandoff.title', 'Continue to Lody Desktop');
+    }
     if (view !== 'email' || (isElectronRendererLogin && !isDevElectronEmailPasswordLoginEnabled)) {
       return t('login.title');
     }
@@ -1622,6 +1873,17 @@ export function LoginPage({
     return t('login.emailViewTitle', 'Sign in with email');
   })();
   const headerDescription = (() => {
+    if (isElectronBrowserHandoff) {
+      return electronHandoffUrl
+        ? t(
+            'login.desktopHandoff.openHint',
+            'If the desktop app did not open, use the button below.'
+          )
+        : t(
+            'login.desktopSessionTransfer',
+            'Using your current web session to continue desktop sign-in.'
+          );
+    }
     if (isElectronRendererLogin && !isDevElectronEmailPasswordLoginEnabled) {
       return t(
         'login.desktopDescription',
@@ -1638,7 +1900,8 @@ export function LoginPage({
   })();
 
   return (
-    <div className="flex h-screen w-full items-center justify-center bg-background p-4">
+    <div className="relative flex h-screen w-full items-center justify-center bg-background p-4">
+      <WindowDragStrip />
       <motion.div
         layout
         transition={VIEW_TRANSITION}
@@ -1715,17 +1978,24 @@ export function LoginPage({
                 className="mb-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-center text-xs text-destructive"
               >
                 {effectiveError}
+                {effectiveErrorDetail ? (
+                  <span className="mt-1 block select-text break-all text-[11px] opacity-80">
+                    {effectiveErrorDetail}
+                  </span>
+                ) : null}
               </motion.p>
             ) : null}
           </AnimatePresence>
 
           <AnimatePresence mode="wait" initial={false}>
-            {isElectronRendererLogin &&
-            !(isDevElectronEmailPasswordLoginEnabled && view === 'email')
-              ? renderElectronRendererPanel()
-              : view === 'oauth'
-                ? renderOAuthPanel()
-                : renderEmailPanel()}
+            {isElectronBrowserHandoff
+              ? renderElectronBrowserHandoffPanel()
+              : isElectronRendererLogin &&
+                  !(isDevElectronEmailPasswordLoginEnabled && view === 'email')
+                ? renderElectronRendererPanel()
+                : view === 'oauth'
+                  ? renderOAuthPanel()
+                  : renderEmailPanel()}
           </AnimatePresence>
 
           {view === 'email' && emailAuthStatus === 'verification-sent' ? null : (

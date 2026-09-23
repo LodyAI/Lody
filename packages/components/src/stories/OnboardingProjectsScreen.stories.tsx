@@ -62,9 +62,11 @@ const meta = {
   },
   tags: ['autodocs'],
   args: {
+    loadingRepos: false,
     onAddLocal: fn(),
     onConnectGitHub: fn(),
     onBack: fn(),
+    onSkip: fn(),
     onComplete: fn(),
   },
   decorators: [

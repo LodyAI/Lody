@@ -1,12 +1,17 @@
-import { Mirror } from 'loro-mirror';
-import type { LoroList, LoroMap } from 'loro-crdt';
+import { createSessionAgentWrites, type SessionAgentWrites } from './session-agent-writes';
+import { readSessionHistory } from '@lody/shared/session-data';
+import { readLatestTurn } from '@lody/shared/session-data';
+import { isContainer, type LoroDoc, type LoroList, type LoroMap } from 'loro-crdt';
 import {
   ACPSessionId,
   AgentConfigCliType,
   AgentType,
   CliType,
   collectOnlineMachineIdsFromPresence,
-  sessionDocSchema,
+  createHistoryWriter,
+  createSessionControlPlaneMirror,
+  SessionControlPlaneMirror,
+  SessionControlPlaneState,
   SessionStatusFactory,
   SessionId,
   WorkspaceId,
@@ -14,6 +19,7 @@ import {
   getSessionIdFromRoomId,
   AgentConfigId,
   MachineId,
+  ManagedBuiltinAgentType,
   SessionHistoryInput,
   isCodeCollabFileIndexFlockDocId,
   isCodeCollabFileIndexSignalFlockDocId,
@@ -31,17 +37,15 @@ import {
   SessionPlanEntry,
   type SessionExternalHistoryCursorDocState,
   ACP_CAPABILITY_CACHE_VERSION,
-  SessionHistory,
   MessageQueueItem,
-  FileDiff,
   SessionTitleSource,
   getAcpCapabilityCacheKey,
-  getLegacyReadForSessionHistoryStatus,
   normalizeSessionPullRequestMeta,
-  normalizeSessionTurnInputConfig,
   getServerNow,
   isLoroRepoDocDeleted,
   getMachineFlockAcpCapabilities,
+  getMachineFlockProviderSetupCancellations,
+  getMachineFlockProviderSetups,
   getMachineFlockDocId,
   machineFlockKeys,
   readMachineFlockRowsFromFlock,
@@ -49,16 +53,22 @@ import {
   writeMachineFlockRowToFlock,
   type AcpConfigOptionSummary,
   type AcpCommandSummary,
+  type SessionGoalAction,
   type AcpCapabilityCacheEntry,
   type SessionForkOperation,
   SessionForkOperationSchema,
   type LodyPresenceStateMap,
+  type SessionAcpRuntimeConfigPatch,
+  type SessionAcpRuntimeConfigSnapshot,
+  isSensitiveAcpConfigOptionId,
+  BuiltinRuntimeOverridesSchema,
+  CustomAcpLaunchSpecSchema,
 } from '@lody/shared';
 import { LocalLoroDataPlaneServer } from '@lody/shared/local-loro-data-plane-server';
 import { createLocalLoroDataPlaneScheduler } from '@lody/shared/local-loro-data-plane-scheduler';
 import { v4 as uuidv4 } from 'uuid';
 import { getLogger, type Logger } from '@/utils/logger';
-import { captureException, captureMessage } from '@/instrument';
+import { captureException } from '@/instrument';
 import { withSlowOperationWarning } from '@/utils/slow-operation-warning';
 import { traceAsync } from '@/utils/trace-span';
 
@@ -77,6 +87,7 @@ import {
   attachAutoMarkLatestUserHistoryAsRead,
   type AutoMarkLatestUserHistoryAsReadHandle,
 } from './history-auto-read';
+import { attachSessionModelSummary, latestSessionModelFromReader } from './session-model-summary';
 
 import {
   LoroConnectionRecoveryController,
@@ -84,7 +95,12 @@ import {
   type StreamsOnlineListener,
 } from './connection-recovery';
 import { MachineFlockSyncCoordinator } from './machine-flock-sync-coordinator';
-import type { ModelInfo } from '@lody/shared';
+import {
+  createLoroSessionData,
+  setFieldTo,
+  type LoroSessionData,
+  type SessionTurn,
+} from '@lody/shared/session-data';
 import { redactProxyUrl, sanitizeUrlForLogging } from '@/utils/log-sanitize';
 import { getProxyForUrl } from 'proxy-from-env';
 import { HttpsProxyAgent } from 'https-proxy-agent';
@@ -94,20 +110,52 @@ import { streamsRoomBinding, type StreamsRoomBinding } from './streams-room-bind
 import { formatErrorMessage } from '@/utils/format-error';
 import {
   listMergedAgentConfigs,
+  readMachineBuiltinAgentOptOuts,
   readMergedAgentConfigById,
   upsertMachineAgentConfig,
 } from '@/lib/agent-config-machine-flock';
 import { installCliHttpGlobalDispatcher } from '@/utils/http-transport';
 import { createCliStreamsTransport } from './streams-transport';
 
-const normalizeSessionHistoryEntry = (entry: SessionHistoryInput): SessionHistoryInput => ({
-  ...entry,
-  inputConfig: normalizeSessionTurnInputConfig(entry.inputConfig),
-});
+const isValidDaemonLaunchConfig = (
+  config: AgentConfigMeta,
+  expectedConfigId: AgentConfigId,
+  expectedMachineId: MachineId
+): boolean => {
+  if (
+    config.id !== expectedConfigId ||
+    config.machineId !== expectedMachineId ||
+    typeof config.agentType !== 'string' ||
+    config.agentType.trim().length === 0 ||
+    typeof config.env !== 'object' ||
+    config.env === null ||
+    Array.isArray(config.env) ||
+    Object.values(config.env).some((value) => typeof value !== 'string')
+  ) {
+    return false;
+  }
+
+  if (config.cliType === 'custom') {
+    return (
+      CustomAcpLaunchSpecSchema.safeParse(config.customAcp).success &&
+      config.runtimeOverrides === undefined
+    );
+  }
+  if (config.cliType === 'registry') {
+    return config.customAcp === undefined && config.runtimeOverrides === undefined;
+  }
+  if (config.cliType === 'builtin') {
+    return (
+      config.customAcp === undefined &&
+      (config.runtimeOverrides === undefined ||
+        BuiltinRuntimeOverridesSchema.safeParse(config.runtimeOverrides).success)
+    );
+  }
+  return false;
+};
 
 type GlobalWithOptionalBun = typeof globalThis & { Bun?: unknown };
 type GlobalWithWebSocket = { WebSocket: typeof ProxiedWebSocket };
-type LoroMapSetValue = Parameters<LoroMap['set']>[1];
 
 const localLoroDataPlaneScheduler = createLocalLoroDataPlaneScheduler((work) => {
   const handle = setImmediate(work);
@@ -1237,12 +1285,12 @@ export class LoroDocumentManager {
   async getSessionHistorySnapshot(sessionId: SessionId): Promise<SessionHistoryInput[]> {
     const active = this.sessions.get(sessionId);
     if (active) {
-      return await active.getHistory();
+      return readSessionHistory(active.sessionData.history);
     }
 
     const pending = this.pendingSessionDocs.get(sessionId);
     if (pending) {
-      return await (await pending).getHistory();
+      return readSessionHistory((await pending).sessionData.history);
     }
 
     const docId = getSessionRoomId(sessionId);
@@ -1259,7 +1307,7 @@ export class LoroDocumentManager {
       );
       await sessionDoc.init({ skipAutoRead: true });
       try {
-        return await sessionDoc.getHistory();
+        return readSessionHistory(sessionDoc.sessionData.history);
       } finally {
         await sessionDoc.destroy({ preserveStatus: true });
       }
@@ -1327,6 +1375,11 @@ export class LoroDocumentManager {
     return false;
   }
 
+  /** Managed builtin provider types the user removed on this machine, so they must not be auto-registered at startup. */
+  async getBuiltinAgentOptOuts(machineId: MachineId): Promise<Set<ManagedBuiltinAgentType>> {
+    return await readMachineBuiltinAgentOptOuts(this.repo, this.workspaceId, machineId);
+  }
+
   async getAgentConfigById(
     agentConfigId: AgentConfigId,
     machineId?: MachineId
@@ -1338,6 +1391,37 @@ export class LoroDocumentManager {
     }
     const configs = await listMergedAgentConfigs(this.repo, this.workspaceId);
     return configs.find((config) => config.id === agentConfigId) ?? null;
+  }
+
+  /**
+   * Resolve the daemon-authoritative Provider config used by a process-launching
+   * Machine RPC. Published configs and durable provider-setup rows are the only
+   * accepted sources; caller-supplied launch fields never participate.
+   */
+  async getAgentConfigForMachineLaunch(
+    agentConfigId: AgentConfigId,
+    machineId: MachineId
+  ): Promise<AgentConfigMeta | null> {
+    const config = await this.getAgentConfigById(agentConfigId, machineId);
+    if (config) {
+      return isValidDaemonLaunchConfig(config, agentConfigId, machineId) ? config : null;
+    }
+
+    const handle = await this.repo.openFlockDoc(getMachineFlockDocId(this.workspaceId, machineId));
+    const rows = readMachineFlockRowsFromFlock(handle.flock, {
+      prefixes: [
+        machineFlockKeys.providerSetup(agentConfigId),
+        machineFlockKeys.providerSetupCancellation(agentConfigId),
+      ],
+    });
+    if (getMachineFlockProviderSetupCancellations(rows)[agentConfigId]) {
+      return null;
+    }
+    const setup = getMachineFlockProviderSetups(rows)[agentConfigId];
+    return setup?.machineId === machineId &&
+      isValidDaemonLaunchConfig(setup.config, agentConfigId, machineId)
+      ? setup.config
+      : null;
   }
 
   async createAgentConfig(
@@ -1440,15 +1524,16 @@ export class LoroDocumentManager {
     sourceVersion: string,
     modelReasoningEfforts?: Record<string, string[]>,
     acknowledgedSteer = false,
+    goalActions?: SessionGoalAction[],
     options: { signal?: AbortSignal } = {}
-  ): Promise<void> {
+  ): Promise<AcpCapabilityCacheEntry> {
     options.signal?.throwIfAborted();
     if (!this.machine) {
       this.machine = this.createMachineDocument(machineId);
       await this.machine.init();
     }
     options.signal?.throwIfAborted();
-    await this.machine.updateAcpCapabilities(
+    return await this.machine.updateAcpCapabilities(
       configId,
       cliType,
       agentType,
@@ -1460,6 +1545,7 @@ export class LoroDocumentManager {
       sourceVersion,
       modelReasoningEfforts,
       acknowledgedSteer,
+      goalActions,
       options
     );
   }
@@ -1626,6 +1712,29 @@ type SessionDocInitialState = {
   forkOperation?: SessionForkOperation;
 };
 
+const configOptionValuesEqual = (
+  left: SessionAcpRuntimeConfigSnapshot['configOptionValues'],
+  right: SessionAcpRuntimeConfigSnapshot['configOptionValues']
+): boolean => {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  const leftKeys = Object.keys(left);
+  return (
+    leftKeys.length === Object.keys(right).length &&
+    leftKeys.every((key) => left[key] === right[key])
+  );
+};
+
+const acpRuntimeConfigEqual = (
+  left: SessionAcpRuntimeConfigSnapshot,
+  right: Omit<SessionAcpRuntimeConfigSnapshot, 'revision'>
+): boolean =>
+  left.acpSessionId === right.acpSessionId &&
+  left.basedOnUserTurnId === right.basedOnUserTurnId &&
+  left.modeId === right.modeId &&
+  left.modelId === right.modelId &&
+  configOptionValuesEqual(left.configOptionValues, right.configOptionValues);
+
 /**
  * Hard cap on how long a queued message can hold the head-of-queue dispatch lock
  * via `isEditing`. If the editing client never releases (hard close, crash, killed
@@ -1634,8 +1743,20 @@ type SessionDocInitialState = {
  */
 const EDITING_LEASE_MS = 5 * 60 * 1000;
 
-export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta> {
-  mirror: Mirror<typeof sessionDocSchema> | null = null;
+/**
+ * Subscribe to any session change for a composed session document: control fields
+ * from the control-plane Mirror plus history from the session-data observation. A
+ * document that was not composed through `composeSessionData` throws.
+ */
+export function subscribeSessionChanges(
+  sessionDoc: Pick<SessionDocument, 'subscribeAll'>,
+  listener: () => void
+): () => void {
+  return sessionDoc.subscribeAll(listener);
+}
+
+export class SessionDocument implements LoroDocument<Omit<SessionDocMeta, 'history'>, SessionMeta> {
+  private mirror: SessionControlPlaneMirror | null = null;
   handle: RepoDocHandle | null = null;
   docSub: RepoRoomSubscription | null = null;
   // Detached-aware 'streams' binding view of `docSub` (see streamsRoomBinding);
@@ -1644,7 +1765,14 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
   private detachDocRoomStatusListener: (() => void) | null = null;
   private readonly docRoomStatusListeners = new Set<(status: RepoTransportRoomStatus) => void>();
   private historyAutoReadHandle: AutoMarkLatestUserHistoryAsReadHandle | null = null;
+  private modelSummary: ReturnType<typeof attachSessionModelSummary> | null = null;
   private destroyed = false;
+  /**
+   * CRDT-neutral read/write seam over the same doc and the Mirror's one shared
+   * writer. Business callers use this instead of raw history callbacks; Loro,
+   * Mirror and container ids stay inside the adapter.
+   */
+  private sessionDataInstance: LoroSessionData | null = null;
 
   get isDestroyed(): boolean {
     return this.destroyed;
@@ -1666,143 +1794,145 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     this.roomId = getSessionRoomId(this.sessionId);
   }
 
-  private createMirror(handle: RepoDocHandle, initialState?: SessionDocInitialState) {
+  /**
+   * Compose the control-plane Mirror, the one shared writer and the session-data
+   * seam over an opened doc. This is the only production composition; a document
+   * that has not been composed here has no `sessionData` and no control Mirror.
+   * `init()` calls it with the opened handle; tests call it with a fixture doc.
+   */
+  composeSessionData(doc: LoroDoc, initialState?: SessionDocInitialState): void {
+    this.modelSummary?.dispose();
+    this.modelSummary = null;
     this.historyAutoReadHandle?.dispose();
     this.historyAutoReadHandle = null;
     this.mirror?.dispose();
-    const base: SessionDocInitialState = {
-      session: { id: this.sessionId },
-      history: [],
-      forkOperation: undefined,
-    };
-    const initialHistory = initialState?.history ?? base.history ?? [];
-    const normalizedHistory = initialHistory.map((entry) => ({
-      ...entry,
-      endedAt: entry.endedAt,
-      modelInfo: entry.modelInfo,
-    }));
+    const initialHistory = initialState?.history ?? [];
     const mergedSession = initialState?.session
       ? { ...initialState.session, id: this.sessionId }
-      : { ...base.session, id: this.sessionId };
-    const merged = {
-      ...base,
-      ...initialState,
-      session: {
-        ...mergedSession,
-      },
-      history: normalizedHistory,
-    };
-    this.mirror = new Mirror({
-      doc: handle.doc,
-      schema: sessionDocSchema,
-      // Tolerate root keys written by peers running a newer schema version.
-      ignoreUnknownProperties: true,
-      // Type assertion needed because InferInputType makes plan required even though
-      // schema defines it as required: false. At runtime, plan is optional on history entries.
-      initialState: merged as unknown as ConstructorParameters<typeof Mirror>[0]['initialState'],
+      : { id: this.sessionId };
+    // Seed a brand-new document's history through the shared writer. A persisted
+    // document already holds its history; the control Mirror never reads it.
+    const writer = createHistoryWriter(doc);
+    if (initialHistory.length > 0 && doc.getList('history').length === 0) {
+      writer.update(() => initialHistory);
+    }
+    const controlInitialState = { ...(initialState ?? {}) } as Record<string, unknown>;
+    delete controlInitialState.history;
+    this.mirror = createSessionControlPlaneMirror({
+      doc,
+      initialState: {
+        ...controlInitialState,
+        session: mergedSession,
+      } as SessionControlPlaneState,
     });
-    this.historyAutoReadHandle = attachAutoMarkLatestUserHistoryAsRead(this.mirror);
-    this.sanitizeSystemNoticeMetaInHistory();
+    this.sessionDataInstance = createLoroSessionData({
+      sessionId: this.sessionId,
+      doc,
+      // One writer instance owns local history writes; the control Mirror never
+      // materializes history.
+      writer,
+      // The composed history import binds its cursor through the control plane:
+      // the adapter reads/writes the cursor in the same synchronous block as
+      // the history write, with no await gap.
+      historyImportCursor: {
+        read: () => this.mirror?.getState().externalHistoryCursor,
+        write: (cursor) => {
+          this.mirror?.setState({
+            externalHistoryCursor: cursor as SessionExternalHistoryCursorDocState,
+          });
+        },
+      },
+    });
   }
 
-  private sanitizeSystemNoticeMetaInHistory(): void {
-    if (!this.mirror) return;
+  /**
+   * Arm the auto-read observe policy (mark the latest unread user turn seen).
+   *
+   * Deliberately separate from storage composition: a read-only open
+   * (`init({ skipAutoRead: true })`, the temporary-snapshot path) composes the
+   * reader/writer without arming a write observer, so opening a doc cannot
+   * change it. Normal `init`/`initOffline` arm it explicitly. Idempotent.
+   */
+  get agentWrites(): SessionAgentWrites {
+    if (!this.sessionDataInstance) throw new Error('SessionDocument not initialized');
+    return createSessionAgentWrites(this.sessionDataInstance.writer);
+  }
 
-    const history = (this.mirror.getState().history as SessionHistoryInput[]) || [];
-    type SessionHistoryItemInput = NonNullable<SessionHistoryInput['items']>[number];
-    let changed = false;
-    let sanitizedItems = 0;
-    let droppedMeta = 0;
-    let droppedKeys = 0;
-
-    const nextHistory = history.map((entry) => {
-      const items = entry.items;
-      if (!items || items.length === 0) return entry;
-
-      let entryChanged = false;
-      const nextItems = items.map((item) => {
-        if (!item || typeof item !== 'object') return item;
-        const obj = item as SessionHistoryItemInput;
-        if (obj.type !== 'system_notice') return item;
-        if (!Object.prototype.hasOwnProperty.call(obj, 'meta')) return item;
-
-        const meta = obj.meta;
-        if (meta === undefined) {
-          entryChanged = true;
-          changed = true;
-          sanitizedItems += 1;
-          droppedMeta += 1;
-          const { meta: _meta, ...rest } = obj;
-          return rest;
-        }
-
-        if (!meta || typeof meta !== 'object' || Array.isArray(meta)) {
-          entryChanged = true;
-          changed = true;
-          sanitizedItems += 1;
-          droppedMeta += 1;
-          const { meta: _meta, ...rest } = obj;
-          return rest;
-        }
-
-        const metaObj = meta as Record<string, unknown>;
-        const cleaned: Record<string, unknown> = {};
-        const removed: string[] = [];
-        for (const [key, value] of Object.entries(metaObj)) {
-          if (value === undefined) {
-            removed.push(key);
-            continue;
-          }
-          cleaned[key] = value;
-        }
-
-        if (removed.length === 0) return item;
-
-        entryChanged = true;
-        changed = true;
-        sanitizedItems += 1;
-        droppedKeys += removed.length;
-
-        if (Object.keys(cleaned).length === 0) {
-          droppedMeta += 1;
-          const { meta: _meta, ...rest } = obj;
-          return rest;
-        }
-
-        return { ...obj, meta: cleaned };
-      });
-
-      if (!entryChanged) return entry;
-      return {
-        ...entry,
-        items: nextItems,
-      };
-    });
-
-    if (!changed) return;
-
-    const payload = {
-      sanitizedItems,
-      droppedMeta,
-      droppedKeys,
-    };
-    this.logger.debug(
-      `[${this.sessionId}] Sanitized system_notice meta in persisted history: ${JSON.stringify(payload)}`
+  attachAutoRead(): void {
+    if (this.historyAutoReadHandle) return;
+    this.historyAutoReadHandle = attachAutoMarkLatestUserHistoryAsRead(this.sessionData, (id) =>
+      this.agentWrites.markTurnSeen(id)
     );
-    void captureMessage('Sanitized system_notice meta in persisted history', {
-      component: 'loro-doc',
-      level: 'warning',
-      extra: {
-        sessionId: this.sessionId,
-        ...payload,
-      },
-    });
+  }
 
-    this.mirror.setState((prev) => {
-      // @ts-ignore
-      prev.history = nextHistory;
-      return prev;
+  /**
+   * Project the latest assistant model into catalog metadata. Armed with the
+   * other write observers, never with a temporary snapshot open.
+   */
+  attachModelSummary(): void {
+    if (this.modelSummary) return;
+    this.modelSummary = attachSessionModelSummary(
+      {
+        subscribe: (listener) => {
+          const observation = this.sessionData.history.observe(() => listener());
+          return () => observation.unsubscribe();
+        },
+        latestModel: () => latestSessionModelFromReader(this.sessionData.history),
+      },
+      async (lastModel, active) => {
+        const current = await this.repo.getDocMeta(this.roomId);
+        const meta = current?.meta as SessionMeta | undefined;
+        // Hidden fork targets and deleted sessions must never be published by a projection.
+        if (!active() || !current || isLoroRepoDocDeleted(current) || meta?.id !== this.sessionId)
+          return false;
+        if (JSON.stringify(meta.lastModel) !== JSON.stringify(lastModel)) {
+          await this.repo.upsertDocMeta(this.roomId, { lastModel });
+        }
+        return true;
+      },
+      () =>
+        this.logger.warn(
+          `[${this.sessionId}] Failed to publish model summary; retry on next history change`
+        )
+    );
+    if (this.sessionData.history.count() > 0) void this.modelSummary.sync();
+  }
+
+  /** Re-run the projection once a catalog row the publisher previously skipped exists. */
+  async syncModelSummary(): Promise<void> {
+    await this.modelSummary?.flush();
+  }
+
+  /**
+   * The domain seam for session history. Callers express business operations
+   * (`appendTurn`, `setTurnField`, `respondPermission`, ...) and never see the
+   * Loro doc, the Mirror, or a container id.
+   */
+  get sessionData(): LoroSessionData {
+    if (!this.sessionDataInstance) throw new Error('SessionDocument not initialized');
+    return this.sessionDataInstance;
+  }
+
+  /**
+   * Subscribe to any session change: control fields (through the control-plane
+   * Mirror) and history (through the gap-free reader observation). Callers that
+   * only care about control state can use `mirror.subscribe` directly.
+   */
+  subscribeAll(listener: () => void): () => void {
+    if (!this.mirror) throw new Error('SessionDocument not initialized');
+    let disposed = false;
+    const unsubscribeMirror = this.mirror.subscribe(() => {
+      if (!disposed) listener();
     });
+    const observation = this.sessionData.history.observe(() => {
+      if (!disposed) listener();
+    });
+    return () => {
+      if (disposed) return;
+      disposed = true;
+      unsubscribeMirror();
+      observation.unsubscribe();
+    };
   }
 
   async init(options: { skipAutoRead?: boolean } = {}) {
@@ -1810,8 +1940,12 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     this.handle = await this.repo.openPersistedDoc(this.roomId);
     // Create the mirror before remote sync completes so dispatch watchers can subscribe
     // immediately; the room join continues in the background and remote changes merge later.
-    this.createMirror(this.handle);
+    this.composeSessionData(this.handle.doc);
+    // A read-only open (`skipAutoRead`) composes storage without arming the
+    // auto-read write policy; normal init arms it and marks the initial turn.
     if (!options.skipAutoRead) {
+      this.attachAutoRead();
+      this.attachModelSummary();
       await this.markLatestUserHistoryAsSeenIfNeeded();
     }
     this.remoteSyncReady = this.startDocRoomSync();
@@ -1895,7 +2029,11 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     this.docBinding = null;
     this.detachDocRoomStatusListener?.();
     this.detachDocRoomStatusListener = null;
-    this.createMirror(this.handle, initialState);
+    this.composeSessionData(this.handle.doc, initialState);
+    // Offline composition is a normal open; arm the auto-read policy that
+    // composition no longer owns.
+    this.attachAutoRead();
+    this.attachModelSummary();
   }
 
   private async startDocRoomSync(): Promise<void> {
@@ -1991,24 +2129,56 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     }
   }
 
-  async getDocState(): Promise<SessionDocMeta | undefined> {
+  /**
+   * Shallow user-turn index for control writes that need a history precondition
+   * synchronously (ACP runtime config must stay targeted). Reads only `role`/`id`
+   * scalars, never a turn body.
+   */
+  private shallowUserTurns(): { indexById: Map<string, number>; latestIndex: number } {
+    const indexById = new Map<string, number>();
+    let latestIndex = -1;
+    const list = this.handle?.doc.getList('history');
+    if (!list) return { indexById, latestIndex };
+    for (let index = 0; index < list.length; index += 1) {
+      const value = list.get(index);
+      if (!isContainer(value) || value.kind() !== 'Map') continue;
+      const map = value as LoroMap;
+      if (map.get('role') !== 'user') continue;
+      const id = map.get('id');
+      if (typeof id === 'string') indexById.set(id, index);
+      latestIndex = index;
+    }
+    return { indexById, latestIndex };
+  }
+
+  private shallowLatestTurnId(role: 'user' | 'assistant'): string | undefined {
+    const list = this.handle?.doc.getList('history');
+    if (!list) return undefined;
+    for (let index = list.length - 1; index >= 0; index -= 1) {
+      const value = list.get(index);
+      if (!isContainer(value) || value.kind() !== 'Map') continue;
+      const map = value as LoroMap;
+      if (map.get('role') !== role) continue;
+      const id = map.get('id');
+      if (typeof id === 'string') return id;
+    }
+    return undefined;
+  }
+
+  /** Control state only. Full history is an explicit sessionData.history.readAll(). */
+  async getDocState(): Promise<Omit<SessionDocMeta, 'history'> | undefined> {
     if (!this.mirror) {
       throw new Error('SessionDocument not initialized');
     }
     const state = this.mirror.getState();
-    const history: SessionHistory[] = (state.history ?? []).map((entry) => ({
-      ...normalizeSessionHistoryEntry(entry as SessionHistoryInput),
-      modelInfo: entry.modelInfo as ModelInfo | undefined,
-      fileDiff: entry.fileDiff as SessionHistory['fileDiff'],
-    }));
 
     return {
       session: state.session,
-      history,
       mq: state.mq as SessionDocMeta['mq'],
       forkOperation: state.forkOperation as SessionDocMeta['forkOperation'],
       preview: state.preview as SessionDocMeta['preview'],
       externalHistoryCursor: state.externalHistoryCursor as SessionDocMeta['externalHistoryCursor'],
+      acpRuntimeConfig: state.acpRuntimeConfig as SessionDocMeta['acpRuntimeConfig'],
     };
   }
 
@@ -2071,49 +2241,105 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     if (!this.mirror) {
       throw new Error('SessionDocument not initialized');
     }
-    this.mirror.setState((prev) => {
-      if (operation) {
-        // Mirror exposes readonly state to callers, but setState supplies its mutable draft.
-        // @ts-expect-error mutable Mirror draft
-        prev.forkOperation = operation;
-      } else {
-        // @ts-expect-error mutable Mirror draft
-        delete prev.forkOperation;
+    if (!operation) {
+      if (!this.handle) {
+        throw new Error('SessionDocument not initialized');
       }
+      // Loro root containers are permanent. Clear the operation's fields while
+      // keeping the root map available for a later fork on this Session.
+      this.handle.doc.getMap('forkOperation').clear();
+      this.handle.doc.commit();
+      return;
+    }
+    this.mirror.setState((prev) => {
+      prev.forkOperation = operation;
       return prev;
     });
+  }
+
+  applyAcpRuntimeConfigPatch(
+    basedOnUserTurnId: string,
+    patch: SessionAcpRuntimeConfigPatch
+  ): boolean {
+    if (!this.mirror) {
+      throw new Error('SessionDocument not initialized');
+    }
+
+    const durablePatch: SessionAcpRuntimeConfigPatch =
+      patch.configOptionValues === undefined
+        ? patch
+        : {
+            ...patch,
+            configOptionValues: Object.fromEntries(
+              Object.entries(patch.configOptionValues).filter(
+                ([configId]) => !isSensitiveAcpConfigOptionId(configId)
+              )
+            ),
+          };
+
+    const state = this.mirror.getState();
+    const { indexById: userTurnIndex, latestIndex: latestUserTurnIndex } = this.shallowUserTurns();
+    const incomingTurnIndex = userTurnIndex.get(basedOnUserTurnId) ?? -1;
+    if (incomingTurnIndex < 0 || incomingTurnIndex !== latestUserTurnIndex) {
+      return false;
+    }
+
+    const current = state.acpRuntimeConfig as SessionAcpRuntimeConfigSnapshot | undefined;
+    const currentTurnIndex = current ? (userTurnIndex.get(current.basedOnUserTurnId) ?? -1) : -1;
+    if (currentTurnIndex > incomingTurnIndex) {
+      return false;
+    }
+
+    const continuesCurrentSnapshot =
+      current?.acpSessionId === durablePatch.acpSessionId &&
+      current.basedOnUserTurnId === basedOnUserTurnId;
+    const nextWithoutRevision: Omit<SessionAcpRuntimeConfigSnapshot, 'revision'> = {
+      ...(continuesCurrentSnapshot
+        ? {
+            ...(current.modeId !== undefined ? { modeId: current.modeId } : {}),
+            ...(current.modelId !== undefined ? { modelId: current.modelId } : {}),
+            ...(current.configOptionValues !== undefined
+              ? { configOptionValues: current.configOptionValues }
+              : {}),
+          }
+        : {}),
+      ...durablePatch,
+      basedOnUserTurnId,
+    };
+    if (current && acpRuntimeConfigEqual(current, nextWithoutRevision)) {
+      return false;
+    }
+
+    const next: SessionAcpRuntimeConfigSnapshot = {
+      ...nextWithoutRevision,
+      revision: (current?.revision ?? 0) + 1,
+    };
+    this.mirror.setState((prev) => {
+      prev.acpRuntimeConfig = next;
+      return prev;
+    });
+    return true;
   }
 
   async markHistoryAsSeen(turnId: string): Promise<void> {
-    if (!this.mirror) {
+    if (!this.sessionDataInstance) {
       throw new Error('SessionDocument not initialized');
     }
     this.logger.debug(`Marking session ${this.sessionId} history as seen`);
-    this.mirror.setState((prev) => {
-      const histories = prev.history ?? [];
-      for (const item of histories) {
-        if (item.id === turnId) {
-          item.status = 'seen';
-          item.read = getLegacyReadForSessionHistoryStatus('seen');
-          break;
-        }
-      }
-      return prev;
-    });
+    this.agentWrites.markTurnSeen(turnId);
   }
 
   async markLatestUserHistoryAsSeenIfNeeded(): Promise<void> {
-    if (!this.mirror) {
+    if (!this.sessionDataInstance) {
       throw new Error('SessionDocument not initialized');
     }
 
-    const history = this.mirror.getState().history ?? [];
-    for (let i = history.length - 1; i >= 0; i--) {
-      const entry = history[i];
-      if (!entry) continue;
-      if (entry.role !== 'user') continue;
-      if (resolveSessionHistoryStatus(entry) !== 'pending') return;
-      await this.markHistoryAsSeen(entry.id);
+    const count = await this.sessionData.history.count();
+    for (let position = count - 1; position >= 0; position -= 1) {
+      const read = await this.sessionData.history.readAt(position);
+      if (read.state !== 'ready' || read.turn.role !== 'user') continue;
+      if (resolveSessionHistoryStatus(read.turn) !== 'pending') return;
+      await this.markHistoryAsSeen(read.turn.id);
       return;
     }
   }
@@ -2395,15 +2621,6 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     this.logger.debug(`[${this.sessionId}] setStatus: upsertDocMeta complete`);
   }
 
-  async getHistory(): Promise<SessionHistoryInput[]> {
-    if (!this.mirror) {
-      return [];
-    }
-    return ((this.mirror.getState().history as SessionHistoryInput[]) || []).map(
-      normalizeSessionHistoryEntry
-    );
-  }
-
   async getPreviewState(): Promise<SessionPreviewDocState | undefined> {
     if (!this.mirror) {
       return undefined;
@@ -2445,7 +2662,7 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
    * Plan is now stored per-turn on each history entry, not at the root level.
    */
   async getPlan(): Promise<SessionPlanEntry[]> {
-    const entry = this.getLatestAssistantHistory();
+    const entry = await readLatestTurn(this.sessionData.history, 'assistant');
     if (!entry) {
       return [];
     }
@@ -2470,211 +2687,30 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     });
   }
 
-  async updateHistory(updateFn: (history: SessionHistoryInput[]) => SessionHistoryInput[]) {
-    if (!this.mirror) {
-      throw new Error('Mirror not initialized');
-    }
-    let attemptedTail: Record<string, unknown> | null = null;
-    try {
-      this.mirror.setState((prev) => {
-        const nextHistory = updateFn((prev.history as SessionHistoryInput[]) || []);
-        attemptedTail = this.summarizeHistoryTailForDiagnostics(nextHistory);
-        // @ts-ignore
-        prev.history = nextHistory;
-        return prev;
-      });
-    } catch (error) {
-      const detail =
-        error instanceof Error
-          ? (error.stack ?? error.message)
-          : error
-            ? String(error)
-            : 'Unknown error';
-      this.logger.error(`[${this.sessionId}] Failed to update history: ${detail}`);
-      if (attemptedTail) {
-        this.logger.error(
-          `[${this.sessionId}] Attempted history tail diagnostics: ${JSON.stringify(attemptedTail)}`
-        );
-      }
-      void captureMessage('Failed to update session history', {
-        component: 'loro-doc',
-        level: 'error',
-        extra: {
-          sessionId: this.sessionId,
-          ...(attemptedTail ?? {}),
-        },
-      });
-      throw error;
-    }
-  }
-
-  private summarizeHistoryTailForDiagnostics(
-    history: SessionHistoryInput[]
-  ): Record<string, unknown> {
-    const last = history.length > 0 ? history[history.length - 1] : undefined;
-    const lastItems = last && Array.isArray(last.items) ? (last.items as unknown[]) : [];
-
-    const summarizeValue = (value: unknown): Record<string, unknown> => {
-      if (value === null) return { type: 'null' };
-      if (Array.isArray(value)) return { type: 'array', length: value.length };
-      if (typeof value === 'string') return { type: 'string', length: value.length };
-      if (typeof value === 'object') {
-        const record = value as Record<string, unknown>;
-        const keys = Object.keys(record).slice(0, 20);
-        const keyTypes: Record<string, string> = {};
-        for (const k of keys) {
-          const v = record[k];
-          keyTypes[k] = v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v;
-        }
-        return { type: 'object', keys: keys.length, keyTypes };
-      }
-      return { type: typeof value };
-    };
-
-    const tailItems = lastItems.slice(-3).map((item) => {
-      if (!item || typeof item !== 'object') {
-        return { itemType: 'non_object' };
-      }
-      const record = item as Record<string, unknown>;
-      const keys = Object.keys(record).slice(0, 20);
-      const fieldSummaries: Record<string, Record<string, unknown>> = {};
-      for (const key of keys) {
-        fieldSummaries[key] = summarizeValue(record[key]);
-      }
-      return {
-        type: typeof record.type === 'string' ? record.type : 'unknown',
-        keys: keys.length,
-        fields: fieldSummaries,
-      };
-    });
-
-    return {
-      historyEntries: history.length,
-      lastEntry: last
-        ? {
-            id: last.id,
-            role: last.role,
-            timestamp: last.timestamp,
-            items: lastItems.length,
-            tailItems,
-          }
-        : null,
-    };
-  }
-
-  getLatestAssistantHistory(): SessionHistoryInput | null {
-    if (!this.mirror) {
-      throw new Error('Mirror not initialized');
-    }
-    const history = (this.mirror.getState().history as SessionHistoryInput[]) || [];
-    for (let i = history.length - 1; i >= 0; i--) {
-      const entry = history[i]!;
-      if (entry.role === 'assistant') {
-        return entry;
-      }
-    }
-    return null;
-  }
-
   /**
-   * Directly set a field on a history entry using loro-crdt API.
-   * This is more efficient than using `updateHistory` for simple field updates
-   * because it avoids the overhead of loro-mirror's setState.
+   * Append a user turn and publish its dispatch pointer as ONE operation.
    *
-   * @param historyId - The id of the history entry to update
-   * @param field - The field name to set
-   * @param value - The value to set
-   * @returns true if the entry was found and updated, false otherwise
+   * Both writes are a single fact — "this turn is waiting to run" — split across
+   * two documents, because the pointer lives in workspace meta (the activation
+   * index startup scans) and so cannot be derived from history. Pairing them by
+   * convention leaves every producer one forgotten line from a turn that runs
+   * without advancing `latestUserMsgId`; see `../../session/AGENTS.md` for what
+   * that costs. History is written first so the content lands before the pointer
+   * that advertises it, and `lastMissingHistoryUserMsgId` is left alone: clearing
+   * it belongs to producers that first supersede the acknowledged entry.
    */
-  setHistoryEntryField(
-    historyId: string,
-    field: 'fileDiff',
-    value: FileDiff[] | undefined
-  ): boolean;
-  setHistoryEntryField(
-    historyId: string,
-    field: 'modelInfo',
-    value: ModelInfo | undefined
-  ): boolean;
-  setHistoryEntryField(
-    historyId: string,
-    field: 'fileDiff' | 'modelInfo',
-    value: FileDiff[] | ModelInfo | undefined
-  ): boolean {
-    if (!this.handle) {
-      throw new Error('SessionDocument not initialized');
+  async appendUserTurn(entry: SessionHistoryInput): Promise<void> {
+    if (entry.role !== 'user') {
+      throw new Error(
+        `appendUserTurn requires a user entry, received role "${entry.role}" for ${entry.id}`
+      );
     }
-
-    const doc = this.handle.doc;
-    const historyList = doc.getList('history') as LoroList<LoroMap>;
-    const length = historyList.length;
-
-    for (let i = length - 1; i >= 0; i--) {
-      const entry = historyList.get(i) as LoroMap | undefined;
-      if (!entry) continue;
-
-      const entryId = entry.get('id') as string | undefined;
-      if (entryId === historyId) {
-        // Raw LoroMap writes bypass loro-mirror's undefined-stripping:
-        // `set(field, undefined)` persists null, which breaks strict readers.
-        // Deleting the key is the correct "unset" for these optional fields.
-        if (value === undefined) {
-          entry.delete(field);
-        } else {
-          entry.set(field, value as LoroMapSetValue);
-        }
-        doc.commit();
-        return true;
-      }
-    }
-
-    return false;
-  }
-
-  /**
-   * Set the fileDiff field on the latest assistant history entry, optionally filtered by turn ID.
-   * This is more efficient than using `updateHistory` for simple field updates.
-   *
-   * @param fileDiff - The file diff data to set
-   * @param turnId - Optional: the turn ID (history entry ID) of the assistant entry to update.
-   *                 A turn is a single message in a conversation, regardless of role.
-   *                 See specs/data-model.md for the definition of "turn".
-   * @returns true if an entry was found and updated, false otherwise
-   */
-  setLatestAssistantHistoryFileDiff(fileDiff: FileDiff[] | undefined, turnId?: string): boolean {
-    if (!this.handle) {
-      throw new Error('SessionDocument not initialized');
-    }
-
-    const doc = this.handle.doc;
-    const historyList = doc.getList('history') as LoroList<LoroMap>;
-    const length = historyList.length;
-
-    // Search from the end for the matching assistant entry
-    for (let i = length - 1; i >= 0; i--) {
-      const entry = historyList.get(i) as LoroMap | undefined;
-      if (!entry) continue;
-
-      const role = entry.get('role') as string | undefined;
-      if (role !== 'assistant') continue;
-
-      // If turnId is specified, only update the entry with matching ID
-      if (turnId) {
-        const entryId = entry.get('id') as string | undefined;
-        if (entryId !== turnId) continue;
-      }
-
-      // See setHistoryEntryField: undefined must delete, not persist null.
-      if (fileDiff === undefined) {
-        entry.delete('fileDiff');
-      } else {
-        entry.set('fileDiff', fileDiff as LoroMapSetValue);
-      }
-      doc.commit();
-      return true;
-    }
-
-    return false;
+    // Queue promotion is a dispatch producer: append through the domain command
+    // (which validates before writing), then publish the activation pointer.
+    await this.sessionData.commands.appendTurn(entry as unknown as SessionTurn);
+    await this.repo.upsertDocMeta(this.roomId, {
+      latestUserMsgId: entry.id,
+    } satisfies Partial<SessionMeta>);
   }
 
   /** Return stable persisted ordering metadata for one assistant turn. */
@@ -2720,18 +2756,9 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     if (!this.mirror) {
       throw new Error('Mirror not initialized');
     }
-    this.mirror.setState((prev) => {
-      const history = (prev.history as SessionHistoryInput[]) || [];
-      // Find the latest assistant entry
-      for (let i = history.length - 1; i >= 0; i--) {
-        const entry = history[i];
-        if (entry && entry.role === 'assistant') {
-          entry.plan = entries;
-          break;
-        }
-      }
-      return prev;
-    });
+    const id = this.shallowLatestTurnId('assistant');
+    if (!id) return;
+    await this.agentWrites.setTurnField(id, 'plan', setFieldTo(entries));
   }
 
   async getMessageQueue(): Promise<MessageQueueItem[]> {
@@ -2741,7 +2768,7 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     return (this.mirror.getState().mq ?? []) as MessageQueueItem[];
   }
 
-  async popMessageQueue(): Promise<MessageQueueItem | null> {
+  async peekReadyMessageQueue(): Promise<MessageQueueItem | null> {
     if (!this.mirror) {
       return null;
     }
@@ -2764,14 +2791,14 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
       }
     }
 
-    this.mirror.setState((prev) => {
-      const mq = (prev.mq ?? []) as MessageQueueItem[];
-      // @ts-ignore
-      prev.mq = mq.slice(1);
-      return prev;
-    });
-
     return first ?? null;
+  }
+
+  async popMessageQueue(): Promise<MessageQueueItem | null> {
+    const first = await this.peekReadyMessageQueue();
+    if (!first) return null;
+    await this.removeMessageQueueItem(first.$cid);
+    return first;
   }
 
   async pushMessageQueue(item: Omit<MessageQueueItem, '$cid'>): Promise<void> {
@@ -2858,7 +2885,11 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
       return;
     }
 
+    await this.modelSummary?.flush();
     this.destroyed = true;
+
+    this.modelSummary?.dispose();
+    this.modelSummary = null;
 
     this.historyAutoReadHandle?.dispose();
     this.historyAutoReadHandle = null;
@@ -2887,6 +2918,9 @@ export class SessionDocument implements LoroDocument<SessionDocMeta, SessionMeta
     this.detachDocRoomStatusListener?.();
     this.detachDocRoomStatusListener = null;
     this.docRoomStatusListeners.clear();
+    // Invalidate outstanding stored-history snapshot handles: their source is
+    // this store, which is going away. Subsequent use reports `source_closed`.
+    this.sessionDataInstance?.dispose();
     this.mirror?.dispose();
     this.mirror = null;
     this.handle = null;
@@ -2911,6 +2945,7 @@ const serializeAcpCapabilityWithoutFetchTime = (entry: AcpCapabilityCacheEntry):
     modes: entry.modes,
     models: entry.models,
     configOptions: entry.configOptions,
+    modelReasoningEfforts: entry.modelReasoningEfforts,
     availableCommands: entry.availableCommands,
     sessionFork: entry.sessionFork,
     acknowledgedSteer: entry.acknowledgedSteer,
@@ -2999,8 +3034,9 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
     sourceVersion: string,
     modelReasoningEfforts?: Record<string, string[]>,
     acknowledgedSteer = false,
+    goalActions?: SessionGoalAction[],
     options: { signal?: AbortSignal } = {}
-  ): Promise<void> {
+  ): Promise<AcpCapabilityCacheEntry> {
     options.signal?.throwIfAborted();
     const normalizedModes = modes.map((mode) => ({
       id: mode.id,
@@ -3024,6 +3060,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
       availableCommands: availableCommands?.length ? availableCommands : undefined,
       sessionFork,
       acknowledgedSteer,
+      goalActions: goalActions?.length ? goalActions : undefined,
       sessionForkWorktree: sessionFork,
       modelReasoningEfforts:
         modelReasoningEfforts && Object.keys(modelReasoningEfforts).length > 0
@@ -3042,7 +3079,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
       serializeAcpCapabilityWithoutFetchTime(existing) ===
         serializeAcpCapabilityWithoutFetchTime(entry)
     ) {
-      return;
+      return existing;
     }
     options.signal?.throwIfAborted();
     const changed = writeMachineFlockRowToFlock(handle.flock, {
@@ -3057,6 +3094,7 @@ export class MachineDocument implements LoroDocument<{}, MachineMeta> {
         await handle.syncOnce().catch(() => undefined);
       }
     }
+    return entry;
   }
 
   async getAcpCapabilities(configId: AgentConfigId): Promise<AcpCapabilityCacheEntry | undefined> {

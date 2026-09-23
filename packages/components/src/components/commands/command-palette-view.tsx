@@ -97,9 +97,9 @@ function ResultRow({ result }: { result: PaletteResult }) {
     <CommandItem
       value={result.key}
       onSelect={result.run}
-      className="mx-2 my-px gap-2.5 rounded-md px-2.5 py-1.5 data-[selected=true]:bg-hover"
+      className="mx-2 my-px gap-2.5 rounded-md px-2.5 py-1.5"
     >
-      <span className="flex size-6 shrink-0 items-center justify-center rounded-md border border-border/50 bg-muted/40 text-muted-foreground">
+      <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-foreground/[0.05] text-muted-foreground">
         {isSession ? (
           <MessagesSquare className="size-3" strokeWidth={1.75} />
         ) : (
@@ -109,7 +109,7 @@ function ResultRow({ result }: { result: PaletteResult }) {
 
       {/* Single line: the title fills and truncates; the project/repo (and local-project
           branch) plus the last-activity time sit on the right. */}
-      <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
+      <span className="min-w-0 flex-1 truncate text-sm font-normal text-foreground">
         {result.title}
       </span>
 

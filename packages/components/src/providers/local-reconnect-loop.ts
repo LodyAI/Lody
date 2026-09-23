@@ -238,9 +238,7 @@ export function createLocalReconnectLoop(options: LocalReconnectLoopOptions): Lo
     inFlight = true;
     options.onStateChange();
     try {
-      await options.reconnect(
-        triggerReason === undefined ? { force } : { force, triggerReason }
-      );
+      await options.reconnect(triggerReason === undefined ? { force } : { force, triggerReason });
     } catch (error) {
       options.onError?.(error);
     } finally {
@@ -259,7 +257,6 @@ export function createLocalReconnectLoop(options: LocalReconnectLoopOptions): Lo
         scheduleBackoffResetWait();
       }
       if (pendingForcedRun) {
-        retryAttempt = 0;
         void run(true);
       } else {
         update();
@@ -275,7 +272,10 @@ export function createLocalReconnectLoop(options: LocalReconnectLoopOptions): Lo
       recordPendingTrigger(reason);
       cancelPendingWait();
       cancelBackoffResetWait();
-      retryAttempt = 0;
+      // A forced edge gets an immediate attempt, but it is still part of the
+      // current outage. Only a sustained healthy dwell may forgive the retry
+      // history; otherwise repeated token/online/visibility signals can pin a
+      // broken connection to the first backoff step forever.
       void run(true);
     },
     stop: () => {

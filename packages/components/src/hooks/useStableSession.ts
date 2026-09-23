@@ -10,9 +10,11 @@ import {
   DEFAULT_SESSION_KEEPALIVE_REFETCH_INTERVAL_MS,
   DEFAULT_SESSION_RESUME_REFETCH_THROTTLE_MS,
   hasAuthenticatedUser,
+  isUnauthorizedSessionError,
   shouldConfirmUnauthenticated,
   shouldRefetchSessionOnBrowserResume,
   shouldRetryMissingAuthenticatedSession,
+  shouldRetrySessionError,
   shouldStartAuthenticatedSessionGrace,
   shouldUsePreservedAuthenticatedSession,
 } from './stable-session-state';
@@ -43,6 +45,11 @@ const StableSessionContext = createContext<StableSessionValue | null>(null);
 
 export { StableSessionContext };
 
+function readAuthResponseError(value: unknown): unknown {
+  if (typeof value !== 'object' || value === null) return null;
+  return (value as { error?: unknown }).error ?? null;
+}
+
 export function useStableSessionInternal(options?: UseStableSessionOptions): StableSessionValue {
   const authClient = useAuthClient();
   const { data, isPending, error, refetch } = authClient.useSession();
@@ -59,6 +66,12 @@ export function useStableSessionInternal(options?: UseStableSessionOptions): Sta
   const isPendingRef = useRef(isPending);
   const [retryCount, setRetryCount] = useState(0);
   const [preserveUntilMs, setPreserveUntilMs] = useState<number | null>(null);
+  const [confirmedUnauthorizedError, setConfirmedUnauthorizedError] = useState<unknown>(null);
+  const [dismissedUnauthorizedError, setDismissedUnauthorizedError] = useState<unknown>(null);
+  const [isForcedUnauthorizedRefreshPending, setIsForcedUnauthorizedRefreshPending] =
+    useState(false);
+  const unauthorizedCheckSequenceRef = useRef(0);
+  const hasForcedUnauthorizedRefreshRef = useRef(false);
   const lastAuthenticatedDataRef = useRef(data);
   const previousHadRawUserRef = useRef(hasAuthenticatedUser(data));
   const hasConsumedInitialBootstrapGraceRef = useRef(false);
@@ -68,8 +81,20 @@ export function useStableSessionInternal(options?: UseStableSessionOptions): Sta
   const [bootstrapSnapshot] = useState<AuthBootstrapSnapshot | null>(() =>
     typeof window === 'undefined' ? null : readAuthBootstrapSnapshot()
   );
-  const hasLocalToken = Boolean(readStoredAuthToken());
+  const localToken = readStoredAuthToken();
+  const hasLocalToken = Boolean(localToken);
   const hasRawUser = hasAuthenticatedUser(data);
+  const hasUnauthorizedSessionError = isUnauthorizedSessionError(error);
+  const isConfirmedSessionUnauthorized =
+    hasUnauthorizedSessionError && confirmedUnauthorizedError === error;
+  const isDismissedSessionUnauthorized =
+    hasUnauthorizedSessionError && dismissedUnauthorizedError === error;
+  const isConfirmingSessionUnauthorized =
+    hasUnauthorizedSessionError &&
+    !isPending &&
+    !isConfirmedSessionUnauthorized &&
+    !isDismissedSessionUnauthorized;
+  const isSessionUnauthorized = hasUnauthorizedSessionError && !isDismissedSessionUnauthorized;
   const shouldRetryMissingSession = shouldRetryMissingAuthenticatedSession({
     hasLocalToken,
     hasRawUser,
@@ -78,14 +103,92 @@ export function useStableSessionInternal(options?: UseStableSessionOptions): Sta
     retryCount,
     maxRetries,
   });
-  const shouldRetry =
-    (Boolean(error) && !isPending && retryCount < maxRetries) || shouldRetryMissingSession;
-  const finalError = Boolean(error) && retryCount >= maxRetries ? error : null;
+  const shouldScheduleRetry =
+    shouldRetrySessionError({
+      hasError: Boolean(error),
+      isPending,
+      isSessionUnauthorized,
+      retryCount,
+      maxRetries,
+    }) || shouldRetryMissingSession;
+  const finalError =
+    isConfirmedSessionUnauthorized ||
+    (Boolean(error) &&
+      retryCount >= maxRetries &&
+      !isConfirmingSessionUnauthorized &&
+      !isForcedUnauthorizedRefreshPending)
+      ? error
+      : null;
   const hasLastAuthenticatedUser = hasAuthenticatedUser(lastAuthenticatedDataRef.current);
   const hasBootstrapSnapshot = bootstrapSnapshot !== null;
 
   useEffect(() => {
-    if (!shouldRetry) {
+    if (!hasUnauthorizedSessionError) {
+      setConfirmedUnauthorizedError(null);
+      setDismissedUnauthorizedError(null);
+      setIsForcedUnauthorizedRefreshPending(false);
+      hasForcedUnauthorizedRefreshRef.current = false;
+      return undefined;
+    }
+    if (isPending || isConfirmedSessionUnauthorized || isDismissedSessionUnauthorized) {
+      return undefined;
+    }
+
+    const tokenAtStart = localToken;
+    const sequence = unauthorizedCheckSequenceRef.current + 1;
+    unauthorizedCheckSequenceRef.current = sequence;
+    let cancelled = false;
+
+    void authClient.getSession({ fetchOptions: { throw: false } }).then(
+      (result) => {
+        if (cancelled || unauthorizedCheckSequenceRef.current !== sequence) return;
+
+        const tokenChanged = readStoredAuthToken() !== tokenAtStart;
+        const verificationError = readAuthResponseError(result);
+        const verificationRejected = isUnauthorizedSessionError(verificationError);
+        if (!tokenChanged && verificationRejected) {
+          setConfirmedUnauthorizedError(error);
+          return;
+        }
+
+        // The 401 belonged to an older credential, or the current credential
+        // now succeeds. Let the ordinary retry lane refresh the session atom.
+        setDismissedUnauthorizedError(error);
+        if (
+          (tokenChanged || verificationError === null) &&
+          retryCount >= maxRetries &&
+          !hasForcedUnauthorizedRefreshRef.current
+        ) {
+          hasForcedUnauthorizedRefreshRef.current = true;
+          setIsForcedUnauthorizedRefreshPending(true);
+          void refetch().finally(() => setIsForcedUnauthorizedRefreshPending(false));
+        }
+      },
+      () => {
+        if (cancelled || unauthorizedCheckSequenceRef.current !== sequence) return;
+        // A transport failure cannot confirm credential rejection.
+        setDismissedUnauthorizedError(error);
+      }
+    );
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    authClient,
+    error,
+    hasUnauthorizedSessionError,
+    isConfirmedSessionUnauthorized,
+    isDismissedSessionUnauthorized,
+    isPending,
+    localToken,
+    maxRetries,
+    refetch,
+    retryCount,
+  ]);
+
+  useEffect(() => {
+    if (!shouldScheduleRetry) {
       if (timerRef.current) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
@@ -110,7 +213,7 @@ export function useStableSessionInternal(options?: UseStableSessionOptions): Sta
         timerRef.current = null;
       }
     };
-  }, [baseDelayMs, maxDelayMs, maxRetries, refetch, retryCount, shouldRetry]);
+  }, [baseDelayMs, maxDelayMs, maxRetries, refetch, retryCount, shouldScheduleRetry]);
 
   useEffect(() => {
     if (hasRawUser) {
@@ -203,7 +306,10 @@ export function useStableSessionInternal(options?: UseStableSessionOptions): Sta
         hasBootstrapSnapshot,
         hasConsumedInitialBootstrapGrace: hasConsumedInitialBootstrapGraceRef.current,
         isPending,
-        shouldRetry,
+        shouldRetry:
+          shouldScheduleRetry ||
+          isConfirmingSessionUnauthorized ||
+          isForcedUnauthorizedRefreshPending,
         hasFinalError: finalError !== null,
         preserveUntilMs,
       })
@@ -224,8 +330,10 @@ export function useStableSessionInternal(options?: UseStableSessionOptions): Sta
     hasLocalToken,
     hasRawUser,
     isPending,
+    isConfirmingSessionUnauthorized,
+    isForcedUnauthorizedRefreshPending,
     preserveUntilMs,
-    shouldRetry,
+    shouldScheduleRetry,
   ]);
 
   useEffect(() => {
@@ -251,32 +359,38 @@ export function useStableSessionInternal(options?: UseStableSessionOptions): Sta
   const optimisticBootstrapSnapshot: AuthBootstrapSnapshot | null =
     hasLocalToken && bootstrapSnapshot ? bootstrapSnapshot : null;
   const now = Date.now();
-  const shouldUsePreservedSession = shouldUsePreservedAuthenticatedSession({
-    hasLocalToken,
-    hasRawUser,
-    hasLastAuthenticatedUser,
-    preserveUntilMs,
-    now,
-  });
   const confirmedUnauthenticated = shouldConfirmUnauthenticated({
     hasLocalToken,
     hasRawUser,
     isPending,
-    shouldRetry,
+    shouldRetry:
+      shouldScheduleRetry || isConfirmingSessionUnauthorized || isForcedUnauthorizedRefreshPending,
     hasFinalError: finalError !== null,
+    isSessionUnauthorized: isConfirmedSessionUnauthorized,
     preserveUntilMs,
     now,
   });
+  const shouldUsePreservedSession =
+    !confirmedUnauthenticated &&
+    shouldUsePreservedAuthenticatedSession({
+      hasLocalToken,
+      hasRawUser,
+      hasLastAuthenticatedUser,
+      preserveUntilMs,
+      now,
+    });
   const shouldUseOptimisticBootstrap =
     !shouldUsePreservedSession &&
     !hasRawUser &&
     optimisticBootstrapSnapshot !== null &&
     !confirmedUnauthenticated;
-  const stableData = shouldUsePreservedSession
-    ? lastAuthenticatedDataRef.current
-    : shouldUseOptimisticBootstrap
-      ? ({ user: optimisticBootstrapSnapshot.user } as typeof data)
-      : data;
+  const stableData = confirmedUnauthenticated
+    ? null
+    : shouldUsePreservedSession
+      ? lastAuthenticatedDataRef.current
+      : shouldUseOptimisticBootstrap
+        ? ({ user: optimisticBootstrapSnapshot.user } as typeof data)
+        : data;
 
   return {
     data: stableData,
@@ -286,7 +400,8 @@ export function useStableSessionInternal(options?: UseStableSessionOptions): Sta
     hasRawUser,
     isOptimistic: shouldUseOptimisticBootstrap,
     isPending,
-    isRetrying: shouldRetry,
+    isRetrying:
+      shouldScheduleRetry || isConfirmingSessionUnauthorized || isForcedUnauthorizedRefreshPending,
     error: finalError,
     confirmedUnauthenticated,
     refetch,

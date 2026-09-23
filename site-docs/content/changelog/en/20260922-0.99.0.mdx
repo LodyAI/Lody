@@ -1,0 +1,17 @@
+---
+title: '20260922-0.99.0'
+version: 0.99.0
+date: 2026-09-22
+description: Choose an alternate app icon on iOS and recover from runtime cache errors at startup.
+---
+
+Version 0.99.0
+
+### ✨ New Features
+
+- On iOS, choose the Aqua app icon in Appearance settings or switch back to the default icon.
+
+### 🐛 Fixes & Improvements
+
+- Fix startup failures after upgrades caused by outdated runtime caches. The affected runtime is downloaded and verified again when needed.
+- Keep the app starting when runtime cache cleanup or update checks fail, without interrupting other runtimes.

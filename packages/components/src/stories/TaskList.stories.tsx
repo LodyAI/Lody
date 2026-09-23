@@ -19,7 +19,13 @@ type TaskListDemoProps = TaskListProps & {
   containerClassName?: string;
 };
 
-function TaskListDemo({ tasks, repos, selectedTaskId, containerClassName }: TaskListDemoProps) {
+function TaskListDemo({
+  tasks,
+  repos,
+  isLoading,
+  selectedTaskId,
+  containerClassName,
+}: TaskListDemoProps) {
   const [selectedId, setSelectedId] = useState<string | null>(selectedTaskId ?? null);
   const [repoState, setRepoState] = useState(repos);
   const [chatsCollapsed, setChatsCollapsed] = useState(false);
@@ -92,6 +98,7 @@ function TaskListDemo({ tasks, repos, selectedTaskId, containerClassName }: Task
       <TaskList
         tasks={taskState}
         repos={repoState}
+        isLoading={isLoading}
         chatsCollapsed={chatsCollapsed}
         selectedTaskId={selectedId}
         onSelect={setSelectedId}
@@ -220,6 +227,16 @@ const DEFAULT_ARGS: TaskListProps = {
 
 export const Default: Story = {
   args: DEFAULT_ARGS,
+  render: (args) => <TaskListDemo {...args} />,
+};
+
+export const Loading: Story = {
+  args: {
+    ...DEFAULT_ARGS,
+    tasks: [],
+    repos: [],
+    isLoading: true,
+  },
   render: (args) => <TaskListDemo {...args} />,
 };
 

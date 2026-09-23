@@ -1,10 +1,13 @@
+import { readSessionHistory } from '@lody/shared/session-data';
 import {
   getServerNow,
   getSessionRoomId,
+  hasPendingUserTurnActivation,
   type AgentConfigId,
   type MachineId,
   type ReviewerAgentRef,
   type SessionId,
+  type SessionMeta,
   type WorkspaceId,
 } from '@lody/shared';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
@@ -55,16 +58,14 @@ const entryText = (entry: { items?: Array<{ text?: string }> } | undefined): str
  * written and the agent actually starting, and a prompt written into that window
  * lands behind the pending turn with the wrong context.
  */
-const isSessionBusy = (facts: {
-  status?: { type: string };
-  latestUserMsgId?: string;
-  lastHandledUserMsgId?: string;
-}): boolean => {
-  const type = facts.status?.type;
+const isSessionBusy = (meta: SessionMeta): boolean => {
+  const type = meta.status?.type;
   if (type === 'running' || type === 'initializing' || type === 'requestPermission') {
     return true;
   }
-  return Boolean(facts.latestUserMsgId) && facts.latestUserMsgId !== facts.lastHandledUserMsgId;
+  // Must match the dispatch watcher exactly: a retired activation leaves the
+  // pointers unequal on purpose, so a raw comparison would wait forever.
+  return hasPendingUserTurnActivation(meta);
 };
 
 export const createReviewAutomation = (
@@ -121,7 +122,7 @@ export const createReviewAutomation = (
     readIntent: async (sessionId) => {
       try {
         const doc = await documentManager.getOrCreateSessionDoc(sessionId);
-        const history = await doc.getHistory();
+        const history = readSessionHistory(doc.sessionData.history);
         const firstUserEntry = history.find((entry) => entry.role === 'user');
         return entryText(firstUserEntry) || undefined;
       } catch {
@@ -131,7 +132,7 @@ export const createReviewAutomation = (
     readLastAssistantText: async (sessionId) => {
       try {
         const doc = await documentManager.getOrCreateSessionDoc(sessionId);
-        const history = await doc.getHistory();
+        const history = readSessionHistory(doc.sessionData.history);
         for (let index = history.length - 1; index >= 0; index -= 1) {
           const entry = history[index];
           if (entry?.role !== 'assistant') {

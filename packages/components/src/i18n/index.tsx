@@ -78,26 +78,30 @@ const BASE_SUBTAG_TO_SUPPORTED: Record<string, SupportedLanguage> = {
 };
 
 function bcp47ToSupportedLanguage(tag: string): SupportedLanguage | null {
-  const base = tag.toLowerCase().split('-')[0];
+  // Electron returns BCP-47 tags, while some Linux locale configurations still
+  // surface the legacy underscore spelling. Treat both separators identically.
+  const base = tag.toLowerCase().split(/[-_]/)[0];
   return BASE_SUBTAG_TO_SUPPORTED[base] ?? null;
 }
 
 export function detectBrowserLanguage(): SupportedLanguage | null {
-  if (typeof window === 'undefined' || typeof navigator === 'undefined') {
+  if (typeof window === 'undefined') {
     return null;
   }
-  // Rejected: detecting in Electron. The desktop shell inherits the system
-  // locale, which rarely matches the user-facing preference. The settings
-  // panel is the canonical way to pick a language there.
-  if (window.__LODY_ELECTRON__ === true) {
-    return null;
-  }
+  // Electron's Chromium locale may reflect which `.pak` files were packaged,
+  // not the user's OS preference. Main passes the real system language list to
+  // preload before renderer code runs, keeping detection correct on macOS,
+  // Windows, and Linux without an asynchronous first-paint language switch.
   const candidates =
-    navigator.languages && navigator.languages.length > 0
-      ? navigator.languages
-      : navigator.language
-        ? [navigator.language]
-        : [];
+    window.__LODY_ELECTRON__ === true
+      ? (window.__LODY_PLATFORM__?.preferredSystemLanguages ?? [])
+      : typeof navigator === 'undefined'
+        ? []
+        : navigator.languages && navigator.languages.length > 0
+          ? navigator.languages
+          : navigator.language
+            ? [navigator.language]
+            : [];
   for (const candidate of candidates) {
     const matched = bcp47ToSupportedLanguage(candidate);
     if (matched) {
@@ -114,7 +118,10 @@ export const initI18n = async (language: string) => {
     initializationPromise = i18next
       .use(initReactI18next)
       .init({
-        lng: fallbackLanguage,
+        // The first call happens at module bootstrap with the stored/detected
+        // preference. Initializing directly in that language avoids committing
+        // one English frame before AppInitializer's effect can reconcile it.
+        lng: nextLanguage,
         fallbackLng: fallbackLanguage,
         defaultNS,
         ns: [defaultNS],
@@ -147,7 +154,7 @@ export const languageCodeToName = Object.fromEntries(
   currentSupportedLanguages.map((lang) => [lang, resources[lang as SupportedLanguage].lang.name])
 );
 
-void initI18n(fallbackLanguage);
+void initI18n(readStoredLanguagePreference() ?? detectBrowserLanguage() ?? fallbackLanguage);
 
 export const LanguageSelector = ({ triggerClassName }: { triggerClassName?: string }) => {
   const { i18n } = useTranslation();

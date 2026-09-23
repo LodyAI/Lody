@@ -1,5 +1,7 @@
+import { getWindowTargetPath, presentWindowTarget } from './window-target'
 import { app, BrowserWindow, dialog, nativeTheme, shell } from 'electron'
 import { is } from '@electron-toolkit/utils'
+import { installContextMenu } from './context-menu'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
@@ -7,7 +9,9 @@ import {
   getMainWindow,
   isAppQuitting,
   isWindowsTrayAvailable,
-  setMainWindow
+  setMainWindow,
+  registerProductWindow,
+  unmarkWarmWindow
 } from './window-state'
 import {
   getMainWindowConstructorOptions,
@@ -21,9 +25,17 @@ import {
 } from './window-theme'
 import { formatUnknownError, normalizeExternalHttpUrl } from './utils'
 import { describeDeepLinkForAuthDebug } from './auth-debug'
+import { captureElectronMainException } from './posthog-error-reporting'
+import { createRendererProcessGoneHandling } from './renderer-process-gone'
+import { createRendererHangWatchdog } from './renderer-hang-watchdog'
+import { recordRendererHang, registerRendererHangDocument } from './renderer-hang-diagnostics'
+import { resolveMainWindowRuntimePolicy } from './window-runtime-policy'
+import { type ElectronWindowTarget } from '@lody/shared/electron-ipc'
+import { serializePreferredSystemLanguagesArgument } from '../system-language-argument'
+import { isDevbarRendererEnabled } from './services/devbar/service'
+import { devbarRendererEntry } from './services/devbar/control'
 import {
   clearMountWatchdog,
-  clearUnresponsiveWatchdog,
   disposeWatchdogState,
   isInRecovery,
   loadRecoveryPage,
@@ -31,16 +43,30 @@ import {
   requestRendererReload,
   setReloadTarget,
   startMountWatchdog,
-  startUnresponsiveWatchdog,
   type ReloadTarget,
   type RecoveryContext
 } from './renderer-recovery'
 
+let productWindowIcon = ''
+
 type CreateMainWindowOptions = {
-  icon: string
-  initialPath?: '/' | '/onboarding'
+  icon?: string
+  initialPath?: string
+  auxiliary?: boolean
+  hideWindowOnAutoLaunch?: boolean
   onDidFinishLoad?: () => void
+  /**
+   * Keeps a hidden spare auxiliary window alive for the next open instead of
+   * showing it. The renderer binds a concrete target later, so the window boots
+   * on a neutral route and must never present itself to the user.
+   */
+  warm?: boolean
 }
+
+// Neutral route a warm spare boots on. `window=workspace` marks it auxiliary
+// (its own session storage); `warm=1` tells the renderer to keep the neutral
+// shell until a target is bound instead of redirecting into a workspace.
+export const WARM_WINDOW_INITIAL_PATH = '/?window=workspace&warm=1'
 
 const DEEP_LINK_DEBUG_PREFIX = '[electron-auth-debug]'
 
@@ -50,11 +76,7 @@ const DEEP_LINK_DEBUG_PREFIX = '[electron-auth-debug]'
 // we'd rather err on the long side than spuriously open DevTools.
 const MOUNT_WATCHDOG_TIMEOUT_MS = 20_000
 
-// How long Electron's `unresponsive` must persist before we surface a dialog.
-// `unresponsive` fires when the renderer event loop blocks for a few seconds;
-// most of those resolve on their own (GC, jank, sync layout). Only show the
-// dialog after a longer outage so we don't pester the user.
-const UNRESPONSIVE_DIALOG_DELAY_MS = 10_000
+const pendingInitialMaximize = new WeakSet<BrowserWindow>()
 
 function logDeepLinkDebug(message: string, meta?: Record<string, unknown>): void {
   if (meta) {
@@ -127,16 +149,29 @@ function formatLoadFailure(details: LoadFailureDetails): string {
   ].join('\n')
 }
 
-function resolveMainRendererTarget(initialPath: '/' | '/onboarding' = '/'): ReloadTarget {
+function resolveMainRendererTarget(
+  initialPath = '/',
+  devbarEnabled = isDevbarRendererEnabled(),
+  auxiliary = false
+): ReloadTarget {
+  const rendererEntry = devbarRendererEntry(devbarEnabled, auxiliary)
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+    // The dev server keeps index.html on plain history paths; only the Devbar
+    // entry loads as <entry>.html#/<route> since it runs hash history on http.
+    const path =
+      rendererEntry === 'index.html'
+        ? initialPath
+        : initialPath === '/'
+          ? rendererEntry
+          : `${rendererEntry}#${initialPath}`
     return {
       type: 'url',
-      url: new URL(initialPath, process.env['ELECTRON_RENDERER_URL']).toString()
+      url: new URL(path, process.env['ELECTRON_RENDERER_URL']).toString()
     }
   }
   return {
     type: 'file',
-    filePath: join(__dirname, '../renderer/index.html'),
+    filePath: join(__dirname, `../renderer/${rendererEntry}`),
     ...(initialPath === '/' ? {} : { hash: initialPath })
   }
 }
@@ -156,6 +191,28 @@ function loadRendererTarget(window: BrowserWindow, target: ReloadTarget): Promis
     return window.loadURL(target.url)
   }
   return window.loadFile(target.filePath, target.hash ? { hash: target.hash } : undefined)
+}
+
+function readCurrentRendererPath(window: BrowserWindow): string {
+  try {
+    const current = new URL(window.webContents.getURL())
+    if (current.hash.startsWith('#/')) return current.hash.slice(1)
+    if (!current.pathname.endsWith('.html') && current.pathname.startsWith('/')) {
+      return `${current.pathname}${current.search}`
+    }
+  } catch {
+    // A window still navigating has no route worth preserving.
+  }
+  return '/'
+}
+
+export async function reloadMainWindowForDevbar(
+  window: BrowserWindow,
+  enabled: boolean
+): Promise<void> {
+  const target = resolveMainRendererTarget(readCurrentRendererPath(window), enabled)
+  setReloadTarget(window, target)
+  await loadRendererTarget(window, target)
 }
 
 function isTrustedNavigation(url: string, targets: readonly ReloadTarget[]): boolean {
@@ -186,46 +243,6 @@ function installNavigationGuard(window: BrowserWindow, targets: readonly ReloadT
   window.webContents.on('will-redirect', preventUntrustedNavigation)
 }
 
-async function showUnresponsiveDialog(window: BrowserWindow): Promise<void> {
-  if (window.isDestroyed()) return
-  let response: number
-  try {
-    const result = await dialog.showMessageBox(window, {
-      type: 'warning',
-      buttons: ['Wait', 'Reload window', 'Force quit'],
-      defaultId: 0,
-      cancelId: 0,
-      title: 'Lody is unresponsive',
-      message: 'Lody is not responding.',
-      detail:
-        'You can keep waiting, reload the window (your in-progress edits in this window will be lost), or force-quit the app.'
-    })
-    response = result.response
-  } catch (error) {
-    console.error('[Electron] Failed to show unresponsive dialog', formatUnknownError(error))
-    return
-  }
-  if (response === 1) {
-    requestRendererReload(window)
-    return
-  }
-  if (response === 2) {
-    app.exit(1)
-    return
-  }
-  // User chose "Wait". Electron only fires `unresponsive` on the first stall;
-  // if the window stays stuck after the dialog closes, no follow-up event
-  // re-arms our watchdog. Re-arm here so we ask again after another stall.
-  if (!window.isDestroyed()) {
-    startUnresponsiveWatchdog(window, {
-      timeoutMs: UNRESPONSIVE_DIALOG_DELAY_MS,
-      onTimeout: () => {
-        void showUnresponsiveDialog(window)
-      }
-    })
-  }
-}
-
 function attachMainWindowDiagnostics(window: BrowserWindow, recoveryTarget: ReloadTarget): void {
   const { webContents } = window
 
@@ -239,23 +256,38 @@ function attachMainWindowDiagnostics(window: BrowserWindow, recoveryTarget: Relo
     loadRecoveryPage(window, recoveryTarget, context)
   }
 
+  const hangWatchdog = createRendererHangWatchdog({
+    now: Date.now,
+    schedule: (callback, delay) => {
+      const timer = setTimeout(callback, delay)
+      return () => clearTimeout(timer)
+    },
+    record: (event, incident, details) => recordRendererHang(window, event, incident, details),
+    showDialog: async () => {
+      const { response } = await dialog.showMessageBox(window, {
+        type: 'warning',
+        buttons: ['Wait', 'Reload window', 'Force quit'],
+        defaultId: 0,
+        cancelId: 0,
+        title: 'Lody is unresponsive',
+        message: 'Lody is not responding.',
+        detail:
+          'You can keep waiting, reload the window (your in-progress edits in this window will be lost), or force-quit the app.'
+      })
+      return response
+    },
+    reload: () => requestRendererReload(window),
+    quit: () => app.exit(1)
+  })
   window.on('unresponsive', () => {
-    console.error('[Electron] Main window became unresponsive')
-    // The recovery page already shows Reload / Copy buttons of its own; don't
-    // stack a second "unresponsive" dialog on top of it. If recovery itself
-    // hangs the user can close the window from the OS.
-    if (isInRecovery(window)) return
-    startUnresponsiveWatchdog(window, {
-      timeoutMs: UNRESPONSIVE_DIALOG_DELAY_MS,
-      onTimeout: () => {
-        void showUnresponsiveDialog(window)
-      }
-    })
+    if (!isInRecovery(window)) hangWatchdog.unresponsive()
   })
-  window.on('responsive', () => {
-    console.info('[Electron] Main window became responsive')
-    clearUnresponsiveWatchdog(window)
+  window.on('responsive', () => hangWatchdog.responsive())
+  webContents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
+    if (isMainFrame && !isInPlace) hangWatchdog.navigation()
   })
+  webContents.on('render-process-gone', () => hangWatchdog.navigation())
+  window.once('closed', () => hangWatchdog.dispose())
 
   webContents.on('did-fail-load', (_event, ...args: unknown[]) => {
     const details = readLoadFailureDetails(args)
@@ -303,14 +335,18 @@ function attachMainWindowDiagnostics(window: BrowserWindow, recoveryTarget: Relo
       reason: details.reason,
       exitCode: details.exitCode
     })
-    // 'clean-exit' is normal shutdown — don't surface it.
-    if (details.reason === 'clean-exit') return
     if (isInRecovery(window)) return
-    showRecovery({
-      message: 'The Lody window crashed.',
-      details: `Reason: ${details.reason}\nExit code: ${details.exitCode}`,
-      source: 'render-process-gone'
+    const handling = createRendererProcessGoneHandling(details)
+    if (!handling) return
+
+    // This executes in main because the crashing renderer cannot finish its own
+    // telemetry request. The recovery page stays open afterwards, so this
+    // best-effort flush is never raced by an automatic product reload.
+    void captureElectronMainException(handling.report.error, {
+      component: handling.report.component,
+      extra: handling.report.extra
     })
+    showRecovery(handling.recovery)
   })
 
   webContents.on('devtools-opened', () => {
@@ -325,22 +361,31 @@ function attachMainWindowDiagnostics(window: BrowserWindow, recoveryTarget: Relo
 }
 
 export function createMainWindow(options: CreateMainWindowOptions): BrowserWindow {
-  const shouldMaximizeOnLaunch = shouldMaximizeMainWindowOnLaunch()
-  nativeTheme.themeSource = getInitialMainWindowThemeSource(options.initialPath)
+  const shouldMaximizeOnLaunch = !options.auxiliary && shouldMaximizeMainWindowOnLaunch()
+  const runtimePolicy = resolveMainWindowRuntimePolicy({
+    isPackaged: app.isPackaged,
+    e2eFlag: process.env['LODY_E2E'],
+    showE2EWindowFlag: process.env['LODY_E2E_SHOW_WINDOW']
+  })
+  if (options.icon) productWindowIcon = options.icon
+  if (!options.auxiliary)
+    nativeTheme.themeSource = getInitialMainWindowThemeSource(
+      options.initialPath === '/onboarding' ? '/onboarding' : '/'
+    )
   const resolvedTheme = nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
   const window = new BrowserWindow({
     ...getMainWindowConstructorOptions(),
+    ...(options.auxiliary ? { width: 1000, height: 760 } : {}),
     show: false,
     backgroundColor: getMainWindowBackgroundColor(resolvedTheme),
     autoHideMenuBar: true,
-    ...(process.platform === 'linux' ? { icon: options.icon } : {}),
+    ...(process.platform === 'linux' ? { icon: productWindowIcon } : {}),
     ...(process.platform === 'darwin'
       ? { titleBarStyle: 'hiddenInset', trafficLightPosition: { x: 20, y: 16 } }
       : {}),
     // Windows: hide the native title bar (its neutral gray clashes with the
     // app canvas) and keep only the OS-drawn caption buttons as an overlay
-    // tinted to match the theme. The renderer reserves a drag band of the
-    // same height at the top of the window.
+    // tinted to match the theme.
     ...(process.platform === 'win32'
       ? {
           titleBarStyle: 'hidden',
@@ -349,20 +394,63 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
       : {}),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
+      backgroundThrottling: runtimePolicy.backgroundThrottling,
+      // Chromium's packaged locale resources are intentionally English-only.
+      // Carry Electron's OS-level preference into preload so first-run product
+      // language detection does not mistake the available .pak for user intent.
+      additionalArguments: [
+        serializePreferredSystemLanguagesArgument(app.getPreferredSystemLanguages())
+      ],
       sandbox: false,
       nodeIntegration: false,
       contextIsolation: true
     }
   })
-  trackMainWindowState(window)
-  const mainTarget = resolveMainRendererTarget(options.initialPath)
+  if (options.hideWindowOnAutoLaunch && shouldMaximizeOnLaunch) {
+    pendingInitialMaximize.add(window)
+  }
+  registerProductWindow(window, options.warm ?? false)
+  if (!options.auxiliary) trackMainWindowState(window)
+  const initialDevbarEnabled = isDevbarRendererEnabled()
+  const mainTarget = resolveMainRendererTarget(
+    options.initialPath,
+    initialDevbarEnabled,
+    options.auxiliary
+  )
+  const standardTarget = resolveMainRendererTarget(options.initialPath, false)
+  const devbarTarget = resolveMainRendererTarget(options.initialPath, true)
   const recoveryTarget = resolveRecoveryTarget()
-  installNavigationGuard(window, [mainTarget, recoveryTarget])
+  const trustedTargets = [standardTarget, devbarTarget, recoveryTarget]
+  installNavigationGuard(window, trustedTargets)
+  registerRendererHangDocument(window, (url) => isTrustedNavigation(url, trustedTargets))
+  installContextMenu(window)
   setReloadTarget(window, mainTarget)
   attachMainWindowDiagnostics(window, recoveryTarget)
 
+  // Push fullscreen state to the renderer so it can collapse the macOS
+  // traffic-light insets (sidebar header, top-bar padding, drag strip) while
+  // the lights are auto-hidden in native fullscreen.
+  const sendFullscreenState = () => {
+    if (!window.isDestroyed()) {
+      window.webContents.send('app.fullscreen', window.isFullScreen())
+    }
+  }
+  window.on('enter-full-screen', sendFullscreenState)
+  window.on('leave-full-screen', sendFullscreenState)
+
   window.on('ready-to-show', () => {
+    // Warm windows are shown by the target-content readiness handshake.
+    if (options.warm) {
+      return
+    }
+    if (options.hideWindowOnAutoLaunch) {
+      return
+    }
+    if (!runtimePolicy.showWhenReady) {
+      return
+    }
     if (shouldMaximizeOnLaunch) {
+      pendingInitialMaximize.delete(window)
       window.maximize()
     }
     window.show()
@@ -389,7 +477,7 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
           MOUNT_WATCHDOG_TIMEOUT_MS,
           'ms — the boot may be stuck.'
         )
-        if (is.dev && !window.isDestroyed()) {
+        if (is.dev && !options.warm && !window.isDestroyed()) {
           try {
             window.webContents.openDevTools({ mode: 'detach' })
           } catch (error) {
@@ -402,7 +490,6 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
 
   window.on('closed', () => {
     clearMountWatchdog(window)
-    clearUnresponsiveWatchdog(window)
     disposeWatchdogState(window)
   })
 
@@ -416,11 +503,15 @@ export function createMainWindow(options: CreateMainWindowOptions): BrowserWindo
 type OpenMainWindowOptions = {
   icon: string
   initialPath?: '/' | '/onboarding'
+  hideWindowOnAutoLaunch?: boolean
 }
 
 export function focusMainWindow(window: BrowserWindow): void {
   if (window.isMinimized()) {
     window.restore()
+  }
+  if (pendingInitialMaximize.delete(window)) {
+    window.maximize()
   }
   if (!window.isVisible()) {
     window.show()
@@ -434,6 +525,7 @@ export function openMainWindow(options: OpenMainWindowOptions): BrowserWindow {
   const window = createMainWindow({
     icon: options.icon,
     initialPath: options.initialPath,
+    hideWindowOnAutoLaunch: options.hideWindowOnAutoLaunch,
     onDidFinishLoad: () => {
       const target = windowRef
       const pendingDeepLink = consumePendingDeepLink()
@@ -454,17 +546,6 @@ export function openMainWindow(options: OpenMainWindowOptions): BrowserWindow {
   windowRef = window
 
   setMainWindow(window)
-
-  // Push fullscreen state to the renderer so it can collapse the macOS
-  // traffic-light insets (sidebar header, top-bar padding, drag strip) while
-  // the lights are auto-hidden in native fullscreen.
-  const sendFullscreenState = () => {
-    if (!window.isDestroyed()) {
-      window.webContents.send('app.fullscreen', window.isFullScreen())
-    }
-  }
-  window.on('enter-full-screen', sendFullscreenState)
-  window.on('leave-full-screen', sendFullscreenState)
 
   window.on('close', (event) => {
     if (isAppQuitting()) {
@@ -496,12 +577,6 @@ export function openMainWindow(options: OpenMainWindowOptions): BrowserWindow {
     window.hide()
   })
 
-  window.on('closed', () => {
-    if (getMainWindow() === window) {
-      setMainWindow(null)
-    }
-  })
-
   return window
 }
 
@@ -517,4 +592,39 @@ export function openOrFocusMainWindow(options: OpenMainWindowOptions): BrowserWi
   }
 
   return openMainWindow(options)
+}
+
+/**
+ * Creates the hidden spare auxiliary window. It boots the renderer on a neutral
+ * route so the next `openSessionWindow` can bind a real target without paying
+ * the full cold-boot cost.
+ */
+export function createWarmWindow(options: { icon?: string } = {}): BrowserWindow {
+  return createMainWindow({
+    icon: options.icon,
+    auxiliary: true,
+    warm: true,
+    initialPath: WARM_WINDOW_INITIAL_PATH
+  })
+}
+
+/**
+ * Hands a claimed warm window its concrete route. Native presentation waits
+ * for matching painted content or the recovery deadline.
+ */
+export function bindMainWindowTarget(window: BrowserWindow, target: ElectronWindowTarget): void {
+  presentWindowTarget(
+    window,
+    target,
+    resolveMainRendererTarget(getWindowTargetPath(target), isDevbarRendererEnabled(), true)
+  )
+}
+
+/** Adopt a prepared view without navigating or replacing its renderer. */
+export function adoptPreparedMainWindow(window: BrowserWindow, target: ElectronWindowTarget): void {
+  unmarkWarmWindow(window)
+  setReloadTarget(
+    window,
+    resolveMainRendererTarget(getWindowTargetPath(target), isDevbarRendererEnabled(), true)
+  )
 }

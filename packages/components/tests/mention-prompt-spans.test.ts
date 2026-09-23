@@ -112,7 +112,7 @@ describe('before-send mention rewrite', () => {
     // The agent sees every expansion.
     expect(result.text).toContain(PASTED_BLOB);
     expect(result.text).toContain('use /review [Skill Path](.claude/skills/review/SKILL.md)');
-    expect(result.text).toContain('use lody mcp to query session[id: sess-9f2c] history');
+    expect(result.text).toContain('[@my-run](session://sess-9f2c)');
 
     // The transcript sees what the user typed, in order, addressing the output.
     expect(result.spans?.map((span) => [span.kind, span.label])).toEqual([

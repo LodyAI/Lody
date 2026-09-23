@@ -4,19 +4,25 @@ import {
   useEffect,
   useRef,
   useMemo,
+  useLayoutEffect,
   memo,
   forwardRef,
   useImperativeHandle,
-  type ReactNode,
   type MutableRefObject,
 } from 'react';
 import { useAtomValue } from 'jotai';
-import { ArrowUp, Loader2 } from 'lucide-react';
+import { ArrowUp } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { Button } from '@/ui/button';
 import type { AcpSessionSelectOption } from '@/components/shared/acp-session-select';
-import { useSessionAgentRole } from '@/hooks/use-session-agent-role';
+import { useSessionAgentRole, type SessionAgentRoleControl } from '@/hooks/use-session-agent-role';
 import { buildAgentRoleFormValueFromRunConfig } from '@/lib/agent-role-form';
-import { doesAgentRolePinPermissionMode } from '@/lib/composer-agent-roles';
+import {
+  doesAgentRolePinPermissionMode,
+  resolveTurnAgentRoleForRunConfig,
+  type ComposerRunConfigOverrides,
+  type SessionTurnAgentRoleSelection as ComposerTurnAgentRoleSelection,
+} from '@/lib/composer-agent-roles';
 import { resolvePermissionModeFace } from '@/lib/permission-mode-face';
 import {
   AgentRoleEditorDialog,
@@ -35,6 +41,7 @@ import {
 } from '@/components/chat/chat-composer';
 import type { CombinedMentionTextareaHandle } from '@/components/mentions/combined-mention-textarea';
 import type { AttachmentAddMenuMcp } from '@/components/chat/attachment-add-menu';
+import { useComposerSubmission } from '@/components/chat/submission/use-composer-submission';
 import { MobileSessionRunConfig } from '@/components/mobile/mobile-session-run-config';
 import type { MentionProjectSource } from '@/components/mentions/mention-project-file-source';
 import {
@@ -58,6 +65,8 @@ import {
 import { IMAGE_UPLOAD_REASONS, type ImageUploadReason } from '@lody/shared';
 import type {
   AcpCommandSummary,
+  AgentRole,
+  AgentRoleId,
   CommentReferencePayload,
   SessionMeta,
   SessionId,
@@ -86,12 +95,18 @@ import type {
 } from '@/components/shared/acp-selector-options';
 import { localMachineIdAtom } from '@/atoms/local-probe';
 import { authTokenAtom, runtimeAtom } from '@/atoms/runtime';
-import { currentWorkspaceIdAtom, mobileKeyboardActionAtom, userAtom } from '@/atoms';
+import {
+  currentWorkspaceIdAtom,
+  getAllAgentConfigAtom,
+  mobileKeyboardActionAtom,
+  userAtom,
+} from '@/atoms';
 import {
   resolveSessionLocalFileSource,
   resolveSessionRepoFullName,
 } from '@/lib/session-local-file-source';
 import { resolveEffectiveCodeCollabWorkspaceId } from '@/lib/code-collab-workspace-id';
+import { getDroppedFileLocalPath, toPathMentionInsertion } from '@/lib/dropped-local-path';
 import { isImeComposingKeyboardEvent } from '@/lib/ime';
 import { toast } from 'sonner';
 import { uploadSessionImage, validateSessionImageFile } from '@/lib/session-image-upload';
@@ -111,9 +126,12 @@ import { SESSION_FILE_MAX_COUNT, SESSION_IMAGE_MAX_SIZE_BYTES } from '@lody/shar
 import type { SessionFilePayload } from '@lody/shared';
 import {
   arePastedTextDraftsEqual,
+  getPastedTextByteSize,
   getPastedTextCharacterCount,
   getPastedTextDraftsAfterInsertion,
   insertPastedTextDraft,
+  isPastedTextTooLarge,
+  MAX_PASTED_TEXT_BYTE_SIZE,
   normalizePastedTextDraft,
   shouldCapturePastedTextDraft,
   type PastedTextDraft,
@@ -132,7 +150,8 @@ import {
 } from '@/lib/mobile-keyboard-action';
 import { useCodeCollabSessionFileProvider } from '@/hooks/use-code-collab-session-file-provider';
 import { useCodeCollabRequestedRole } from '@/hooks/use-code-collab-requested-role';
-import { splitImageAndFileAttachments } from '@/lib/file-drop';
+import { selectPastedClipboardFiles, splitImageAndFileAttachments } from '@/lib/file-drop';
+import { isPlainLinkPasteShortcut, parseAppSessionUrl } from '@/lib/session-app-url';
 import { SessionUsagePopover } from './session-usage-popover';
 import type { MachineRateLimits } from '@/lib/session-usage';
 
@@ -369,7 +388,10 @@ export function getSessionChatInputAreaShellClassName({
 }
 
 export interface SessionChatInputAreaProps {
+  /** Claims a one-shot navigation focus request; absent for ordinary session visits. */
+  claimNavigationFocus?: () => boolean;
   session: SessionMeta;
+  isVisible?: boolean;
   sessionLocalProjectRootPath: string | null;
   isMachineRemoved: boolean;
   isAgentBusy: boolean;
@@ -380,6 +402,15 @@ export interface SessionChatInputAreaProps {
   isEmptyConversation: boolean;
   selectedModeId: string | null;
   selectedModelId: string | null;
+  /** Role identity restored from the latest accepted/queued Turn. */
+  durableAgentRoleId?: AgentRoleId | null;
+  durableAgentRoleRevision?: number;
+  durableAgentRoleSourceTurnKey?: string;
+  durableAgentRoleKnownTurnKeys?: readonly string[];
+  /** False while this Session's durable document is still hydrating. */
+  durableAgentRoleReady?: boolean;
+  /** True when the composer run config differs through an unsent user edit. */
+  runConfigHasUserEdits?: boolean;
   modeOptions: AcpSessionSelectOption[];
   modelOptions: AcpSessionSelectOption[];
   /** Subscription limits already resolved from this session's machine Flock data. */
@@ -410,19 +441,34 @@ export interface SessionChatInputAreaProps {
     limit: number;
     onUpgrade?: () => void;
   } | null;
-  queueDisplay?: ReactNode;
   /** Per-turn MCP selection, rendered inside the composer's "+" menu. */
   mcp?: AttachmentAddMenuMcp;
+  /**
+   * The host owns the gap above the composer (the session page's info bar,
+   * which may stack the queue directly on the composer), so skip the spacer.
+   */
+  hideTopSpacer?: boolean;
   /** One-shot guard for a viewport resize caused by the composer auto-growing. */
   skipNextViewportResizeAutoScrollRef?: MutableRefObject<boolean>;
   onModeChange: (value: string) => void;
   onModelChange: (value: string) => void;
   onConfigOptionChange?: (configId: string, value: AcpConfigOptionValue) => void;
-  onSendMessage: (inputBlocks: SessionInputBlock[]) => Promise<boolean>;
+  onSendMessage: (
+    inputBlocks: SessionInputBlock[],
+    agentRole: SessionTurnAgentRoleSelection,
+    options?: SessionSendMessageOptions
+  ) => Promise<boolean>;
   onStop: () => void | Promise<void>;
   onRemoveQueueItem: (itemId: string) => Promise<void>;
   /** When provided and conversation is empty, the agent config badge becomes a selector. */
   onAgentConfigChange?: (selection: AgentSelection) => void;
+  /**
+   * New-Session surfaces may provide complete Role semantics. Existing
+   * Sessions omit this and keep the same-agent-type run-config-only behavior.
+   */
+  agentRoleControl?: SessionAgentRoleControl;
+  /** Receives durable Role editor saves owned by a new-Session surface. */
+  onAgentRoleSaved?: (role: AgentRole, meta: { created: boolean }) => void;
   initialInputText?: string;
   onInputValueChange?: (value: string) => void;
   disableImageUpload?: boolean;
@@ -438,6 +484,13 @@ export interface SessionChatInputAreaProps {
   ) => void | Promise<void>;
 }
 
+export type SessionTurnAgentRoleSelection = ComposerTurnAgentRoleSelection;
+
+export type SessionSendMessageOptions = {
+  /** Swaps the configured busy-send behavior (queue <-> steer) for this send. */
+  invertSubmitBehavior?: boolean;
+};
+
 export type SessionChatInputAreaHandle = {
   setInputText: (text: string) => void;
   focusInput: () => void;
@@ -446,18 +499,29 @@ export type SessionChatInputAreaHandle = {
   addVisualAnnotationReference: (reference: VisualAnnotationReferencePayload) => boolean;
   toggleVisualAnnotationReference: (reference: VisualAnnotationReferencePayload) => boolean;
   handleImageDrop: (files: File[]) => void;
+  /** Folders dropped from the OS; each becomes a `@<absolute path>` mention. */
+  handleDirectoryDrop: (directories: File[]) => void;
   /**
    * Mention another conversation in this draft. Returns false when nothing was
    * written (archived draft, unknown/own session, already mentioned), so the
    * caller can leave the gesture unacknowledged instead of implying a change.
    */
-  insertSessionMention: (sessionId: string) => boolean;
+  insertSessionMention: (
+    sessionId: string,
+    options?: { at?: number; replaceEnd?: number }
+  ) => boolean;
+  /** Role identity committed in the currently rendered composer. */
+  getAgentRoleSelection: (
+    runConfigOverrides?: ComposerRunConfigOverrides
+  ) => SessionTurnAgentRoleSelection;
 };
 
 export const SessionChatInputArea = memo(
   forwardRef<SessionChatInputAreaHandle, SessionChatInputAreaProps>(function SessionChatInputArea(
     {
       session,
+      isVisible = true,
+      claimNavigationFocus,
       sessionLocalProjectRootPath,
       isMachineRemoved,
       canStopAgent = false,
@@ -467,6 +531,12 @@ export const SessionChatInputArea = memo(
       isEmptyConversation,
       selectedModeId,
       selectedModelId,
+      durableAgentRoleId,
+      durableAgentRoleRevision,
+      durableAgentRoleSourceTurnKey,
+      durableAgentRoleKnownTurnKeys,
+      durableAgentRoleReady,
+      runConfigHasUserEdits,
       modeOptions,
       modelOptions,
       rateLimits,
@@ -477,8 +547,8 @@ export const SessionChatInputArea = memo(
       isRepoPublic,
       availableCommands,
       commandsEnabled = true,
+      hideTopSpacer = false,
       freeTurnLimitNotice,
-      queueDisplay,
       mcp,
       skipNextViewportResizeAutoScrollRef,
       onModeChange,
@@ -488,6 +558,8 @@ export const SessionChatInputArea = memo(
       onStop,
       onRemoveQueueItem: _onRemoveQueueItem,
       onAgentConfigChange,
+      agentRoleControl,
+      onAgentRoleSaved,
       initialInputText,
       onInputValueChange,
       disableImageUpload = false,
@@ -533,7 +605,18 @@ export const SessionChatInputArea = memo(
     const postHog = usePostHog();
     const isArchived = session.isArchived === true;
     const textareaRef = useRef<HTMLTextAreaElement>(null);
-    const restoreFocusAfterRejectedMobileSendRef = useRef(false);
+    useLayoutEffect(() => {
+      if (claimNavigationFocus?.() && !usesMobileKeyboardAction) {
+        textareaRef.current?.focus({ preventScroll: true });
+      }
+    }, [claimNavigationFocus, usesMobileKeyboardAction]);
+    const agentRoleTurnSelectionRef = useRef<SessionTurnAgentRoleSelection>(undefined);
+    const selectedAgentRoleRef = useRef<AgentRole | undefined>(undefined);
+    const agentRoleRunConfigRef = useRef({
+      modeId: selectedModeId,
+      modelId: selectedModelId,
+      configOptionValues: configOptionValues ?? {},
+    });
     const attachmentInputRef = useRef<HTMLInputElement>(null);
     const activeSessionIdRef = useRef(session.id);
     activeSessionIdRef.current = session.id;
@@ -725,7 +808,7 @@ export const SessionChatInputArea = memo(
     // The visible draft can move into an in-flight submission immediately while
     // its actual state stays intact until the durable writer accepts it. A
     // rejected send simply reveals the preserved draft again.
-    const [submissionPending, setSubmissionPending] = useState(false);
+    const { submissionPending, beginSubmission } = useComposerSubmission(session.id, textareaRef);
     const expandPromptMentionsRef = useRef<
       (args: MentionPromptExpansionArgs) => ExpandedMentionPrompt
     >(({ text }) => ({ text }));
@@ -763,7 +846,6 @@ export const SessionChatInputArea = memo(
     const [prevSessionId, setPrevSessionId] = useState(session.id);
     if (prevSessionId !== session.id) {
       setPrevSessionId(session.id);
-      setSubmissionPending(false);
       const cached = sessionDraftsCache.get(session.id) ?? initialInputText ?? '';
       setUserInputState(cached);
       setPendingImages(getSessionImageDrafts(session.id));
@@ -1087,7 +1169,7 @@ export const SessionChatInputArea = memo(
 
     const startFileUpload = useCallback(
       async (targetSessionId: SessionId, localId: string, file: File) => {
-        if (!workspaceId || !authToken) {
+        if (!workspaceId) {
           updatePendingFile(targetSessionId, localId, (entry) => ({
             ...entry,
             status: 'failed',
@@ -1125,6 +1207,16 @@ export const SessionChatInputArea = memo(
           } catch {
             // Local handoff threw; fall back to the cloud upload path.
           }
+        }
+
+        if (!authToken) {
+          updatePendingFile(targetSessionId, localId, (entry) => ({
+            ...entry,
+            status: 'failed',
+            progress: 0,
+            error: fileUploadMissingAuthLabel,
+          }));
+          return;
         }
 
         const abort = new AbortController();
@@ -1549,36 +1641,14 @@ export const SessionChatInputArea = memo(
         userInput,
       ]
     );
-    const handlePaste = useCallback(
-      (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
-        if (isArchived) {
-          return;
-        }
-        const text = event.clipboardData.getData('text/plain');
-
-        if (text && shouldCapturePastedTextDraft(text)) {
-          event.preventDefault();
-          if (insertLargePastedTextAtSelection(text)) {
-            return;
-          }
-        }
-
-        const pastedFiles = Array.from(event.clipboardData.items)
-          .filter((item) => item.kind === 'file')
-          .map((item) => item.getAsFile())
-          .filter((item): item is File => item !== null);
-
-        if (pastedFiles.length === 0) {
-          return;
-        }
-
-        event.preventDefault();
+    const attachPastedFiles = useCallback(
+      (files: File[]) => {
         // Images route through the image path (which auto-degrades oversize
         // ones); everything else is a file attachment.
         const { images: pastedImages, attachments: pastedAttachments } =
-          splitImageAndFileAttachments(pastedFiles);
+          splitImageAndFileAttachments(files);
         const images = disableImageUpload ? [] : pastedImages;
-        const attachments = disableImageUpload ? pastedFiles : pastedAttachments;
+        const attachments = disableImageUpload ? files : pastedAttachments;
         if (images.length > 0) {
           handleAddFiles(images, 'paste');
         }
@@ -1586,13 +1656,93 @@ export const SessionChatInputArea = memo(
           enqueueFileAttachments(attachments);
         }
       },
-      [
-        disableImageUpload,
-        enqueueFileAttachments,
-        handleAddFiles,
-        insertLargePastedTextAtSelection,
-        isArchived,
-      ]
+      [disableImageUpload, enqueueFileAttachments, handleAddFiles]
+    );
+    const insertSessionMention = useCallback(
+      (sessionId: string, options?: { at?: number; replaceEnd?: number }) => {
+        if (isArchived) {
+          return false;
+        }
+        return mentionActionsRef.current?.insertSessionMention(sessionId, options) ?? false;
+      },
+      [isArchived]
+    );
+    const handlePaste = useCallback(
+      (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+        if (isArchived) {
+          return;
+        }
+        const text = event.clipboardData.getData('text/plain');
+
+        // Cmd/Ctrl+Shift+V keeps a conversation URL as a plain link.
+        if (text && !isPlainLinkPasteShortcut(event)) {
+          const sessionUrl = parseAppSessionUrl(text);
+          if (sessionUrl) {
+            const target = event.currentTarget;
+            const at = target.selectionStart ?? target.value.length;
+            const replaceEnd = target.selectionEnd ?? at;
+            if (insertSessionMention(sessionUrl.sessionId, { at, replaceEnd })) {
+              event.preventDefault();
+              return;
+            }
+          }
+        }
+
+        // Refuse the whole paste rather than silently truncating it: a blob this
+        // large is a log dump, and a half-pasted log is worse than none.
+        if (text && isPastedTextTooLarge(text)) {
+          event.preventDefault();
+          toast.error(
+            t('composer.pastedTextTooLarge', 'Pasted text is too large ({{size}}).', {
+              size: formatFileSize(getPastedTextByteSize(text)),
+            }),
+            {
+              description: t(
+                'composer.pastedTextTooLargeDescription',
+                'The limit is {{limit}}. Attach it as a file instead.',
+                { limit: formatFileSize(MAX_PASTED_TEXT_BYTE_SIZE) }
+              ),
+            }
+          );
+          return;
+        }
+
+        if (text && shouldCapturePastedTextDraft(text)) {
+          event.preventDefault();
+          insertLargePastedTextAtSelection(text);
+        }
+
+        const clipboardFiles = Array.from(event.clipboardData.items)
+          .filter((item) => item.kind === 'file')
+          .map((item) => item.getAsFile())
+          .filter((item): item is File => item !== null);
+        // A Word or PowerPoint copy carries a picture of the selection beside
+        // the text, so attaching every clipboard file turned those pastes into
+        // a screenshot of themselves.
+        const { files: pastedFiles, renderedImages } = selectPastedClipboardFiles({
+          text,
+          files: clipboardFiles,
+        });
+
+        if (renderedImages.length > 0) {
+          toast(t('composer.pastedRichTextAsText', 'Pasted as text'), {
+            // One id, so pasting repeatedly replaces the hint instead of stacking it.
+            id: 'composer-pasted-rich-text-as-text',
+            action: {
+              label: t('composer.pastedRichTextAttachImage', 'Attach image'),
+              onClick: () => attachPastedFiles(renderedImages),
+            },
+          });
+        }
+
+        if (pastedFiles.length === 0) {
+          return;
+        }
+
+        event.preventDefault();
+        attachPastedFiles(pastedFiles);
+      },
+      [attachPastedFiles, insertLargePastedTextAtSelection, insertSessionMention, isArchived, t]
     );
     const handleImageDrop = useCallback(
       (files: File[]) => {
@@ -1612,13 +1762,16 @@ export const SessionChatInputArea = memo(
       },
       [disableImageUpload, enqueueFileAttachments, handleAddFiles, isArchived]
     );
-
-    const insertSessionMention = useCallback(
-      (sessionId: string) => {
+    const handleDirectoryDrop = useCallback(
+      (directories: File[]) => {
         if (isArchived) {
-          return false;
+          return;
         }
-        return mentionActionsRef.current?.insertSessionMention(sessionId) ?? false;
+        const insertions = directories.flatMap((directory) => {
+          const localPath = getDroppedFileLocalPath(directory);
+          return localPath ? [toPathMentionInsertion(localPath, 'dir')] : [];
+        });
+        mentionActionsRef.current?.insertPathMentions(insertions);
       },
       [isArchived]
     );
@@ -1635,7 +1788,15 @@ export const SessionChatInputArea = memo(
         addVisualAnnotationReference,
         toggleVisualAnnotationReference,
         handleImageDrop,
+        handleDirectoryDrop,
         insertSessionMention,
+        getAgentRoleSelection: (runConfigOverrides) =>
+          resolveTurnAgentRoleForRunConfig({
+            turnSelection: agentRoleTurnSelectionRef.current,
+            role: selectedAgentRoleRef.current,
+            current: agentRoleRunConfigRef.current,
+            overrides: runConfigOverrides,
+          }),
       }),
       [
         setInputText,
@@ -1644,6 +1805,7 @@ export const SessionChatInputArea = memo(
         addVisualAnnotationReference,
         toggleVisualAnnotationReference,
         handleImageDrop,
+        handleDirectoryDrop,
         insertSessionMention,
       ]
     );
@@ -1666,8 +1828,58 @@ export const SessionChatInputArea = memo(
       [pastedTextDrafts, session.id, updatePastedTextDraftsForSession]
     );
 
+    const [submissionPhase, setSubmissionPhase] = useState<'waiting_upload' | 'dispatching'>(
+      'dispatching'
+    );
+    const uploadWaitRef = useRef<{ settle: (ready: boolean) => void; files: Set<File> } | null>(
+      null
+    );
+    const sendStateRef = useRef({ onSendMessage, blocked: false });
+    useLayoutEffect(() => {
+      sendStateRef.current = {
+        onSendMessage,
+        blocked:
+          isArchived ||
+          isMachineRemoved ||
+          isExternalHistoryRefreshing ||
+          durableAgentRoleReady === false ||
+          Boolean(freeTurnLimitNotice && freeTurnLimitNotice.current >= freeTurnLimitNotice.limit),
+      };
+      const wait = uploadWaitRef.current;
+      if (!wait) return;
+      const failed =
+        pendingImages.some((image) => image.status === 'failed') ||
+        pendingFiles.some((file) => wait.files.has(file.file) && file.status === 'failed');
+      const uploading =
+        pendingImages.some((image) => image.status === 'uploading') ||
+        pendingFiles.some((file) => isSessionFileTransferPhase(file.status));
+      if (failed || sendStateRef.current.blocked || !uploading) {
+        uploadWaitRef.current = null;
+        setSubmissionPhase('dispatching');
+        wait.settle(!failed && !sendStateRef.current.blocked);
+      }
+    }, [
+      onSendMessage,
+      isArchived,
+      isMachineRemoved,
+      isExternalHistoryRefreshing,
+      durableAgentRoleReady,
+      freeTurnLimitNotice,
+      pendingImages,
+      pendingFiles,
+      submissionPending,
+    ]);
+    useLayoutEffect(
+      () => () => {
+        uploadWaitRef.current?.settle(false);
+        uploadWaitRef.current = null;
+      },
+      [session.id]
+    );
+
     const sendMessage = useCallback(
-      async (source: 'keyboard' | 'button' = 'button') => {
+      async (options?: SessionSendMessageOptions) => {
+        if (!isVisible) return;
         if (freeTurnLimitNotice && freeTurnLimitNotice.current >= freeTurnLimitNotice.limit) {
           capturePostHogEvent(postHog, 'session/input_blocked', {
             reason: 'free_session_turn_limit_reached',
@@ -1687,6 +1899,9 @@ export const SessionChatInputArea = memo(
             workspace_id: workspaceId ?? null,
             session_id: session.id,
           });
+          return;
+        }
+        if (durableAgentRoleReady === false) {
           return;
         }
         if (isMachineRemoved) {
@@ -1736,33 +1951,7 @@ export const SessionChatInputArea = memo(
               },
             ]
           : [];
-        const uploadedImages = pendingImages
-          .filter((image): image is PendingImage & { uploaded: SessionImagePayload } => {
-            return image.status === 'uploaded' && !!image.uploaded;
-          })
-          .map((image) => toImageInputBlock(image.uploaded));
-        const hasBlockingImages = pendingImages.some((image) => image.status !== 'uploaded');
-        // A still-uploading file (not failed) blocks send; failed ones are
-        // skipped so a single failed attachment doesn't trap the message.
-        const hasBlockingFiles = pendingFiles.some((file) =>
-          isSessionFileTransferPhase(file.status)
-        );
-        const uploadedFiles = pendingFiles
-          .filter((file): file is PendingFile & { uploaded: SessionFilePayload } => {
-            return file.status === 'uploaded' && !!file.uploaded;
-          })
-          .map((file) => toFileInputBlock(file.uploaded));
-        if (hasBlockingImages || hasBlockingFiles) {
-          capturePostHogEvent(postHog, 'session/input_blocked', {
-            reason: 'image_upload_in_progress',
-            entrypoint: 'session_chat',
-            project_kind: sessionProjectKind,
-            has_pending_images: true,
-            workspace_id: workspaceId ?? null,
-            session_id: session.id,
-          });
-          return;
-        }
+        if (pendingImages.some((image) => image.status === 'failed')) return;
         const commentRefBlocks: SessionInputBlock[] = commentReferencesRef.current.map((item) => ({
           type: 'comment_reference' as const,
           ...item.reference,
@@ -1778,8 +1967,8 @@ export const SessionChatInputArea = memo(
 
         if (
           textBlocks.length === 0 &&
-          uploadedImages.length === 0 &&
-          uploadedFiles.length === 0 &&
+          pendingImages.length === 0 &&
+          pendingFiles.every((file) => file.status === 'failed') &&
           commentRefBlocks.length === 0 &&
           visualAnnotationRefBlocks.length === 0
         ) {
@@ -1794,55 +1983,117 @@ export const SessionChatInputArea = memo(
           return;
         }
 
-        const inputBlocks: SessionInputBlock[] = [
-          ...commentRefBlocks,
-          ...visualAnnotationRefBlocks,
-          ...uploadedImages,
-          ...uploadedFiles,
-          ...textBlocks,
-        ];
-        const dismissKeyboardForSubmit =
-          usesMobileKeyboardAction && (source === 'keyboard' || source === 'button');
-        if (dismissKeyboardForSubmit) {
-          // The mobile Send action should dismiss the soft keyboard at the same
-          // immediate handoff boundary as the visible draft, not after the
-          // asynchronous local writer accepts the turn.
-          textareaRef.current?.blur();
-        }
-        setSubmissionPending(true);
-        // React still owns the preserved draft state. Clear only the visible DOM
-        // immediately so Enter/click feedback does not wait for local IPC.
-        if (textareaRef.current) {
-          textareaRef.current.value = '';
-        }
-        let accepted = false;
+        const submittedDraft = {
+          text: sessionDraftsCache.get(session.id),
+          images: sessionImageDraftsCache.get(session.id),
+          files: sessionFileDraftsCache.get(session.id),
+          pastedText: sessionPastedTextDraftsCache.get(session.id),
+          comments: commentReferencesRef.current,
+          annotations: visualAnnotationReferencesRef.current,
+        };
+        const submission = beginSubmission({ dismissKeyboard: usesMobileKeyboardAction });
+        if (!submission) return;
         try {
-          accepted = await onSendMessage(inputBlocks);
+          const uploading =
+            pendingImages.some((image) => image.status === 'uploading') ||
+            pendingFiles.some((file) => isSessionFileTransferPhase(file.status));
+          setSubmissionPhase(uploading ? 'waiting_upload' : 'dispatching');
+          if (uploading) {
+            const ready = await new Promise<boolean>((resolve) => {
+              uploadWaitRef.current = {
+                settle: resolve,
+                files: new Set(
+                  [...pendingImages, ...pendingFiles]
+                    .filter((item) => item.status !== 'failed')
+                    .map((item) => item.file)
+                ),
+              };
+            });
+            if (!ready || !submission.isCurrent() || sendStateRef.current.blocked) return;
+          }
+          const images = getSessionImageDrafts(session.id);
+          const files = getSessionFileDrafts(session.id);
+          // Uploads can replace an image with a local file. Match the original
+          // File objects so removal or an external draft edit cannot send a subset.
+          const expectedFiles = [...pendingImages, ...pendingFiles]
+            .filter((item) => item.status !== 'failed')
+            .map((item) => item.file);
+          const actualFiles = [...images, ...files]
+            .filter((item) => item.status === 'uploaded' && item.uploaded)
+            .map((item) => item.file);
+          if (
+            expectedFiles.length !== actualFiles.length ||
+            expectedFiles.some((file) => !actualFiles.includes(file)) ||
+            sessionDraftsCache.get(session.id) !== submittedDraft.text
+          )
+            return;
+          const inputBlocks: SessionInputBlock[] = [
+            ...commentRefBlocks,
+            ...visualAnnotationRefBlocks,
+            ...images.flatMap((image) =>
+              image.status === 'uploaded' && image.uploaded
+                ? [toImageInputBlock(image.uploaded)]
+                : []
+            ),
+            ...files.flatMap((file) =>
+              file.status === 'uploaded' && file.uploaded ? [toFileInputBlock(file.uploaded)] : []
+            ),
+            ...textBlocks,
+          ];
+          submittedDraft.images = sessionImageDraftsCache.get(session.id);
+          submittedDraft.files = sessionFileDraftsCache.get(session.id);
+          // Use the committed callback and Role after waiting: routing and run
+          // config must come from the same current composer state.
+          const accepted = await sendStateRef.current.onSendMessage(
+            inputBlocks,
+            agentRoleTurnSelectionRef.current,
+            options
+          );
           if (accepted) {
-            clearInput();
-            clearPendingImages();
-            clearPendingFiles();
-            updatePastedTextDraftsForSession(session.id, () => []);
-            publishCommentReferences([]);
-            publishVisualAnnotationReferences([]);
+            if (submission.isCurrent()) {
+              // External actions can replace a disabled draft while acceptance is pending.
+              // Retire only the fields that still belong to this accepted submission.
+              if (sessionDraftsCache.get(session.id) === submittedDraft.text) clearInput();
+              if (sessionImageDraftsCache.get(session.id) === submittedDraft.images)
+                clearPendingImages();
+              if (sessionFileDraftsCache.get(session.id) === submittedDraft.files)
+                clearPendingFiles();
+              if (sessionPastedTextDraftsCache.get(session.id) === submittedDraft.pastedText)
+                updatePastedTextDraftsForSession(session.id, () => []);
+              if (commentReferencesRef.current === submittedDraft.comments)
+                publishCommentReferences([]);
+              if (visualAnnotationReferencesRef.current === submittedDraft.annotations)
+                publishVisualAnnotationReferences([]);
+            } else if (
+              sessionDraftsCache.get(session.id) === submittedDraft.text &&
+              sessionImageDraftsCache.get(session.id) === submittedDraft.images &&
+              sessionFileDraftsCache.get(session.id) === submittedDraft.files &&
+              sessionPastedTextDraftsCache.get(session.id) === submittedDraft.pastedText
+            ) {
+              // Acceptance retires the original cached draft even after unmount.
+              // A later edit owns a different snapshot and must survive. Never
+              // write component state from a retired submission.
+              clearSessionChatInputDrafts(session.id);
+            }
             if (submittedVisualAnnotationReferences.length > 0) {
               void onVisualAnnotationReferencesSubmitted?.(submittedVisualAnnotationReferences);
             }
           }
         } finally {
-          restoreFocusAfterRejectedMobileSendRef.current = dismissKeyboardForSubmit && !accepted;
-          setSubmissionPending(false);
+          submission.finish();
         }
       },
       [
+        beginSubmission,
         clearInput,
         clearPendingImages,
         clearPendingFiles,
         freeTurnLimitNotice,
         isArchived,
+        durableAgentRoleReady,
         isExternalHistoryRefreshing,
         isMachineRemoved,
-        onSendMessage,
+        isVisible,
         onVisualAnnotationReferencesSubmitted,
         pendingFiles,
         pendingImages,
@@ -1859,17 +2110,16 @@ export const SessionChatInputArea = memo(
       ]
     );
 
-    useEffect(() => {
-      if (submissionPending || !restoreFocusAfterRejectedMobileSendRef.current) {
-        return;
-      }
-      restoreFocusAfterRejectedMobileSendRef.current = false;
-      textareaRef.current?.focus();
-    }, [submissionPending]);
-
     const handleKeyDown = useCallback(
       (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.key !== 'Enter' || isImeComposingKeyboardEvent(e)) {
+          return;
+        }
+        // Mod+Shift+Enter sends through the opposite busy-send behavior:
+        // a queue default steers, a steer default queues.
+        if (e.shiftKey && (e.metaKey || e.ctrlKey)) {
+          e.preventDefault();
+          void sendMessage({ invertSubmitBehavior: true });
           return;
         }
         if (
@@ -1882,7 +2132,7 @@ export const SessionChatInputArea = memo(
           return;
         }
         e.preventDefault();
-        void sendMessage('keyboard');
+        void sendMessage();
       },
       [mobileKeyboardAction, sendMessage, usesMobileKeyboardAction]
     );
@@ -1893,24 +2143,26 @@ export const SessionChatInputArea = memo(
       pendingFiles.length > 0 ||
       commentReferences.length > 0 ||
       visualAnnotationReferences.length > 0;
-    const hasBlockingImages = pendingImages.some((image) => image.status !== 'uploaded');
+    const hasFailedImages = pendingImages.some((image) => image.status === 'failed');
     const hasUploadedImages = pendingImages.some((image) => image.status === 'uploaded');
-    const hasBlockingFiles = pendingFiles.some((file) => isSessionFileTransferPhase(file.status));
     const hasUploadedFiles = pendingFiles.some((file) => file.status === 'uploaded');
     const hasSendableContent =
       userInput.trim().length > 0 ||
       hasUploadedImages ||
+      pendingImages.some((image) => image.status === 'uploading') ||
       hasUploadedFiles ||
+      pendingFiles.some((file) => isSessionFileTransferPhase(file.status)) ||
       commentReferences.length > 0 ||
       visualAnnotationReferences.length > 0;
     const showStopButton = canStopAgent && !hasDraft && !isArchived;
     const isSendActionDisabled =
+      !isVisible ||
       submissionPending ||
-      hasBlockingImages ||
-      hasBlockingFiles ||
+      hasFailedImages ||
       isMachineRemoved ||
       isArchived ||
       isExternalHistoryRefreshing ||
+      durableAgentRoleReady === false ||
       Boolean(freeTurnLimitNotice && freeTurnLimitNotice.current >= freeTurnLimitNotice.limit);
     const attachmentAddEnabled = !isArchived;
     const sessionLocalFileSource = useMemo(
@@ -2036,10 +2288,11 @@ export const SessionChatInputArea = memo(
           : undefined,
       [isArchived, session.agentType, session.cliType, session.machineId]
     );
-    const expandPromptMentions = useMentionPromptExpansion({
+    const { expand: expandPromptMentions } = useMentionPromptExpansion({
       source: isArchived ? undefined : mentionSource,
       skillAgent,
       promptValue: userInput,
+      currentSessionId: session.id,
     });
     expandPromptMentionsRef.current = expandPromptMentions;
 
@@ -2079,17 +2332,23 @@ export const SessionChatInputArea = memo(
       session.agentConfigId && session.machineId
         ? { agentId: session.agentConfigId, machineId: session.machineId }
         : null;
-    /* Role, in an EXISTING session. The agent is fixed here, so this offers
-       only Roles bound to an agent of the same TYPE and applies only their run
-       config — see `useSessionAgentRole`. The row is NOT gated on
-       `isEmptyConversation`: those values stay changeable every turn, so a Role
-       that packages them stays useful for the whole conversation. */
+    /* Existing Sessions use their exact machine/provider, run-config-only Role control.
+       A not-yet-created child-tab draft supplies its own complete new-Session
+       control instead. The row is NOT gated on `isEmptyConversation`: these
+       values stay changeable every turn in an existing conversation too. */
     const [agentRoleEditor, setAgentRoleEditor] = useState<AgentRoleEditorState | null>(null);
     const { roles: accessibleAgentRoles } = useWorkspaceAgentRoles();
     const sessionAgentRole = useSessionAgentRole({
       sessionId: session.id,
       provenanceRoleId: session.agentRoleId,
-      agentType: session.agentType,
+      provenanceRoleRevision: session.agentRoleRevision,
+      durableRoleId: durableAgentRoleId,
+      durableRoleRevision: durableAgentRoleRevision,
+      durableSourceTurnKey: durableAgentRoleSourceTurnKey,
+      durableKnownSourceTurnKeys: durableAgentRoleKnownTurnKeys,
+      durableRoleReady: durableAgentRoleReady,
+      machineId: session.machineId,
+      agentConfigId: session.agentConfigId,
       modelOptions,
       selectedModelId,
       onModelChange,
@@ -2098,13 +2357,59 @@ export const SessionChatInputArea = memo(
       onModeChange,
       configOptionSelectors: configOptionSelectors ?? [],
       configOptionValues,
+      runConfigHasUserEdits,
       onConfigOptionChange,
     });
+    const effectiveAgentRoleControl = agentRoleControl ?? sessionAgentRole;
+    const selectedAgentRoleItem = effectiveAgentRoleControl.selectedRoleId
+      ? effectiveAgentRoleControl.items.find(
+          (item) => item.role.id === effectiveAgentRoleControl.selectedRoleId
+        )
+      : undefined;
+    const agentConfigs = useAtomValue(getAllAgentConfigAtom);
+    const compactPlaceholderName =
+      selectedAgentRoleItem?.role.name ??
+      agentConfigs.find((config) => config.id === session.agentConfigId)?.name ??
+      null;
+    const selectedAgentRoleItemId = selectedAgentRoleItem?.role.id;
+    const selectedAgentRoleItemRevision = selectedAgentRoleItem?.role.revision;
+    const agentRoleTurnSelection = useMemo<SessionTurnAgentRoleSelection>(
+      () =>
+        agentRoleControl
+          ? selectedAgentRoleItemId && selectedAgentRoleItemRevision !== undefined
+            ? {
+                agentRoleId: selectedAgentRoleItemId,
+                agentRoleRevision: selectedAgentRoleItemRevision,
+              }
+            : null
+          : sessionAgentRole.turnSelection,
+      [
+        agentRoleControl,
+        selectedAgentRoleItemId,
+        selectedAgentRoleItemRevision,
+        sessionAgentRole.turnSelection,
+      ]
+    );
+    useLayoutEffect(() => {
+      agentRoleTurnSelectionRef.current = agentRoleTurnSelection;
+      selectedAgentRoleRef.current = selectedAgentRoleItem?.role;
+      agentRoleRunConfigRef.current = {
+        modeId: selectedModeId,
+        modelId: selectedModelId,
+        configOptionValues: configOptionValues ?? {},
+      };
+    }, [
+      agentRoleTurnSelection,
+      configOptionValues,
+      selectedAgentRoleItem?.role,
+      selectedModeId,
+      selectedModelId,
+    ]);
     const agentRolesProp = useMemo(
       () => ({
-        items: sessionAgentRole.items,
-        selectedRoleId: sessionAgentRole.selectedRoleId,
-        onSelect: sessionAgentRole.onSelect,
+        items: effectiveAgentRoleControl.items,
+        selectedRoleId: effectiveAgentRoleControl.selectedRoleId,
+        onSelect: effectiveAgentRoleControl.onSelect,
         onCreate: () =>
           setAgentRoleEditor(
             openAgentRoleEditorForCreate(
@@ -2125,13 +2430,13 @@ export const SessionChatInputArea = memo(
         selectedModeId,
         session.agentConfigId,
         session.machineId,
-        sessionAgentRole,
+        effectiveAgentRoleControl,
       ]
     );
-    const sessionAgentRolePinsPermissionMode = useMemo(() => {
-      if (!sessionAgentRole.selectedRoleId) return false;
-      const selectedRole = sessionAgentRole.items.find(
-        (item) => item.role.id === sessionAgentRole.selectedRoleId
+    const selectedAgentRolePinsPermissionMode = useMemo(() => {
+      if (!effectiveAgentRoleControl.selectedRoleId) return false;
+      const selectedRole = effectiveAgentRoleControl.items.find(
+        (item) => item.role.id === effectiveAgentRoleControl.selectedRoleId
       )?.role;
       if (!selectedRole) return false;
       const { source } = resolvePermissionModeFace({
@@ -2146,8 +2451,8 @@ export const SessionChatInputArea = memo(
       configOptionValues,
       modeOptions,
       selectedModeId,
-      sessionAgentRole.items,
-      sessionAgentRole.selectedRoleId,
+      effectiveAgentRoleControl.items,
+      effectiveAgentRoleControl.selectedRoleId,
     ]);
     const mobileFooterSelectorNode = isMobile ? (
       <MobileSessionRunConfig
@@ -2200,7 +2505,7 @@ export const SessionChatInputArea = memo(
           selectedModeId={selectedModeId}
           agentRoles={agentRolesProp}
         />
-        {sessionAgentRolePinsPermissionMode ? null : (
+        {selectedAgentRolePinsPermissionMode ? null : (
           <DesktopPermissionModeButton
             modeOptions={modeOptions}
             selectedModeId={selectedModeId}
@@ -2227,7 +2532,19 @@ export const SessionChatInputArea = memo(
               : 'flex min-w-0 flex-1 flex-nowrap items-center gap-1.5 overflow-hidden'
           }
         >
-          {mobileFooterSelectorNode ?? desktopFooterSelectorNode}
+          {submissionPending ? (
+            <button
+              type="button"
+              disabled
+              aria-label={t('chat.runConfig.buttonAriaLabel', 'Run configuration')}
+              title={t('sessions.sendConfigLocked', 'Configuration is locked while sending')}
+              className="h-7 truncate px-2 text-sm text-muted-foreground opacity-70"
+            >
+              {selectedModelLabel ?? t('chat.runConfig.buttonAriaLabel', 'Run configuration')}
+            </button>
+          ) : (
+            (mobileFooterSelectorNode ?? desktopFooterSelectorNode)
+          )}
         </div>
         <SessionUsagePopover
           contextWindowUsage={session.contextWindowUsage}
@@ -2245,7 +2562,7 @@ export const SessionChatInputArea = memo(
     const externalHistorySyncNode =
       isExternalHistoryRefreshing && externalHistorySyncLabel ? (
         <div className="mb-2 inline-flex max-w-full items-center gap-1.5 rounded-md border border-border/60 bg-muted/60 px-2 py-1 text-xs text-muted-foreground">
-          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
+          <Spinner className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
           <span className="truncate">{externalHistorySyncLabel}</span>
         </div>
       ) : null;
@@ -2270,6 +2587,7 @@ export const SessionChatInputArea = memo(
     ) : null;
     /* Keep desktop actions compact while preserving the mobile touch target. */
     const primaryActionSizeClassName = isMobile ? 'h-8 w-8' : 'h-7 w-7';
+    const waitingForUploads = submissionPending && submissionPhase === 'waiting_upload';
     const primaryActionNode = showStopButton ? (
       <Button
         onClick={() => {
@@ -2294,12 +2612,22 @@ export const SessionChatInputArea = memo(
         type="button"
         size="icon"
         variant="ghost"
-        onClick={() => void sendMessage('button')}
-        disabled={!hasSendableContent || isSendActionDisabled}
+        onClick={() => {
+          if (waitingForUploads) {
+            uploadWaitRef.current?.settle(false);
+            uploadWaitRef.current = null;
+            setSubmissionPhase('dispatching');
+          } else {
+            void sendMessage();
+          }
+        }}
+        disabled={!waitingForUploads && (!hasSendableContent || isSendActionDisabled)}
         aria-label={
-          isExternalHistoryRefreshing && externalHistorySyncLabel
-            ? externalHistorySyncLabel
-            : t('sessions.send')
+          waitingForUploads
+            ? t('sessions.cancelSend', 'Cancel send')
+            : isExternalHistoryRefreshing && externalHistorySyncLabel
+              ? externalHistorySyncLabel
+              : t('sessions.send')
         }
         className={cn(
           primaryActionSizeClassName,
@@ -2307,8 +2635,8 @@ export const SessionChatInputArea = memo(
           'bg-foreground text-background hover:bg-foreground/90 hover:text-background active:translate-y-[1px]'
         )}
       >
-        {submissionPending || hasBlockingImages || isExternalHistoryRefreshing ? (
-          <Loader2 className={isMobile ? 'h-5 w-5 animate-spin' : 'h-4 w-4 animate-spin'} />
+        {submissionPending || isExternalHistoryRefreshing ? (
+          <Spinner className={isMobile ? 'h-5 w-5' : 'h-4 w-4'} />
         ) : (
           <ArrowUp className={isMobile ? 'h-5 w-5' : 'h-4 w-4'} />
         )}
@@ -2334,6 +2662,7 @@ export const SessionChatInputArea = memo(
         onPromptKeyDown={handleKeyDown}
         onPromptPaste={handlePaste}
         onImageDrop={!submissionPending && attachmentAddEnabled ? handleImageDrop : undefined}
+        onDirectoryDrop={handleDirectoryDrop}
         // The dropzone accepts files AND images, so it must NOT inherit the
         // image-only disable (which trips at 8 pending images). Per-type count
         // limits are enforced inside handleImageDrop's handlers. Drops are only
@@ -2341,6 +2670,7 @@ export const SessionChatInputArea = memo(
         // a merely offline machine still accepts input (deferred execution).
         imageDropDisabled={submissionPending || isArchived || isMachineRemoved}
         promptPlaceholder={promptPlaceholder}
+        compactPlaceholderName={compactPlaceholderName}
         promptDisabled={submissionPending || isArchived}
         promptRows={2}
         promptEnterKeyHint={promptEnterKeyHint}
@@ -2390,27 +2720,33 @@ export const SessionChatInputArea = memo(
 
     return (
       <div
-        className={getSessionChatInputAreaShellClassName({
-          protectFromEdgeBackZone: isMobile,
-        })}
+        className={getSessionChatInputAreaShellClassName({ protectFromEdgeBackZone: isMobile })}
+        onMouseDown={(event) => {
+          // Keep the restored shell-owned bottom spacing focusable without
+          // stealing focus from selectors, attachments, or the prompt itself.
+          if (event.button === 0 && event.target === event.currentTarget) {
+            event.preventDefault();
+            textareaRef.current?.focus({ preventScroll: true });
+          }
+        }}
       >
         {/* The Role editor is a Dialog, so it is hosted OUT here rather than
             inside the run-config menu or the mobile drawer, where it would
             unmount with them the moment it opened. Mounted only while OPEN:
             it reads machine visibility, and the composer must stay renderable
             in hosts that do not provide that context. */}
-        {agentRoleEditor ? (
+        {agentRoleEditor && !submissionPending ? (
           <AgentRoleEditorDialog
             editor={agentRoleEditor}
             accessibleRoles={accessibleAgentRoles}
             onChange={setAgentRoleEditor}
             onClose={() => setAgentRoleEditor(null)}
+            onSaved={onAgentRoleSaved}
             source="session_composer"
           />
         ) : null}
         <ConversationColumn>
-          <div aria-hidden="true" className="h-1" />
-          {queueDisplay ? <div className="pb-2">{queueDisplay}</div> : null}
+          {hideTopSpacer ? null : <div aria-hidden="true" className="h-1" />}
           {externalHistorySyncNode}
           {freeTurnLimitNoticeNode}
           {attachmentAddEnabled ? (

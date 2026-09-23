@@ -93,6 +93,7 @@ async function encodePngBytes(src: string, blob: Blob): Promise<ArrayBuffer> {
   }
 
   const image = new Image();
+  image.crossOrigin = 'anonymous';
   image.src = src;
   await image.decode();
 

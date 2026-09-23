@@ -174,12 +174,9 @@ describe('Schedule worker handoff', () => {
     expect(h.ports.dispatch).toHaveBeenCalledWith({ prompt: 'original' });
     expect(h.store.get(run.runKey)?.plannedAt).toBe(60_000);
   });
-  it('retains only the newest unprepared run and waits for Task occupancy', async () => {
+  it('retains only the newest unprepared run and waits for another slot occupant', async () => {
     const h = harness();
-    h.slots.replaceTaskOccupancy(
-      [{ taskId: 'task', agentConfigId: 'agent', ownerId: 'owner', status: 'in_progress' }],
-      'owner'
-    );
+    expect(h.slots.reserve('agent', 'other-work')).toBe(true);
     await h.engine.evaluate();
     h.time(180_000);
     await h.engine.evaluate();
@@ -189,7 +186,7 @@ describe('Schedule worker handoff', () => {
     expect(
       h.store.history('workspace', 'schedule').find((run) => run.scheduledFor === 60_000)?.errorCode
     ).toBe('SUPERSEDED');
-    h.slots.replaceTaskOccupancy([], 'owner');
+    h.slots.release('agent', 'other-work');
     await h.engine.evaluate();
     expect(h.ports.dispatch).toHaveBeenCalledTimes(1);
   });

@@ -5,7 +5,16 @@ File attachments use `file` blocks; the product contract is in
 
 - `session-file-card.tsx` — pure card (icon by extension, name, size; pending/expired/
   previewable/downloadable derived from transport + `getServerNow()` expiry) and
-  `SessionFileCardList` (adjacent-block aggregation). Story: `SessionFileCard.stories.tsx`.
+  `SessionFileCardList` (adjacent-block aggregation). Story: `SessionFileCard.stories.tsx`,
+  test: `tests/session-file-card.test.tsx`.
+- Static shares pass `retention='publication'`: the copied object has no dependency
+  on the source upload's expiry. Its manifest-gated reader decides availability.
+- One card, one primary action — EXCEPT an HTML attachment, which also gets a separate
+  download button for the source bytes. Its click opens the RENDERED page (browser
+  surface or live file preview), a surface with no control of its own for the file that
+  was uploaded; every other previewable file opens the preview dialog, which already
+  downloads from inside, so it must not grow a duplicate control. That button carries the
+  in-flight spinner, and the primary affordance keeps reading as preview.
 - `session-file-preview-dialog.tsx` — `SessionFilePreviewPanel` (status-driven;
   markdown reuses `MarkdownRenderer`, raw toggle, copy=raw, truncation) and dialog wrapper.
   Story: `SessionFilePreviewPanel.stories.tsx`.
@@ -24,6 +33,13 @@ File attachments use `file` blocks; the product contract is in
   cache dir → Share sheet → best-effort cleanup; never buffers the whole file). Base64
   streaming math is in `@/lib/base64-chunk.ts` (tested by `tests/base64-chunk.test.ts`).
   Capacitor plugins stay dynamically imported so web/electron bundles remain clean.
+- A group of image attachments is ONE wrapping row (`IMAGE_ATTACHMENT_ROW_CLASS` in
+  `view.tsx`), used by `ImageGroupBubble` and the user row's grouped `image` items.
+  Never give it a fixed column count or a max width: the thumbnail is a fixed square,
+  so a `grid-cols-2` turned a thirteen-image turn into a two-wide tower that scrolled
+  for screens. Tiles keep `shrink-0` (flex shrinks before it wraps) and hug the
+  speaker's side. Decision:
+  [image attachment row](../../../../../.agents/notes/implemented/bug-fix/2026-09-15-image-attachment-row-wraps.md).
 
 ## Image-preview overlay (zoom / pan)
 

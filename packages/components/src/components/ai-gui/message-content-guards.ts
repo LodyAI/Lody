@@ -144,6 +144,23 @@ export const isMessageContent = (value: unknown): value is MessageContent => {
       return Array.isArray(value.commands);
     case 'system_notice':
       return typeof value.name === 'string';
+    case 'operation_progress':
+      return (
+        typeof value.operationId === 'string' &&
+        (value.operationKind === 'session_create' ||
+          value.operationKind === 'session_create_many') &&
+        Array.isArray(value.items) &&
+        value.items.every(
+          (item) =>
+            isRecord(item) &&
+            isRecord(item.target) &&
+            typeof item.target.sessionId === 'string' &&
+            typeof item.target.userTurnId === 'string' &&
+            (item.label === undefined || typeof item.label === 'string') &&
+            typeof item.status === 'string' &&
+            ['created', 'running', 'succeeded', 'failed', 'cancelled'].includes(item.status)
+        )
+      );
     case 'operation_completion':
       return (
         typeof value.deliveryId === 'string' &&
@@ -190,12 +207,9 @@ export const normalizeMessageContent = (value: unknown): MessageContent | null =
 /**
  * Whether a history item renders as a row in the system-message group.
  *
- * Three item types render as system rows. The one conditional case is the
- * agent's task proposal: the Tasks MCP surface is not gated (the beta gate is
- * frontend-only), so an agent can propose a task into a workspace whose user
- * never enabled Tasks. Such a proposal is dropped entirely rather than falling
- * through to the generic notice, which would describe a feature that is not
- * there.
+ * Four item types render as system rows. Agent task proposals are dropped
+ * entirely: the Tasks product is gone, so a leftover notice must not fall
+ * through to the generic renderer.
  *
  * Kept here, named and pure, because the call site expresses it as a filter
  * predicate where a mis-inverted boolean would silently stop rendering
@@ -204,11 +218,13 @@ export const normalizeMessageContent = (value: unknown): MessageContent | null =
  */
 export const shouldRenderSystemRowItem = <T extends { type: string }>(
   item: T,
-  tasksEnabled: boolean,
   schedulesEnabled = false
-): item is Extract<T, { type: 'system_notice' | 'worktree_script' | 'operation_completion' }> => {
+): item is Extract<
+  T,
+  { type: 'system_notice' | 'worktree_script' | 'operation_completion' | 'operation_progress' }
+> => {
   if (item.type === 'system_notice' && 'name' in item && item.name === 'task_proposal') {
-    return tasksEnabled;
+    return false;
   }
   // Same gate as the Schedules navigation: a proposal card must not be the one
   // place the feature leaks out before the beta flag is on.
@@ -218,6 +234,7 @@ export const shouldRenderSystemRowItem = <T extends { type: string }>(
   return (
     item.type === 'system_notice' ||
     item.type === 'worktree_script' ||
-    item.type === 'operation_completion'
+    item.type === 'operation_completion' ||
+    item.type === 'operation_progress'
   );
 };

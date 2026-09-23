@@ -506,15 +506,18 @@ describe('SqliteTurnDiffStore', () => {
 
   it('limits each incremental GC step to one turn batch', () => {
     const store = new SqliteTurnDiffStore({ dbPath: createDbPath(), retentionDays: 1 });
-    for (let index = 0; index < 129; index += 1) {
-      store.recordTurn({
-        ownerId: 'session-a',
-        turnId: `turn-${index}`,
-        capturedAtMs: 0,
-        recordedAtMs: 0,
-        events: [event(`${index}.txt`, null, 'same snapshot', 1, 0)],
-      });
-    }
+    const database = (store as unknown as { readonly db: Database.Database }).db;
+    database.transaction(() => {
+      for (let index = 0; index < 129; index += 1) {
+        store.recordTurn({
+          ownerId: 'session-a',
+          turnId: `turn-${index}`,
+          capturedAtMs: 0,
+          recordedAtMs: 0,
+          events: [event(`${index}.txt`, null, 'same snapshot', 1, 0)],
+        });
+      }
+    })();
 
     const cursor = store.beginGc(DAY_MS + 1);
     expect(store.gcStep(cursor)).toBeNull();

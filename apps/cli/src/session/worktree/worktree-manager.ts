@@ -12,7 +12,7 @@ import {
   getCredentialHelperHostPath,
 } from '@/lib/git-credential-helper-script';
 import { formatErrorMessage } from '@/utils/format-error';
-import { getLodyDataDir } from '@lody/shared/node/installation-profile';
+import { ensureLodyDataDir, getLodyDataDir } from '@lody/shared/node/installation-profile';
 import { mapGitSpawnError } from './git-process-error';
 import { resolveAvailableBranchName } from './branch-name-allocation';
 
@@ -124,6 +124,8 @@ const buildBrokerAuthEnv = (auth: GitCredentialBrokerAuth | undefined): NodeJS.P
 
 export type RemoveWorktreeOptions = {
   baseBranchName?: string;
+  /** Keep the session branch; only the worktree directory goes away. */
+  preserveBranch?: boolean;
 };
 
 const DEFAULT_ARCHIVE_BACKUP_AUTHOR_NAME = 'Lody Archive';
@@ -410,6 +412,13 @@ export class WorktreeManager {
 
   private async ensureLocalSharedRepoLocked(): Promise<void> {
     if (this.source.kind !== 'local-shared') return;
+
+    // A local-shared repo keeps its git data in the user's own project, but its
+    // worktrees still live under the installation data directory — the same
+    // `fs.mkdirSync` the bare branch of `ensureRepoLocked` performs. Without it the
+    // only thing that would create the directory is `git worktree add`, which reports
+    // the failure as a path git was handed rather than as Lody's own data root.
+    fs.mkdirSync(this.worktreesDir, { recursive: true });
 
     const originalRootPath = this.source.originalRootPath;
     let stat: fs.Stats;
@@ -741,6 +750,10 @@ export class WorktreeManager {
     fetchMode: RepoFetchMode = 'best-effort',
     brokerAuth?: GitCredentialBrokerAuth
   ): Promise<void> {
+    // Both branches below build every path they hand git out of this root, so prove it
+    // is reachable once, here, and report it as Lody's own directory when it is not.
+    ensureLodyDataDir();
+
     if (this.source.kind === 'local-shared') {
       await this.ensureLocalSharedRepoLocked();
       return;
@@ -1470,7 +1483,7 @@ export class WorktreeManager {
         deleteBranch: true,
         branchName,
       });
-      if (resolvedBranchName) {
+      if (resolvedBranchName && options?.preserveBranch !== true) {
         if (this.shouldDeleteRemovedBranch(resolvedBranchName, options)) {
           await this.cleanupBranch(resolvedBranchName);
         }

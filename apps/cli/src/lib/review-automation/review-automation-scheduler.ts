@@ -94,7 +94,10 @@ export class ReviewAutomationScheduler {
     // slot indefinitely. Rotating the start point gives each run its turn.
     const ordered =
       active.length > limit
-        ? [...active.slice(this.rotation % active.length), ...active.slice(0, this.rotation % active.length)]
+        ? [
+            ...active.slice(this.rotation % active.length),
+            ...active.slice(0, this.rotation % active.length),
+          ]
         : active;
     this.rotation = (this.rotation + limit) % Math.max(1, active.length);
 

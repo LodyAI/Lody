@@ -5,7 +5,6 @@ import type {
   MachineBugReportResponse,
   PermissionRequestKind,
   SessionPullRequestMeta,
-  ACPSessionId,
   BillingPlanTier,
   MachineId,
   SessionId,
@@ -13,6 +12,20 @@ import type {
   createLoroStreamsTokenProvider,
 } from '@lody/shared';
 import type { PlatformKind, WorkspaceSummary } from './provider';
+import type {
+  SessionShareRequestInput,
+  SessionShareRequestResult,
+} from '@lody/shared/session-sharing';
+
+export interface CloudSessionSharingPort {
+  request(input: SessionShareRequestInput): Promise<SessionShareRequestResult>;
+  getResult(
+    input: Pick<
+      SessionShareRequestInput,
+      'workspaceId' | 'sourceSessionId' | 'requesterUserId' | 'deliveryPublicKey'
+    > & { shareRequestId: string }
+  ): Promise<SessionShareRequestResult>;
+}
 
 /**
  * CloudPort is the CLI-side seam: every cloud service the daemon talks to is
@@ -41,6 +54,8 @@ export interface CloudPort {
   githubTokens: CloudGithubTokenPort | null;
   /** `null` ⇒ no in-app bug report upload. */
   bugReports: CloudBugReportPort | null;
+  /** Proposals only. Human approval and publication have no daemon port. */
+  sessionSharing: CloudSessionSharingPort | null;
   /** `null` ⇒ no PR association / status reconciliation. */
   prAssociation: CloudPrAssociationPort | null;
   /**
@@ -174,7 +189,8 @@ export interface CloudNotificationsPort {
 export interface CloudUsageUpdateInput {
   workspaceId: WorkspaceId;
   sessionId: SessionId;
-  acpSessionId: ACPSessionId;
+  /** Accounting scope; may be a native session ID or a provider turn key. */
+  acpSessionId: string;
   userId: string;
   machineId: MachineId;
   cliType: string;

@@ -46,22 +46,11 @@ describe('session preparation run config', () => {
     ]);
   });
 
-  it('keeps the Task tool gate in preparation and dedup identity', () => {
-    const enabled = buildSessionPreparationRunConfig({ taskToolsEnabled: true });
-
-    expect(enabled).toEqual({ taskToolsEnabled: true });
-    expect(normalizeSessionPreparationRunConfigForDedup(enabled)).toEqual([null, null, null, true]);
-    expect(buildSessionPreparationRunConfig({ taskToolsEnabled: false })).toBeUndefined();
-  });
-
-  it('separates Schedule-enabled preparation from both plain and Task-only Agent instances', () => {
+  it('separates Schedule-enabled preparation from plain Agent instances', () => {
     const enabled = buildSessionPreparationRunConfig({ scheduleToolsEnabled: true });
     expect(enabled).toEqual({ scheduleToolsEnabled: true });
     expect(normalizeSessionPreparationRunConfigForDedup(enabled)).not.toEqual(
       normalizeSessionPreparationRunConfigForDedup({})
-    );
-    expect(normalizeSessionPreparationRunConfigForDedup(enabled)).not.toEqual(
-      normalizeSessionPreparationRunConfigForDedup({ taskToolsEnabled: true })
     );
     expect(buildSessionPreparationRunConfig({ scheduleToolsEnabled: false })).toBeUndefined();
   });

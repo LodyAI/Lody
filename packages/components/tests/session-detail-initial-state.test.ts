@@ -26,13 +26,16 @@ const persistedProviderFileState: PersistedLastActiveTabState = {
 };
 
 describe('getSessionDetailInitialTabState', () => {
-  it('restores the persisted session tab and provider file viewer state when the URL has no tab', () => {
+  it('restores the persisted viewer and side-panel state', () => {
+    // The active conversation tab is NOT part of this state: the `?tab`
+    // search value owns it, and the session route's entry restoration fills
+    // an absent value in before the component renders. Local storage owns the
+    // panels, which restore regardless of how `?tab` arrived.
     expect(
       getSessionDetailInitialTabState(parentSessionId, undefined, {
         readPersistedState: () => persistedProviderFileState,
       })
     ).toEqual({
-      activeTabSessionId: 'child-session',
       viewerTabs: [persistedProviderFileState.viewerTab],
       activeViewerTabId: 'file:file-1',
       sidePanel: {
@@ -44,49 +47,50 @@ describe('getSessionDetailInitialTabState', () => {
     });
   });
 
-  it('lets an explicit URL session tab override persisted viewer state', () => {
+  it('keeps the restored viewer idle for an explicit conversation deep link on one-active-surface hosts', () => {
+    // Mobile shows one surface at a time: an opened-by or shared link naming
+    // `session:<child>` must land on that conversation, not under the
+    // restored full-screen viewer. The viewer stays as an open tab.
+    expect(
+      getSessionDetailInitialTabState(parentSessionId, 'session:url-child', {
+        oneActiveSurface: true,
+        readPersistedState: () => persistedProviderFileState,
+      })
+    ).toEqual({
+      viewerTabs: [persistedProviderFileState.viewerTab],
+      activeViewerTabId: null,
+      sidePanel: persistedProviderFileState.sidePanel,
+    });
+    expect(
+      getSessionDetailInitialTabState(parentSessionId, 'draft:draft-uuid', {
+        oneActiveSurface: true,
+        readPersistedState: () => persistedProviderFileState,
+      }).activeViewerTabId
+    ).toBeNull();
+    // No explicit conversation target (entry restoration will fill the tab):
+    // the viewer stays active exactly as the user left it.
+    expect(
+      getSessionDetailInitialTabState(parentSessionId, undefined, {
+        oneActiveSurface: true,
+        readPersistedState: () => persistedProviderFileState,
+      }).activeViewerTabId
+    ).toBe('file:file-1');
+  });
+
+  it('keeps the viewer active for explicit deep links on desktop (side panel is a second surface)', () => {
     expect(
       getSessionDetailInitialTabState(parentSessionId, 'session:url-child', {
         readPersistedState: () => persistedProviderFileState,
-      })
-    ).toEqual({
-      activeTabSessionId: 'url-child',
-      viewerTabs: [],
-      activeViewerTabId: null,
-      sidePanel: {
-        open: false,
-        tab: null,
-        tabs: [],
-        sideSessionId: null,
-      },
-    });
+      }).activeViewerTabId
+    ).toBe('file:file-1');
   });
 
-  it('normalizes a URL tab pointing at the parent session and clears viewer state', () => {
+  it('defaults everything when nothing is persisted', () => {
     expect(
-      getSessionDetailInitialTabState(parentSessionId, 'session:parent-session', {
-        readPersistedState: () => persistedProviderFileState,
+      getSessionDetailInitialTabState(parentSessionId, undefined, {
+        readPersistedState: () => null,
       })
     ).toEqual({
-      activeTabSessionId: parentSessionId,
-      viewerTabs: [],
-      activeViewerTabId: null,
-      sidePanel: {
-        open: false,
-        tab: null,
-        tabs: [],
-        sideSessionId: null,
-      },
-    });
-  });
-
-  it('treats invalid URL tab state as an explicit parent-session reset', () => {
-    expect(
-      getSessionDetailInitialTabState(parentSessionId, 'file:src/index.ts', {
-        readPersistedState: () => persistedProviderFileState,
-      })
-    ).toEqual({
-      activeTabSessionId: parentSessionId,
       viewerTabs: [],
       activeViewerTabId: null,
       sidePanel: {
@@ -107,7 +111,6 @@ describe('getSessionDetailInitialTabState', () => {
         }),
       })
     ).toEqual({
-      activeTabSessionId: 'child-session',
       viewerTabs: [],
       activeViewerTabId: null,
       sidePanel: {

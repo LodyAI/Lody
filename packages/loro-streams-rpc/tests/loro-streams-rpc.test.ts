@@ -64,6 +64,7 @@ import {
   createLoroStreamsJsonStreamClient,
   decryptCodeCollabV2RpcPayload,
   encryptCodeCollabV2RpcPayload,
+  getMachineAcpAuthenticationInputSecretContext,
   getLoroWorkspaceRpcResponseStreamId,
   getMachineAcpAuthorizationCodeSecretContext,
   normalizeLoroGatewayBaseUrl,
@@ -1147,10 +1148,6 @@ describe('LoroStreamsMachineRpcClient', () => {
 
     const responsePromise = client.requestMachineAcpCapabilitiesRefresh({
       configId,
-      cliType: 'custom',
-      agentType: 'custom-agent',
-      customAcp: { command: 'my-acp-agent', args: ['--stdio'] },
-      env: { ACP_PROVIDER_TOKEN: 'secret-token' },
       timeoutMs: 5000,
     });
 
@@ -1162,13 +1159,10 @@ describe('LoroStreamsMachineRpcClient', () => {
       id: string;
       params?: {
         configId?: string;
-        customAcp?: { command: string; args?: string[] };
-        env?: Record<string, string>;
       };
     };
     expect(request.params?.configId).toBe(configId);
-    expect(request.params?.customAcp).toEqual({ command: 'my-acp-agent', args: ['--stdio'] });
-    expect(request.params?.env).toEqual({ ACP_PROVIDER_TOKEN: 'secret-token' });
+    expect(request.params).toEqual({ configId });
     fake.pushBatch({
       messages: [
         {
@@ -1192,8 +1186,8 @@ describe('LoroStreamsMachineRpcClient', () => {
       expect.objectContaining({
         type: 'machine/acp-capabilities-refresh_response',
         configId,
-        cliType: 'custom',
-        agentType: 'custom-agent',
+        cliType: 'builtin',
+        agentType: 'unknown',
         success: false,
       })
     );
@@ -1212,8 +1206,6 @@ describe('LoroStreamsMachineRpcClient', () => {
 
     const responsePromise = client.requestMachineAcpCapabilitiesRefresh({
       configId,
-      cliType: 'builtin',
-      agentType: 'codex',
       onProgress,
       timeoutMs: 5000,
     });
@@ -1305,8 +1297,6 @@ describe('LoroStreamsMachineRpcClient', () => {
 
     const responsePromise = client.requestMachineAcpCapabilitiesRefresh({
       configId,
-      cliType: 'builtin',
-      agentType: 'codex',
       onProgress,
       signal: controller.signal,
       timeoutMs: 5000,
@@ -1387,8 +1377,6 @@ describe('LoroStreamsMachineRpcClient', () => {
 
       const responsePromise = client.requestMachineAcpCapabilitiesRefresh({
         configId,
-        cliType: 'builtin',
-        agentType: 'codex',
         timeoutMs: 1_000,
       });
       await originalAppendStarted;
@@ -1424,8 +1412,6 @@ describe('LoroStreamsMachineRpcClient', () => {
 
     const responsePromise = client.requestMachineAcpCapabilitiesRefresh({
       configId,
-      cliType: 'builtin',
-      agentType: 'codex',
       timeoutMs: 5_000,
     });
     await fake.waitForAppendedCount(1);
@@ -1453,8 +1439,6 @@ describe('LoroStreamsMachineRpcClient', () => {
 
     const responsePromise = client.requestMachineAcpCapabilitiesRefresh({
       configId,
-      cliType: 'builtin',
-      agentType: 'codex',
       timeoutMs: 5_000,
     });
     client.stop();
@@ -1476,9 +1460,6 @@ describe('LoroStreamsMachineRpcClient', () => {
       requestId: 'auth-1',
       action: 'start',
       configId,
-      cliType: 'builtin',
-      agentType: 'kimi',
-      runtimeOverrides: { kimiPath: '/opt/kimi' },
       onProgress,
       timeoutMs: 5000,
     });
@@ -1492,10 +1473,10 @@ describe('LoroStreamsMachineRpcClient', () => {
       expect.objectContaining({
         requestId: 'auth-1',
         action: 'start',
-        agentType: 'kimi',
-        runtimeOverrides: { kimiPath: '/opt/kimi' },
+        configId,
       })
     );
+    expect(request.params).toEqual({ requestId: 'auth-1', action: 'start', configId });
 
     fake.pushBatch({
       messages: [
@@ -1578,8 +1559,6 @@ describe('LoroStreamsMachineRpcClient', () => {
       requestId: 'auth-claude',
       action: 'start',
       configId,
-      cliType: 'builtin',
-      agentType: 'claude',
       timeoutMs: 5000,
       onProgress: () => resolveProgressReceived(),
     });
@@ -1616,9 +1595,6 @@ describe('LoroStreamsMachineRpcClient', () => {
       action: 'submit-code',
       authenticationRequestId: 'auth-claude',
       authorizationCode: 'browser-returned-code',
-      configId,
-      cliType: 'builtin',
-      agentType: 'claude',
       timeoutMs: 5000,
     });
 
@@ -1704,6 +1680,136 @@ describe('LoroStreamsMachineRpcClient', () => {
       expect.objectContaining({ disposition: 'authenticated', success: true })
     );
 
+    client.stop();
+  });
+
+  it('binds encrypted form input to the authentication request and interaction', async () => {
+    const fake = createFakeStreamClient();
+    const client = new LoroStreamsMachineRpcClient({
+      workspaceId: 'workspace-1',
+      machineId: 'machine-1',
+      streamClient: fake.streamClient,
+    });
+    const recipient = await createRpcSecretRecipient();
+    let resolveProgressReceived: () => void = () => {};
+    const progressReceived = new Promise<void>((resolve) => {
+      resolveProgressReceived = resolve;
+    });
+    const startPromise = client.requestMachineAcpAuthenticate({
+      requestId: 'auth-custom',
+      action: 'start',
+      configId,
+      timeoutMs: 5000,
+      onProgress: () => resolveProgressReceived(),
+    });
+    await fake.waitForAppendedCount(1);
+    const startRequest = fake.appended[0]?.value as { id: string };
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id: startRequest.id,
+          method: 'machine/acp-authenticate',
+          rpcVersion: '1',
+          machineId: 'machine-1',
+          result: {
+            type: 'machine/acp-authentication-progress',
+            machineId: 'machine-1',
+            requestId: 'auth-custom',
+            agentType: 'custom-agent',
+            status: 'input-required',
+            interactionId: 'form-1',
+            message: 'Complete sign-in',
+            form: {
+              fields: [{ id: 'code', type: 'secret', label: 'Code', required: true }],
+            },
+            authenticationInputPublicKey: recipient.publicKey,
+          },
+        },
+      ],
+      nextOffset: '2',
+      cursor: 'cursor-2',
+      upToDate: false,
+    });
+    await progressReceived;
+
+    const authenticationInput = JSON.stringify({
+      action: 'accept',
+      content: { code: 'secret-code' },
+    });
+    const responsePromise = client.requestMachineAcpAuthenticate({
+      requestId: 'auth-input-ack',
+      action: 'submit-input',
+      authenticationRequestId: 'auth-custom',
+      interactionId: 'form-1',
+      authenticationInput,
+      timeoutMs: 5000,
+    });
+    await fake.waitForAppendedCount(2);
+    const inputRequest = fake.appended[1]?.value as {
+      id: string;
+      params?: { authenticationInputEnvelope?: RpcSecretEnvelope };
+    };
+    expect(JSON.stringify(inputRequest)).not.toContain('secret-code');
+    await expect(
+      recipient.decrypt(
+        inputRequest.params!.authenticationInputEnvelope!,
+        getMachineAcpAuthenticationInputSecretContext({
+          workspaceId: 'workspace-1',
+          machineId: 'machine-1',
+          authenticationRequestId: 'auth-custom',
+          interactionId: 'form-1',
+        })
+      )
+    ).resolves.toBe(authenticationInput);
+
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id: inputRequest.id,
+          method: 'machine/acp-authenticate',
+          rpcVersion: '1',
+          machineId: 'machine-1',
+          result: {
+            type: 'machine/acp-authenticate_response',
+            machineId: 'machine-1',
+            requestId: 'auth-input-ack',
+            agentType: 'custom-agent',
+            success: true,
+            disposition: 'input-accepted',
+          },
+        },
+      ],
+      nextOffset: '3',
+      cursor: 'cursor-3',
+      upToDate: true,
+    });
+    await expect(responsePromise).resolves.toMatchObject({ disposition: 'input-accepted' });
+
+    fake.pushBatch({
+      messages: [
+        {
+          jsonrpc: '2.0',
+          id: startRequest.id,
+          method: 'machine/acp-authenticate',
+          rpcVersion: '1',
+          machineId: 'machine-1',
+          result: {
+            type: 'machine/acp-authenticate_response',
+            machineId: 'machine-1',
+            requestId: 'auth-custom',
+            agentType: 'custom-agent',
+            success: true,
+            disposition: 'authenticated',
+          },
+        },
+      ],
+      nextOffset: '4',
+      cursor: 'cursor-4',
+      upToDate: true,
+    });
+    await expect(startPromise).resolves.toMatchObject({ disposition: 'authenticated' });
     client.stop();
   });
 
@@ -3050,5 +3156,126 @@ describe('machine RPC response live transport fallback', () => {
     });
 
     dispatcher.stop();
+  });
+});
+
+describe('pending RPC deadline', () => {
+  // Flush the microtask queue without advancing the (faked) clock, so the
+  // response loop can deliver a pushed batch between timer advances.
+  const flushMicrotasks = async (): Promise<void> => {
+    for (let index = 0; index < 8; index += 1) {
+      await Promise.resolve();
+    }
+  };
+
+  const registerRefresh = (
+    dispatcher: LoroStreamsRpcResponseDispatcher,
+    onAcpBinaryProgress: (message: unknown) => void
+  ) =>
+    dispatcher.registerPending('request-1', {
+      machineId: 'machine-1',
+      method: 'machine/acp-capabilities-refresh',
+      timeoutMs: 1_000,
+      startedAtMs: Date.now(),
+      onAcpBinaryProgress: onAcpBinaryProgress as never,
+    });
+
+  const progressBatch = (nextOffset: string): LoroJsonStreamBatch => ({
+    messages: [
+      {
+        jsonrpc: '2.0',
+        id: 'request-1',
+        method: 'machine/acp-capabilities-refresh',
+        rpcVersion: '1',
+        machineId: 'machine-1',
+        result: {
+          type: 'machine/acp-binary-progress',
+          machineId: 'machine-1',
+          agentType: 'kimi',
+          status: 'downloading',
+          percent: 42,
+        },
+      },
+    ],
+    nextOffset,
+    cursor: `cursor-${nextOffset}`,
+    upToDate: true,
+  });
+
+  it('measures silence, so a reporting download cannot expire its own request', async () => {
+    // The startup budget excludes runtime download on the stated grounds that
+    // progress frames keep resetting this deadline. With an absolute timer that
+    // was simply false: a download slower than the budget expired the very
+    // request that was reporting it, and the user got a client-side timeout
+    // instead of the machine's answer.
+    vi.useFakeTimers();
+    try {
+      const fake = createFakeStreamClient();
+      const dispatcher = new LoroStreamsRpcResponseDispatcher({
+        workspaceId: 'workspace-1',
+        streamClient: fake.streamClient,
+        responseStreamId: 'workspace-1:rpc:res:client-1',
+      });
+      await dispatcher.start();
+      await flushMicrotasks();
+
+      const progress: unknown[] = [];
+      let settled = false;
+      const pending = registerRefresh(dispatcher, (message) => progress.push(message)).then(
+        (value) => {
+          settled = true;
+          return value;
+        }
+      );
+
+      for (let elapsed = 0; elapsed < 5_000; elapsed += 800) {
+        await vi.advanceTimersByTimeAsync(800);
+        fake.pushBatch(progressBatch(String(elapsed)));
+        await flushMicrotasks();
+      }
+
+      // Five seconds on a one-second deadline, and still in flight.
+      expect(progress).toHaveLength(7);
+      expect(settled).toBe(false);
+
+      dispatcher.stop();
+      await expect(pending).resolves.toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still gives up once the machine goes quiet', async () => {
+    // The point of re-arming is that silence, not elapsed work, is what a
+    // dead daemon looks like. A machine that stops reporting must still expire.
+    vi.useFakeTimers();
+    try {
+      const fake = createFakeStreamClient();
+      const dispatcher = new LoroStreamsRpcResponseDispatcher({
+        workspaceId: 'workspace-1',
+        streamClient: fake.streamClient,
+        responseStreamId: 'workspace-1:rpc:res:client-1',
+      });
+      await dispatcher.start();
+      await flushMicrotasks();
+
+      const pending = registerRefresh(dispatcher, () => {});
+
+      await vi.advanceTimersByTimeAsync(800);
+      fake.pushBatch(progressBatch('1'));
+      await flushMicrotasks();
+
+      await vi.advanceTimersByTimeAsync(800);
+      await flushMicrotasks();
+      // 1.6s total, but only 0.8s since the last frame.
+      await expect(Promise.race([pending, Promise.resolve('pending')])).resolves.toBe('pending');
+
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(pending).resolves.toBeNull();
+
+      dispatcher.stop();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

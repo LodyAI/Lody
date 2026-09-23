@@ -1,16 +1,12 @@
 import { Command } from 'commander';
 import {
   getMachineFlockDocId,
-  getTaskIndexFlockDocId,
-  getTaskRoomId,
   getScheduleRoomId,
   getScheduleRegistryFlockDocId,
   isMachineDocRoomId,
   type MachineMeta,
-  type TaskId,
   type WorkspaceId,
 } from '@lody/shared';
-import { listWorkspaceTaskIds } from '@/lib/task-doc';
 import { listWorkspaceScheduleIds } from '@/lib/schedules/schedule-documents';
 import {
   getAuthContextOrThrow,
@@ -231,14 +227,10 @@ export async function syncItems(input: {
 }
 
 /**
- * Flock documents `lody sync` pulls: one per machine, plus the workspace task
- * index.
- *
- * Both halves of a task are pulled explicitly: the index here, and the task rooms
- * in the doc sweep. Neither comes for free — task rooms are absent from workspace
- * meta, so the meta-driven room scan never lists them, and the index is a Flock
- * doc that the room sweep does not cover. Code Collab file-index Flocks stay
- * excluded by design.
+ * Flock documents `lody sync` pulls: one per machine, plus the workspace
+ * Schedule Registry. The Registry is a Flock doc the room sweep does not cover,
+ * so it is pulled explicitly. Code Collab file-index Flocks stay excluded by
+ * design.
  */
 async function listSyncableFlockDocIds(
   manager: LoroDocumentManager,
@@ -247,7 +239,6 @@ async function listSyncableFlockDocIds(
   const machines = await listAliveDocMetas<MachineMeta>(manager, isMachineDocRoomId);
   return [
     ...machines.map((entry) => getMachineFlockDocId(workspaceId, entry.meta.id)),
-    getTaskIndexFlockDocId(workspaceId),
     getScheduleRegistryFlockDocId(workspaceId),
   ].sort((left, right) => left.localeCompare(right));
 }
@@ -255,22 +246,17 @@ async function listSyncableFlockDocIds(
 /**
  * Documents `lody sync` pulls.
  *
- * Task rooms normally come from loro-repo's `e/<docId>` existence index. The
- * Task Index remains a compatibility and repair source for older or interrupted
- * writes, so merge both enumerations without syncing a room twice.
+ * Schedule rooms normally come from loro-repo's `e/<docId>` existence index;
+ * the Schedule Registry is merged in as a repair source without syncing a room
+ * twice.
  */
 export function buildSyncDocIds(
   aliveRoomIds: readonly string[],
-  taskIds: readonly TaskId[],
   scheduleIds: readonly string[] = []
 ): string[] {
-  return [
-    ...new Set([
-      ...aliveRoomIds,
-      ...taskIds.map((taskId) => getTaskRoomId(taskId)),
-      ...scheduleIds.map(getScheduleRoomId),
-    ]),
-  ].sort((left, right) => left.localeCompare(right));
+  return [...new Set([...aliveRoomIds, ...scheduleIds.map(getScheduleRoomId)])].sort(
+    (left, right) => left.localeCompare(right)
+  );
 }
 
 async function syncWorkspace(input: {
@@ -305,16 +291,11 @@ async function syncWorkspace(input: {
       return;
     }
 
-    const taskIds = await listWorkspaceTaskIds(manager, workspaceId).catch(() => []);
     await manager.syncFlockDocOrThrow(getScheduleRegistryFlockDocId(workspaceId), {
       reason: 'sync:schedules:registry',
     });
     const scheduleIds = await listWorkspaceScheduleIds(manager, workspaceId);
-    const docIds = buildSyncDocIds(
-      await listAliveRoomIds(manager, () => true),
-      taskIds,
-      scheduleIds
-    );
+    const docIds = buildSyncDocIds(await listAliveRoomIds(manager, () => true), scheduleIds);
     const flockDocIds = await listSyncableFlockDocIds(manager, workspaceId);
 
     await syncItems({

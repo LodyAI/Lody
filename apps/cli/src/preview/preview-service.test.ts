@@ -356,6 +356,115 @@ describe('PreviewService', () => {
     );
   });
 
+  it('never tunnels to a LAN host, so the machine cannot become a pivot into its network', async () => {
+    // A user-approved request is the strongest input the create path accepts, and
+    // the approver sits on the OTHER side of the tunnel: they cannot know what a
+    // LAN address means on this machine. So even a fresh, matching approval must
+    // not open one. `startPreviewTunnel` staying uncalled is the observable
+    // guarantee; the error code is what the client renders.
+    const sessionId = 'session-preview-pivot' as SessionId;
+    const meta: SessionMetaWithLegacyPreview = {
+      id: sessionId,
+      machineId,
+      createdAt: '2026-04-30T00:00:00.000Z',
+      userId,
+      cliType: 'builtin',
+      agentType: 'codex',
+    };
+    const service = new PreviewService({
+      logger: createLogger(),
+      workspaceDocument: {
+        getOrCreateSessionDoc: vi.fn(async () => ({
+          getPreviewState: vi.fn(async () => ({})),
+          setPreviewState: vi.fn(async () => undefined),
+        })),
+        repo: { getDocMeta: vi.fn(async () => ({ meta })), upsertDocMeta: vi.fn() },
+      },
+      machineId,
+      workspaceId,
+      userId,
+      now: () => 1_714_438_400_000,
+      authToken: () => 'token',
+      remoteGatewayUrl: 'https://preview.example.com',
+    } as unknown as ConstructorParameters<typeof PreviewService>[0]);
+
+    for (const host of ['192.168.1.20', '10.0.0.5', '172.16.4.4', 'fc00::1', 'printer.local']) {
+      const target = { protocol: 'http' as const, host, port: 3000 };
+      const response = await service.createPreview({
+        type: 'session/preview-create',
+        machineId,
+        workspaceId,
+        sessionId,
+        requestedByUserId: userId,
+        target,
+        approval: {
+          source: 'browser_address',
+          targetClass: 'loopback',
+          target,
+          confirmedByUserId: userId,
+          confirmedAt: 1_714_438_400_000,
+        },
+      });
+      expect(response.success, host).toBe(false);
+      expect(response.error, host).toBe('host_not_loopback');
+    }
+    expect(startPreviewTunnel).not.toHaveBeenCalled();
+  });
+
+  it('requires a loopback literal or the exact name localhost, not any *.localhost spelling', async () => {
+    // `classifyBrowserHostname` calls `foo.localhost` loopback by spelling, but nothing
+    // guarantees a resolver answers it from 127.0.0.0/8, and the probe substitutes
+    // literals only for the exact string `localhost`. Accepting the spelling would make
+    // the no-pivot invariant true of the name and false of the address.
+    const sessionId = 'session-preview-localhost-name' as SessionId;
+    const meta: SessionMetaWithLegacyPreview = {
+      id: sessionId,
+      machineId,
+      createdAt: '2026-04-30T00:00:00.000Z',
+      userId,
+      cliType: 'builtin',
+      agentType: 'codex',
+    };
+    const service = new PreviewService({
+      logger: createLogger(),
+      workspaceDocument: {
+        getOrCreateSessionDoc: vi.fn(async () => ({
+          getPreviewState: vi.fn(async () => ({})),
+          setPreviewState: vi.fn(async () => undefined),
+        })),
+        repo: { getDocMeta: vi.fn(async () => ({ meta })), upsertDocMeta: vi.fn() },
+      },
+      machineId,
+      workspaceId,
+      userId,
+      now: () => 1_714_438_400_000,
+      authToken: () => 'token',
+      remoteGatewayUrl: 'https://preview.example.com',
+    } as unknown as ConstructorParameters<typeof PreviewService>[0]);
+
+    for (const host of ['app.localhost', 'evil.localhost']) {
+      const target = { protocol: 'http' as const, host, port: 3000 };
+      const response = await service.createPreview({
+        type: 'session/preview-create',
+        machineId,
+        workspaceId,
+        sessionId,
+        requestedByUserId: userId,
+        target,
+        approval: {
+          source: 'browser_address',
+          targetClass: 'loopback',
+          target,
+          confirmedByUserId: userId,
+          confirmedAt: 1_714_438_400_000,
+        },
+      });
+      expect(response.success, host).toBe(false);
+      expect(response.error, host).toBe('host_not_loopback');
+    }
+    expect(startPreviewTunnel).not.toHaveBeenCalled();
+  });
+
   it('creates a target-bound tunnel from explicit user input without a candidate', async () => {
     const { server, port } = await listenHttpOnLoopback();
     servers.push(server);

@@ -9,7 +9,7 @@ import {
   type SessionMeta,
 } from '@lody/shared';
 
-import { buildProjectOptions } from '../task-automation/task-automation-start';
+import { buildProjectOptions } from './schedule-project-options';
 
 /**
  * The two decisions that turn a Schedule definition into one Session's inputs:

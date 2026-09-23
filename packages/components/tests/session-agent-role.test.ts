@@ -14,6 +14,7 @@ import {
 import {
   isAgentRoleRunConfigApplied,
   isComposerAgentRoleApplied,
+  resolveProgrammaticTurnAgentRole,
   selectSessionAgentRoles,
 } from '../src/lib/composer-agent-roles';
 
@@ -47,8 +48,7 @@ describe('selectSessionAgentRoles', () => {
     name: 'Reviewer',
     agentConfigId: 'codex-1' as AgentConfigId,
   });
-  // Same TYPE, other config, other machine: its run-config values are published
-  // per cliType:agentType, so they still mean something for this session.
+  // Same provider type, but a different machine/config binding.
   const codexElsewhere = makeRole({
     id: 'r-codex-2' as AgentRoleId,
     name: 'Auditor',
@@ -65,51 +65,66 @@ describe('selectSessionAgentRoles', () => {
     config('codex-2', 'codex', 'machine-2'),
     config('claude-1', 'claude'),
   ];
+  const resolveAvailability = () => ({ kind: 'available' as const });
 
-  it('offers every Role bound to an agent of the same type, on any machine', () => {
+  it('offers only Roles bound to the existing Session machine and provider', () => {
     const items = selectSessionAgentRoles({
       roles: [codexHere, codexElsewhere, claude],
-      agentType: 'codex',
+      machineId: 'machine-1' as MachineId,
+      agentConfigId: 'codex-1' as AgentConfigId,
       agentConfigs,
+      resolveAvailability,
     });
-    expect(items.map((item) => item.role.id)).toEqual(['r-codex-2', 'r-codex']);
+    expect(items.map((item) => item.role.id)).toEqual(['r-codex']);
   });
 
-  it('drops a Role bound to another agent type — its values would not transfer', () => {
-    const items = selectSessionAgentRoles({
-      roles: [claude],
-      agentType: 'codex',
-      agentConfigs,
-    });
-    expect(items).toEqual([]);
-  });
-
-  it('drops a Role whose config is gone rather than guessing its type', () => {
+  it('keeps an exact-binding Role visible when its config is gone', () => {
     const orphan = makeRole({
       id: 'r-orphan' as AgentRoleId,
       name: 'Orphan',
       agentConfigId: 'deleted' as AgentConfigId,
     });
-    expect(selectSessionAgentRoles({ roles: [orphan], agentType: 'codex', agentConfigs })).toEqual(
-      []
-    );
-  });
-
-  it('offers nothing until the session reports its agent type', () => {
-    expect(selectSessionAgentRoles({ roles: [codexHere], agentType: null, agentConfigs })).toEqual(
-      []
-    );
-  });
-
-  // Nothing is going to that Role's machine, so its availability is not what is
-  // being asked of it here.
-  it('does not consult availability, because the binding is not executed', () => {
     const items = selectSessionAgentRoles({
-      roles: [codexElsewhere],
-      agentType: 'codex',
+      roles: [orphan],
+      machineId: 'machine-1' as MachineId,
+      agentConfigId: 'deleted' as AgentConfigId,
       agentConfigs,
+      resolveAvailability: () => ({ kind: 'unavailable', reason: 'agent_config_missing' }),
     });
-    expect(items[0]?.availability).toEqual({ kind: 'available' });
+    expect(items).toHaveLength(1);
+    expect(items[0]?.role).toBe(orphan);
+    expect(items[0]?.agentConfig).toBeUndefined();
+    expect(items[0]?.availability).toEqual({
+      kind: 'unavailable',
+      reason: 'agent_config_missing',
+    });
+  });
+});
+
+describe('resolveProgrammaticTurnAgentRole', () => {
+  const durableRoleId = 'role-durable' as AgentRoleId;
+  const composerRoleId = 'role-composer' as AgentRoleId;
+
+  it('uses requested, composer, then durable Role metadata', () => {
+    expect(
+      resolveProgrammaticTurnAgentRole({
+        composer: { agentRoleId: composerRoleId, agentRoleRevision: 3 },
+        durableRoleId,
+        durableRoleRevision: 2,
+      })
+    ).toEqual({ agentRoleId: composerRoleId, agentRoleRevision: 3 });
+    expect(
+      resolveProgrammaticTurnAgentRole({
+        requested: null,
+        composer: { agentRoleId: composerRoleId, agentRoleRevision: 3 },
+        durableRoleId,
+        durableRoleRevision: 2,
+      })
+    ).toBeNull();
+    expect(resolveProgrammaticTurnAgentRole({ durableRoleId, durableRoleRevision: 2 })).toEqual({
+      agentRoleId: durableRoleId,
+      agentRoleRevision: 2,
+    });
   });
 });
 

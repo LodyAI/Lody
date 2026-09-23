@@ -1,3 +1,4 @@
+import type { AgentRunRef } from '@/components/shared/agent-run-ref';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useAtom, useAtomValue } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
@@ -8,7 +9,6 @@ import {
   getBuiltinDefaultModeId,
   type AgentConfigId,
   type AgentConfigMeta,
-  type TaskAgentRef,
 } from '@lody/shared';
 import { getAllAgentConfigAtom } from '@/atoms/agents';
 import { getModeIcon as getPermissionModeIcon } from '@/components/chat/chat-landing-selectors';
@@ -175,8 +175,8 @@ export type AgentRunConfigMenuProps = {
   requireExplicitPermission?: boolean;
   menuClassName?: string;
   menuStyle?: CSSProperties;
-  value: TaskAgentRef | null;
-  onChange: (next: TaskAgentRef) => void;
+  value: AgentRunRef | null;
+  onChange: (next: AgentRunRef) => void;
   disabled?: boolean;
   /** Presence badge on the property-row trigger. */
   trailing?: ReactNode;
@@ -225,7 +225,7 @@ export function AgentRunConfigMenu({
     const ids = new Set(agentConfigs.map((config) => config.machineId));
     return [...ids].map((machineId) => ({
       machineId,
-      name: machines.get(machineId)?.name ?? t('tasks.slots.unknownMachine', 'Unknown machine'),
+      name: machines.get(machineId)?.name ?? t('agentRunConfig.unknownMachine', 'Unknown machine'),
       online: onlineMachineIds.has(machineId),
     }));
   }, [agentConfigs, machines, onlineMachineIds, t]);
@@ -237,7 +237,7 @@ export function AgentRunConfigMenu({
     return list.map((config) => ({
       config,
       machineName:
-        machines.get(config.machineId)?.name ?? t('tasks.slots.unknownMachine', 'Unknown machine'),
+        machines.get(config.machineId)?.name ?? t('agentRunConfig.unknownMachine', 'Unknown machine'),
       online: onlineMachineIds.has(config.machineId),
     }));
   }, [agentConfigs, machineFilterId, machines, onlineMachineIds, t]);
@@ -355,7 +355,7 @@ export function AgentRunConfigMenu({
     null;
 
   const rememberRecent = useCallback(
-    (next: TaskAgentRef, config: AgentConfigMeta) => {
+    (next: AgentRunRef, config: AgentConfigMeta) => {
       const entry: RecentTaskAgentCombo = {
         agentConfigId: next.agentConfigId,
         ...(next.modeId ? { modeId: next.modeId } : {}),
@@ -364,7 +364,7 @@ export function AgentRunConfigMenu({
         label: config.name || `${config.cliType}`,
         machineName:
           machines.get(config.machineId)?.name ??
-          t('tasks.slots.unknownMachine', 'Unknown machine'),
+          t('agentRunConfig.unknownMachine', 'Unknown machine'),
         usedAt: Date.now(),
       };
       setRecents((previous) => {
@@ -383,7 +383,7 @@ export function AgentRunConfigMenu({
   );
 
   const commit = useCallback(
-    (next: TaskAgentRef) => {
+    (next: AgentRunRef) => {
       onChange(next);
       const config = agentConfigs.find((candidate) => candidate.id === next.agentConfigId);
       if (config) {
@@ -494,7 +494,7 @@ export function AgentRunConfigMenu({
             <Bot className="h-3.5 w-3.5 shrink-0 opacity-70" />
           )}
           <span className="min-w-0 flex-1 truncate">
-            {agentLabel ?? t('tasks.slots.chooseAgent', 'Choose agent')}
+            {agentLabel ?? t('agentRunConfig.chooseAgent', 'Choose agent')}
             {triggerSecondary ? (
               <span className="text-muted-foreground"> · {triggerSecondary}</span>
             ) : null}
@@ -511,7 +511,7 @@ export function AgentRunConfigMenu({
         {recents.length > 0 ? (
           <>
             <DropdownMenuLabel className="text-[0.68rem] font-medium tracking-wide text-muted-foreground/70">
-              {t('tasks.agent.recent', 'Recent')}
+              {t('agentRunConfig.recent', 'Recent')}
             </DropdownMenuLabel>
             {recents.map((entry) => {
               const config = agentConfigs.find((candidate) => candidate.id === entry.agentConfigId);
@@ -577,14 +577,14 @@ export function AgentRunConfigMenu({
                   />
                 }
                 label={entry.name}
-                description={entry.online ? undefined : t('tasks.slots.offline', 'Offline')}
+                description={entry.online ? undefined : t('agentRunConfig.offline', 'Offline')}
                 selected={entry.machineId === machineFilterId}
                 onSelect={() => setMachineFilterId(entry.machineId)}
               />
             ))}
             {machinesWithAgents.length === 0 ? (
               <DropdownMenuItem disabled>
-                {t('tasks.slots.noMachines', 'No machines with agents')}
+                {t('agentRunConfig.noMachines', 'No machines with agents')}
               </DropdownMenuItem>
             ) : null}
           </DropdownMenuSubContent>
@@ -614,10 +614,10 @@ export function AgentRunConfigMenu({
                   machineFilterId
                     ? online
                       ? undefined
-                      : t('tasks.slots.offline', 'Offline')
+                      : t('agentRunConfig.offline', 'Offline')
                     : online
                       ? machineName
-                      : `${machineName} · ${t('tasks.slots.offline', 'Offline')}`
+                      : `${machineName} · ${t('agentRunConfig.offline', 'Offline')}`
                 }
                 selected={config.id === value?.agentConfigId}
                 onSelect={() => selectAgentConfig(config)}
@@ -625,7 +625,7 @@ export function AgentRunConfigMenu({
             ))}
             {agentsOnMachine.length === 0 ? (
               <DropdownMenuItem disabled>
-                {t('tasks.slots.noAgentsOnMachine', 'No agents on this machine')}
+                {t('agentRunConfig.noAgentsOnMachine', 'No agents on this machine')}
               </DropdownMenuItem>
             ) : null}
           </DropdownMenuSubContent>

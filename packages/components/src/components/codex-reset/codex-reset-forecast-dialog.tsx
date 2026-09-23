@@ -1,8 +1,10 @@
-import { useCallback } from 'react';
-import { useTranslation } from 'react-i18next';
+import { useCallback, type ReactNode } from 'react';
+import { Trans, useTranslation } from 'react-i18next';
 import { formatDistance, type Locale } from 'date-fns';
-import { enUS, zhCN } from 'date-fns/locale';
-import { ExternalLink, Loader2, TimerReset } from 'lucide-react';
+import { enUS } from 'date-fns/locale/en-US';
+import { zhCN } from 'date-fns/locale/zh-CN';
+import { ExternalLink, TimerReset } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 
 import { Badge } from '@/ui/badge';
 import { Button } from '@/ui/button';
@@ -22,10 +24,13 @@ import type { CodexResetForecastState } from '@/lib/codex-reset-forecast-store';
  * dark theme, so a tint of the foreground plus a hairline is what actually reads.
  */
 const SUBTLE_FIELD = 'rounded-md border border-border/60 bg-foreground/[0.03]';
+const CODEX_RESETS_ATTRIBUTION_URL = 'https://codex-resets.com/?utm_source=lody';
 
 export type CodexResetForecastDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Render above an already-open dialog, such as the desktop settings modal. */
+  nestedInDialog?: boolean;
   state: CodexResetForecastState;
   /** The still-valid forecast, already selected against `nowMs` by the caller. */
   watch: CodexResetWatch | null;
@@ -46,6 +51,7 @@ export type CodexResetForecastDialogProps = {
 export function CodexResetForecastDialog({
   open,
   onOpenChange,
+  nestedInDialog = false,
   state,
   watch,
   isExpired,
@@ -72,7 +78,10 @@ export function CodexResetForecastDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="gap-4 sm:max-w-md">
+      <DialogContent
+        overlayClassName={nestedInDialog ? 'z-[var(--z-dialog)] bg-black/20' : undefined}
+        className="gap-4 sm:max-w-md"
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base">
             <TimerReset className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -83,7 +92,7 @@ export function CodexResetForecastDialog({
         <div className="flex flex-col gap-4">
           {isInitialLoading ? (
             <p className="flex items-center gap-2 py-1 text-sm text-muted-foreground">
-              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+              <Spinner className="h-3.5 w-3.5" aria-hidden="true" />
               {t('codexReset.loading', 'Loading the latest forecast…')}
             </p>
           ) : watch ? (
@@ -110,10 +119,18 @@ export function CodexResetForecastDialog({
         </div>
 
         <DialogDescription className="-mt-1 border-t border-border/60 pt-3 text-xs leading-relaxed text-muted-foreground">
-          {t(
-            'codexReset.disclaimer',
-            'Third-party forecast from codex-resets.com. For reference only.'
-          )}
+          <Trans
+            i18nKey="codexReset.disclaimer"
+            defaults="Third-party forecast from <website>codex-resets.com</website>. For reference only."
+            components={{
+              website: (
+                <ExternalTextLink
+                  url={CODEX_RESETS_ATTRIBUTION_URL}
+                  className="align-baseline underline decoration-muted-foreground/50 underline-offset-2 hover:text-foreground"
+                />
+              ),
+            }}
+          />
         </DialogDescription>
       </DialogContent>
     </Dialog>
@@ -280,12 +297,11 @@ function SourceBlock({ text, source }: { text: string; source: CodexResetSource 
       ) : null}
       {source ? (
         <figcaption>
-          <ExternalTextLink
-            url={source.url}
-            label={t('codexReset.viewSource', 'View the source post by @{{author}}', {
+          <ExternalTextLink url={source.url}>
+            {t('codexReset.viewSource', 'View the source post by @{{author}}', {
               author: source.author,
             })}
-          />
+          </ExternalTextLink>
         </figcaption>
       ) : null}
     </figure>
@@ -299,11 +315,11 @@ function SourceBlock({ text, source }: { text: string; source: CodexResetSource 
  */
 function ExternalTextLink({
   url,
-  label,
+  children,
   className,
 }: {
   url: string;
-  label: string;
+  children?: ReactNode;
   className?: string;
 }) {
   return (
@@ -317,11 +333,11 @@ function ExternalTextLink({
         void openExternalUrl(url);
       }}
       className={cn(
-        'inline-flex w-fit items-center gap-1 text-xs text-muted-foreground hover:underline',
+        'inline-flex w-fit items-center gap-1 rounded-sm text-xs text-muted-foreground underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
         className
       )}
     >
-      {label}
+      {children}
       <ExternalLink className="h-3 w-3 shrink-0" aria-hidden="true" />
     </a>
   );

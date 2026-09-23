@@ -2,9 +2,16 @@ import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import {
+  ACP_CAPABILITIES_REFRESH_CLIENT_BACKSTOP_MS,
+  ACP_INIT_TIMEOUT_MS,
+  ACP_NEW_SESSION_TIMEOUT_MS,
+  ACP_NPX_STARTUP_MAX_ATTEMPTS,
+} from '@lody/shared';
 import { AcpTimeoutError } from './agent-client';
 import {
   COLD_NPX_INIT_TIMEOUT_MS,
+  DEFAULT_NPX_STARTUP_MAX_ATTEMPTS,
   runNpxStartupWithRecovery,
   type NpxStartupAttemptInput,
 } from './acp-npx-startup-policy';
@@ -507,6 +514,49 @@ describe('runNpxStartupWithRecovery', () => {
     expect(result).toBe('ok');
     expect(attempts).toHaveLength(2);
     expect(new Set(io.removed)).toEqual(new Set([npxRoot, cacache]));
+  });
+
+  it('keeps a whole cold-timeout retry run inside the client backstop', async () => {
+    // The client budget is derived from this loop, so the loop is what has to
+    // prove the budget: every attempt it is allowed to make, at the timeouts it
+    // hands each attempt, must still fit under the backstop. Otherwise the
+    // client reports a timeout while the machine is mid-recovery.
+    const attempts: NpxStartupAttemptInput[] = [];
+    const cache = getLodyNpmCacheDir();
+    const npxRoot = join(cache, '_npx');
+    const io = makeIo({ dirs: { [npxRoot]: [], [join(cache, '_cacache')]: [] } });
+
+    await expect(
+      runNpxStartupWithRecovery({
+        command: 'npx',
+        args: npxArgs(),
+        env: { npm_config_cache: cache },
+        logger,
+        logPrefix: '[test]',
+        npxCacheIo: io,
+        npxCacheRoots: [npxRoot],
+        getStderrTail: () => '',
+        attempt: async (input) => {
+          attempts.push(input);
+          throw new AcpTimeoutError(
+            'connection.initialize',
+            input.startupTimeouts?.initTimeoutMs ?? ACP_INIT_TIMEOUT_MS,
+            `session-${input.attempt}`
+          );
+        },
+      })
+    ).rejects.toBeInstanceOf(AcpTimeoutError);
+
+    expect(DEFAULT_NPX_STARTUP_MAX_ATTEMPTS).toBe(ACP_NPX_STARTUP_MAX_ATTEMPTS);
+    expect(attempts).toHaveLength(ACP_NPX_STARTUP_MAX_ATTEMPTS);
+    const worstCaseMs = attempts.reduce(
+      (total, input) =>
+        total +
+        (input.startupTimeouts?.initTimeoutMs ?? ACP_INIT_TIMEOUT_MS) +
+        (input.startupTimeouts?.newSessionTimeoutMs ?? ACP_NEW_SESSION_TIMEOUT_MS),
+      0
+    );
+    expect(worstCaseMs).toBeLessThan(ACP_CAPABILITIES_REFRESH_CLIENT_BACKSTOP_MS);
   });
 
   it('refreshes stale npm metadata online once for a missing exact version', async () => {

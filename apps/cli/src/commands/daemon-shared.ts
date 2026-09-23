@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { Readable } from 'node:stream';
 import os from 'node:os';
@@ -12,6 +12,7 @@ import {
   LODY_SUPERVISOR_TOKEN_ENV,
 } from '@lody/shared/node/local-cli-supervisor';
 import { getLodyDataDir } from '@lody/shared/node/installation-profile';
+import { requestLocalCliHostShutdown } from '@lody/shared/node/local-cli-host-lease';
 import { calculateWorkerMaxOldSpaceMiB } from '@lody/cli-supervisor';
 export { LODY_LOG_DIR } from '@/utils/log-retention';
 
@@ -111,14 +112,16 @@ export function resolveLodyBin(): string {
 //
 // `lody daemon start` (and the watchdog upgrade handoff) spawn a detached
 // `daemon-runner` with an extra pipe on fd 3. The runner writes exactly one
-// JSON line describing its launch outcome, then closes the fd. The launcher
-// therefore learns success/failure deterministically instead of polling the
-// Host endpoint and PID record on a timer.
+// JSON line describing its launch outcome, then closes the fd. A successful
+// outcome means the supervised Worker reached its local-ready boundary, not
+// merely that the watchdog claimed the Host lease and wrote its PID record.
 
 export const DAEMON_RUNNER_READY_FD_ENV = 'LODY_DAEMON_RUNNER_READY_FD';
 const DAEMON_RUNNER_READY_FD = 3;
 const DAEMON_RUNNER_READY_TIMEOUT_MS = 30_000;
 const DAEMON_RUNNER_READY_MAX_BUFFER = 8 * 1024;
+const DAEMON_RUNNER_SHUTDOWN_GRACE_MS = 40_000;
+const DAEMON_RUNNER_FORCE_KILL_WAIT_MS = 5_000;
 
 const DaemonRunnerLaunchOutcomeSchema = z.discriminatedUnion('status', [
   z.object({
@@ -172,10 +175,125 @@ export type SpawnDaemonRunnerResult =
   | { status: 'runner_exited'; runnerPid: number }
   | { status: 'timeout'; runnerPid: number };
 
+type DaemonRunnerWaitResult = {
+  outcome: SpawnDaemonRunnerResult;
+  cancelRunner: boolean;
+};
+
+/** Translate the runner report and identify outcomes whose child must be awaited. */
+export function interpretDaemonRunnerLaunchOutcome(
+  outcome: DaemonRunnerLaunchOutcome,
+  runnerPid: number
+): DaemonRunnerWaitResult {
+  switch (outcome.status) {
+    case 'ready':
+      return {
+        outcome: { status: 'ready', pid: runnerPid, instanceId: outcome.instanceId },
+        cancelRunner: false,
+      };
+    case 'occupied':
+      return {
+        outcome: {
+          status: 'occupied',
+          runnerPid,
+          ownerMode: outcome.ownerMode,
+          ownerPid: outcome.ownerPid,
+        },
+        cancelRunner: false,
+      };
+    case 'error':
+      // The report is written before the runner's fatal cleanup releases its
+      // Host lease. Await this exact child so upgrade handoff fallback cannot
+      // race the failing replacement and mistake it for a new owner.
+      return {
+        outcome: { status: 'error', runnerPid, message: outcome.message },
+        cancelRunner: true,
+      };
+    default: {
+      const unreachable: never = outcome;
+      return unreachable;
+    }
+  }
+}
+
+function isChildProcessRunning(child: ChildProcess): boolean {
+  return child.exitCode === null && child.signalCode === null;
+}
+
+async function waitForChildProcessExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
+  if (!isChildProcessRunning(child)) return true;
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let onExit: () => void;
+    const finish = (exited: boolean) => {
+      if (settled) return;
+      settled = true;
+      if (timeout !== undefined) clearTimeout(timeout);
+      child.off('exit', onExit);
+      child.off('close', onExit);
+      resolve(exited);
+    };
+    onExit = () => finish(true);
+    timeout = setTimeout(() => finish(!isChildProcessRunning(child)), timeoutMs);
+    child.once('exit', onExit);
+    child.once('close', onExit);
+    if (!isChildProcessRunning(child)) finish(true);
+  });
+}
+
+/**
+ * A failed foreground launch must not leave its exact detached child running.
+ * Ask that runner's authenticated Host endpoint to drain its Worker; the exact
+ * ChildProcess handle we spawned is the fallback and force-stop authority.
+ */
+export async function terminateSpawnedDaemonRunner(
+  child: ChildProcess,
+  runnerPid: number,
+  options: { shutdownGraceMs?: number; forceKillWaitMs?: number } = {}
+): Promise<boolean> {
+  if (!isChildProcessRunning(child)) return true;
+
+  // Prefer the runner's authenticated cross-platform shutdown channel so its
+  // Worker drains even where OS signals do not reach Node handlers (Windows).
+  const pidRecord = readPidFileRecord();
+  let gracefulShutdownRequested = false;
+  if (pidRecord?.pid === runnerPid) {
+    const requested = await requestLocalCliHostShutdown({
+      instanceId: pidRecord.instanceId,
+      token: pidRecord.controlToken,
+      expectedPid: runnerPid,
+      expectedMode: 'daemon',
+    });
+    gracefulShutdownRequested = requested.ok;
+  }
+  if (!gracefulShutdownRequested) {
+    try {
+      child.kill('SIGTERM');
+    } catch {
+      // Exit state below remains authoritative.
+    }
+  }
+  if (
+    await waitForChildProcessExit(child, options.shutdownGraceMs ?? DAEMON_RUNNER_SHUTDOWN_GRACE_MS)
+  ) {
+    return true;
+  }
+  try {
+    child.kill('SIGKILL');
+  } catch {
+    // The final wait reports whether the exact child actually exited.
+  }
+  return await waitForChildProcessExit(
+    child,
+    options.forceKillWaitMs ?? DAEMON_RUNNER_FORCE_KILL_WAIT_MS
+  );
+}
+
 /**
  * Spawns a detached daemon runner with a scrubbed environment and waits for
- * its readiness report. The runner keeps running after this resolves; only the
- * handshake pipe is torn down.
+ * its readiness report. A ready runner stays detached; a timed-out or invalid
+ * handshake is terminated and awaited before failure returns.
  */
 export async function spawnDaemonRunnerAndAwaitReady(
   passthroughArgs: string[],
@@ -218,22 +336,23 @@ export async function spawnDaemonRunnerAndAwaitReady(
   }
 
   const readyPipe = (child.stdio[DAEMON_RUNNER_READY_FD] ?? null) as Readable | null;
-  const result = await new Promise<SpawnDaemonRunnerResult>((resolve) => {
+  const waitResult = await new Promise<DaemonRunnerWaitResult>((resolve) => {
     let settled = false;
     let buffer = '';
-    const finish = (outcome: SpawnDaemonRunnerResult) => {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const finish = (outcome: SpawnDaemonRunnerResult, cancelRunner = false) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timeout);
-      resolve(outcome);
+      if (timeout !== undefined) clearTimeout(timeout);
+      resolve({ outcome, cancelRunner });
     };
-    const timeout = setTimeout(
-      () => finish({ status: 'timeout', runnerPid }),
+    timeout = setTimeout(
+      () => finish({ status: 'timeout', runnerPid }, true),
       options.timeoutMs ?? DAEMON_RUNNER_READY_TIMEOUT_MS
     );
     timeout.unref?.();
     if (!readyPipe) {
-      finish({ status: 'error', runnerPid, message: 'readiness channel unavailable' });
+      finish({ status: 'error', runnerPid, message: 'readiness channel unavailable' }, true);
       return;
     }
     readyPipe.on('data', (chunk: Buffer) => {
@@ -241,7 +360,7 @@ export async function spawnDaemonRunnerAndAwaitReady(
       const newline = buffer.indexOf('\n');
       if (newline < 0) {
         if (buffer.length > DAEMON_RUNNER_READY_MAX_BUFFER) {
-          finish({ status: 'error', runnerPid, message: 'invalid readiness report' });
+          finish({ status: 'error', runnerPid, message: 'invalid readiness report' }, true);
         }
         return;
       }
@@ -249,34 +368,32 @@ export async function spawnDaemonRunnerAndAwaitReady(
       try {
         parsed = JSON.parse(buffer.slice(0, newline));
       } catch {
-        finish({ status: 'error', runnerPid, message: 'invalid readiness report' });
+        finish({ status: 'error', runnerPid, message: 'invalid readiness report' }, true);
         return;
       }
       const outcome = DaemonRunnerLaunchOutcomeSchema.safeParse(parsed);
       if (!outcome.success) {
-        finish({ status: 'error', runnerPid, message: 'invalid readiness report' });
+        finish({ status: 'error', runnerPid, message: 'invalid readiness report' }, true);
         return;
       }
-      if (outcome.data.status === 'ready') {
-        finish({ status: 'ready', pid: runnerPid, instanceId: outcome.data.instanceId });
-      } else if (outcome.data.status === 'occupied') {
-        finish({
-          status: 'occupied',
-          runnerPid,
-          ownerMode: outcome.data.ownerMode,
-          ownerPid: outcome.data.ownerPid,
-        });
-      } else {
-        finish({ status: 'error', runnerPid, message: outcome.data.message });
-      }
+      const interpreted = interpretDaemonRunnerLaunchOutcome(outcome.data, runnerPid);
+      finish(interpreted.outcome, interpreted.cancelRunner);
     });
-    // EOF without a report means the runner exited before claiming ownership.
-    readyPipe.once('end', () => finish({ status: 'runner_exited', runnerPid }));
-    readyPipe.once('error', () => finish({ status: 'runner_exited', runnerPid }));
+    // EOF without a report means the runner exited before its Worker became ready.
+    readyPipe.once('end', () => finish({ status: 'runner_exited', runnerPid }, true));
+    readyPipe.once('error', () => finish({ status: 'runner_exited', runnerPid }, true));
   });
 
   readyPipe?.removeAllListeners();
   readyPipe?.destroy();
+  let result = waitResult.outcome;
+  if (waitResult.cancelRunner && !(await terminateSpawnedDaemonRunner(child, runnerPid))) {
+    result = {
+      status: 'error',
+      runnerPid,
+      message: `Daemon launch failed (${result.status}) and runner ${runnerPid} did not exit`,
+    };
+  }
   child.unref();
   return result;
 }

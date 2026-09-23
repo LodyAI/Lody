@@ -15,7 +15,6 @@ import {
   ChevronUp,
   Download,
   Laptop,
-  Loader2,
   LogOut,
   MoreHorizontal,
   Pencil,
@@ -25,6 +24,7 @@ import {
   UserRound,
   Users,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { Badge } from '@/ui/badge';
 import { Button } from '@/ui/button';
 import { Input } from '@/ui/input';
@@ -52,11 +52,13 @@ import { useIsMobile } from '@/hooks/use-mobile';
 import { useMachineOnlineStatus } from '@/hooks/use-machine-online-status';
 import { useMachineActionState } from '@/hooks/use-machine-action-state';
 import { MobileSettingsDetailHeader } from '@/components/mobile/mobile-settings-layout';
+import { MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
 import { ProviderRow } from './provider-row';
 import { ProviderSetupRow } from './provider-setup-row';
 import { DeviceResourceMonitor } from './device-resource-monitor';
 import type { MachineMonitorViewState } from '@/hooks/use-machine-monitor';
 import {
+  MACHINE_META_PILL_CLASS,
   WorkspaceMachineAccordionSummary,
   WorkspaceMachineOwnerAvatar,
   type WorkspaceMachineAccordionMeta,
@@ -74,6 +76,7 @@ export type MachineProvidersSectionProps = {
   onDeleteSetup?: (setup: ProviderSetupTask) => Promise<void>;
   /** Desktop pills content is flush with the title — no extra horizontal inset. */
   flush?: boolean;
+  variant?: 'default' | 'mobile-list';
 };
 
 /** "Agent Provider" list + add button — shared by the mobile detail pane and the
@@ -89,8 +92,76 @@ export function MachineProvidersSection({
   onRetrySetup,
   onDeleteSetup,
   flush = false,
+  variant = 'default',
 }: MachineProvidersSectionProps) {
   const { t } = useTranslation();
+  const addButton = (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+          onClick={onAddConfig}
+          aria-label={t('settings.agent.provider.addProvider', 'Add provider')}
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </Button>
+      </TooltipTrigger>
+      <TooltipContent>{t('settings.agent.provider.addProvider', 'Add provider')}</TooltipContent>
+    </Tooltip>
+  );
+
+  if (variant === 'mobile-list') {
+    return (
+      <MobileSettingsSection
+        title={t('settings.agent.provider.title', 'Agent Provider')}
+        actions={addButton}
+      >
+        {configs.length === 0 && setups.length === 0 ? (
+          <div className="flex flex-col items-center px-6 py-8 text-center text-sm">
+            <Bot className="h-6 w-6 text-muted-foreground/70" />
+            <p className="mt-2 text-muted-foreground">
+              {t('settings.agent.provider.empty', 'No providers on this machine yet.')}
+            </p>
+            <Button size="sm" className="mt-3" onClick={onAddConfig}>
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              {t('settings.agent.provider.addProvider', 'Add provider')}
+            </Button>
+          </div>
+        ) : (
+          <>
+            {setups.map((setup, index) => (
+              <ProviderSetupRow
+                key={setup.id}
+                setup={setup}
+                machine={machine}
+                onRetry={onRetrySetup ?? (async () => undefined)}
+                onDelete={onDeleteSetup ?? (async () => undefined)}
+                className={cn(
+                  'rounded-none border-0 bg-transparent',
+                  index > 0 && 'border-t border-border'
+                )}
+              />
+            ))}
+            {configs.map((config, index) => (
+              <ProviderRow
+                key={config.id}
+                config={config}
+                machine={machine}
+                onEdit={onEditConfig}
+                onDelete={onDeleteConfig}
+                onRefresh={onRefreshConfig}
+                variant="list"
+                className={index === 0 && setups.length > 0 ? 'border-t border-border' : undefined}
+              />
+            ))}
+          </>
+        )}
+      </MobileSettingsSection>
+    );
+  }
+
   return (
     <section className="flex flex-col">
       <div
@@ -99,25 +170,10 @@ export function MachineProvidersSection({
           flush ? 'px-0' : 'px-4'
         )}
       >
-        <h3 className="text-xs font-semibold text-muted-foreground">
+        <h3 className="text-xs font-normal text-muted-foreground">
           {t('settings.agent.provider.title', 'Agent Provider')}
         </h3>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-muted-foreground hover:bg-muted/60 hover:text-foreground"
-              onClick={onAddConfig}
-              aria-label={t('settings.agent.provider.addProvider', 'Add provider')}
-            >
-              <Plus className="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>
-            {t('settings.agent.provider.addProvider', 'Add provider')}
-          </TooltipContent>
-        </Tooltip>
+        {addButton}
       </div>
       {configs.length === 0 && setups.length === 0 ? (
         <EmptyProviders onAdd={onAddConfig} flush={flush} />
@@ -302,12 +358,12 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
   const metaBadges = (
     <>
       {isLocal && (
-        <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
+        <Badge variant="secondary" className={MACHINE_META_PILL_CLASS}>
           {t('workspace.machines.thisDevice', 'This device')}
         </Badge>
       )}
       {ownerName && !isOwn && (
-        <Badge variant="secondary" className="gap-1 px-1.5 py-0 text-[10px]">
+        <Badge variant="secondary" className={cn('gap-1', MACHINE_META_PILL_CLASS)}>
           <UserRound className="h-2.5 w-2.5" />
           {ownerName}
         </Badge>
@@ -323,11 +379,11 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
           )}
         />
       )}
-      <Badge variant="secondary" className="gap-1 px-1.5 py-0 text-[10px]">
+      <Badge variant="secondary" className={cn('gap-1', MACHINE_META_PILL_CLASS)}>
         <Laptop className="h-2.5 w-2.5" />
         {machine.os || '-'}
       </Badge>
-      <Badge variant="secondary" className="px-1.5 py-0 font-mono text-[10px]">
+      <Badge variant="secondary" className={cn('font-mono', MACHINE_META_PILL_CLASS)}>
         {machine.cliVersion ? `v${machine.cliVersion}` : t('machines.never', 'Never')}
       </Badge>
     </>
@@ -372,7 +428,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                     ref={inputRef}
                     value={renameDraft}
                     disabled={renameSaving}
-                    className="h-7 min-w-0 flex-1 px-1.5 py-0 text-base font-semibold leading-snug"
+                    className="h-7 min-w-0 flex-1 px-1.5 py-0 text-base font-normal leading-snug"
                     onChange={(event) =>
                       setRenameDraft(event.target.value.replace(/[\r\n]+/g, ' '))
                     }
@@ -406,13 +462,13 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                   <>
                     <h2
                       className={cn(
-                        'min-w-0 truncate font-semibold',
+                        'min-w-0 truncate font-normal',
                         isMobile ? 'text-center text-lg' : 'text-base'
                       )}
                     >
                       {machine.name || machine.id}
                     </h2>
-                    {renameSaving && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    {renameSaving && <Spinner className="h-3.5 w-3.5" />}
                     {!isMobile && manageableOwnMachine && (
                       <Button
                         variant="ghost"
@@ -442,7 +498,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                     onClick={() => void handlePing()}
                   >
                     {pinging ? (
-                      <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                      <Spinner className="mr-1 h-3.5 w-3.5" />
                     ) : (
                       <Activity className="mr-1 h-3.5 w-3.5" />
                     )}
@@ -463,7 +519,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                     {t('workspace.machines.shareMachineLabel', 'Share machine')}
                   </span>
                   {sharing ? (
-                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                    <Spinner className="h-4 w-4 text-muted-foreground" />
                   ) : (
                     <Switch
                       checked={effectiveShared}
@@ -491,7 +547,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                       onClick={() => void handleRestartDaemon()}
                     >
                       {restartingDaemon ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <Spinner className="h-3.5 w-3.5" />
                       ) : (
                         <RotateCcw className="h-3.5 w-3.5" />
                       )}
@@ -566,7 +622,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                       aria-label={t('workspace.machines.moreActions', 'Machine options')}
                     >
                       {sharing ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
+                        <Spinner className="h-4 w-4" />
                       ) : (
                         <MoreHorizontal className="h-4 w-4" />
                       )}
@@ -633,7 +689,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                         disabled={pinging}
                       >
                         {pinging ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          <Spinner className="h-3.5 w-3.5" />
                         ) : (
                           <Activity className="h-3.5 w-3.5" />
                         )}
@@ -655,7 +711,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                         disabled={restartingDaemon || upgradingDaemon}
                       >
                         {upgradingDaemon ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          <Spinner className="h-3.5 w-3.5" />
                         ) : (
                           <Download className="h-3.5 w-3.5" />
                         )}
@@ -673,7 +729,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                         disabled={restartingDaemon || upgradingDaemon}
                       >
                         {restartingDaemon ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          <Spinner className="h-3.5 w-3.5" />
                         ) : (
                           <RotateCcw className="h-3.5 w-3.5" />
                         )}
@@ -747,7 +803,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
           {updateVisible && daemonUpdate && (
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-primary/25 bg-primary/5 px-3 py-2">
               <div className="min-w-0">
-                <div className="text-xs font-medium text-foreground">
+                <div className="text-xs font-normal text-foreground">
                   {t('settings.agent.machineLifecycle.updateAvailable', 'Update available')}
                 </div>
                 <div className="font-mono text-[11px] text-muted-foreground">
@@ -769,7 +825,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
                   onClick={() => void handleUpgradeDaemon()}
                 >
                   {upgradingDaemon ? (
-                    <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                    <Spinner className="mr-1 h-3.5 w-3.5" />
                   ) : (
                     <Download className="mr-1 h-3.5 w-3.5" />
                   )}
@@ -843,7 +899,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
               }}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {deleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {deleting && <Spinner className="mr-2 h-4 w-4" />}
               {t('workspace.machines.removeAction', 'Remove')}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -883,7 +939,7 @@ export function MachineDetailPane(props: MachineDetailPaneProps) {
               }}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {revoking ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              {revoking ? <Spinner className="mr-2 h-4 w-4" /> : null}
               {t('settings.devices.credentials.disconnect', 'Revoke machine access')}
             </AlertDialogAction>
           </AlertDialogFooter>

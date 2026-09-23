@@ -1,12 +1,12 @@
 import { ChangelogDetailPage, ChangelogIndexPage } from '@site/components/changelog';
 import type { ChangelogEntry, ChangelogLocale } from '@site/lib/changelog';
-import { pageHead } from '@site/lib/metadata';
+import { brandTitle, pageHead } from '@site/lib/metadata';
 import type { SiteHead } from '@site/lib/metadata';
 import { type ChangelogPostRouteData, localeCode } from './shared';
 
 export function changelogIndexHead(locale: ChangelogLocale): SiteHead {
   return pageHead({
-    title: locale === 'zh' ? '更新日志' : 'Changelog',
+    title: brandTitle(locale === 'zh' ? '更新日志' : 'Changelog'),
     description:
       locale === 'zh'
         ? '追踪 Lody 的产品更新、改进和修复。'
@@ -35,7 +35,7 @@ export function changelogPostHead(locale: ChangelogLocale, data: ChangelogPostRo
   const enPath = `/changelog/${entry.slug}`;
 
   return pageHead({
-    title: entry.title,
+    title: brandTitle(entry.title),
     description: entry.description ?? `Lody ${entry.version} release notes.`,
     path: entry.url,
     locale: localeCode(locale),

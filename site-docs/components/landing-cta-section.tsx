@@ -20,7 +20,9 @@ export type LandingCtaCopy = {
   lead: string;
   allPlatforms: string;
   allPlatformsHref: string;
-  webApp: string;
+  github: string;
+  githubHref: string;
+  /** Still resolves the browser-platform primary action; no longer a link. */
   webAppHref: string;
   /** Low-key "book a call with the founder" link in the secondary row. */
   bookCall: string;
@@ -78,7 +80,9 @@ export function LandingCtaSection({ copy }: { copy: LandingCtaCopy }) {
             <span className="uw-cta__dot" aria-hidden="true">
               ·
             </span>
-            <a href={copy.webAppHref}>{copy.webApp}</a>
+            <a href={copy.githubHref} rel="noreferrer" target="_blank">
+              {copy.github}
+            </a>
             {platform === 'mac-arm' ? (
               <>
                 <span className="uw-cta__dot" aria-hidden="true">

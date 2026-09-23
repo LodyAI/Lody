@@ -6,21 +6,19 @@ import { useCloudMutation } from '@lody/platform/react';
 import { cloudOperations } from '@/lib/cloud-api-operations';
 import {
   type AcpSessionMonitorSnapshot,
-  type AgentConfigCliType,
   type AgentConfigId,
   type AgentConfigMeta,
-  type AgentType,
-  type CustomAcpLaunchSpec,
   type MachineId,
   type MachineViewMeta,
   type ProviderSetupTask,
   type SessionId,
   type WorkspaceId,
 } from '@lody/shared';
-import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { toast } from 'sonner';
 import { activeWorkspaceRuntimeAtom, authTokenAtom, type WorkspaceRuntime } from '@/atoms/runtime';
-import { developerModeEnabledAtom } from '@/atoms/settings';
+import { developerModeEnabledAtom, reviewAgentFeatureEnabledAtom } from '@/atoms/settings';
 import { settingsDialogOpenAtom } from '@/atoms/settings';
 import { sessionMetaCacheAtom } from '@/atoms/doc-meta';
 import { currentWorkspaceIdAtom, currentWorkspaceSlugAtom } from '@/atoms/workspace-context';
@@ -62,7 +60,10 @@ import { formatSessionTabSearch } from '@/lib/session-tab-url';
 import { useMachineMonitor } from '@/hooks/use-machine-monitor';
 import { useMachineLifecycleCapability } from '@/hooks/use-machine-lifecycle-capability';
 import { useOpenSettings } from '@/hooks/use-open-settings';
+import { cn } from '@/lib/utils';
 import { Button } from '@/ui/button';
+import { Drawer, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
+import { MobileSettingsRow, MobileSettingsSection } from '@/components/mobile/mobile-settings-row';
 import {
   MachineListFilterButton,
   MachineTabList,
@@ -178,6 +179,7 @@ export function MachineAgentSettings({
   const runtime = useAtomValue(activeWorkspaceRuntimeAtom);
   const authToken = useAtomValue(authTokenAtom);
   const developerModeEnabled = useAtomValue(developerModeEnabledAtom);
+  const reviewAgentEnabled = useAtomValue(reviewAgentFeatureEnabledAtom);
   const setSettingsDialogOpen = useSetAtom(settingsDialogOpenAtom);
   const sessionMetaCache = useAtomValue(sessionMetaCacheAtom);
   const workspaceId = useAtomValue(currentWorkspaceIdAtom);
@@ -221,6 +223,8 @@ export function MachineAgentSettings({
     useAtomValue(machineSettingsFilterAtom),
     useSetAtom(machineSettingsFilterAtom),
   ];
+  const [mobileMachinePickerOpen, setMobileMachinePickerOpen] = useState(false);
+  const [mobileReviewPolicyOpen, setMobileReviewPolicyOpen] = useState(false);
   const effectiveFilter = filter;
   const [desktopExpandedMachineId, setDesktopExpandedMachineId] = useState<MachineId | null>(
     selectedMachineId
@@ -341,7 +345,7 @@ export function MachineAgentSettings({
     [accessByMachineId, currentUserId, localMachineId]
   );
 
-  const { items: tabItems, totalBeforeFilter } = useMemo(() => {
+  const { items: tabItems } = useMemo(() => {
     return buildMachineTabItems({
       machines,
       accessByMachineId,
@@ -360,6 +364,12 @@ export function MachineAgentSettings({
       filter: { onlineOnly: false, mineOnly: false },
     }).items;
   }, [machines, accessByMachineId, onlineMachineIds, isOwnMachine]);
+  const machinePills = allItems.map((item) => ({
+    id: item.machine.id,
+    label: item.machine.name || item.machine.id,
+    online: item.isOnline,
+    private: !item.sharedWithTeam,
+  }));
   const localMachineItems = useMemo(
     () => (localMachineId ? allItems.filter((item) => item.machine.id === localMachineId) : []),
     [allItems, localMachineId]
@@ -481,14 +491,40 @@ export function MachineAgentSettings({
     visibleSelectedMachineId,
   ]);
 
+  useEffect(() => {
+    if (!isMobile || mode !== 'agents') return;
+    const selectableItems = remoteMachinesAvailable ? allItems : localMachineItems;
+    if (selectableItems.length === 0) return;
+    if (
+      selectedMachineId &&
+      selectableItems.some((item) => item.machine.id === selectedMachineId)
+    ) {
+      return;
+    }
+    onSelectedMachineChange(selectableItems[0]!.machine.id);
+  }, [
+    allItems,
+    isMobile,
+    localMachineItems,
+    mode,
+    onSelectedMachineChange,
+    remoteMachinesAvailable,
+    selectedMachineId,
+  ]);
+
   const resolvedSelectedMachine: MachineViewMeta | undefined = isMobile
-    ? mode !== 'agents' && !remoteMachinesAvailable
-      ? localMachineId
-        ? machines.get(localMachineId)
-        : undefined
-      : selectedMachineId
-        ? machines.get(selectedMachineId)
-        : undefined
+    ? mode === 'agents'
+      ? remoteMachinesAvailable
+        ? ((selectedMachineId ? machines.get(selectedMachineId) : undefined) ??
+          allItems[0]?.machine)
+        : localMachineItems[0]?.machine
+      : !remoteMachinesAvailable
+        ? localMachineId
+          ? machines.get(localMachineId)
+          : undefined
+        : selectedMachineId
+          ? machines.get(selectedMachineId)
+          : undefined
     : mode === 'machines' && remoteMachinesAvailable && visibleSelectedMachineId === null
       ? undefined
       : resolvedDesktopMachine;
@@ -552,7 +588,8 @@ export function MachineAgentSettings({
   const [dialogMode, setDialogMode] = useState<AgentConfigDialogMode | null>(null);
   // The provider dialog targets whichever machine's accordion row opened it,
   // decoupled from any single "selected machine" now that desktop lists them all.
-  const [dialogMachine, setDialogMachine] = useState<MachineViewMeta | null>(null);
+  const [dialogMachineId, setDialogMachineId] = useState<MachineId | null>(null);
+  const dialogMachine = dialogMachineId ? machines.get(dialogMachineId) : undefined;
   const dialogOpen = dialogMode !== null;
   const [latestCliVersion, setLatestCliVersion] = useState<string | null>(null);
 
@@ -682,31 +719,15 @@ export function MachineAgentSettings({
   }, [remoteMachinesAvailable]);
 
   const refreshCapabilities = useCallback(
-    async (args: {
-      machineId: MachineId;
-      configId: AgentConfigId;
-      cliType: AgentConfigCliType;
-      agentType: string;
-      customAcp?: CustomAcpLaunchSpec;
-      runtimeOverrides?: AgentConfigMeta['runtimeOverrides'];
-      env?: Record<string, string>;
-    }) => {
+    async (args: { machineId: MachineId; configId: AgentConfigId }) => {
       if (!runtime || !workspaceId) {
         throw new Error(t('chat.validation.missingContext', 'Missing workspace context'));
-      }
-      if (!args.agentType.trim()) {
-        throw new Error(t('agents.validation.missingAgentType', 'Agent type is required'));
       }
       const response = await runtime.requestMachineAcpCapabilitiesRefresh({
         type: 'machine/acp-capabilities-refresh',
         machineId: args.machineId,
         workspaceId,
         configId: args.configId,
-        cliType: args.cliType,
-        agentType: args.agentType as AgentType,
-        customAcp: args.customAcp,
-        runtimeOverrides: args.runtimeOverrides,
-        env: args.env,
       });
       if (!response) {
         throw new Error(
@@ -726,7 +747,11 @@ export function MachineAgentSettings({
       // The CLI wrote the fresh capabilities to the machine flock doc, which the
       // web only syncs once per session; force a re-sync so chat landing and the
       // settings dialog reflect the new modes/models without a reload.
-      await resyncMachineFlockRows(runtime, args.machineId);
+      await resyncMachineFlockRows(runtime, args.machineId, {
+        refreshedCapability: response.capability
+          ? { configId: response.configId, value: response.capability }
+          : undefined,
+      });
       return response;
     },
     [runtime, t, workspaceId]
@@ -848,11 +873,6 @@ export function MachineAgentSettings({
       await refreshCapabilities({
         machineId: config.machineId,
         configId: config.id,
-        cliType: config.cliType,
-        agentType: config.agentType,
-        customAcp: config.customAcp,
-        runtimeOverrides: config.runtimeOverrides,
-        env: config.env,
       });
     },
     [refreshCapabilities]
@@ -861,18 +881,18 @@ export function MachineAgentSettings({
   const { checkBinaryStatus, installBinary } = useMachineAcpBinaryActions(runtime, workspaceId);
 
   const openCreateDialog = useCallback((machine: MachineViewMeta) => {
-    setDialogMachine(machine);
+    setDialogMachineId(machine.id);
     setDialogMode({ kind: 'create' });
   }, []);
 
   const openEditDialog = useCallback((machine: MachineViewMeta, config: AgentConfigMeta) => {
-    setDialogMachine(machine);
+    setDialogMachineId(machine.id);
     setDialogMode({ kind: 'edit', config });
   }, []);
 
   const handleDialogSubmit = useCallback(
     async (payload: AgentConfigSubmitPayload) => {
-      if (!dialogMachine || !dialogMode) return;
+      if (!dialogMachineId || !dialogMode) return;
       try {
         if (dialogMode.kind === 'create') {
           const config: AgentConfigMeta = {
@@ -887,7 +907,7 @@ export function MachineAgentSettings({
             prompt: payload.prompt,
             titleGeneration: payload.titleGeneration,
             brandId: payload.brandId,
-            machineId: dialogMachine.id,
+            machineId: dialogMachineId,
           };
           if (payload.backgroundSetup) {
             await createSetup(config);
@@ -920,7 +940,7 @@ export function MachineAgentSettings({
         throw error;
       }
     },
-    [dialogMachine, dialogMode, createConfig, createSetup, updateConfig, t]
+    [dialogMachineId, dialogMode, createConfig, createSetup, updateConfig, t]
   );
 
   const handleRetrySetup = useCallback(
@@ -965,7 +985,7 @@ export function MachineAgentSettings({
 
   const banner = showBanner ? (
     <div className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+      <Spinner className="h-3.5 w-3.5" />
       {t('settings.agent.migration.banner', 'Upgrading agent configs to be per-machine…')}
     </div>
   ) : null;
@@ -982,6 +1002,12 @@ export function MachineAgentSettings({
         machine={dialogMachine}
         onSubmit={handleDialogSubmit}
         onRefreshCapabilities={refreshCapabilities}
+        onScanPiExtensions={
+          runtime
+            ? ({ machineId, configId }) =>
+                runtime.requestMachinePiExtensions(machineId, { configId })
+            : undefined
+        }
         onCheckBinaryStatus={checkBinaryStatus}
         onInstallBinary={installBinary}
       />
@@ -990,7 +1016,7 @@ export function MachineAgentSettings({
   if (isLoading && !hasMachines) {
     return (
       <div className="flex h-full items-center justify-center gap-2 p-4 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" />
+        <Spinner className="h-4 w-4" />
         {t('workspace.machines.loadingVisibility', 'Loading machines')}
       </div>
     );
@@ -1004,8 +1030,157 @@ export function MachineAgentSettings({
     );
   }
 
-  // Mobile: detail-only when a machine is selected, else list-only.
+  // Mobile Agents keeps machine selection and providers on one page. Machines
+  // retains its list → detail navigation because the detail owns device controls.
   if (isMobile) {
+    if (mode === 'agents') {
+      return (
+        <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-y-auto">
+          {banner ? <div className="px-3 pt-3">{banner}</div> : null}
+          <div className="flex flex-col pb-4">
+            {remoteMachinesAvailable && resolvedSelectedMachine ? (
+              <MobileSettingsSection title={t('settings.tabs.machines', 'Machines')}>
+                <MobileSettingsRow
+                  label={
+                    <div className="flex min-w-0 items-center gap-2.5">
+                      <span
+                        aria-hidden
+                        className={cn(
+                          'h-2 w-2 shrink-0 rounded-full',
+                          selectedIsOnline ? 'bg-status-success' : 'bg-muted-foreground/35'
+                        )}
+                      />
+                      <span className="truncate text-[0.95rem] font-normal leading-tight">
+                        {resolvedSelectedMachine.name || resolvedSelectedMachine.id}
+                      </span>
+                    </div>
+                  }
+                  helper={
+                    <span>
+                      {selectedIsOnline
+                        ? t('workspace.machines.online', 'Online')
+                        : t('workspace.machines.offline', 'Offline')}
+                      {isLocal ? ` · ${t('workspace.machines.thisDevice', 'This device')}` : ''}
+                    </span>
+                  }
+                  onClick={() => setMobileMachinePickerOpen(true)}
+                  trailing={<ChevronRight className="h-4 w-4" />}
+                />
+              </MobileSettingsSection>
+            ) : null}
+            {resolvedSelectedMachine ? (
+              <MachineProvidersSection
+                key={resolvedSelectedMachine.id}
+                variant="mobile-list"
+                machine={resolvedSelectedMachine}
+                configs={configsForMachine}
+                setups={setupsForMachine}
+                onAddConfig={() => openCreateDialog(resolvedSelectedMachine)}
+                onEditConfig={(config) => openEditDialog(resolvedSelectedMachine, config)}
+                onDeleteConfig={handleDeleteConfig}
+                onRefreshConfig={handleRefreshConfig}
+                onRetrySetup={handleRetrySetup}
+                onDeleteSetup={handleDeleteSetup}
+              />
+            ) : null}
+            {reviewAgentEnabled ? (
+              <MobileSettingsSection>
+                <MobileSettingsRow
+                  label={t('settings.review.title', 'Review agent')}
+                  helper={t(
+                    'settings.review.machineConfigHelper',
+                    'Choose the reviewer used by sessions on each machine.'
+                  )}
+                  onClick={() => setMobileReviewPolicyOpen(true)}
+                  trailing={<ChevronRight className="h-4 w-4" />}
+                />
+              </MobileSettingsSection>
+            ) : null}
+          </div>
+          {remoteMachinesAvailable ? (
+            <Drawer open={mobileMachinePickerOpen} onOpenChange={setMobileMachinePickerOpen}>
+              <DrawerContent className="max-h-[80dvh]! rounded-t-2xl border-border/60">
+                <DrawerTitle className="px-4 pb-1 pt-3 text-center text-[0.95rem]">
+                  {t('settings.tabs.machines', 'Machines')}
+                </DrawerTitle>
+                <DrawerDescription className="sr-only">
+                  {t('settings.agent.machineTabs.selectPromptAgent', 'Select a machine.')}
+                </DrawerDescription>
+                <div className="min-h-0 overflow-y-auto px-3 pb-[calc(12px+max(0px,var(--safe-area-bottom,0px)))] pt-2">
+                  <div className="overflow-hidden rounded-2xl border border-border/60 bg-card">
+                    {allItems.map((item, index) => {
+                      const selected = item.machine.id === resolvedSelectedMachine?.id;
+                      const itemIsLocal = item.machine.id === localMachineId;
+                      return (
+                        <button
+                          key={item.machine.id}
+                          type="button"
+                          className={cn(
+                            'flex w-full items-center gap-3 px-4 py-3 text-left transition-colors active:bg-muted/40',
+                            index > 0 && 'border-t border-border'
+                          )}
+                          onClick={() => {
+                            onSelectedMachineChange(item.machine.id);
+                            setMobileMachinePickerOpen(false);
+                          }}
+                        >
+                          <span
+                            aria-hidden
+                            className={cn(
+                              'h-2 w-2 shrink-0 rounded-full',
+                              item.isOnline ? 'bg-status-success' : 'bg-muted-foreground/35'
+                            )}
+                          />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-[0.95rem] font-normal">
+                              {item.machine.name || item.machine.id}
+                            </span>
+                            <span className="mt-0.5 block truncate text-[0.78rem] text-muted-foreground">
+                              {item.isOnline
+                                ? t('workspace.machines.online', 'Online')
+                                : t('workspace.machines.offline', 'Offline')}
+                              {itemIsLocal
+                                ? ` · ${t('workspace.machines.thisDevice', 'This device')}`
+                                : ''}
+                              {!item.sharedWithTeam
+                                ? ` · ${t('workspace.machines.private', 'Private')}`
+                                : ''}
+                            </span>
+                          </span>
+                          <span className="flex h-5 w-5 shrink-0 items-center justify-center text-primary">
+                            {selected ? <Check className="h-4 w-4" /> : null}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </DrawerContent>
+            </Drawer>
+          ) : null}
+          {reviewAgentEnabled ? (
+            <Drawer open={mobileReviewPolicyOpen} onOpenChange={setMobileReviewPolicyOpen}>
+              <DrawerContent className="h-[88dvh]! max-h-[88dvh]! rounded-t-2xl border-border/60">
+                <DrawerTitle className="px-4 pb-1 pt-3 text-center text-[0.95rem]">
+                  {t('settings.review.title', 'Review agent')}
+                </DrawerTitle>
+                <DrawerDescription className="sr-only">
+                  {t(
+                    'settings.review.machineConfigHelper',
+                    'Choose the reviewer used by sessions on each machine.'
+                  )}
+                </DrawerDescription>
+                <div className="min-h-0 flex-1 overflow-y-auto pb-[calc(12px+max(0px,var(--safe-area-bottom,0px)))]">
+                  {mobileReviewPolicyOpen ? <ReviewPolicySection /> : null}
+                </div>
+              </DrawerContent>
+            </Drawer>
+          ) : null}
+          {dialog}
+        </div>
+      );
+    }
+
     if (resolvedSelectedMachine) {
       return (
         <div className="flex h-full min-h-0 w-full min-w-0 flex-col">
@@ -1013,8 +1188,8 @@ export function MachineAgentSettings({
           <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             <MachineDetailPane
               key={resolvedSelectedMachine.id}
-              mode={mode === 'agents' ? 'agents' : 'devices'}
-              readOnly={mode === 'machines' && !isOwn}
+              mode="devices"
+              readOnly={!isOwn}
               machine={resolvedSelectedMachine}
               configs={configsForMachine}
               setups={setupsForMachine}
@@ -1022,13 +1197,11 @@ export function MachineAgentSettings({
               isLocal={isLocal}
               ownerName={ownerName}
               sharedWithTeam={sharedWithTeam}
-              canDelete={mode === 'machines' && isOwn && selectedCanDelete}
+              canDelete={isOwn && selectedCanDelete}
               onRename={actions.renameMachine}
               onDelete={actions.deleteMachine}
               onSharedWithTeamChange={
-                mode === 'machines' && isOwn && teamSharingAvailable
-                  ? actions.setSharedWithTeam
-                  : undefined
+                isOwn && teamSharingAvailable ? actions.setSharedWithTeam : undefined
               }
               onAddConfig={() => openCreateDialog(resolvedSelectedMachine)}
               onEditConfig={(config) => openEditDialog(resolvedSelectedMachine, config)}
@@ -1036,41 +1209,31 @@ export function MachineAgentSettings({
               onRefreshConfig={handleRefreshConfig}
               onRetrySetup={handleRetrySetup}
               onDeleteSetup={handleDeleteSetup}
-              onPing={
-                mode === 'machines' && isOwn && developerModeEnabled ? pingMachine : undefined
-              }
-              daemonUpdate={mode === 'machines' && isOwn ? selectedDaemonUpdate : undefined}
-              onRestartDaemon={
-                mode === 'machines' && isOwn && selectedCanRemoteRestart
-                  ? restartMachine
-                  : undefined
-              }
-              onUpgradeDaemon={
-                mode === 'machines' && isOwn && selectedDaemonUpdate ? upgradeMachine : undefined
-              }
+              onPing={isOwn && developerModeEnabled ? pingMachine : undefined}
+              daemonUpdate={isOwn ? selectedDaemonUpdate : undefined}
+              onRestartDaemon={isOwn && selectedCanRemoteRestart ? restartMachine : undefined}
+              onUpgradeDaemon={isOwn && selectedDaemonUpdate ? upgradeMachine : undefined}
               monitorSnapshot={machineMonitor.snapshot}
               monitorState={machineMonitor.state}
               monitorSessionMetas={monitorSessionMetas}
               onOpenMonitorSession={openMonitorSession}
               onTerminateMonitorSession={
-                mode === 'machines' && isOwn
+                isOwn
                   ? (monitoredSession) =>
                       terminateMonitorSession(resolvedSelectedMachine, monitoredSession)
                   : undefined
               }
               footer={
-                mode === 'machines' ? (
-                  <MachineConnectedResources
-                    machineId={resolvedSelectedMachine.id}
-                    configs={configsForMachine}
-                    preloadedProjects={
-                      connectedProjectsByMachineId.get(resolvedSelectedMachine.id) ?? []
-                    }
-                    projectsLoading={visibleLocalProjectsLoading}
-                    readOnly={!isOwn}
-                    onManageAgents={() => openAgentsForMachine(resolvedSelectedMachine.id)}
-                  />
-                ) : undefined
+                <MachineConnectedResources
+                  machineId={resolvedSelectedMachine.id}
+                  configs={configsForMachine}
+                  preloadedProjects={
+                    connectedProjectsByMachineId.get(resolvedSelectedMachine.id) ?? []
+                  }
+                  projectsLoading={visibleLocalProjectsLoading}
+                  readOnly={!isOwn}
+                  onManageAgents={() => openAgentsForMachine(resolvedSelectedMachine.id)}
+                />
               }
             />
           </div>
@@ -1082,33 +1245,26 @@ export function MachineAgentSettings({
       <div className="flex h-full min-h-0 w-full min-w-0 flex-col gap-3 p-3">
         {banner}
         <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-2">
-          <div className={mode === 'agents' ? 'h-[42vh] min-h-56 shrink-0' : 'min-h-0 flex-1'}>
+          <div className="min-h-0 flex-1">
             <MachineTabList
               variant="detailed"
-              items={mode === 'agents' ? tabItems : filteredModeItems}
+              items={filteredModeItems}
               selectedMachineId={null}
               onSelect={(machineId) => onSelectedMachineChange(machineId)}
               filter={effectiveFilter}
               onFilterChange={setFilter}
-              totalBeforeFilter={mode === 'agents' ? totalBeforeFilter : modeTotalBeforeFilter}
+              totalBeforeFilter={modeTotalBeforeFilter}
               showFilter
-              showOwner={mode === 'machines'}
+              showOwner
               ownerByUserId={machineOwnerMap}
             />
           </div>
-          {mode === 'machines' ? (
-            <OwnPrivateMachines
-              items={ownPrivateItems}
-              expanded={ownPrivateExpanded}
-              onExpandedChange={setOwnPrivateExpanded}
-              onOpen={openPrivateMachine}
-            />
-          ) : null}
-          {mode === 'agents' ? (
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              <ReviewPolicySection />
-            </div>
-          ) : null}
+          <OwnPrivateMachines
+            items={ownPrivateItems}
+            expanded={ownPrivateExpanded}
+            onExpandedChange={setOwnPrivateExpanded}
+            onOpen={openPrivateMachine}
+          />
         </div>
       </div>
     );
@@ -1135,7 +1291,7 @@ export function MachineAgentSettings({
   const header = (
     <div className="min-w-0">
       <div className="flex items-center gap-1.5">
-        <h2 className="text-base font-semibold text-foreground">{title}</h2>
+        <h2 className="text-base font-normal text-foreground">{title}</h2>
         {mode === 'machines' && remoteMachinesAvailable ? (
           <MachineListFilterButton filter={effectiveFilter} onFilterChange={setFilter} />
         ) : null}
@@ -1319,7 +1475,7 @@ export function MachineAgentSettings({
           <section className="space-y-3 pt-3">
             <div className="px-1">
               <div className="flex items-center gap-2">
-                <h3 className="text-sm font-semibold text-foreground">
+                <h3 className="text-sm font-normal text-foreground">
                   {t('settings.machines.yourPrivateMachines', 'Your private machines')}
                 </h3>
                 <span className="text-xs tabular-nums text-muted-foreground">
@@ -1340,13 +1496,6 @@ export function MachineAgentSettings({
       </div>
     );
   }
-
-  const machinePills = allItems.map((item) => ({
-    id: item.machine.id,
-    label: item.machine.name || item.machine.id,
-    online: item.isOnline,
-    private: !item.sharedWithTeam,
-  }));
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-4">
@@ -1411,7 +1560,7 @@ function OwnPrivateMachines({
         ) : (
           <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         )}
-        <span className="min-w-0 flex-1 text-xs font-medium">
+        <span className="min-w-0 flex-1 text-xs font-normal">
           {t('settings.machines.yourPrivateMachines', 'Your private machines')}
         </span>
         <span className="text-[11px] text-muted-foreground">{items.length}</span>

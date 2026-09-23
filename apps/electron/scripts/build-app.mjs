@@ -10,21 +10,25 @@ const nodeOptions = /--max[-_]old[-_]space[-_]size(?:=|\s|$)/u.test(inheritedNod
   ? inheritedNodeOptions
   : `${inheritedNodeOptions} --max-old-space-size=8192`.trim()
 
-const result = spawnSync(process.execPath, [electronViteEntry, 'build', '--mode', 'oss'], {
-  cwd: electronDir,
-  env: {
-    ...process.env,
-    NODE_OPTIONS: nodeOptions
-  },
-  stdio: 'inherit'
-})
+function run(entry, args) {
+  const result = spawnSync(process.execPath, [entry, ...args], {
+    cwd: electronDir,
+    env: {
+      ...process.env,
+      NODE_OPTIONS: nodeOptions
+    },
+    stdio: 'inherit'
+  })
 
-if (result.error) {
-  throw result.error
+  if (result.error) {
+    throw result.error
+  }
+
+  if (result.signal) {
+    throw new Error(`Electron application build terminated by ${result.signal}`)
+  }
+
+  if (result.status !== 0) process.exit(result.status ?? 1)
 }
 
-if (result.signal) {
-  throw new Error(`Electron renderer build terminated by ${result.signal}`)
-}
-
-process.exit(result.status ?? 1)
+run(electronViteEntry, ['build', '--mode', 'oss'])

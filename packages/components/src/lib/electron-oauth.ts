@@ -148,13 +148,21 @@ export function buildElectronWebLoginCallbackUrl(
   return isAbsolute ? url.toString() : `${url.pathname}${url.search}`;
 }
 
-export function redirectToElectronWithAuthorizationCode(
-  authorizationCode: string,
-  state: string
-): void {
+// Navigates to an already-built `lody://auth/callback#token=…` URL. Callers that
+// show the same URL as a clickable fallback link build it once with
+// `buildElectronRedirectUrl` and pass it here, so the automatic attempt and the
+// link the user can click carry the identical authorization payload.
+export function redirectToElectronDeepLink(deepLinkUrl: string): void {
   if (typeof window === 'undefined') {
     return;
   }
 
-  window.location.replace(buildElectronRedirectUrl(authorizationCode, state));
+  window.location.replace(deepLinkUrl);
+}
+
+export function redirectToElectronWithAuthorizationCode(
+  authorizationCode: string,
+  state: string
+): void {
+  redirectToElectronDeepLink(buildElectronRedirectUrl(authorizationCode, state));
 }

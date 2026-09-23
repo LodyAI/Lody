@@ -5,7 +5,6 @@ import {
   getScheduleRoomId,
   getServerNow,
   getSessionRoomId,
-  getTaskIndexFlockDocId,
   isLoroRepoDocDeleted,
   ScheduleRepository,
   scheduleDefinitionFingerprint,
@@ -21,7 +20,9 @@ import {
   type MachineMeta,
   type AgentConfigId,
   hasExplicitSchedulePermission,
+  hasPendingUserTurnActivation,
 } from '@lody/shared';
+import { readSessionHistory } from '@lody/shared/session-data';
 import type { AuthContext } from '../command-runtime';
 import type { WorkspaceSummary } from '../workspace';
 import type { LoroDocumentManager } from '../loro/doc';
@@ -34,8 +35,6 @@ import {
   scheduleDestinationSessionId,
   scheduleRequiredLocalProjectId,
 } from './schedule-run-preparation';
-import { readTaskIndexRowsForWorkspace } from '../task-automation/task-automation-scheduler';
-import { hasPendingUserTurnActivation } from '@/session/session-dispatch-logic';
 import { AgentExecutionSlots } from '../agent-execution-slots';
 import { readMergedAgentConfigById } from '../agent-config-machine-flock';
 import {
@@ -67,7 +66,6 @@ export async function createScheduleWorkspace(args: {
   const repository = new ScheduleRepository(manager.repo, workspaceId);
   const store = new ScheduleStore<PreparedSessionInput>();
   const registry = await manager.repo.openFlockDoc(getScheduleRegistryFlockDocId(workspaceId));
-  const taskIndex = await manager.repo.openFlockDoc(getTaskIndexFlockDocId(workspaceId));
   const subscriptions: RepoRoomSubscription[] = [];
   const cleanups: (() => void)[] = [];
   let disposed = false;
@@ -220,7 +218,7 @@ export async function createScheduleWorkspace(args: {
         return false;
       const session = await manager.getOrCreateSessionDoc(id);
       if ((await session.getMessageQueue()).length) return false;
-      const history = await session.getHistory();
+      const history = readSessionHistory(session.sessionData.history);
       return (
         !args.hasSessionWork(id) &&
         history.some(
@@ -271,16 +269,9 @@ export async function createScheduleWorkspace(args: {
       ),
   });
   engine.restoreOccupancy();
-  slots.replaceTaskOccupancy(
-    await readTaskIndexRowsForWorkspace(manager.repo, workspaceId),
-    auth.userId
-  );
 
   const pass = async (): Promise<void> => {
     if (disposed) return;
-    const tasks = await readTaskIndexRowsForWorkspace(manager.repo, workspaceId);
-    if (disposed) return;
-    slots.replaceTaskOccupancy(tasks, auth.userId);
     if (isReady() && !disabled) {
       const rows = await repository.list();
       for (const entry of registry.flock.scan({ prefix: ['manual'] })) {
@@ -340,26 +331,20 @@ export async function createScheduleWorkspace(args: {
   const wake = (): void => {
     void evaluate().catch(() => args.logger.warn('[schedules] wake failed'));
   };
-  cleanups.push(
-    registry.flock.subscribe(wake),
-    taskIndex.flock.subscribe(wake),
-    slots.subscribe(wake)
-  );
+  cleanups.push(registry.flock.subscribe(wake), slots.subscribe(wake));
 
   // One short timer is also the wake-from-sleep clock check. No per-Schedule
   // timer survives a definition edit, and evaluation coalesces in the engine.
   const timer = setInterval(wake, 15_000);
   timer.unref();
-  for (const handle of [registry, taskIndex]) {
-    const sub = await handle.joinRoom();
-    subscriptions.push(sub);
-    if (handle === registry && !args.localOnly) {
-      const binding = streamsRoomBinding(sub);
-      cloudGate = createScheduleSyncGate(binding, wake, () =>
-        args.logger.warn('[schedules] Registry synchronization pending')
-      );
-      cleanups.push(cloudGate.dispose);
-    }
+  const registrySubscription = await registry.joinRoom();
+  subscriptions.push(registrySubscription);
+  if (!args.localOnly) {
+    const binding = streamsRoomBinding(registrySubscription);
+    cloudGate = createScheduleSyncGate(binding, wake, () =>
+      args.logger.warn('[schedules] Registry synchronization pending')
+    );
+    cleanups.push(cloudGate.dispose);
   }
   wake();
   return {

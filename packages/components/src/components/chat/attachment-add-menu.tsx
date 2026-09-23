@@ -115,7 +115,7 @@ export function AttachmentAddMenu({
             'data-[state=open]:bg-hover data-[state=open]:text-foreground'
           )}
         >
-          <Plus strokeWidth={1.5} className={isMobile ? 'size-6' : 'size-5'} />
+          <Plus strokeWidth={1.5} className={isMobile ? 'size-6' : 'size-4'} />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent

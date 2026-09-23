@@ -83,7 +83,7 @@ export function MachinePills({
               className={cn(
                 'flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs transition-colors',
                 selected
-                  ? 'border-transparent bg-secondary font-medium text-secondary-foreground'
+                  ? 'border-transparent bg-secondary font-normal text-secondary-foreground'
                   : 'border-border/60 text-muted-foreground hover:bg-hover/50 hover:text-foreground'
               )}
             >
@@ -100,7 +100,14 @@ export function MachinePills({
                   )}
                 />
               ) : null}
-              <span className="whitespace-nowrap">{pill.label}</span>
+              <span className="max-w-[9.5rem] truncate" title={pill.label}>
+                {pill.label}
+              </span>
+              {selected && pill.online === false ? (
+                <span className="text-[10px] font-normal text-muted-foreground">
+                  {t('workspace.machines.offline', 'Offline')}
+                </span>
+              ) : null}
               {pill.private ? (
                 <span className="text-[10px] font-normal text-muted-foreground/70">
                   {t('workspace.machines.private', 'Private')}

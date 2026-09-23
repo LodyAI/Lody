@@ -18,6 +18,7 @@ import type { SessionManager } from '../src/session/session-manager';
 import type { Logger } from '../src/utils/logger';
 import { loadEnv } from '../src/utils/const';
 import { createTestCloudPort } from './test-cloud-port';
+import { isSessionContextCompacting } from '../../../packages/components/src/lib/session-context-compaction';
 
 const createSilentLogger = (): Logger => ({
   info: () => {},
@@ -143,6 +144,63 @@ const createHandlerHarness = async (sessionIds: SessionId[]) => {
 };
 
 describe('MessageHandler ACP batching', () => {
+  it('isolates a malformed tool notification and continues flushing valid output', async () => {
+    const sessionId = 'poison-session' as SessionId;
+    const { repo, docs, handler } = await createHandlerHarness([sessionId]);
+    const doc = docs.get(sessionId);
+    if (!doc) throw new Error('Missing synthetic doc');
+    const host = handler as unknown as {
+      beginConversationTurn(id: SessionId): string;
+      enqueueACPUpdate(id: SessionId, update: AcpSessionNotification): void;
+      flushACPUpdatesNow(id: SessionId): Promise<void>;
+      store: { get(id: SessionId): { acpUpdateBuffer: unknown[] } };
+    };
+    try {
+      host.beginConversationTurn(sessionId);
+      const text = (value: string): AcpSessionNotification => ({
+        sessionId,
+        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: value } },
+      });
+      host.enqueueACPUpdate(sessionId, text('before'));
+      host.enqueueACPUpdate(sessionId, {
+        sessionId,
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'bad-tool',
+          title: 'Synthetic',
+          kind: 'execute',
+          status: 'in_progress',
+          content: [{ type: 'content', content: { type: 'text', text: 42 } }],
+        },
+      } as unknown as AcpSessionNotification);
+      host.enqueueACPUpdate(sessionId, {
+        sessionId,
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'bad-location',
+          title: 'Synthetic',
+          kind: 'other',
+          status: 'in_progress',
+          locations: [{ path: 'synthetic.ts', line: 'invalid' }],
+        },
+      } as unknown as AcpSessionNotification);
+      host.enqueueACPUpdate(sessionId, text('after'));
+      await host.flushACPUpdatesNow(sessionId);
+      expect(host.store.get(sessionId).acpUpdateBuffer).toEqual([]);
+      expect(readItems((await doc.sessionData.history.readAll())[0])).toEqual([
+        { type: 'text', text: 'beforeafter' },
+      ]);
+      host.enqueueACPUpdate(sessionId, text('later'));
+      await host.flushACPUpdatesNow(sessionId);
+      expect(readItems((await doc.sessionData.history.readAll())[0])).toEqual([
+        { type: 'text', text: 'beforeafterlater' },
+      ]);
+      expect(host.store.get(sessionId).acpUpdateBuffer).toEqual([]);
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
   beforeEach(() => {
     vi.useFakeTimers();
     process.env.LODY_SERVER_URL = 'https://server.example.test';
@@ -201,7 +259,7 @@ describe('MessageHandler ACP batching', () => {
 
       expect(workspaceDocument.getOrCreateSessionDoc).toHaveBeenCalledTimes(1);
 
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
       const entry = history[0];
       const items = readItems(entry);
       expect(items).toEqual([{ type: 'text', text: 'hello world' }]);
@@ -250,7 +308,7 @@ describe('MessageHandler ACP batching', () => {
       await vi.advanceTimersByTimeAsync(15);
       expect(workspaceDocument.getOrCreateSessionDoc).toHaveBeenCalledTimes(2);
 
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
       expect(readItems(history[0])).toEqual([{ type: 'text', text: 'hello again' }]);
     } finally {
       await destroyRepoOnRealTimers(repo);
@@ -286,7 +344,7 @@ describe('MessageHandler ACP batching', () => {
       await host.finalizeACPState(sessionId);
 
       const callCountAfterFinalize = workspaceDocument.getOrCreateSessionDoc.mock.calls.length;
-      const historyAfterFinalize = await doc.getHistory();
+      const historyAfterFinalize = await doc.sessionData.history.readAll();
       const entryAfterFinalize = historyAfterFinalize[0] as
         | (SessionHistoryInput & { finished?: boolean; endedAt?: number })
         | undefined;
@@ -299,8 +357,98 @@ describe('MessageHandler ACP batching', () => {
 
       expect(workspaceDocument.getOrCreateSessionDoc).toHaveBeenCalledTimes(callCountAfterFinalize);
 
-      const historyAfterTimerDrain = await doc.getHistory();
+      const historyAfterTimerDrain = await doc.sessionData.history.readAll();
       expect(readItems(historyAfterTimerDrain[0])).toEqual([{ type: 'text', text: 'pending' }]);
+    } finally {
+      await destroyRepoOnRealTimers(repo);
+    }
+  });
+
+  it('settles an open compaction across finalization, reload, and later activity', async () => {
+    vi.useRealTimers();
+    const sessionId = 'compaction-lifecycle' as SessionId;
+    const { repo, docs, handler } = await createHandlerHarness([sessionId]);
+    const doc = docs.get(sessionId);
+    if (!doc) throw new Error(`Missing session doc for ${sessionId}`);
+    const host = handler as unknown as {
+      beginConversationTurn(sessionId: SessionId): string;
+      enqueueACPUpdate(sessionId: SessionId, update: AcpSessionNotification): void;
+      flushACPUpdatesNow(sessionId: SessionId): Promise<void>;
+      finalizeACPState(sessionId: SessionId, turnId?: string): Promise<void>;
+    };
+    const findCompaction = (history: SessionHistoryInput[], toolCallId: string) =>
+      history
+        .flatMap((entry) => readItems(entry))
+        .find(
+          (item) =>
+            item.type === 'tool_call' &&
+            item.activityKind === 'context_compaction' &&
+            item.toolCallId === toolCallId
+        );
+
+    try {
+      const turnId = host.beginConversationTurn(sessionId);
+      host.enqueueACPUpdate(sessionId, {
+        sessionId,
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'compact-1',
+          title: 'Context compacting',
+          status: 'in_progress',
+          _meta: { contextCompaction: true },
+        },
+      });
+      await host.flushACPUpdatesNow(sessionId);
+      expect(isSessionContextCompacting(await doc.sessionData.history.readAll())).toBe(true);
+
+      // Nothing after the turn boundary can carry `compact-1` to a terminal
+      // status, so finalization owns it: the durable record must not reload as
+      // a compaction that is still running. Repeating the call is a no-op.
+      await host.finalizeACPState(sessionId, turnId);
+      await host.finalizeACPState(sessionId, turnId);
+
+      const reopened = new SessionDocument(repo, sessionId, async () => {});
+      await reopened.initOffline({ history: [] });
+      const reloadedHistory = await reopened.sessionData.history.readAll();
+      const reloadedTurn = reloadedHistory.find((entry) => entry.id === turnId);
+      expect(reloadedTurn?.finished).toBe(true);
+      expect(findCompaction(reloadedHistory, 'compact-1')).toMatchObject({ status: 'failed' });
+      expect(isSessionContextCompacting(reloadedHistory)).toBe(false);
+
+      host.enqueueACPUpdate(sessionId, {
+        sessionId,
+        update: {
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'compact-1',
+          status: 'completed',
+          _meta: { contextCompaction: true },
+        },
+      });
+      await host.flushACPUpdatesNow(sessionId);
+      const completedHistory = await doc.sessionData.history.readAll();
+      const completedCompaction = findCompaction(completedHistory, 'compact-1');
+      expect(completedCompaction).toMatchObject({ status: 'completed' });
+      if (!completedCompaction || completedCompaction.type !== 'tool_call') {
+        throw new Error('Missing completed context compaction');
+      }
+      expect(isSessionContextCompacting(completedHistory)).toBe(false);
+
+      const nextTurnId = host.beginConversationTurn(sessionId);
+      host.enqueueACPUpdate(sessionId, {
+        sessionId,
+        update: {
+          sessionUpdate: 'tool_call',
+          toolCallId: 'compact-2',
+          title: 'Context compacting',
+          status: 'in_progress',
+          _meta: { contextCompaction: true },
+        },
+      });
+      await host.flushACPUpdatesNow(sessionId);
+      const nextHistory = await doc.sessionData.history.readAll();
+      expect(nextTurnId).not.toBe(turnId);
+      expect(findCompaction(nextHistory, 'compact-2')).toMatchObject({ status: 'in_progress' });
+      expect(isSessionContextCompacting(nextHistory)).toBe(true);
     } finally {
       await destroyRepoOnRealTimers(repo);
     }
@@ -331,15 +479,20 @@ describe('MessageHandler ACP batching', () => {
       });
 
       // Agents keep emitting briefly after cancel: land one update in the
-      // finalization tail — after the drain flushed 'pending' (1st history
-      // write) and the finished marker was stamped (2nd write), but before the
-      // turn state is cleared. Wiping the buffer at turn clear used to drop it.
-      const originalUpdateHistory = doc.updateHistory.bind(doc);
-      let historyWrites = 0;
-      doc.updateHistory = (async (mutator: Parameters<typeof originalUpdateHistory>[0]) => {
+      // finalization tail — after the drain flushed 'pending' (through the
+      // session-data command) and the finished marker was stamped (the first
+      // whole-history write), but before the turn state is cleared. Wiping the
+      // buffer at turn clear used to drop it.
+      const originalUpdateHistory = doc.sessionData.commands.applyHistoryAction.bind(
+        doc.sessionData.commands
+      );
+      let finalizedWrites = 0;
+      doc.sessionData.commands.applyHistoryAction = (async (
+        mutator: Parameters<typeof originalUpdateHistory>[0]
+      ) => {
         const result = await originalUpdateHistory(mutator);
-        historyWrites += 1;
-        if (historyWrites === 2) {
+        finalizedWrites += 1;
+        if (finalizedWrites === 1) {
           host.enqueueACPUpdate(sessionId, {
             sessionId,
             update: {
@@ -349,13 +502,13 @@ describe('MessageHandler ACP batching', () => {
           });
         }
         return result;
-      }) as typeof doc.updateHistory;
+      }) as typeof doc.sessionData.commands.applyHistoryAction;
 
       await host.finalizeACPState(sessionId);
 
       await vi.advanceTimersByTimeAsync(250);
 
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
       expect(readItems(history[0])).toEqual([{ type: 'text', text: 'pending tail' }]);
     } finally {
       await destroyRepoOnRealTimers(repo);
@@ -415,8 +568,8 @@ describe('MessageHandler ACP batching', () => {
         throw new Error('Missing session docs for multi-session batching test');
       }
 
-      const firstHistory = await firstDoc.getHistory();
-      const secondHistory = await secondDoc.getHistory();
+      const firstHistory = await firstDoc.sessionData.history.readAll();
+      const secondHistory = await secondDoc.sessionData.history.readAll();
 
       expect(readItems(firstHistory[0])).toEqual([{ type: 'text', text: 'alpha one' }]);
       expect(readItems(secondHistory[0])).toEqual([{ type: 'text', text: 'beta two' }]);
@@ -473,7 +626,7 @@ describe('MessageHandler ACP batching', () => {
       await host.flushACPUpdatesNow(sessionId);
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
       const items = readItems(history[0]);
       expect(items).toEqual([
         {
@@ -551,15 +704,19 @@ describe('MessageHandler ACP batching', () => {
         uploadedAt: 123,
         downloadUrl: 'https://server.example.test/api/files/file-retried',
       });
-    const originalUpdateHistory = doc.updateHistory.bind(doc);
+    const originalUpdateHistory = doc.sessionData.commands.applyHistoryAction.bind(
+      doc.sessionData.commands
+    );
     let historyWrites = 0;
-    doc.updateHistory = (async (mutator: Parameters<typeof originalUpdateHistory>[0]) => {
+    doc.sessionData.commands.applyHistoryAction = (async (
+      mutator: Parameters<typeof originalUpdateHistory>[0]
+    ) => {
       historyWrites += 1;
       if (historyWrites === 2) {
         throw new Error('transient history write failure');
       }
       return await originalUpdateHistory(mutator);
-    }) as typeof doc.updateHistory;
+    }) as typeof doc.sessionData.commands.applyHistoryAction;
 
     try {
       const host = handler as unknown as {
@@ -597,7 +754,7 @@ describe('MessageHandler ACP batching', () => {
       await host.flushACPUpdatesNow(sessionId);
 
       expect(uploadFileMock).toHaveBeenCalledTimes(1);
-      const items = readItems((await doc.getHistory())[0]);
+      const items = readItems((await doc.sessionData.history.readAll())[0]);
       expect(items.map((item) => item.type)).toEqual(['text', 'file', 'text']);
       expect(items[0]).toEqual({ type: 'text', text: 'before ' });
       expect(items[1]).toMatchObject({
@@ -666,7 +823,9 @@ describe('MessageHandler ACP batching', () => {
         { content: 'Latest', priority: 'high', status: 'in_progress' },
       ]);
       expect(planSnapshots[1]).toEqual(planSnapshots[0]);
-      expect(readItems((await doc.getHistory())[0])).toEqual([{ type: 'text', text: 'before' }]);
+      expect(readItems((await doc.sessionData.history.readAll())[0])).toEqual([
+        { type: 'text', text: 'before' },
+      ]);
       expect(host.store.get(sessionId).pendingUnread).toBe(true);
     } finally {
       await destroyRepoOnRealTimers(repo);
@@ -1106,7 +1265,7 @@ describe('MessageHandler ACP batching', () => {
         sha256,
         textPreview: true,
       });
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
       const items = readItems(history[0]);
       expect(items.map((item) => item.type)).toEqual(['text', 'file', 'text']);
       expect(items[0]).toEqual({ type: 'text', text: 'before ' });

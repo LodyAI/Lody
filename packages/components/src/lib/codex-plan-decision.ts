@@ -4,6 +4,7 @@ import type {
   SessionDoc,
   SessionHistory,
 } from '@lody/shared';
+import { LODY_PLAN_MODE_CONFIG_ID } from '@lody/shared';
 
 import {
   CODEX_COLLABORATION_MODE_CONFIG_ID,
@@ -44,6 +45,9 @@ export function shouldShowCodexProposedPlanDecision({
 export function isCodexPlanModeEnabled(
   configOptionValues: Record<string, AcpConfigOptionValue>
 ): boolean {
+  if (typeof configOptionValues[LODY_PLAN_MODE_CONFIG_ID] === 'boolean') {
+    return configOptionValues[LODY_PLAN_MODE_CONFIG_ID] === true;
+  }
   return (
     configOptionValues[CODEX_COLLABORATION_MODE_CONFIG_ID] === CODEX_COLLABORATION_MODE_PLAN_VALUE
   );
@@ -54,7 +58,13 @@ export function disableCodexPlanMode(
 ): Record<string, AcpConfigOptionValue> {
   return {
     ...configOptionValues,
-    [CODEX_COLLABORATION_MODE_CONFIG_ID]: CODEX_COLLABORATION_MODE_DEFAULT_VALUE,
+    ...(LODY_PLAN_MODE_CONFIG_ID in configOptionValues ||
+    !(CODEX_COLLABORATION_MODE_CONFIG_ID in configOptionValues)
+      ? { [LODY_PLAN_MODE_CONFIG_ID]: false }
+      : {}),
+    ...(CODEX_COLLABORATION_MODE_CONFIG_ID in configOptionValues
+      ? { [CODEX_COLLABORATION_MODE_CONFIG_ID]: CODEX_COLLABORATION_MODE_DEFAULT_VALUE }
+      : {}),
   };
 }
 

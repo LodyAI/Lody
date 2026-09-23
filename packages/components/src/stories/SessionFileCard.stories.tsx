@@ -50,6 +50,33 @@ export const PreviewableMarkdown: Story = {
   render: (args) => wrap(<SessionFileCard {...args} />),
 };
 
+const htmlArgs = {
+  file: baseFile({
+    fileId: 'file-html',
+    fileName: 'lody-one-flyer.html',
+    mimeType: 'text/html',
+    sizeBytes: 16_300,
+    textPreview: true,
+  }),
+  onPreview: () => {},
+  onDownload: () => {},
+};
+
+/**
+ * An HTML attachment's click opens the rendered page, so the card carries a
+ * second action for the source file — the only card variant with two controls.
+ */
+export const PreviewableHtml: Story = {
+  args: htmlArgs,
+  render: (args) => wrap(<SessionFileCard {...args} />),
+};
+
+/** That second action spins on its own while the source download is in flight. */
+export const PreviewableHtmlDownloading: Story = {
+  args: { ...htmlArgs, isDownloading: true },
+  render: (args) => wrap(<SessionFileCard {...args} />),
+};
+
 export const PendingLocalTransport: Story = {
   args: {
     file: baseFile({

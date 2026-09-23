@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { Loader2 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { Button } from '@/ui/button';
 import { Progress } from '@/ui/progress';
 import { cn } from '@/lib/utils';
@@ -69,7 +69,7 @@ export function SidebarUpdateBanner({
         </Button>
         {isDownloading ? null : (
           <Button type="button" size="sm" className="h-7 px-2.5" onClick={onRestart}>
-            {isRestarting ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
+            {isRestarting ? <Spinner className="mr-1.5 h-3.5 w-3.5" /> : null}
             {t('sidebar.updateReady.restart', 'Update & Restart')}
           </Button>
         )}

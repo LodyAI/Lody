@@ -1,9 +1,5 @@
-import {
-  getServerNow,
-  type MessageContent,
-  type ScheduleProposalMeta,
-  type SessionHistoryInput,
-} from '@lody/shared';
+import { getServerNow, type MessageContent, type ScheduleProposalMeta } from '@lody/shared';
+import { readSessionHistory, type SessionTurn } from '@lody/shared/session-data';
 
 export type ScheduleProposalDraft = Pick<
   ScheduleProposalMeta,
@@ -19,7 +15,10 @@ export type ScheduleProposalPublishResult =
 
 type ProposalDocument = {
   roomId: string;
-  updateHistory(update: (history: SessionHistoryInput[]) => SessionHistoryInput[]): Promise<void>;
+  sessionData: {
+    history: { readAll(): readonly unknown[] };
+    commands: { appendTurn(turn: SessionTurn): Promise<void> };
+  };
 };
 
 const sameDraft = (current: ScheduleProposalMeta, desired: ScheduleProposalMeta): boolean =>
@@ -32,7 +31,7 @@ const sameDraft = (current: ScheduleProposalMeta, desired: ScheduleProposalMeta)
 /**
  * Write a schedule proposal card into the invoking conversation.
  *
- * It is a `system_notice` history item, like a task proposal, so it survives
+ * It is a `system_notice` history item, so it survives
  * the turn and stays actionable days later. Idempotent on `proposalId`: a retry
  * with the same draft is a no-op, a retry with a different draft is a conflict,
  * and a proposal the person already acted on reports that outcome instead of
@@ -54,33 +53,30 @@ export async function publishScheduleProposal(
   };
   const item: MessageContent = { type: 'system_notice', name: 'schedule_proposal', meta: desired };
   const entryId = `schedule-proposal-${draft.proposalId}`;
-  let result: ScheduleProposalPublishResult = { pending: true };
-  await doc.updateHistory((history) => {
-    const existing = history.find((entry) => entry.id === entryId);
-    if (!existing)
-      return [
-        ...history,
-        {
-          id: entryId,
-          role: 'system',
-          timestamp: new Date(now()).toISOString(),
-          items: [item],
-          fileDiff: [],
-          finished: true,
-        },
-      ];
-    const prior = existing.items?.find(
-      (candidate) => candidate.type === 'system_notice' && candidate.name === 'schedule_proposal'
-    );
-    const current =
-      prior?.type === 'system_notice' && prior.name === 'schedule_proposal'
-        ? (prior.meta as ScheduleProposalMeta | undefined)
-        : undefined;
-    if (!current || !sameDraft(current, desired)) throw new Error('Idempotency key conflict');
-    if (current.outcome === 'created')
-      result = { pending: false, outcome: 'created', scheduleId: current.scheduleId };
-    else if (current.outcome === 'dismissed') result = { pending: false, outcome: 'dismissed' };
-    return history;
-  });
-  return result;
+  const existing = readSessionHistory(doc.sessionData.history).find(
+    (entry) => entry.id === entryId
+  );
+  if (!existing) {
+    await doc.sessionData.commands.appendTurn({
+      id: entryId,
+      role: 'system',
+      timestamp: new Date(now()).toISOString(),
+      items: [item],
+      fileDiff: [],
+      finished: true,
+    });
+    return { pending: true };
+  }
+  const prior = (existing.items as MessageContent[] | undefined)?.find(
+    (candidate) => candidate.type === 'system_notice' && candidate.name === 'schedule_proposal'
+  );
+  const current =
+    prior?.type === 'system_notice' && prior.name === 'schedule_proposal'
+      ? (prior.meta as ScheduleProposalMeta | undefined)
+      : undefined;
+  if (!current || !sameDraft(current, desired)) throw new Error('Idempotency key conflict');
+  if (current.outcome === 'created')
+    return { pending: false, outcome: 'created', scheduleId: current.scheduleId };
+  if (current.outcome === 'dismissed') return { pending: false, outcome: 'dismissed' };
+  return { pending: true };
 }

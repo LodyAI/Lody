@@ -12,8 +12,7 @@
   `schedule-save-blockers.ts` is the one save rule, `schedule-format.ts` the one
   vocabulary, `schedule-property-row.tsx` the one layout primitive (label left,
   live value right, rows appearing only when they apply).
-  Agent/Project selectors live in `components/shared`; Task wrappers own Task
-  visual tokens. Keep Schedule independent of delegated Task state.
+  Agent/Project selectors and the `AgentRunRef` type live in `components/shared`.
 - Save requires an Agent with an explicit permission mode on an owned, capable
   machine. It does NOT require a project: a schedule with none runs as a plain
   chat, end to end (optional `project` in the definition, registry row, draft and
@@ -55,7 +54,7 @@
   Agent when one is picked. `ScheduleDestinationRows` is the presentational
   piece; the container resolves the chat from `sessionListAtom`.
 - An agent can PROPOSE a schedule but never create one. `lody_schedule_propose`
-  writes a `schedule_proposal` system notice (like a task proposal) and
+  writes a `schedule_proposal` system notice and
   `ScheduleProposalNotice` renders it in the conversation; pressing Create on
   the card IS the creation — no form follows — with `proposalId` as the schedule
   id so a double click cannot make two. The card resolves its target through

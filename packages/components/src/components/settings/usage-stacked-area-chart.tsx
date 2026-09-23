@@ -9,6 +9,7 @@ import {
   YAxis,
 } from 'recharts';
 import { cn } from '@/lib/utils';
+import { Skeleton } from '../../ui/skeleton';
 
 export type StackedAreaSeriesValue = {
   id: string;
@@ -51,6 +52,14 @@ type UsageStackedAreaChartProps = {
    * stroke color (instead of relying on a swatch or ring).
    */
   tintSeriesLabel?: boolean;
+  /**
+   * Render a chart-shaped placeholder while the range data resolves. Only takes
+   * effect when there is no data to show yet — populated charts stay mounted
+   * during background refreshes so they never flash back into a skeleton.
+   */
+  loading?: boolean;
+  /** Accessible loading announcement; rendered visually hidden. */
+  loadingText?: string;
 };
 
 type UsagePerspectiveChartProps = {
@@ -169,10 +178,7 @@ function prepareChart(buckets: StackedAreaBucket[], maxSeries: number): Prepared
 function DefaultSeriesMarker({ color, size = 'sm' }: { color: string; size?: 'sm' | 'md' }) {
   return (
     <span
-      className={cn(
-        'inline-block shrink-0 rounded-xs',
-        size === 'sm' ? 'h-2 w-2' : 'h-2.5 w-2.5'
-      )}
+      className={cn('inline-block shrink-0 rounded-xs', size === 'sm' ? 'h-2 w-2' : 'h-2.5 w-2.5')}
       style={{ backgroundColor: color }}
     />
   );
@@ -218,7 +224,7 @@ function UsageTooltip({
 
   return (
     <div className="min-w-[180px] max-w-[260px] rounded-md border border-border/80 bg-background/95 px-3 py-2 text-xs shadow-md backdrop-blur-sm">
-      <div className="font-medium text-foreground">{label}</div>
+      <div className="font-normal text-foreground">{label}</div>
       <div className="mt-1 font-mono text-muted-foreground">{tooltipValueFormatter(total)}</div>
       <div className="mt-1.5 space-y-1">
         {rows.slice(0, 6).map((row) => (
@@ -251,6 +257,62 @@ function UsageTooltip({
   );
 }
 
+const LEGEND_PLACEHOLDER_WIDTHS = [112, 96, 128, 88, 104];
+
+function ChartLoadingPlaceholder({ chartHeight }: { chartHeight: number }) {
+  return (
+    <>
+      <div className="p-4">
+        {/* Same footprint as the real chart: a full-height plot with layered
+           area silhouettes, gridlines, and axis tick placeholders. */}
+        <Skeleton
+          className="relative w-full overflow-hidden rounded-md bg-primary/[0.06]"
+          style={{ height: chartHeight }}
+        >
+          <svg
+            aria-hidden="true"
+            className="absolute inset-0 h-full w-full"
+            viewBox="0 0 600 200"
+            preserveAspectRatio="none"
+          >
+            {[0.25, 0.5, 0.75].map((progress) => (
+              <line
+                key={progress}
+                x1="0"
+                x2="600"
+                y1={200 * progress}
+                y2={200 * progress}
+                stroke={GRID_COLOR}
+                strokeOpacity="0.4"
+              />
+            ))}
+            <path
+              d="M0,150 C60,142 100,92 160,82 C240,68 300,112 380,92 C460,74 540,42 600,52 L600,200 L0,200 Z"
+              fill="hsl(var(--chart-1) / 0.14)"
+            />
+            <path
+              d="M0,176 C80,170 140,132 220,126 C320,118 400,142 500,120 C550,109 580,106 600,102 L600,200 L0,200 Z"
+              fill="hsl(var(--chart-2, var(--chart-1)) / 0.18)"
+            />
+          </svg>
+          <div className="absolute inset-x-14 bottom-1.5 flex justify-between">
+            {Array.from({ length: 8 }).map((_, index) => (
+              <Skeleton key={index} className="h-2 w-6 rounded-sm" />
+            ))}
+          </div>
+        </Skeleton>
+      </div>
+      <div className="border-t border-border/60 px-4 pb-3 pt-2">
+        <div className="flex flex-wrap gap-x-3 gap-y-1.5">
+          {LEGEND_PLACEHOLDER_WIDTHS.map((width) => (
+            <Skeleton key={width} className="h-4 rounded-sm" style={{ width }} />
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
 export function UsageStackedAreaChart({
   title,
   buckets,
@@ -261,6 +323,8 @@ export function UsageStackedAreaChart({
   tooltipValueFormatter = (value) => new Intl.NumberFormat().format(Math.round(value)),
   renderSeriesMarker,
   tintSeriesLabel = false,
+  loading = false,
+  loadingText,
 }: UsageStackedAreaChartProps) {
   const gradientPrefix = useId().replace(/[^a-zA-Z0-9_-]/g, '');
   const isMobile = useIsMobileChart();
@@ -268,11 +332,27 @@ export function UsageStackedAreaChart({
 
   const prepared = useMemo(() => prepareChart(buckets, maxSeries), [buckets, maxSeries]);
 
+  if (loading && !prepared) {
+    return (
+      <div
+        className={cn('overflow-hidden rounded-lg border border-border/70 bg-card/60', className)}
+        role="status"
+        aria-busy="true"
+      >
+        <header className="flex min-h-10 items-center gap-2 border-b border-border/70 dark:bg-muted/40 px-3 py-1.5">
+          <p className="text-xs font-normal text-muted-foreground">{title}</p>
+        </header>
+        <ChartLoadingPlaceholder chartHeight={chartHeight} />
+        {loadingText ? <span className="sr-only">{loadingText}</span> : null}
+      </div>
+    );
+  }
+
   if (!prepared) {
     return (
       <div className={cn('rounded-lg border border-border/70 bg-card/60 text-sm', className)}>
-        <header className="flex min-h-10 items-center gap-2 border-b border-border/70 bg-muted/40 px-3 py-1.5">
-          <p className="text-xs font-semibold text-muted-foreground">{title}</p>
+        <header className="flex min-h-10 items-center gap-2 border-b border-border/70 dark:bg-muted/40 px-3 py-1.5">
+          <p className="text-xs font-normal text-muted-foreground">{title}</p>
         </header>
         <div className="p-4">
           <p className="text-sm text-muted-foreground">{emptyText}</p>
@@ -287,8 +367,8 @@ export function UsageStackedAreaChart({
 
   return (
     <div className={cn('overflow-hidden rounded-lg border border-border/70 bg-card/60', className)}>
-      <header className="flex min-h-10 items-center gap-2 border-b border-border/70 bg-muted/40 px-3 py-1.5">
-        <p className="text-xs font-semibold text-muted-foreground">{title}</p>
+      <header className="flex min-h-10 items-center gap-2 border-b border-border/70 dark:bg-muted/40 px-3 py-1.5">
+        <p className="text-xs font-normal text-muted-foreground">{title}</p>
       </header>
       <div className="p-4">
         {/* ResponsiveContainer measures the parent and never overflows, so the
@@ -370,7 +450,7 @@ export function UsageStackedAreaChart({
               <span
                 className={
                   tintSeriesLabel
-                    ? 'max-w-[200px] truncate whitespace-nowrap font-medium'
+                    ? 'max-w-[200px] truncate whitespace-nowrap font-normal'
                     : 'max-w-[200px] truncate whitespace-nowrap text-muted-foreground'
                 }
                 style={tintSeriesLabel ? { color: s.color } : undefined}
@@ -434,8 +514,8 @@ export function UsagePerspectiveChart({
   if (!chart) {
     return (
       <div className={cn('rounded-lg border border-border/70 bg-card/60 text-sm', className)}>
-        <header className="flex min-h-10 items-center border-b border-border/70 bg-muted/40 px-3 py-1.5">
-          <p className="text-xs font-semibold text-muted-foreground">{title}</p>
+        <header className="flex min-h-10 items-center border-b border-border/70 dark:bg-muted/40 px-3 py-1.5">
+          <p className="text-xs font-normal text-muted-foreground">{title}</p>
         </header>
         <div className="p-4 text-muted-foreground">{emptyText}</div>
       </div>
@@ -444,8 +524,8 @@ export function UsagePerspectiveChart({
 
   return (
     <div className={cn('overflow-hidden rounded-lg border border-border/70 bg-card/60', className)}>
-      <header className="flex min-h-10 items-center border-b border-border/70 bg-muted/40 px-3 py-1.5">
-        <p className="text-xs font-semibold text-muted-foreground">{title}</p>
+      <header className="flex min-h-10 items-center border-b border-border/70 dark:bg-muted/40 px-3 py-1.5">
+        <p className="text-xs font-normal text-muted-foreground">{title}</p>
       </header>
       <div className="relative h-[238px] overflow-hidden bg-muted/20 sm:h-[272px]">
         <div
@@ -501,11 +581,32 @@ export function UsagePerspectiveChart({
                 </text>
               </g>
             ))}
-            <line x1="98" x2="932" y1={chart.baseline} y2={chart.baseline} stroke="currentColor" strokeOpacity="0.35" />
-            <line x1="98" x2="98" y1="34" y2={chart.baseline} stroke="currentColor" strokeOpacity="0.35" />
+            <line
+              x1="98"
+              x2="932"
+              y1={chart.baseline}
+              y2={chart.baseline}
+              stroke="currentColor"
+              strokeOpacity="0.35"
+            />
+            <line
+              x1="98"
+              x2="98"
+              y1="34"
+              y2={chart.baseline}
+              stroke="currentColor"
+              strokeOpacity="0.35"
+            />
             {chart.xTicks.map((tick) => (
               <g key={tick.x}>
-                <line x1={tick.x} x2={tick.x} y1={chart.baseline} y2={chart.baseline + 6} stroke="currentColor" strokeOpacity="0.35" />
+                <line
+                  x1={tick.x}
+                  x2={tick.x}
+                  y1={chart.baseline}
+                  y2={chart.baseline + 6}
+                  stroke="currentColor"
+                  strokeOpacity="0.35"
+                />
                 <text
                   x={tick.x}
                   y={chart.baseline + 23}

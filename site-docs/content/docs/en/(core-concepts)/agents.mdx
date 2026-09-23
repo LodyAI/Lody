@@ -23,6 +23,9 @@ For ACP-compatible agents that are not published in the ACP Registry, use **Cust
 launch command yourself. See [CLI Runtime Types](/docs/cli-runtimes#custom-acp-agent) for the setup
 steps and command-line rules.
 
+Agent configs can be shared so teammates use the same CLI setup. To hand off a live session — not
+just the config — see [Share a Coding Agent Session](/docs/session-handoff).
+
 ## Claude
 
 ```bash
@@ -44,9 +47,12 @@ CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 
 ### DeepSeek Harness
 
-Lody includes **DeepSeek Harness** as a built-in ACP provider. Create an Agent Config, choose
-DeepSeek Harness, and paste a DeepSeek API token. Lody stores it as `DEEPSEEK_API_KEY`; you do not
-need to install the standalone `dsh` command.
+Lody includes **DeepSeek Harness** as a built-in ACP provider. Create an Agent Config and choose
+DeepSeek Harness. The **DeepSeek Official** tab only needs a DeepSeek API token. The **Custom
+Endpoint** tab accepts an HTTP(S) API endpoint and its API key for a Harness-compatible service.
+Lody stores these values as `DEEPSEEK_BASE_URL` and `DEEPSEEK_API_KEY`; you do not need to install
+the standalone `dsh` command. Saving the official tab explicitly uses `https://api.deepseek.com`,
+so an ambient endpoint variable from the host machine cannot redirect the config.
 
 > **Known delegation limitation:** When a session uses a model other than DeepSeek-V4-Pro,
 > delegated subagents may still use the session's creation-time DeepSeek-V4-Pro seed instead of the
@@ -80,6 +86,22 @@ ANTHROPIC_API_KEY=sk-kimi-xxxxxxxxxxxxxxxxxxxxxxxxxx  # Generated API key
 ```
 
 [Reference docs](https://www.kimi.com/code/docs/en/more/third-party-agents.html)
+
+## Bub
+
+Lody includes **Bub** as a built-in ACP provider. Unlike the managed runtimes above, Bub is
+installed by you, so Lody ships the integration without provisioning the command. Install Bub and
+its ACP server plugin into the environment that provides `bub`:
+
+```bash
+curl -fsSL https://bub.build/install.sh | bash -- --preset acp
+```
+
+Then create an Agent Config and choose **Bub**. Lody launches `bub acp` and talks to it over
+ACP. If the command cannot be found or fails to start, the provider setup shows an install hint that
+links to the tutorial below.
+
+[Install guide](https://bub.build/docs/tutorials/acp-server/?utm_source=lody)
 
 ## GLM
 

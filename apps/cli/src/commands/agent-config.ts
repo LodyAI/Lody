@@ -148,9 +148,9 @@ export function resolveAgentConfigSelector(
 }
 
 // CLI inference predates explicit cliType. Keep the historical Claude/Codex
-// aliases and the unambiguous built-in Grok alias here; `kimi` continues to
-// mean the registry agent for backward compatibility.
-const LEGACY_BUILTIN_AGENT_TYPES = new Set(['claude', 'codex', 'grok']);
+// aliases and the unambiguous built-in Grok/Bub/Dimcode aliases here; `kimi` continues
+// to mean the registry agent for backward compatibility.
+const LEGACY_BUILTIN_AGENT_TYPES = new Set(['claude', 'codex', 'grok', 'bub', 'dimcode']);
 
 export function inferAgentConfigCliType(agentType: string): AgentConfigCliType {
   const normalized = normalizeCliValue(agentType)?.toLowerCase();
@@ -580,9 +580,6 @@ const agentConfigRefreshCapabilitiesCommand = new Command('refresh-capabilities'
             machineId: machine.id,
             workspaceId: workspace.id as WorkspaceId,
             configId: config.id,
-            cliType: config.cliType,
-            agentType: config.agentType,
-            env: config.env,
           })
         );
 

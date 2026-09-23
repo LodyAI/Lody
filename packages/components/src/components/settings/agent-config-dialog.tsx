@@ -1,22 +1,30 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useAtomValue } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { v4 as uuidv4 } from 'uuid';
+import { toast } from 'sonner';
 import {
   computeTitleGenerationDefaults,
+  DEEPSEEK_HARNESS_API_KEY_ENV,
+  DEEPSEEK_HARNESS_BASE_URL_ENV,
   formatCustomAcpCommandLine,
   getAcpCapabilityCacheEntryAuthority,
   getAcpCapabilityCacheKey,
   getStaticBuiltinAcpCapabilities,
   getBuiltinTitleGenerationDefaults,
   getRegistryAcpLaunchKind,
+  hasBuiltinRuntimeOverrideValues,
   machineSupportsProviderSetupProtocol,
+  machineSupportsPiExtensions,
+  type MachinePiExtensionsResponse,
   isManagedBuiltinAgentType,
   isAcpCapabilityCacheEntryCurrent,
   parseCustomAcpCommandLine,
   serializeCustomAcpLaunchSpec,
+  machineSupportsAcpProtocolAuthentication,
   supportsBuiltinAuthentication,
-  usesAcpProvidedSessionTitle,
+  usesAcpProtocolAuthentication,
+  acpOwnsSessionTitleGeneration,
   REGISTRY_ACP_AGENTS,
   type AgentBrandId,
   type AgentConfigCliType,
@@ -48,7 +56,6 @@ import {
   Download,
   FlaskConical,
   KeyRound,
-  Loader2,
   Lock,
   RefreshCw,
   Search,
@@ -56,6 +63,7 @@ import {
   SquareTerminal,
   X,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { AgentIcon } from '@/components/icons/agent-icon';
 import { cn } from '@/lib/utils';
 import { useKeyboardAwareScrollIntoView } from '@/hooks/use-keyboard-aware-scroll-into-view';
@@ -68,9 +76,20 @@ import { Input } from '@/ui/input';
 import { Label } from '@/ui/label';
 import { Textarea } from '@/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/ui/tabs';
 import { EnvVarsTextarea, envVarsToText } from './env-vars-textarea';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { AcpAuthenticationPanel } from './acp-authentication-panel';
+import { BubInstallGuide } from './bub-install-guide';
+import { CollapsibleSection } from './form-primitives';
+import { PiExtensionsField } from './pi-extensions-field';
+import { ProviderSetupRow } from './provider-setup-row';
+import {
+  getAgentMetaByIdAtomFamily,
+  getProviderSetupsByMachineAtomFamily,
+  cmdRetryProviderSetupAtom,
+  deleteProviderSetupAtom,
+} from '@/atoms/agents';
 
 type Translate = ReturnType<typeof useTranslation>['t'];
 
@@ -80,7 +99,9 @@ type Translate = ReturnType<typeof useTranslation>['t'];
 
 export const DEEPSEEK_CLAUDE_PRESET_ID = 'deepseek-over-claude-code';
 export const DEEPSEEK_REASONIX_PRESET_ID = 'deepseek-reasonix';
-const DEEPSEEK_API_KEY_ENV = 'DEEPSEEK_API_KEY';
+const DEEPSEEK_OFFICIAL_BASE_URL = 'https://api.deepseek.com';
+const LEGACY_DSH_MODELS_ENV = 'ACP_EXTENSION_DSH_MODELS';
+type DeepSeekEndpointMode = 'official' | 'custom';
 export const MIMO_CLAUDE_PRESET_ID = 'mimo-over-claude-code';
 export const MINIMAX_CLAUDE_PRESET_ID = 'minimax-over-claude-code';
 export const GLM_CLAUDE_PRESET_ID = 'glm-over-claude-code';
@@ -494,6 +515,36 @@ const BUILTIN_OPTIONS: AgentTypeOption[] = [
     experimental: true,
     searchKeys: 'deepseek harness dsh acp',
   },
+  {
+    kind: 'builtin',
+    value: 'builtin:pi',
+    label: 'Pi',
+    descriptionKey: 'settings.agent.dialog.option.pi.description',
+    descriptionDefault: 'Lody-managed Pi ACP runtime',
+    cliType: 'builtin',
+    agentType: 'pi',
+    searchKeys: 'pi acp',
+  },
+  {
+    kind: 'builtin',
+    value: 'builtin:dimcode',
+    label: 'Dimcode',
+    descriptionKey: 'settings.agent.dialog.option.dimcode.description',
+    descriptionDefault: 'Dimcode coding agent over ACP',
+    cliType: 'builtin',
+    agentType: 'dimcode',
+    searchKeys: 'dimcode dim dimagent acp',
+  },
+  {
+    kind: 'builtin',
+    value: 'builtin:bub',
+    label: 'Bub',
+    descriptionKey: 'settings.agent.dialog.option.bub.description',
+    descriptionDefault: 'Bub agent runtime over ACP (install the bub-acp-server plugin)',
+    cliType: 'builtin',
+    agentType: 'bub',
+    searchKeys: 'bub bubbuild acp',
+  },
 ];
 
 const PRESET_OPTIONS: AgentTypeOption[] = PRESETS.map((p) => ({
@@ -560,6 +611,10 @@ export type AgentConfigFormData = {
   presetCredentialModeId?: string;
   presetBaseUrlOptionId?: string;
   presetBaseUrl?: string;
+  /** Dialog-only DeepSeek Harness endpoint tab; never persisted on AgentConfigMeta. */
+  deepseekEndpointMode?: DeepSeekEndpointMode;
+  /** Draft custom DEEPSEEK_BASE_URL while the official tab is selected. */
+  deepseekCustomBaseUrl?: string;
 };
 
 export type AgentConfigSubmitPayload = {
@@ -587,11 +642,6 @@ export type AgentConfigDialogMode =
 type RefreshArgs = {
   machineId: MachineId;
   configId: AgentConfigId;
-  cliType: AgentConfigCliType;
-  agentType: string;
-  customAcp?: CustomAcpLaunchSpec;
-  runtimeOverrides?: BuiltinRuntimeOverrides;
-  env?: Record<string, string>;
 };
 
 /** Whether a registry agent's platform binary is present on the target machine. */
@@ -620,6 +670,10 @@ export type AgentConfigDialogProps = {
   machine: MachineViewMeta;
   onSubmit: (payload: AgentConfigSubmitPayload) => Promise<void>;
   onRefreshCapabilities: (args: RefreshArgs) => Promise<MachineAcpCapabilitiesRefreshResponse>;
+  onScanPiExtensions?: (args: {
+    machineId: MachineId;
+    configId?: AgentConfigId;
+  }) => Promise<MachinePiExtensionsResponse>;
   /** Check a registry binary or managed builtin runtime on the target machine. */
   onCheckBinaryStatus?: (
     args: BinaryActionArgs
@@ -706,6 +760,92 @@ function isValidHttpUrl(value: string): boolean {
   }
 }
 
+function isDeepSeekBuiltinForm(form: Pick<AgentConfigFormData, 'cliType' | 'agentType'>): boolean {
+  return form.cliType === 'builtin' && form.agentType === 'deepseek';
+}
+
+function getDeepSeekEndpointMode(form: AgentConfigFormData): DeepSeekEndpointMode {
+  return form.deepseekEndpointMode === 'custom' ? 'custom' : 'official';
+}
+
+/**
+ * Official DeepSeek API, including trailing slashes and a bare `/v1` path.
+ * Other hosts, ports, query strings, or extra path segments are custom.
+ */
+function isDeepSeekOfficialBaseUrl(value: string | undefined): boolean {
+  const trimmed = value?.trim() ?? '';
+  if (!trimmed) return false;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== 'https:') return false;
+    if (url.username || url.password) return false;
+    if (url.hostname.toLowerCase() !== 'api.deepseek.com') return false;
+    if (url.port !== '' && url.port !== '443') return false;
+    if (url.search !== '' || url.hash !== '') return false;
+    const path = url.pathname.replace(/\/+$/, '').toLowerCase();
+    return path === '' || path === '/v1';
+  } catch {
+    return false;
+  }
+}
+
+function resolveDeepSeekEndpointForm(
+  env: Record<string, string>,
+  explicit?: Pick<AgentConfigFormData, 'deepseekEndpointMode' | 'deepseekCustomBaseUrl'>
+): Pick<AgentConfigFormData, 'deepseekEndpointMode' | 'deepseekCustomBaseUrl'> {
+  if (
+    explicit?.deepseekEndpointMode === 'official' ||
+    explicit?.deepseekEndpointMode === 'custom'
+  ) {
+    return {
+      deepseekEndpointMode: explicit.deepseekEndpointMode,
+      deepseekCustomBaseUrl: explicit.deepseekCustomBaseUrl ?? '',
+    };
+  }
+  const stored = env[DEEPSEEK_HARNESS_BASE_URL_ENV];
+  if (!stored?.trim() || isDeepSeekOfficialBaseUrl(stored)) {
+    return { deepseekEndpointMode: 'official', deepseekCustomBaseUrl: '' };
+  }
+  return { deepseekEndpointMode: 'custom', deepseekCustomBaseUrl: stored };
+}
+
+function omitDeepSeekProtectedEnv(env: Record<string, string>): Record<string, string> {
+  const additionalEnv = { ...env };
+  delete additionalEnv[DEEPSEEK_HARNESS_API_KEY_ENV];
+  delete additionalEnv[DEEPSEEK_HARNESS_BASE_URL_ENV];
+  delete additionalEnv[LEGACY_DSH_MODELS_ENV];
+  return additionalEnv;
+}
+
+function hydrateDeepSeekEndpointForm(form: AgentConfigFormData): AgentConfigFormData {
+  if (!isDeepSeekBuiltinForm(form)) return form;
+  const env = { ...form.env };
+  const resolved = resolveDeepSeekEndpointForm(env, form);
+  delete env[DEEPSEEK_HARNESS_BASE_URL_ENV];
+  delete env[LEGACY_DSH_MODELS_ENV];
+  return {
+    ...form,
+    env,
+    deepseekEndpointMode: resolved.deepseekEndpointMode,
+    deepseekCustomBaseUrl: resolved.deepseekCustomBaseUrl,
+  };
+}
+
+function buildDeepSeekSubmitEnv(formData: AgentConfigFormData): Record<string, string> {
+  const env = omitDeepSeekProtectedEnv(formData.env);
+  const apiKey = formData.env[DEEPSEEK_HARNESS_API_KEY_ENV]?.trim();
+  if (apiKey) {
+    env[DEEPSEEK_HARNESS_API_KEY_ENV] = apiKey;
+  } else {
+    delete env[DEEPSEEK_HARNESS_API_KEY_ENV];
+  }
+  env[DEEPSEEK_HARNESS_BASE_URL_ENV] =
+    getDeepSeekEndpointMode(formData) === 'custom'
+      ? (formData.deepseekCustomBaseUrl ?? '').trim()
+      : DEEPSEEK_OFFICIAL_BASE_URL;
+  return env;
+}
+
 function getPresetTokenEnvKey(
   preset: PresetDefinition,
   mode: PresetCredentialMode | undefined
@@ -775,12 +915,6 @@ function buildPresetInjectedEnvPreview(
   return env;
 }
 
-function omitDeepSeekApiKey(env: Record<string, string>): Record<string, string> {
-  const additionalEnv = { ...env };
-  delete additionalEnv[DEEPSEEK_API_KEY_ENV];
-  return additionalEnv;
-}
-
 // For an existing custom config, returns the command "key" to pre-seed as
 // already-tested IFF the machine still has current cached capabilities whose
 // source version matches the saved command (same derivation the CLI uses in
@@ -813,6 +947,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     machine,
     onSubmit,
     onRefreshCapabilities,
+    onScanPiExtensions,
     onCheckBinaryStatus,
     onInstallBinary,
     onManagedRuntimeSelected,
@@ -823,10 +958,26 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     mode.kind === 'edit'
       ? mode.config.id
       : (draftConfigIdRef.current ??= uuidv4() as AgentConfigId);
+  const publishedConfig = useAtomValue(getAgentMetaByIdAtomFamily(agentConfigId));
+  const setups = useAtomValue(getProviderSetupsByMachineAtomFamily(machine.id));
+  const retrySetup = useSetAtom(cmdRetryProviderSetupAtom);
+  const deleteSetup = useSetAtom(deleteProviderSetupAtom);
+  // Creation observes the daemon-owned setup instead of launching a competing
+  // capability probe. Once published, this draft edits the same provider id.
+  const [testingBuiltinSetup, setTestingBuiltinSetup] = useState(false);
+  const publishedSetupConfig =
+    testingBuiltinSetup &&
+    publishedConfig?.machineId === machine.id &&
+    publishedConfig.cliType === 'builtin' &&
+    (publishedConfig.agentType === 'bub' || publishedConfig.agentType === 'dimcode');
+  const builtinSetup = testingBuiltinSetup
+    ? setups.find((setup) => setup.id === agentConfigId)
+    : undefined;
+  const waitingForBuiltinSetup = testingBuiltinSetup && !publishedSetupConfig;
 
   const initialForm = useMemo<AgentConfigFormData>(() => {
     if (mode.kind === 'edit') {
-      return {
+      return hydrateDeepSeekEndpointForm({
         name: mode.config.name,
         cliType: mode.config.cliType,
         agentType: mode.config.agentType,
@@ -837,9 +988,9 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
         prompt: mode.config.prompt ?? '',
         env: mode.config.env || {},
         titleGeneration: mode.config.titleGeneration,
-      };
+      });
     }
-    return { ...DEFAULT_FORM, ...mode.initialForm };
+    return hydrateDeepSeekEndpointForm({ ...DEFAULT_FORM, ...mode.initialForm });
   }, [mode]);
 
   const [formData, setFormData] = useState<AgentConfigFormData>(initialForm);
@@ -898,19 +1049,14 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   );
   const isNarrowLayout = useNarrowDialogLayout();
   const titleDefaultsAppliedRef = useRef(false);
-  const latestProbeEnvRef = useRef(formData.env);
   const formScrollRef = useRef<HTMLDivElement>(null);
   const machineRef = useRef(machine);
   machineRef.current = machine;
   useKeyboardAwareScrollIntoView(formScrollRef);
 
   useEffect(() => {
-    latestProbeEnvRef.current = formData.env;
-  }, [formData.env]);
-
-  useEffect(() => {
     if (open) {
-      latestProbeEnvRef.current = initialForm.env;
+      setTestingBuiltinSetup(false);
       setFormData(initialForm);
       setManuallyTested(false);
       setAuthRequired(false);
@@ -930,11 +1076,15 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
       // doesn't force a re-test. Any other case starts un-tested.
       setTestedCustomKey(resolveInitialTestedCustomKey(mode, machineRef.current));
     }
-  }, [open, initialForm, mode]);
+  }, [open, initialForm, mode, machine.id]);
 
   const activePreset = formData.presetId ? PRESETS_BY_ID[formData.presetId] : undefined;
   const isPreset = !!activePreset;
-  const acpProvidesSessionTitle = usesAcpProvidedSessionTitle(formData.cliType, formData.agentType);
+  const acpProvidesSessionTitle = acpOwnsSessionTitleGeneration(
+    formData.cliType,
+    formData.agentType,
+    formData.runtimeOverrides
+  );
   const activeCredentialMode = activePreset
     ? getPresetCredentialMode(activePreset, formData.presetCredentialModeId)
     : undefined;
@@ -946,12 +1096,23 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     activePreset?.brandId ?? (mode.kind === 'edit' ? mode.config.brandId : undefined);
 
   const isCustom = formData.cliType === 'custom';
-  const isDeepSeekBuiltin = formData.cliType === 'builtin' && formData.agentType === 'deepseek';
+  const isDeepSeekBuiltin = isDeepSeekBuiltinForm(formData);
+  // Bub is builtin but user-installed, so there is no managed runtime to
+  // prepare. It still must pass a live probe on create: that is how a missing
+  // `bub acp` becomes an actionable "install Bub" prompt instead of a
+  // provider that fails later on its first turn.
+  const isBubBuiltin = formData.cliType === 'builtin' && formData.agentType === 'bub';
+  const isQueuedBuiltin =
+    isBubBuiltin || (formData.cliType === 'builtin' && formData.agentType === 'dimcode');
+  const deepseekEndpointMode = getDeepSeekEndpointMode(formData);
   const isManagedBuiltin =
     formData.cliType === 'builtin' && isManagedBuiltinAgentType(formData.agentType);
   const builtinVerificationContext = `${machine.id}:${builtinVerificationRevision}`;
   const requiresBuiltinCreationVerification =
-    mode.kind === 'create' && !isPreset && isManagedBuiltin;
+    mode.kind === 'create' &&
+    !publishedSetupConfig &&
+    !isPreset &&
+    (isManagedBuiltin || isDeepSeekBuiltin || isQueuedBuiltin);
   const builtinCreationVerified =
     !requiresBuiltinCreationVerification || verifiedBuiltinContext === builtinVerificationContext;
   const builtinCreationPending =
@@ -965,6 +1126,15 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   // so a sign-in would do nothing for them. Creating one only surfaces the
   // panel when a live probe reported missing credentials, because that panel is
   // the single way to unblock the creation-time verification gate.
+  // Registry and custom providers authenticate through the standard ACP
+  // exchange, but only the agent knows whether it has anything to sign into —
+  // so their panel appears once a live probe reported that auth is required.
+  // The exchange runs entirely on the daemon, so a machine that predates it
+  // answers "Authentication is not supported"; do not offer a button that can
+  // only fail.
+  const usesProtocolAuthentication =
+    usesAcpProtocolAuthentication(formData.cliType) &&
+    machineSupportsAcpProtocolAuthentication(machine);
   const showAuthenticationPanel =
     mode.kind === 'edit'
       ? supportsBuiltinAuthentication({
@@ -972,8 +1142,10 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           agentType: formData.agentType,
           brandId: resolvedBrandId,
           env: formData.env,
-        })
-      : authRequired && isManagedBuiltin;
+        }) ||
+        (authRequired && usesProtocolAuthentication)
+      : authRequired &&
+        ((isManagedBuiltin && formData.agentType !== 'pi') || usesProtocolAuthentication);
   const builtinRuntimeOverrideKey =
     formData.cliType !== 'builtin'
       ? null
@@ -999,8 +1171,12 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const customAcpKey = parsedCustomAcp ? formatCustomAcpCommandLine(parsedCustomAcp) : '';
 
   const cacheKey = getAcpCapabilityCacheKey(agentConfigId);
+  const configCapability = machine.acpCapabilities?.[cacheKey];
   const cachedCapabilityAuthority = getAcpCapabilityCacheEntryAuthority(
-    machine.acpCapabilities?.[cacheKey],
+    configCapability?.cliType === formData.cliType &&
+      configCapability.agentType === formData.agentType
+      ? configCapability
+      : undefined,
     formData.runtimeOverrides
   );
   const hasCachedCaps =
@@ -1037,10 +1213,61 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   // only safe once that daemon advertises the protocol. Derived here rather
   // than passed in: every host already gives us the target machine, and a
   // per-caller flag can disagree with the machine it travels with.
-  const backgroundManagedBuiltinSetup =
-    machineSupportsProviderSetupProtocol(machine) &&
+  const supportsProviderSetup = machineSupportsProviderSetupProtocol(machine);
+  // providerSetup rows only launch the default managed runtime; any override
+  // (a custom path or selected Pi extensions) must take the live-probe path.
+  const backgroundBuiltinSetup =
+    supportsProviderSetup &&
     requiresBuiltinCreationVerification &&
-    usesDefaultManagedRuntime;
+    (usesDefaultManagedRuntime || isQueuedBuiltin) &&
+    !hasBuiltinRuntimeOverrideValues(formData.runtimeOverrides);
+  const lastPersistedPayloadKeyRef = useRef<string | null>(null);
+  const buildSubmitPayload = useCallback((): AgentConfigSubmitPayload => {
+    let env = { ...formData.env };
+    if (activePreset) {
+      env = buildPresetEnv(activePreset, activeCredentialMode, formData);
+    } else if (isDeepSeekBuiltinForm(formData)) {
+      env = buildDeepSeekSubmitEnv(formData);
+    }
+    const agentType = formData.agentType as AgentType;
+    const titleGeneration = acpProvidesSessionTitle
+      ? undefined
+      : isPreset
+        ? buildPresetTitleGeneration(formData.cliType, agentType, formData.titleGeneration)
+        : formData.titleGeneration;
+    return {
+      id: agentConfigId,
+      name: formData.name.trim(),
+      cliType: formData.cliType,
+      agentType,
+      customAcp: isCustom ? (parsedCustomAcp ?? undefined) : undefined,
+      runtimeOverrides: formData.runtimeOverrides,
+      prompt: formData.prompt,
+      env,
+      titleGeneration,
+      description: undefined,
+      brandId: resolvedBrandId,
+      ...(backgroundBuiltinSetup ? { backgroundSetup: true } : {}),
+    };
+  }, [
+    activeCredentialMode,
+    activePreset,
+    acpProvidesSessionTitle,
+    agentConfigId,
+    backgroundBuiltinSetup,
+    formData,
+    isCustom,
+    isPreset,
+    parsedCustomAcp,
+    resolvedBrandId,
+  ]);
+  const persistConfigBeforeMachineLaunch = useCallback(async (): Promise<void> => {
+    const payload = buildSubmitPayload();
+    const payloadKey = JSON.stringify(payload);
+    if (lastPersistedPayloadKeyRef.current === payloadKey) return;
+    await onSubmit(payload);
+    lastPersistedPayloadKeyRef.current = payloadKey;
+  }, [buildSubmitPayload, onSubmit]);
 
   useEffect(() => {
     if (
@@ -1070,6 +1297,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const rawCapabilitiesReady = isCustom
     ? customReady
     : manuallyTested ||
+      publishedSetupConfig ||
       hasCachedCaps ||
       (hasStaticBuiltinCaps && !(formData.cliType === 'builtin' && formData.agentType === 'kimi'));
   const capabilitiesReady = rawCapabilitiesReady && !binaryStatusBlocksReady;
@@ -1209,13 +1437,11 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     setProbeError(null);
     void (async () => {
       try {
+        await persistConfigBeforeMachineLaunch();
+        if (cancelled) return;
         const response = await onRefreshCapabilities({
           machineId: machine.id,
           configId: agentConfigId,
-          cliType: formData.cliType,
-          agentType: formData.agentType,
-          env: latestProbeEnvRef.current,
-          runtimeOverrides: formData.runtimeOverrides,
         });
         if (cancelled) return;
         if (response.authRequired) {
@@ -1250,6 +1476,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     })();
     return () => {
       cancelled = true;
+      setProbing(false);
     };
   }, [
     open,
@@ -1266,6 +1493,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     binaryReady,
     requiresBuiltinCreationVerification,
     builtinVerificationContext,
+    persistConfigBeforeMachineLaunch,
     t,
   ]);
 
@@ -1277,15 +1505,22 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     setProbing(true);
     setProbeError(null);
     try {
-      await onRefreshCapabilities({
+      await persistConfigBeforeMachineLaunch();
+      const response = await onRefreshCapabilities({
         machineId: machine.id,
         configId: agentConfigId,
-        cliType: formData.cliType,
-        agentType: formData.agentType,
-        customAcp: parsedCustomAcp,
-        env: latestProbeEnvRef.current,
-        runtimeOverrides: formData.runtimeOverrides,
       });
+      if (response.authRequired) {
+        setAuthRequired(true);
+        setManuallyTested(false);
+        return;
+      }
+      if (!response.success) {
+        throw new Error(
+          response.error ?? t('settings.agent.dialog.probeFailed', 'Provider verification failed.')
+        );
+      }
+      setAuthRequired(false);
       setTestedCustomKey(probedKey);
     } catch (error) {
       setProbeError(error instanceof Error ? error.message : String(error));
@@ -1364,11 +1599,10 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     });
   }, [isPreset, titleSelectors, formData.titleGeneration?.configOptionValues]);
 
-  const additionalEnv = isDeepSeekBuiltin ? omitDeepSeekApiKey(formData.env) : formData.env;
+  const additionalEnv = isDeepSeekBuiltin ? omitDeepSeekProtectedEnv(formData.env) : formData.env;
   const envCount = Object.keys(additionalEnv).length;
 
-  const updateEnvironment = (env: Record<string, string>) => {
-    latestProbeEnvRef.current = env;
+  const invalidateBuiltinVerification = () => {
     setManuallyTested(false);
     setAuthRequired(false);
     setProbeError(null);
@@ -1376,21 +1610,34 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     setBuiltinVerificationRevision((revision) => revision + 1);
     setVerifiedBuiltinContext(null);
     setPendingCreateBuiltinContext(null);
+  };
+
+  const updateEnvironment = (env: Record<string, string>) => {
+    invalidateBuiltinVerification();
     setFormData((prev) => ({ ...prev, env }));
   };
 
   const updateDeepSeekApiKey = (value: string) => {
-    const env = { ...formData.env };
+    const env = omitDeepSeekProtectedEnv(formData.env);
     const apiKey = value.trim();
     if (apiKey) {
-      env[DEEPSEEK_API_KEY_ENV] = apiKey;
-    } else {
-      delete env[DEEPSEEK_API_KEY_ENV];
+      env[DEEPSEEK_HARNESS_API_KEY_ENV] = apiKey;
     }
     updateEnvironment(env);
   };
 
+  const updateDeepSeekEndpointMode = (endpointMode: DeepSeekEndpointMode) => {
+    invalidateBuiltinVerification();
+    setFormData((prev) => ({ ...prev, deepseekEndpointMode: endpointMode }));
+  };
+
+  const updateDeepSeekCustomBaseUrl = (value: string) => {
+    invalidateBuiltinVerification();
+    setFormData((prev) => ({ ...prev, deepseekCustomBaseUrl: value }));
+  };
+
   const selectOption = (opt: AgentTypeOption) => {
+    if (testingBuiltinSetup) return;
     titleDefaultsAppliedRef.current = false;
     setManuallyTested(false);
     setAuthRequired(false);
@@ -1519,6 +1766,12 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     if (!formData.agentType.trim())
       return t('agents.disableReason.missingAgentType', 'Please select an agent type');
     if (incompatibleHostMessage) return incompatibleHostMessage;
+    if (mode.kind === 'create' && isQueuedBuiltin && !supportsProviderSetup) {
+      return t(
+        'settings.agent.setup.unsupportedTarget',
+        'Update Lody on the target machine to finish this provider setup.'
+      );
+    }
     if (binaryRequired && !binaryReady) {
       if (binaryStatus === 'unsupported-platform') {
         return t(
@@ -1545,8 +1798,20 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
         ? t('agents.disableReason.invalidCustomCommand', 'The launch command has unclosed quotes')
         : t('agents.disableReason.missingCustomCommand', 'Please enter the launch command');
     }
-    if (isDeepSeekBuiltin && !formData.env[DEEPSEEK_API_KEY_ENV]?.trim()) {
+    if (isDeepSeekBuiltin && !formData.env[DEEPSEEK_HARNESS_API_KEY_ENV]?.trim()) {
       return t('agents.disableReason.missingDeepseekApiKey', 'Please enter your DeepSeek API Key');
+    }
+    if (isDeepSeekBuiltin && deepseekEndpointMode === 'custom') {
+      const endpoint = (formData.deepseekCustomBaseUrl ?? '').trim();
+      if (!endpoint) {
+        return t('agents.disableReason.missingDeepseekEndpoint', 'Please enter an API Endpoint');
+      }
+      if (!isValidHttpUrl(endpoint)) {
+        return t(
+          'agents.disableReason.invalidDeepseekEndpoint',
+          'Please enter a valid HTTP or HTTPS endpoint'
+        );
+      }
     }
     if (activePreset && !(formData.presetToken ?? '').trim()) {
       return t('agents.disableReason.missingPresetToken', 'Please paste your {{preset}} token', {
@@ -1580,56 +1845,20 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   const persistConfig = useCallback(async () => {
     try {
       setSubmitting(true);
-      let env = { ...formData.env };
-      if (activePreset) {
-        env = buildPresetEnv(activePreset, activeCredentialMode, formData);
-      }
-      const agentType = formData.agentType as AgentType;
-      const titleGeneration = acpProvidesSessionTitle
-        ? undefined
-        : isPreset
-          ? buildPresetTitleGeneration(formData.cliType, agentType, formData.titleGeneration)
-          : formData.titleGeneration;
-      await onSubmit({
-        id: agentConfigId,
-        name: formData.name.trim(),
-        cliType: formData.cliType,
-        agentType,
-        customAcp: isCustom ? (parsedCustomAcp ?? undefined) : undefined,
-        runtimeOverrides: formData.runtimeOverrides,
-        prompt: formData.prompt,
-        env,
-        titleGeneration,
-        description: undefined,
-        brandId: resolvedBrandId,
-        ...(backgroundManagedBuiltinSetup ? { backgroundSetup: true } : {}),
-      });
+      await persistConfigBeforeMachineLaunch();
       onOpenChange(false);
     } catch (error) {
       console.error('Failed to save agent config:', error);
     } finally {
       setSubmitting(false);
     }
-  }, [
-    activeCredentialMode,
-    activePreset,
-    acpProvidesSessionTitle,
-    agentConfigId,
-    backgroundManagedBuiltinSetup,
-    formData,
-    isCustom,
-    isPreset,
-    onOpenChange,
-    onSubmit,
-    parsedCustomAcp,
-    resolvedBrandId,
-  ]);
+  }, [onOpenChange, persistConfigBeforeMachineLaunch]);
 
   const submit = async () => {
-    if (disableReason || submitting) return;
+    if (disableReason || submitting || waitingForBuiltinSetup) return;
     if (
       requiresBuiltinCreationVerification &&
-      !backgroundManagedBuiltinSetup &&
+      !backgroundBuiltinSetup &&
       !builtinCreationVerified
     ) {
       setPendingCreateBuiltinContext(builtinVerificationContext);
@@ -1644,7 +1873,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
   };
 
   useEffect(() => {
-    if (!requiresBuiltinCreationVerification || backgroundManagedBuiltinSetup) return;
+    if (!requiresBuiltinCreationVerification || backgroundBuiltinSetup) return;
     if (pendingCreateBuiltinContext !== builtinVerificationContext) return;
     if (!builtinCreationVerified || probing || authRequired || submitting) return;
     if (disableReason) {
@@ -1655,7 +1884,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
     void persistConfig();
   }, [
     authRequired,
-    backgroundManagedBuiltinSetup,
+    backgroundBuiltinSetup,
     builtinCreationVerified,
     builtinVerificationContext,
     disableReason,
@@ -1731,7 +1960,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
             <ArrowLeft className="h-4 w-4" />
           </button>
         )}
-        <div className="min-w-0 flex-1 truncate text-sm font-semibold tracking-tight">
+        <div className="min-w-0 flex-1 truncate text-sm font-normal tracking-tight">
           {t('settings.agent.dialog.chooseType', 'Choose a type')}
         </div>
       </div>
@@ -1767,7 +1996,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
               key={opt.value}
               option={opt}
               selected={selectedOption?.value === opt.value}
-              disabled={mode.kind === 'edit'}
+              disabled={mode.kind === 'edit' || testingBuiltinSetup}
               chevron={isNarrowLayout}
               onSelect={() => selectOption(opt)}
             />
@@ -1780,7 +2009,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 key={opt.value}
                 option={opt}
                 selected={selectedOption?.value === opt.value}
-                disabled={mode.kind === 'edit'}
+                disabled={mode.kind === 'edit' || testingBuiltinSetup}
                 chevron={isNarrowLayout}
                 onSelect={() => selectOption(opt)}
               />
@@ -1794,7 +2023,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 key={opt.value}
                 option={opt}
                 selected={selectedOption?.value === opt.value}
-                disabled={mode.kind === 'edit'}
+                disabled={mode.kind === 'edit' || testingBuiltinSetup}
                 chevron={isNarrowLayout}
                 onSelect={() => selectOption(opt)}
               />
@@ -1808,7 +2037,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 key={opt.value}
                 option={opt}
                 selected={selectedOption?.value === opt.value}
-                disabled={mode.kind === 'edit'}
+                disabled={mode.kind === 'edit' || testingBuiltinSetup}
                 chevron={isNarrowLayout}
                 onSelect={() => selectOption(opt)}
               />
@@ -1855,7 +2084,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
             {selectedOption ? <OptionIcon option={selectedOption} className="h-4 w-4" /> : null}
           </span>
           <div className="min-w-0">
-            <h2 className="truncate text-sm font-semibold leading-tight">{dialogTitle}</h2>
+            <h2 className="truncate text-sm font-normal leading-tight">{dialogTitle}</h2>
             {selectedOptionDescription && (
               <p className="line-clamp-1 text-xs text-muted-foreground">
                 {selectedOptionDescription}
@@ -1863,27 +2092,73 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
             )}
           </div>
         </div>
-        <ProbeStatus
-          isPreset={isPreset}
-          probing={probing}
-          probeError={probeError}
-          ready={capabilitiesReady && !builtinNeedsCredentialCheck && !authRequired}
-          showIdleAction={!isCustom}
-          onRetry={() => {
-            setProbeError(null);
-            if (isCustom) {
-              void runCustomProbe();
-              return;
-            }
-            setManuallyTested(false);
-            setVerifiedBuiltinContext(null);
-            setProbeTick((n) => n + 1);
-          }}
-        />
+        {!waitingForBuiltinSetup && (
+          <ProbeStatus
+            isPreset={isPreset}
+            probing={probing}
+            probeError={probeError}
+            ready={capabilitiesReady && !builtinNeedsCredentialCheck && !authRequired}
+            showIdleAction={!isCustom}
+            disabled={isQueuedBuiltin && (!!disableReason || submitting)}
+            onRetry={() => {
+              setProbeError(null);
+              if (isQueuedBuiltin && backgroundBuiltinSetup) {
+                if (disableReason || submitting) return;
+                setTestingBuiltinSetup(true);
+                void persistConfigBeforeMachineLaunch().catch((error) => {
+                  setTestingBuiltinSetup(false);
+                  setProbeError(error instanceof Error ? error.message : String(error));
+                });
+                return;
+              }
+              if (isCustom) {
+                void runCustomProbe();
+                return;
+              }
+              setManuallyTested(false);
+              setVerifiedBuiltinContext(null);
+              setProbeTick((n) => n + 1);
+            }}
+          />
+        )}
       </header>
 
       <div ref={formScrollRef} className="scrollbar-pro min-h-0 flex-1 overflow-y-auto px-5 py-5">
-        <div className="space-y-5">
+        {waitingForBuiltinSetup &&
+          (builtinSetup ? (
+            <ProviderSetupRow
+              setup={builtinSetup}
+              machine={machine}
+              onRetry={async (setup) => {
+                try {
+                  await retrySetup(setup.id);
+                } catch (error) {
+                  toast.error(
+                    t('settings.agent.setup.retryFailed', 'Could not retry provider setup')
+                  );
+                  throw error;
+                }
+              }}
+              onDelete={async (setup) => {
+                try {
+                  await deleteSetup(setup.id);
+                  // Cancellation is durable for this id. A new test must be a
+                  // new setup, or the daemon would cancel it again.
+                  draftConfigIdRef.current = uuidv4() as AgentConfigId;
+                  lastPersistedPayloadKeyRef.current = null;
+                  setTestingBuiltinSetup(false);
+                } catch (error) {
+                  toast.error(
+                    t('settings.agent.setup.deleteFailed', 'Could not delete provider setup')
+                  );
+                  throw error;
+                }
+              }}
+            />
+          ) : (
+            <Spinner className="h-4 w-4" />
+          ))}
+        <div className="space-y-5" hidden={waitingForBuiltinSetup}>
           <Field
             htmlFor="agent-config-name"
             label={t('agents.configName', 'Name')}
@@ -1925,31 +2200,14 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           ) : null}
 
           {isDeepSeekBuiltin ? (
-            <div className="rounded-xl border border-primary/20 bg-primary/[0.04] p-4">
-              <Field
-                htmlFor="deepseek-api-key"
-                label={t('settings.agent.dialog.deepseek.apiKeyLabel', 'DeepSeek API Key')}
-                hint={t(
-                  'settings.agent.dialog.deepseek.apiKeyHelp',
-                  'Saved with this provider and injected as DEEPSEEK_API_KEY when DSH starts.'
-                )}
-                icon={<KeyRound className="h-3.5 w-3.5" aria-hidden="true" />}
-              >
-                <Input
-                  id="deepseek-api-key"
-                  type="password"
-                  autoComplete="off"
-                  spellCheck={false}
-                  value={formData.env[DEEPSEEK_API_KEY_ENV] ?? ''}
-                  onChange={(event) => updateDeepSeekApiKey(event.target.value)}
-                  placeholder={t(
-                    'settings.agent.dialog.deepseek.apiKeyPlaceholder',
-                    'sk-XXXXXXXXXXXX'
-                  )}
-                  className="h-9 font-mono"
-                />
-              </Field>
-            </div>
+            <DeepSeekHarnessPanel
+              endpointMode={deepseekEndpointMode}
+              onEndpointModeChange={updateDeepSeekEndpointMode}
+              apiKey={formData.env[DEEPSEEK_HARNESS_API_KEY_ENV] ?? ''}
+              onApiKeyChange={updateDeepSeekApiKey}
+              customBaseUrl={formData.deepseekCustomBaseUrl ?? ''}
+              onCustomBaseUrlChange={updateDeepSeekCustomBaseUrl}
+            />
           ) : null}
 
           {isCustom && (
@@ -1987,7 +2245,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   onClick={() => void runCustomProbe()}
                 >
                   {probing ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <Spinner className="h-3.5 w-3.5" />
                   ) : (
                     <FlaskConical className="h-3.5 w-3.5" />
                   )}
@@ -1996,7 +2254,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                     : t('settings.agent.dialog.custom.test', 'Test command')}
                 </Button>
                 {customReady && !probing && (
-                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-status-success">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-normal text-status-success">
                     <Check className="h-3.5 w-3.5" aria-hidden="true" />
                     {t('settings.agent.dialog.ready', 'Ready')}
                   </span>
@@ -2066,7 +2324,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   }}
                 >
                   {probing ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    <Spinner className="h-3.5 w-3.5" />
                   ) : (
                     <FlaskConical className="h-3.5 w-3.5" />
                   )}
@@ -2075,7 +2333,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                     : t('settings.agent.dialog.runtimeOverride.test', 'Test runtime')}
                 </Button>
                 {capabilitiesReady && !probing && (
-                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-status-success">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-normal text-status-success">
                     <Check className="h-3.5 w-3.5" aria-hidden="true" />
                     {t('settings.agent.dialog.ready', 'Ready')}
                   </span>
@@ -2089,6 +2347,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
               {probeError}
             </div>
           )}
+          {probeError && isBubBuiltin && <BubInstallGuide />}
 
           {showAuthenticationPanel ? (
             <div className="rounded-xl border border-border/60 bg-muted/20 p-4">
@@ -2112,14 +2371,20 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                   configId={agentConfigId}
                   cliType={formData.cliType}
                   agentType={formData.agentType}
+                  providerName={formData.name}
+                  customAcp={parsedCustomAcp ?? undefined}
                   runtimeOverrides={formData.runtimeOverrides}
                   env={formData.env}
                   compact
                   reauthentication={!authRequired}
+                  onBeforeStart={persistConfigBeforeMachineLaunch}
                   onAuthenticated={() => {
                     setAuthRequired(false);
                     setProbeError(null);
                     setManuallyTested(true);
+                    if (isCustom && parsedCustomAcp) {
+                      setTestedCustomKey(customAcpKey);
+                    }
                     if (requiresBuiltinCreationVerification) {
                       setVerifiedBuiltinContext(builtinVerificationContext);
                     }
@@ -2142,7 +2407,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 </p>
               ) : binaryStatus === 'unknown' || binaryProgressActive ? (
                 <p className="flex items-center gap-2 text-muted-foreground">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <Spinner className="h-3.5 w-3.5" />
                   {formatBinaryStatusText(
                     t,
                     binaryStatus,
@@ -2159,7 +2424,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                           'The agent runtime download failed.'
                         )
                       : usesDefaultManagedRuntime
-                        ? backgroundManagedBuiltinSetup
+                        ? backgroundBuiltinSetup
                           ? t(
                               'settings.agent.dialog.managedRuntimeQueuedAfterCreate',
                               'The managed runtime is not downloaded or is out of date. Lody will download and verify it in the background after you add this provider.'
@@ -2189,7 +2454,7 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                     >
                       {installingBinary ? (
                         <>
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          <Spinner className="h-3.5 w-3.5" />
                           {t('settings.agent.dialog.binaryDownloading', 'Downloading…')}
                         </>
                       ) : (
@@ -2210,11 +2475,18 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           {!isPreset &&
             !acpProvidesSessionTitle &&
             (capabilitiesReady ? titleSelectors.length > 0 : true) && (
-              <Section
+              <CollapsibleSection
                 title={t('settings.agent.dialog.section.titleGen', 'Title generation')}
                 defaultOpen
                 disabled={!capabilitiesReady}
-                disabledHint={t('settings.agent.dialog.probing', 'Loading available options…')}
+                disabledHint={
+                  probing
+                    ? t('settings.agent.dialog.probing', 'Probing…')
+                    : t(
+                        'settings.agent.dialog.testToRefreshCapabilities',
+                        'Click Test to refresh available options.'
+                      )
+                }
               >
                 <TitleGenerationFields
                   selectors={titleSelectors}
@@ -2233,10 +2505,10 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                     });
                   }}
                 />
-              </Section>
+              </CollapsibleSection>
             )}
 
-          <Section
+          <CollapsibleSection
             title={t('settings.agent.dialog.section.prompt', 'Custom prompt')}
             action={
               formData.prompt.trim().length > 0 ? (
@@ -2253,9 +2525,9 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
               )}
               rows={3}
             />
-          </Section>
+          </CollapsibleSection>
 
-          <Section
+          <CollapsibleSection
             title={
               activePreset || isDeepSeekBuiltin
                 ? t(
@@ -2286,26 +2558,58 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
               <p className="mb-2 text-xs text-muted-foreground">
                 {t(
                   'settings.agent.dialog.deepseek.envHint',
-                  'Optional: set DEEPSEEK_BASE_URL here to use a compatible endpoint.'
+                  'DEEPSEEK_API_KEY and DEEPSEEK_BASE_URL are set above and cannot be overridden here.'
                 )}
               </p>
             ) : null}
             <EnvVarsTextarea
               value={additionalEnv}
               onChange={(env) => {
-                updateEnvironment(
-                  isDeepSeekBuiltin && formData.env[DEEPSEEK_API_KEY_ENV]
-                    ? {
-                        ...env,
-                        [DEEPSEEK_API_KEY_ENV]: formData.env[DEEPSEEK_API_KEY_ENV],
-                      }
-                    : env
-                );
+                if (!isDeepSeekBuiltin) {
+                  updateEnvironment(env);
+                  return;
+                }
+                const next = omitDeepSeekProtectedEnv(env);
+                if (formData.env[DEEPSEEK_HARNESS_API_KEY_ENV]) {
+                  next[DEEPSEEK_HARNESS_API_KEY_ENV] = formData.env[DEEPSEEK_HARNESS_API_KEY_ENV];
+                }
+                updateEnvironment(next);
               }}
               showLabel={false}
               rows={5}
             />
-          </Section>
+          </CollapsibleSection>
+
+          {formData.cliType === 'builtin' && formData.agentType === 'pi' && (
+            <PiExtensionsField
+              key={`${machine.id}:${agentConfigId}:${mode.kind === 'edit' ? (mode.config.env?.PI_CODING_AGENT_DIR ?? '') : ''}`}
+              value={formData.runtimeOverrides?.piExtensions ?? []}
+              supported={machineSupportsPiExtensions(machine)}
+              onScan={
+                onScanPiExtensions
+                  ? () =>
+                      onScanPiExtensions({
+                        machineId: machine.id,
+                        configId: mode.kind === 'edit' ? mode.config.id : undefined,
+                      })
+                  : undefined
+              }
+              onChange={(paths) => {
+                invalidateBuiltinVerification();
+                setFormData((prev) => {
+                  const runtimeOverrides = { ...prev.runtimeOverrides };
+                  if (paths.length) runtimeOverrides.piExtensions = paths;
+                  else delete runtimeOverrides.piExtensions;
+                  return {
+                    ...prev,
+                    runtimeOverrides: Object.keys(runtimeOverrides).length
+                      ? runtimeOverrides
+                      : undefined,
+                  };
+                });
+              }}
+            />
+          )}
         </div>
       </div>
 
@@ -2333,14 +2637,19 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 <Button
                   onClick={() => void submit()}
                   disabled={
-                    !!disableReason || submitting || (builtinCreationPending && !probeError)
+                    !!disableReason ||
+                    submitting ||
+                    waitingForBuiltinSetup ||
+                    (builtinCreationPending && !probeError)
                   }
                   size="sm"
                 >
                   {(submitting || (builtinCreationPending && !authRequired && !probeError)) && (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    <Spinner className="mr-2 h-4 w-4" />
                   )}
-                  {mode.kind === 'edit' ? t('common.save', 'Save') : t('common.create', 'Create')}
+                  {mode.kind === 'edit' || publishedSetupConfig
+                    ? t('common.save', 'Save')
+                    : t('common.create', 'Create')}
                 </Button>
               </span>
             </TooltipTrigger>
@@ -2447,7 +2756,7 @@ function getOptionDescription(t: Translate, option: AgentTypeOption) {
 function RailGroup({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="mb-1">
-      <div className="px-2 pt-3 pb-1.5 text-[11px] font-medium text-muted-foreground/80">
+      <div className="px-2 pt-3 pb-1.5 text-[11px] font-normal text-muted-foreground/80">
         {title}
       </div>
       <div className="flex flex-col gap-0.5">{children}</div>
@@ -2563,6 +2872,7 @@ function ProbeStatus({
   probeError,
   ready,
   showIdleAction,
+  disabled = false,
   onRetry,
 }: {
   isPreset: boolean;
@@ -2570,12 +2880,13 @@ function ProbeStatus({
   probeError: string | null;
   ready: boolean;
   showIdleAction: boolean;
+  disabled?: boolean;
   onRetry: () => void;
 }) {
   const { t } = useTranslation();
   if (isPreset) {
     return (
-      <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary">
+      <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-normal text-primary">
         <Sparkles className="h-3 w-3" aria-hidden="true" />
         {t('settings.agent.dialog.presetBadge', 'Preset')}
       </span>
@@ -2584,7 +2895,7 @@ function ProbeStatus({
   if (probing) {
     return (
       <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground">
-        <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+        <Spinner className="h-3 w-3" aria-hidden="true" />
         {t('settings.agent.dialog.probing', 'Probing…')}
       </span>
     );
@@ -2597,6 +2908,7 @@ function ProbeStatus({
         size="sm"
         className="h-7 gap-1 px-2 text-xs text-status-warning"
         onClick={onRetry}
+        disabled={disabled}
         aria-label={t('settings.agent.dialog.retryProbe', 'Retry capability probe')}
       >
         <RefreshCw className="h-3 w-3" />
@@ -2612,6 +2924,7 @@ function ProbeStatus({
             <button
               type="button"
               onClick={onRetry}
+              disabled={disabled}
               aria-label={t(
                 'settings.agent.dialog.refreshCapabilities',
                 'Refresh agent capabilities'
@@ -2628,7 +2941,7 @@ function ProbeStatus({
             )}
           </TooltipContent>
         </Tooltip>
-        <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-status-success/30 bg-status-success/10 px-2.5 py-1 text-[11px] font-medium text-status-success">
+        <span className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-status-success/30 bg-status-success/10 px-2.5 py-1 text-[11px] font-normal text-status-success">
           <Check className="h-3 w-3" aria-hidden="true" />
           {t('settings.agent.dialog.ready', 'Ready')}
         </span>
@@ -2645,11 +2958,123 @@ function ProbeStatus({
       size="sm"
       className="h-7 gap-1 px-2 text-xs"
       onClick={onRetry}
+      disabled={disabled}
       aria-label={t('settings.agent.dialog.testCapabilities', 'Test agent capabilities')}
     >
       <FlaskConical className="h-3 w-3" />
       {t('settings.agent.dialog.testCapabilitiesShort', 'Test')}
     </Button>
+  );
+}
+
+function DeepSeekApiKeyField({
+  value,
+  onChange,
+  label,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  label?: string;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Field
+      htmlFor="deepseek-api-key"
+      label={label ?? t('settings.agent.dialog.deepseek.apiKeyLabel', 'DeepSeek API Key')}
+      hint={t(
+        'settings.agent.dialog.deepseek.apiKeyHelp',
+        'Saved with this provider and injected as DEEPSEEK_API_KEY when DSH starts.'
+      )}
+      icon={<KeyRound className="h-3.5 w-3.5" aria-hidden="true" />}
+    >
+      <Input
+        id="deepseek-api-key"
+        type="password"
+        autoComplete="off"
+        spellCheck={false}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={t('settings.agent.dialog.deepseek.apiKeyPlaceholder', 'sk-XXXXXXXXXXXX')}
+        className="h-9 font-mono"
+      />
+    </Field>
+  );
+}
+
+function DeepSeekHarnessPanel({
+  endpointMode,
+  onEndpointModeChange,
+  apiKey,
+  onApiKeyChange,
+  customBaseUrl,
+  onCustomBaseUrlChange,
+}: {
+  endpointMode: DeepSeekEndpointMode;
+  onEndpointModeChange: (value: DeepSeekEndpointMode) => void;
+  apiKey: string;
+  onApiKeyChange: (value: string) => void;
+  customBaseUrl: string;
+  onCustomBaseUrlChange: (value: string) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-3 rounded-xl border border-primary/20 bg-primary/[0.04] p-4">
+      <Tabs
+        value={endpointMode}
+        onValueChange={(value) => {
+          if (value === 'official' || value === 'custom') {
+            onEndpointModeChange(value);
+          }
+        }}
+      >
+        <TabsList className="grid h-8 w-full grid-cols-2">
+          <TabsTrigger value="official" className="px-2.5 text-xs">
+            {t('settings.agent.dialog.deepseek.officialTab', 'DeepSeek official')}
+          </TabsTrigger>
+          <TabsTrigger value="custom" className="px-2.5 text-xs">
+            {t('settings.agent.dialog.deepseek.customTab', 'Custom Endpoint')}
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="official" className="mt-3">
+          <DeepSeekApiKeyField value={apiKey} onChange={onApiKeyChange} />
+        </TabsContent>
+        <TabsContent value="custom" className="mt-3 space-y-3">
+          <Field
+            htmlFor="deepseek-endpoint"
+            label={t('settings.agent.dialog.deepseek.endpointLabel', 'API Endpoint')}
+            hint={t(
+              'settings.agent.dialog.deepseek.endpointHelp',
+              'Required HTTP or HTTPS URL. Saved as DEEPSEEK_BASE_URL without adding or removing /v1.'
+            )}
+          >
+            <Input
+              id="deepseek-endpoint"
+              type="url"
+              autoComplete="off"
+              spellCheck={false}
+              value={customBaseUrl}
+              onChange={(event) => onCustomBaseUrlChange(event.target.value)}
+              placeholder={t(
+                'settings.agent.dialog.deepseek.endpointPlaceholder',
+                'https://example.com'
+              )}
+              className="h-9 font-mono"
+            />
+          </Field>
+          <p className="text-xs text-muted-foreground">
+            {t(
+              'settings.agent.dialog.deepseek.modelsDiscovered',
+              'Available models are discovered automatically from the endpoint when this provider is verified.'
+            )}
+          </p>
+          <DeepSeekApiKeyField
+            value={apiKey}
+            onChange={onApiKeyChange}
+            label={t('settings.agent.dialog.deepseek.customApiKeyLabel', 'API Key')}
+          />
+        </TabsContent>
+      </Tabs>
+    </div>
   );
 }
 
@@ -2716,7 +3141,7 @@ function PresetPanel({
                       : 'border-border/60 bg-background/50 text-foreground/80 hover:bg-background'
                   )}
                 >
-                  <span className="block text-xs font-medium">
+                  <span className="block text-xs font-normal">
                     {t(mode.labelKey, mode.labelDefault)}
                   </span>
                   <span className="mt-1 block text-[11px] leading-snug text-muted-foreground">
@@ -2748,7 +3173,7 @@ function PresetPanel({
                   href={preset.helpUrl}
                   target="_blank"
                   rel="noreferrer"
-                  className="font-medium text-primary underline-offset-2 hover:underline"
+                  className="font-normal text-primary underline-offset-2 hover:underline"
                 >
                   {t(
                     preset.helpLinkLabelKey ?? 'settings.agent.dialog.preset.helpLink',
@@ -2825,7 +3250,7 @@ function PresetPanel({
         <CollapsibleTrigger asChild>
           <button
             type="button"
-            className="group inline-flex items-center gap-1.5 rounded-md text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
+            className="group inline-flex items-center gap-1.5 rounded-md text-[11px] font-normal text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
           >
             <ChevronDown className="h-3 w-3 transition-transform group-data-[state=open]:rotate-180" />
             {t('settings.agent.dialog.preset.showInjected', 'Show injected variables')}
@@ -2876,62 +3301,13 @@ function Field({
     <div className="space-y-1.5">
       <div className="flex items-center gap-1.5">
         {icon && <span className="text-muted-foreground">{icon}</span>}
-        <Label htmlFor={htmlFor} className="text-xs font-medium">
+        <Label htmlFor={htmlFor} className="text-xs font-normal">
           {label}
         </Label>
       </div>
       {children}
       {hint && <p className="text-[11px] leading-snug text-muted-foreground">{hint}</p>}
     </div>
-  );
-}
-
-function Section({
-  title,
-  count,
-  children,
-  disabled,
-  disabledHint,
-  defaultOpen,
-  action,
-}: {
-  title: string;
-  count?: number;
-  children: ReactNode;
-  disabled?: boolean;
-  disabledHint?: string;
-  defaultOpen?: boolean;
-  action?: ReactNode;
-}) {
-  return (
-    <Collapsible defaultOpen={defaultOpen}>
-      <div className="flex h-9 items-center gap-1 rounded-md border border-border/60 bg-card/40 pr-1 hover:bg-card/70">
-        <CollapsibleTrigger asChild>
-          <button
-            type="button"
-            className="group flex h-full min-w-0 flex-1 items-center gap-2 rounded-md px-3 text-left text-sm font-medium text-foreground/90 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <ChevronDown className="h-3 w-3 shrink-0 transition-transform group-data-[state=open]:rotate-180" />
-            <span className="min-w-0 truncate">{title}</span>
-            {typeof count === 'number' && count > 0 ? (
-              <span className="ml-auto rounded-full bg-muted px-1.5 text-[10px] text-muted-foreground">
-                {count}
-              </span>
-            ) : null}
-          </button>
-        </CollapsibleTrigger>
-        {action}
-      </div>
-      <CollapsibleContent className="mt-2">
-        <div className="pl-1">
-          {disabled ? (
-            <p className="px-1 py-2 text-xs text-muted-foreground">{disabledHint}</p>
-          ) : (
-            children
-          )}
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
   );
 }
 

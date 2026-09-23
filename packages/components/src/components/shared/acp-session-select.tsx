@@ -79,7 +79,7 @@ export function AcpSessionSelect({
         variant === 'compact' && compactClassName(isDark, iconOnly),
         variant !== 'compact' && iconOnly && 'h-6 w-6 rounded-[4px]',
         variant !== 'compact' && !iconOnly && 'h-8 px-2',
-        variant === 'default' && !iconOnly && 'rounded-full hover:bg-foreground/10',
+        variant === 'default' && !iconOnly && 'rounded-full hover:bg-hover',
         variant === 'text' && !iconOnly && 'rounded-md bg-transparent px-1 hover:bg-transparent',
         className
       )}

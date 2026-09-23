@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Globe2, Loader2, ShieldAlert } from 'lucide-react';
+import { Globe2, ShieldAlert } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useAtomValue } from 'jotai';
 import { useTranslation } from 'react-i18next';
 import {
@@ -77,13 +78,15 @@ type EffectivePreviewState = {
 
 type ManagedNavigationPhase = 'resolving-machine' | 'opening-local' | 'creating-tunnel';
 
+type PublicBrowserNavigationRequest = { id: number; url: string };
+
 const approvalFor = (
   address: BrowserAddress & { engine: 'managed-preview'; target: PreviewTarget },
   userId: string,
   source: PreviewTargetApproval['source']
 ): PreviewTargetApproval => ({
   source,
-  targetClass: address.targetClass === 'private-lan' ? 'private_lan' : 'loopback',
+  targetClass: 'loopback',
   target: address.target,
   confirmedByUserId: userId,
   confirmedAt: getServerNow(),
@@ -139,7 +142,11 @@ function SessionBrowserPanelController({
     index: -1,
   });
   const [publicState, setPublicState] = useState<ElectronPublicBrowserState | null>(null);
-  const [publicNavigationRequestId, setPublicNavigationRequestId] = useState<number | null>(null);
+  // Native state may change the current address after a redirect or history
+  // movement. Keep the explicit renderer intent separate so that observation
+  // cannot be fed back into WebContentsView.loadURL.
+  const [publicNavigationRequest, setPublicNavigationRequest] =
+    useState<PublicBrowserNavigationRequest | null>(null);
   const [annotationEnabled, setAnnotationEnabled] = useState(false);
   const [annotationAvailable, setAnnotationAvailable] = useState(false);
   const [managedLoading, setManagedLoading] = useState(false);
@@ -163,6 +170,7 @@ function SessionBrowserPanelController({
   const [machinePlane, setMachinePlane] = useState<'local' | 'cloud' | null>(null);
   const [resumeAddress, setResumeAddress] = useState<BrowserAddress | null>(null);
   const navigationSequenceRef = useRef(0);
+  const publicNavigationSequenceRef = useRef(0);
   const restoreAttemptKeyRef = useRef<string | null>(null);
   const handledCandidateNavigationRequestRef = useRef(0);
 
@@ -235,7 +243,7 @@ function SessionBrowserPanelController({
     setLocalEndpoint(null);
     setHistory(resumeState?.history ?? { entries: [], index: -1 });
     setPublicState(null);
-    setPublicNavigationRequestId(null);
+    setPublicNavigationRequest(null);
     setManagedState(null);
     setManagedCommand(undefined);
     setAnnotationEnabled(false);
@@ -396,15 +404,36 @@ function SessionBrowserPanelController({
         approved?: boolean;
         historyIndex?: number;
         restore?: boolean;
+        /** The destination came from page content, not from the person. */
+        fromPageContent?: boolean;
       }
     ) => {
       const sequence = ++navigationSequenceRef.current;
       setError(null);
+      // A page inside Managed Preview is served by the agent machine, so a navigation
+      // request it posts up is agent-authored, not a user gesture. Public destinations
+      // are ordinary external links, and loopback still lands in the managed branch
+      // below where it needs its own approval — but a private-LAN address would open
+      // silently in the user's own browser, on the user's own network, which no page
+      // has any business asking for. Only the address bar can reach one.
+      if (options?.fromPageContent && next.targetClass === 'private-lan') {
+        setError(
+          t(
+            'sessions.browser.errors.pagePrivateNetworkBlocked',
+            'The page asked to open a private network address. Only you can enter one, from the address bar.'
+          )
+        );
+        return;
+      }
       if (next.engine === 'public-web') {
         await releaseLocalEndpoint();
         if (sequence !== navigationSequenceRef.current) return;
         commitOpenedAddress(next, null, options?.historyIndex);
-        setPublicNavigationRequestId((current) => (options?.restore ? null : (current ?? 0) + 1));
+        setPublicNavigationRequest(
+          options?.restore
+            ? null
+            : { id: ++publicNavigationSequenceRef.current, url: next.logicalUrl }
+        );
         return;
       }
       if (!next.target) {
@@ -696,12 +725,14 @@ function SessionBrowserPanelController({
       publicState?.canGoBack &&
       getPublicBrowserBridge()
     ) {
-      void getPublicBrowserBridge()?.back(`session-browser-${session.id}`).then(
-        (result) => {
-          if (!result.ok) setError(result.error);
-        },
-        (commandError: unknown) => setError(errorMessage(commandError))
-      );
+      void getPublicBrowserBridge()
+        ?.back(`session-browser-${session.id}`)
+        .then(
+          (result) => {
+            if (!result.ok) setError(result.error);
+          },
+          (commandError: unknown) => setError(errorMessage(commandError))
+        );
       return;
     }
     if (currentAddress?.engine === 'managed-preview' && managedState?.canGoBack) {
@@ -724,12 +755,14 @@ function SessionBrowserPanelController({
       publicState?.canGoForward &&
       getPublicBrowserBridge()
     ) {
-      void getPublicBrowserBridge()?.forward(`session-browser-${session.id}`).then(
-        (result) => {
-          if (!result.ok) setError(result.error);
-        },
-        (commandError: unknown) => setError(errorMessage(commandError))
-      );
+      void getPublicBrowserBridge()
+        ?.forward(`session-browser-${session.id}`)
+        .then(
+          (result) => {
+            if (!result.ok) setError(result.error);
+          },
+          (commandError: unknown) => setError(errorMessage(commandError))
+        );
       return;
     }
     if (currentAddress?.engine === 'managed-preview' && managedState?.canGoForward) {
@@ -748,12 +781,14 @@ function SessionBrowserPanelController({
 
   const handleReload = useCallback(() => {
     if (currentAddress?.engine === 'public-web' && getPublicBrowserBridge()) {
-      void getPublicBrowserBridge()?.reload(`session-browser-${session.id}`).then(
-        (result) => {
-          if (!result.ok) setError(result.error);
-        },
-        (commandError: unknown) => setError(errorMessage(commandError))
-      );
+      void getPublicBrowserBridge()
+        ?.reload(`session-browser-${session.id}`)
+        .then(
+          (result) => {
+            if (!result.ok) setError(result.error);
+          },
+          (commandError: unknown) => setError(errorMessage(commandError))
+        );
       return;
     }
     if (viewerUrl) {
@@ -771,12 +806,14 @@ function SessionBrowserPanelController({
 
   const handleStop = useCallback(() => {
     if (currentAddress?.engine === 'public-web' && getPublicBrowserBridge()) {
-      void getPublicBrowserBridge()?.stop(`session-browser-${session.id}`).then(
-        (result) => {
-          if (!result.ok) setError(result.error);
-        },
-        (commandError: unknown) => setError(errorMessage(commandError))
-      );
+      void getPublicBrowserBridge()
+        ?.stop(`session-browser-${session.id}`)
+        .then(
+          (result) => {
+            if (!result.ok) setError(result.error);
+          },
+          (commandError: unknown) => setError(errorMessage(commandError))
+        );
       return;
     }
     if (currentAddress?.engine === 'managed-preview' && annotationAvailable) {
@@ -905,6 +942,15 @@ function SessionBrowserPanelController({
     [commitHistory]
   );
 
+  const handlePublicNavigationRequestConsumed = useCallback(
+    (request: PublicBrowserNavigationRequest) => {
+      setPublicNavigationRequest((current) =>
+        current?.id === request.id && current.url === request.url ? null : current
+      );
+    },
+    []
+  );
+
   const handleManagedState = useCallback(
     (state: ManagedBrowserStateMessage['payload']) => {
       setManagedState(state);
@@ -928,7 +974,7 @@ function SessionBrowserPanelController({
   const handleManagedNavigationRequest = useCallback(
     (url: string) => {
       try {
-        void openAddress(parseBrowserAddress(url));
+        void openAddress(parseBrowserAddress(url), { fromPageContent: true });
       } catch (navigationError) {
         setError(errorMessage(navigationError));
       }
@@ -1002,7 +1048,7 @@ function SessionBrowserPanelController({
           aria-live="polite"
           className="flex min-h-0 flex-1 items-center justify-center gap-2 bg-background text-sm text-muted-foreground"
         >
-          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+          <Spinner className="h-4 w-4" aria-hidden />
           <span>
             {managedNavigationPhase === 'resolving-machine'
               ? t('sessions.browser.resolvingMachine', 'Resolving the session machine…')
@@ -1014,10 +1060,10 @@ function SessionBrowserPanelController({
       ) : currentAddress?.engine === 'public-web' ? (
         <PublicBrowserSurface
           browserId={`session-browser-${session.id}`}
-          url={currentAddress.logicalUrl}
-          navigationRequestId={publicNavigationRequestId}
+          navigationRequest={publicNavigationRequest}
           active={active && !error && pendingAction === null}
           onStateChange={handlePublicState}
+          onNavigationRequestConsumed={handlePublicNavigationRequestConsumed}
         />
       ) : currentAddress?.engine === 'managed-preview' && viewerUrl ? (
         <ManagedPreviewSurface

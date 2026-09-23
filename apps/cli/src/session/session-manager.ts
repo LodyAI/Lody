@@ -261,7 +261,6 @@ function buildSessionPreparationCompatibility(
   launchSource: Partial<SessionLaunchConfig> | null | undefined,
   mcpServerIds: readonly McpServerId[] | undefined,
   configOptionValues: SessionConfig['configOptionValues'],
-  taskToolsEnabled: boolean,
   scheduleToolsEnabled?: boolean
 ) {
   return {
@@ -273,7 +272,6 @@ function buildSessionPreparationCompatibility(
     runConfig: normalizeSessionPreparationRunConfigForDedup({
       mcpServerIds: mcpServerIds ? [...mcpServerIds] : undefined,
       configOptionValues,
-      taskToolsEnabled,
       scheduleToolsEnabled,
     }),
   };
@@ -323,7 +321,12 @@ export interface ISession {
    * Update git identity for commits made in this session.
    * This should be called when a new user sends a chat request to an existing session.
    */
-  updateGitIdentity(userName: string, userEmail: string, userId?: string): void;
+  updateGitIdentity(
+    userName: string,
+    userEmail: string,
+    userId: string | undefined,
+    options: { preferMachineIdentity: boolean }
+  ): void;
   /**
    * Return the already-resolved effective git identity only when it belongs to
    * the requested user. Forks use this as an optimistic local fast path.
@@ -356,6 +359,7 @@ export type SessionMonitorRuntimeInfo = {
 };
 
 export interface CreateAgentConfig {
+  resolveWorktreeProject?: AgentClientOptions['resolveWorktreeProject'];
   cliType: AgentConfigCliType;
   agentType: string;
   command: string;
@@ -385,7 +389,7 @@ export interface CreateAgentConfig {
     requestId: string,
     request: RequestPermissionRequest
   ) => Promise<RequestPermissionResponse>;
-  onUsageUpdate: (usage: SessionUsageUpdate) => void;
+  onUsageUpdate: (usage: SessionUsageUpdate, accountingId?: string) => void;
   onContextWindowUsageUpdate: (usage: SessionContextWindowUsage) => void;
   onRateLimitUpdate: (limits: RateLimit) => void;
   onThreadGoalUpdated: (goal: Extract<MessageContent, { type: 'goal' }>) => void;
@@ -429,6 +433,7 @@ interface SessionManagerEvents {
     sessionId: SessionId;
     acpSessionId: ACPSessionId;
     usage: SessionUsageUpdate;
+    accountingId?: string;
   }) => void;
   onContextWindowUsageUpdate: (sessionId: SessionId, usage: SessionContextWindowUsage) => void;
   onRateLimitUpdate: (machineId: MachineId, cliType: CliType, limits: RateLimit) => void;
@@ -453,6 +458,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   private githubTokenManager: CloudGithubTokenManager | null = null;
   private gitCredentialBroker: GitCredentialBroker | null = null;
   private readonly sessions = new Map<SessionId, Session>();
+  /** Per-instance listener teardown for `detachSession`; see `registerSessionEvents`. */
+  private readonly sessionEventDetachers = new WeakMap<Session, () => void>();
   private readonly pendingSessionCreates = new Map<SessionId, Promise<ISession>>();
   private readonly pendingTerminationPromises = new Map<SessionId, Promise<void>>();
   private readonly preparationSessions = new Map<SessionId, Session>();
@@ -505,7 +512,8 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         await this.cloudPort.access.resolveWorkspaceUser({
           workspaceId: this.workspaceId,
           userId,
-        })
+        }),
+      this.cloudPort.identity.userId
     );
     this.preparationService = new SessionPreparationService(this.logger, {
       hardTtlMs: SESSION_PREPARATION_HARD_TTL_MS,
@@ -604,7 +612,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
           current.config,
           resource.config.mcpServerIds,
           resource.config.configOptionValues,
-          resource.config.taskToolsEnabled,
           resource.config.scheduleToolsEnabled
         )
       )
@@ -672,7 +679,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       config,
       config.mcpServerIds,
       config.configOptionValues,
-      config.taskToolsEnabled,
       config.scheduleToolsEnabled
     );
     const claim = this.preparationService.claim({
@@ -701,7 +707,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
               current.config,
               config.mcpServerIds,
               config.configOptionValues,
-              config.taskToolsEnabled,
               config.scheduleToolsEnabled
             )
           )
@@ -921,7 +926,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       agentType: spec.agentType,
       configOptionValues: spec.runConfig?.configOptionValues,
       mcpServerIds: spec.runConfig?.mcpServerIds ?? [],
-      taskToolsEnabled: spec.runConfig?.taskToolsEnabled === true,
       scheduleToolsEnabled: spec.runConfig?.scheduleToolsEnabled === true,
       customAcp: agentConfig.customAcp,
       runtimeOverrides: agentConfig.runtimeOverrides,
@@ -941,7 +945,6 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       config,
       config.mcpServerIds,
       config.configOptionValues,
-      config.taskToolsEnabled,
       config.scheduleToolsEnabled
     );
     const ghTokenInjected = await this.prepareGitHubRepoSessionConfig(config);
@@ -951,6 +954,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       agentType: config.agentType,
       customAcp: config.customAcp,
       runtimeOverrides: config.runtimeOverrides,
+      env: config.env,
     });
     signal.throwIfAborted();
     const worktreeTarget = this.resolveSessionWorktreeTarget(config);
@@ -1206,7 +1210,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         sessionId
       );
       session.ghTokenInjected = prepared.session.ghTokenInjected;
-      session.updateGitIdentity(config.userName, config.userEmail, config.requesterUserId);
+      session.updateGitIdentity(config.userName, config.userEmail, config.requesterUserId, {
+        preferMachineIdentity: config.requesterUserId === this.cloudPort.identity.userId,
+      });
       const acpSessionId = await prepared.agentResult;
       const sessionDoc = await this.workspaceDocument.getOrCreateSessionDoc(sessionId);
       await sessionDoc.setACPSessionId(acpSessionId as ACPSessionId);
@@ -1234,12 +1240,21 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   ): CreateAgentConfig {
     const sessionId = config.sessionId!;
     const dispatchEvent = options?.dispatchEvent ?? ((event: () => void) => event());
+    const localProjectId =
+      config.project?.kind === 'local' ? config.project.localProjectId : undefined;
     return {
       cliType: config.agentCliType,
       agentType: config.agentType,
       command: launch.command,
       args: launch.args,
       env: launch.env,
+      resolveWorktreeProject: localProjectId
+        ? async () => {
+            const originProjectPath = await this.resolveLocalProjectRootPath(localProjectId);
+            if (!originProjectPath) throw new Error(`Local project not found: ${localProjectId}`);
+            return { version: 1, originProjectPath };
+          }
+        : undefined,
       capabilitySourceVersion: launch.capabilitySourceVersion,
       resumeSessionId: options?.resumeSessionId,
       forkSessionId: options?.forkSessionId,
@@ -1260,7 +1275,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         }
         return this.requestPermissionHandler(sessionId, requestId, request, session.agentClient!);
       },
-      onUsageUpdate: (usage: SessionUsageUpdate) => {
+      onUsageUpdate: (usage: SessionUsageUpdate, accountingId?: string) => {
         dispatchEvent(() => {
           const currentAcpSessionId = session.acpSessionId;
           if (!currentAcpSessionId) {
@@ -1269,7 +1284,12 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
             );
             return;
           }
-          this.emit('onUsageUpdate', { sessionId, acpSessionId: currentAcpSessionId, usage });
+          this.emit('onUsageUpdate', {
+            sessionId,
+            acpSessionId: currentAcpSessionId,
+            usage,
+            accountingId,
+          });
         });
       },
       onContextWindowUsageUpdate: (usage: SessionContextWindowUsage) => {
@@ -1344,7 +1364,9 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
     session.ghTokenInjected = ghTokenInjected;
     const sessionId = config.sessionId!;
     this.logger.debug(`[${sessionId}] Session workdir resolved: ${session.getWorkdir()}`);
-    session.updateGitIdentity(config.userName, config.userEmail, config.requesterUserId);
+    session.updateGitIdentity(config.userName, config.userEmail, config.requesterUserId, {
+      preferMachineIdentity: config.requesterUserId === this.cloudPort.identity.userId,
+    });
     let acpSessionId: string | undefined;
 
     const launchResolutionStartedAt = performance.now();
@@ -1354,6 +1376,7 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       agentType: config.agentType,
       customAcp: config.customAcp,
       runtimeOverrides: config.runtimeOverrides,
+      env: config.env,
       onManagedRuntimeProgress: (event) => {
         config.onPresencePhase?.('managed-runtime', formatManagedRuntimeProgressDetail(event));
         if (event.phase === 'complete' && !managedRuntimeReadyLogged) {
@@ -1433,6 +1456,19 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
       this.logger.error(
         `[${config.sessionId}] Failed to create agent: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
+      // This instance never left `createSession`, so nobody upstream holds it
+      // and nobody may observe its death. Detach it BEFORE terminate: the
+      // Session still emits `terminated`/`exit` while it kills its processes,
+      // and with the manager listeners attached those events reach
+      // MessageHandler as "the session running turn X died". The handler then
+      // finalizes the live turn (clears its ACP update target, stamps the
+      // assistant entry finished) even though the caller is about to recover —
+      // e.g. the execution service falls back from a failed ACP resume to a
+      // history-replay session — and every update from the replacement agent
+      // is dropped for lack of a target. The trade-off: a startup crash no
+      // longer produces an `exit`-driven idle-status write; the rejected
+      // promise is the only signal, and the caller owns the recovery.
+      this.detachSession(session);
       try {
         await session.terminate(true);
       } catch (terminateError) {
@@ -2246,21 +2282,18 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
   }
 
   private registerSessionEvents(session: Session): void {
-    session.on('output', (event: SessionOutputEvent) => {
+    const onOutput = (event: SessionOutputEvent): void => {
       this.emit('output', event);
-    });
-
-    session.on('error', (event: SessionErrorEvent) => {
+    };
+    const onError = (event: SessionErrorEvent): void => {
       this.emit('error', event);
-    });
-
-    session.on('exit', (event: SessionExitEvent) => {
+    };
+    const onExit = (event: SessionExitEvent): void => {
       this.sessions.delete(event.sessionId);
       void this.rebalanceSessionSandboxes();
       this.emit('exit', event);
-    });
-
-    session.on('terminated', (event: SessionExitEvent) => {
+    };
+    const onTerminated = (event: SessionExitEvent): void => {
       this.sessions.delete(event.sessionId);
       void this.rebalanceSessionSandboxes();
       const terminatedEvent: SessionTerminatedEvent = {
@@ -2268,7 +2301,33 @@ export class SessionManager extends EventEmitter<SessionManagerEvents> {
         exitCode: event.exitCode,
       };
       this.emit('terminated', terminatedEvent);
+    };
+    session.on('output', onOutput);
+    session.on('error', onError);
+    session.on('exit', onExit);
+    session.on('terminated', onTerminated);
+    this.sessionEventDetachers.set(session, () => {
+      session.off('output', onOutput);
+      session.off('error', onError);
+      session.off('exit', onExit);
+      session.off('terminated', onTerminated);
     });
+  }
+
+  /**
+   * Stop publishing a Session instance's lifecycle events and drop it from the
+   * live map. Only for an instance that was registered by `createSessionInner`
+   * but whose creation then failed: it was never returned to a caller, so from
+   * the outside it never existed. Keyed by instance, not session id, because a
+   * recovery path may already be creating the replacement under the same id.
+   */
+  private detachSession(session: Session): void {
+    this.sessionEventDetachers.get(session)?.();
+    this.sessionEventDetachers.delete(session);
+    if (this.sessions.get(session.sessionId) === session) {
+      this.sessions.delete(session.sessionId);
+      void this.rebalanceSessionSandboxes();
+    }
   }
 
   private async rebalanceSessionSandboxes(): Promise<void> {

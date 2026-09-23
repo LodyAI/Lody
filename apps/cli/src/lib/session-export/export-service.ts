@@ -9,14 +9,7 @@ import { buildTranscriptMarkdown } from './markdown';
 import { prepareExportOutputDir } from './output-dir';
 import { encodeExportPathSegment, joinExportPath } from './path-utils';
 import { fetchWorkspaceUsageBundle } from './workspace-usage';
-import {
-  buildTaskIndexExportEntry,
-  formatTaskMarkdown,
-  sortTasksByCreatedAt,
-  type TaskIndexExportEntry,
-} from './task-export';
 import type { ExportManifest, ExportSessionSummary } from './types';
-import { listWorkspaceTaskIds, readTask } from '@/lib/task-doc';
 import { formatErrorMessage } from '@/utils/format-error';
 import { getScheduleRegistryFlockDocId, ScheduleRepository } from '@lody/shared';
 import { listWorkspaceScheduleIds } from '../schedules/schedule-documents';
@@ -170,42 +163,6 @@ async function exportSession(args: {
   };
 }
 
-async function exportTasks(input: {
-  manager: LoroDocumentManager;
-  workspaceId: WorkspaceId;
-  outputDir: string;
-  warnings: string[];
-}): Promise<TaskIndexExportEntry[]> {
-  let taskIds: readonly string[];
-  try {
-    taskIds = await listWorkspaceTaskIds(input.manager, input.workspaceId);
-  } catch (error) {
-    // A workspace that never created a task has no index document.
-    input.warnings.push(`Task export skipped: ${formatErrorMessage(error)}`);
-    return [];
-  }
-
-  const snapshots = await mapWithConcurrency(taskIds, SESSION_EXPORT_CONCURRENCY, async (taskId) =>
-    readTask(input.manager, taskId as Parameters<typeof readTask>[1]).catch((error: unknown) => {
-      input.warnings.push(`Task ${taskId} export failed: ${formatErrorMessage(error)}`);
-      return null;
-    })
-  );
-
-  const index: TaskIndexExportEntry[] = [];
-  for (const snapshot of sortTasksByCreatedAt(snapshots.filter((entry) => entry !== null))) {
-    const taskDir = path.join(
-      input.outputDir,
-      'tasks',
-      encodeExportPathSegment(snapshot.meta.taskId, 'task')
-    );
-    await writeJson(path.join(taskDir, 'task.json'), snapshot);
-    await writeText(path.join(taskDir, 'task.md'), formatTaskMarkdown(snapshot));
-    index.push(buildTaskIndexExportEntry(snapshot));
-  }
-  return index;
-}
-
 export async function exportWorkspaceData(
   options: ExportWorkspaceDataOptions
 ): Promise<{ manifest: ExportManifest; sessionIndex: SessionIndexEntry[]; warnings: string[] }> {
@@ -233,13 +190,6 @@ export async function exportWorkspaceData(
 
   await writeJson(path.join(options.outputDir, 'sessions', 'index.json'), sessionIndex);
 
-  const taskIndex = await exportTasks({
-    manager: options.manager,
-    workspaceId: options.workspace.id as WorkspaceId,
-    outputDir: options.outputDir,
-    warnings,
-  });
-  await writeJson(path.join(options.outputDir, 'tasks', 'index.json'), taskIndex);
   const scheduleRepository = new ScheduleRepository(
     options.manager.repo,
     options.workspace.id as WorkspaceId
@@ -304,7 +254,7 @@ export async function exportWorkspaceData(
     },
     outputDir: options.outputDir,
     sessionCount: sessionIndex.length,
-    taskCount: taskIndex.length,
+    taskCount: 0,
     scheduleCount: scheduleIndex.length,
     usageExported,
   };

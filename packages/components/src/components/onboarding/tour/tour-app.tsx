@@ -297,7 +297,10 @@ function TourWindow({
 
   const items = useMemo(
     () =>
-      history.map((message) => ({ type: 'message', sessionId: TOUR_SESSION_ID, message }) as const),
+      history.map(
+        (message, turnIndex) =>
+          ({ type: 'message', sessionId: TOUR_SESSION_ID, message, turnIndex }) as const
+      ),
     [history]
   );
 
@@ -497,10 +500,10 @@ function TourWindow({
         <span className="w-14" />
       </div>
 
-      <div className="flex min-h-0 flex-1 m-2">
+      <div className="flex min-h-0 flex-1">
         <div data-tour-anchor="sidebar" className="h-full w-[280px] shrink-0 overflow-hidden">
           <LoroSidebar
-            className="border border-border h-full w-[280px]"
+            className="h-full w-[280px] border-r-[0.5px] border-sidebar-border/70 bg-sidebar"
             defaultWidth={280}
             minWidth={280}
             maxWidth={280}
@@ -644,6 +647,8 @@ function TourWindow({
                           />
                         </div>
                         <SessionChatInputArea
+                          // The info bar above owns this gap, as on the session page.
+                          hideTopSpacer
                           ref={composerRef}
                           session={session}
                           sessionLocalProjectRootPath={`/Users/you/Code/${identity.projectName}`}
@@ -697,7 +702,7 @@ function TourWindow({
             secondaryPanel={
               <div
                 data-tour-anchor="side-panel"
-                className="mx-2 mb-2 mt-2 flex h-[calc(100%_-_1rem)] min-w-0 flex-col overflow-hidden rounded-xl border border-sidebar-border/80 bg-sidebar shadow-[0_1px_4px_-1px_rgba(0,0,0,0.18)]"
+                className="flex h-full min-w-0 flex-col overflow-hidden border-l border-border/70 bg-background"
               >
                 <SessionSidePanelTabBar
                   tabs={sidePanelTabs}

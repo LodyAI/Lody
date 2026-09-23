@@ -211,6 +211,7 @@ export const startCommand = new Command('start')
     const authFailureExitCode = supervisorIdentity ? EXIT_CODE_AUTH_FAILURE : 1;
     const runtimeStateReporter = new CliRuntimeStateReporter({
       supervisor: toRuntimeSupervisorIdentity(supervisorIdentity),
+      trackBackendConnectionAge: platformKind === 'cloud',
     });
     runtimeStateReporter.setStartupStage('bootstrap');
     const electronManaged = supervisorIdentity?.launchMode === 'electron';
@@ -221,6 +222,7 @@ export const startCommand = new Command('start')
     const cliDetectionStartedAt = Date.now();
     const cliAvailability = {
       kimi: 'managed-runtime',
+      pi: 'managed-runtime',
       grok: 'managed-runtime',
       claude: checkClaude(),
       codex: checkCodex(),

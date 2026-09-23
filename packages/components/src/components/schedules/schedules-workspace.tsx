@@ -1,3 +1,4 @@
+import type { AgentRunRef } from '@/components/shared/agent-run-ref';
 import {
   Dialog,
   DialogContent,
@@ -29,7 +30,6 @@ import {
   type ScheduleDestination,
   type ScheduleDocument,
   type ScheduleRegistryRow,
-  type TaskAgentRef,
 } from '@lody/shared';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import {
@@ -446,7 +446,7 @@ function ScheduleEditor({
     runtime ? { workspaceId: runtime.workspaceId } : 'skip'
   ) as { repoFullName?: string; fullName?: string }[] | null | undefined;
   const { openSettings } = useOpenSettings();
-  const [agent, setAgent] = useState<TaskAgentRef | null>(
+  const [agent, setAgent] = useState<AgentRunRef | null>(
     document
       ? {
           ...document.definition.agent,

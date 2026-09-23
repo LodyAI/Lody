@@ -99,6 +99,11 @@ export interface ConversationOutlineRailProps {
   enableArrivalIntent?: boolean;
   /** Storybook/dev instrumentation only. The rail never persists or uploads it. */
   onArrivalIntentDebugEvent?: (event: ConversationOutlineArrivalIntentDebugEvent) => void;
+  /**
+   * The pointer reached this round's tick. The stream uses it to hydrate a
+   * round whose preview is still empty so the card can fill in.
+   */
+  onPreviewRound?: (index: number) => void;
   className?: string;
 }
 
@@ -259,6 +264,7 @@ export function ConversationOutlineRail({
   overlayRoot = null,
   enableArrivalIntent = false,
   onArrivalIntentDebugEvent,
+  onPreviewRound,
   className,
 }: ConversationOutlineRailProps) {
   const { t } = useTranslation();
@@ -278,6 +284,7 @@ export function ConversationOutlineRail({
 
   const activeIndexRef = useLatestRef(activeIndex);
   const arrivalIntentDebugRef = useLatestRef(onArrivalIntentDebugEvent);
+  const onPreviewRoundRef = useLatestRef(onPreviewRound);
   const arrivalIntentDetectorRef = useRef<ArrivalIntentDetector | null>(null);
   const tickCount = entries.length;
 
@@ -441,6 +448,7 @@ export function ConversationOutlineRail({
       });
       if (isWarm || bypassWarmup) {
         if (bypassWarmup) warmBrowsingRef.current = false;
+        onPreviewRoundRef.current?.(index);
         setHoverCard({ index, element });
         setCardOpen(true);
         arrivalIntentDebugRef.current?.({ type: 'card-open', at: now, index, source });
@@ -451,6 +459,7 @@ export function ConversationOutlineRail({
         // Deliberately waiting out the fixed delay is what earns the old
         // rapid-browsing window. A predictor bypass never arms it.
         warmBrowsingRef.current = true;
+        onPreviewRoundRef.current?.(index);
         setHoverCard({ index, element });
         setCardOpen(true);
         arrivalIntentDebugRef.current?.({
@@ -461,7 +470,7 @@ export function ConversationOutlineRail({
         });
       }, HOVER_WARMUP_MS);
     },
-    [arrivalIntentDebugRef, cardOpenRef, clearOpenTimer]
+    [arrivalIntentDebugRef, cardOpenRef, clearOpenTimer, onPreviewRoundRef]
   );
 
   const handlePointerLeave = useCallback(() => {
@@ -685,10 +694,10 @@ export function ConversationOutlineRail({
         >
           {hoveredEntry === null ? null : (
             <>
-              <div className="line-clamp-2 text-[13px] font-medium leading-snug text-foreground">
+              <div className="line-clamp-3 text-[13px] font-medium leading-snug text-foreground">
                 {jumpLabel(hoveredEntry)}
               </div>
-              <div className="mt-1.5 line-clamp-4 text-[12px] leading-relaxed text-muted-foreground">
+              <div className="mt-1.5 line-clamp-6 text-[12px] leading-relaxed text-muted-foreground">
                 {hoveredEntry.preview ||
                   (hoveredEntry.startsWithAgent
                     ? t('sessions.outline.noUserMessage', 'Started by the agent.')

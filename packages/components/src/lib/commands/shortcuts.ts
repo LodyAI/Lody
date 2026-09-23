@@ -6,6 +6,7 @@ export type ShortcutCommandId =
   | 'nav.back'
   | 'nav.forward'
   | 'app.cycleTheme'
+  | 'layout.toggleZenMode'
   | 'workspace.openSettings'
   | 'session.new'
   | 'session.archiveCurrent'
@@ -18,20 +19,26 @@ export type ShortcutCommandId =
   | 'session.copyUrl'
   | 'session.renameCurrent'
   | 'session.newTabOrTerminal'
-  | 'session.closeFocusedTab'
   | 'session.toggleTerminal'
   | 'session.saveCurrentFile'
   | 'session.nextTab'
   | 'session.previousTab'
+  | 'session.switchToTab1'
+  | 'session.switchToTab2'
+  | 'session.switchToTab3'
+  | 'session.switchToTab4'
+  | 'session.switchToTab5'
+  | 'session.switchToTab6'
+  | 'session.switchToTab7'
+  | 'session.switchToTab8'
+  | 'session.switchToLastTab'
   | 'session.previousVisible'
   | 'session.nextVisible'
   | 'session.cycleMode'
   | 'session.cycleProvider'
   | 'session.cycleModel'
   | 'session.cycleThinkEffort'
-  | 'mention.toggleSessionProjectScope'
-  | 'tasks.quickAdd'
-  | 'tasks.open';
+  | 'mention.toggleSessionProjectScope';
 
 type CommandKeybindings = Array<string | KeyBinding>;
 
@@ -46,45 +53,58 @@ const whileComposerFocused = (key: string): KeyBinding => ({
 });
 
 export const COMMAND_SHORTCUTS: Record<ShortcutCommandId, CommandKeybindings> = {
-  'palette.toggle': ['$mod+k', '$mod+Shift+p'],
+  'palette.toggle': ['Mod+k', 'Mod+Shift+p'],
   // Browser-style history nav. Desktop only — on web ⌘[ / ⌘] are the browser's own
   // back/forward and can't be intercepted.
-  'nav.back': [electron('$mod+[')],
-  'nav.forward': [electron('$mod+]')],
+  'nav.back': [electron('Mod+[')],
+  'nav.forward': [electron('Mod+]')],
   'app.cycleTheme': [],
+  'layout.toggleZenMode': ['Mod+.'],
   // Settings: ⌘, follows OS convention, on web + desktop. On desktop the native app menu
   // still SHOWS ⌘, next to "Settings" but does NOT register the accelerator
   // (`registerAccelerator: false` in apps/electron menu.ts), so the key reaches this
   // registry binding — a single source that also shows + is rebindable on the
   // keyboard-shortcuts settings page (instead of an invisible native-menu accelerator).
-  'workspace.openSettings': ['$mod+,'],
-  'session.new': [electron('$mod+n'), web('$mod+Alt+n')],
-  'session.archiveCurrent': ['$mod+Alt+a'],
-  'sidebar.toggle': ['$mod+b'],
-  'session.toggleCurrentPinned': ['$mod+Alt+p'],
-  'session.searchCurrent': [electron('$mod+f'), web('$mod+Alt+f')],
-  'session.focusInput': ['$mod+l'],
-  'session.toggleExplorerSidebar': ['$mod+Alt+b'],
+  'workspace.openSettings': ['Mod+,'],
+  'session.new': [electron('Mod+n'), web('Mod+Alt+n')],
+  'session.archiveCurrent': ['Mod+Alt+a'],
+  'sidebar.toggle': ['Mod+b'],
+  'session.toggleCurrentPinned': ['Mod+Alt+p'],
+  'session.searchCurrent': [electron('Mod+f'), web('Mod+Alt+f')],
+  // Desktop ⌘L focuses the composer. On web the browser owns ⌘L (Open Location),
+  // so leave it unbound — the hint chip follows the resolved binding.
+  'session.focusInput': [electron('Mod+l')],
+  'session.toggleExplorerSidebar': ['Mod+Alt+b'],
   'session.copyCurrentBranch': ['Alt+Shift+b'],
   'session.copyUrl': ['Alt+Shift+c'],
   'session.renameCurrent': ['F2'],
   // ⌥N creates a new tab, or a new terminal when the terminal is focused (desktop).
-  // ⌘T is intentionally avoided — the browser claims it on web.
-  'session.newTabOrTerminal': ['Alt+n'],
-  // Electron's native menu only displays this accelerator; the renderer owns it so the
-  // focused in-app tab closes instead of the BrowserWindow.
-  'session.closeFocusedTab': [electron('$mod+w')],
+  // Desktop also gets the browser-convention ⌘T; on web the browser claims it,
+  // so it stays electron-only. ⌥N remains the primary binding shown in settings.
+  'session.newTabOrTerminal': ['Alt+n', electron('Mod+t')],
   // Open/close the terminal panel (desktop, local sessions only).
-  'session.toggleTerminal': [electron('Ctrl+`'), electron('$mod+j')],
-  'session.saveCurrentFile': ['$mod+s'],
+  'session.toggleTerminal': [electron('Ctrl+`'), electron('Mod+j')],
+  'session.saveCurrentFile': ['Mod+s'],
   // Tab + conversation switching use the Mac-browser convention: ⌘⇧[ / ⌘⇧] step
   // between conversations and ⌘⇧, / ⌘⇧. (i.e. ⌘⇧< / ⌘⇧>) between tabs. The bracket
-  // / comma / period keys are matched by physical position (event.code) so the
-  // shifted glyph ({ } < >) the OS reports doesn't matter — see physicalKeyFromEvent.
-  'session.nextTab': [electron('$mod+Shift+.')],
-  'session.previousTab': [electron('$mod+Shift+,')],
-  'session.previousVisible': [electron('$mod+Shift+[')],
-  'session.nextVisible': [electron('$mod+Shift+]')],
+  // / comma / period keys use the engine's event.code fallback so the shifted glyph
+  // ({ } < >) reported by the OS does not change the shortcut.
+  'session.nextTab': [electron('Mod+Shift+.')],
+  'session.previousTab': [electron('Mod+Shift+,')],
+  'session.previousVisible': [electron('Mod+Shift+[')],
+  'session.nextVisible': [electron('Mod+Shift+]')],
+  // Direct tab jumps use the browser convention: ⌘1–⌘8 select that conversation tab
+  // and ⌘9 selects the last one. Desktop only — on web the browser claims ⌘<digit>
+  // for its own tab strip.
+  'session.switchToTab1': [electron('Mod+1')],
+  'session.switchToTab2': [electron('Mod+2')],
+  'session.switchToTab3': [electron('Mod+3')],
+  'session.switchToTab4': [electron('Mod+4')],
+  'session.switchToTab5': [electron('Mod+5')],
+  'session.switchToTab6': [electron('Mod+6')],
+  'session.switchToTab7': [electron('Mod+7')],
+  'session.switchToTab8': [electron('Mod+8')],
+  'session.switchToLastTab': [electron('Mod+9')],
   // ⇧Tab cycles the agent mode while the composer is focused. The other cyclers ship
   // WITHOUT a default binding — they're rebindable from the keyboard settings page.
   'session.cycleMode': [whileComposerFocused('Shift+Tab')],
@@ -92,8 +112,6 @@ export const COMMAND_SHORTCUTS: Record<ShortcutCommandId, CommandKeybindings> = 
   'session.cycleModel': [],
   'session.cycleThinkEffort': [],
   'mention.toggleSessionProjectScope': [],
-  'tasks.quickAdd': ['$mod+Alt+t'],
-  'tasks.open': [],
 };
 
 export function getCommandKeybindings(id: ShortcutCommandId): CommandKeybindings {
@@ -152,12 +170,12 @@ function cloneKeybinding(binding: string | KeyBinding): string | KeyBinding {
  * useless, so the registry warns in dev.
  */
 export const UNINTERCEPTABLE_WEB_KEYS = new Set<string>([
-  '$mod+n',
-  '$mod+shift+n',
-  '$mod+t',
-  '$mod+shift+t',
-  '$mod+w',
-  '$mod+shift+w',
-  '$mod+q',
-  '$mod+shift+q',
+  'mod+n',
+  'mod+shift+n',
+  'mod+t',
+  'mod+shift+t',
+  'mod+w',
+  'mod+shift+w',
+  'mod+q',
+  'mod+shift+q',
 ]);

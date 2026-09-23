@@ -3,7 +3,8 @@ export type OpenSourceAttributionKind = 'package' | 'vendored';
 export type OpenSourceAttributionScope =
   | 'production-dependency'
   | 'bundled-theme'
-  | 'vendored-icon-set';
+  | 'vendored-icon-set'
+  | 'vendored-source';
 
 export type OpenSourceAttributionEntry = {
   id: string;

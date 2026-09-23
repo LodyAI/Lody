@@ -30,6 +30,7 @@ import {
   collectErrorBoundaryEnvironment,
   isRawConvexServerError,
 } from '@/lib/error-boundary-report';
+import { getSessionRenderTraceText } from '@/lib/session-render-trace';
 import { cn } from '@/lib/utils';
 
 export type ErrorBoundaryFallbackVariant = 'page' | 'section' | 'inline';
@@ -43,12 +44,6 @@ export type ErrorBoundaryFallbackViewProps = {
   boundaryName?: string | undefined;
   /** Hide the message + details block. Only used by hosts that must stay terse. */
   showErrorDetails?: boolean;
-  /**
-   * The boundary gave up on recovering this error by itself (see
-   * `MAX_AUTOMATIC_RESETS`). Say so, because from here the screen only changes
-   * when the user presses something.
-   */
-  automaticRetriesStopped?: boolean;
 };
 
 const COPIED_RESET_MS = 2000;
@@ -71,7 +66,6 @@ export function ErrorBoundaryFallback({
   componentStack,
   boundaryName,
   showErrorDetails = true,
-  automaticRetriesStopped = false,
 }: ErrorBoundaryFallbackViewProps) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
@@ -89,6 +83,7 @@ export function ErrorBoundaryFallback({
         boundaryName,
         componentStack,
         environment: collectErrorBoundaryEnvironment(),
+        renderTrace: getSessionRenderTraceText(),
       }),
     [error, boundaryName, componentStack]
   );
@@ -185,15 +180,10 @@ export function ErrorBoundaryFallback({
               {t('errorBoundary.title', 'Lody hit an unexpected error')}
             </h2>
             <p className="mt-1 text-xs text-muted-foreground sm:text-sm">
-              {automaticRetriesStopped
-                ? t(
-                    'errorBoundary.descriptionRetriesStopped',
-                    'This error came back every time, so Lody stopped retrying on its own — the screen now stays put until you choose a step below.'
-                  )
-                : t(
-                    'errorBoundary.description',
-                    'The rest of the app is still running. Nothing reloads on its own — pick a step below.'
-                  )}
+              {t(
+                'errorBoundary.description',
+                'The rest of the app is still running. Nothing reloads on its own — pick a step below.'
+              )}
             </p>
           </div>
         </div>

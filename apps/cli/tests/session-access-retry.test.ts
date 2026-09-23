@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { Cause, Duration, Effect, Exit, Fiber, Option, TestClock, TestContext } from 'effect';
 import {
   AccessDenied,
+  MachineAccessVerificationError,
+  readMachineAccessWithBoundedRetry,
   verifyMachineAccessWithRetry,
   type MachineAccessVerification,
 } from '../src/session/session-access-retry';
@@ -174,5 +176,73 @@ describe('verifyMachineAccessWithRetry', () => {
 
     expect(Exit.isInterrupted(exit)).toBe(true);
     expect(onAuthEscalation).not.toHaveBeenCalled();
+  });
+});
+
+describe('readMachineAccessWithBoundedRetry', () => {
+  it('retries transient fetch failures and returns the definitive result', async () => {
+    const verify = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError('fetch failed'))
+      .mockRejectedValueOnce(Object.assign(new Error('connect reset'), { code: 'ECONNRESET' }))
+      .mockResolvedValue({ allowed: true });
+    const sleep = vi.fn(async () => undefined);
+
+    await expect(
+      readMachineAccessWithBoundedRetry({
+        verify,
+        retryDelaysMs: [10, 20],
+        sleep,
+      })
+    ).resolves.toEqual({ allowed: true });
+
+    expect(verify).toHaveBeenCalledTimes(3);
+    expect(sleep.mock.calls).toEqual([[10], [20]]);
+  });
+
+  it('does not retry a non-transport failure', async () => {
+    const verify = vi.fn(async () => {
+      throw new Error('Authenticated CLI user does not match the session requester.');
+    });
+    const sleep = vi.fn(async () => undefined);
+
+    const error = await readMachineAccessWithBoundedRetry({ verify, sleep }).catch(
+      (cause: unknown) => cause
+    );
+
+    expect(error).toBeInstanceOf(MachineAccessVerificationError);
+    expect(error).toMatchObject({
+      attempts: 1,
+      code: 'MACHINE_ACCESS_CHECK_FAILED',
+      retryable: false,
+    });
+    expect(verify).toHaveBeenCalledTimes(1);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+
+  it('preserves the nested network cause when bounded retries are exhausted', async () => {
+    const lowLevel = Object.assign(new Error('socket closed'), { code: 'ECONNRESET' });
+    const verify = vi.fn(async () => {
+      throw new TypeError('fetch failed', {
+        cause: new AggregateError([lowLevel], 'connection attempts failed'),
+      });
+    });
+
+    const error = await readMachineAccessWithBoundedRetry({
+      verify,
+      retryDelaysMs: [10, 20],
+      sleep: async () => undefined,
+    }).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(MachineAccessVerificationError);
+    expect(error).toMatchObject({
+      attempts: 3,
+      code: 'MACHINE_ACCESS_UNAVAILABLE',
+      retryable: true,
+    });
+    expect((error as Error).message).toContain('after 3 attempts');
+    expect((error as Error).message).toContain('ECONNRESET');
+    expect((error as Error).message).toContain('socket closed');
+    expect(verify).toHaveBeenCalledTimes(3);
   });
 });

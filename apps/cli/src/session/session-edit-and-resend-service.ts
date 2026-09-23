@@ -1,3 +1,4 @@
+import { readSessionHistory } from '@lody/shared/session-data';
 import {
   buildPendingUserHistoryEntry,
   getServerNow,
@@ -18,6 +19,7 @@ import {
   type SessionMeta,
   type SessionTurnInputConfig,
 } from '@lody/shared';
+import { resolveEditableTail, type SessionTurn } from '@lody/shared/session-data';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
 import type { Logger } from '@/utils/logger';
 import { formatErrorMessage } from '@/utils/format-error';
@@ -25,57 +27,20 @@ import type { SessionExecutionService } from './session-execution-service';
 import type { ISession, SessionManager } from './session-manager';
 import type { SessionUserResolver } from './session-user-resolver';
 
-type EditableTail = {
-  userIndex: number;
-  user: SessionHistoryInput;
-  forkTurnId?: string;
-};
-
 export type SessionEditAndResendInput = Omit<SessionEditAndResendSpec, 'inputConfig'> & {
   inputConfig: SessionTurnInputConfig;
 };
 
-const findLastUserIndex = (history: readonly SessionHistoryInput[]): number => {
+/**
+ * The raw last-user position, used only for the idempotency/stale pre-check
+ * before the editable-tail rule is consulted. The rule itself (eligibility,
+ * boundary) lives once in the shared planner.
+ */
+const lastUserIndex = (history: readonly SessionHistoryInput[]): number => {
   for (let index = history.length - 1; index >= 0; index -= 1) {
-    if (history[index]?.role === 'user') {
-      return index;
-    }
+    if (history[index]?.role === 'user') return index;
   }
   return -1;
-};
-
-const resolveEditableTail = (
-  history: SessionHistoryInput[],
-  expectedUserTurnId: string
-): EditableTail | null => {
-  const userIndex = findLastUserIndex(history);
-  const user = history[userIndex];
-  if (userIndex < 0 || !user || user.id !== expectedUserTurnId || user.role !== 'user') {
-    return null;
-  }
-  if (
-    user.status === 'pending_apply' ||
-    (user.inputConfig as Record<string, unknown> | undefined)?._lodyDeliveryKind === 'steer'
-  ) {
-    return null;
-  }
-
-  for (let index = userIndex - 1; index >= 0; index -= 1) {
-    const entry = history[index];
-    if (!entry) continue;
-    if (entry.role === 'user') {
-      // A preceding user without an intervening provider boundary is not the
-      // first-message case and cannot be reconstructed safely.
-      return null;
-    }
-    if (entry.role !== 'assistant') continue;
-    if (entry.finished !== true || !entry.acpTurnId) {
-      return null;
-    }
-    return { userIndex, user, forkTurnId: entry.acpTurnId };
-  }
-
-  return { userIndex, user };
 };
 
 export class SessionEditAndResendService {
@@ -140,12 +105,12 @@ export class SessionEditAndResendService {
       );
     }
 
-    const history = await sessionDoc.getHistory();
-    const lastUserIndex = findLastUserIndex(history);
-    if (history[lastUserIndex]?.id === spec.replacementUserTurnId) {
+    const history = readSessionHistory(sessionDoc.sessionData.history);
+    const lastUser = lastUserIndex(history);
+    if (history[lastUser]?.id === spec.replacementUserTurnId) {
       return this.success(spec);
     }
-    if (history[lastUserIndex]?.id !== spec.expectedUserTurnId) {
+    if (history[lastUser]?.id !== spec.expectedUserTurnId) {
       return sessionEditAndResendFailure(
         spec,
         'STALE_USER_TURN',
@@ -163,8 +128,7 @@ export class SessionEditAndResendService {
 
     const legacyMeta = meta as SessionMeta & SessionLegacyMetaFields;
     const latestGoal = resolveLatestSessionGoalFromHistory(history) ?? legacyMeta.latestGoal;
-    const execution = this.deps.executionService.getExecutionSnapshot(spec.sessionId);
-    if (meta.autoReview || execution.hasActiveAutomation || isSessionGoalActive(latestGoal)) {
+    if (meta.autoReview || isSessionGoalActive(latestGoal)) {
       return sessionEditAndResendFailure(
         spec,
         'ACTIVE_AUTOMATION',
@@ -194,7 +158,6 @@ export class SessionEditAndResendService {
         meta,
         spec.requestedByUserId,
         resolveSessionMcpSelection(history),
-        spec.inputConfig.taskToolsEnabled === true,
         spec.inputConfig.scheduleToolsEnabled === true
       );
       const agentClient = runtime.agentClient;
@@ -220,7 +183,7 @@ export class SessionEditAndResendService {
 
         const [freshMeta, freshHistory] = await Promise.all([
           sessionDoc.getMetaState(),
-          sessionDoc.getHistory(),
+          readSessionHistory(sessionDoc.sessionData.history),
         ]);
         const freshEditable = resolveEditableTail(freshHistory, spec.expectedUserTurnId);
         if (!freshMeta || !freshEditable || freshEditable.forkTurnId !== editable.forkTurnId) {
@@ -259,11 +222,7 @@ export class SessionEditAndResendService {
         const freshGoal =
           resolveLatestSessionGoalFromHistory(freshHistory) ?? freshLegacyMeta.latestGoal;
         const freshExecution = this.deps.executionService.getExecutionSnapshot(spec.sessionId);
-        if (
-          freshMeta.autoReview ||
-          freshExecution.hasActiveAutomation ||
-          isSessionGoalActive(freshGoal)
-        ) {
+        if (freshMeta.autoReview || isSessionGoalActive(freshGoal)) {
           await this.closePrepared(runtime, preparedSessionId);
           preparedSessionId = null;
           return sessionEditAndResendFailure(
@@ -289,13 +248,16 @@ export class SessionEditAndResendService {
               'Another logical turn owns the active ACP session.'
             );
           }
-          const cancelled = await this.deps.executionService.cancelSession({
-            type: 'session/cancel',
-            sessionId: spec.sessionId,
-            machineId: commitMeta.machineId,
-            workspaceId: this.deps.workspaceId as never,
-            turnId: activeTurnId,
-          });
+          const cancelled = await this.deps.executionService.cancelSession(
+            {
+              type: 'session/cancel',
+              sessionId: spec.sessionId,
+              machineId: commitMeta.machineId,
+              workspaceId: this.deps.workspaceId as never,
+              turnId: activeTurnId,
+            },
+            { pendingInput: 'preserve', prePromptSession: 'keep' }
+          );
           if (!cancelled.success) {
             await this.closePrepared(runtime, preparedSessionId);
             preparedSessionId = null;
@@ -309,7 +271,6 @@ export class SessionEditAndResendService {
         }
 
         const preCommitMeta = await sessionDoc.getMetaState();
-        const preCommitExecution = this.deps.executionService.getExecutionSnapshot(spec.sessionId);
         if (
           !preCommitMeta ||
           preCommitMeta.isArchived ||
@@ -326,7 +287,7 @@ export class SessionEditAndResendService {
             'The session changed before the replacement could be committed.'
           );
         }
-        if (preCommitMeta.autoReview || preCommitExecution.hasActiveAutomation) {
+        if (preCommitMeta.autoReview) {
           await this.closePrepared(runtime, preparedSessionId);
           preparedSessionId = null;
           return sessionEditAndResendFailure(
@@ -339,7 +300,7 @@ export class SessionEditAndResendService {
 
         const inputConfig = this.buildReplacementInputConfig(
           commitMeta,
-          commitEditable.user,
+          commitEditable.turn,
           spec.inputConfig,
           preparedSessionId
         );
@@ -348,7 +309,7 @@ export class SessionEditAndResendService {
           inputConfig.prompt ?? ''
         );
         const pending = buildPendingUserHistoryEntry({
-          userId: commitEditable.user.userId ?? spec.requestedByUserId,
+          userId: commitEditable.turn.userId ?? spec.requestedByUserId,
           inputBlocks,
           timestamp: spec.timestamp,
           inputConfig,
@@ -363,32 +324,47 @@ export class SessionEditAndResendService {
           );
         }
 
-        const replacement: SessionHistoryInput = {
+        const replacement: SessionTurn = {
           ...pending,
           id: spec.replacementUserTurnId,
         };
-        let historyBeforeWrite: SessionHistoryInput[] | null = null;
-        let previousUserId: string | undefined;
-        await sessionDoc.updateHistory((currentHistory) => {
-          const currentGoal =
-            resolveLatestSessionGoalFromHistory(currentHistory) ??
-            (commitMeta as SessionMeta & SessionLegacyMetaFields).latestGoal;
-          if (isSessionGoalActive(currentGoal)) {
-            throw new Error(
-              '[ACTIVE_AUTOMATION] A session goal started before history replacement.'
-            );
-          }
-          const currentEditable = resolveEditableTail(currentHistory, spec.expectedUserTurnId);
-          if (!currentEditable || currentEditable.forkTurnId !== commitEditable.forkTurnId) {
-            throw new Error(
-              '[STALE_USER_TURN] The editable history boundary changed before commit.'
-            );
-          }
-          historyBeforeWrite = currentHistory;
-          const prefix = currentHistory.slice(0, currentEditable.userIndex);
-          previousUserId = [...prefix].reverse().find((entry) => entry.role === 'user')?.id;
-          return [...prefix, replacement];
+        // One domain command re-runs the eligibility and active-goal rules against
+        // the history read inside the store's commit; the caller cannot supply a
+        // history array or a raw writer callback.
+        const rollbackResult = await sessionDoc.sessionData.commands.replaceEditableTail({
+          expectedUserTurnId: spec.expectedUserTurnId,
+          expectedForkTurnId: commitEditable.forkTurnId,
+          replacement,
+          fallbackGoal: (commitMeta as SessionMeta & SessionLegacyMetaFields).latestGoal ?? null,
         });
+        if (rollbackResult.status === 'rejected') {
+          await this.closePrepared(runtime, preparedSessionId);
+          preparedSessionId = null;
+          if (rollbackResult.reason.code === 'active_goal') {
+            return sessionEditAndResendFailure(
+              spec,
+              'ACTIVE_AUTOMATION',
+              'A session goal started before history replacement.'
+            );
+          }
+          if (rollbackResult.reason.code === 'stale_boundary') {
+            return sessionEditAndResendFailure(
+              spec,
+              'STALE_USER_TURN',
+              'The editable history boundary changed before commit.'
+            );
+          }
+          throw new Error(
+            `[HISTORY_WRITE_FAILED] History replacement was rejected before commit: ${rollbackResult.reason.code}`
+          );
+        }
+        if (rollbackResult.status !== 'accepted') {
+          throw new Error(
+            `[HISTORY_WRITE_FAILED] History replacement outcome is unknown: ${formatErrorMessage(rollbackResult.cause)}`
+          );
+        }
+        const previousUserId = rollbackResult.previousUserTurnId;
+        const rollbackHistory = rollbackResult.rollback;
         try {
           await this.deps.workspaceDocument.repo.upsertDocMeta(getSessionRoomId(spec.sessionId), {
             acpSessionId: preparedSessionId,
@@ -402,14 +378,15 @@ export class SessionEditAndResendService {
           });
           await this.deps.workspaceDocument.persistPendingChanges('session-edit-and-resend-commit');
         } catch (error) {
-          if (historyBeforeWrite) {
-            await sessionDoc
-              .updateHistory(() => historyBeforeWrite ?? [])
-              .catch((rollbackError) => {
-                this.deps.logger.error(
-                  `[${spec.sessionId}] Failed to restore history after commit failure: ${formatErrorMessage(rollbackError)}`
-                );
-              });
+          try {
+            // Await the compensation before restoring meta and persisting the
+            // rollback: a compensation that is still in flight must not race the
+            // follow-up state it is undoing.
+            await rollbackHistory();
+          } catch (rollbackError) {
+            this.deps.logger.error(
+              `[${spec.sessionId}] Failed to restore history after commit failure: ${formatErrorMessage(rollbackError)}`
+            );
           }
           await this.deps.workspaceDocument.repo
             .upsertDocMeta(getSessionRoomId(spec.sessionId), {
@@ -498,7 +475,6 @@ export class SessionEditAndResendService {
     meta: SessionMeta,
     requestedByUserId: string,
     mcpServerIds: McpServerId[],
-    taskToolsEnabled: boolean,
     scheduleToolsEnabled: boolean
   ): Promise<ISession> {
     const existing = this.deps.sessionManager.getSession(meta.id);
@@ -522,7 +498,6 @@ export class SessionEditAndResendService {
         agentCliType: meta.cliType,
         agentType: meta.agentType,
         mcpServerIds,
-        taskToolsEnabled,
         scheduleToolsEnabled,
         customAcp: agentConfig.customAcp,
         runtimeOverrides: agentConfig.runtimeOverrides,

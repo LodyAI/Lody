@@ -74,11 +74,6 @@ import type { MachineProcessLifecycleAction } from '@/lib/machine-lifecycle';
 import { traceAsync } from '@/utils/trace-span';
 import { MemoryPressureSampler } from '@/monitor/memory-pressure-sampler';
 import { makePrStatusPoller, type PrStatusPollerShape } from '@/lib/pr-poller/pr-status-poller';
-import {
-  createTaskAutomationWorkspace,
-  type TaskAutomationWorkspaceHandle,
-} from '@/lib/task-automation/task-automation-workspace';
-import { startDelegatedTask } from '@/lib/task-automation/task-automation-start';
 import { ACP_PLAN_PERMISSION_MODE_ID } from '@lody/shared';
 import { createReviewAutomation } from '@/lib/review-automation/create-review-automation';
 import type { ReviewAutomationWorkspaceHandle } from '@/lib/review-automation/review-automation-workspace';
@@ -132,7 +127,6 @@ type WorkspaceRuntimeState = {
   lody: Lody;
   unsubscribeTerminalCleanup: () => void;
   prPollerWorkspace: PrPollerWorkspaceHandle | null;
-  taskAutomation: TaskAutomationWorkspaceHandle | null;
   schedules: ScheduleWorkspaceHandle;
   reviewAutomation: ReviewAutomationWorkspaceHandle | null;
 };
@@ -598,7 +592,6 @@ export class LodyFleet {
     this.runtimes.clear();
     for (const runtime of runtimes) {
       try {
-        await runtime.taskAutomation?.dispose();
         await runtime.schedules.dispose();
         await runtime.lody.cleanup();
         runtime.unsubscribeTerminalCleanup();
@@ -780,7 +773,6 @@ export class LodyFleet {
 
       let lody: Lody | null = null;
       let stopSchedules: (() => Promise<void>) | undefined;
-      let stopTasks: (() => Promise<void>) | undefined;
       const workspaceStartAt = Date.now();
       try {
         lody = await Lody.create({
@@ -832,8 +824,8 @@ export class LodyFleet {
               logger: workspaceLogger,
             })
           : null;
-        // Delegated automation: this machine drains the queues of the agents that
-        // live here, so entrusted work continues while nobody is looking.
+        // Scheduled automation: this machine runs the schedules it owns, so
+        // entrusted work continues while nobody is looking.
         const executionSlots = new AgentExecutionSlots();
         const schedules = await createScheduleWorkspace({
           manager: startedLody.documentManager,
@@ -852,50 +844,10 @@ export class LodyFleet {
           hasSessionWork: (sessionId) => startedLody.hasAutomationSessionWork(sessionId),
         });
         stopSchedules = schedules.dispose;
-        const taskAutomation = createTaskAutomationWorkspace({
-          executionSlots,
-          localOnly: this.localPlatform,
-          documentManager: startedLody.documentManager,
-          workspaceId: workspace.id as WorkspaceId,
-          machineId: this.machineId,
-          userId: this.userId,
-          logger: workspaceLogger,
-          startTask: async (taskId, agentConfigId) => {
-            const { createSessionResult, resolveTurnDispatchConfig } =
-              await import('@/commands/session');
-            await startDelegatedTask(
-              {
-                auth: {
-                  token: this.cliToken,
-                  userId: this.userId,
-                  userName: '',
-                  userEmail: '',
-                  machineId: this.machineId,
-                  machineName: this.machineName,
-                },
-                workspace,
-                manager: startedLody.documentManager,
-                logger: workspaceLogger,
-                createSession: async (args) =>
-                  createSessionResult(
-                    args.auth,
-                    args.workspace,
-                    args.manager,
-                    args.prompt,
-                    args.options as Parameters<typeof createSessionResult>[4],
-                    resolveTurnDispatchConfig({})
-                  ),
-              },
-              taskId,
-              agentConfigId
-            );
-          },
-        });
         // Auto review and merge. It runs here rather than through MCP because
         // the orchestration chain-depth guard caps a chain at five hops from the
         // last human input, and because CI and GitHub state are explicitly
         // outside that contract.
-        stopTasks = taskAutomation.dispose;
         const reviewAutomation = this.cloudPort.githubTokens
           ? createReviewAutomation({
               documentManager: startedLody.documentManager,
@@ -969,7 +921,6 @@ export class LodyFleet {
           lody: startedLody,
           unsubscribeTerminalCleanup,
           prPollerWorkspace,
-          taskAutomation,
           schedules,
           reviewAutomation,
         });
@@ -986,7 +937,6 @@ export class LodyFleet {
         this.runtimeStateReporter.clearIssue(`workspace_start_failed:${workspace.id}`);
         this.refreshRuntimeState();
       } catch (error) {
-        await stopTasks?.();
         await stopSchedules?.();
         if (lody) {
           await lody.cleanup().catch((cleanupError: unknown) => {
@@ -1058,7 +1008,6 @@ export class LodyFleet {
     this.prStatusPoller?.unregisterWorkspace(workspaceId);
 
     try {
-      await state.taskAutomation?.dispose();
       await state.schedules.dispose();
       await state.reviewAutomation?.dispose();
       await state.lody.cleanup();
@@ -1130,7 +1079,7 @@ export class LodyFleet {
   /**
    * Auth context for engine-authored turns.
    *
-   * Same shape delegated task automation uses: the daemon's own CLI credential
+   * Same shape scheduled automation uses: the daemon's own CLI credential
    * is the authorization principal, and the session's owner is inherited from
    * the session being driven.
    */

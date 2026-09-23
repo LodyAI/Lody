@@ -5,6 +5,7 @@ import type { OrchestrationSectionCopy } from './landing-orchestration-section';
 import type { PowerSectionCopy } from './landing-power-section';
 import type { SubscriptionsSectionCopy } from './landing-subscriptions-section';
 import { founderCallUrl } from '@site/lib/founder-call';
+import { GITHUB_REPO_URL } from '@site/lib/github';
 import { SiteFooter } from './site-footer';
 import { SiteNav } from './site-nav';
 import { UnderwaterExperience } from './underwater-experience';
@@ -27,9 +28,10 @@ type LandingCopy = {
     words: string[];
     suffix: string;
     lead: string;
-    /** Ghost secondary (usually Web App). */
+    /** Ghost secondary (source repository). */
     secondary: string;
     secondaryHref: string;
+    secondaryExternal?: boolean;
     webAppHref: string;
     /** Shared with closing CTA for platform-aware primary download. */
     labels: LandingCtaCopy['labels'];
@@ -61,6 +63,10 @@ const copy: Record<LandingLocale, LandingCopy> = {
     orchestration: {
       title: 'One agent can run the others',
       body: 'Manage many sessions from a single chat — across machines, agents, and repos.',
+      docsLink: {
+        href: '/docs/session-orchestration',
+        label: 'How one agent runs the others',
+      },
       hubLabel: 'Your agent',
       useCases: [
         {
@@ -103,6 +109,10 @@ const copy: Record<LandingLocale, LandingCopy> = {
     power: {
       title: 'Ship together in one workspace',
       body: 'Sessions are shared, so decisions stay in the team workspace — hand off and steer from the same context',
+      docsLink: {
+        href: '/docs/session-handoff',
+        label: 'How to hand off a session',
+      },
       points: [
         'Open any teammate’s session and keep chatting',
         'Machines stay private until you share',
@@ -131,7 +141,8 @@ const copy: Record<LandingLocale, LandingCopy> = {
       lead: 'Desktop, phone, browser. Same workspace',
       allPlatforms: 'All platforms',
       allPlatformsHref: '/download',
-      webApp: 'Web app',
+      github: 'GitHub',
+      githubHref: GITHUB_REPO_URL,
       webAppHref: '/login',
       bookCall: 'Book a founder call',
       bookCallHref: founderCallUrl('landing'),
@@ -152,8 +163,9 @@ const copy: Record<LandingLocale, LandingCopy> = {
       words: [],
       suffix: '',
       lead: 'Shared sessions, live diffs, and one control plane — so your team and agents stay in sync',
-      secondary: 'Web App',
-      secondaryHref: '/login',
+      secondary: 'GitHub',
+      secondaryHref: GITHUB_REPO_URL,
+      secondaryExternal: true,
       webAppHref: '/login',
       otherDownloads: 'Other download options',
       otherDownloadsHref: '/download',
@@ -189,6 +201,10 @@ const copy: Record<LandingLocale, LandingCopy> = {
     orchestration: {
       title: '一个 Agent 调度其他 Agent',
       body: '在一个对话里管理多个 session——跨机器、跨 Agent、跨仓库。',
+      docsLink: {
+        href: '/zh/docs/session-orchestration',
+        label: '一个 Agent 如何调度其他会话',
+      },
       hubLabel: '你的 Agent',
       useCases: [
         {
@@ -228,6 +244,10 @@ const copy: Record<LandingLocale, LandingCopy> = {
     power: {
       title: '在同一工作区一起交付',
       body: '会话可共享，AI 对话里的决策留在团队 workspace 里，方便 hand off 和接着 steer',
+      docsLink: {
+        href: '/zh/docs/session-handoff',
+        label: '如何交接会话',
+      },
       points: ['打开同事的会话，接着聊下去', '机器默认私有，你打开才共享'],
       features: [
         {
@@ -253,7 +273,8 @@ const copy: Record<LandingLocale, LandingCopy> = {
       lead: '桌面、手机、浏览器。同一工作区',
       allPlatforms: '全部平台',
       allPlatformsHref: '/zh/download',
-      webApp: 'Web App',
+      github: 'GitHub',
+      githubHref: GITHUB_REPO_URL,
       webAppHref: '/login',
       bookCall: '和创始人聊聊',
       bookCallHref: founderCallUrl('landing'),
@@ -274,8 +295,9 @@ const copy: Record<LandingLocale, LandingCopy> = {
       words: [],
       suffix: '和团队共用 Coding Agents',
       lead: '共享会话、实时差异、统一控制面 — 团队与 Agents 始终同步',
-      secondary: 'Web App',
-      secondaryHref: '/login',
+      secondary: 'GitHub',
+      secondaryHref: GITHUB_REPO_URL,
+      secondaryExternal: true,
       webAppHref: '/login',
       otherDownloads: '其他下载方式',
       otherDownloadsHref: '/zh/download',

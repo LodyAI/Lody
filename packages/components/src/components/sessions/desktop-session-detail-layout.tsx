@@ -3,6 +3,8 @@ import { motion, useReducedMotion } from 'framer-motion';
 import type { ImperativePanelHandle } from 'react-resizable-panels';
 import { cn } from '@/lib/utils';
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/ui/resizable';
+import { FocusScope } from '@/ui/focus-scope';
+import { WORKSPACE_FOCUS_SCOPES } from '@/atoms';
 
 export type DesktopSessionDetailLayoutProps = {
   defaultSizes: {
@@ -149,34 +151,31 @@ export function DesktopSessionDetailLayout({
           minSize={15}
           className="min-w-[280px]"
         >
-          <div className="flex h-full flex-col bg-background">
+          <FocusScope
+            id={WORKSPACE_FOCUS_SCOPES.sessionConversation}
+            data-lody-action-scope="conversation"
+            className="group/close-scope flex h-full flex-col bg-background"
+          >
             {topBar}
             <div className="flex min-h-0 flex-1 flex-col">
               <div className="min-h-0 flex-1 overflow-hidden">{chatSurfaces}</div>
               {terminalDock}
             </div>
-          </div>
+          </FocusScope>
         </ResizablePanel>
 
         <ResizableHandle
           disabled={!sidebarOpen}
           // Invisible at rest; hover/drag paints a 2px accent line that
-          // covers the side panel CARD's left border — the card is inset
-          // `mx-2` from this 1px layout handle (see desktopSecondaryPanel
-          // in session-detail.tsx), so a line centered on the handle would
-          // float in the gutter instead of lighting up the visible edge.
-          // left-[9px] = handle 1px + 8px card margin. hitAreaMargins
-          // widened so hovering ON the card border also triggers.
+          // covers the side panel's left hairline (see desktopSecondaryPanel
+          // in session-detail.tsx).
           hitAreaMargins={{ coarse: 15, fine: 12 }}
           onDragging={setIsResizing}
           className={cn(
             'bg-transparent transition-opacity',
             sidebarOpen ? 'opacity-100' : 'pointer-events-none opacity-0',
-            'after:left-[9px] after:w-[2px] after:translate-x-0',
-            // Vertically clamp to the card border's STRAIGHT segment: the
-            // card is inset mt-2/mb-2 and rounded-xl (12px), so a full
-            // height line would overshoot past the rounded corners.
-            'after:inset-y-auto after:top-5 after:bottom-5 after:rounded-full',
+            'after:left-0 after:w-[2px] after:translate-x-0',
+            'after:inset-y-0 after:top-0 after:bottom-0',
             'after:transition-colors after:duration-150',
             'data-[resize-handle-state=hover]:after:bg-sidebar-ring/50',
             'data-[resize-handle-state=hover]:after:delay-150',
@@ -216,7 +215,9 @@ export function DesktopSessionDetailLayout({
               ease: [0.32, 0.72, 0, 1],
             }}
           >
-            {secondaryPanel}
+            <FocusScope id={WORKSPACE_FOCUS_SCOPES.sessionSidePanel} className="h-full">
+              {secondaryPanel}
+            </FocusScope>
           </motion.div>
         </ResizablePanel>
       </ResizablePanelGroup>

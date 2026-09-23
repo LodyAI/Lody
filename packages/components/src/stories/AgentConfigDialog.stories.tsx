@@ -76,8 +76,8 @@ const refreshCapabilities: AgentConfigDialogProps['onRefreshCapabilities'] = asy
   type: 'machine/acp-capabilities-refresh_response',
   machineId: args.machineId,
   configId: args.configId,
-  cliType: args.cliType,
-  agentType: args.agentType,
+  cliType: 'builtin',
+  agentType: 'claude',
   success: true,
   modes: [],
   models: [],
@@ -167,29 +167,72 @@ function DeepSeekPresetWrapper() {
   );
 }
 
-function DeepSeekHarnessWrapper() {
+function DeepSeekHarnessWrapper({
+  initialForm,
+  config,
+}: {
+  initialForm?: {
+    name: string;
+    cliType: 'builtin';
+    agentType: 'deepseek';
+    env?: Record<string, string>;
+    deepseekEndpointMode?: 'official' | 'custom';
+    deepseekCustomBaseUrl?: string;
+  };
+  config?: AgentConfigMeta;
+} = {}) {
   const [open, setOpen] = useState(true);
   return (
     <AgentConfigDialog
       open={open}
       onOpenChange={setOpen}
-      mode={{
-        kind: 'create',
-        initialForm: {
-          name: 'DeepSeek Harness',
-          cliType: 'builtin',
-          agentType: 'deepseek',
-          env: {
-            DEEPSEEK_API_KEY: 'sk-storybook-demo-token',
-          },
-        },
-      }}
+      mode={
+        config
+          ? { kind: 'edit', config }
+          : {
+              kind: 'create',
+              initialForm: initialForm ?? {
+                name: 'DeepSeek Harness',
+                cliType: 'builtin',
+                agentType: 'deepseek',
+                env: {
+                  DEEPSEEK_API_KEY: 'sk-storybook-demo-token',
+                },
+              },
+            }
+      }
       machine={makeMachineWithClaudeCaps()}
       onSubmit={async () => {}}
       onRefreshCapabilities={refreshCapabilities}
     />
   );
 }
+
+const deepseekHarnessEditOfficial: AgentConfigMeta = {
+  id: existingConfigId,
+  machineId,
+  name: 'DeepSeek Harness',
+  description: undefined,
+  cliType: 'builtin',
+  agentType: 'deepseek',
+  env: {
+    DEEPSEEK_API_KEY: 'sk-storybook-demo-token',
+    DEEPSEEK_BASE_URL: 'https://api.deepseek.com/v1',
+  },
+};
+
+const deepseekHarnessEditCustom: AgentConfigMeta = {
+  id: existingConfigId,
+  machineId,
+  name: 'DeepSeek Harness',
+  description: undefined,
+  cliType: 'builtin',
+  agentType: 'deepseek',
+  env: {
+    DEEPSEEK_API_KEY: 'sk-storybook-demo-token',
+    DEEPSEEK_BASE_URL: 'https://llm.example.com/open',
+  },
+};
 
 function MiMoPresetWrapper() {
   const [open, setOpen] = useState(true);
@@ -278,6 +321,64 @@ function GlmPresetWrapper({ credentialModeId }: { credentialModeId?: string } = 
   );
 }
 
+function PiExtensionsWrapper({
+  supported = true,
+  scanError = false,
+}: {
+  supported?: boolean;
+  scanError?: boolean;
+}) {
+  const [open, setOpen] = useState(true);
+  return (
+    <AgentConfigDialog
+      open={open}
+      onOpenChange={setOpen}
+      mode={{
+        kind: 'edit',
+        config: {
+          ...existingConfig,
+          name: 'Pi',
+          agentType: 'pi',
+          runtimeOverrides: { piExtensions: ['/fixture/custom/provider.ts'] },
+        },
+      }}
+      machine={{
+        ...makeMachineWithClaudeCaps(),
+        protocolCapabilities: supported ? { piExtensions: 1 } : {},
+      }}
+      onSubmit={async () => {}}
+      onRefreshCapabilities={async (args) => ({
+        ...(await refreshCapabilities(args)),
+        agentType: 'pi',
+      })}
+      onScanPiExtensions={async () =>
+        scanError
+          ? { success: false, error: 'Synthetic scan failure' }
+          : {
+              success: true,
+              discovery: {
+                version: 1,
+                agentDir: '/fixture/pi/agent',
+                warnings: [],
+                extensions: [
+                  {
+                    path: '/fixture/pi/agent/extensions/provider.ts',
+                    name: 'Provider extension',
+                    source: 'directory',
+                  },
+                  {
+                    path: '/fixture/pi/agent/npm/node_modules/example-tools/index.js',
+                    name: 'Example tools',
+                    source: 'package',
+                  },
+                ],
+              },
+            }
+      }
+    />
+  );
+}
+
 const meta = {
   title: 'Settings/AgentConfigDialog',
   parameters: { layout: 'fullscreen' },
@@ -286,6 +387,12 @@ const meta = {
 
 export default meta;
 type Story = StoryObj<typeof meta>;
+
+export const PiExtensions: Story = { render: () => <PiExtensionsWrapper /> };
+export const PiExtensionsUnsupported: Story = {
+  render: () => <PiExtensionsWrapper supported={false} />,
+};
+export const PiExtensionsScanError: Story = { render: () => <PiExtensionsWrapper scanError /> };
 
 export const Create: Story = {
   render: () => <CreateWrapper />,
@@ -310,6 +417,31 @@ export const DeepSeekPreset: Story = {
 
 export const DeepSeekHarness: Story = {
   render: () => <DeepSeekHarnessWrapper />,
+};
+
+export const DeepSeekHarnessCustomEndpoint: Story = {
+  render: () => (
+    <DeepSeekHarnessWrapper
+      initialForm={{
+        name: 'DeepSeek Harness',
+        cliType: 'builtin',
+        agentType: 'deepseek',
+        deepseekEndpointMode: 'custom',
+        deepseekCustomBaseUrl: 'https://llm.example.com/open',
+        env: {
+          DEEPSEEK_API_KEY: 'sk-storybook-demo-token',
+        },
+      }}
+    />
+  ),
+};
+
+export const DeepSeekHarnessEditOfficial: Story = {
+  render: () => <DeepSeekHarnessWrapper config={deepseekHarnessEditOfficial} />,
+};
+
+export const DeepSeekHarnessEditCustom: Story = {
+  render: () => <DeepSeekHarnessWrapper config={deepseekHarnessEditCustom} />,
 };
 
 export const MiMoPreset: Story = {
@@ -360,6 +492,13 @@ export const MobileEditEnvCredentialProvider: Story = {
 
 export const MobileDeepSeekPreset: Story = {
   render: () => <DeepSeekPresetWrapper />,
+  parameters: {
+    viewport: { defaultViewport: 'mobile1' },
+  },
+};
+
+export const MobileDeepSeekHarness: Story = {
+  render: () => <DeepSeekHarnessWrapper />,
   parameters: {
     viewport: { defaultViewport: 'mobile1' },
   },

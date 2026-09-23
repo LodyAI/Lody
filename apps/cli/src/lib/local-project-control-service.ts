@@ -187,10 +187,37 @@ function readLocalFileAtRoot(
     const stat = fs.fstatSync(fd);
     if (!stat.isFile()) return null;
 
-    const buffer = Buffer.alloc(maxBytes + 1);
-    const bytesRead = fs.readSync(fd, buffer, 0, maxBytes + 1, 0);
+    // Read to EOF, or to one byte past the budget so a file AT the limit is not
+    // reported as truncated.
+    //
+    // The buffer starts at the stat size rather than at the budget, because
+    // `Buffer.alloc(maxBytes + 1)` reserved the whole ceiling on every read and
+    // a viewer-sized budget would tax every small read with it. That makes
+    // `stat` a HINT, never the end condition: an agent appending to the file
+    // between the stat and the read would otherwise fill the buffer exactly,
+    // and returning that prefix as the whole file is worse than any budget —
+    // it is wrong content with no flag on it. A full buffer therefore grows and
+    // keeps reading, and only `read === 0` (EOF) or the budget stops the loop.
+    // The loop is also what makes a SHORT read safe, which a single `readSync`
+    // never was.
+    const readLimit = maxBytes + 1;
+    let buffer = Buffer.alloc(Math.max(1, Math.min(readLimit, stat.size + 1)));
+    let bytesRead = 0;
+    for (;;) {
+      if (bytesRead >= readLimit) break;
+      if (bytesRead === buffer.length) {
+        const grown = Buffer.alloc(Math.min(readLimit, buffer.length * 2));
+        buffer.copy(grown, 0, 0, bytesRead);
+        buffer = grown;
+      }
+      const read = fs.readSync(fd, buffer, bytesRead, buffer.length - bytesRead, bytesRead);
+      if (read === 0) break;
+      bytesRead += read;
+    }
+    // Derived from what was actually read, never from the possibly stale
+    // `stat.size`: a file that SHRANK to fit is not truncated either.
     const truncated = bytesRead > maxBytes;
-    const safeBytes = truncated ? maxBytes : bytesRead;
+    const safeBytes = Math.min(bytesRead, maxBytes);
     const resolvedRelativePath = toProjectRelativePath(rootRealPath, targetRealPath);
     // Image files are read as raw bytes and base64-encoded so they survive the
     // JSON/Streams transport intact; a UTF-8 decode would corrupt them. A

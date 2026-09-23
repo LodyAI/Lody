@@ -92,6 +92,8 @@ export async function fetchAcpCapabilities(
       ...normalizeAcpSessionCapabilities(sessionResponse, {
         sessionFork: client.supportsSessionFork?.() === true,
         acknowledgedSteer: client.supportsAcknowledgedSteer(),
+        goalActions: client.getGoalCapability()?.actions.slice(),
+        agent: { cliType, agentType },
       }),
       capabilitySourceVersion,
     };

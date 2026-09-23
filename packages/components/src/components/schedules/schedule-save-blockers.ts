@@ -1,3 +1,4 @@
+import type { AgentRunRef } from '@/components/shared/agent-run-ref';
 import type { TFunction } from 'i18next';
 import {
   getAcpCapabilityCacheKey,
@@ -9,7 +10,6 @@ import {
   type MachineMeta,
   type ProjectRef,
   type ScheduleDestination,
-  type TaskAgentRef,
 } from '@lody/shared';
 
 export type ScheduleSaveContext = {
@@ -17,7 +17,7 @@ export type ScheduleSaveContext = {
   disabledReason?: string;
   workspaceReady: boolean;
   userId?: string;
-  agent: TaskAgentRef | null;
+  agent: AgentRunRef | null;
   agentConfig: AgentConfigMeta | null | undefined;
   machine: (MachineMeta & MachineLegacyMetaFields) | undefined;
   /** `null` is a deliberate chat-only schedule, not an unfinished form. */

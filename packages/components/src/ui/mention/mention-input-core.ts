@@ -31,6 +31,8 @@ export type MentionSplice = {
    * trigger span without committing a mention.
    */
   commitRange: boolean;
+  /** Ranges relative to text, inserted without an enclosing mention. */
+  mentions?: Mention[];
 };
 
 /**
@@ -96,7 +98,14 @@ export function applyMentionSplice(
             kind: splice.kind ?? 'mention',
           },
         ].sort((a, b) => a.start - b.start)
-      : shifted,
+      : [
+          ...shifted,
+          ...(splice.mentions ?? []).map((mention) => ({
+            ...mention,
+            start: rangeStart + mention.start,
+            end: rangeStart + mention.end,
+          })),
+        ].sort((a, b) => a.start - b.start),
     caret: replaceStart + inserted.length,
   };
 }

@@ -16,6 +16,7 @@ import {
   type SettingsUsageTimelineData,
 } from '@/components/settings/settings-data-cache';
 import { UsageCalendarVisualization } from '@/components/settings/usage-calendar-visualization';
+import { UsageCalendarSkeleton } from '@/components/settings/usage-calendar-skeleton';
 import { formatUsageTimelineBucketLabel } from '@/components/settings/usage-timeline-bucket-label';
 import { formatCompactNumber, formatUsdAmount } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
@@ -80,6 +81,7 @@ export function MobileStatsSettings() {
   );
 
   const usageTimeline = usageTimelineByRange[range];
+  const loading = Boolean(workspaceId) && !usageTimeline;
 
   const activeTotals = usageTimeline?.totals;
 
@@ -166,16 +168,22 @@ export function MobileStatsSettings() {
         </div>
       </MobileSettingsSection>
 
-      {usageCalendar ? (
+      {/* While a workspace is selected, a missing calendar only means its query
+         is still in flight — keep the section's shape with the skeleton. */}
+      {workspaceId ? (
         <MobileSettingsSection noCard>
           <div className="mx-3">
-            <UsageCalendarVisualization
-              calendar={usageCalendar}
-              workspaceName={activeOrganization?.name}
-              dayDetail={usageDay}
-              dayDetailLoading={usageDayLoading}
-              onSelectedDayChange={setSelectedUsageDayMs}
-            />
+            {usageCalendar ? (
+              <UsageCalendarVisualization
+                calendar={usageCalendar}
+                workspaceName={activeOrganization?.name}
+                dayDetail={usageDay}
+                dayDetailLoading={usageDayLoading}
+                onSelectedDayChange={setSelectedUsageDayMs}
+              />
+            ) : (
+              <UsageCalendarSkeleton range={range} />
+            )}
           </div>
         </MobileSettingsSection>
       ) : null}
@@ -192,6 +200,8 @@ export function MobileStatsSettings() {
             emptyText={t('workspace.usage.empty', 'No usage data in this range')}
             valueFormatter={formatTokensCompact}
             tooltipValueFormatter={formatTokensCompact}
+            loading={loading}
+            loadingText={t('workspace.usage.loading', 'Loading usage data...')}
           />
         </div>
       </MobileSettingsSection>
@@ -204,6 +214,8 @@ export function MobileStatsSettings() {
             emptyText={t('workspace.usage.empty', 'No usage data in this range')}
             valueFormatter={formatTokensCompact}
             tooltipValueFormatter={formatTokensCompact}
+            loading={loading}
+            loadingText={t('workspace.usage.loading', 'Loading usage data...')}
           />
         </div>
       </MobileSettingsSection>
@@ -211,11 +223,6 @@ export function MobileStatsSettings() {
       {!workspaceId && (
         <div className="mx-3 mt-5 rounded-2xl border border-dashed border-border/60 bg-card p-4 text-sm text-muted-foreground">
           {t('workspace.usage.workspaceRequired', 'Select a workspace to view usage')}
-        </div>
-      )}
-      {workspaceId && !usageTimeline && (
-        <div className="mx-3 mt-5 rounded-2xl border border-dashed border-border/60 bg-card p-4 text-sm text-muted-foreground">
-          {t('workspace.usage.loading', 'Loading usage data...')}
         </div>
       )}
     </div>

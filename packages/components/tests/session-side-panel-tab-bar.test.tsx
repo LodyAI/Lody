@@ -182,6 +182,15 @@ describe('SessionSidePanelTabBar', () => {
     expect(onTabSelect).not.toHaveBeenCalled();
   });
 
+  it('caps each tab at 175px when the side panel is narrow', async () => {
+    await renderTabBar();
+    const bar = container?.querySelector('.\\@container\\/side-tabs') ?? container?.firstElementChild;
+    expect(bar?.className).toContain('@container/side-tabs');
+    const tab = container?.querySelector('[role="tab"]');
+    expect(tab?.className).toContain('max-w-[175px]');
+    expect(tab?.className).toContain('@max-[420px]/side-tabs:max-w-[175px]');
+  });
+
   it('selects fixed and dynamic tabs through the same tablist', async () => {
     await renderTabBar();
 
@@ -239,7 +248,6 @@ describe('SessionSidePanelTabBar', () => {
           ],
           onPanelOpen,
           title: 'Open a panel',
-          description: 'Choose what to show.',
         })
       );
     });

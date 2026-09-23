@@ -375,11 +375,8 @@ export const resolveAgentRoleAvailability = (
  *
  * - `machine`: a Local Project, or a child Session that shares this physical
  *   workspace — the target has to be the same machine.
- * - `authorized_machines`: a GitHub project, where the target Session clones
- *   the repo itself and may therefore live on another authorized machine.
- *
- * A plain chat with no project uses `machine` in V1; opening it up is a
- * separate decision, not a default.
+ * - `authorized_machines`: plain chat or a GitHub project whose target Session
+ *   can clone the repo itself on another authorized machine.
  */
 export type AgentRoleMentionScope =
   | { kind: 'machine'; machineId: MachineId | null }
@@ -394,7 +391,7 @@ export const isAgentRoleInMentionScope = (
     : scope.machineIds.has(role.machineId);
 
 /**
- * The Roles a composer may offer: readable by this user, executable right now,
+ * The Roles a composer may execute: readable by this user, executable right now,
  * and inside the current work context.
  *
  * Order is visibility- and scope-independent so the menu stays stable: name

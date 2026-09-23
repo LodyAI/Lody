@@ -15,6 +15,7 @@ function FilterShell({
 }) {
   const [organize, setOrganize] = useState<SidebarOrganizeMode>(organizeArg);
   const [scope, setScope] = useState<SidebarChatScope>(scopeArg);
+  const [showUpdatedProjectNames, setShowUpdatedProjectNames] = useState(true);
 
   return (
     <div className="flex min-h-[260px] items-end gap-6 rounded-2xl bg-sidebar p-6 text-sidebar-foreground">
@@ -31,6 +32,10 @@ function FilterShell({
             <span className="text-sidebar-foreground-muted">Scope:</span>{' '}
             <span className="font-medium">{scope}</span>
           </div>
+          <div className="mt-1">
+            <span className="text-sidebar-foreground-muted">Show Project:</span>{' '}
+            <span className="font-medium">{showUpdatedProjectNames ? 'on' : 'off'}</span>
+          </div>
         </div>
         <p className="mt-3 text-xs text-sidebar-foreground-muted">
           Click the filter icon to open the popover. Selections update the panel above.
@@ -42,6 +47,8 @@ function FilterShell({
           scope={scope}
           onOrganizeChange={setOrganize}
           onScopeChange={setScope}
+          showUpdatedProjectNames={showUpdatedProjectNames}
+          onShowUpdatedProjectNamesChange={setShowUpdatedProjectNames}
           {...(defaultOpen ? { side: 'top', align: 'end' } : null)}
         />
       </div>

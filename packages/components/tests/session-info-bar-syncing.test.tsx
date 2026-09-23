@@ -64,7 +64,11 @@ describe('SessionInfoBar syncing indicator', () => {
       root.render(<SessionInfoBar {...CONTEXT_LESS_PROPS} />);
     });
 
-    expect(container.innerHTML).toBe('');
+    // No bar is shown: only the hidden spacer that keeps the composer's gap.
+    expect(container.textContent).toBe('');
+    expect(container.querySelector('button, [role]')).toBeNull();
+    expect(container.children).toHaveLength(1);
+    expect(container.firstElementChild?.getAttribute('aria-hidden')).toBe('true');
   });
 
   it('renders and activates a reported preview action without staged context', () => {
@@ -131,5 +135,29 @@ describe('SessionInfoBar syncing indicator', () => {
 
     act(() => pauseButton?.click());
     expect(onGoalCommand).toHaveBeenCalledWith('pause', ACTIVE_GOAL);
+  });
+
+  it('shows and dispatches Resume for a blocked Codex goal', () => {
+    const blockedGoal: SessionGoalMessage = { ...ACTIVE_GOAL, status: 'blocked' };
+    const onGoalCommand = vi.fn();
+    act(() => {
+      root.render(
+        <SessionInfoBar
+          {...CONTEXT_LESS_PROPS}
+          goal={blockedGoal}
+          goalCommands={SESSION_GOAL_COMMANDS}
+          onGoalCommand={onGoalCommand}
+        />
+      );
+    });
+
+    act(() => container.querySelector<HTMLButtonElement>('button[aria-label="Goal"]')?.click());
+    const resumeButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent === 'Resume'
+    );
+    expect(resumeButton).toBeDefined();
+
+    act(() => resumeButton?.click());
+    expect(onGoalCommand).toHaveBeenCalledWith('resume', blockedGoal);
   });
 });

@@ -33,6 +33,13 @@ import {
 } from '../src/hooks/use-machine-flock-rows';
 import { useResolvedMachineMeta } from '../src/hooks/use-resolved-machine-meta';
 
+const postHogEvents = vi.hoisted(() => [] as { name: string; properties: unknown }[]);
+vi.mock('../src/lib/deferred-posthog', () => ({
+  deferredPostHog: {
+    capture: (name: string, properties: unknown) => postHogEvents.push({ name, properties }),
+  },
+}));
+
 let root: Root | null = null;
 let container: HTMLDivElement | null = null;
 
@@ -244,6 +251,90 @@ describe('useMachineFlockRows', () => {
     // Callers that already have an acknowledged mutation keep the local refresh
     // without inheriting the remote failure.
     await expect(resyncMachineFlockRows(runtime, machineId)).resolves.toBeUndefined();
+  });
+
+  it('keeps a freshly returned ACP capability when remote resync reads the previous snapshot', async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+    const store = createStore();
+    const workspaceId = 'workspace-machine-flock-refresh-overlay-test' as WorkspaceId;
+    const workspaceSlug = 'workspace-machine-flock-refresh-overlay-test';
+    const machineId = 'machine-machine-flock-refresh-overlay-test' as MachineId;
+    const configId = 'config-machine-flock-refresh-overlay-test' as AgentConfigId;
+    const capability = {
+      cliType: 'registry' as const,
+      agentType: 'deepseek',
+      cacheVersion: ACP_CAPABILITY_CACHE_VERSION,
+      provenance: 'runtime' as const,
+      sourceVersion: 'registry:deepseek:test',
+      modes: [],
+      models: [{ modelId: 'kimi-k3', name: 'Kimi K3' }],
+      configOptions: [
+        {
+          id: 'model',
+          name: 'Model',
+          category: 'model',
+          type: 'select' as const,
+          currentValue: 'kimi-k3',
+          options: [{ value: 'kimi-k3', name: 'Kimi K3' }],
+        },
+        {
+          id: 'reasoning_effort',
+          name: 'Thinking',
+          category: 'thought_level',
+          type: 'select' as const,
+          currentValue: 'max',
+          options: ['low', 'high', 'max'].map((value) => ({ value, name: value })),
+        },
+      ],
+      modelReasoningEfforts: { 'kimi-k3': ['low', 'high', 'max'] },
+      sessionFork: false,
+      fetchedAt: 1,
+    };
+    const handle = {
+      flock: {
+        // The just-written daemon row has not reached this replica yet.
+        scan: vi.fn(() => []),
+        subscribe: vi.fn(() => vi.fn()),
+      },
+      syncOnce: vi.fn(async () => ({
+        ok: true,
+        transports: [{ transportId: 'cloud', ok: true, failures: [] }],
+      })),
+      joinRoom: vi.fn(),
+    };
+    const runtime = {
+      workspaceId,
+      workspaceSlug,
+      repo: { openFlockDoc: vi.fn(async () => handle) },
+    } as unknown as WorkspaceRuntime;
+    store.set(runtimeAtom, runtime);
+    store.set(currentWorkspaceIdAtom, workspaceId);
+    store.set(currentWorkspaceSlugAtom, workspaceSlug);
+
+    const updates: MachineFlockRowMap[] = [];
+    render(
+      createElement(
+        Provider,
+        { store },
+        createElement(RowsProbe, {
+          machineId,
+          remoteMachineIds: [],
+          families: ['acpCapability'],
+          onRows: (rows) => updates.push(rows),
+        })
+      )
+    );
+    await flushMicrotasks();
+
+    await resyncMachineFlockRows(runtime, machineId, {
+      requireRemoteSync: true,
+      refreshedCapability: { configId, value: capability },
+    });
+    await flushMicrotasks();
+
+    const capabilityRowId = serializeMachineFlockKey(machineFlockKeys.acpCapability(configId));
+    expect(updates.at(-1)?.[capabilityRowId]?.value).toEqual(capability);
   });
 
   it('resolves ACP capabilities from Machine Flock over legacy machine meta', async () => {
@@ -1339,6 +1430,174 @@ describe('useMachineFlockRows', () => {
 
     expect(failingOpenFlockDoc).toHaveBeenCalledWith(`${workspaceId}:mf:${machineId}`);
     expect(updates.at(-1)?.[dotlodyPathRowId]?.value).toBe(dotlodyPath);
+  });
+
+  it('retries a failed remote catchup and reports the failure once until it recovers', async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+
+    try {
+      const store = createStore();
+      const workspaceId = 'workspace-machine-flock-remote-retry-test' as WorkspaceId;
+      const workspaceSlug = 'workspace-machine-flock-remote-retry-test';
+      const machineId = 'machine-machine-flock-remote-retry-test';
+      const configId = 'agent-config-remote-retry-test' as AgentConfigId;
+      const configRowId = serializeMachineFlockKey(machineFlockKeys.agentConfig(configId));
+      const sharedConfig: AgentConfigMeta = {
+        id: configId,
+        machineId: machineId as MachineId,
+        name: 'Shared agent',
+        description: undefined,
+        cliType: 'custom',
+        agentType: 'custom-shared-acp',
+        customAcp: { command: 'node', args: ['server.js'] },
+        env: {},
+        prompt: '',
+      };
+      let remoteVisible = false;
+      const recoveredRoom = liveRoom(Promise.resolve(), () => {
+        remoteVisible = true;
+      });
+      const joinFailure = Object.assign(new Error('stream forbidden'), { status: 403 });
+      const joinRoom = vi
+        .fn()
+        .mockRejectedValueOnce(joinFailure)
+        .mockRejectedValueOnce(joinFailure)
+        .mockImplementation(() => recoveredRoom.joinRoom());
+      const openFlockDoc = vi.fn(async () => ({
+        flock: {
+          scan: vi.fn(() =>
+            remoteVisible
+              ? [{ key: machineFlockKeys.agentConfig(configId), value: sharedConfig }]
+              : []
+          ),
+          subscribe: vi.fn(() => vi.fn()),
+        },
+        syncOnce: vi.fn(async () => undefined),
+        joinRoom,
+      }));
+
+      store.set(runtimeAtom, {
+        workspaceId,
+        workspaceSlug,
+        repo: { openFlockDoc },
+      } as unknown as WorkspaceRuntime);
+      store.set(currentWorkspaceIdAtom, workspaceId);
+      store.set(currentWorkspaceSlugAtom, workspaceSlug);
+
+      const updates: MachineFlockRowMap[] = [];
+      render(
+        createElement(
+          Provider,
+          { store },
+          createElement(RowsProbe, {
+            machineId,
+            families: ['agentConfig'],
+            onRows: (rows) => updates.push(rows),
+          })
+        )
+      );
+      await flushMicrotasks();
+      await flushMicrotasks();
+
+      const reportsFor = () =>
+        postHogEvents.filter(
+          (event) =>
+            event.name === 'machine_flock/remote_sync_failed' &&
+            (event.properties as { machine_id?: string }).machine_id === machineId
+        );
+      expect(updates.at(-1)?.[configRowId]).toBeUndefined();
+      expect(reportsFor()).toEqual([
+        {
+          name: 'machine_flock/remote_sync_failed',
+          properties: expect.objectContaining({
+            workspace_id: workspaceId,
+            machine_id: machineId,
+            families: ['agentConfig'],
+            error_type: 'Error',
+            http_status: 403,
+          }),
+        },
+      ]);
+      expect(warn).toHaveBeenCalledTimes(1);
+
+      // Second failure: retried on backoff, but not reported again.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1_000);
+      });
+      expect(joinRoom).toHaveBeenCalledTimes(2);
+      expect(updates.at(-1)?.[configRowId]).toBeUndefined();
+      expect(reportsFor()).toHaveLength(1);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      expect(joinRoom).toHaveBeenCalledTimes(3);
+      expect(updates.at(-1)?.[configRowId]?.value).toMatchObject({ name: 'Shared agent' });
+      expect(reportsFor()).toHaveLength(1);
+      expect(debug).toHaveBeenCalledWith(
+        '[machine-flock] remote sync failed; keeping cached rows and retrying',
+        expect.objectContaining({ failureCount: 2, retryDelayMs: 2_000 })
+      );
+    } finally {
+      warn.mockRestore();
+      debug.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops retrying a failed remote catchup once the consumer unmounts', async () => {
+    (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    try {
+      const store = createStore();
+      const workspaceId = 'workspace-machine-flock-retry-unmount-test' as WorkspaceId;
+      const workspaceSlug = 'workspace-machine-flock-retry-unmount-test';
+      const machineId = 'machine-machine-flock-retry-unmount-test';
+      const joinRoom = vi.fn(async () => {
+        throw new Error('join failed');
+      });
+      const openFlockDoc = vi.fn(async () => ({
+        flock: {
+          scan: vi.fn(() => []),
+          subscribe: vi.fn(() => vi.fn()),
+        },
+        syncOnce: vi.fn(async () => undefined),
+        joinRoom,
+      }));
+
+      store.set(runtimeAtom, {
+        workspaceId,
+        workspaceSlug,
+        repo: { openFlockDoc },
+      } as unknown as WorkspaceRuntime);
+      store.set(currentWorkspaceIdAtom, workspaceId);
+      store.set(currentWorkspaceSlugAtom, workspaceSlug);
+
+      render(
+        createElement(
+          Provider,
+          { store },
+          createElement(RowsProbe, { machineId, onRows: () => undefined })
+        )
+      );
+      await flushMicrotasks();
+      await flushMicrotasks();
+      expect(joinRoom).toHaveBeenCalledTimes(1);
+
+      unmountCurrentRoot();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
+      expect(joinRoom).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it('merges remote catchup rows without removing local agent configs', async () => {

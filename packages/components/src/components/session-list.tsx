@@ -1,3 +1,6 @@
+import { isElectronRenderer } from '@/lib/electron';
+import { openSessionOnModifiedClick } from '@/lib/desktop-window';
+import { SessionWindowMenuItem } from './session-window-menu-item';
 import { cn } from '@/lib/utils';
 import {
   closestCenter,
@@ -23,14 +26,15 @@ import {
   GitPullRequest,
   GripVertical,
   Link2,
-  Loader2,
   LockKeyhole,
+  Mail,
   Pencil,
   Pin,
   PinOff,
   Plus,
   Users,
 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import {
   memo,
   useCallback,
@@ -50,7 +54,6 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/ui/context-menu';
-import { Skeleton } from '@/ui/skeleton';
 import type {
   LocalProjectHistoryProvider,
   MachineId,
@@ -88,6 +91,7 @@ import {
   SessionMergeablePill,
   SessionOpenedByTreeRow,
   SessionRowOpenedByMenuItems,
+  SidebarListSkeleton,
   buildSessionRowOpenedByTreeSlot,
 } from '@/components/sidebar-row-shared';
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
@@ -187,6 +191,7 @@ export type SessionListProps = {
   onToggleRepoCollapsed?: (repoFullName: string) => void;
   onToggleChatsCollapsed?: () => void;
   onArchiveSession?: (sessionId: string) => void;
+  onMarkSessionUnread?: (sessionId: string) => void;
   onRenameSession?: (sessionId: string, nextTitle: string) => void | Promise<void>;
   /** Toggle pin state for a session. Receives the next desired state (true = pin, false = unpin). */
   onTogglePinSession?: (sessionId: string, nextPinned: boolean) => void;
@@ -215,6 +220,8 @@ export type SessionListProps = {
    * row above the loading skeleton so the control stays reachable.
    */
   headerAction?: ReactNode;
+  /** Content rendered below the standalone header action when no groups remain. */
+  emptyState?: ReactNode;
 };
 
 export type SessionRowGroup = {
@@ -279,26 +286,6 @@ export function sessionGroupOverflowsPreview(group: SessionRowGroup): boolean {
   return (
     countOpenedByTreeRoots(group.sessions, SESSION_ROW_OPENED_BY_TREE_ACCESSORS) >
     MAX_VISIBLE_SESSIONS
-  );
-}
-
-function SessionListSkeleton({ className }: { className?: string }) {
-  const rowWidths = ['w-[70%]', 'w-[58%]', 'w-[76%]', 'w-[62%]', 'w-[68%]', 'w-[54%]'];
-  return (
-    <div className={cn('space-y-3', className)}>
-      <div className="space-y-2">
-        <Skeleton className="h-3 w-24" />
-        <div className="space-y-2 rounded-lg border border-border/50 p-2">
-          {rowWidths.map((width, index) => (
-            <div key={index} className="flex items-center gap-2 px-1 py-1.5">
-              <Skeleton className="h-7 w-7 rounded-md" />
-              <Skeleton className={cn('h-3', width)} />
-              <Skeleton className="ml-auto h-3 w-10" />
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -506,6 +493,7 @@ type SessionGroupSectionProps = {
   onToggleRepoCollapsed?: (repoFullName: string) => void;
   onToggleChatsCollapsed?: () => void;
   onArchiveSession?: (sessionId: string) => void;
+  onMarkSessionUnread?: (sessionId: string) => void;
   onRenameSession?: (sessionId: string, nextTitle: string) => void | Promise<void>;
   onTogglePinSession?: (sessionId: string, nextPinned: boolean) => void;
   onCopySessionUrl?: (sessionId: string) => void;
@@ -539,6 +527,7 @@ export type ContextMenuLabels = {
   pin: string;
   unpin: string;
   archive: string;
+  markUnread: string;
   copyUrl: string;
   shareWithTeam: string;
   onlyOwnerCanShare: string;
@@ -558,6 +547,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
   onToggleRepoCollapsed,
   onToggleChatsCollapsed,
   onArchiveSession,
+  onMarkSessionUnread,
   onRenameSession,
   onTogglePinSession,
   onCopySessionUrl,
@@ -644,25 +634,22 @@ const SessionGroupSection = memo(function SessionGroupSection({
     group.kind === 'repo'
       ? 'text-sidebar-foreground dark:text-sidebar-foreground/75'
       : 'text-sidebar-foreground-muted';
-  // Typography splits with color: repo headers read as content (xs semibold),
-  // the "Chats" header reads as section chrome (13px medium) so
-  // section labels visually recede from titles at a glance.
+  // Typography splits with color: repo headers read as content (regular weight,
+  // full foreground; the leading repo icon marks them as a group), the "Chats"
+  // header reads as section chrome (medium, muted) so section labels recede.
   const headerTypographyClass =
-    group.kind === 'repo' ? 'text-xs font-semibold' : 'text-[13px] font-medium';
+    group.kind === 'repo' ? 'text-[0.9em] font-normal' : 'text-[0.9em] font-medium';
   const headerToggleHoverClass =
     group.kind === 'repo' ? 'hover:text-sidebar-hover-foreground' : 'hover:text-sidebar-foreground';
 
   return (
-    <div
-      className={cn(
-        'flex flex-col gap-0.5',
-        group.collapsed ? 'mb-1 last:mb-0' : 'mb-2.5 last:mb-0'
-      )}
-    >
+    <div className={cn('flex flex-col gap-0.5', getSidebarGroupSpacingClass(group.collapsed))}>
       <div className="group flex h-7 items-center">
         <div
           role={canNavigate || canToggle ? 'button' : undefined}
           tabIndex={canNavigate || canToggle ? 0 : -1}
+          data-id={`group:${group.key}`}
+          data-scope-item="row"
           data-sidebar-group-key={group.key}
           className={cn(
             'relative flex h-7 w-full select-none items-center gap-1 rounded-md px-2 text-left',
@@ -735,7 +722,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
                 <ChevronDown
                   className={cn(
                     'absolute left-0 top-1/2 -translate-y-1/2 h-4 w-4',
-                    'transition-[opacity,translate,scale] duration-150 ease-out',
+                    'transition-[opacity,translate,scale,rotate] duration-150 ease-out',
                     isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
                     group.collapsed ? '-rotate-90' : 'rotate-0'
                   )}
@@ -748,7 +735,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
             <ChevronDown
               className={cn(
                 'h-3.5 w-3.5 shrink-0 text-current',
-                'transition-[opacity,translate,scale] duration-150 ease-out',
+                'transition-[opacity,translate,scale,rotate] duration-150 ease-out',
                 group.collapsed || isMobile ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
                 // Chats is a top-level sidebar section, so its collapsed chevron
                 // stays visible without hover.
@@ -779,7 +766,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
           </button>
         )}
 
-        {headerAction ? <div className="shrink-0">{headerAction}</div> : null}
+        {headerAction ? <div className="mr-2 shrink-0">{headerAction}</div> : null}
       </div>
 
       {!group.collapsed && (
@@ -812,6 +799,8 @@ const SessionGroupSection = memo(function SessionGroupSection({
               prStatus !== 'closed';
             const showMergeablePill = isMergeable && !isSelected;
             const canArchive = typeof onArchiveSession === 'function';
+            const canMarkUnread =
+              typeof onMarkSessionUnread === 'function' && !session.hasUnreadMessages;
             const showInlineArchive = canArchive && !isMobile;
             const isChatSession = group.kind === 'chat';
             // Copy URL stays available for private sessions (the link still
@@ -848,10 +837,11 @@ const SessionGroupSection = memo(function SessionGroupSection({
             const sessionHref = isSelectable ? getSessionHref?.(session.sessionId) : undefined;
             const useAnchor = typeof sessionHref === 'string' && sessionHref.length > 0;
             const renderTitle = (extraClassName?: string) => (
-              <span className={cn('truncate', extraClassName)}>{session.title}</span>
+              <span className={cn('truncate font-normal', extraClassName)}>{session.title}</span>
             );
             const handleAnchorClick = useAnchor
               ? (event: ReactMouseEvent<HTMLAnchorElement>) => {
+                  if (openSessionOnModifiedClick(event, session.sessionId)) return;
                   if (
                     event.metaKey ||
                     event.ctrlKey ||
@@ -882,6 +872,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
               onRenameSession ||
               onTogglePinSession ||
               onArchiveSession ||
+              canMarkUnread ||
               onCopySessionUrl ||
               shareMenuState ||
               session.branchName ||
@@ -895,6 +886,9 @@ const SessionGroupSection = memo(function SessionGroupSection({
                 role={!useAnchor && isSelectable ? 'button' : undefined}
                 tabIndex={!useAnchor && isSelectable ? 0 : undefined}
                 aria-disabled={!isSelectable ? true : undefined}
+                aria-current={isSelected ? 'page' : undefined}
+                data-id={`session:${session.sessionId}`}
+                data-scope-item="row"
                 data-sidebar-session-id={session.sessionId}
                 // Drag a conversation onto a chat surface to mention it there.
                 draggable
@@ -916,7 +910,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
                     !isMobile &&
                     'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
                   showSelectedState &&
-                    'border-sidebar-foreground/10 bg-sidebar-foreground/10 text-sidebar-foreground hover:bg-sidebar-foreground/10',
+                    'bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection',
                   // Keyboard-only focus ring. Plain :focus-within also matches
                   // after a mouse click (the overlay <a> keeps focus), which
                   // left a permanent inset ring on the selected row that read
@@ -929,8 +923,9 @@ const SessionGroupSection = memo(function SessionGroupSection({
                 onClick={
                   useAnchor
                     ? undefined
-                    : () => {
+                    : (event) => {
                         if (!isSelectable) return;
+                        if (openSessionOnModifiedClick(event, session.sessionId)) return;
                         onSelectSession?.(session.sessionId);
                       }
                 }
@@ -938,6 +933,10 @@ const SessionGroupSection = memo(function SessionGroupSection({
                   useAnchor
                     ? undefined
                     : (e) => {
+                        // Nested controls (such as the opened-session disclosure) own their
+                        // keyboard activation. Selecting the row here would navigate before
+                        // the control receives its native click.
+                        if (e.currentTarget !== e.target) return;
                         if (!isSelectable) return;
                         if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault();
@@ -959,19 +958,16 @@ const SessionGroupSection = memo(function SessionGroupSection({
                 ) : null}
                 <div className="flex min-w-0 items-center gap-1.5">
                   <SessionRowLeadingSlot
-                    isWaitingPermission={session.isWaitingPermission}
-                    isWorking={session.isWorking}
-                    hasUnreadMessages={session.hasUnreadMessages}
                     showMenuButton={hasMenuActions}
                     menuLabel={moreActionsLabel}
                     openedByTree={openedByTreeSlot}
                   />
                   <div
                     className={cn(
-                      'min-w-0 flex-1 flex items-center gap-1 truncate text-sm',
+                      'min-w-0 flex-1 flex items-center gap-1 truncate text-[0.9em]',
                       showSelectedState
                         ? 'text-sidebar-selection-foreground'
-                        : 'text-sidebar-foreground dark:text-sidebar-foreground/75'
+                        : 'text-sidebar-foreground'
                     )}
                     // Double-click to rename is scoped to the title only, so it can't
                     // be triggered by double-clicking the Archive confirm button.
@@ -991,20 +987,23 @@ const SessionGroupSection = memo(function SessionGroupSection({
                     ) : null}
                     {renderTitle()}
                   </div>
-                  {/* Keep PR at the right edge, with All Changes totals immediately before it. */}
+                  {/* Keep PR at the right edge. Line totals stay in the hover card. */}
                   <SidebarRowEndSlot
+                    isWaitingPermission={session.isWaitingPermission}
+                    isWorking={session.isWorking}
+                    hasUnreadMessages={session.hasUnreadMessages}
                     restIcon={
                       isChatSession ? (
                         <span className={cn('flex items-center gap-1.5', useAnchor && 'z-20')}>
                           <SessionRowTime
                             latestMessageAt={session.latestMessageAt}
-                            className="text-xs text-muted-foreground"
+                            className="text-[0.8em] text-muted-foreground"
                           />
                         </span>
-                      ) : hasPr || hasChanges || showMergeablePill || isMobile ? (
+                      ) : hasPr || showMergeablePill || isMobile ? (
                         <span
                           className={cn(
-                            'flex select-none items-center gap-1.5 text-[11px] tabular-nums text-sidebar-foreground-muted/80',
+                            'flex select-none items-center gap-1.5 text-[0.75em] tabular-nums text-sidebar-foreground-muted/80',
                             useAnchor && 'z-20'
                           )}
                         >
@@ -1014,14 +1013,7 @@ const SessionGroupSection = memo(function SessionGroupSection({
                               className="text-muted-foreground"
                             />
                           ) : null}
-                          {showMergeablePill ? (
-                            <SessionMergeablePill />
-                          ) : hasChanges && !isMergeable ? (
-                            <span className="flex items-center gap-1">
-                              <span className="text-code-added">+{session.addedLines}</span>
-                              <span className="text-code-removed">-{session.deletedLines}</span>
-                            </span>
-                          ) : null}
+                          {showMergeablePill ? <SessionMergeablePill /> : null}
                           {hasPr ? (
                             <SessionPrIcon prStatus={prStatus} prCiState={session.prCiState} />
                           ) : null}
@@ -1049,7 +1041,113 @@ const SessionGroupSection = memo(function SessionGroupSection({
                 <ContextMenuContent className="min-w-[180px]">
                   <SessionRowOpenedByMenuItems
                     opener={openedByOpener}
-                    separateToggle={hasStandardMenuActions}
+                    goToOpenerLabel={contextMenuLabels.goToOpenerSession}
+                  />
+                  {onTogglePinSession ? (
+                    <ContextMenuItem
+                      onSelect={() => {
+                        onTogglePinSession(session.sessionId, !session.isPinned);
+                      }}
+                    >
+                      {session.isPinned ? <PinOff /> : <Pin />}
+                      {session.isPinned ? contextMenuLabels.unpin : contextMenuLabels.pin}
+                    </ContextMenuItem>
+                  ) : null}
+                  {canMarkUnread ? (
+                    <ContextMenuItem
+                      onSelect={() => {
+                        onMarkSessionUnread?.(session.sessionId);
+                      }}
+                    >
+                      <Mail />
+                      {contextMenuLabels.markUnread}
+                    </ContextMenuItem>
+                  ) : null}
+                  {onRenameSession ? (
+                    <ContextMenuItem
+                      onSelect={() => {
+                        beginRename(session.sessionId, session.title);
+                      }}
+                    >
+                      <Pencil />
+                      {contextMenuLabels.rename}
+                    </ContextMenuItem>
+                  ) : null}
+                  {(openedByOpener || onTogglePinSession || canMarkUnread || onRenameSession) &&
+                  (onCopySessionUrl || session.branchName || shareMenuState) ? (
+                    <ContextMenuSeparator />
+                  ) : null}
+                  {onCopySessionUrl ? (
+                    <ContextMenuItem
+                      onSelect={() => {
+                        onCopySessionUrl(session.sessionId);
+                      }}
+                    >
+                      <Link2 />
+                      {contextMenuLabels.copyUrl}
+                    </ContextMenuItem>
+                  ) : null}
+                  {session.branchName ? (
+                    <ContextMenuItem
+                      onSelect={() => {
+                        void navigator.clipboard.writeText(session.branchName).catch(() => {});
+                      }}
+                    >
+                      <GitBranch />
+                      {contextMenuLabels.copyBranch}
+                    </ContextMenuItem>
+                  ) : null}
+                  {shareMenuState ? (
+                    <ContextMenuItem
+                      disabled={shareMenuState !== 'share'}
+                      onSelect={() => {
+                        onShareSessionWithTeam?.(session.sessionId);
+                      }}
+                    >
+                      {shareMenuState === 'share' ? (
+                        <Users />
+                      ) : shareMenuState === 'loading' ? (
+                        <Spinner />
+                      ) : (
+                        <LockKeyhole />
+                      )}
+                      {shareMenuState === 'share'
+                        ? contextMenuLabels.shareWithTeam
+                        : shareMenuState === 'unregistered'
+                          ? contextMenuLabels.registerDeviceToShare
+                          : shareMenuState === 'owner-only'
+                            ? contextMenuLabels.onlyOwnerCanShare
+                            : contextMenuLabels.loadingSharing}
+                    </ContextMenuItem>
+                  ) : null}
+                  {(openedByOpener ||
+                    onTogglePinSession ||
+                    canMarkUnread ||
+                    onRenameSession ||
+                    onCopySessionUrl ||
+                    session.branchName ||
+                    shareMenuState) &&
+                  ((onOpenPullRequest && prUrl) ||
+                    (canGoToOpener && openerSessionId) ||
+                    isElectronRenderer()) ? (
+                    <ContextMenuSeparator />
+                  ) : null}
+                  {onOpenPullRequest && prUrl ? (
+                    <ContextMenuItem
+                      onSelect={() => {
+                        onOpenPullRequest({
+                          sessionId: session.sessionId,
+                          repoFullName: group.repoFullName,
+                          prUrl,
+                          prNumber,
+                        });
+                      }}
+                    >
+                      <GitPullRequest />
+                      {contextMenuLabels.openPr}
+                    </ContextMenuItem>
+                  ) : null}
+                  <SessionRowOpenedByMenuItems
                     goToOpener={
                       canGoToOpener && openerSessionId
                         ? () => {
@@ -1063,49 +1161,19 @@ const SessionGroupSection = memo(function SessionGroupSection({
                     }
                     goToOpenerLabel={contextMenuLabels.goToOpenerSession}
                   />
-                  {onOpenPullRequest && prUrl ? (
-                    <>
-                      <ContextMenuItem
-                        onSelect={() => {
-                          onOpenPullRequest({
-                            sessionId: session.sessionId,
-                            repoFullName: group.repoFullName,
-                            prUrl,
-                            prNumber,
-                          });
-                        }}
-                      >
-                        <GitPullRequest />
-                        {contextMenuLabels.openPr}
-                      </ContextMenuItem>
-                      {onRenameSession ||
-                      onTogglePinSession ||
-                      onArchiveSession ||
-                      onCopySessionUrl ||
-                      session.branchName ? (
-                        <ContextMenuSeparator />
-                      ) : null}
-                    </>
-                  ) : null}
-                  {onRenameSession ? (
-                    <ContextMenuItem
-                      onSelect={() => {
-                        beginRename(session.sessionId, session.title);
-                      }}
-                    >
-                      <Pencil />
-                      {contextMenuLabels.rename}
-                    </ContextMenuItem>
-                  ) : null}
-                  {onTogglePinSession ? (
-                    <ContextMenuItem
-                      onSelect={() => {
-                        onTogglePinSession(session.sessionId, !session.isPinned);
-                      }}
-                    >
-                      {session.isPinned ? <PinOff /> : <Pin />}
-                      {session.isPinned ? contextMenuLabels.unpin : contextMenuLabels.pin}
-                    </ContextMenuItem>
+                  <SessionWindowMenuItem sessionId={session.sessionId} />
+                  {(openedByOpener ||
+                    onTogglePinSession ||
+                    canMarkUnread ||
+                    onRenameSession ||
+                    onCopySessionUrl ||
+                    session.branchName ||
+                    shareMenuState ||
+                    (onOpenPullRequest && prUrl) ||
+                    (canGoToOpener && openerSessionId) ||
+                    isElectronRenderer()) &&
+                  onArchiveSession ? (
+                    <ContextMenuSeparator />
                   ) : null}
                   {onArchiveSession ? (
                     <ContextMenuItem
@@ -1115,53 +1183,6 @@ const SessionGroupSection = memo(function SessionGroupSection({
                     >
                       <Archive />
                       {contextMenuLabels.archive}
-                    </ContextMenuItem>
-                  ) : null}
-                  {(onRenameSession || onTogglePinSession || onArchiveSession) &&
-                  (onCopySessionUrl || session.branchName) ? (
-                    <ContextMenuSeparator />
-                  ) : null}
-                  {onCopySessionUrl ? (
-                    <ContextMenuItem
-                      onSelect={() => {
-                        onCopySessionUrl(session.sessionId);
-                      }}
-                    >
-                      <Link2 />
-                      {contextMenuLabels.copyUrl}
-                    </ContextMenuItem>
-                  ) : null}
-                  {shareMenuState ? (
-                    <ContextMenuItem
-                      disabled={shareMenuState !== 'share'}
-                      onSelect={() => {
-                        onShareSessionWithTeam?.(session.sessionId);
-                      }}
-                    >
-                      {shareMenuState === 'share' ? (
-                        <Users />
-                      ) : shareMenuState === 'loading' ? (
-                        <Loader2 className="animate-spin" />
-                      ) : (
-                        <LockKeyhole />
-                      )}
-                      {shareMenuState === 'share'
-                        ? contextMenuLabels.shareWithTeam
-                        : shareMenuState === 'unregistered'
-                          ? contextMenuLabels.registerDeviceToShare
-                          : shareMenuState === 'owner-only'
-                            ? contextMenuLabels.onlyOwnerCanShare
-                            : contextMenuLabels.loadingSharing}
-                    </ContextMenuItem>
-                  ) : null}
-                  {session.branchName ? (
-                    <ContextMenuItem
-                      onSelect={() => {
-                        void navigator.clipboard.writeText(session.branchName).catch(() => {});
-                      }}
-                    >
-                      <GitBranch />
-                      {contextMenuLabels.copyBranch}
                     </ContextMenuItem>
                   ) : null}
                 </ContextMenuContent>
@@ -1248,9 +1269,12 @@ const SessionGroupSection = memo(function SessionGroupSection({
           {canToggleFullList && (
             <button
               type="button"
+              data-id={`show-more:${group.key}`}
+              data-scope-item="row"
               data-sidebar-show-more={group.key}
               className={cn(
-                'flex select-none items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-sidebar-foreground-muted/80',
+                // Same 30px pitch as a conversation row (py-1 + 1px borders + 20px line).
+                'flex h-[30px] select-none items-center gap-2 rounded-md px-2 text-left text-[0.8em] text-sidebar-foreground-muted/80',
                 'transition-colors',
                 'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
                 'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-sidebar-ring/40'
@@ -1330,7 +1354,13 @@ const SortableRepoGroupSection = memo(function SortableRepoGroupSection({
     <div
       ref={setNodeRef}
       style={style}
-      className={cn('w-full', isDragging && 'opacity-60')}
+      // The group spacing lives on this sortable wrapper: inside it the section
+      // is always `:last-child`, so its own `last:mb-0` would erase the gap.
+      className={cn(
+        'w-full',
+        getSidebarGroupSpacingClass(group.collapsed),
+        isDragging && 'opacity-60'
+      )}
       data-repo-full-name={group.repoFullName}
     >
       <SessionGroupSection
@@ -1342,6 +1372,14 @@ const SortableRepoGroupSection = memo(function SortableRepoGroupSection({
     </div>
   );
 }, sessionGroupPropsEqual);
+
+/**
+ * Space after a sidebar group (a repo, Chats, a machine's projects): 12px when
+ * expanded, at least twice the 1–2px rhythm between rows inside a group, so
+ * groups separate by space alone. Collapsed headers stack more tightly.
+ */
+export const getSidebarGroupSpacingClass = (collapsed: boolean | undefined) =>
+  collapsed ? 'mb-1 last:mb-0' : 'mb-3 last:mb-0';
 
 export const SessionList = memo(function SessionList({
   sessions,
@@ -1357,6 +1395,7 @@ export const SessionList = memo(function SessionList({
   onToggleRepoCollapsed,
   onToggleChatsCollapsed,
   onArchiveSession,
+  onMarkSessionUnread,
   onRenameSession,
   onTogglePinSession,
   onCopySessionUrl,
@@ -1367,6 +1406,7 @@ export const SessionList = memo(function SessionList({
   onNavigateToNewSession,
   getSessionHref,
   headerAction,
+  emptyState,
 }: SessionListProps) {
   const { t } = useTranslation();
   const archiveTooltipLabel = t('sessions.archive', 'Archive session');
@@ -1379,6 +1419,7 @@ export const SessionList = memo(function SessionList({
       pin: t('sessions.contextMenu.pin', 'Pin Session'),
       unpin: t('sessions.contextMenu.unpin', 'Unpin Session'),
       archive: t('sessions.contextMenu.archive', 'Archive Session'),
+      markUnread: t('sessions.contextMenu.markUnread', 'Mark as unread'),
       copyUrl: t('sessions.contextMenu.copyUrl', 'Copy Session URL'),
       shareWithTeam: t('sessions.sharing.shareWithTeam', 'Share with team…'),
       onlyOwnerCanShare: t('sessions.sharing.onlyOwnerCanShare', 'Only the device owner can share'),
@@ -1446,9 +1487,9 @@ export const SessionList = memo(function SessionList({
     return (
       <div className="flex flex-col">
         {headerAction ? (
-          <div className="flex h-7 shrink-0 items-center justify-end">{headerAction}</div>
+          <div className="flex h-7 shrink-0 items-center justify-end pr-2">{headerAction}</div>
         ) : null}
-        <SessionListSkeleton className={className} />
+        <SidebarListSkeleton className={className} />
       </div>
     );
   }
@@ -1477,8 +1518,15 @@ export const SessionList = memo(function SessionList({
 
   if (!groups.length) {
     // Keep the header action reachable even when every group filtered out.
-    if (headerAction) {
-      return <div className="flex h-7 shrink-0 items-center justify-end">{headerAction}</div>;
+    if (headerAction || emptyState) {
+      return (
+        <div className="flex flex-col">
+          {headerAction ? (
+            <div className="flex h-7 shrink-0 items-center justify-end pr-2">{headerAction}</div>
+          ) : null}
+          {emptyState}
+        </div>
+      );
     }
     return null;
   }
@@ -1506,6 +1554,7 @@ export const SessionList = memo(function SessionList({
                     onToggleRepoCollapsed={onToggleRepoCollapsed}
                     onToggleChatsCollapsed={onToggleChatsCollapsed}
                     onArchiveSession={onArchiveSession}
+                    onMarkSessionUnread={onMarkSessionUnread}
                     onRenameSession={onRenameSession}
                     onTogglePinSession={onTogglePinSession}
                     onCopySessionUrl={onCopySessionUrl}
@@ -1539,6 +1588,7 @@ export const SessionList = memo(function SessionList({
                   onToggleRepoCollapsed={onToggleRepoCollapsed}
                   onToggleChatsCollapsed={onToggleChatsCollapsed}
                   onArchiveSession={onArchiveSession}
+                  onMarkSessionUnread={onMarkSessionUnread}
                   onRenameSession={onRenameSession}
                   onTogglePinSession={onTogglePinSession}
                   onCopySessionUrl={onCopySessionUrl}

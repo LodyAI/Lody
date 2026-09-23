@@ -28,6 +28,14 @@ describe('SettingsCategoryList', () => {
   beforeEach(async () => {
     await initI18n('en');
     navigateMock.mockClear();
+    Object.defineProperty(HTMLElement.prototype, 'checkVisibility', {
+      configurable: true,
+      value: () => true,
+    });
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: vi.fn(),
+    });
     Reflect.deleteProperty(window, '__LODY_NATIVE__');
     Reflect.deleteProperty(window, 'Capacitor');
     store = createStore();
@@ -120,6 +128,25 @@ describe('SettingsCategoryList', () => {
       getButton('Appearance').click();
     });
 
+    expect(navigateMock).toHaveBeenCalledWith({
+      to: '/$workspaceName/settings/appearance',
+      params: { workspaceName: 'acme' },
+      search: expect.any(Function),
+    });
+  });
+
+  it('opens the category reached by keyboard navigation', async () => {
+    await renderList();
+    const preferences = getButton('Preferences');
+
+    await act(async () => preferences.focus());
+    await act(async () => {
+      preferences.dispatchEvent(
+        new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowDown' })
+      );
+    });
+
+    expect(document.activeElement).toBe(getButton('Appearance'));
     expect(navigateMock).toHaveBeenCalledWith({
       to: '/$workspaceName/settings/appearance',
       params: { workspaceName: 'acme' },

@@ -20,11 +20,6 @@ type BuiltInCommandDefinition = {
 // keeps them non-executable; a mounted real command replaces the placeholder by id. Titles
 // carry a `titleKey` (not a pre-translated string) because this module registers outside
 // React and can't call `t()` — display surfaces translate via the key instead.
-// The Tasks commands (`tasks.quickAdd` / `tasks.open`) are deliberately absent: a
-// placeholder here would list them in the palette and keyboard settings even for
-// users who never enabled the Tasks beta. `app-commands.tsx` registers the real
-// ones behind `tasksFeatureEnabledAtom`, and it is mounted workspace-wide, so
-// nothing is lost once the beta is on.
 const UNAVAILABLE_COMMANDS: BuiltInCommandDefinition[] = [
   {
     id: 'nav.back',
@@ -48,6 +43,12 @@ const UNAVAILABLE_COMMANDS: BuiltInCommandDefinition[] = [
     id: 'app.cycleTheme',
     titleKey: 'commands.app.cycleTheme',
     title: 'Cycle Theme',
+    category: 'View',
+  },
+  {
+    id: 'layout.toggleZenMode',
+    titleKey: 'commands.layout.toggleZenMode',
+    title: 'Toggle Zen Layout',
     category: 'View',
   },
   {
@@ -117,12 +118,6 @@ const UNAVAILABLE_COMMANDS: BuiltInCommandDefinition[] = [
     category: 'Session',
   },
   {
-    id: 'session.closeFocusedTab',
-    titleKey: 'commands.session.closeFocusedTab',
-    title: 'Close Focused Tab',
-    category: 'Session',
-  },
-  {
     id: 'session.toggleTerminal',
     titleKey: 'commands.session.toggleTerminal',
     title: 'Toggle Terminal',
@@ -156,6 +151,60 @@ const UNAVAILABLE_COMMANDS: BuiltInCommandDefinition[] = [
     id: 'session.nextVisible',
     titleKey: 'commands.session.nextVisible',
     title: 'Switch to Next Session',
+    category: 'Navigation',
+  },
+  {
+    id: 'session.switchToTab1',
+    titleKey: 'commands.session.switchToTab1',
+    title: 'Switch to Tab 1',
+    category: 'Navigation',
+  },
+  {
+    id: 'session.switchToTab2',
+    titleKey: 'commands.session.switchToTab2',
+    title: 'Switch to Tab 2',
+    category: 'Navigation',
+  },
+  {
+    id: 'session.switchToTab3',
+    titleKey: 'commands.session.switchToTab3',
+    title: 'Switch to Tab 3',
+    category: 'Navigation',
+  },
+  {
+    id: 'session.switchToTab4',
+    titleKey: 'commands.session.switchToTab4',
+    title: 'Switch to Tab 4',
+    category: 'Navigation',
+  },
+  {
+    id: 'session.switchToTab5',
+    titleKey: 'commands.session.switchToTab5',
+    title: 'Switch to Tab 5',
+    category: 'Navigation',
+  },
+  {
+    id: 'session.switchToTab6',
+    titleKey: 'commands.session.switchToTab6',
+    title: 'Switch to Tab 6',
+    category: 'Navigation',
+  },
+  {
+    id: 'session.switchToTab7',
+    titleKey: 'commands.session.switchToTab7',
+    title: 'Switch to Tab 7',
+    category: 'Navigation',
+  },
+  {
+    id: 'session.switchToTab8',
+    titleKey: 'commands.session.switchToTab8',
+    title: 'Switch to Tab 8',
+    category: 'Navigation',
+  },
+  {
+    id: 'session.switchToLastTab',
+    titleKey: 'commands.session.switchToLastTab',
+    title: 'Switch to Last Tab',
     category: 'Navigation',
   },
   {

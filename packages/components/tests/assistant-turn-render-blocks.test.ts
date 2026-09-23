@@ -160,6 +160,26 @@ describe('buildAssistantTurnRenderLayout', () => {
     ]);
   });
 
+  it('keeps every text block in the final contiguous run outside the work group', () => {
+    const layout = buildAssistantTurnRenderLayout(
+      'assistant-1',
+      [
+        { type: 'text', text: 'Progress update.' },
+        tool('command-1', 'execute'),
+        { type: 'text', text: 'First part of the final response.' },
+        { type: 'text', text: 'Second part of the final response.' },
+      ],
+      true
+    );
+
+    expect(layout.blocks.map((block) => layout.workBlockKeys.has(block.key))).toEqual([
+      true,
+      true,
+      false,
+      false,
+    ]);
+  });
+
   it('does not create completed-work boundaries while a turn is streaming', () => {
     const layout = buildAssistantTurnRenderLayout(
       'assistant-1',

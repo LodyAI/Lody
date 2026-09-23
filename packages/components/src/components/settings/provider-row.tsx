@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAtomValue } from 'jotai';
-import { Loader2, RefreshCw, Trash2 } from 'lucide-react';
+import { RefreshCw, Trash2 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import {
   REGISTRY_ACP_AGENTS,
   type AgentConfigCliType,
@@ -24,6 +25,7 @@ import {
   AlertDialogTitle,
 } from '@/ui/alert-dialog';
 import { cn } from '@/lib/utils';
+import { SETTINGS_ROW_CARD_CLASS } from './compact-layout';
 import { activeWorkspaceRuntimeAtom } from '@/atoms/runtime';
 import { useMachineAcpBinaryProgress } from '@/hooks/use-machine-acp-binary-progress';
 import { AgentIcon } from '@/components/icons/agent-icon';
@@ -31,6 +33,7 @@ import { CodexResetForecastChip } from '@/components/codex-reset/codex-reset-for
 import { canShowCodexResetForecast } from '@/lib/codex-reset-forecast';
 import {
   canShowSubscriptionRateLimits,
+  formatAgentRateLimitWindowLabel,
   formatRateLimitWindowShortLabel,
   getAgentRateLimitEntries,
   getAgentRateLimitWindows,
@@ -42,11 +45,21 @@ export type ProviderRowProps = {
   onEdit: (config: AgentConfigMeta) => void;
   onDelete?: (config: AgentConfigMeta) => Promise<void>;
   onRefresh?: (config: AgentConfigMeta) => Promise<void>;
+  variant?: 'card' | 'list';
+  className?: string;
 };
 
 /** One provider entry. Signing in again lives in the provider's detail dialog
  *  (`AgentConfigDialog`), not here: only some providers can sign in at all. */
-export function ProviderRow({ config, machine, onEdit, onDelete, onRefresh }: ProviderRowProps) {
+export function ProviderRow({
+  config,
+  machine,
+  onEdit,
+  onDelete,
+  onRefresh,
+  variant = 'card',
+  className,
+}: ProviderRowProps) {
   const { t } = useTranslation();
   const { cliType, agentType } = config;
   const envCount = Object.keys(config.env || {}).length;
@@ -119,26 +132,42 @@ export function ProviderRow({ config, machine, onEdit, onDelete, onRefresh }: Pr
   };
 
   return (
-    <div className="overflow-hidden rounded-lg bg-foreground/[0.04]">
+    <div
+      className={cn(
+        'overflow-hidden',
+        variant === 'card'
+          ? cn('@container', SETTINGS_ROW_CARD_CLASS)
+          : 'bg-transparent [&+&]:border-t [&+&]:border-border',
+        className
+      )}
+    >
       <div className="flex w-full min-w-0 items-center transition-colors hover:bg-hover/40">
         <button
           type="button"
           onClick={() => onEdit(config)}
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-3 py-1.5 text-left focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+          className={cn(
+            'flex min-w-0 flex-1 items-center text-left focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring',
+            variant === 'card' ? 'gap-2 rounded-md px-3 py-1.5' : 'gap-3 rounded-none px-4 py-3'
+          )}
           aria-label={t('agents.editConfig', 'Edit config')}
         >
-          <div className="flex h-6 w-6 shrink-0 items-center justify-center text-foreground/80">
+          <div
+            className={cn(
+              'flex shrink-0 items-center justify-center text-foreground/80',
+              variant === 'card' ? 'h-6 w-6' : 'h-8 w-8'
+            )}
+          >
             <AgentIcon
               cliType={cliType}
               agentType={agentType}
               brandId={config.brandId}
               env={config.env}
-              className="h-4 w-4"
+              className={variant === 'card' ? 'h-4 w-4' : 'h-5 w-5'}
             />
           </div>
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-              <span className="min-w-0 truncate text-sm font-medium">{config.name}</span>
+              <span className="min-w-0 truncate text-sm font-normal">{config.name}</span>
               {typeBadge ? (
                 <Badge variant="secondary" className="text-[10px] capitalize">
                   {typeBadge}
@@ -147,16 +176,25 @@ export function ProviderRow({ config, machine, onEdit, onDelete, onRefresh }: Pr
             </div>
           </div>
         </button>
-        <div className="flex shrink-0 items-center gap-2 py-1.5 pr-3 text-xs text-muted-foreground">
+        <div
+          className={cn(
+            'flex shrink-0 items-center gap-2 pr-3 text-xs text-muted-foreground',
+            variant === 'card' ? 'py-1.5' : 'py-3'
+          )}
+        >
           {/* Not mounted at all when ineligible, so a non-Codex row costs no
               store subscription and no clock tick. */}
           {showResetForecast ? <CodexResetForecastChip enabled /> : null}
-          {rateLimitWindows.length > 0 && (
-            <div className="hidden items-center gap-2.5 sm:flex">
+          {rateLimitWindows.length > 0 && variant === 'card' && (
+            <div className="hidden items-center gap-2.5 @sm:flex">
               {rateLimitWindows.map((window, index) => (
                 <RateLimitMeter
                   key={`${window.windowDurationSeconds ?? 'unknown'}-${index}`}
-                  label={formatRateLimitWindowShortLabel(window.windowDurationSeconds)}
+                  label={formatAgentRateLimitWindowLabel(
+                    window,
+                    formatRateLimitWindowShortLabel(window.windowDurationSeconds),
+                    t
+                  )}
                   remainingPercent={window.remainingPercent}
                 />
               ))}
@@ -184,7 +222,7 @@ export function ProviderRow({ config, machine, onEdit, onDelete, onRefresh }: Pr
               }}
             >
               {refreshing ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                <Spinner className="h-3.5 w-3.5" />
               ) : (
                 <RefreshCw className="h-3.5 w-3.5" />
               )}
@@ -206,10 +244,8 @@ export function ProviderRow({ config, machine, onEdit, onDelete, onRefresh }: Pr
           )}
         </div>
       </div>
-      {/* Mobile keeps the usage meters on a second line under the name; desktop
-          shows them inline before the refresh button. */}
-      {rateLimitWindows.length > 0 && (
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 px-3 pb-2.5 pt-0.5 sm:hidden">
+      {rateLimitWindows.length > 0 && variant === 'card' && (
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 px-3 pb-2.5 pt-0.5 @sm:hidden">
           {rateLimitWindows.map((window, index) => (
             <RateLimitMeter
               key={`${window.windowDurationSeconds ?? 'unknown'}-${index}`}
@@ -245,7 +281,7 @@ export function ProviderRow({ config, machine, onEdit, onDelete, onRefresh }: Pr
               }}
               className={cn('bg-destructive text-destructive-foreground hover:bg-destructive/90')}
             >
-              {deleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {deleting && <Spinner className="mr-2 h-4 w-4" />}
               {t('common.delete', 'Delete')}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -269,7 +305,7 @@ function RateLimitMeter({
       className="flex shrink-0 items-center gap-1.5 text-[11px] text-muted-foreground"
       title={`${label}: ${percentText}`}
     >
-      <span className="font-medium">{label}</span>
+      <span className="font-normal">{label}</span>
       <span className="relative h-1 w-10 overflow-hidden rounded-full bg-foreground/10">
         <span
           className="absolute inset-y-0 left-0 rounded-full bg-muted-foreground/60"

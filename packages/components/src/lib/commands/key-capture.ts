@@ -1,32 +1,20 @@
+import {
+  isModifierKey,
+  normalizeHotkeyFromParsed,
+  normalizeKeyName,
+  parseKeyboardEvent,
+  PUNCTUATION_CODE_MAP,
+} from '@tanstack/hotkeys';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { physicalKeyFromEvent } from './key-matcher';
-import { isMac } from './platform';
+import { getHotkeyPlatform } from './platform';
 import { commands } from './registry';
 import { setGlobalShortcutsSuspended } from '@/lib/native-global-shortcuts';
 
 const SETTLE_AFTER_CAPTURE_MS = 1000;
 
-const MODIFIER_KEYS = new Set([
-  'Shift',
-  'Control',
-  'Alt',
-  'Meta',
-  'CapsLock',
-  'OS',
-  'Hyper',
-  'Super',
-  'AltGraph',
-  'NumLock',
-  'ScrollLock',
-  'Fn',
-  'FnLock',
-]);
-
 /**
- * Encode an event's modifier flags + (optionally) its physical key into the registry's
- * binding-string syntax. `$mod` is the platform's primary modifier; the non-primary
- * modifier is emitted explicitly. Physical-key resolution sidesteps macOS's
- * Option-glyph behavior (⌥B → `b`, not `∫`).
+ * Normalize an event with the same library used by command dispatch. Modifier-only
+ * events use a temporary key so the library can still produce the live preview order.
  *
  * `allowModifierOnly: true` lets a modifiers-only event return a partial string for
  * live preview during recording; the default (false) returns `null` so callers can
@@ -36,18 +24,23 @@ function buildBindingString(
   event: KeyboardEvent,
   { allowModifierOnly = false }: { allowModifierOnly?: boolean } = {}
 ): string | null {
-  const isModifierEvent = MODIFIER_KEYS.has(event.key);
+  const isModifierEvent = isModifierKey(normalizeKeyName(event.key));
   if (isModifierEvent && !allowModifierOnly) return null;
-  const mac = isMac();
-  const parts: string[] = [];
-  const primary = mac ? event.metaKey : event.ctrlKey;
-  const secondary = mac ? event.ctrlKey : event.metaKey;
-  if (primary) parts.push('$mod');
-  if (secondary) parts.push(mac ? 'Control' : 'Meta');
-  if (event.altKey) parts.push('Alt');
-  if (event.shiftKey) parts.push('Shift');
-  if (!isModifierEvent) parts.push(physicalKeyFromEvent(event));
-  return parts.length > 0 ? parts.join('+') : null;
+  const platform = getHotkeyPlatform();
+  if (!isModifierEvent) {
+    const parsed = parseKeyboardEvent(event);
+    const code = event.code;
+    if (/^Key[A-Z]$/.test(code)) parsed.key = code.slice(3);
+    else if (/^(?:Digit|Numpad)[0-9]$/.test(code)) parsed.key = code.slice(-1);
+    else if (PUNCTUATION_CODE_MAP[code]) parsed.key = PUNCTUATION_CODE_MAP[code];
+    return normalizeHotkeyFromParsed(parsed, platform);
+  }
+
+  const preview = normalizeHotkeyFromParsed(
+    { ...parseKeyboardEvent(event), key: 'F24' },
+    platform
+  ).replace(/\+?F24$/, '');
+  return preview || null;
 }
 
 /** One-shot encode for callers outside the recording lifecycle. */
@@ -163,7 +156,7 @@ export function useKeyCapture({ onCapture, onCancel }: KeyCaptureOptions): KeyCa
 
       const combo = buildBindingString(event, { allowModifierOnly: true });
       if (combo) setPreviewIfChanged(combo);
-      if (combo && !MODIFIER_KEYS.has(event.key)) {
+      if (combo && !isModifierKey(normalizeKeyName(event.key))) {
         latestValid = combo;
       }
     };

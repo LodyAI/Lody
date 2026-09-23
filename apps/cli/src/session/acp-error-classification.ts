@@ -1,5 +1,5 @@
 import type { ChatFailedReason } from '@lody/shared';
-import { formatErrorMessage } from '@/utils/format-error';
+import { formatErrorMessage, formatErrorWithCauses } from '@/utils/format-error';
 
 export const ACP_ERROR_CODES = {
   PARSE_ERROR: -32700,
@@ -57,6 +57,12 @@ const AUTHENTICATION_REQUIRED_PATTERNS = [
   /\bsession expired\b[\s\S]{0,160}\b(?:log|sign) in again\b/i,
   /\brefresh token\b[\s\S]{0,160}\b(?:already used|expired|revoked|cannot be refreshed|could not be refreshed)\b/i,
   /\baccess token\b[\s\S]{0,160}\bcould not be refreshed\b[\s\S]{0,160}\brefresh token\b/i,
+  // Providers that report an expired credential without naming the remedy.
+  // Requiring an auth noun (oauth/token/credential/api key) next to "expired"
+  // keeps unrelated expiries — TLS certificates, caches, trial periods — out.
+  /\boauth\b[\s\S]{0,80}\b(?:session|token|credentials?|login)\b[\s\S]{0,80}\bexpired\b/i,
+  /\b(?:oauth|access|refresh|bearer|api)[ _-]?(?:token|key)\b[\s\S]{0,80}\b(?:has |is |was )?expired\b/i,
+  /\bexpired\b[\s\S]{0,80}\b(?:oauth|access|refresh|bearer)[ _-]?token\b/i,
 ] as const;
 
 export const parseACPError = (error: unknown): ParsedACPError | null => {
@@ -83,6 +89,15 @@ export const getACPErrorUserMessage = (error: ParsedACPError): string => {
 
 export const isUpstreamApiACPError = (error: ParsedACPError): boolean =>
   /API Error:\s*(?:500|502|503|529)\b/.test(getACPDiagnosticText(error, error));
+
+/**
+ * Codex app-server exposes model-capacity failures as the stable
+ * `serverOverloaded` error kind in RequestError.data. Match the structured
+ * value only: provider copy changes, and a generic HTTP 503 may instead mean a
+ * transport outage that should retain the ordinary upstream-error behavior.
+ */
+export const isProviderOverloadedACPError = (error: ParsedACPError): boolean =>
+  getStringField(error.data, 'codexErrorInfo') === 'serverOverloaded';
 
 export const isAcpSessionStorageIncompatibleError = (error: unknown): boolean => {
   const diagnosticText = getACPDiagnosticText(error);
@@ -115,19 +130,68 @@ export const isAcpSessionNotFoundError = (error: unknown): boolean => {
   return /\bsession not found\b/i.test(getACPDiagnosticText(error, parsed));
 };
 
+/** One link of the chain says "this is an authentication failure". */
+const isAcpAuthRequiredErrorShape = (error: unknown): boolean => {
+  if (parseACPError(error)?.code === ACP_ERROR_CODES.AUTH_REQUIRED) {
+    return true;
+  }
+  // Matched structurally rather than by `instanceof`: the error class lives in
+  // `agent-client`, which this module must not import back into.
+  return (
+    !!error &&
+    typeof error === 'object' &&
+    (error as Error).name === 'AcpAuthenticationRequiredError'
+  );
+};
+
+/**
+ * Authentication evidence must survive wrapping. `AgentClient.startSession`
+ * rewraps a failed `loadSession`/`resumeSession` as `[ACP_RESUME_FAILED] …`
+ * with the provider error attached as `cause`, and the restore path decides
+ * from this answer alone whether to ask the user to sign in or to throw the
+ * resumable ACP session away. Reading only the outer error loses that.
+ */
+const walkErrorChain = function* (error: unknown): Generator<unknown> {
+  const seen = new Set<unknown>();
+  let current = error;
+  while (current && typeof current === 'object' && !seen.has(current)) {
+    seen.add(current);
+    yield current;
+    current = (current as { cause?: unknown }).cause;
+  }
+};
+
+const getACPAuthDiagnosticText = (error: unknown, parsedError?: ParsedACPError | null): string => {
+  const direct = getACPDiagnosticText(error, parsedError);
+  const withCauses = formatErrorWithCauses(error);
+  return direct.includes(withCauses) ? direct : `${direct}\n${withCauses}`;
+};
+
+const matchesAuthenticationText = (text: string): boolean =>
+  AUTHENTICATION_REQUIRED_PATTERNS.some((pattern) => pattern.test(text));
+
 /**
  * Some provider runtimes still wrap expired OAuth credentials in an ACP
  * internal error instead of using ACP's dedicated auth-required code. Keep the
- * compatibility match narrow and limited to provider-owned instructions that
- * explicitly require another login.
+ * compatibility match narrow and limited to provider-owned text that names an
+ * auth credential, so unrelated expiries are not read as a sign-in prompt.
  */
 export const isAuthenticationRequiredACPError = (error: unknown): boolean => {
-  const parsed = parseACPError(error);
-  if (parsed?.code === ACP_ERROR_CODES.AUTH_REQUIRED) {
-    return true;
+  for (const link of walkErrorChain(error)) {
+    if (isAcpAuthRequiredErrorShape(link)) {
+      return true;
+    }
+    // Matched per link, not once over the flattened chain: the SDK's
+    // `RequestError` is an `Error`, and `formatErrorWithCauses` prints only its
+    // message for a nested one — dropping the `data.details` that carries the
+    // provider's expired-credential text. `getACPDiagnosticText` reads `data`.
+    if (matchesAuthenticationText(getACPDiagnosticText(link))) {
+      return true;
+    }
   }
-  const diagnosticText = getACPDiagnosticText(error, parsed);
-  return AUTHENTICATION_REQUIRED_PATTERNS.some((pattern) => pattern.test(diagnosticText));
+  // Covers a non-object error and anything the cause walk cannot reach, such as
+  // an AggregateError's `errors` entries.
+  return matchesAuthenticationText(getACPAuthDiagnosticText(error, parseACPError(error)));
 };
 
 export const mapACPErrorToFailureReason = (error: ParsedACPError): ChatFailedReason => {
@@ -141,6 +205,9 @@ export const mapACPErrorToFailureReason = (error: ParsedACPError): ChatFailedRea
       // of surfacing a generic "Agent internal error" to users.
       if (isAgentDisconnectedError(error) || isAcpSessionNotFoundError(error)) {
         return 'agent_disconnected';
+      }
+      if (isProviderOverloadedACPError(error)) {
+        return 'acp_provider_overloaded';
       }
       if (isUpstreamApiACPError(error)) {
         return 'acp_upstream_api_error';
@@ -174,6 +241,9 @@ export const shouldTerminateOnACPError = (
     return true;
   }
   if (failureReason === 'acp_upstream_api_error') {
+    return false;
+  }
+  if (failureReason === 'acp_provider_overloaded') {
     return false;
   }
   return error.code === ACP_ERROR_CODES.INTERNAL_ERROR;

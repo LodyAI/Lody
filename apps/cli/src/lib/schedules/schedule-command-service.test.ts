@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { LoroDoc } from 'loro-crdt';
+import { withHistoryPort } from '../../../tests/history-port-fixture';
 import {
   ScheduleRepository,
   ScheduleDefinitionSchema,
@@ -76,17 +77,18 @@ async function fixture() {
               }
             : undefined,
       },
-      getOrCreateSessionDoc: async () => ({
-        roomId: 'session-session',
-        waitUntilSynced: notificationSync,
-        getHistory: async () => [
-          { id: 'turn', role: 'user', inputConfig: { scheduleToolsEnabled: tools } },
-          ...history,
-        ],
-        updateHistory: async (update: (entries: any[]) => any[]) => {
-          history = update(history);
-        },
-      }),
+      getOrCreateSessionDoc: async () =>
+        withHistoryPort({
+          roomId: 'session-session',
+          waitUntilSynced: notificationSync,
+          getHistory: () => [
+            { id: 'turn', role: 'user', inputConfig: { scheduleToolsEnabled: tools } },
+            ...history,
+          ],
+          updateHistory: async (update: (entries: any[]) => any[]) => {
+            history = update(history);
+          },
+        }),
       syncDocOrThrow: vi.fn(),
     },
     workspace: { id: 'workspace' },
@@ -200,12 +202,24 @@ it('publishes the pause gate before waiting for a failed notification sync', asy
 it('bounds MCP prompt output and returns usable Registry pagination metadata', async () => {
   const h = await fixture();
   const document = (await h.repository.read('schedule'))!;
-  await h.repository.save({ scheduleId: 'schedule', draft: { ...document.definition, prompt: 'x'.repeat(9000) }, actorId: 'owner', now: 2, activationId: 'edit', activityId: 'edit' });
+  await h.repository.save({
+    scheduleId: 'schedule',
+    draft: { ...document.definition, prompt: 'x'.repeat(9000) },
+    actorId: 'owner',
+    now: 2,
+    activationId: 'edit',
+    activityId: 'edit',
+  });
   h.context.requesterSessionId = 'session' as never;
-  const result = await executeScheduleCommand(h.context, { action: 'show', scheduleId: 'schedule' }) as { schedule: { prompt: string }; truncated: { promptCharsOmitted: number } };
+  const result = (await executeScheduleCommand(h.context, {
+    action: 'show',
+    scheduleId: 'schedule',
+  })) as { schedule: { prompt: string }; truncated: { promptCharsOmitted: number } };
   expect(result.schedule.prompt).toHaveLength(8000);
   expect(result.truncated.promptCharsOmitted).toBe(1000);
-  expect(await executeScheduleCommand(h.context, { action: 'list', limit: 1, offset: 1 })).toMatchObject({ schedules: [], matched: 1 });
+  expect(
+    await executeScheduleCommand(h.context, { action: 'list', limit: 1, offset: 1 })
+  ).toMatchObject({ schedules: [], matched: 1 });
 });
 
 describe('proposing a schedule from a conversation', () => {
@@ -261,7 +275,12 @@ describe('proposing a schedule from a conversation', () => {
         entry.id === 'schedule-proposal-nightly'
           ? {
               ...entry,
-              items: [{ ...entry.items![0]!, meta: { ...entry.items![0]!.meta, outcome: 'created', scheduleId: 'nightly' } }],
+              items: [
+                {
+                  ...entry.items![0]!,
+                  meta: { ...entry.items![0]!.meta, outcome: 'created', scheduleId: 'nightly' },
+                },
+              ],
             }
           : entry
       )
@@ -277,8 +296,12 @@ describe('proposing a schedule from a conversation', () => {
   it('rejects a rule the editor could not show, before writing anything', async () => {
     const h = await fixture();
     h.context.requesterSessionId = 'session' as never;
-    await expect(propose(h, { rule: { kind: 'weekly', weekdays: [], hour: 9, minute: 0 } })).rejects.toThrow();
-    await expect(propose(h, { rule: { kind: 'cron', expression: '0 9 * * *', timeZone: 'UTC' } })).rejects.toThrow();
+    await expect(
+      propose(h, { rule: { kind: 'weekly', weekdays: [], hour: 9, minute: 0 } })
+    ).rejects.toThrow();
+    await expect(
+      propose(h, { rule: { kind: 'cron', expression: '0 9 * * *', timeZone: 'UTC' } })
+    ).rejects.toThrow();
     expect(h.history()).toHaveLength(0);
   });
 

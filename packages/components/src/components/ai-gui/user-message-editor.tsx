@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 
 import { Button } from '@/ui/button';
 import { Textarea } from '@/ui/textarea';
@@ -65,7 +65,7 @@ export function UserMessageEditor({
     <div
       className={cn(
         'flex w-[32rem] max-w-full flex-col',
-        'rounded-2xl border border-foreground/[0.10] bg-background px-3 py-2.5',
+        'rounded-2xl border-[0.5px] border-foreground/[0.10] bg-background px-3 py-2.5',
         'shadow-[0_1px_2px_hsl(0_0%_0%/0.04),0_8px_24px_-16px_hsl(0_0%_0%/0.12)]',
         'transition-colors duration-150 focus-within:border-foreground/25',
         'dark:border-input-border/70 dark:bg-input/90 dark:focus-within:border-input-border'
@@ -120,7 +120,7 @@ export function UserMessageEditor({
             'active:translate-y-[1px]'
           )}
         >
-          {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+          {isSaving ? <Spinner className="h-3.5 w-3.5" /> : null}
           {t('sessions.send', 'Send')}
         </Button>
       </div>

@@ -1,3 +1,4 @@
+import { useMentionFileSearch } from './file-search/use-file-search';
 import * as React from 'react';
 import { forEachAtTokenSpan, type HydratedMentions } from '@/components/mentions/mention-hydration';
 import { useAtomValue } from 'jotai';
@@ -11,6 +12,8 @@ import {
   getRepoMentionAnalyticsId,
   normalizeGithubFetchErrorCode,
 } from '@/components/mentions/mention-analytics';
+import { buildPathSuggestions } from './file-search/engine';
+export * from './file-search/engine';
 import { withGitHubTokenRetry } from '@/lib/github-token';
 import { cn } from '@/lib/utils';
 import { FileIcon, FolderIcon } from '@/components/icons/file-icons';
@@ -32,15 +35,6 @@ export type RepoFilePathsResult = {
   truncated: boolean;
 };
 
-export type FuseInstance<T> = {
-  search: (pattern: string, options?: { limit?: number }) => Array<{ item: T; score?: number }>;
-};
-
-export type FuseConstructor<T> = new (
-  list: T[],
-  options?: Record<string, unknown>
-) => FuseInstance<T>;
-
 const RepoFilePathsResultSchema = z.object({
   repoFullName: z.string(),
   defaultBranch: z.string(),
@@ -54,8 +48,6 @@ type RepoFilePathsCacheEntry = RepoFilePathsResult & {
 };
 
 const CACHE_TTL_MS = 1000 * 60 * 60 * 6; // 6h
-export const MAX_SUGGESTIONS = 120;
-export const MAX_DEFAULT_SUGGESTIONS = 60;
 
 const memoryCache = new Map<string, RepoFilePathsCacheEntry>();
 
@@ -117,226 +109,6 @@ async function idbSet(key: string, value: RepoFilePathsCacheEntry): Promise<void
 
 function isStale(entry: RepoFilePathsCacheEntry, now: number) {
   return now - entry.fetchedAt > CACHE_TTL_MS;
-}
-
-function toSearchablePath(path: string) {
-  return path.toLowerCase();
-}
-
-export type PathSuggestion = {
-  kind: 'dir' | 'file';
-  path: string;
-  token: string;
-  searchable: string;
-};
-
-export function buildPathSuggestions(filePaths: string[]) {
-  const fileSet = new Set<string>();
-  const dirSet = new Set<string>();
-
-  for (const filePath of filePaths) {
-    const normalized = filePath.replace(/^\/+/, '');
-    if (!normalized) continue;
-    fileSet.add(normalized);
-
-    const parts = normalized.split('/');
-    if (parts.length <= 1) continue;
-    let current = '';
-    for (let i = 0; i < parts.length - 1; i++) {
-      const part = parts[i];
-      if (!part) continue;
-      current = current ? `${current}/${part}` : part;
-      dirSet.add(current);
-    }
-  }
-
-  const dirs = Array.from(dirSet)
-    .sort((a, b) => a.localeCompare(b))
-    .map<PathSuggestion>((path) => ({
-      kind: 'dir',
-      path,
-      token: `${path}/`,
-      searchable: toSearchablePath(`${path}/`),
-    }));
-
-  const files = Array.from(fileSet)
-    .sort((a, b) => a.localeCompare(b))
-    .map<PathSuggestion>((path) => ({
-      kind: 'file',
-      path,
-      token: path,
-      searchable: toSearchablePath(path),
-    }));
-
-  const allSuggestions = [...dirs, ...files];
-  return {
-    dirs,
-    files,
-    allSuggestions,
-    allTokens: new Set([...dirs.map((d) => d.token), ...files.map((f) => f.token)]),
-  };
-}
-
-export function isTopLevelToken(token: string) {
-  const normalized = token.replace(/\/+$/, '');
-  return !normalized.includes('/');
-}
-
-export function getTokenDepth(token: string) {
-  const normalized = token.replace(/\/+$/, '');
-  if (!normalized) return 0;
-  return normalized.split('/').filter(Boolean).length;
-}
-
-export function getSegments(token: string) {
-  const normalized = token.replace(/\/+$/, '');
-  if (!normalized) return [];
-  return normalized.split('/').filter(Boolean);
-}
-
-export function getSegmentMatchInfo(token: string, term: string) {
-  const segments = getSegments(token);
-  const termLower = term.toLowerCase();
-
-  for (let i = 0; i < segments.length; i++) {
-    const seg = segments[i]?.toLowerCase() ?? '';
-    const idx = seg.indexOf(termLower);
-    if (idx === -1) continue;
-    return {
-      segmentIndex: i,
-      segmentMatchIndex: idx,
-      segmentPrefix: idx === 0,
-      depth: segments.length,
-    };
-  }
-
-  return null;
-}
-
-export function getCommonPrefixLen(a: string[], b: string[]) {
-  const max = Math.min(a.length, b.length);
-  let i = 0;
-  for (; i < max; i++) {
-    if (a[i] !== b[i]) break;
-  }
-  return i;
-}
-
-export function getFuseOptions() {
-  return {
-    keys: ['token'],
-    includeScore: true,
-    threshold: 0.35,
-    ignoreLocation: true,
-    minMatchCharLength: 2,
-    shouldSort: true,
-  } as const;
-}
-
-export function getSuggestions(
-  suggestions: {
-    dirs: PathSuggestion[];
-    files: PathSuggestion[];
-    allSuggestions: PathSuggestion[];
-  },
-  term: string,
-  fuse: FuseInstance<PathSuggestion> | null
-) {
-  const trimmed = term.trim().toLowerCase();
-
-  if (!trimmed) {
-    const topDirs = suggestions.dirs.filter((s) => isTopLevelToken(s.token));
-    const topFiles = suggestions.files.filter((s) => isTopLevelToken(s.token));
-    return [...topDirs, ...topFiles].slice(0, MAX_DEFAULT_SUGGESTIONS);
-  }
-
-  const candidates: Array<{ item: PathSuggestion; score: number | null }> = (() => {
-    if (fuse) {
-      const results = fuse.search(trimmed, { limit: MAX_SUGGESTIONS * 3 });
-      return results.map((r) => ({
-        item: r.item,
-        score: typeof r.score === 'number' ? r.score : null,
-      }));
-    }
-    return suggestions.allSuggestions
-      .filter((s) => s.searchable.includes(trimmed))
-      .map((item) => ({ item, score: null }));
-  })();
-
-  // If user is typing a path (contains `/`), prioritize matches by path prefix depth.
-  if (trimmed.includes('/')) {
-    const termSegments = trimmed.replace(/\/+$/, '').split('/').filter(Boolean);
-
-    const sorted = candidates.sort((a, b) => {
-      const aSegs = getSegments(a.item.token).map((x) => x.toLowerCase());
-      const bSegs = getSegments(b.item.token).map((x) => x.toLowerCase());
-      const aPrefix = getCommonPrefixLen(aSegs, termSegments);
-      const bPrefix = getCommonPrefixLen(bSegs, termSegments);
-      if (aPrefix !== bPrefix) return bPrefix - aPrefix;
-
-      const aDepth = aSegs.length;
-      const bDepth = bSegs.length;
-      if (aDepth !== bDepth) return aDepth - bDepth;
-
-      if (a.score !== null && b.score !== null && a.score !== b.score) {
-        return a.score - b.score;
-      }
-
-      // Prefer directories only when match quality is otherwise identical.
-      if (a.item.kind !== b.item.kind) return a.item.kind === 'dir' ? -1 : 1;
-
-      return a.item.token.localeCompare(b.item.token);
-    });
-
-    return sorted.slice(0, MAX_SUGGESTIONS).map((c) => c.item);
-  }
-
-  // Otherwise, prioritize shallower (top-level) directory matches first.
-  const sorted = candidates.sort((a, b) => {
-    const aMatch = getSegmentMatchInfo(a.item.token, trimmed);
-    const bMatch = getSegmentMatchInfo(b.item.token, trimmed);
-
-    // Both should match because we filtered by includes, but be defensive.
-    if (!aMatch && bMatch) return 1;
-    if (aMatch && !bMatch) return -1;
-    if (!aMatch || !bMatch) {
-      const aDepth = getTokenDepth(a.item.token);
-      const bDepth = getTokenDepth(b.item.token);
-      if (aDepth !== bDepth) return aDepth - bDepth;
-      if (a.score !== null && b.score !== null && a.score !== b.score) {
-        return a.score - b.score;
-      }
-      return a.item.token.localeCompare(b.item.token);
-    }
-
-    // Prefer matching in higher-level segments (top-level dir first).
-    if (aMatch.segmentIndex !== bMatch.segmentIndex) {
-      return aMatch.segmentIndex - bMatch.segmentIndex;
-    }
-    // Prefer prefix matches within the segment (e.g. "comp" -> "components" before "my-components").
-    if (aMatch.segmentPrefix !== bMatch.segmentPrefix) {
-      return aMatch.segmentPrefix ? -1 : 1;
-    }
-    // Earlier match inside segment wins.
-    if (aMatch.segmentMatchIndex !== bMatch.segmentMatchIndex) {
-      return aMatch.segmentMatchIndex - bMatch.segmentMatchIndex;
-    }
-    // Shallower path wins (e.g. "components/" before "src/components/").
-    if (aMatch.depth !== bMatch.depth) {
-      return aMatch.depth - bMatch.depth;
-    }
-
-    if (a.score !== null && b.score !== null && a.score !== b.score) {
-      return a.score - b.score;
-    }
-
-    // Prefer directories only when match quality is otherwise identical.
-    if (a.item.kind !== b.item.kind) return a.item.kind === 'dir' ? -1 : 1;
-
-    return a.item.token.localeCompare(b.item.token);
-  });
-
-  return sorted.slice(0, MAX_SUGGESTIONS).map((c) => c.item);
 }
 
 export function hydrateFileMentionsFromText(text: string, knownPaths: Set<string>) {
@@ -504,42 +276,8 @@ function FileAtMentionMenu({
   const context = useMentionContext('FileAtMentionMenu');
 
   const term = context.filterStore.search;
-  const suggestionIndex = React.useMemo(() => {
-    if (!entry) return null;
-    return buildPathSuggestions(entry.paths);
-  }, [entry]);
-
-  const [fuseCtor, setFuseCtor] = React.useState<FuseConstructor<PathSuggestion> | null>(null);
-  React.useEffect(() => {
-    if (!suggestionIndex) return undefined;
-    let cancelled = false;
-    void import('fuse.js')
-      .then((mod) => {
-        if (cancelled) return;
-        const ctor = (mod as unknown as { default?: unknown }).default ?? mod;
-        setFuseCtor(() => ctor as unknown as FuseConstructor<PathSuggestion>);
-      })
-      .catch(() => {
-        // fuse.js isn't installed yet; fallback to substring matching.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [suggestionIndex]);
-
-  const fuse = React.useMemo(() => {
-    if (!fuseCtor || !suggestionIndex) return null;
-    try {
-      return new fuseCtor(suggestionIndex.allSuggestions, getFuseOptions());
-    } catch {
-      return null;
-    }
-  }, [fuseCtor, suggestionIndex]);
-
-  const indexed = React.useMemo(() => {
-    if (!suggestionIndex) return [];
-    return getSuggestions(suggestionIndex, term, fuse);
-  }, [suggestionIndex, term, fuse]);
+  const search = useMentionFileSearch(entry, context.open ? term : null);
+  const indexed = search.items;
 
   React.useEffect(() => {
     if (!context.open) return;
@@ -557,9 +295,9 @@ function FileAtMentionMenu({
         <div className="px-2 py-1.5 text-sm text-muted-foreground">
           Select a repo to mention files.
         </div>
-      ) : status === 'loading' && !entry ? (
+      ) : (status === 'loading' && !entry) || search.status === 'loading' ? (
         <FileAtMentionLoadingSkeleton />
-      ) : status === 'error' ? (
+      ) : status === 'error' || search.status === 'error' ? (
         <div className="px-2 py-1.5 text-sm text-destructive">
           {error ?? 'Failed to load files.'}
         </div>

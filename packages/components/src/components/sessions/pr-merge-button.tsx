@@ -1,4 +1,5 @@
-import { Check, ChevronDown, GitMerge, Loader2 } from 'lucide-react';
+import { Check, ChevronDown, GitMerge } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import { useTranslation } from 'react-i18next';
 import type { GitHubMergeMethod } from '@lody/shared';
 import { cn } from '@/lib/utils';
@@ -14,33 +15,30 @@ const MERGE_METHODS: Array<{
   value: GitHubMergeMethod;
   labelKey: string;
   labelFallback: string;
-  descKey: string;
-  descFallback: string;
 }> = [
   {
     value: 'merge',
     labelKey: 'sessions.prTab.mergeMerge',
     labelFallback: 'Create a merge commit',
-    descKey: 'sessions.prTab.mergeMergeDesc',
-    descFallback: 'All commits from this branch will be added to the base branch.',
   },
   {
     value: 'squash',
     labelKey: 'sessions.prTab.mergeSquash',
     labelFallback: 'Squash and merge',
-    descKey: 'sessions.prTab.mergeSquashDesc',
-    descFallback: 'The commits from this branch will be combined into a single commit.',
   },
   {
     value: 'rebase',
     labelKey: 'sessions.prTab.mergeRebase',
     labelFallback: 'Rebase and merge',
-    descKey: 'sessions.prTab.mergeRebaseDesc',
-    descFallback: 'The commits will be rebased and added to the base branch.',
   },
 ];
 
-function PrMergeMethodLabel({ method }: { method: GitHubMergeMethod }) {
+/**
+ * The active merge method as a label. Exported because the info bar can demote
+ * Merge into the overflow menu (a dirty worktree outranks it), and that plain
+ * menu item has to name the same method the split button would have performed.
+ */
+export function PrMergeMethodLabel({ method }: { method: GitHubMergeMethod }) {
   const { t } = useTranslation();
   if (method === 'squash') {
     return <>{t('sessions.prTab.mergeSquashAction', 'Squash and merge')}</>;
@@ -79,11 +77,7 @@ export function PrMergeButton({
 
   const mainContent = (
     <>
-      {isMerging ? (
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-      ) : (
-        <GitMerge className="h-3.5 w-3.5" />
-      )}
+      {isMerging ? <Spinner className="h-3.5 w-3.5" /> : <GitMerge className="h-3.5 w-3.5" />}
       {isMerging ? t('sessions.prTab.merging', 'Merging…') : <PrMergeMethodLabel method={method} />}
     </>
   );
@@ -112,7 +106,11 @@ export function PrMergeButton({
           variant={buttonVariant}
           disabled={isDisabled}
           onClick={() => void onMerge?.(method)}
-          className={cn('h-8 gap-1 rounded-r-none border-transparent', readyGreen && greenClasses)}
+          className={cn(
+            'h-8 gap-1 rounded-r-none',
+            buttonVariant === 'outline' ? 'border-r-0' : 'border-transparent',
+            readyGreen && greenClasses
+          )}
         >
           {mainContent}
         </Button>
@@ -144,33 +142,18 @@ export function PrMergeButton({
             </Button>
           )}
         </DropdownMenuTrigger>
-        <DropdownMenuContent
-          align="end"
-          side={compact ? 'top' : 'bottom'}
-          className="min-w-[280px]"
-        >
+        <DropdownMenuContent align="end" side={compact ? 'top' : 'bottom'}>
           {MERGE_METHODS.map((candidate) => {
             const isActive = candidate.value === method;
             return (
               <DropdownMenuItem
                 key={candidate.value}
                 onClick={() => onSelectMethod?.(candidate.value)}
-                className="items-start"
               >
                 <Check
-                  className={cn(
-                    'mt-0.5 h-3.5 w-3.5 shrink-0',
-                    isActive ? 'text-foreground' : 'text-transparent'
-                  )}
+                  className={cn('shrink-0', isActive ? 'text-foreground' : 'text-transparent')}
                 />
-                <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                  <span className="text-sm font-medium">
-                    {t(candidate.labelKey, candidate.labelFallback)}
-                  </span>
-                  <span className="text-[11px] text-muted-foreground">
-                    {t(candidate.descKey, candidate.descFallback)}
-                  </span>
-                </div>
+                {t(candidate.labelKey, candidate.labelFallback)}
               </DropdownMenuItem>
             );
           })}

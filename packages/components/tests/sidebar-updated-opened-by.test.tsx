@@ -225,6 +225,34 @@ describe('SidebarUpdatedSessionList opened-by rendering', () => {
     expect(childSlot?.querySelector('button[aria-label="More actions"]')).not.toBeNull();
   });
 
+  it('keeps the connectors on a working or unread child and puts status at the row end', () => {
+    // `opened-1` is working and `opened-2` is unread: the rows most likely to be
+    // watched are exactly the ones that used to lose their ├/└ to a status mark.
+    render(makeOpenerItems());
+
+    const rowOf = (id: string) => container?.querySelector(`[data-sidebar-updated-id="${id}"]`);
+
+    for (const id of ['opened-1', 'opened-2', 'opened-3']) {
+      expect(
+        rowOf(id)
+          ?.querySelector('[data-session-row-leading-slot]')
+          ?.querySelectorAll('[data-session-tree-connector]')
+      ).toHaveLength(2);
+    }
+
+    expect(
+      rowOf('opened-1')?.querySelector(
+        '[data-session-row-end-slot] [data-session-working-spinner]'
+      )
+    ).not.toBeNull();
+    expect(
+      rowOf('opened-2')?.querySelector('[data-session-row-end-slot] [data-session-row-indicator]')
+    ).not.toBeNull();
+    expect(
+      rowOf('opened-3')?.querySelector('[data-session-row-end-slot] [data-session-row-indicator]')
+    ).toBeNull();
+  });
+
   it('offers collapse from the opener context menu', () => {
     render(makeOpenerItems());
     const opener = container?.querySelector('[data-sidebar-updated-id="opener"]');

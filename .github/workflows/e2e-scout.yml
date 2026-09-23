@@ -1,0 +1,91 @@
+name: Desktop E2E Scout
+
+on:
+  schedule:
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+    inputs:
+      journey:
+        description: Resource journey to exercise
+        required: true
+        type: choice
+        options: [all, session, review, work]
+        default: all
+      iterations:
+        description: Measured iterations per journey
+        required: true
+        type: number
+        default: 30
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-e2e-scout
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: 22
+  COREPACK_ENABLE_DOWNLOAD_PROMPT: 0
+
+jobs:
+  scout:
+    name: Desktop E2E resource scout
+    runs-on: macos-15
+    timeout-minutes: 180
+    steps:
+      - name: Checkout trusted default branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          submodules: recursive
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Check suite contract
+        run: pnpm e2e:check
+
+      - name: Build OSS desktop and bundled CLI
+        run: pnpm e2e:build
+
+      - name: Run resource scout
+        id: scout
+        shell: bash
+        env:
+          SCOUT_ITERATIONS: ${{ github.event.inputs.iterations || '30' }}
+          SCOUT_JOURNEY: ${{ github.event.inputs.journey || 'all' }}
+        run: |
+          set -o pipefail
+          mkdir -p e2e/artifacts/scout
+          pnpm e2e:scout -- --journey "$SCOUT_JOURNEY" --iterations "$SCOUT_ITERATIONS" \
+            2>&1 | tee e2e/artifacts/scout/scout-output.log
+
+      - name: Record informational outcome
+        if: always()
+        shell: bash
+        env:
+          SCOUT_OUTCOME: ${{ steps.scout.outcome }}
+        run: |
+          mkdir -p e2e/artifacts/scout
+          printf '%s\n' "$SCOUT_OUTCOME" > e2e/artifacts/scout/workflow-outcome.txt
+          printf "### Desktop E2E Scout\n\nProbe outcome: \`%s\`\n" "$SCOUT_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Scout evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-e2e-scout-${{ github.run_id }}
+          path: e2e/artifacts/scout/
+          if-no-files-found: warn
+          retention-days: 30

@@ -248,6 +248,26 @@ describe('FilePreviewService', () => {
     });
   });
 
+  it('resolves a local file larger than the remote budget without reading its content', async () => {
+    const workspaceRoot = await makeDir('preview-ws-');
+    await writeFile(
+      path.join(workspaceRoot, 'huge.txt'),
+      'y'.repeat(FILE_PREVIEW_V3_LIMITS.maxTextBytes + 1024)
+    );
+    const service = createService({ workspaceRoot });
+    expect(
+      await service.previewFile({ v: 3, sessionId: SESSION_ID, path: 'huge.txt' })
+    ).toMatchObject({ status: 'error', code: 'too_large' });
+    expect(
+      await service.resolveLocalFile({ v: 3, sessionId: SESSION_ID, path: 'huge.txt' })
+    ).toEqual({
+      status: 'local-file',
+      path: 'huge.txt',
+      absolutePath: await realpath(path.join(workspaceRoot, 'huge.txt')),
+      external: false,
+    });
+  });
+
   it('applies the caller-supplied maxBytes when it is stricter than the machine limit', async () => {
     const workspaceRoot = await makeDir('preview-ws-');
     await writeFile(path.join(workspaceRoot, 'medium.txt'), 'z'.repeat(100));
@@ -285,21 +305,16 @@ describe('FilePreviewService', () => {
     await writeFile(filePath, '# Local note\n');
     const service = createService({ workspaceRoot });
 
-    const response = await service.previewFile(
-      {
-        v: 3,
-        sessionId: SESSION_ID,
-        path: filePath,
-      },
-      { allowArbitraryPaths: true }
-    );
+    const response = await service.resolveLocalFile({
+      v: 3,
+      sessionId: SESSION_ID,
+      path: filePath,
+    });
 
     expect(response).toMatchObject({
-      status: 'ok',
+      status: 'local-file',
       path: await realpath(filePath),
       external: true,
-      readonly: true,
-      kind: 'text',
     });
   });
 

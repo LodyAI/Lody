@@ -110,7 +110,7 @@ describe('AcpBottomBarModeSelector UI', () => {
   });
 
   it('renders on/off select fast options as the fast toggle and writes the next select value', () => {
-    const onChange = vi.fn();
+    const values: Record<string, AcpConfigOptionValue> = { fast: 'on' };
     renderSelector(
       { fast: 'on' },
       {
@@ -126,7 +126,9 @@ describe('AcpBottomBarModeSelector UI', () => {
             ],
           },
         ],
-        onConfigOptionChange: onChange,
+        onConfigOptionChange: (id, value) => {
+          values[id] = value;
+        },
       }
     );
 
@@ -136,7 +138,29 @@ describe('AcpBottomBarModeSelector UI', () => {
 
     expect(fastModeButton?.className).toContain('bg-primary/[0.12]');
     fastModeButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-    expect(onChange).toHaveBeenCalledWith('fast', 'off');
+    expect(values).toEqual({ fast: 'off' });
+  });
+
+  it('renders Core planning and sends boolean changes while preserving permission', () => {
+    const values: Record<string, AcpConfigOptionValue> = { plan_mode: false, mode: 'agent' };
+    renderSelector(values, {
+      selectors: [
+        {
+          configId: 'plan_mode',
+          label: 'Plan',
+          type: 'boolean',
+          currentValue: false,
+          options: [],
+        },
+      ],
+      onConfigOptionChange: (id, value) => {
+        values[id] = value;
+      },
+    });
+    const button = container?.querySelector<HTMLButtonElement>('button[aria-label="Plan"]');
+    expect(button?.textContent).toBe('Plan');
+    flushSync(() => button?.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    expect(values).toEqual({ plan_mode: true, mode: 'agent' });
   });
 
   it('shows an explicit permission selector instead of the provider interaction modes', () => {

@@ -39,7 +39,7 @@ export function ChildTabEmptyState({ onSuggest }: { onSuggest: (text: string) =>
               <button
                 key={suggestion.labelKey}
                 type="button"
-                className="inline-flex items-center gap-2 rounded-lg border border-border/40 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground"
+                className="inline-flex items-center gap-2 rounded-lg border border-border/40 px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-border hover:bg-hover hover:text-foreground"
                 onClick={() => onSuggest(label)}
               >
                 <Icon className="h-3.5 w-3.5 shrink-0 opacity-60" aria-hidden="true" />

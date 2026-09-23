@@ -1,3 +1,6 @@
+import { LoroDoc, LoroMap } from 'loro-crdt';
+import { createHistoryWriter } from '@lody/shared';
+import { createLoroSessionData } from '@lody/shared/session-data';
 import path from 'path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
@@ -6,13 +9,12 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   AGENT_ROLE_VERSION,
   SESSION_FILE_MAX_COUNT,
-  TASK_LABEL_MAX_COUNT,
+  getSessionRoomId,
   workspaceFlockKeys,
   type AgentConfigId,
   type AgentRole,
   type AgentRoleId,
   type MachineId,
-  type SessionHistoryInput,
   type SessionId,
   type SessionTurnInputConfig,
   type WorkspaceId,
@@ -23,21 +25,18 @@ import {
   WorkspaceSyncUnavailableError,
 } from '@/lib/command-runtime';
 import type { LoroDocumentManager } from '@/lib/loro/doc';
+import {
+  getLodyOperationStorePath,
+  LodyOperationStoreError,
+} from '@/orchestration/operation-store';
 
-import { __lodyMcpServerInternals, buildLodyMcpServer } from './lody-mcp-server';
+import {
+  __lodyMcpServerInternals,
+  buildLodyMcpServer,
+  runWithMcpSessionContext,
+} from './lody-mcp-server';
 
 const {
-  TaskListToolInputSchema,
-  TaskGetToolInputSchema,
-  TaskCreateToolInputSchema,
-  TaskProposeToolInputSchema,
-  TaskUpdateToolInputSchema,
-  TaskEditBodyToolInputSchema,
-  TaskCommentToolInputSchema,
-  resolveTaskPrProvider,
-  buildTaskListFilter,
-  buildTaskUpdateInput,
-  toTaskProjectRef,
   FeedbackToolInputSchema,
   FileUploadToolInputSchema,
   SessionCreateOptionsToolInputSchema,
@@ -48,10 +47,15 @@ const {
   SessionCancelToolInputSchema,
   SessionHistoryToolInputSchema,
   SessionListToolInputSchema,
+  SessionRenameToolInputSchema,
+  SessionRenameManyToolInputSchema,
   SessionStatusManyToolInputSchema,
   mcpErrorResult,
   assertDifferentMcpSession,
   assertBatchSize,
+  resolveSessionRenameItems,
+  applySessionRenameItems,
+  persistSessionRenameItems,
   buildWaitErrorResponse,
   buildMcpCreateOptions,
   bindMcpCreateContext,
@@ -63,26 +67,14 @@ const {
   buildOperationTargetCancelArgs,
   summarizeAgentConfig,
   getSessionContext,
+  resolveOperationStorePathForContext,
   resolveUploadPath,
-  resolveInvokingHistoryInput,
+  buildInvocationIdentity,
   summarizeProjectRefForMcp,
   resolveSessionExecutionSnapshot,
-  makeMachineOnlineLookupForMcp,
+  makeMachineLivenessLookupForMcp,
   truncateUtf8HeadTail,
 } = __lodyMcpServerInternals;
-
-const historyTurn = (
-  id: string,
-  role: SessionHistoryInput['role'],
-  chainDepth?: number
-): SessionHistoryInput => ({
-  id,
-  role,
-  timestamp: '2026-07-20T00:00:00.000Z',
-  items: [],
-  fileDiff: [],
-  ...(chainDepth === undefined ? {} : { inputConfig: { chainDepth } }),
-});
 
 const createMcpContext = (): ReturnType<typeof getSessionContext> => ({
   machineId: 'machine-id',
@@ -90,7 +82,6 @@ const createMcpContext = (): ReturnType<typeof getSessionContext> => ({
   sessionId: 'current-session-id',
   localControlSocketPath: '/tmp/lody-control.sock',
   workdir: '/tmp/workspace',
-  taskToolsEnabled: false,
 });
 
 const agentRole = (overrides: Partial<AgentRole> = {}): AgentRole => ({
@@ -108,12 +99,40 @@ const agentRole = (overrides: Partial<AgentRole> = {}): AgentRole => ({
   ...overrides,
 });
 
-const listPublishedToolNames = async (
-  taskToolsEnabled: boolean,
-  scheduleToolsEnabled = false
-): Promise<string[]> => {
-  const server = buildLodyMcpServer({ taskToolsEnabled, scheduleToolsEnabled });
-  const client = new Client({ name: 'task-gate-test-client', version: '1.0.0' });
+describe('shared Operation store path', () => {
+  // Regression: the daemon-hosted HTTP MCP transport carries its session
+  // context in AsyncLocalStorage and its process has no LODY_MCP_MACHINE_ID,
+  // so an env-derived store path silently falls back to the 'local' store that
+  // no daemon coordinator reconciles — accepted Operations never finish and
+  // the requester Session never receives its completion turn.
+  it('resolves the coordinator-visible store from the context machineId without env', () => {
+    const savedEnv = {
+      LODY_MCP_MACHINE_ID: process.env.LODY_MCP_MACHINE_ID,
+      LODY_PREVIEW_MCP_MACHINE_ID: process.env.LODY_PREVIEW_MCP_MACHINE_ID,
+    };
+    delete process.env.LODY_MCP_MACHINE_ID;
+    delete process.env.LODY_PREVIEW_MCP_MACHINE_ID;
+    try {
+      const context = { ...createMcpContext(), machineId: 'http-host-machine-id' };
+      const storePath = runWithMcpSessionContext(context, () =>
+        resolveOperationStorePathForContext()
+      );
+      // Same path the daemon coordinator opens for this machine id...
+      expect(storePath).toBe(getLodyOperationStorePath(context.machineId));
+      // ...and NOT the legacy 'local'-keyed store nobody reconciles.
+      expect(storePath).not.toBe(getLodyOperationStorePath('local'));
+    } finally {
+      for (const [name, value] of Object.entries(savedEnv)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
+});
+
+const listPublishedToolNames = async (scheduleToolsEnabled = false): Promise<string[]> => {
+  const server = buildLodyMcpServer({ scheduleToolsEnabled });
+  const client = new Client({ name: 'mcp-catalog-test-client', version: '1.0.0' });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
   try {
@@ -123,27 +142,14 @@ const listPublishedToolNames = async (
   }
 };
 
-describe('Lody Task MCP tool gate', () => {
-  const taskToolNames = [
-    'lody_task_list',
-    'lody_task_get',
-    'lody_task_create',
-    'lody_task_propose',
-    'lody_task_update',
-    'lody_task_edit_body',
-    'lody_task_comment',
-    'lody_task_upload_images',
-  ];
-
-  it('omits every Task tool while leaving the rest of Lody MCP available when disabled', async () => {
-    const names = await listPublishedToolNames(false);
+describe('Lody MCP tool catalog', () => {
+  it('publishes session tools and never advertises a Task family', async () => {
+    const names = await listPublishedToolNames();
     expect(names).toContain('lody_feedback');
+    expect(names).toEqual(
+      expect.arrayContaining(['lody_session_rename', 'lody_session_rename_many'])
+    );
     expect(names.filter((name) => name.startsWith('lody_task_'))).toEqual([]);
-  });
-
-  it('publishes the complete Task tool family when enabled', async () => {
-    const names = await listPublishedToolNames(true);
-    expect(names).toEqual(expect.arrayContaining(taskToolNames));
   });
 });
 
@@ -241,14 +247,13 @@ describe('session MCP input schemas', () => {
     expect(result.isError).toBe(true);
   });
 
-  it('anchors continuation depth before a later queued human input', () => {
-    const completion = historyTurn('operation-completion', 'system', 5);
-    const executingAssistant = historyTurn('assistant:continuation', 'assistant');
-    const queuedHumanInput = historyTurn('queued-human', 'user', 0);
-
-    expect(resolveInvokingHistoryInput([completion, executingAssistant, queuedHumanInput])).toBe(
-      completion
-    );
+  it('derives delegated identity from the exact driving Turn', () => {
+    expect(
+      buildInvocationIdentity({ id: 'source-turn', userId: 'collaborator-b', inputConfig: {} })
+    ).toEqual({ userId: 'collaborator-b', sourceTurnId: 'source-turn' });
+    expect(() =>
+      buildInvocationIdentity({ id: 'legacy-turn', userId: ' ', inputConfig: {} })
+    ).toThrow('has no authenticated human identity');
   });
 
   it('uses stable ids and rejects legacy selector names', () => {
@@ -330,7 +335,7 @@ describe('session MCP input schemas', () => {
     ).toBe(false);
   });
 
-  it('publishes session create work contexts as object schemas over MCP', async () => {
+  it('publishes session create work contexts and child workspace sharing over MCP', async () => {
     const server = new McpServer({ name: 'schema-test-server', version: '1.0.0' });
     server.registerTool(
       'lody_session_create',
@@ -377,6 +382,10 @@ describe('session MCP input schemas', () => {
       expect(createTool?.inputSchema).toMatchObject({
         type: 'object',
         properties: {
+          useCurrentSessionAsParent: {
+            description:
+              'Create a child of the current Session that reuses the exact same workspace directory; cannot be combined with workContext.',
+          },
           workContext: workContextSchema,
         },
       });
@@ -385,13 +394,25 @@ describe('session MCP input schemas', () => {
         properties: {
           defaults: {
             type: 'object',
-            properties: { workContext: workContextSchema },
+            properties: {
+              useCurrentSessionAsParent: {
+                description:
+                  'Create a child of the current Session that reuses the exact same workspace directory; cannot be combined with workContext.',
+              },
+              workContext: workContextSchema,
+            },
           },
           items: {
             type: 'array',
             items: {
               type: 'object',
-              properties: { workContext: workContextSchema },
+              properties: {
+                useCurrentSessionAsParent: {
+                  description:
+                    'Create a child of the current Session that reuses the exact same workspace directory; cannot be combined with workContext.',
+                },
+                workContext: workContextSchema,
+              },
             },
           },
         },
@@ -415,8 +436,11 @@ describe('session MCP input schemas', () => {
     );
     bindMcpCreateContext(
       options,
-      { userId: 'machine-owner' },
-      { machineId: 'machine-id', userId: 'session-owner' }
+      {
+        userId: 'collaborator-b',
+        sourceTurnId: 'source-turn',
+      },
+      { machineId: 'machine-id' }
     );
 
     expect(options).toMatchObject({
@@ -425,8 +449,7 @@ describe('session MCP input schemas', () => {
       machine: 'machine-id',
       agentConfig: 'agent-config-id',
       useCurrentSessionAsParent: true,
-      requesterUserId: 'machine-owner',
-      sessionOwnerUserId: 'session-owner',
+      delegatedRequester: { userId: 'collaborator-b' },
       defaultMachineId: 'machine-id',
     });
   });
@@ -576,7 +599,6 @@ describe('session MCP input schemas', () => {
       modeId: 'default',
       modelId: 'opus',
       configOptionValues: { reasoning_effort: 'medium' },
-      taskToolsEnabled: false,
       scheduleToolsEnabled: false,
       inheritSessionDefaults: false,
     });
@@ -789,6 +811,169 @@ describe('session MCP input schemas', () => {
     ).toBe(false);
   });
 
+  it('validates single and batch session renames', () => {
+    expect(SessionRenameToolInputSchema.safeParse({ title: 'Current title' }).success).toBe(true);
+    expect(
+      SessionRenameToolInputSchema.safeParse({ sessionId: 'session-1', title: 'New title' }).success
+    ).toBe(true);
+    expect(SessionRenameToolInputSchema.safeParse({ title: '   ' }).success).toBe(false);
+    expect(SessionRenameToolInputSchema.safeParse({ title: 'x'.repeat(201) }).success).toBe(false);
+
+    expect(
+      SessionRenameManyToolInputSchema.safeParse({
+        items: [
+          { sessionId: 'session-1', title: 'One' },
+          { sessionId: 'session-2', title: 'Two' },
+        ],
+      }).success
+    ).toBe(true);
+    expect(SessionRenameManyToolInputSchema.safeParse({ items: [] }).success).toBe(false);
+    expect(
+      SessionRenameManyToolInputSchema.safeParse({
+        items: [
+          { sessionId: 'session-1', title: 'One' },
+          { sessionId: 'session-1', title: 'Two' },
+        ],
+      }).success
+    ).toBe(false);
+    expect(
+      SessionRenameManyToolInputSchema.safeParse({
+        items: Array.from({ length: 21 }, (_, index) => ({
+          sessionId: `session-${index}`,
+          title: `Title ${index}`,
+        })),
+      }).success
+    ).toBe(false);
+  });
+
+  it('resolves current session renames and preserves ordered independent results', async () => {
+    expect(
+      resolveSessionRenameItems(
+        [{ sessionId: 'current', title: 'Current title' }],
+        createMcpContext()
+      )
+    ).toEqual([{ sessionId: 'current-session-id', title: 'Current title' }]);
+    expect(() =>
+      resolveSessionRenameItems(
+        [
+          { sessionId: 'current', title: 'First' },
+          { sessionId: 'current-session-id', title: 'Second' },
+        ],
+        createMcpContext()
+      )
+    ).toThrow(/appear only once/);
+
+    const results = await applySessionRenameItems(
+      [
+        { sessionId: 'session-1' as SessionId, title: 'One' },
+        { sessionId: 'missing' as SessionId, title: 'Missing' },
+        { sessionId: 'session-3' as SessionId, title: 'Three' },
+      ],
+      async ({ sessionId }) => {
+        if (sessionId === 'missing') {
+          throw new LodyOperationStoreError(
+            'SESSION_NOT_FOUND',
+            'Session not found: missing',
+            false
+          );
+        }
+      }
+    );
+
+    expect(results).toEqual([
+      { sessionId: 'session-1', ok: true, title: 'One' },
+      {
+        sessionId: 'missing',
+        ok: false,
+        error: {
+          code: 'SESSION_NOT_FOUND',
+          message: 'Session not found: missing',
+          retryable: false,
+        },
+      },
+      { sessionId: 'session-3', ok: true, title: 'Three' },
+    ]);
+  });
+
+  it('persists only existing sessions as user titles and confirms successful writes', async () => {
+    const upsertDocMeta = vi.fn(async () => undefined);
+    const waitUntilMetaSynced = vi.fn(async () => true);
+    const manager = {
+      repo: {
+        getDocMeta: vi.fn(async (roomId: string) =>
+          roomId === getSessionRoomId('missing' as SessionId)
+            ? undefined
+            : { meta: { id: roomId }, exists: true }
+        ),
+        upsertDocMeta,
+      },
+      waitUntilMetaSynced,
+    } as unknown as LoroDocumentManager;
+
+    const results = await persistSessionRenameItems(
+      manager,
+      [
+        { sessionId: 'session-1' as SessionId, title: 'One' },
+        { sessionId: 'missing' as SessionId, title: 'Missing' },
+        { sessionId: 'session-3' as SessionId, title: 'Three' },
+      ],
+      'mcp.session_rename_many:current-session-id'
+    );
+
+    expect(results).toEqual([
+      { sessionId: 'session-1', ok: true, title: 'One' },
+      {
+        sessionId: 'missing',
+        ok: false,
+        error: {
+          code: 'SESSION_NOT_FOUND',
+          message: 'Session not found: missing',
+          retryable: false,
+        },
+      },
+      { sessionId: 'session-3', ok: true, title: 'Three' },
+    ]);
+    expect(upsertDocMeta.mock.calls).toEqual([
+      [getSessionRoomId('session-1' as SessionId), { title: 'One', titleSource: 'user' }],
+      [getSessionRoomId('session-3' as SessionId), { title: 'Three', titleSource: 'user' }],
+    ]);
+    expect(waitUntilMetaSynced).toHaveBeenCalledOnce();
+    expect(waitUntilMetaSynced).toHaveBeenCalledWith({
+      reason: 'mcp.session_rename_many:current-session-id',
+    });
+  });
+
+  it('does not request write confirmation when every session is missing', async () => {
+    const waitUntilMetaSynced = vi.fn(async () => true);
+    const manager = {
+      repo: {
+        getDocMeta: vi.fn(async () => undefined),
+        upsertDocMeta: vi.fn(async () => undefined),
+      },
+      waitUntilMetaSynced,
+    } as unknown as LoroDocumentManager;
+
+    await expect(
+      persistSessionRenameItems(
+        manager,
+        [{ sessionId: 'missing' as SessionId, title: 'Missing' }],
+        'mcp.session_rename_many:current-session-id'
+      )
+    ).resolves.toEqual([
+      {
+        sessionId: 'missing',
+        ok: false,
+        error: {
+          code: 'SESSION_NOT_FOUND',
+          message: 'Session not found: missing',
+          retryable: false,
+        },
+      },
+    ]);
+    expect(manager.repo.upsertDocMeta).not.toHaveBeenCalled();
+    expect(waitUntilMetaSynced).not.toHaveBeenCalled();
+  });
+
   it('cancels only the assistant turn created by the Operation item', () => {
     expect(
       buildOperationTargetCancelArgs('workspace-1', {
@@ -871,6 +1056,39 @@ describe('session MCP input schemas', () => {
     expect(response).not.toHaveProperty('wait');
   });
 
+  it('reads status from shallow history and queue without materializing bodies', async () => {
+    const doc = new LoroDoc();
+    const writer = createHistoryWriter(doc);
+    for (let i = 0; i < 100; i++)
+      writer.append({
+        id: `a-${i}`,
+        role: 'assistant',
+        timestamp: '2026-01-01T00:00:00Z',
+        items: [{ type: 'text', text: 'large body'.repeat(100) }],
+        fileDiff: [],
+        finished: i < 99,
+      });
+    const sessionId = 'status-session' as SessionId;
+    const data = createLoroSessionData({ sessionId, doc, writer });
+    const manager = {
+      getOrCreateSessionDoc: async () => ({ sessionData: data, getMessageQueue: async () => [{}] }),
+    };
+    const spy = vi.spyOn(LoroMap.prototype, 'toJSON').mockImplementation(() => {
+      throw new Error('Status must not materialize a body');
+    });
+    try {
+      const result = await __lodyMcpServerInternals.readSessionExecutionSnapshot(
+        manager as never,
+        { id: sessionId } as never,
+        { working: false, source: 'none' }
+      );
+      expect(result).toMatchObject({ activeTurnId: 'a-99', queuedTurnCount: 1 });
+    } finally {
+      spy.mockRestore();
+      data.dispose();
+    }
+  });
+
   it('derives one authoritative execution phase and state', () => {
     expect(
       resolveSessionExecutionSnapshot({
@@ -898,19 +1116,39 @@ describe('session MCP input schemas', () => {
 
   it('shares one remote Machine presence read across a batch', async () => {
     const getOnlineMachineIds = vi.fn(async () => new Set(['remote-a', 'remote-b']));
-    const isMachineOnline = makeMachineOnlineLookupForMcp(
+    const machineLiveness = makeMachineLivenessLookupForMcp(
       { getOnlineMachineIds } as never,
       createMcpContext()
     );
 
     await expect(
       Promise.all([
-        isMachineOnline('machine-id'),
-        isMachineOnline('remote-a'),
-        isMachineOnline('remote-b'),
+        machineLiveness('machine-id'),
+        machineLiveness('remote-a'),
+        machineLiveness('remote-b'),
       ])
-    ).resolves.toEqual([true, true, true]);
+    ).resolves.toEqual(['online', 'online', 'online']);
     expect(getOnlineMachineIds).toHaveBeenCalledTimes(1);
+  });
+
+  it('separates a Machine absent from a joined presence room from one it could not check', async () => {
+    const joined = makeMachineLivenessLookupForMcp(
+      { getOnlineMachineIds: vi.fn(async () => new Set(['remote-a'])) } as never,
+      createMcpContext()
+    );
+    // A joined room that simply lacks the entry is real evidence of an offline Machine.
+    await expect(joined('remote-b')).resolves.toBe('offline');
+
+    const unavailable = makeMachineLivenessLookupForMcp(
+      { getOnlineMachineIds: vi.fn(async () => null) } as never,
+      createMcpContext()
+    );
+    // A null snapshot is "presence room unavailable" and must never read as offline:
+    // every dispatch guard blocks on 'offline' alone, so this is what kept a healthy
+    // remote Machine usable while presence was still joining.
+    await expect(unavailable('remote-b')).resolves.toBe('unknown');
+    // The local Machine never depends on the presence room to prove its own liveness.
+    await expect(unavailable('machine-id')).resolves.toBe('online');
   });
 
   it('truncates history text on Unicode boundaries with exact omitted bytes', () => {
@@ -925,227 +1163,12 @@ describe('session MCP input schemas', () => {
   });
 });
 
-describe('lody task MCP input schemas', () => {
-  it('requires a task id and rejects extra fields', () => {
-    expect(TaskGetToolInputSchema.safeParse({ taskId: 't1' }).success).toBe(true);
-    expect(TaskGetToolInputSchema.safeParse({ taskId: '  ' }).success).toBe(false);
-    expect(TaskGetToolInputSchema.safeParse({}).success).toBe(false);
-    expect(TaskGetToolInputSchema.safeParse({ taskId: 't1', extra: 1 }).success).toBe(false);
-  });
-
-  it('requires a stable proposal id and a title', () => {
-    expect(
-      TaskProposeToolInputSchema.safeParse({ proposalId: 'p1', title: 'Do the thing' }).success
-    ).toBe(true);
-    expect(TaskProposeToolInputSchema.safeParse({ title: 'Do the thing' }).success).toBe(false);
-    expect(TaskProposeToolInputSchema.safeParse({ proposalId: 'p1', title: '' }).success).toBe(
-      false
-    );
-    expect(
-      TaskProposeToolInputSchema.safeParse({
-        proposalId: 'p1',
-        title: 'x',
-        body: '# Details',
-      }).success
-    ).toBe(true);
-  });
-
-  it('does not let an agent update a task with nothing to change', () => {
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1' }).success).toBe(false);
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1', status: 'done' }).success).toBe(
-      true
-    );
-    expect(
-      TaskUpdateToolInputSchema.safeParse({
-        taskId: 't1',
-        pullRequestUrl: 'https://github.com/o/r/pull/1',
-      }).success
-    ).toBe(true);
-  });
-
-  it('rejects unknown statuses and non-URL pull requests', () => {
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1', status: 'shipped' }).success).toBe(
-      false
-    );
-    expect(
-      TaskUpdateToolInputSchema.safeParse({ taskId: 't1', pullRequestUrl: 'o/r#1' }).success
-    ).toBe(false);
-  });
-
-  it('accepts every writable scalar property', () => {
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1', title: 'new' }).success).toBe(true);
-    // Empty string is the unassign path, so it must not be rejected as blank.
-    // (Naming an owner is human-only; covered separately below.)
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1', ownerId: '' }).success).toBe(true);
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1', priority: 'high' }).success).toBe(
-      true
-    );
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1', priority: 'none' }).success).toBe(
-      true
-    );
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1', labels: [] }).success).toBe(true);
-    expect(
-      TaskUpdateToolInputSchema.safeParse({
-        taskId: 't1',
-        project: { kind: 'github', repo: 'o/r' },
-      }).success
-    ).toBe(true);
-  });
-
-  it('keeps the body and the entrusted agent out of the update tool', () => {
-    // The body goes through the exact-match edit so a content change carries its
-    // size delta; `agent` is the automation consent and only a person sets it.
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1', body: 'new' }).success).toBe(false);
-    expect(
-      TaskUpdateToolInputSchema.safeParse({ taskId: 't1', agent: { agentConfigId: 'a1' } }).success
-    ).toBe(false);
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1', agentConfigId: 'a1' }).success).toBe(
-      false
-    );
-  });
-
-  it('rejects an unknown priority and an oversized label set', () => {
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1', priority: 'blocker' }).success).toBe(
-      false
-    );
-    expect(
-      TaskUpdateToolInputSchema.safeParse({
-        taskId: 't1',
-        labels: Array.from({ length: TASK_LABEL_MAX_COUNT + 1 }, (_, index) => `l${index}`),
-      }).success
-    ).toBe(false);
-  });
-
-  it('requires a title to create a task and never accepts an agent', () => {
-    expect(TaskCreateToolInputSchema.safeParse({ title: 'Fix the header' }).success).toBe(true);
-    expect(TaskCreateToolInputSchema.safeParse({ body: 'no title' }).success).toBe(false);
-    expect(TaskCreateToolInputSchema.safeParse({ title: '   ' }).success).toBe(false);
-    expect(
-      TaskCreateToolInputSchema.safeParse({ title: 'x', agent: { agentConfigId: 'a1' } }).success
-    ).toBe(false);
-    expect(
-      TaskCreateToolInputSchema.safeParse({
-        title: 'x',
-        body: '## Why',
-        status: 'todo',
-        priority: 'low',
-        labels: ['Bug'],
-        project: { kind: 'local', projectId: 'p1', worktree: true },
-      }).success
-    ).toBe(true);
-  });
-
-  it('bounds the task list page and rejects an unknown status filter', () => {
-    expect(TaskListToolInputSchema.safeParse({}).success).toBe(true);
-    expect(TaskListToolInputSchema.safeParse({ status: ['todo', 'done'] }).success).toBe(true);
-    expect(TaskListToolInputSchema.safeParse({ status: [] }).success).toBe(false);
-    expect(TaskListToolInputSchema.safeParse({ status: ['shipped'] }).success).toBe(false);
-    expect(TaskListToolInputSchema.safeParse({ limit: 101 }).success).toBe(false);
-    expect(TaskListToolInputSchema.safeParse({ limit: 0 }).success).toBe(false);
-  });
-
-  it('lets an agent unassign an owner but never name one', () => {
-    // Unassigning is the one direction that can only reduce automation
-    // eligibility; naming an owner points the predicate somewhere new.
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1', ownerId: '' }).success).toBe(true);
-    expect(TaskCreateToolInputSchema.safeParse({ title: 'x', ownerId: '' }).success).toBe(true);
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1', ownerId: 'user-2' }).success).toBe(
-      false
-    );
-    expect(TaskCreateToolInputSchema.safeParse({ title: 'x', ownerId: 'user-2' }).success).toBe(
-      false
-    );
-    // `me` is a list filter, not a user id — it must not sneak through either.
-    expect(TaskUpdateToolInputSchema.safeParse({ taskId: 't1', ownerId: 'me' }).success).toBe(
-      false
-    );
-    expect(TaskListToolInputSchema.safeParse({ ownerId: 'me' }).success).toBe(true);
-    expect(TaskListToolInputSchema.safeParse({ ownerId: 'user-2' }).success).toBe(true);
-  });
-
-  it('resolves "me" in the list filter against the signed-in operator', () => {
-    expect(buildTaskListFilter({ ownerId: 'me' }, 'user-1')).toEqual({
-      ownerId: 'user-1',
-      limit: 20,
-    });
-    // Empty string means unassigned and must survive as itself.
-    expect(buildTaskListFilter({ ownerId: '' }, 'user-1')).toEqual({ ownerId: '', limit: 20 });
-    // An omitted owner must not become the operator: that would silently hide
-    // every task belonging to a teammate.
-    expect(buildTaskListFilter({}, 'user-1')).toEqual({ limit: 20 });
-  });
-
-  it('maps the update input onto the document patch', () => {
-    expect(
-      buildTaskUpdateInput(
-        {
-          taskId: 't1',
-          priority: 'none',
-          labels: ['Bug', 'bug'],
-          project: { kind: 'github', repo: 'o/r' },
-          pullRequestUrl: 'https://github.com/o/r/pull/1',
-        },
-        'session-1' as SessionId
-      )
-    ).toEqual({
-      // 'none' is how a caller clears a priority; null is what the document takes.
-      priority: null,
-      labels: ['Bug', 'bug'],
-      projects: [{ kind: 'github', repoFullName: 'o/r', branch: 'main' }],
-      pullRequest: {
-        url: 'https://github.com/o/r/pull/1',
-        provider: 'github',
-        originSessionId: 'session-1',
-      },
-    });
-    // An untouched field must stay absent rather than be written as undefined,
-    // or a no-op update would clear it.
-    expect(
-      buildTaskUpdateInput({ taskId: 't1', status: 'done' }, 'session-1' as SessionId)
-    ).toEqual({ status: 'done' });
-  });
-
-  it('keeps a local project worktree flag and drops it when unset', () => {
-    expect(toTaskProjectRef({ kind: 'local', projectId: 'p1', worktree: true })).toEqual({
-      kind: 'local',
-      localProjectId: 'p1',
-      useWorktree: true,
-    });
-    expect(toTaskProjectRef({ kind: 'local', projectId: 'p1' })).toEqual({
-      kind: 'local',
-      localProjectId: 'p1',
-    });
-  });
-
-  it('allows an empty oldString so an agent can append a section', () => {
-    expect(
-      TaskEditBodyToolInputSchema.safeParse({ taskId: 't1', oldString: '', newString: '## New' })
-        .success
-    ).toBe(true);
-    expect(TaskEditBodyToolInputSchema.safeParse({ taskId: 't1', oldString: 'a' }).success).toBe(
-      false
-    );
-  });
-
-  it('requires comment text', () => {
-    expect(TaskCommentToolInputSchema.safeParse({ taskId: 't1', body: 'done' }).success).toBe(true);
-    expect(TaskCommentToolInputSchema.safeParse({ taskId: 't1', body: '   ' }).success).toBe(false);
-  });
-
-  it('derives the provider from the pull request URL', () => {
-    expect(resolveTaskPrProvider('https://github.com/o/r/pull/1')).toBe('github');
-    expect(resolveTaskPrProvider('https://gitlab.com/o/r/-/merge_requests/1')).toBe('gitlab');
-  });
-});
-
 describe('Schedule MCP tool gate', () => {
-  it('advertises only the bounded Schedule family independently of Task tools', async () => {
+  it('advertises only the bounded Schedule family when the turn enables it', async () => {
     expect(
-      (await listPublishedToolNames(true, false)).filter((name) =>
-        name.startsWith('lody_schedule_')
-      )
+      (await listPublishedToolNames(false)).filter((name) => name.startsWith('lody_schedule_'))
     ).toEqual([]);
-    const names = await listPublishedToolNames(false, true);
+    const names = await listPublishedToolNames(true);
     expect(names.filter((name) => name.startsWith('lody_schedule_')).sort()).toEqual([
       'lody_schedule_get',
       'lody_schedule_list',

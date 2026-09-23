@@ -48,14 +48,16 @@ const stripIpv6Brackets = (host: string): string => {
     : normalized;
 };
 
-const parseIpv4 = (host: string): [number, number, number, number] | null => {
+type Ipv4Octets = [number, number, number, number];
+
+const parseIpv4 = (host: string): Ipv4Octets | null => {
   const parts = host.split('.');
   if (parts.length !== 4) return null;
   const octets = parts.map((part) => Number(part));
   if (octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) {
     return null;
   }
-  return octets as [number, number, number, number];
+  return octets as Ipv4Octets;
 };
 
 const parseIpv6 = (host: string): number[] | null => {
@@ -83,12 +85,8 @@ const parseIpv6 = (host: string): number[] | null => {
   return [...left, ...Array.from({ length: 8 - left.length - right.length }, () => 0), ...right];
 };
 
-const classifyIpv4 = ([first, second, third, fourth]: [
-  number,
-  number,
-  number,
-  number,
-]): BrowserTargetClass => {
+const classifyIpv4 = (octets: Ipv4Octets): BrowserTargetClass => {
+  const [first, second, third, fourth] = octets;
   if (first === 127) return 'loopback';
   if (first === 10 || (first === 172 && second >= 16 && second <= 31)) return 'private-lan';
   if (first === 192 && second === 168) return 'private-lan';
@@ -107,16 +105,22 @@ const classifyIpv4 = ([first, second, third, fourth]: [
   return prohibited ? 'prohibited' : 'public';
 };
 
+const mappedIpv4 = (segments: number[]): Ipv4Octets | null => {
+  if (!segments.slice(0, 5).every((segment) => segment === 0) || segments[5] !== 0xffff) {
+    return null;
+  }
+  const high = segments[6] ?? 0;
+  const low = segments[7] ?? 0;
+  return [high >> 8, high & 0xff, low >> 8, low & 0xff];
+};
+
 const classifyIpv6 = (segments: number[]): BrowserTargetClass => {
   if (segments.every((segment) => segment === 0)) return 'prohibited';
   if (segments.slice(0, 7).every((segment) => segment === 0) && segments[7] === 1) {
     return 'loopback';
   }
-  if (segments.slice(0, 5).every((segment) => segment === 0) && segments[5] === 0xffff) {
-    const high = segments[6] ?? 0;
-    const low = segments[7] ?? 0;
-    return classifyIpv4([high >> 8, high & 0xff, low >> 8, low & 0xff]);
-  }
+  const mapped = mappedIpv4(segments);
+  if (mapped) return classifyIpv4(mapped);
   const first = segments[0] ?? 0;
   if ((first & 0xfe00) === 0xfc00) return 'private-lan';
   if ((first & 0xffc0) === 0xfe80 || (first & 0xff00) === 0xff00) return 'prohibited';
@@ -194,7 +198,14 @@ export const parseBrowserAddress = (rawInput: string): BrowserAddress => {
   }
 
   const logicalUrl = url.toString();
-  if (targetClass === 'public') {
+  // Two engines, split on exactly one question: is this the agent machine's own
+  // loopback? Only that goes through Managed Preview, where the machine opens a
+  // single approved port on itself. Everything else — public sites AND private
+  // LAN / mDNS / docker hosts — is the user's own local browser reaching the
+  // user's own network, which is the user's business. Routing a LAN address
+  // through the machine would make that machine a pivot into its LAN; see
+  // `apps/cli/src/preview/preview-service.ts` for the authoritative rejection.
+  if (targetClass !== 'loopback') {
     return { logicalUrl, engine: 'public-web', targetClass };
   }
 

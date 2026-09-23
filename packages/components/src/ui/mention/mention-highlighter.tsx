@@ -15,8 +15,10 @@ type HighlighterElement = HTMLDivElement;
  * glyphs — the plain highlight. `chip` sits *over* it and paints opaque chips
  * that hide the raw characters they replace, which is the only way to show an
  * icon and a chip-specific text colour without giving up the native textarea.
- * Both mirrors render the identical character stream, so they agree on every
- * line break and the caret stays aligned with both.
+ * At a mention boundary MentionInput temporarily raises the textarea above
+ * `chip`, so `background` carries the text while the native caret remains on
+ * top. Both mirrors render the identical character stream, so they agree on
+ * every line break and the caret stays aligned with both.
  */
 type MentionHighlighterLayer = 'background' | 'chip';
 
@@ -38,6 +40,12 @@ const defaultHighlighterStyle: React.CSSProperties = {
 
 interface MentionHighlighterProps extends React.HTMLAttributes<HighlighterElement> {
   layer?: MentionHighlighterLayer;
+  /** Text rendered by this mirror; IME preedit may lead the committed context value. */
+  renderValue?: string;
+  /** Ranges addressing `renderValue`; defaults to the committed context ranges. */
+  renderMentions?: readonly Mention[];
+  /** Make the background mirror carry the textarea's visible text. */
+  showText?: boolean;
 }
 
 type MentionHighlightSegment =
@@ -110,8 +118,7 @@ export function getMentionHighlightSegments(
  * defaults to the input colour; a composer on a different surface must say so,
  * or its mentions will show as faint rectangles.
  */
-const CHIP_CLASS_NAME =
-  'box-decoration-clone bg-[var(--mention-chip-surface,hsl(var(--input)))]';
+const CHIP_CLASS_NAME = 'box-decoration-clone bg-[var(--mention-chip-surface,hsl(var(--input)))]';
 
 /**
  * Selection is the one case that still needs a fill: the surface cover also
@@ -126,7 +133,9 @@ const CHIP_SELECTED_CLASS_NAME =
 /**
  * The textarea's selection range, tracked only while chips are painted.
  * `selectionchange` fires on the document for textarea selections in every
- * engine we ship on; `select` alone misses caret-only moves.
+ * engine we ship on; `select` alone misses caret-only moves. Collapsed ranges
+ * do not need to rerender the chip mirror: the native caret is raised above
+ * the chip at a mention boundary by MentionInput.
  */
 function useInputSelection(
   inputRef: React.RefObject<HTMLTextAreaElement | HTMLInputElement | null>,
@@ -134,7 +143,7 @@ function useInputSelection(
 ) {
   const [selection, setSelection] = React.useState<[number, number] | null>(null);
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
     if (!enabled) return undefined;
 
     const read = () => {
@@ -144,7 +153,11 @@ function useInputSelection(
         return;
       }
       const { selectionStart, selectionEnd } = input;
-      if (selectionStart === null || selectionEnd === null || selectionStart === selectionEnd) {
+      if (selectionStart === null || selectionEnd === null) {
+        setSelection(null);
+        return;
+      }
+      if (selectionStart === selectionEnd) {
         setSelection(null);
         return;
       }
@@ -207,7 +220,14 @@ function MentionChipContent({ chip, text }: { chip: MentionChip; text: string })
 
 const MentionHighlighter = React.memo(
   React.forwardRef<HighlighterElement, MentionHighlighterProps>((props, forwardedRef) => {
-    const { style, layer = 'background', ...highlighterProps } = props;
+    const {
+      style,
+      layer = 'background',
+      renderValue,
+      renderMentions,
+      showText = false,
+      ...highlighterProps
+    } = props;
     const context = useMentionContext(HIGHLIGHTER_NAME);
     const highlighterRef = React.useRef<HighlighterElement>(null);
     const composedRef = useComposedRefs(forwardedRef, highlighterRef);
@@ -280,9 +300,12 @@ const MentionHighlighter = React.memo(
 
       return {
         ...defaultHighlighterStyle,
-        // Above the textarea: an opaque chip has to cover the raw characters it
-        // stands in for. `pointer-events: none` keeps the textarea clickable.
+        // Usually above the textarea: an opaque chip has to cover the raw
+        // characters it stands in for. At a caret boundary MentionInput raises
+        // the textarea above this layer. `pointer-events: none` keeps the
+        // textarea clickable in either order.
         zIndex: layer === 'chip' ? 20 : defaultHighlighterStyle.zIndex,
+        color: layer === 'background' && showText ? inputStyle.color : 'transparent',
         fontStyle: inputStyle.fontStyle,
         fontVariant: inputStyle.fontVariant,
         fontWeight: inputStyle.fontWeight,
@@ -303,13 +326,15 @@ const MentionHighlighter = React.memo(
         direction: context.dir,
         ...style,
       };
-    }, [inputStyle, style, context.dir, layer]);
+    }, [inputStyle, style, context.dir, layer, showText]);
 
     const getMentionChip = context.getMentionChip;
+    const mirroredValue = renderValue ?? context.inputValue;
+    const mirroredMentions = renderMentions ?? context.mentions;
     const selection = useInputSelection(context.inputRef, layer === 'chip' && !!getMentionChip);
     const onSegmentsRender = React.useCallback(
       () =>
-        getMentionHighlightSegments(context.inputValue, context.mentions).map((segment) => {
+        getMentionHighlightSegments(mirroredValue, mirroredMentions).map((segment) => {
           if (segment.type !== 'mention') {
             return <span key={segment.key}>{segment.text}</span>;
           }
@@ -332,13 +357,16 @@ const MentionHighlighter = React.memo(
               !!selection &&
               selection[0] < segment.mention.end &&
               selection[1] > segment.mention.start;
-
             return layer === 'chip' ? (
               <span
                 key={segment.key}
                 {...rangeProps}
                 data-selected={selected ? '' : undefined}
-                className={cn(CHIP_CLASS_NAME, chip.className, selected && CHIP_SELECTED_CLASS_NAME)}
+                className={cn(
+                  CHIP_CLASS_NAME,
+                  chip.className,
+                  selected && CHIP_SELECTED_CLASS_NAME
+                )}
               >
                 <MentionChipContent chip={chip} text={segment.text} />
               </span>
@@ -369,7 +397,7 @@ const MentionHighlighter = React.memo(
             </span>
           );
         }),
-      [context.inputValue, context.mentions, getMentionChip, layer, selection]
+      [getMentionChip, layer, mirroredMentions, mirroredValue, selection]
     );
 
     if (!inputStyle) return null;

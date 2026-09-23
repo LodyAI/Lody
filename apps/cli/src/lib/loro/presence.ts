@@ -79,6 +79,11 @@ export class CliPresenceRuntime {
   private machineKey: string | null = null;
   private readonly sessionKeys = new Map<SessionId, string>();
   private machineHeartbeatSeq = 0;
+  /**
+   * The one outstanding heartbeat whose delivery age is being measured, or null.
+   * See {@link observeHeartbeatDelivery}.
+   */
+  private heartbeatDeliveryProbe: { seq: number; enqueuedAtMs: number } | null = null;
   private sessionPresenceSeq = 0;
   private started = false;
   private stopped = false;
@@ -120,6 +125,13 @@ export class CliPresenceRuntime {
    * Single write path for locally-authored presence: keeps the workspace
    * replica and the local-origin view from ever diverging, and is the only
    * place that announces a local-plane push.
+   *
+   * Every call queues one serial POST on the workspace's SHARED presence
+   * transport, ahead of the machine heartbeat, with no coalescing and no queue
+   * bound. Callers must therefore be driven by a timer, a lifecycle transition,
+   * or a user navigation — never by a stream/progress/chunk callback. A burst
+   * here makes this machine read offline even though the room stays `joined`.
+   * Bounds: `specs/loro-ephemeral-presence-channel.md`.
    */
   private writeLocalOrigin(key: string, state: LodyPresenceState): void {
     this.store.set(key, state as unknown as Value);
@@ -380,8 +392,93 @@ export class CliPresenceRuntime {
     };
     this.writeLocalOrigin(this.machineKey, state);
     this.options.logger.debug(
-      `[${this.options.workspaceId}] Loro presence machine heartbeat written (seq=${seq} updatedAt=${state.updatedAt})`
+      `[${this.options.workspaceId}] Loro presence machine heartbeat written (seq=${seq} updatedAt=${state.updatedAt})${this.describePresenceWriteQueue()}`
     );
+    this.observeHeartbeatDelivery(seq, state.updatedAt);
+  }
+
+  /**
+   * Content-free snapshot of the SHARED presence write queue: counts, ages, a room
+   * status and an error code. Never a presence value, key, or machine identity.
+   *
+   * Empty while no transport is attached, because there is then no queue to describe.
+   */
+  private describePresenceWriteQueue(): string {
+    const subscription = this.subscription;
+    if (!subscription) return '';
+    const parts = [`queued=${subscription.pendingLocalCount}`, `room=${subscription.status}`];
+    const { lastLocalAppendAtMs } = subscription;
+    if (lastLocalAppendAtMs !== undefined) {
+      // Documented as a `Date.now()` stamp, so it is compared against the local wall
+      // clock rather than the server-corrected `getServerNow()` used for `updatedAt`.
+      parts.push(`sinceLastAppendMs=${Math.max(0, Date.now() - lastLocalAppendAtMs)}`);
+    }
+    const { lastWriteError } = subscription;
+    if (lastWriteError) {
+      // Only the write path clears this, so it explains a non-zero queue even when the
+      // read side is healthy and the room still reports `joined`.
+      parts.push(
+        `writeError=${lastWriteError.code}`,
+        `writeErrorRetryable=${lastWriteError.retryable}`
+      );
+    }
+    const unacked = this.heartbeatDeliveryProbe;
+    if (unacked) {
+      parts.push(
+        `unackedHeartbeatSeq=${unacked.seq}`,
+        `unackedForMs=${Math.max(0, getServerNow() - unacked.enqueuedAtMs)}`
+      );
+    }
+    return ` ${parts.join(' ')}`;
+  }
+
+  /**
+   * Records how old the machine heartbeat already is when it actually leaves this
+   * process.
+   *
+   * The line above proves only a LOCAL store write. The presence queue is serial,
+   * shared with every other presence writer in this workspace, and unbounded, so a
+   * heartbeat can sit behind a backlog; its `updatedAt` is stamped at enqueue and never
+   * refreshed, so a delayed one arrives ALREADY past {@link LODY_PRESENCE_TTL_MS}.
+   * Readers receive it and still report this machine offline, while the room keeps
+   * reporting `joined` and no error is raised anywhere. Nothing else in this runtime
+   * observes that, which is why the incident behind
+   * `specs/loro-ephemeral-presence-channel.md` could not be diagnosed from logs.
+   *
+   * One probe at a time: a probe per heartbeat would itself grow with the backlog it
+   * measures. A probe that never settles IS the signal — every later heartbeat reports
+   * its age through {@link describePresenceWriteQueue}.
+   */
+  private observeHeartbeatDelivery(seq: number, enqueuedAtMs: number): void {
+    const subscription = this.subscription;
+    if (!subscription || this.heartbeatDeliveryProbe) return;
+    // The heartbeat just enqueued is itself pending, so anything else is ahead of it.
+    const queuedAhead = Math.max(0, subscription.pendingLocalCount - 1);
+    const probe = { seq, enqueuedAtMs };
+    this.heartbeatDeliveryProbe = probe;
+    void subscription
+      .waitUntilSynced()
+      .then(() => {
+        const ageAtSendMs = Math.max(0, getServerNow() - enqueuedAtMs);
+        const detail = `[${this.options.workspaceId}] Loro presence machine heartbeat delivered (seq=${seq} queuedAhead=${queuedAhead} ageAtSendMs=${ageAtSendMs})`;
+        if (ageAtSendMs >= LODY_PRESENCE_TTL_MS) {
+          this.options.logger.warn(
+            `${detail}: older than the ${LODY_PRESENCE_TTL_MS}ms freshness window on arrival, so readers still report this machine offline`
+          );
+          return;
+        }
+        this.options.logger.debug(detail);
+      })
+      .catch((error: unknown) => {
+        this.options.logger.debug(
+          `[${this.options.workspaceId}] Loro presence machine heartbeat delivery unobserved (seq=${seq} queuedAhead=${queuedAhead}): ${formatErrorMessage(error)}`
+        );
+      })
+      .finally(() => {
+        if (this.heartbeatDeliveryProbe === probe) {
+          this.heartbeatDeliveryProbe = null;
+        }
+      });
   }
 
   setSessionPresence(args: {

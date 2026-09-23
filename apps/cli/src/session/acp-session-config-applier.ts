@@ -9,8 +9,10 @@ import {
   type AcpConfigOptionValue,
   type AgentConfigCliType,
   type SessionId,
+  type SessionAcpRuntimeConfigPatch,
 } from '@lody/shared';
 import type { AgentClient } from '@/agent/agent-client';
+import { getAcpRuntimeConfigPatchFromOptions } from '@/lib/acp/runtime-config';
 import type { Logger } from '@/utils/logger';
 
 const MAX_ACP_CONFIG_VALUE_LOG_LENGTH = 160;
@@ -61,6 +63,8 @@ type AcpSessionRunConfigApplyResult = {
   rejectedSelections: string[];
   /** Rejections that should become a user-visible Agent warning. */
   warningSelections: string[];
+  /** Agent-confirmed state after applying the requested selections. */
+  runtimeConfigPatch: SessionAcpRuntimeConfigPatch | null;
 };
 
 function isCodexOrClaudeRunConfig(config: AcpSessionRunConfig): boolean {
@@ -88,8 +92,15 @@ export async function applyAcpSessionRunConfig(args: {
   session: AcpSessionConfigTarget;
   config: AcpSessionRunConfig;
   logger: Logger;
+  signal?: AbortSignal;
 }): Promise<AcpSessionRunConfigApplyResult> {
-  const { session, config, logger } = args;
+  const { session, config, logger, signal } = args;
+  const assertNotAborted = (): void => {
+    if (!signal?.aborted) return;
+    throw signal.reason instanceof Error
+      ? signal.reason
+      : new Error('ACP run configuration was aborted');
+  };
   const { sessionId, acpSessionId, agentClient } = session;
   const configOptionValues = config.configOptionValues;
   const configOptionEntries = configOptionValues ? Object.entries(configOptionValues) : [];
@@ -108,11 +119,13 @@ export async function applyAcpSessionRunConfig(args: {
   );
   if (!agentClient?.isCreated() || !acpSessionId) {
     logger.debug(`[${sessionId}] applyAcpSessionRunConfig skipped (agentClient not ready)`);
-    return { rejectedSelections: [], warningSelections: [] };
+    return { rejectedSelections: [], warningSelections: [], runtimeConfigPatch: null };
   }
 
   const rejectedSelections: string[] = [];
   const warningSelections: string[] = [];
+  let confirmedLegacyModeId: string | undefined;
+  let confirmedLegacyModelId: string | undefined;
   const agentConfigOptions = agentClient.getConfigOptions?.() ?? [];
   const suppressKnownRunConfigWarnings = isCodexOrClaudeRunConfig(config);
   const recordRejection = (selection: string, suppressWarning: boolean): void => {
@@ -130,9 +143,12 @@ export async function applyAcpSessionRunConfig(args: {
     config.modelId ?? (typeof configOptionModelId === 'string' ? configOptionModelId : undefined);
 
   if (config.modeId) {
+    assertNotAborted();
     try {
       await agentClient.setSessionMode?.(acpSessionId, config.modeId);
+      confirmedLegacyModeId = config.modeId;
     } catch (error) {
+      assertNotAborted();
       recordRejection(
         `mode=${JSON.stringify(config.modeId)}`,
         suppressKnownRunConfigWarnings && config.modeId === ACP_PLAN_PERMISSION_MODE_ID
@@ -141,24 +157,32 @@ export async function applyAcpSessionRunConfig(args: {
         `[${sessionId}] Failed to set ACP mode ${JSON.stringify(config.modeId)}: ${String(error)}`
       );
     }
+    assertNotAborted();
   }
   if (config.modelId) {
+    assertNotAborted();
     try {
       await agentClient.unstable_setSessionModel?.(acpSessionId, config.modelId);
+      confirmedLegacyModelId = config.modelId;
     } catch (error) {
+      assertNotAborted();
       recordRejection(`model=${JSON.stringify(config.modelId)}`, suppressKnownRunConfigWarnings);
       logger.debug(
         `[${sessionId}] Failed to set ACP model ${JSON.stringify(config.modelId)}: ${String(error)}`
       );
     }
+    assertNotAborted();
   }
 
   for (const [configId, value] of configOptionEntries) {
+    assertNotAborted();
     if (configId === modeConfigId) {
       if (!config.modeId && typeof value === 'string') {
         try {
           await agentClient.setSessionMode?.(acpSessionId, value);
+          confirmedLegacyModeId = value;
         } catch (error) {
+          assertNotAborted();
           logger.debug(
             `[${sessionId}] Failed to set ACP mode option ${configId}=${formatAcpConfigValueForLog(
               configId,
@@ -166,6 +190,7 @@ export async function applyAcpSessionRunConfig(args: {
             )}: ${String(error)}`
           );
         }
+        assertNotAborted();
       }
       continue;
     }
@@ -173,7 +198,9 @@ export async function applyAcpSessionRunConfig(args: {
       if (!config.modelId && typeof value === 'string') {
         try {
           await agentClient.unstable_setSessionModel?.(acpSessionId, value);
+          confirmedLegacyModelId = value;
         } catch (error) {
+          assertNotAborted();
           logger.debug(
             `[${sessionId}] Failed to set ACP model option ${configId}=${formatAcpConfigValueForLog(
               configId,
@@ -181,6 +208,7 @@ export async function applyAcpSessionRunConfig(args: {
             )}: ${String(error)}`
           );
         }
+        assertNotAborted();
       }
       continue;
     }
@@ -190,14 +218,40 @@ export async function applyAcpSessionRunConfig(args: {
     try {
       await agentClient.setSessionConfigOption(acpSessionId, configId, value);
     } catch (error) {
+      assertNotAborted();
       recordRejection(
         `${configId}=${formatAcpConfigValueForLog(configId, value)}`,
         suppressKnownRunConfigWarnings && isKnownRunConfigOption(configId, agentConfigOptions)
       );
       logger.debug(`[${sessionId}] Failed to set ACP config option ${configId}: ${String(error)}`);
     }
+    assertNotAborted();
   }
 
+  assertNotAborted();
   logger.debug(`[${sessionId}] applyAcpSessionRunConfig completed`);
-  return { rejectedSelections, warningSelections };
+  const runtimeConfigPatch = getAcpRuntimeConfigPatchFromOptions(
+    acpSessionId,
+    agentClient.getConfigOptions()
+  );
+  if (confirmedLegacyModeId) {
+    runtimeConfigPatch.modeId = confirmedLegacyModeId;
+    if (
+      !isSensitiveAcpConfigOptionId(modeConfigId) &&
+      agentConfigOptions.some((option) => option.id === modeConfigId)
+    ) {
+      runtimeConfigPatch.configOptionValues = {
+        ...runtimeConfigPatch.configOptionValues,
+        [modeConfigId]: confirmedLegacyModeId,
+      };
+    }
+  }
+  if (confirmedLegacyModelId && !runtimeConfigPatch.modelId) {
+    runtimeConfigPatch.modelId = confirmedLegacyModelId;
+  }
+  return {
+    rejectedSelections,
+    warningSelections,
+    runtimeConfigPatch,
+  };
 }

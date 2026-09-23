@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   isSessionGoalComplete,
   isSessionGoalPaused,
+  isSessionGoalResumable,
   isSessionGoalActive,
   isSessionGoalWorking,
   resolveLatestSessionGoalFromHistory,
@@ -106,6 +107,10 @@ describe('session goal state helpers', () => {
   it('maps goal statuses to active/paused/complete states', () => {
     expect(isSessionGoalActive(goal)).toBe(true);
     expect(isSessionGoalPaused({ ...goal, status: 'paused' })).toBe(true);
+    expect(isSessionGoalResumable({ ...goal, status: 'paused' })).toBe(true);
+    expect(isSessionGoalResumable({ ...goal, status: 'blocked' })).toBe(true);
+    expect(isSessionGoalResumable({ ...goal, status: 'budgetLimited' })).toBe(false);
+    expect(isSessionGoalResumable({ ...goal, status: 'complete' })).toBe(false);
     expect(isSessionGoalComplete({ ...goal, status: 'complete' })).toBe(true);
     expect(isSessionGoalActive({ ...goal, status: 'complete' })).toBe(false);
   });

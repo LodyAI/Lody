@@ -1,9 +1,15 @@
 import * as THREE from 'three';
 import lodySvg from '@/assets/lody.svg?raw';
+import {
+  USAGE_CALENDAR_CELLS,
+  USAGE_CALENDAR_COLUMNS,
+  USAGE_CALENDAR_ROWS,
+} from './usage-calendar-geometry';
 
-export const USAGE_CALENDAR_COLUMNS = 53;
-export const USAGE_CALENDAR_ROWS = 7;
-export const USAGE_CALENDAR_CELLS = USAGE_CALENDAR_COLUMNS * USAGE_CALENDAR_ROWS;
+// The grid dimensions live in usage-calendar-geometry so the loading skeleton
+// can share them without pulling three.js. Re-export keeps existing imports
+// of this module working.
+export { USAGE_CALENDAR_CELLS, USAGE_CALENDAR_COLUMNS, USAGE_CALENDAR_ROWS };
 export const USAGE_SKYLINE_STL_CELL_SIZE = 2.5;
 export const USAGE_SKYLINE_STL_BASE_HEIGHT = 10;
 export const USAGE_SKYLINE_STL_COLUMN_HEIGHT_MULTIPLIER = 4;

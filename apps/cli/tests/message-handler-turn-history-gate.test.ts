@@ -1,3 +1,4 @@
+import { updateTestHistory } from './history-port-fixture';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LoroRepo } from 'loro-repo';
 
@@ -17,6 +18,8 @@ import { DEFAULT_TURN_HISTORY_GATE_TIMEOUT_MS } from '../src/session/turn-histor
 import type { Logger } from '../src/utils/logger';
 import { loadEnv } from '../src/utils/const';
 import { createTestCloudPort } from './test-cloud-port';
+import type { RequestPermissionRequest, RequestPermissionResponse } from '@agentclientprotocol/sdk';
+import type { AgentClient } from '../src/agent/agent-client';
 
 const createSilentLogger = (): Logger => ({
   info: () => {},
@@ -32,6 +35,15 @@ const createSilentLogger = (): Logger => ({
 const originalLodyServerUrl = process.env.LODY_SERVER_URL;
 
 type MessageHandlerHost = {
+  appendACPUpdatesToAssistantEntry(...args: unknown[]): Promise<void>;
+  flushACPUpdatesNow(sessionId: SessionId): Promise<void>;
+  handleAgentPermissionRequest(
+    sessionId: SessionId,
+    requestId: string,
+    request: RequestPermissionRequest,
+    model: undefined,
+    client: Pick<AgentClient, 'getAutomaticToolPermissionOutcome' | 'subscribeConfigOptions'>
+  ): Promise<RequestPermissionResponse>;
   beginConversationTurn(
     sessionId: SessionId,
     userTurnId?: string,
@@ -125,6 +137,104 @@ const agentChunk = (sessionId: SessionId, text: string): AcpSessionNotification 
 });
 
 describe('MessageHandler turn history gate (RPC fast path ordering)', () => {
+  it.each([false, true, 'write-failure', 'new-turn'] as const)(
+    'drains text before a permission tool (buffered tool: %s)',
+    async (includeTool) => {
+      const sessionId = 'permission-order' as SessionId;
+      const { repo, doc, handler } = await createHandlerHarness(sessionId);
+      try {
+        await updateTestHistory(doc, () => [userEntry('user-permission')]);
+        const turnId = handler.beginConversationTurn(sessionId, 'user-permission');
+        await handler.createAssistantEntryForTurn(
+          sessionId,
+          doc,
+          turnId,
+          undefined,
+          'user-permission'
+        );
+        handler.enqueueACPUpdate(sessionId, agentChunk(sessionId, 'The first '));
+        await handler.flushACPUpdatesNow(sessionId);
+        handler.enqueueACPUpdate(sessionId, agentChunk(sessionId, 'sentence.'));
+        const failedWrite =
+          includeTool === 'write-failure'
+            ? vi
+                .spyOn(handler, 'appendACPUpdatesToAssistantEntry')
+                .mockRejectedValue(new Error('storage unavailable'))
+            : undefined;
+        const toolCall = {
+          toolCallId: 'read-1',
+          title: 'Read',
+          kind: 'read' as const,
+          status: 'pending' as const,
+        };
+        if (includeTool && includeTool !== 'new-turn')
+          handler.enqueueACPUpdate(sessionId, {
+            sessionId,
+            update: { sessionUpdate: 'tool_call', ...toolCall },
+          });
+        if (includeTool === 'new-turn') {
+          const drain = handler.flushACPUpdatesNow.bind(handler);
+          vi.spyOn(handler, 'flushACPUpdatesNow').mockImplementationOnce(async (id) => {
+            await drain(id);
+            await updateTestHistory(doc, (history) => [...history, userEntry('next-user')]);
+            const next = handler.beginConversationTurn(sessionId, 'next-user');
+            await handler.createAssistantEntryForTurn(sessionId, doc, next, undefined, 'next-user');
+          });
+        }
+        const outcome = { outcome: 'selected' as const, optionId: 'allow' };
+        const result = await handler.handleAgentPermissionRequest(
+          sessionId,
+          'permission-1',
+          {
+            sessionId,
+            toolCall,
+            options: [{ kind: 'allow_once', optionId: 'allow', name: 'Allow' }],
+          },
+          undefined,
+          {
+            getAutomaticToolPermissionOutcome: () => outcome,
+            subscribeConfigOptions: () => () => {},
+          }
+        );
+        if (includeTool === 'new-turn') {
+          expect(result).toEqual({ outcome: { outcome: 'cancelled' } });
+          const history = await doc.sessionData.history.readAll();
+          expect(history.at(-1)?.items).toEqual([]);
+          expect(history[1]?.items).toEqual([{ type: 'text', text: 'The first sentence.' }]);
+          return;
+        }
+        if (failedWrite) {
+          expect(result).toEqual({ outcome: { outcome: 'cancelled' } });
+          const beforeRetry = await doc.sessionData.history.readAll();
+          expect(beforeRetry[1]?.items).toEqual([{ type: 'text', text: 'The first ' }]);
+          failedWrite.mockRestore();
+          await handler.flushACPUpdatesNow(sessionId);
+          const afterRetry = await doc.sessionData.history.readAll();
+          expect(afterRetry[1]?.items).toMatchObject([
+            { type: 'text', text: 'The first sentence.' },
+            { type: 'tool_call', toolCallId: 'read-1' },
+          ]);
+          return;
+        }
+        expect(result).toEqual({ outcome });
+        handler.enqueueACPUpdate(sessionId, agentChunk(sessionId, 'A separate answer.'));
+        await handler.flushACPUpdatesNow(sessionId);
+        const history = await doc.sessionData.history.readAll();
+        expect(history[1]?.items).toMatchObject([
+          { type: 'text', text: 'The first sentence.' },
+          {
+            type: 'tool_call',
+            toolCallId: 'read-1',
+            permissionRequest: { requestId: 'permission-1', outcome },
+          },
+          { type: 'text', text: 'A separate answer.' },
+        ]);
+      } finally {
+        await destroyRepoOnRealTimers(repo);
+      }
+    }
+  );
+
   beforeEach(() => {
     vi.useFakeTimers();
     process.env.LODY_SERVER_URL = 'https://server.example.test';
@@ -158,20 +268,20 @@ describe('MessageHandler turn history gate (RPC fast path ordering)', () => {
       // The eager assistant-entry creation (execution service does this before
       // the prompt) must defer while the user entry is missing locally.
       await handler.createAssistantEntryForTurn(sessionId, doc, turnId, undefined, userTurnId);
-      expect(await doc.getHistory()).toHaveLength(0);
+      expect(await doc.sessionData.history.readAll()).toHaveLength(0);
 
       // Streamed output arrives and the batch window elapses — still nothing
       // may be persisted ahead of the user entry.
       handler.enqueueACPUpdate(sessionId, agentChunk(sessionId, 'hello'));
       handler.enqueueACPUpdate(sessionId, agentChunk(sessionId, ' world'));
       await vi.advanceTimersByTimeAsync(200);
-      expect(await doc.getHistory()).toHaveLength(0);
+      expect(await doc.sessionData.history.readAll()).toHaveLength(0);
 
       // The user entry syncs in (as the web client's CRDT write would land).
-      await doc.updateHistory((history) => [...history, userEntry(userTurnId)]);
+      await updateTestHistory(doc, (history) => [...history, userEntry(userTurnId)]);
       await vi.advanceTimersByTimeAsync(200);
 
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
       expect(history.map((entry) => [entry.role, entry.id])).toEqual([
         ['user', userTurnId],
         ['assistant', turnId],
@@ -195,11 +305,11 @@ describe('MessageHandler turn history gate (RPC fast path ordering)', () => {
       });
       handler.enqueueACPUpdate(sessionId, agentChunk(sessionId, 'stalled sync'));
       await vi.advanceTimersByTimeAsync(200);
-      expect(await doc.getHistory()).toHaveLength(0);
+      expect(await doc.sessionData.history.readAll()).toHaveLength(0);
 
       await vi.advanceTimersByTimeAsync(DEFAULT_TURN_HISTORY_GATE_TIMEOUT_MS);
 
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
       expect(history.map((entry) => [entry.role, entry.id])).toEqual([['assistant', turnId]]);
     } finally {
       await destroyRepoOnRealTimers(repo);
@@ -212,7 +322,7 @@ describe('MessageHandler turn history gate (RPC fast path ordering)', () => {
     const { repo, doc, handler } = await createHandlerHarness(sessionId);
 
     try {
-      await doc.updateHistory((history) => [...history, userEntry(userTurnId)]);
+      await updateTestHistory(doc, (history) => [...history, userEntry(userTurnId)]);
       const turnId = handler.beginConversationTurn(sessionId, userTurnId, {
         dispatchSource: 'crdt',
         sessionDoc: doc,
@@ -221,7 +331,7 @@ describe('MessageHandler turn history gate (RPC fast path ordering)', () => {
       handler.enqueueACPUpdate(sessionId, agentChunk(sessionId, 'immediate'));
       await vi.advanceTimersByTimeAsync(20);
 
-      const history = await doc.getHistory();
+      const history = await doc.sessionData.history.readAll();
       expect(history.map((entry) => [entry.role, entry.id])).toEqual([
         ['user', userTurnId],
         ['assistant', turnId],

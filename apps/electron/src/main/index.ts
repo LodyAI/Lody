@@ -1,19 +1,50 @@
-import { app, BrowserWindow, safeStorage } from 'electron'
+import { handleWindowContentReady } from './window-target'
+import { enableRendererHangStacks } from './renderer-hang-diagnostics'
+import {
+  registerLocalFileResourceScheme,
+  installLocalFileResourceProtocol
+} from './services/local-file-resource-protocol'
+import { app, BrowserWindow, ipcMain, safeStorage } from 'electron'
 import { electronApp, optimizer } from '@electron-toolkit/utils'
 import dns from 'node:dns'
+import { writeHeapSnapshot } from 'node:v8'
 import icon from '../../resources/icon.png?asset'
-import { acquireSingleInstanceLock, registerOpenUrlHandler } from './deep-link'
+import macIcon from '../../build/icon-mac.padded.png?asset'
+import aquaIcon from '../../resources/app-icons/aqua.png?asset'
+import { createElectronAppIconService } from './services/app-icon-service'
+import {
+  acquireSingleInstanceLock,
+  initializeAuthDeepLinks,
+  registerOpenUrlHandler
+} from './deep-link'
 import { registerLodyProtocolClient } from './protocol-client'
 import { registerIpcServices } from './ipc/register-services'
-import { openMainWindow, openOrFocusMainWindow, setMainWindowProductReloadTarget } from './window'
-import { getMainWindow, setAppQuitting, setWindowsTrayAvailable } from './window-state'
+import {
+  openMainWindow,
+  openOrFocusMainWindow,
+  reloadMainWindowForDevbar,
+  setMainWindowProductReloadTarget
+} from './window'
+import {
+  getMainWindow,
+  productWindows,
+  setAppQuitting,
+  setWindowsTrayAvailable
+} from './window-state'
 import { CliService } from './services/cli-service'
+import { applyPendingDesktopLocalReset } from './services/local-reset-service'
 import { TerminalRelay } from './services/terminal-relay'
 import { LoroDataPlaneRelay } from './services/loro-data-plane-relay'
 import { NotificationService } from './services/notification-service'
 import { AuthService } from './services/auth-service'
 import { authClient } from './auth'
 import { AppUpdaterService } from './services/app-updater-service'
+import { shouldConstructUpdaterEnabled } from './services/app-updater-sparkle-policy'
+import {
+  configureDevbarDiagnostics,
+  startDevbarDevframeService,
+  stopDevbarDevframeService
+} from './services/devbar/service'
 import { GlobalShortcutsService } from './services/global-shortcuts-service'
 import { WindowsTrayService } from './services/windows-tray-service'
 import {
@@ -26,13 +57,20 @@ import {
   flushElectronMainErrorReporting,
   installElectronMainErrorReporting
 } from './posthog-error-reporting'
-import { IPC_PUSH_CHANNELS } from '@lody/shared/electron-ipc'
+import { IPC_PUSH_CHANNELS, IPC_SEND_CHANNELS } from '@lody/shared/electron-ipc'
 import { PublicBrowserService } from './services/public-browser-service'
 import { desktopInstallationProfile, isLocalPlatform } from './platform'
 import { mainPlatformKind } from './platform'
 import { getLocalLoroDataPlaneSocketPath } from '@lody/shared/node/local-ipc'
 import { getLocalTerminalSocketPath } from '@lody/shared/node/local-terminal'
 import { getInitialDesktopPath, markOnboardingCompleted } from './onboarding-state'
+import { handlePreparedWindowState, handleWindowWarmReady } from './window-warm-service'
+import { extractDeepLinkFromArgv } from './deep-link-url'
+import { shouldHideMainWindowOnAutoLaunch } from './auto-launch-policy'
+import {
+  getAutoLaunchInvocationStatus,
+  getHideWindowOnAutoLaunchEnabled
+} from './auto-launch-settings'
 
 // On Linux, Electron/Chromium auto-detects the keyring backend for GNOME and KDE
 // desktops, but falls back to basic-text (unencrypted) on other desktops like
@@ -63,10 +101,35 @@ if (
   }
 }
 
+enableRendererHangStacks()
+configureDevbarDiagnostics()
+registerLocalFileResourceScheme()
+
 const LODY_PROTOCOL = desktopInstallationProfile.desktopProtocol
 const PRODUCT_NAME = desktopInstallationProfile.desktopProductName
 const DESKTOP_FILE_NAME = `${desktopInstallationProfile.desktopAppId}.desktop`
 const DEEP_LINK_DEBUG_PREFIX = '[electron-auth-debug]'
+const IS_E2E = !app.isPackaged && process.env.LODY_E2E === '1'
+
+type E2EBootDiagnostic = { stage: string; error?: string }
+type E2EGlobal = typeof globalThis & {
+  __LODY_E2E_BOOT_DIAGNOSTIC__?: E2EBootDiagnostic
+  __LODY_E2E_WRITE_HEAP_SNAPSHOT__?: (path: string) => string
+}
+
+if (IS_E2E) {
+  ;(globalThis as E2EGlobal).__LODY_E2E_WRITE_HEAP_SNAPSHOT__ = (path) => writeHeapSnapshot(path)
+}
+
+function recordE2EBootDiagnostic(stage: string, error?: unknown): void {
+  if (!IS_E2E) return
+  const diagnostic: E2EBootDiagnostic = { stage }
+  if (error !== undefined) {
+    diagnostic.error = error instanceof Error ? (error.stack ?? error.message) : String(error)
+  }
+  const e2eGlobal = globalThis as E2EGlobal
+  e2eGlobal.__LODY_E2E_BOOT_DIAGNOSTIC__ = diagnostic
+}
 
 function logDeepLinkDebug(message: string, meta?: Record<string, unknown>): void {
   if (meta) {
@@ -146,24 +209,74 @@ if (hasSingleInstanceLock) {
 }
 
 if (hasSingleInstanceLock) {
-  void app.whenReady().then(() => {
+  recordE2EBootDiagnostic('waiting-for-app-ready')
+  const appReady = app.whenReady().then(async () => {
+    installLocalFileResourceProtocol()
+    // Before any window can reopen the local stores: a reset armed with
+    // `lody app reset-cache` is the way back for a user whose renderer is wedged,
+    // so it has to run while nothing holds that storage open.
+    await applyPendingDesktopLocalReset()
+    await startDevbarDevframeService()
+    recordE2EBootDiagnostic('initializing-services')
+    if (process.platform === 'darwin' && !app.isPackaged) app.dock?.setIcon(macIcon)
+    const appIconService = createElectronAppIconService(macIcon, aquaIcon)
+    if (process.platform === 'darwin' && app.isPackaged) {
+      void Promise.resolve()
+        .then(() => appIconService.getState())
+        .catch((error: unknown) => {
+          console.warn('[Electron] Failed to restore app icon', error)
+        })
+    }
+
     logDeepLinkDebug('app.whenReady resolved', {
       isDefaultProtocolClient: app.isDefaultProtocolClient(LODY_PROTOCOL),
       protocol: LODY_PROTOCOL
     })
-    const authService = new AuthService()
+    const authService = new AuthService(
+      (state) => {
+        // Only redacted lifecycle data goes to diagnostics, never the session.
+        console.info('[Auth] login transition', {
+          attemptId: state.attemptId,
+          phase: state.phase,
+          error: state.error
+        })
+        for (const window of productWindows) {
+          if (!window.isDestroyed() && !window.webContents.isDestroyed()) {
+            try {
+              window.webContents.send('auth.loginState', state)
+            } catch {
+              // A closing renderer cannot roll back the authoritative result.
+              console.warn('[Auth] Login state delivery failed; snapshot remains available')
+            }
+          }
+        }
+      },
+      () => {
+        void cliService.restartAutoStart().catch(() => console.warn('[Auth] CLI restart failed'))
+      }
+    )
     const cliService = new CliService({
       resolveBootstrapSession: async () => {
         return await authService.getBootstrapSession()
       }
     })
+    if (!isLocalPlatform()) {
+      initializeAuthDeepLinks(async (token) => {
+        await authService.login.complete(token)
+      })
+    }
     const terminalRelay = new TerminalRelay(getLocalTerminalSocketPath(mainPlatformKind))
     const loroDataPlaneRelay = new LoroDataPlaneRelay(
       getLocalLoroDataPlaneSocketPath(mainPlatformKind)
     )
     loroDataPlaneRelay.setEnabled(cliService.getCliAutoStartEnabled())
 
-    const appUpdaterService = new AppUpdaterService({ enabled: !isLocalPlatform() })
+    const appUpdaterService = new AppUpdaterService({
+      enabled: shouldConstructUpdaterEnabled({
+        localPlatform: isLocalPlatform(),
+        forceEnable: process.env.LODY_ELECTRON_ENABLE_UPDATER === '1'
+      })
+    })
     const notificationService = new NotificationService(() => getMainWindow())
     const windowsTrayService = new WindowsTrayService({
       iconPath: icon,
@@ -210,6 +323,7 @@ if (hasSingleInstanceLock) {
       setMainWindowProductReloadTarget(window)
     }
     registerIpcServices({
+      appIconService,
       cliService,
       appUpdaterService,
       authService,
@@ -220,7 +334,8 @@ if (hasSingleInstanceLock) {
       windowBadgeService,
       globalShortcutsService,
       getMainWindow,
-      completeOnboarding
+      completeOnboarding,
+      reloadMainWindowForDevbar
     })
 
     setupApplicationMenu({
@@ -229,8 +344,32 @@ if (hasSingleInstanceLock) {
       openOrFocusMainWindow: () => openOrFocusMainWindow({ icon })
     })
     const initialPath = getInitialDesktopPath()
-    openMainWindow({ icon, initialPath })
-    console.info('[Electron] Initial desktop surface selected', { initialPath })
+    const loginItemSettings = getAutoLaunchInvocationStatus()
+    const hideWindowOnAutoLaunch = shouldHideMainWindowOnAutoLaunch({
+      preferenceEnabled: getHideWindowOnAutoLaunchEnabled(),
+      launchedAtLogin: loginItemSettings.launchedAtLogin,
+      initialPath,
+      hasInitialDeepLink: Boolean(extractDeepLinkFromArgv(process.argv))
+    })
+    recordE2EBootDiagnostic('opening-main-window')
+    openMainWindow({ icon, initialPath, hideWindowOnAutoLaunch })
+    recordE2EBootDiagnostic('main-window-opened')
+    // Warmup is off by default and only enabled from Developer mode. When it is
+    // enabled, session-windows primes the spare after an auxiliary request so
+    // ordinary single-window sessions never pay an idle renderer cost.
+    ipcMain.on(IPC_SEND_CHANNELS.appWindowReady, (event) => handleWindowWarmReady(event.sender.id))
+    ipcMain.on(IPC_SEND_CHANNELS.appPreparedWindowState, (event, state) => {
+      if (event.senderFrame === event.sender.mainFrame)
+        handlePreparedWindowState(event.sender.id, state)
+    })
+    ipcMain.on(IPC_SEND_CHANNELS.appWindowContentReady, (event, target) => {
+      if (event.senderFrame === event.sender.mainFrame)
+        handleWindowContentReady(event.sender.id, target)
+    })
+    console.info('[Electron] Initial desktop surface selected', {
+      initialPath,
+      hideWindowOnAutoLaunch
+    })
     setWindowsTrayAvailable(windowsTrayService.start())
     cliService.autoStart(getMainWindow()?.webContents ?? undefined)
     appUpdaterService.start()
@@ -268,7 +407,8 @@ if (hasSingleInstanceLock) {
       event.preventDefault()
       void Promise.allSettled([
         cliService.shutdownForQuit(),
-        flushElectronMainErrorReporting()
+        flushElectronMainErrorReporting(),
+        stopDevbarDevframeService()
       ]).finally(() => {
         cliShutdownComplete = true
         app.quit()
@@ -284,6 +424,11 @@ if (hasSingleInstanceLock) {
       appUpdaterService.stop()
       publicBrowserService.destroyAll()
     })
+  })
+  void appReady.catch((error: unknown) => {
+    recordE2EBootDiagnostic('failed', error)
+    console.error('[Electron] Fatal error while creating the main window', error)
+    if (!IS_E2E) app.exit(1)
   })
 }
 

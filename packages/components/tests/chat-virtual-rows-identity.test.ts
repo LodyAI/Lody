@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MessageContent, SessionHistoryParsed, SessionId } from '@lody/shared';
 import {
+  areAssistantChatVirtualRowsEqual,
   buildChatVirtualRows,
   resolveAssistantMessageActions,
   type AssistantMessageAction,
@@ -43,13 +44,18 @@ const makeMessage = (
     finished,
   }) as unknown as SessionHistoryParsed;
 
+let nextTurnIndex = 0;
 const wrap = (message: SessionHistoryParsed): ChatStreamItem => ({
   type: 'message',
   sessionId,
   message,
+  turnIndex: (nextTurnIndex += 1),
 });
 
-const build = (items: ChatStreamItem[], overrides?: { expansionVersion?: number }) =>
+const build = (
+  items: ChatStreamItem[],
+  overrides?: { expansionVersion?: number; copyContextAvailable?: boolean }
+) =>
   buildChatVirtualRows({
     items,
     lastAssistantMessageId:
@@ -60,6 +66,9 @@ const build = (items: ChatStreamItem[], overrides?: { expansionVersion?: number 
             item.type === 'message' && item.message.role === 'assistant'
         )?.message.id ?? null,
     expansionVersion: overrides?.expansionVersion ?? 0,
+    ...(overrides?.copyContextAvailable === undefined
+      ? {}
+      : { copyContextAvailable: overrides.copyContextAvailable }),
   });
 
 const makeConversation = () => {
@@ -73,6 +82,17 @@ const makeConversation = () => {
 };
 
 describe('buildChatVirtualRows per-turn row identity', () => {
+  it('skips empty presentation without changing absolute turn positions', () => {
+    const message = wrap(makeMessage('first-user', 'user', [text('hello')]));
+    const rows = build([{ type: 'empty', sessionId }, message]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      type: 'standard',
+      key: 'first-user',
+      messageIndex: message.type === 'message' ? message.turnIndex : -1,
+    });
+  });
+
   it('keeps actions on their plan reply when a newer assistant reply exists', () => {
     const actions: AssistantMessageAction[] = [
       { id: 'implement-plan', label: 'Implement plan', onClick: () => undefined },
@@ -134,11 +154,68 @@ describe('buildChatVirtualRows per-turn row identity', () => {
     const { finishedTurn, streamingTurn, items } = makeConversation();
     const first = build(items);
     const userTurn = wrap(makeMessage('turn-user', 'user', [text('hi')]));
-    const second = build([userTurn, finishedTurn, streamingTurn]);
+    // A prepend moves every later turn's absolute index, and
+    // `buildChatStreamItems` re-wraps a turn whose index changed.
+    const shifted = (item: ChatStreamItem & { type: 'message' }): ChatStreamItem => ({
+      ...item,
+      turnIndex: item.turnIndex + 1,
+    });
+    const second = build([
+      userTurn,
+      shifted(finishedTurn as ChatStreamItem & { type: 'message' }),
+      shifted(streamingTurn as ChatStreamItem & { type: 'message' }),
+    ]);
     const secondAssistantRows = second.filter((row) => row.type === 'assistant');
     secondAssistantRows.forEach((row) => {
       expect(first).not.toContain(row);
       expect(row.messageIndex).toBeGreaterThan(0);
     });
   });
+});
+
+it('does not create an empty live footer without a copy action', () => {
+  const item = wrap(makeMessage('stream-copy', 'assistant', [text('partial')], false));
+  const args = { items: [item], lastAssistantMessageId: 'stream-copy', expansionVersion: 0 };
+  const before = buildChatVirtualRows(args);
+  expect(before.some((row) => row.type === 'assistant' && row.content.kind === 'footer')).toBe(
+    false
+  );
+  const withCopy = buildChatVirtualRows({ ...args, copyContextAvailable: true });
+  expect(withCopy).toContainEqual(
+    expect.objectContaining({
+      content: expect.objectContaining({ kind: 'footer', isLive: true }),
+    })
+  );
+  const unchanged = buildChatVirtualRows({ ...args, copyContextAvailable: true });
+  expect(unchanged.every((row, index) => row === withCopy[index])).toBe(true);
+
+  const displaced = buildChatVirtualRows({ ...args, lastAssistantMessageId: 'newer-turn' });
+  expect(displaced.some((row) => row.type === 'assistant' && row.content.kind === 'footer')).toBe(
+    false
+  );
+});
+
+/* An active copy action is bound to ONE footer by `isLive`. That bound is only
+   as good as the memo: a displaced turn's rebuilt row differs from the mounted
+   one by this flag alone, so if the comparison ignores it the old footer keeps
+   its active action state beside the new turn. */
+it('reports a displaced turn footer as changed when it stops being the live one', () => {
+  const abandoned = wrap(makeMessage('turn-abandoned', 'assistant', [toolCall()], false));
+  const footerOf = (rows: ReturnType<typeof build>, messageId: string) =>
+    rows.find((row) => row.key === `assistant:${messageId}:footer`);
+
+  const whileLive = footerOf(build([abandoned], { copyContextAvailable: true }), 'turn-abandoned');
+  expect(whileLive).toMatchObject({ content: { kind: 'footer', isLive: true } });
+
+  const newTurn = wrap(makeMessage('turn-new', 'assistant', [text('taking over')], false));
+  const afterRows = build([abandoned, newTurn], { copyContextAvailable: true });
+  const afterDisplaced = footerOf(afterRows, 'turn-abandoned');
+  expect(afterDisplaced).toMatchObject({ content: { kind: 'footer', isLive: false } });
+  expect(footerOf(afterRows, 'turn-new')).toMatchObject({
+    content: { kind: 'footer', isLive: true },
+  });
+
+  expect(whileLive).toBeDefined();
+  expect(afterDisplaced).toBeDefined();
+  expect(areAssistantChatVirtualRowsEqual(whileLive!, afterDisplaced!)).toBe(false);
 });

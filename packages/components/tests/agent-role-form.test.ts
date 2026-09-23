@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { reconcileAgentRoleSchema } from '../src/lib/agent-role-schema-reconciliation';
 import {
   AGENT_ROLE_VERSION,
+  type AcpCapabilityCacheEntry,
   type AgentConfigId,
   type AgentRole,
   type AgentRoleId,
@@ -44,6 +46,131 @@ const formValue = (overrides: Partial<AgentRoleFormValue> = {}): AgentRoleFormVa
 });
 
 const createId = () => 'new-role' as AgentRoleId;
+
+describe('automatic role schema reconciliation', () => {
+  const capability: AcpCapabilityCacheEntry = {
+    cliType: 'builtin',
+    agentType: 'codex',
+    provenance: 'runtime',
+    fetchedAt: 1,
+    modes: [],
+    models: [],
+    configOptions: [
+      {
+        id: 'model',
+        category: 'model',
+        name: 'Model',
+        type: 'select',
+        currentValue: 'retired-model',
+        options: [],
+      },
+      { id: 'plan_mode', name: 'Plan', type: 'boolean', currentValue: false },
+      {
+        id: 'effort',
+        name: 'Effort',
+        type: 'select',
+        currentValue: 'high',
+        options: [{ value: 'high', name: 'High' }],
+      },
+    ],
+  };
+
+  it('removes retired fields, migrates Plan and preserves model, permissions and invalid values', () => {
+    const before = role({
+      runConfig: {
+        modelId: 'retired-model',
+        modeId: 'strict',
+        configOptionValues: {
+          interaction_mode: 'code',
+          collaboration_mode: 'plan',
+          effort: 'invalid',
+          _permission: 'ask',
+          sandbox: 'read-only',
+          future_removed: false,
+        },
+      },
+    });
+    const after = reconcileAgentRoleSchema(before, capability);
+    expect(after.runConfig).toEqual({
+      modelId: 'retired-model',
+      modeId: 'strict',
+      configOptionValues: {
+        effort: 'invalid',
+        _permission: 'ask',
+        sandbox: 'read-only',
+        plan_mode: true,
+      },
+    });
+    expect(before.runConfig.configOptionValues?.collaboration_mode).toBe('plan');
+    expect(reconcileAgentRoleSchema(after, capability)).toBe(after);
+  });
+
+  it('keeps an explicit new Plan value and leaves advertised legacy fields intact', () => {
+    const before = role({
+      runConfig: { configOptionValues: { plan_mode: false, collaboration_mode: 'plan' } },
+    });
+    expect(reconcileAgentRoleSchema(before, capability).runConfig.configOptionValues).toEqual({
+      plan_mode: false,
+    });
+    expect(
+      reconcileAgentRoleSchema(before, {
+        ...capability,
+        configOptions: [
+          ...capability.configOptions!,
+          {
+            id: 'collaboration_mode',
+            name: 'Plan',
+            type: 'select',
+            currentValue: 'default',
+            options: [],
+          },
+        ],
+      })
+    ).toBe(before);
+  });
+
+  it('does not infer removals from absent or provisional schemas', () => {
+    const before = role({ runConfig: { configOptionValues: { unknown: 'keep' } } });
+    expect(reconcileAgentRoleSchema(before, { ...capability, configOptions: undefined })).toBe(
+      before
+    );
+    expect(reconcileAgentRoleSchema(before, { ...capability, provenance: undefined })).toBe(before);
+    expect(
+      reconcileAgentRoleSchema(before, { ...capability, configOptions: [] }).runConfig
+        .configOptionValues
+    ).toEqual({});
+  });
+
+  it('preserves model-dependent options when the probe describes another model', () => {
+    const before = role({
+      runConfig: {
+        modelId: 'another-model',
+        configOptionValues: {
+          model_specific: true,
+          collaboration_mode: 'plan',
+        },
+      },
+    });
+    expect(reconcileAgentRoleSchema(before, capability).runConfig).toEqual({
+      modelId: 'another-model',
+      configOptionValues: { model_specific: true, plan_mode: true },
+    });
+  });
+
+  it.each([
+    [{ interaction_mode: 'plan' }, true],
+    [{ interaction_mode: 'plan', collaboration_mode: 'default' }, false],
+    [{ interaction_mode: 'plan', plan_mode: false }, false],
+  ] as const)(
+    'preserves legacy interaction Plan with explicit newer choices taking precedence: %j',
+    (values, enabled) => {
+      const before = role({ runConfig: { configOptionValues: values } });
+      expect(reconcileAgentRoleSchema(before, capability).runConfig.configOptionValues).toEqual({
+        plan_mode: enabled,
+      });
+    }
+  );
+});
 
 const selectorOptions = (overrides: Partial<AcpSelectorOptions> = {}): AcpSelectorOptions => ({
   capabilityAuthority: 'authoritative',

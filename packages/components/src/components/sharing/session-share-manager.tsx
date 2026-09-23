@@ -1,0 +1,449 @@
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Check, Copy, Globe } from 'lucide-react';
+import { SHARE_LIMITS } from '@lody/shared/session-sharing';
+import type { useSessionShareManagement } from '@/hooks/use-session-share-management';
+import { cn } from '@/lib/utils';
+import { Button } from '@/ui/button';
+import { Checkbox } from '@/ui/checkbox';
+import { Progress } from '@/ui/progress';
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+  AlertDialogAction,
+} from '@/ui/alert-dialog';
+
+export type ShareCandidate = { sessionId: string; title: string };
+export type SessionShareManagerProps = ReturnType<typeof useSessionShareManagement> & {
+  sessionId: string;
+  candidates: ShareCandidate[];
+  selectionLocked?: boolean;
+  onClose?: () => void;
+};
+
+/** Which panel the dialog shows. One screen at a time, one primary action each. */
+type ShareStep = 'loading' | 'setup' | 'publishing' | 'published';
+
+/**
+ * Animates the dialog's height between steps so the panel grows into the next
+ * screen instead of snapping. The measured child is the only source of height:
+ * a step whose own content changes (an error appearing)
+ * resizes with the same transition.
+ */
+function StepTransition({ step, children }: { step: ShareStep; children: ReactNode }) {
+  const inner = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState<number>();
+  useLayoutEffect(() => {
+    const node = inner.current;
+    if (!node) return undefined;
+    const observer = new ResizeObserver(() => setHeight(node.offsetHeight));
+    observer.observe(node);
+    setHeight(node.offsetHeight);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <div
+      className="relative overflow-hidden transition-[height] duration-300 ease-out motion-reduce:transition-none"
+      style={{ height }}
+    >
+      <div ref={inner}>
+        <div
+          key={step}
+          className="duration-200 animate-in fade-in-0 slide-in-from-right-1 motion-reduce:animate-none"
+        >
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The bearer link, always selectable so a failed clipboard write is recoverable. */
+function ShareLinkField({ url, onCopy, busy }: { url: string; onCopy: () => void; busy: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex items-center gap-1 rounded-md border border-input-border bg-input-field py-1 pl-2.5 pr-1">
+      <input
+        readOnly
+        value={url}
+        aria-label={t('sharing.static.linkLabel', 'Share link')}
+        onFocus={(event) => event.currentTarget.select()}
+        className="min-w-0 flex-1 truncate bg-transparent font-mono text-xs text-muted-foreground outline-hidden"
+      />
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        disabled={busy}
+        onClick={onCopy}
+        aria-label={t('settings.shares.copy', 'Copy link')}
+        className="h-6 w-6 shrink-0 p-0"
+      >
+        <Copy className="size-3.5" />
+      </Button>
+    </div>
+  );
+}
+
+function Note({ tone = 'muted', children }: { tone?: 'muted' | 'alert'; children: ReactNode }) {
+  return (
+    <p
+      role={tone === 'alert' ? 'alert' : undefined}
+      className={cn(
+        'text-xs leading-5',
+        tone === 'alert' ? 'text-destructive' : 'text-muted-foreground'
+      )}
+    >
+      {children}
+    </p>
+  );
+}
+
+/** Pure controls: only a human's action uploads and publishes the frozen package. */
+export function SessionShareManager(props: SessionShareManagerProps) {
+  const { t } = useTranslation();
+  const { entry, hasPending, busy, phase, result, conflict, selectionLocked } = props;
+  const [confirming, setConfirming] = useState<{
+    kind: 'reset' | 'revoke';
+    revision: number;
+  } | null>(null);
+  const children = props.candidates.filter((c) => c.sessionId !== props.sessionId);
+  // One switch, but never a lie about scope: a share that carries only some of
+  // the current children reads as indeterminate until the user commits to all.
+  const shareableChildren = children.slice(0, SHARE_LIMITS.conversations - 1);
+  const selectedChildren = shareableChildren.filter((c) =>
+    props.selected.includes(c.sessionId)
+  ).length;
+  const includeChildren: boolean | 'indeterminate' =
+    selectedChildren === 0
+      ? false
+      : selectedChildren >= shareableChildren.length
+        ? true
+        : 'indeterminate';
+  const active = entry?.status === 'active';
+  const canPublish = entry === null || !!entry?.canManage || entry?.status === 'revoked';
+  const publishing = phase === 'capturing' || phase === 'uploading' || phase === 'publishing';
+  const step: ShareStep = (() => {
+    if (entry === undefined) return 'loading';
+    if (publishing) return 'publishing';
+    if (result) return 'published';
+    return 'setup';
+  })();
+
+  const toggleChildren = (checked: boolean) =>
+    props.onSelect(
+      checked ? [props.sessionId, ...shareableChildren.map((c) => c.sessionId)] : [props.sessionId]
+    );
+
+  const publishLabel = active
+    ? t('sharing.static.update', 'Update share')
+    : t('sharing.static.share', 'Share conversation');
+  const retrying = !!props.error && hasPending;
+
+  const body = (() => {
+    if (step === 'loading')
+      return (
+        <div className="space-y-3 px-5 pb-5" aria-busy="true">
+          <div className="h-4 w-3/4 animate-pulse rounded bg-muted" />
+          <div className="h-3 w-full animate-pulse rounded bg-muted" />
+          <div className="h-3 w-2/3 animate-pulse rounded bg-muted" />
+          <span className="sr-only">{t('common.loading', 'Loading…')}</span>
+        </div>
+      );
+    if (step === 'publishing') {
+      const label =
+        phase === 'uploading'
+          ? t('sharing.static.phaseUploading', 'Uploading the copy… {{progress}}%', {
+              progress: props.progress,
+            })
+          : phase === 'publishing'
+            ? t('sharing.static.phasePublishing', 'Publishing…')
+            : t('sharing.static.phaseCapturing', 'Freezing this conversation…');
+      return (
+        <div className="space-y-3 px-5 pb-6 pt-1">
+          <p role="status" className="text-sm text-foreground">
+            {label}
+          </p>
+          <Progress
+            className="h-1 bg-muted"
+            indeterminate={phase !== 'uploading'}
+            value={props.progress}
+          />
+          <Note>{t('sharing.static.phaseHint', 'Keep this dialog open until it finishes.')}</Note>
+        </div>
+      );
+    }
+    if (step === 'published')
+      return (
+        <div className="space-y-3 px-5 pb-5 pt-1">
+          <div className="flex items-center gap-2">
+            <Check className="size-4 text-emerald-500" aria-hidden />
+            <p className="text-sm font-medium text-foreground">
+              {result?.copied
+                ? t('sharing.static.publishedCopied', 'Shared. Link copied to your clipboard.')
+                : t('sharing.static.published', 'Shared.')}
+            </p>
+          </div>
+          {result?.url ? (
+            <>
+              <ShareLinkField url={result.url} busy={busy} onCopy={() => void props.onCopy()} />
+              {!result.copied && (
+                <Note>
+                  {t(
+                    'sharing.static.copyFallback',
+                    'Automatic copying was blocked. Copy the link above.'
+                  )}
+                </Note>
+              )}
+            </>
+          ) : (
+            <Note>
+              {t(
+                'settings.shares.secretMissing',
+                'The link credential is not saved on this device.'
+              )}
+            </Note>
+          )}
+          {props.error && <Note tone="alert">{props.error}</Note>}
+        </div>
+      );
+    return (
+      <div className="space-y-3 px-5 pb-5 pt-1">
+        {active ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <Globe className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+            <span>
+              {t('sharing.static.publicNotice', 'Anyone with the link can view this conversation.')}
+            </span>
+          </div>
+        ) : (
+          <p className="text-sm leading-6 text-muted-foreground">
+            {t('sharing.static.publicNotice', 'Anyone with the link can view this conversation.')}
+          </p>
+        )}
+        {active && props.shareLink && (
+          <ShareLinkField url={props.shareLink} busy={busy} onCopy={() => void props.onCopy()} />
+        )}
+        {entry?.status === 'revoked' && (
+          <Note>
+            {t(
+              'sharing.static.revokedNotice',
+              'The previous link was revoked. Sharing again creates a new link.'
+            )}
+          </Note>
+        )}
+        {!canPublish && (
+          <Note>
+            {t(
+              'settings.shares.otherPublisher',
+              'Published by another workspace member. Link credentials are private to the publisher.'
+            )}
+          </Note>
+        )}
+        {active && canPublish && (
+          <Note>
+            {t(
+              'sharing.static.updateNotice',
+              'Updating replaces the published copy with the current history and its public title. The link stays the same.'
+            )}
+          </Note>
+        )}
+        {children.length > 0 && canPublish && !selectionLocked && (
+          <label className="-mx-2 flex cursor-pointer items-center gap-2.5 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-hover has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60">
+            <Checkbox
+              checked={includeChildren}
+              disabled={busy}
+              onCheckedChange={(checked) => toggleChildren(checked !== false)}
+            />
+            <span>
+              {includeChildren === 'indeterminate'
+                ? t(
+                    'sharing.static.includeChildrenPartial',
+                    'Also share sub-conversations ({{selected}} of {{count}})',
+                    { selected: selectedChildren, count: shareableChildren.length }
+                  )
+                : t('sharing.static.includeChildren', 'Also share {{count}} sub-conversations', {
+                    count: shareableChildren.length,
+                  })}
+            </span>
+          </label>
+        )}
+        {children.length >= SHARE_LIMITS.conversations && (
+          <Note>
+            {t('sharing.static.limit', 'A share can contain at most {{count}} conversations.', {
+              count: SHARE_LIMITS.conversations,
+            })}
+          </Note>
+        )}
+        <Note>
+          {t(
+            'sharing.static.attachmentNotice',
+            'Images are also shared. File attachments are not included.'
+          )}
+        </Note>
+        {!props.canCapture && canPublish && (
+          <Note>
+            {t(
+              'sharing.static.sourceUnavailable',
+              'The selected source conversations are unavailable. The published copy is unchanged.'
+            )}
+          </Note>
+        )}
+        {active && entry?.canManage && !props.hasSecret && (
+          <div className="space-y-2">
+            <Note>
+              {t(
+                'settings.shares.secretMissing',
+                'The link credential is not saved on this device.'
+              )}
+            </Note>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={busy}
+              onClick={() => setConfirming({ kind: 'reset', revision: entry.revision })}
+            >
+              {t('sharing.static.reset', 'Reset link')}
+            </Button>
+          </div>
+        )}
+        {conflict && (
+          <Note tone="alert">
+            {t(
+              'sharing.static.conflict',
+              'This share changed somewhere else. Start over to publish the current content.'
+            )}
+          </Note>
+        )}
+        {props.error && <Note tone="alert">{props.error}</Note>}
+        {props.notice && (
+          <p role="status" className="text-xs text-muted-foreground">
+            {props.notice}
+          </p>
+        )}
+      </div>
+    );
+  })();
+
+  const footer = (() => {
+    if (step === 'loading' || step === 'publishing') return null;
+    if (step === 'published')
+      return (
+        <>
+          {entry?.canRevoke && (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={busy}
+              className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+              onClick={() => setConfirming({ kind: 'revoke', revision: entry.revision })}
+            >
+              {t('sharing.static.revoke', 'Revoke share')}
+            </Button>
+          )}
+          <div className="flex-1" />
+          <Button size="sm" disabled={busy || !result?.url} onClick={() => void props.onCopy()}>
+            {t('settings.shares.copy', 'Copy link')}
+          </Button>
+        </>
+      );
+    return (
+      <>
+        {entry?.canRevoke && (
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+            onClick={() => setConfirming({ kind: 'revoke', revision: entry.revision })}
+          >
+            {t('sharing.static.revoke', 'Revoke share')}
+          </Button>
+        )}
+        <div className="flex-1" />
+        {active && props.shareLink && (
+          <Button variant="outline" size="sm" disabled={busy} onClick={() => void props.onCopy()}>
+            {t('settings.shares.copy', 'Copy link')}
+          </Button>
+        )}
+        {!canPublish ? (
+          <Button variant="outline" size="sm" onClick={props.onClose}>
+            {t('common.close', 'Close')}
+          </Button>
+        ) : (
+          <>
+            {!active && (
+              <Button variant="ghost" size="sm" disabled={busy} onClick={props.onClose}>
+                {t('common.cancel', 'Cancel')}
+              </Button>
+            )}
+            <Button
+              size="sm"
+              disabled={busy || (!props.canCapture && !conflict)}
+              onClick={() => (conflict ? props.onDiscard() : void props.onPublish())}
+            >
+              {conflict
+                ? t('sharing.static.startOver', 'Start over')
+                : retrying
+                  ? t('common.retry', 'Retry')
+                  : publishLabel}
+            </Button>
+          </>
+        )}
+      </>
+    );
+  })();
+
+  return (
+    <div className="flex min-h-full flex-col">
+      <StepTransition step={step}>{body}</StepTransition>
+      {footer && (
+        <div className="sticky bottom-0 mt-auto flex flex-wrap items-center gap-2 border-t border-border/60 bg-background px-5 py-3">
+          {footer}
+        </div>
+      )}
+      <AlertDialog
+        open={confirming !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirming(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {confirming?.kind === 'reset'
+                ? t('sharing.static.reset', 'Reset link')
+                : t('sharing.static.revoke', 'Revoke share')}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {t(
+                'sharing.static.invalidateNotice',
+                'The previous link will stop working. Downloaded copies cannot be recalled.'
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t('common.cancel', 'Cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={busy || confirming?.revision !== entry?.revision}
+              onClick={() => {
+                if (!confirming || confirming.revision !== entry?.revision) return;
+                if (confirming.kind === 'reset') void props.onReset();
+                else void props.onRevoke();
+                setConfirming(null);
+              }}
+            >
+              {t('common.confirm', 'Confirm')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}

@@ -4,11 +4,14 @@
 
 ## Mirrors over synced docs tolerate unknown root keys
 
-Every `new Mirror(...)` over a doc that syncs between clients must pass
-`ignoreUnknownProperties: true`. Peers on a newer schema write root keys this
-build does not declare; without the flag loro-mirror rejects the entire state
-with `Unknown property: <key>`, so the older client can never write to that doc
-again. Contract test: `packages/shared/tests/session-doc-forward-compat.test.ts`.
+Every synced Mirror must use `ignoreUnknownProperties: true`: otherwise an
+unknown root from a newer peer blocks writes on this client. Regression:
+`packages/shared/tests/session-doc-forward-compat.test.ts`.
+
+SessionDocument's private Mirror is control-only. HistoryWriter owns writes;
+SessionData owns reads. CLI execution methods in `session-agent-writes.ts` reuse
+shared planners over that writer, not UI port methods or a second writer.
+Replacement rules: [shared](../../../../../packages/shared/AGENTS.md#session-history).
 
 ## Opening a doc pulls its stream
 
@@ -45,7 +48,80 @@ Rules:
   teardown write status/meta for docs that must stay hidden (e.g. unfinished
   fork targets).
 
-The dispatch watcher learned this the hard way — twice (reconnect-triggered
-bootstrap scans fanning out over every owned room). Its current contract,
-"session metadata is the activation index", is documented in
-`../../session/AGENTS.md` and applies to any new module that enumerates rooms.
+The dispatch watcher's contract, "session metadata is the activation index", is
+documented in `../../session/AGENTS.md` and applies to any module enumerating rooms.
+
+## Shared ACP runtime config contains no secrets
+
+`SessionDocument.applyAcpRuntimeConfigPatch` is the durable boundary for the
+workspace-shared runtime baseline. It must remove every option id matched by
+`isSensitiveAcpConfigOptionId`, even when an upstream caller already filtered the
+ACP response; otherwise a future agent can persist and broadcast credential-like
+selector values to collaborators.
+
+## Presence is ephemeral and partitioned by origin
+
+Read [the presence rules](../../../../../.agents/docs/cli-lib-loro-presence.md) before
+publishing presence or changing `presence.ts`/`session-active-presence.ts`: the origin
+partition and the two stores, the single-owner rule for session active presence, and
+turn-finalization side effects. Intent and the reader contract:
+`specs/loro-ephemeral-presence-channel.md`.
+
+A workspace has ONE serial presence queue and the machine heartbeat shares it. Trigger
+a presence write ONLY from a timer, a lifecycle transition, or a user navigation,
+NEVER from a stream/progress/chunk callback however small one payload is, and bound
+every field in `packages/shared/src/presence.ts`. A burst delays the heartbeat past
+its 90s freshness window while the room still reports `joined`, so the machine reads
+offline with no error raised anywhere. The `(phase, detail)` dedupe is NOT a rate
+limit: a detail that changes per emit (percentage, counter, label) defeats it.
+
+Never reintroduce periodic doc-meta writes (`lastSeen`/`lastRunningSeen`) — they stall
+Loro flush; meta timestamps are written only at status transitions. Durable
+`MachineMeta.lastSeen` is retired (not written even at registration); machine online
+checks read presence only, and `getOnlineMachineIds()` returning null means the
+presence room is not joined — status unknown, not offline.
+
+## Device resources use `machine-monitor.ts`
+
+Local renderer observer/snapshot state crosses protocol-v6 `machine-monitor` frames
+and MUST sample without a cloud transport. Cloud observers/snapshots attach only after
+the authorized remote bridge attaches, and detach on offline/revocation. Sampling is
+observer-lease driven; never start OS probes permanently or persist snapshots.
+
+## Machine Flock writes for this machine are local-first
+
+After `repo.flush()`, call `LoroDocumentManager.markMachineFlockDocDirty(...)` (or pass
+the manager as the sync scheduler) instead of awaiting `handle.syncOnce()` in a
+user/RPC request path. `machine-flock-sync-coordinator.ts` owns the live room, dirty
+state, and exponential retry; request-scoped `syncOnce()` failures must not make local
+project add/update flows fail after the local write is durable.
+
+## Durable commands are scanned, not evented
+
+`machine-flock-command-watcher.ts` owns the machine's durable COMMAND subscription
+(archive/delete/delete-local-project/provider-setup), separately from the sync
+coordinator's write room. Flock rows are durable, so reconnect correctness is
+SCAN-based: every authoritative join rescans every queue, and join or initial-sync
+failures retry with bounded backoff. Events are only low-latency wakeups and carry
+`authoritative`, which gates provider setup — a stale local setup row must not outrun
+a remote cancellation. Route both the event and rejoin paths through
+`MessageHandler.rescanMachineCommands`; a family wired to only one of them fails
+silently, because its queue stops draining. Room-status recovery uses the shared
+`isRecoverableStreamsRoomStatus` ('detached' is never recoverable). Local project
+removal rules live in [../AGENTS.md](../AGENTS.md).
+
+## Streams recovery has TWO signals and they must not be recombined
+
+`connection-recovery.ts` has TWO signals. `onStreamsOnline` is cheap, unthrottled, and
+fires on every health rising edge — it RELEASES work parked while offline (dirty
+Machine Flock docs, which arm no timer of their own, plus the task/review automation
+queues). `onMetaRoomSynced` is the EXPENSIVE "rescan the workspace index" signal whose
+listeners do O(rooms) work: it waits for meta catch-up and is rate-limited to one
+fan-out per `LODY_LORO_META_SYNCED_MIN_INTERVAL_MS` (30s), deferred and never dropped,
+because the dispatch bootstrap scan is the only retry path for a session whose
+reconcile threw. A fan-out after a real meta-room outage skips that floor; a
+transport-only flap does not. Recombining them turned a single stuck room into ~3400
+session reconciles/minute. Backoff is flap-aware for the same reason: health that does
+not survive `LODY_LORO_HEALTH_STABILITY_WINDOW_MS` (5s) counts as a failed recovery and
+charges the attempt counter instead of resetting it, and `force` must not clear that
+history. Regression: `tests/reconnect-storm-repro.test.ts`.

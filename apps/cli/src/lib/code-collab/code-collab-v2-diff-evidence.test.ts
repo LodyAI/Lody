@@ -77,6 +77,50 @@ describe('Code Collab v2 ACP diff evidence normalization', () => {
     });
   });
 
+  it('keeps empty-file create and delete evidence lossless', async () => {
+    await expect(
+      pendingEventFromStandardDiffEvidence({
+        workspaceRoot: WORKSPACE_ROOT,
+        diff: { path: '/workspace/empty-created.txt', oldText: null, newText: '' },
+        readCurrentText: async () => '',
+      })
+    ).resolves.toMatchObject({
+      path: '/workspace/empty-created.txt',
+      oldText: null,
+      newText: '',
+      oldTextEvidence: 'standard-null',
+    });
+
+    await expect(
+      pendingEventFromAgentEditEvidence({
+        workspaceRoot: WORKSPACE_ROOT,
+        edit: { path: '/workspace/empty-deleted.txt', changeType: 'delete' },
+        latestText: { status: 'tracked', text: '' },
+        readCurrentText: async () => null,
+      })
+    ).resolves.toMatchObject({
+      path: '/workspace/empty-deleted.txt',
+      oldText: '',
+      newText: null,
+      oldTextEvidence: 'strong',
+    });
+  });
+
+  it('keeps an identical full-file write as evidence for the diff layer', () => {
+    expect(
+      pendingEventFromWriteTextFileEvidence({
+        path: '/workspace/unchanged.txt',
+        oldText: 'same\n',
+        newText: 'same\n',
+      })
+    ).toEqual({
+      path: '/workspace/unchanged.txt',
+      oldText: 'same\n',
+      newText: 'same\n',
+      oldTextEvidence: 'strong',
+    });
+  });
+
   it('does not accept standard-null evidence when the current file does not match newText', async () => {
     const event = await pendingEventFromStandardDiffEvidence({
       workspaceRoot: WORKSPACE_ROOT,

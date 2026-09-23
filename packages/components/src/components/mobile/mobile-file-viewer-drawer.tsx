@@ -70,6 +70,7 @@ export function MobileFileViewerDrawer({
     <>
       <Drawer
         direction="right"
+        // The shared Drawer selects live viewport insets on non-iOS native shells.
         repositionInputs={isNativeAppShell()}
         open={open}
         onOpenChange={(nextOpen) => {

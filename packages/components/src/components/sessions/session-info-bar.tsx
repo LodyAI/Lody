@@ -1,9 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { LockKeyhole, MonitorPlay } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import type { PendingScheduledTask, SessionGoalCommand, SessionGoalMessage } from '@lody/shared';
-import type { SessionPullRequestMeta } from '@lody/shared';
+import type {
+  PendingScheduledTask,
+  SessionGoalCommand,
+  SessionGoalMessage,
+  SessionPullRequestCiState,
+  SessionPullRequestMeta,
+} from '@lody/shared';
 import { sanitizeGoalObjective } from '@lody/shared';
+import { INFO_BAR_ELEVATION_CLASS } from '@/components/chat/composer-surface';
 import { ConversationColumn } from '@/components/shared/conversation-column';
 import { cn } from '@/lib/utils';
 import { ActionChip } from './info-chip';
@@ -12,7 +18,6 @@ import {
   GoalChip,
   ScheduleChip,
   StatusChip,
-  TaskChip,
   ScheduleSourceChip,
   useScheduledTaskSignature,
   type GoalChipCommandHandler,
@@ -23,14 +28,17 @@ import {
 import type { SessionStatusStripState } from './session-status-strip';
 import { SessionSyncingIndicator } from './session-syncing-indicator';
 
-export type InfoBarItemKey = 'status' | 'goal' | 'schedule' | 'task' | 'scheduleSource' | 'context';
+export type InfoBarItemKey = 'status' | 'goal' | 'schedule' | 'scheduleSource' | 'context';
 
 export type SessionInfoBarProps = {
   status: SessionStatusStripState | null;
-  /** Task this session belongs to; the chip is the way back to it. */
-  task?: { taskId: string; title: string } | null;
-  onOpenTask?: (taskId: string) => void;
+  /** The schedule that started this session; the chip is the way back to it. */
   scheduleSource?: { title: string; onOpen: () => void } | null;
+  /**
+   * The queued-turn sheet. Not a bar item: it sits on the bar's top edge, or,
+   * when the bar has nothing to show, directly on the composer below.
+   */
+  queue?: ReactNode;
   /** Active/paused/terminal goal snapshot; the chip replaces the old sticky top banner. */
   goal?: SessionGoalMessage | null;
   goalCommands?: readonly SessionGoalCommand[];
@@ -42,6 +50,8 @@ export type SessionInfoBarProps = {
   /** CI check runs for the session's PR; cluster-only verdict chip (click = popover). */
   prCiRuns?: readonly PrCiRun[];
   onOpenPrCiRun?: (run: PrCiRun) => void;
+  /** Compact CI state from the session row; live runs override it when present. */
+  prCiState?: SessionPullRequestCiState | null;
   projectName?: string | null;
   branch?: string | null;
   /** The session's on-disk location (worktree vs local folder) + its resolved
@@ -103,6 +113,10 @@ export type SessionInfoBarProps = {
  * The message queue intentionally stays OUT of the bar — pending sends need
  * persistent visibility and direct manipulation next to the composer.
  */
+/* The queue sheet is inset past the rounded corners of the surface it sits on
+   (the bar pill or the composer), so its square bottom meets a straight edge. */
+const QUEUE_SHEET_INSET_CLASS = 'mx-3';
+
 export function SessionInfoBar({
   status,
   goal,
@@ -110,12 +124,11 @@ export function SessionInfoBar({
   goalPendingCommand,
   onGoalCommand,
   onGoalDismiss,
-  task,
-  onOpenTask,
   scheduleSource,
   scheduledTasks,
   prCiRuns,
   onOpenPrCiRun,
+  prCiState,
   projectName,
   branch,
   workspaceLocation,
@@ -129,6 +142,7 @@ export function SessionInfoBar({
   syncing = false,
   protectFromEdgeBackZone = false,
   initialStage,
+  queue,
 }: SessionInfoBarProps) {
   const { t } = useTranslation();
   const hasDiff = diffStat != null && diffStat.add + diffStat.del > 0;
@@ -138,18 +152,16 @@ export function SessionInfoBar({
   const scheduleSignature = useScheduledTaskSignature(scheduledTasks);
   const hasSchedule = scheduleSignature !== null;
   const hasStatus = !!status;
-  const hasTask = !!task;
 
   const present: Record<InfoBarItemKey, boolean> = {
     status: hasStatus,
     goal: hasGoal,
     schedule: hasSchedule,
-    task: hasTask,
     scheduleSource: !!scheduleSource,
     context: hasContext,
   };
   const defaultKey =
-    (['context', 'status', 'goal', 'schedule', 'task', 'scheduleSource'] as const).find(
+    (['context', 'status', 'goal', 'schedule', 'scheduleSource'] as const).find(
       (key) => present[key]
     ) ?? null;
 
@@ -173,12 +185,10 @@ export function SessionInfoBar({
     : null;
 
   const mountedRef = useRef(false);
-  const taskSignature = task ? `${task.taskId}:${task.title}` : null;
   const prevRef = useRef({
     status: statusSignature,
     goal: goalSignature,
     schedule: scheduleSignature,
-    task: taskSignature,
     context: contextSignature,
   });
   useEffect(() => {
@@ -193,8 +203,6 @@ export function SessionInfoBar({
       setStage('goal');
     } else if (scheduleSignature !== prev.schedule && scheduleSignature !== null) {
       setStage('schedule');
-    } else if (taskSignature !== prev.task && taskSignature !== null) {
-      setStage('task');
     } else if (contextSignature !== prev.context && contextSignature !== null) {
       setStage('context');
     }
@@ -202,16 +210,28 @@ export function SessionInfoBar({
       status: statusSignature,
       goal: goalSignature,
       schedule: scheduleSignature,
-      task: taskSignature,
       context: contextSignature,
     };
-  }, [statusSignature, goalSignature, scheduleSignature, taskSignature, contextSignature]);
+  }, [statusSignature, goalSignature, scheduleSignature, contextSignature]);
 
   // With no staged items the bar hides unless it still owns a standalone
   // action or ambient syncing state. A reported preview is often the only
   // context a chat-only Session has, so dropping the Browser action here would
   // leave no visible path from the report to the preview.
-  if (!defaultKey && !onOpenBrowser && !syncing && !privateAccessStatus) return null;
+  // The bar owns the gap above the composer (the session composer skips its own
+  // spacer): 8px under the pill, none under a queue sheet (it sits on the
+  // composer), and the plain 4px when there is nothing to show.
+  if (!defaultKey && !onOpenBrowser && !syncing && !privateAccessStatus) {
+    return queue ? (
+      <div className="w-full shrink-0 bg-background">
+        <ConversationColumn>
+          <div className={QUEUE_SHEET_INSET_CLASS}>{queue}</div>
+        </ConversationColumn>
+      </div>
+    ) : (
+      <div aria-hidden="true" className="h-1 w-full shrink-0" />
+    );
+  }
 
   // Derived, never null while any item is present: if the staged item's data
   // disappeared (goal dismissed, machine back online), fall back to the
@@ -251,15 +271,6 @@ export function SessionInfoBar({
             {...itemMode}
           />
         ) : null;
-      case 'task':
-        return task ? (
-          <TaskChip
-            key={key}
-            title={task.title}
-            onOpen={onOpenTask ? () => onOpenTask(task.taskId) : undefined}
-            {...itemMode}
-          />
-        ) : null;
       case 'context':
         return hasContext ? (
           <ContextChip
@@ -274,6 +285,7 @@ export function SessionInfoBar({
             diffStat={diffStat}
             prCiRuns={prCiRuns}
             onOpenPrCiRun={onOpenPrCiRun}
+            prCiState={prCiState}
             {...itemMode}
           />
         ) : null;
@@ -282,17 +294,16 @@ export function SessionInfoBar({
     }
   };
 
-  const clusterKeys = (
-    ['status', 'goal', 'schedule', 'task', 'scheduleSource', 'context'] as const
-  ).filter((key) => present[key] && key !== stagedKey);
+  const clusterKeys = (['status', 'goal', 'schedule', 'scheduleSource', 'context'] as const).filter(
+    (key) => present[key] && key !== stagedKey
+  );
   const clusterNonEmpty = clusterKeys.length > 0 || !!onOpenBrowser;
 
   return (
-    // Keep the bar in the composer's input-surface family, with a lighter
-    // opacity so it reads as the secondary tier of the same control stack.
+    // Light: same fill and lift as the session composer. Dark: recessed input.
     <div
       className={cn(
-        'w-full shrink-0 bg-background pb-1.5',
+        'w-full shrink-0 bg-background pb-2',
         /* Gutter is on ConversationColumn (same as stream + composer).
            The native session drawer's transparent edge-back strip is z-30 and
            spans the body's left 48px. Elevating this band keeps the leading
@@ -303,7 +314,16 @@ export function SessionInfoBar({
       {/* Same centered width as the composer content, so the bar and the
           input box share edges. */}
       <ConversationColumn>
-        <div className="@container flex h-8 w-full min-w-0 select-none items-center gap-1.5 rounded-md border border-foreground/[0.10] bg-background px-2.5 text-xs shadow-[0_1px_2px_hsl(0_0%_0%/0.03)] dark:border-input-border/45 dark:bg-input/70 dark:shadow-none">
+        {queue ? <div className={QUEUE_SHEET_INSET_CLASS}>{queue}</div> : null}
+        <div
+          className={cn(
+            '@container flex h-8 w-full min-w-0 select-none items-center gap-1.5 rounded-lg border-[0.5px] border-foreground/[0.10] bg-[hsl(var(--composer))] px-2.5 text-xs dark:border-input-border/45 dark:bg-input/70',
+            INFO_BAR_ELEVATION_CLASS,
+            // With the queue sheet seated on top, clip the shadow's upward bleed
+            // (its 1px spread) at the top edge only; sides and bottom keep it.
+            queue && '[clip-path:inset(0_-6px_-6px_-6px)]'
+          )}
+        >
           {privateAccessStatus ? (
             <button
               type="button"

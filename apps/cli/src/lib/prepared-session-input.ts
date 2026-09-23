@@ -2,11 +2,11 @@ import { isDeepStrictEqual } from 'node:util';
 import {
   getSessionRoomId,
   isLoroRepoDocDeleted,
-  type SessionHistory,
   type SessionHistoryInput,
   type SessionId,
   type SessionMeta,
 } from '@lody/shared';
+import { readSessionHistory, type SessionTurn } from '@lody/shared/session-data';
 import type { LoroDocumentManager } from './loro/doc';
 
 /** JSON-only preparation, persisted before any Session mutation. */
@@ -19,7 +19,14 @@ export type PreparedSessionInput = {
 
 export function hasSessionDispatchEvidence(
   meta: SessionMeta,
-  history: readonly SessionHistory[],
+  history: readonly {
+    id: string;
+    role: string;
+    status?: string;
+    userTurnId?: string;
+    finished?: boolean;
+    endedAt?: number;
+  }[],
   userTurnId: string
 ): boolean {
   const user = history.find((entry) => entry.id === userTurnId && entry.role === 'user');
@@ -49,7 +56,7 @@ export async function isPreparedSessionDispatched(
   const session = await manager.getOrCreateSessionDoc(prepared.sessionId);
   return hasSessionDispatchEvidence(
     record.meta as SessionMeta,
-    await session.getHistory(),
+    readSessionHistory(session.sessionData.history),
     prepared.userTurn.id
   );
 }
@@ -74,25 +81,22 @@ export async function materializePreparedSessionInput(
     }
   } else await manager.repo.upsertDocMeta(roomId, prepared.meta);
   const session = await manager.getOrCreateSessionDoc(prepared.sessionId);
-  await session.updateHistory((history) => {
-    const next = [...history];
-    for (const entry of [prepared.source, prepared.userTurn]) {
-      if (!entry) continue;
-      const prior = next.find((item) => item.id === entry.id);
-      if (prior) {
-        if (
-          prior.role !== entry.role ||
-          !isDeepStrictEqual(prior.items, entry.items) ||
-          !isDeepStrictEqual(
-            JSON.parse(JSON.stringify(prior.inputConfig ?? {})),
-            JSON.parse(JSON.stringify(entry.inputConfig ?? {}))
-          )
+  const history = readSessionHistory(session.sessionData.history);
+  for (const entry of [prepared.source, prepared.userTurn]) {
+    if (!entry) continue;
+    const prior = history.find((item) => item.id === entry.id);
+    if (prior) {
+      if (
+        prior.role !== entry.role ||
+        !isDeepStrictEqual(prior.items, entry.items) ||
+        !isDeepStrictEqual(
+          JSON.parse(JSON.stringify(prior.inputConfig ?? {})),
+          JSON.parse(JSON.stringify(entry.inputConfig ?? {}))
         )
-          throw new Error('Prepared Session Turn identity conflict');
-      } else next.push(entry);
-    }
-    return next;
-  });
+      )
+        throw new Error('Prepared Session Turn identity conflict');
+    } else await session.sessionData.commands.appendTurn(entry as unknown as SessionTurn);
+  }
   await manager.repo.flush();
 }
 

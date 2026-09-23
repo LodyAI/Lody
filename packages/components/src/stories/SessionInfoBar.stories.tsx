@@ -111,7 +111,6 @@ function StoryHarness({
   actionLabels,
   mergeAction = false,
   syncing = false,
-  task = null,
 }: {
   status?: SessionStatusStripState | null;
   goal?: SessionGoalMessage | null;
@@ -127,8 +126,7 @@ function StoryHarness({
   pr?: SessionPullRequestMeta | null;
   diffStat?: { add: number; del: number } | null;
   width?: number;
-  initialStage?: 'status' | 'goal' | 'schedule' | 'task' | 'context';
-  task?: { taskId: string; title: string } | null;
+  initialStage?: 'status' | 'goal' | 'schedule' | 'context';
   withPreview?: boolean;
   actionLabels?: string[];
   mergeAction?: boolean;
@@ -136,21 +134,28 @@ function StoryHarness({
 }) {
   const [currentGoal, setCurrentGoal] = useState(goal);
   const [mergeMethod, setMergeMethod] = useState<GitHubMergeMethod>('merge');
-  const contextActions: ContextChipAction[] | undefined = mergeAction
-    ? [
-        {
-          kind: 'merge',
-          id: 'merge',
-          method: mergeMethod,
-          onMerge: fn(),
-          onSelectMethod: setMergeMethod,
-        },
-      ]
-    : actionLabels?.map((label) => ({
-        id: label.toLowerCase().replaceAll(' ', '-'),
-        label,
-        onClick: fn(),
-      }));
+  // Priority order, highest first: `mergeAction` appends the merge control after
+  // any labelled actions, so a story can show it BOTH as the leading split button
+  // and demoted into the chevron behind a higher-priority Commit & Push.
+  const actions: ContextChipAction[] = [
+    ...(actionLabels ?? []).map((label) => ({
+      id: label.toLowerCase().replaceAll(' ', '-'),
+      label,
+      onClick: fn(),
+    })),
+    ...(mergeAction
+      ? [
+          {
+            kind: 'merge' as const,
+            id: 'merge' as const,
+            method: mergeMethod,
+            onMerge: fn(),
+            onSelectMethod: setMergeMethod,
+          },
+        ]
+      : []),
+  ];
+  const contextActions = actions.length > 0 ? actions : undefined;
   return (
     <div className="flex max-w-full flex-col" style={{ width }}>
       {/* Room above the bar so chip popovers (side=top) stay visible. */}
@@ -165,8 +170,6 @@ function StoryHarness({
         scheduledTasks={scheduledTasks}
         prCiRuns={prCiRuns}
         onOpenPrCiRun={fn()}
-        task={task}
-        onOpenTask={fn()}
         initialStage={initialStage}
         projectName={projectName}
         branch={branch}
@@ -362,6 +365,19 @@ export const DraftReadyForReview: Story = {
   },
 };
 
+/** Uncommitted work on a mergeable PR. Commit & Push outranks Merge, so the
+ *  split button is demoted to a plain chevron item that still merges with the
+ *  selected method — merging a stale PR head is exactly the mistake this ranking
+ *  exists to prevent. */
+export const DirtyWorktreeOutranksMerge: Story = {
+  name: 'Dirty worktree outranks Merge',
+  args: {
+    prCiRuns: CI_PASSING,
+    actionLabels: ['Commit & Push'],
+    mergeAction: true,
+  },
+};
+
 export const CiFailing: Story = { args: { prCiRuns: CI_FAILING } };
 
 export const CiFailingWithActions: Story = {
@@ -534,36 +550,4 @@ function PeekPlayground() {
 
 export const RecencyFocus: Story = {
   render: () => <PeekPlayground />,
-};
-
-/**
- * 会话属于某个任务时，簇里多一个 task chip——它是从工作现场回到任务的路。
- * 任务链接不是状态，所以保持中性色，不带语义色。
- */
-export const WithTask: Story = {
-  args: {
-    status: null,
-    task: { taskId: 't1', title: 'Refactor the auth flow' },
-    projectName: 'loro-dev/lody',
-    branch: 'feat/tasks',
-  },
-};
-
-/** 任务标题还没同步过来时，chip 退化为"未命名任务"而不是空白。 */
-export const WithUntitledTask: Story = {
-  args: {
-    status: null,
-    task: { taskId: 't1', title: '' },
-    projectName: 'loro-dev/lody',
-  },
-};
-
-/** task chip 作为舞台项时给出打开任务的动作。 */
-export const TaskStaged: Story = {
-  args: {
-    status: null,
-    task: { taskId: 't1', title: 'Ship the PR poller fix' },
-    projectName: 'loro-dev/lody',
-    initialStage: 'task',
-  },
 };

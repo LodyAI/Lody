@@ -33,6 +33,7 @@ import {
   makeLocalProbeClientAuto
 } from '@lody/shared/node/local-ipc'
 import { getLodyDataDir } from '@lody/shared/node/installation-profile'
+import { ACP_CAPABILITIES_REFRESH_CLIENT_BACKSTOP_MS } from '@lody/shared/acp-startup-budget'
 import type {
   LocalProjectControlRequest,
   LocalProjectControlResponse,
@@ -72,7 +73,12 @@ const CLI_ELECTRON_SESSION_TOKEN_ENV = 'LODY_ELECTRON_SESSION_TOKEN'
 // See apps/cli/src/commands/start.ts:ELECTRON_SESSION_USER_ID_ENV for rationale.
 const CLI_ELECTRON_SESSION_USER_ID_ENV = 'LODY_ELECTRON_SESSION_USER_ID'
 const LOCAL_SESSION_CONTROL_TIMEOUT_MS = 10_000
-const LOCAL_SESSION_CONTROL_ACP_REFRESH_TIMEOUT_MS = 120_000
+// The machine owns this deadline and answers with its own failure reason. This
+// is only a backstop for a daemon that died without replying, so it is derived
+// from the machine's worst case rather than set to a second, smaller number:
+// a 120s socket timeout here expired requests the CLI was still working on
+// (a cold `npx` init alone may run 300s) and reported them as our timeout.
+const LOCAL_SESSION_CONTROL_ACP_REFRESH_TIMEOUT_MS = ACP_CAPABILITIES_REFRESH_CLIENT_BACKSTOP_MS
 // Downloading + unpacking a registry agent binary can take minutes on a slow
 // link, so the local-control request must outlive the default before falling
 // back to Streams RPC.
@@ -265,6 +271,9 @@ function buildCliRuntimeEnvOverrides(): NodeJS.ProcessEnv {
   assignEnvIfPresent(env, 'LODY_AUTH_URL', import.meta.env.VITE_CONVEX_DEPLOY_URL)
   assignEnvIfPresent(env, 'LODY_AUTH_SITE_URL', import.meta.env.VITE_CONVEX_SITE_URL)
   assignEnvIfPresent(env, 'LODY_SERVER_URL', import.meta.env.VITE_SERVER_URL)
+  // Always shadow any inherited value: an unset bundled gateway must fall back to
+  // LODY_SERVER_URL in the CLI, never to a user-provided control origin.
+  env.LODY_PREVIEW_GATEWAY_URL = import.meta.env.VITE_PREVIEW_GATEWAY_URL?.trim() ?? ''
   assignEnvIfPresent(env, 'SITE_URL', import.meta.env.VITE_SITE_URL)
 
   return env

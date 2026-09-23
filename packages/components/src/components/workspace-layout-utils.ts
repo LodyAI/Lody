@@ -25,6 +25,53 @@ export const NATIVE_KEYBOARD_OFFSET_CLASS =
   'pb-[var(--native-keyboard-height)] transition-[padding-bottom] duration-[250ms] ease-out';
 
 /**
+ * Tailwind classes that inset a full-viewport layout root out of the device
+ * safe area at the top and sides (iPadOS status bar, display cutouts).
+ *
+ * The `--safe-area-*` variables resolve to `env(safe-area-inset-*)`
+ * (tailwind/index.css `:root`), which is `0px` on desktop and in any window
+ * that does not extend under system chrome — so this is a no-op on Electron and
+ * the browser, and it collapses on its own in Split View / Stage Manager, where
+ * iPadOS reports no inset.
+ *
+ * The desktop/web layout needs it because the iPad native shell renders THIS
+ * layout (viewport width ≥ 768, `detectAppDeviceClass()` is `tablet`) with
+ * `viewport-fit=cover`: without the inset the sidebar header and the session
+ * chrome are drawn edge-to-edge and share their first row with the system
+ * status bar. The mobile layout deliberately does not use this, because its
+ * surfaces inset their own headers.
+ *
+ * Top and sides only. The bottom safe area belongs to whichever surface sits
+ * against it — the composer shell
+ * (`getSessionChatInputAreaShellClassName`) already pads itself by
+ * `env(safe-area-inset-bottom)`, and padding the root as well would double it.
+ */
+export const LAYOUT_SAFE_AREA_INSET_CLASS =
+  'pt-[var(--safe-area-top)] pl-[var(--safe-area-left)] pr-[var(--safe-area-right)]';
+
+/**
+ * Returns the root container className for the desktop/web workspace layout.
+ *
+ * Settings routes render a single pane and position the Electron window drag
+ * strip against this root, hence the extra `relative`.
+ *
+ * Shared between production code and tests to keep the two roots' viewport
+ * handling (safe area, native keyboard offset) in sync.
+ */
+export function getWebWorkspaceLayoutRootClassName({
+  settingsRoute,
+}: { settingsRoute?: boolean } = {}): string {
+  return [
+    settingsRoute ? 'relative' : undefined,
+    'flex h-svh w-full overflow-hidden bg-background',
+    LAYOUT_SAFE_AREA_INSET_CLASS,
+    NATIVE_KEYBOARD_OFFSET_CLASS,
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
+/**
  * Returns the root container className for the mobile workspace layout.
  *
  * Uses `h-full` so the container height matches the parent (#root) exactly.

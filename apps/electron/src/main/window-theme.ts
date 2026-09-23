@@ -12,10 +12,6 @@ const WINDOW_BACKGROUND_COLORS: Record<ResolvedWindowTheme, string> = {
   dark: '#101010'
 }
 
-// Windows caption-button strip (titleBarOverlay) height in CSS px. The
-// renderer reserves the same band at the top of the window
-// (`h-9` drag strip in `packages/components/src/routes/__root.tsx` and the
-// matching `pt-9` in `web-workspace-layout.tsx`) — keep all three in sync.
 export const MAIN_WINDOW_TITLE_BAR_OVERLAY_HEIGHT = 36
 
 // Matches the bundled VS Code themes' `titleBar.*` colors

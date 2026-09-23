@@ -27,7 +27,7 @@ export function SkillScopeBadge({
 }) {
   const { t } = useTranslation();
   return (
-    <span className={cn(SKILL_BADGE_BASE, SKILL_BADGE_PADDING[size], 'font-medium', className)}>
+    <span className={cn(SKILL_BADGE_BASE, SKILL_BADGE_PADDING[size], 'font-normal', className)}>
       {scope === 'system'
         ? t('workspace.projects.skills.scopeSystem', 'System')
         : scope === 'global'

@@ -182,7 +182,7 @@ function ReviewerMachineRow({
       <div role="cell" className="flex min-w-0 items-center gap-2.5">
         <Monitor className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         <div className="min-w-0">
-          <p className="truncate font-medium leading-tight text-foreground">{machine.name}</p>
+          <p className="truncate font-normal leading-tight text-foreground">{machine.name}</p>
           <p className="truncate text-[11px] leading-tight text-muted-foreground">
             {online
               ? t('settings.review.machineOnline', 'Online')
@@ -292,8 +292,8 @@ function ReviewerMachineRow({
                 {configured
                   ? t('settings.review.configured', 'Configured')
                   : reviewerConfig
-                  ? t('settings.review.agentRemoved', 'Reviewer unavailable')
-                  : t('settings.review.notConfigured', 'Not configured')}
+                    ? t('settings.review.agentRemoved', 'Reviewer unavailable')
+                    : t('settings.review.notConfigured', 'Not configured')}
               </span>
 
               {reviewerConfig ? (
@@ -345,7 +345,7 @@ export function ReviewerMachineConfigTable({
     >
       <div
         role="row"
-        className="hidden grid-cols-[minmax(150px,0.75fr)_minmax(0,1.75fr)] gap-4 bg-muted/25 px-3 py-1.5 text-[11px] font-medium text-muted-foreground sm:grid"
+        className="hidden grid-cols-[minmax(150px,0.75fr)_minmax(0,1.75fr)] gap-4 bg-muted/25 px-3 py-1.5 text-[11px] font-normal text-muted-foreground sm:grid"
       >
         <div role="columnheader">{t('settings.review.machineColumn', 'Machine')}</div>
         <div role="columnheader" className="pl-4">
@@ -481,12 +481,17 @@ export function ReviewPolicySection() {
 
   // Each policy write is a Flock row put plus a sync, so persisting per
   // keystroke in the requirements textarea would put one on the wire per char.
-  const pendingWrite = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingWrite = useRef<{
+    timeout: ReturnType<typeof setTimeout>;
+    flush: () => void;
+  } | null>(null);
   useEffect(
     () => () => {
-      if (pendingWrite.current) {
-        clearTimeout(pendingWrite.current);
-      }
+      const pending = pendingWrite.current;
+      if (!pending) return;
+      clearTimeout(pending.timeout);
+      pendingWrite.current = null;
+      pending.flush();
     },
     []
   );
@@ -499,12 +504,17 @@ export function ReviewPolicySection() {
         return;
       }
       if (pendingWrite.current) {
-        clearTimeout(pendingWrite.current);
+        clearTimeout(pendingWrite.current.timeout);
       }
-      pendingWrite.current = setTimeout(() => {
-        pendingWrite.current = null;
+      const flush = () => {
         void writeReviewPolicyToFlock(runtime, workspacePolicy);
+      };
+      const timeout = setTimeout(() => {
+        if (pendingWrite.current?.timeout !== timeout) return;
+        pendingWrite.current = null;
+        flush();
       }, POLICY_WRITE_DEBOUNCE_MS);
+      pendingWrite.current = { timeout, flush };
     },
     [runtime]
   );

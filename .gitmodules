@@ -16,3 +16,6 @@
 [submodule "packages/acp-extension-dsh"]
 	path = packages/acp-extension-dsh
 	url = https://github.com/LodyAI/acp-extension-dsh.git
+[submodule "packages/acp-extension-pi"]
+	path = packages/acp-extension-pi
+	url = https://github.com/LodyAI/acp-extension-pi.git

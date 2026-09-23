@@ -210,8 +210,8 @@ function MobileRunConfigSheetRows({
   /* ── Role (the row above Agent, because a Role ANSWERS every row under it) ──
      `None` leads the list: leaving a Role clears the NAME, not the
      configuration, and that is not the same gesture as picking one. An
-     unavailable Role stays listed and disabled, carrying its reason, so a Role
-     that cannot run is visibly broken rather than missing. */
+     non-available Role stays listed and disabled, carrying its reason/status,
+     so a Role that cannot run is visibly broken rather than missing. */
   const roleNoneLabel = t('chat.runConfig.roles.none', 'None');
   const roleOptions = useMemo<MobileInlinePickerOption<string>[]>(() => {
     if (!agentRoles) return [];
@@ -232,7 +232,9 @@ function MobileRunConfigSheetRows({
         const reason =
           availability.kind === 'unavailable'
             ? t(AGENT_ROLE_UNAVAILABLE_REASON_KEYS[availability.reason])
-            : null;
+            : availability.kind === 'unknown'
+              ? t('settings.agentRoles.status.checking')
+              : null;
         return {
           value: role.id as string,
           label: role.name,

@@ -1,6 +1,7 @@
 import { preloadBlogContent } from '@site/components/blog';
+import { notFoundHead } from '@site/lib/not-found-seo';
 import { loadBlogPostRoute } from '@site/src/blog-loader';
-import { BlogPostRoutePage, blogIndexHead, blogPostHead } from '@site/src/site-pages/blog';
+import { BlogPostRoutePage, blogPostHead } from '@site/src/site-pages/blog';
 import { createFileRoute } from '@tanstack/react-router';
 
 export const Route = createFileRoute('/blog/$')({
@@ -11,7 +12,7 @@ export const Route = createFileRoute('/blog/$')({
     return data;
   },
   head: ({ loaderData }) =>
-    loaderData ? blogPostHead('en', loaderData.entry) : blogIndexHead('en'),
+    loaderData ? blogPostHead('en', loaderData.entry) : notFoundHead('en'),
   component: BlogPost,
 });
 

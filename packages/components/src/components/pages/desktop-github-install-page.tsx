@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import { motion } from 'framer-motion';
-import { Github, Loader2 } from 'lucide-react';
+import { Github } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 
 import { Button } from '@/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/ui/card';
@@ -34,7 +35,7 @@ export function DesktopGithubInstallPage({ deepLink }: DesktopGithubInstallPageP
                 {t('desktopGithubInstall.title', 'Continue in Lody Desktop')}
               </CardTitle>
               <span className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-muted/40 px-3 py-1 text-xs font-medium text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                <Spinner className="h-3.5 w-3.5" aria-hidden="true" />
                 {t('desktopGithubInstall.opening', 'Opening Lody Desktop…')}
               </span>
             </div>

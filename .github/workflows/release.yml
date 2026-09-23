@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Validate version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Expected a stable version tag such as v0.90.0"
+            exit 1
+          fi
+          echo "RELEASE_VERSION=${RELEASE_TAG#v}" >> "$GITHUB_ENV"
+
+      - name: Checkout default branch for version synchronization
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - name: Synchronize app versions
+        run: |
+          node --input-type=module <<'NODE'
+          import { readdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+          for (const entry of readdirSync('apps', { withFileTypes: true })) {
+            if (!entry.isDirectory()) continue
+            const file = `apps/${entry.name}/package.json`
+            if (!existsSync(file)) continue
+            const manifest = JSON.parse(readFileSync(file, 'utf8'))
+            manifest.version = process.env.RELEASE_VERSION
+            writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`)
+          }
+          NODE
+
+      - name: Create version synchronization PR
+        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
+        with:
+          branch: chore/app-versions-${{ env.RELEASE_TAG }}
+          base: ${{ github.event.repository.default_branch }}
+          add-paths: apps/*/package.json
+          commit-message: 'chore: sync app versions to ${{ env.RELEASE_TAG }}'
+          title: 'chore: sync app versions to ${{ env.RELEASE_TAG }}'
+          body: |
+            Synchronize all apps/*/package.json versions to `${{ env.RELEASE_VERSION }}`.
+            The release tag remains unchanged; this PR updates the default branch only.
+          draft: true
+
+      - name: Create changelog-only GitHub Release
+        shell: bash
+        run: |
+          set -euo pipefail
+          releases="$(gh api "repos/$GH_REPO/releases" --paginate --jq '.[].tag_name')"
+          if printf '%s\n' "$releases" | grep -Fxq "$RELEASE_TAG"; then
+            echo "Release already exists; preserving its notes and assets."
+          else
+            gh release create "$RELEASE_TAG" --verify-tag \
+              --title "Lody OSS $RELEASE_VERSION" --generate-notes
+          fi

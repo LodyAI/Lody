@@ -22,7 +22,8 @@ const TooltipContent = React.forwardRef<
         // wrapper, so re-scope it to dark (this renderer is dark-only) — otherwise
         // it falls back to the light `:root` tokens and clashes with the UI.
         'dark',
-        'z-50 overflow-hidden rounded-md border border-border bg-popover text-foreground shadow-md',
+        'z-50 overflow-hidden rounded-md border-[0.5px] border-border bg-popover text-foreground',
+        'shadow-[0_0.5px_1px_1px_rgba(0,0,0,0.04)]',
         'animate-in fade-in-0 zoom-in-95',
         'data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95',
         'data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2',

@@ -1,5 +1,15 @@
 const SITE_URL = 'https://lody.ai';
 const OG_IMAGE_PATH = '/og-image.png';
+const DEFAULT_DESCRIPTION =
+  'Lody is a team workspace for running AI coding agents in parallel with isolated Git worktrees, live diff review, GitHub integration, and mobile access.';
+
+/** Append `| Lody` to a document head title unless it is already branded. */
+export function brandTitle(title: string, brand = 'Lody'): string {
+  if (!title) return brand;
+  if (title.toLowerCase().includes(brand.toLowerCase())) return title;
+  if (/(?:\| Lody|– Lody|- Lody)$/u.test(title)) return title;
+  return `${title} | ${brand}`;
+}
 
 type Alternate = {
   lang: 'en-US' | 'zh-CN';
@@ -49,7 +59,7 @@ export function pageHead(args: {
   /** Serialized JSON-LD object (placed in head as application/ld+json). */
   jsonLd?: Record<string, unknown> | readonly Record<string, unknown>[];
 }): SiteHead {
-  const description = args.description ?? 'Lody AI';
+  const description = args.description ?? DEFAULT_DESCRIPTION;
   const canonical = absoluteUrl(args.path);
   const image = absoluteUrl(args.image ?? OG_IMAGE_PATH);
   const robots = robotsContent(args.robots);

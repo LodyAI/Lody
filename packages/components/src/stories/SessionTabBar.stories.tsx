@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react';
 import { Provider, createStore } from 'jotai';
 import { fn, userEvent, within } from 'storybook/test';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   getLodySessionPresenceKey,
   getServerNow,
@@ -13,11 +13,16 @@ import {
   type SessionMeta,
 } from '@lody/shared';
 
-import { focusLayerAtom, type FocusLayer } from '@/atoms/focus-layer';
 import { lodyPresenceStatesAtom } from '@/atoms/presence';
 import { SessionAccessControl } from '@/components/session-sharing';
 import { SessionHeaderMenu } from '@/components/sessions/session-chat-interface';
+import {
+  SESSION_PAGE_HEADER_PILLS_CLASS,
+  SESSION_PAGE_HEADER_PILLS_MIN_WIDTH_PX,
+} from '@/components/sessions/session-conversation-page';
 import { SessionTabBar, type ViewerTabItem } from '@/components/sessions/session-tab-bar';
+import { cn } from '@/lib/utils';
+import type { PathLauncherOption } from '@/lib/session-path-launchers';
 import type { DraftSessionTab } from '@/lib/session-draft-tabs';
 import type { SessionSharingState } from '@/lib/session-sharing';
 
@@ -69,6 +74,7 @@ const archivedChildSessions: SessionMeta[] = [
     title: 'Old branch review',
     userId: 'user-1',
     lastMessageAt: Date.now() - 60_000,
+    lastReadAt: Date.now() - 30_000,
     status: { type: 'idle' },
     cliType: 'builtin',
     agentType: 'codex',
@@ -129,10 +135,26 @@ const translate = (_key: string, fallback: string, options?: Record<string, unkn
     fallback
   );
 
+const vscodeLauncher: PathLauncherOption = {
+  kind: 'builtin',
+  id: 'vscode',
+  label: 'VS Code',
+};
+
 function ConversationToolbar() {
   return (
     <div className="flex h-full shrink-0 items-center gap-1 pl-1 pr-2">
-      <SessionAccessControl state={toolbarSharing} onShareWithTeam={toolbarAction} />
+      <div className={cn(SESSION_PAGE_HEADER_PILLS_CLASS, 'items-center')}>
+        <button
+          type="button"
+          className="inline-flex h-6 items-center rounded-md border border-border px-2 text-xs"
+        >
+          VS Code
+        </button>
+      </div>
+      <div className={cn(SESSION_PAGE_HEADER_PILLS_CLASS, 'items-center')}>
+        <SessionAccessControl state={toolbarSharing} onShareWithTeam={toolbarAction} />
+      </div>
       <SessionHeaderMenu
         session={screenshotParentSession}
         localProjectMeta={{ name: 'lody', rootPath: '/Users/developer/Code/lody' }}
@@ -145,6 +167,12 @@ function ConversationToolbar() {
         onOpenSearch={toolbarAction}
         onFork={toolbarAction}
         onRename={toolbarAction}
+        openInIde={{
+          options: [vscodeLauncher],
+          selected: vscodeLauncher,
+          onOpen: toolbarAction,
+          onSelect: toolbarAction,
+        }}
         t={translate}
       />
     </div>
@@ -162,6 +190,88 @@ const screenshotChildSessions: SessionMeta[] = [
   },
 ];
 
+/**
+ * Live presence per session id. Presence — never `SessionMeta.status` — is what
+ * the tab bar reads for working / waiting-permission, so a story that wants a
+ * spinner or an amber marker has to seed it here.
+ */
+type StoryPresence = Record<string, 'running' | 'requestPermission'>;
+
+const DEFAULT_STORY_PRESENCE: StoryPresence = {
+  [childSessions[0]!.id]: 'running',
+  [childSessions[1]!.id]: 'requestPermission',
+};
+
+function buildPresenceStates(presence: StoryPresence) {
+  return Object.fromEntries(
+    Object.entries(presence).map(([sessionId, type]) => {
+      const instanceId = `storybook-${sessionId}` as LodyPresenceInstanceId;
+      return [
+        getLodySessionPresenceKey(sessionId as SessionId, instanceId),
+        {
+          kind: 'session' as const,
+          sessionId: sessionId as SessionId,
+          machineId,
+          instanceId,
+          status: { type },
+          updatedAt: getServerNow(),
+        },
+      ];
+    })
+  );
+}
+
+/* ── Unread sub-session tabs ────────────────────────────────────────────
+   A child tab is the ONLY place its own new output is announced: sub-sessions
+   get no sidebar row of their own. These four cover the whole status ladder in
+   one row — waiting > working > unread > resting. */
+const UNREAD_NOW = Date.parse('2026-04-02T01:00:00.000Z');
+
+const unreadChildSessions: SessionMeta[] = [
+  {
+    ...childSessions[0]!,
+    id: 'session-unread-1' as SessionId,
+    title: 'Review changes',
+    // Answered after the user last looked at it — the unread case.
+    lastMessageAt: UNREAD_NOW,
+    lastReadAt: UNREAD_NOW - 120_000,
+  },
+  {
+    ...childSessions[0]!,
+    id: 'session-unread-2' as SessionId,
+    title: 'Trace message dispatch',
+    // Never opened, and it has produced output.
+    lastMessageAt: UNREAD_NOW - 30_000,
+  },
+  {
+    ...childSessions[0]!,
+    id: 'session-unread-3' as SessionId,
+    title: 'Run the integration tests',
+    // Still working: the spinner outranks unread.
+    lastMessageAt: UNREAD_NOW - 5_000,
+  },
+  {
+    ...childSessions[0]!,
+    id: 'session-unread-4' as SessionId,
+    title: 'Write the migration notes',
+    // Blocked on a permission request: outranks everything.
+    lastMessageAt: UNREAD_NOW - 9_000,
+  },
+  {
+    ...childSessions[0]!,
+    id: 'session-unread-5' as SessionId,
+    title: 'Update the changelog',
+    // Caught up — plain agent icon.
+    lastMessageAt: UNREAD_NOW - 600_000,
+    lastReadAt: UNREAD_NOW - 60_000,
+  },
+];
+
+const unreadPresence: StoryPresence = {
+  'session-unread-3': 'running',
+  'session-unread-4': 'requestPermission',
+};
+
 const manyChildSessions: SessionMeta[] = [
   'Review the protocol design',
   'Trace message dispatch',
@@ -178,57 +288,127 @@ const manyChildSessions: SessionMeta[] = [
 }));
 
 type StoryShellProps = React.ComponentProps<typeof SessionTabBar> & {
-  focusLayer?: FocusLayer;
   frameWidth?: number;
   reservedRightWidth?: number;
+  presence?: StoryPresence;
+  /** Wire close/select/reorder/new-tab to local state so the bar is clickable. */
+  interactive?: boolean;
 };
 
 function StoryShell({
-  focusLayer = 'L3',
   frameWidth,
   reservedRightWidth = 0,
+  presence = DEFAULT_STORY_PRESENCE,
+  interactive = false,
   ...props
 }: StoryShellProps) {
   const [store] = useState(() => {
     const nextStore = createStore();
-    nextStore.set(lodyPresenceStatesAtom, {
-      [getLodySessionPresenceKey(
-        childSessions[0]!.id,
-        'storybook-running' as LodyPresenceInstanceId
-      )]: {
-        kind: 'session',
-        sessionId: childSessions[0]!.id,
-        machineId,
-        instanceId: 'storybook-running' as LodyPresenceInstanceId,
-        status: { type: 'running' },
-        updatedAt: getServerNow(),
-      },
-      [getLodySessionPresenceKey(
-        childSessions[1]!.id,
-        'storybook-permission' as LodyPresenceInstanceId
-      )]: {
-        kind: 'session',
-        sessionId: childSessions[1]!.id,
-        machineId,
-        instanceId: 'storybook-permission' as LodyPresenceInstanceId,
-        status: { type: 'requestPermission' },
-        updatedAt: getServerNow(),
-      },
-    });
+    nextStore.set(lodyPresenceStatesAtom, buildPresenceStates(presence));
     return nextStore;
   });
   const [activeTabSessionId, setActiveTabSessionId] = useState(props.activeTabSessionId);
   const [activeViewerTabId, setActiveViewerTabId] = useState(props.activeViewerTabId);
+  const [parentClosed, setParentClosed] = useState(false);
+  const [childrenState, setChildrenState] = useState(props.childSessions);
+  const [draftsState, setDraftsState] = useState(props.draftTabs);
+  const [viewersState, setViewersState] = useState(props.viewerTabs ?? []);
+  const [archivedState, setArchivedState] = useState(props.archivedChildSessions);
+  const [orderState, setOrderState] = useState(props.tabOrder);
+  const draftSeq = useRef(0);
 
-  useEffect(() => {
-    store.set(focusLayerAtom, focusLayer);
-  }, [focusLayer, store]);
   useEffect(() => {
     setActiveTabSessionId(props.activeTabSessionId);
   }, [props.activeTabSessionId]);
   useEffect(() => {
     setActiveViewerTabId(props.activeViewerTabId);
   }, [props.activeViewerTabId]);
+  useEffect(() => {
+    setChildrenState(props.childSessions);
+    setDraftsState(props.draftTabs);
+    setViewersState(props.viewerTabs ?? []);
+    setArchivedState(props.archivedChildSessions);
+    setOrderState(props.tabOrder);
+    setParentClosed(false);
+  }, [
+    props.childSessions,
+    props.draftTabs,
+    props.viewerTabs,
+    props.archivedChildSessions,
+    props.tabOrder,
+  ]);
+
+  const interactiveProps = interactive
+    ? {
+        parentSession: { ...props.parentSession, isTabClosed: parentClosed },
+        childSessions: childrenState,
+        draftTabs: draftsState,
+        viewerTabs: viewersState,
+        archivedChildSessions: archivedState,
+        tabOrder: orderState,
+        onTabClose: (tabId: string) => {
+          if (tabId === props.parentSession.id) {
+            setParentClosed(true);
+            setArchivedState((prev) => [props.parentSession, ...prev]);
+          }
+          setChildrenState((prev) => {
+            const closedIndex = prev.findIndex((session) => session.id === tabId);
+            const next = prev.filter((session) => session.id !== tabId);
+            if (tabId === activeTabSessionId) {
+              // Mirror getSessionTabFallback: next open neighbour, then the
+              // previous one, then the parent.
+              setActiveTabSessionId(
+                closedIndex === -1
+                  ? (next[0]?.id ?? props.parentSession.id)
+                  : (next[closedIndex]?.id ?? next[closedIndex - 1]?.id ?? props.parentSession.id)
+              );
+            }
+            return next;
+          });
+          setDraftsState((prev) => prev.filter((draft) => draft.id !== tabId));
+          void props.onTabClose?.(tabId);
+        },
+        onViewerTabClose: (tabId: string) => {
+          setViewersState((prev) => prev.filter((tab) => tab.id !== tabId));
+          void props.onViewerTabClose?.(tabId);
+        },
+        onTabReorder: (orderedTabIds: string[]) => {
+          setOrderState(orderedTabIds);
+          props.onTabReorder?.(orderedTabIds);
+        },
+        onNewTab: () => {
+          const id = `draft:story-${++draftSeq.current}`;
+          setDraftsState((prev) => [
+            ...prev,
+            {
+              id: id as DraftSessionTab['id'],
+              sessionId: id as SessionId,
+              prompt: '',
+              cliType: 'builtin',
+              agentType: 'codex',
+              agentConfigId,
+              modeId: null,
+              modelId: null,
+            },
+          ]);
+          setOrderState((prev) => [...(prev ?? []), id]);
+          setActiveViewerTabId(null);
+          setActiveTabSessionId(id);
+          void props.onNewTab?.();
+        },
+        onTabRestore: (sessionId: SessionId) => {
+          const restored = archivedState.find((session) => session.id === sessionId);
+          setArchivedState((prev) => prev.filter((session) => session.id !== sessionId));
+          if (sessionId === props.parentSession.id) {
+            setParentClosed(false);
+          } else if (restored) {
+            setChildrenState((prev) => [...prev, restored]);
+            setOrderState((prev) => [...(prev ?? []), sessionId]);
+          }
+          void props.onTabRestore?.(sessionId);
+        },
+      }
+    : {};
 
   const reservedRightSlot =
     reservedRightWidth > 0 ? (
@@ -244,6 +424,7 @@ function StoryShell({
       >
         <SessionTabBar
           {...props}
+          {...interactiveProps}
           activeTabSessionId={activeTabSessionId}
           activeViewerTabId={activeViewerTabId}
           onTabSelect={(tabId) => {
@@ -301,7 +482,6 @@ const meta = {
     onTabReorder: fn(),
     tabOrder: [childSessions[1]!.id, childSessions[0]!.id, draftTabs[0]!.id],
     viewerTabs: [],
-    focusLayer: 'L3',
     activeViewerTabId: null,
     onViewerTabSelect: fn(),
     onViewerTabClose: fn(),
@@ -356,6 +536,41 @@ export const ConversationPrivateAccessMenuOpen: Story = {
   globals: { theme: 'light' },
   play: async ({ canvasElement }) => {
     await userEvent.click(within(canvasElement).getByRole('button', { name: /Private to you/ }));
+  },
+};
+
+export const ConversationToolbarNarrow: Story = {
+  name: 'Conversation toolbar — narrow hides pills',
+  args: {
+    parentSession: screenshotParentSession,
+    childSessions: screenshotChildSessions,
+    draftTabs: [],
+    archivedChildSessions: [],
+    tabOrder: screenshotChildSessions.map((session) => session.id),
+    activeTabSessionId: screenshotChildSessions[0]!.id,
+    frameWidth: 560,
+    rightSlot: <ConversationToolbar />,
+  },
+  parameters: {
+    docs: {
+      description: {
+        story: `IDE and share pills hide below ${SESSION_PAGE_HEADER_PILLS_MIN_WIDTH_PX}px. Tabs and ⋯ remain.`,
+      },
+    },
+  },
+};
+
+export const ConversationToolbarWide: Story = {
+  name: 'Conversation toolbar — wide shows pills',
+  args: {
+    parentSession: screenshotParentSession,
+    childSessions: screenshotChildSessions,
+    draftTabs: [],
+    archivedChildSessions: [],
+    tabOrder: screenshotChildSessions.map((session) => session.id),
+    activeTabSessionId: screenshotChildSessions[0]!.id,
+    frameWidth: 1024,
+    rightSlot: <ConversationToolbar />,
   },
 };
 
@@ -431,6 +646,29 @@ export const ManyTabsNarrow: Story = {
   },
 };
 
+export const RapidClose: Story = {
+  name: 'Rapid close (Chrome-style freeze)',
+  args: {
+    interactive: true,
+    childSessions: manyChildSessions,
+    draftTabs: [],
+    archivedChildSessions: archivedChildSessions,
+    tabOrder: manyChildSessions.map((session) => session.id),
+    activeTabSessionId: manyChildSessions[0]!.id,
+    frameWidth: 1200,
+  },
+  parameters: {
+    docs: {
+      description: {
+        story:
+          'Interactive: close a middle tab and the survivors keep their widths so the next ' +
+          'close button lands under the cursor — repeated clicks keep closing. Move the ' +
+          'pointer out of the strip (or add a tab) and the row re-expands to full width.',
+      },
+    },
+  },
+};
+
 export const ToolbarAndHistoryPressure: Story = {
   args: {
     parentSession: screenshotParentSession,
@@ -449,12 +687,6 @@ export const ToolbarAndHistoryPressure: Story = {
           'Reserves space for the production toolbar while the new-tab and history buttons remain pinned.',
       },
     },
-  },
-};
-
-export const ParentKeyboardFocused: Story = {
-  args: {
-    focusLayer: 'L2',
   },
 };
 
@@ -495,5 +727,91 @@ export const ViewerGroupOnly: Story = {
     archivedChildSessions: [],
     tabOrder: [viewerTabs[1]!.id, viewerTabs[0]!.id],
     activeViewerTabId: viewerTabs[1]!.id,
+  },
+};
+
+export const ClosedMainTab: Story = {
+  args: {
+    parentSession: { ...screenshotParentSession, isTabClosed: true },
+    childSessions,
+    draftTabs: [],
+    archivedChildSessions: [
+      { ...screenshotParentSession, isTabClosed: true },
+      ...archivedChildSessions,
+    ],
+    activeTabSessionId: childSessions[0]!.id,
+  },
+};
+
+export const AllConversationsClosed: Story = {
+  args: {
+    parentSession: { ...screenshotParentSession, isTabClosed: true },
+    childSessions: [],
+    draftTabs: [draftTabs[0]!],
+    archivedChildSessions: [
+      { ...screenshotParentSession, isTabClosed: true },
+      ...archivedChildSessions,
+    ],
+    activeTabSessionId: draftTabs[0]!.id,
+  },
+};
+
+export const UnreadChildTabs: Story = {
+  name: 'Unread sub-session tabs',
+  args: {
+    parentSession: screenshotParentSession,
+    childSessions: unreadChildSessions,
+    draftTabs: [],
+    archivedChildSessions: [],
+    tabOrder: unreadChildSessions.map((session) => session.id),
+    activeTabSessionId: screenshotParentSession.id,
+    presence: unreadPresence,
+    frameWidth: 1200,
+  },
+  parameters: {
+    docs: {
+      description: {
+        story:
+          'The tab bar status slot across its whole ladder, left to right: the ACTIVE parent ' +
+          '(never marked — it is the surface clearing unread), an unread child, a never-read ' +
+          'child, a working child (spinner outranks unread), a child blocked on a permission ' +
+          'request (outranks everything), and a caught-up child (plain agent icon).',
+      },
+    },
+  },
+};
+
+export const ClosedTabUnread: Story = {
+  name: 'Unread output in a closed tab',
+  args: {
+    parentSession: screenshotParentSession,
+    childSessions,
+    draftTabs: [],
+    archivedChildSessions: [
+      {
+        ...archivedChildSessions[0]!,
+        id: 'session-closed-unread' as SessionId,
+        title: 'Fix flaky upload test',
+        isTabClosed: true,
+        lastMessageAt: Date.now() - 20_000,
+        lastReadAt: Date.now() - 600_000,
+      },
+      ...archivedChildSessions,
+    ],
+    activeTabSessionId: screenshotParentSession.id,
+  },
+  parameters: {
+    docs: {
+      description: {
+        story:
+          'A closed tab received output after the user last read it: the history button ' +
+          'carries the unread dot, and the closed list marks the conversation that caused it.',
+      },
+    },
+  },
+  play: async ({ canvasElement }) => {
+    await userEvent.click(
+      within(canvasElement).getByRole('button', { name: /Closed conversations/ })
+    );
   },
 };

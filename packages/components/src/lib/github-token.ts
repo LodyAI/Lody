@@ -80,6 +80,14 @@ export function isGitHubUnauthorizedTokenError(error: unknown): boolean {
   return error instanceof GitHubClientTokenError && error.code === 'unauthorized';
 }
 
+/**
+ * A Convex action was sent but its result was lost during a reconnect. This is
+ * safe to retry for token minting because no GitHub operation has started yet.
+ */
+export function isGitHubOperationTokenConnectionLostError(error: unknown): boolean {
+  return error instanceof Error && error.message === 'Connection lost while action was in flight';
+}
+
 function normalizeExpiresAt(expiresAt: string | undefined, tokenSource: GitHubTokenSource) {
   if (expiresAt) {
     const parsed = Date.parse(expiresAt);
@@ -205,7 +213,8 @@ export async function getGitHubOperationToken(
 
   const requestGeneration = tokenCacheGeneration;
   const request = (async (): Promise<TokenEntry> => {
-    const result = await requireGitHubTokenPort().getOperationToken({
+    const fetchToken = async (): Promise<TokenEntry> => {
+      const result = await requireGitHubTokenPort().getOperationToken({
         workspaceId,
         repoFullName,
         operation,
@@ -214,16 +223,26 @@ export async function getGitHubOperationToken(
           : {}),
       });
 
-    if (!result.success) {
-      throw new GitHubClientTokenError(result.errorCode, result.errorMessage);
-    }
+      if (!result.success) {
+        throw new GitHubClientTokenError(result.errorCode, result.errorMessage);
+      }
 
-    const tokenSource: GitHubTokenSource = result.tokenSource === 'personal' ? 'personal' : 'app';
-    const entry: TokenEntry = {
-      token: result.token,
-      expiresAt: normalizeExpiresAt(result.expiresAt, tokenSource),
-      tokenSource,
+      const tokenSource: GitHubTokenSource = result.tokenSource === 'personal' ? 'personal' : 'app';
+      const entry: TokenEntry = {
+        token: result.token,
+        expiresAt: normalizeExpiresAt(result.expiresAt, tokenSource),
+        tokenSource,
+      };
+      return entry;
     };
+
+    let entry: TokenEntry;
+    try {
+      entry = await fetchToken();
+    } catch (error) {
+      if (!isGitHubOperationTokenConnectionLostError(error)) throw error;
+      entry = await fetchToken();
+    }
     if (requestGeneration === tokenCacheGeneration) {
       tokenCache.set(key, entry);
     }

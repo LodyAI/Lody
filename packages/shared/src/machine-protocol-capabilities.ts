@@ -8,16 +8,27 @@
 export type MachineProtocolCapabilities = Record<string, number>;
 
 export const MACHINE_PROTOCOL_CAPABILITIES = {
+  builtinPi: 'builtinPi',
+  subagentCancellation: 'subagentCancellation',
+  acpAuthenticationInteractions: 'acpAuthenticationInteractions',
   localProjectRemoval: 'localProjectRemoval',
   providerSetup: 'providerSetup',
   schedules: 'schedules',
   preparedSessionInput: 'preparedSessionInput',
+  localFileResources: 'localFileResources',
+  acpProtocolAuthentication: 'acpProtocolAuthentication',
+  piExtensions: 'piExtensions',
 } as const;
 
+export const ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION = 2;
+export const SUBAGENT_CANCELLATION_PROTOCOL_VERSION = 1;
 export const LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION = 1;
 export const PROVIDER_SETUP_PROTOCOL_VERSION = 1;
 export const SCHEDULES_PROTOCOL_VERSION = 1;
 export const PREPARED_SESSION_INPUT_PROTOCOL_VERSION = 1;
+export const LOCAL_FILE_RESOURCES_PROTOCOL_VERSION = 1;
+export const ACP_PROTOCOL_AUTHENTICATION_VERSION = 2;
+export const PI_EXTENSIONS_PROTOCOL_VERSION = 1;
 
 type MachineProtocolCapabilityCarrier = {
   protocolCapabilities?: MachineProtocolCapabilities;
@@ -39,6 +50,16 @@ export function machineSupportsProtocolCapability(
   return getMachineProtocolCapabilityVersion(machine, capability) >= minimumVersion;
 }
 
+export function machineSupportsSubagentCancellation(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.subagentCancellation,
+    SUBAGENT_CANCELLATION_PROTOCOL_VERSION
+  );
+}
+
 /**
  * The capability set this build advertises, and the checks that read it.
  *
@@ -47,11 +68,27 @@ export function machineSupportsProtocolCapability(
  * in the "supported" direction and there is no version fallback to catch it.
  */
 export const CURRENT_MACHINE_PROTOCOL_CAPABILITIES: MachineProtocolCapabilities = {
+  [MACHINE_PROTOCOL_CAPABILITIES.subagentCancellation]: SUBAGENT_CANCELLATION_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.acpAuthenticationInteractions]:
+    ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.localProjectRemoval]: LOCAL_PROJECT_REMOVAL_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.providerSetup]: PROVIDER_SETUP_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.schedules]: SCHEDULES_PROTOCOL_VERSION,
   [MACHINE_PROTOCOL_CAPABILITIES.preparedSessionInput]: PREPARED_SESSION_INPUT_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.localFileResources]: LOCAL_FILE_RESOURCES_PROTOCOL_VERSION,
+  [MACHINE_PROTOCOL_CAPABILITIES.acpProtocolAuthentication]: ACP_PROTOCOL_AUTHENTICATION_VERSION,
 };
+
+/** Whether the target daemon supports interactive Custom/Registry ACP authentication. */
+export function machineSupportsAcpAuthenticationInteractionsProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.acpAuthenticationInteractions,
+    ACP_AUTHENTICATION_INTERACTIONS_PROTOCOL_VERSION
+  );
+}
 
 /** Whether the target daemon supports preflighted local-project worktree cleanup and results. */
 export function machineSupportsLocalProjectRemovalProtocol(
@@ -75,6 +112,43 @@ export function machineSupportsProviderSetupProtocol(
   );
 }
 
+/**
+ * Whether the target daemon can run the baseline standard ACP `authenticate`
+ * exchange for a registry or custom agent. Interactive method/form/URL replies
+ * additionally require `acpAuthenticationInteractions`; older daemons answer
+ * "Authentication is not supported", so sign-in is not offered at all.
+ */
+export function machineSupportsAcpProtocolAuthentication(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.acpProtocolAuthentication,
+    ACP_PROTOCOL_AUTHENTICATION_VERSION
+  );
+}
+
+export function machineSupportsLocalFileResourcesProtocol(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.localFileResources,
+    LOCAL_FILE_RESOURCES_PROTOCOL_VERSION
+  );
+}
+
+export function machineSupportsPiExtensions(
+  machine: MachineProtocolCapabilityCarrier | null | undefined
+): boolean {
+  return machineSupportsProtocolCapability(
+    machine,
+    MACHINE_PROTOCOL_CAPABILITIES.piExtensions,
+    PI_EXTENSIONS_PROTOCOL_VERSION
+  );
+}
+
+/** Whether the target daemon owns and runs machine-scheduled automation. */
 export function machineSupportsSchedulesProtocol(
   machine: MachineProtocolCapabilityCarrier | null | undefined
 ): boolean {
@@ -85,6 +159,7 @@ export function machineSupportsSchedulesProtocol(
   );
 }
 
+/** Whether the target daemon accepts inert `prepared` user turns. */
 export function machineSupportsPreparedSessionInputProtocol(
   machine: MachineProtocolCapabilityCarrier | null | undefined
 ): boolean {

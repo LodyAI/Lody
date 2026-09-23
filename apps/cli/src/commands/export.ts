@@ -1,7 +1,6 @@
 import path from 'node:path';
 import { Command } from 'commander';
-import { getSessionRoomId, getTaskRoomId, type WorkspaceId } from '@lody/shared';
-import { listWorkspaceTaskIds } from '@/lib/task-doc';
+import { getSessionRoomId, type WorkspaceId } from '@lody/shared';
 import { getScheduleRegistryFlockDocId, getScheduleRoomId } from '@lody/shared';
 import { listWorkspaceScheduleIds } from '@/lib/schedules/schedule-documents';
 import {
@@ -63,10 +62,6 @@ async function syncWorkspaceSessionsForExport(
       await syncDocForRead(manager, getScheduleRoomId(id), `export:schedule:${id}`);
     }
   );
-  const taskIds = await listWorkspaceTaskIds(manager, workspaceId).catch(() => []);
-  await mapWithConcurrency(taskIds, EXPORT_SYNC_CONCURRENCY, async (taskId) => {
-    await syncDocForRead(manager, getTaskRoomId(taskId), `export:${workspace.id}:${taskId}`);
-  });
 }
 
 export const exportCommand = new Command('export')

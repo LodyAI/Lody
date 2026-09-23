@@ -2,13 +2,19 @@ import { atom } from 'jotai';
 import { atomWithStorage } from 'jotai/utils';
 import type { MachineId, SupportedLanguage } from '@lody/shared';
 import type { MobileKeyboardAction } from '@/lib/mobile-keyboard-action';
+import { isSymbolFontFamily } from '@/lib/local-fonts';
 import { SETTINGS_DEFAULT_TAB, type SettingsTabId } from '@/components/settings/settings-tabs';
 
 export const languageAtom = atomWithStorage<SupportedLanguage>('lody-language', 'en');
 
 export const DEFAULT_CONVERSATION_FONT_SIZE = 14;
-export const CONVERSATION_FONT_SIZE_MIN = 9;
-export const CONVERSATION_FONT_SIZE_MAX = 32;
+/**
+ * The sizes settings offers, ascending — five named tiers (smaller, small, default,
+ * large, larger). Free-form entry is deliberately gone: a number field silently rewrote
+ * whatever the user typed (clamped into a range, rounded), which reads as the app
+ * fighting the keystrokes. A short scale has one value per visible step.
+ */
+export const CONVERSATION_FONT_SIZES = [12, 13, 14, 15, 16] as const;
 export type ConversationFontSize = number;
 
 const LEGACY_CONVERSATION_FONT_SIZES: Record<string, ConversationFontSize> = {
@@ -17,14 +23,18 @@ const LEGACY_CONVERSATION_FONT_SIZES: Record<string, ConversationFontSize> = {
   large: 16,
 };
 
+/**
+ * Snaps to the nearest offered size (ties go up) so a value persisted by an older build —
+ * a preset name, or any number the old input accepted — keeps the closest size the user
+ * chose instead of collapsing to the default.
+ */
 export function normalizeConversationFontSize(value: unknown): ConversationFontSize {
   const migratedValue = typeof value === 'string' ? LEGACY_CONVERSATION_FONT_SIZES[value] : value;
   if (typeof migratedValue !== 'number' || !Number.isFinite(migratedValue)) {
     return DEFAULT_CONVERSATION_FONT_SIZE;
   }
-  return Math.min(
-    CONVERSATION_FONT_SIZE_MAX,
-    Math.max(CONVERSATION_FONT_SIZE_MIN, Math.round(migratedValue))
+  return CONVERSATION_FONT_SIZES.reduce((closest, size) =>
+    Math.abs(size - migratedValue) <= Math.abs(closest - migratedValue) ? size : closest
   );
 }
 
@@ -43,7 +53,9 @@ export const conversationFontSizeAtom = atom(
 export const INTERFACE_FONT_FAMILY_MAX_LENGTH = 100;
 
 export function normalizeInterfaceFontFamily(value: unknown): string {
-  return typeof value === 'string' ? value.trim().slice(0, INTERFACE_FONT_FAMILY_MAX_LENGTH) : '';
+  return typeof value === 'string' && !isSymbolFontFamily(value)
+    ? value.trim().slice(0, INTERFACE_FONT_FAMILY_MAX_LENGTH)
+    : '';
 }
 
 const interfaceFontFamilyStorageAtom = atomWithStorage<unknown>('lody-interface-font-family', '');
@@ -61,7 +73,9 @@ export const TERMINAL_FONT_SIZE_MAX = 24;
 export const TERMINAL_FONT_FAMILY_MAX_LENGTH = 100;
 
 export function normalizeTerminalFontFamily(value: unknown): string {
-  return typeof value === 'string' ? value.trim().slice(0, TERMINAL_FONT_FAMILY_MAX_LENGTH) : '';
+  return typeof value === 'string' && !isSymbolFontFamily(value)
+    ? value.trim().slice(0, TERMINAL_FONT_FAMILY_MAX_LENGTH)
+    : '';
 }
 
 export function normalizeTerminalFontSize(value: unknown): number {
@@ -173,61 +187,15 @@ export const autoArchiveOnPrClosedAtom = atomWithStorage<boolean>(
 
 /** localStorage keys for developer-only beta gates — keep in sync with the atoms below. */
 export const DEVELOPER_MODE_STORAGE_KEY = 'lody-developer-mode-enabled';
-export const TASKS_BETA_STORAGE_KEY = 'lody-tasks-beta-enabled';
 export const INBOX_BETA_STORAGE_KEY = 'lody-inbox-beta-enabled';
 
-/**
- * Synchronous read of the Tasks feature gate from localStorage.
- *
- * `atomWithStorage` without a settled store can still report its default on the
- * first paint (and `getOnInit` only samples storage once at module load, so a
- * test or late write is invisible). Route guards that redirect on `false` must
- * use this on that first frame so a bookmarked `/tasks/$taskId` is not bounced
- * to chat before hydration finishes.
- */
-export function readTasksFeatureEnabledFromStorage(): boolean {
-  if (typeof window === 'undefined') {
-    return false;
-  }
-  try {
-    const developerMode = JSON.parse(localStorage.getItem(DEVELOPER_MODE_STORAGE_KEY) ?? 'false');
-    const tasksBeta = JSON.parse(localStorage.getItem(TASKS_BETA_STORAGE_KEY) ?? 'false');
-    return developerMode === true && tasksBeta === true;
-  } catch {
-    return false;
-  }
-}
-
 // getOnInit samples storage when the atom module loads so a cold SPA boot
-// (the deep-link case) already has the right init value.
+// already has the right init value.
 export const developerModeEnabledAtom = atomWithStorage<boolean>(
   DEVELOPER_MODE_STORAGE_KEY,
   false,
   undefined,
   { getOnInit: true }
-);
-
-// Opt-in for the Tasks beta. Reachable only from the beta section of Settings,
-// which itself only renders while Developer mode is on.
-export const tasksBetaEnabledAtom = atomWithStorage<boolean>(
-  TASKS_BETA_STORAGE_KEY,
-  false,
-  undefined,
-  { getOnInit: true }
-);
-
-/**
- * The single gate every Tasks surface reads — sidebar entry, routes, commands,
- * quick-add, index sync, status watcher, session task chip, and the agent's task
- * proposal card. When it is false the feature must be indistinguishable from one
- * that was never built.
- *
- * Developer mode is part of the condition, not merely the way to reach the
- * switch: turning Developer mode off has to hide Tasks again, and it does so
- * without discarding the opt-in, so turning it back on restores the choice.
- */
-export const tasksFeatureEnabledAtom = atom(
-  (get) => get(developerModeEnabledAtom) && get(tasksBetaEnabledAtom)
 );
 
 export const schedulesBetaEnabledAtom = atomWithStorage<boolean>(
@@ -240,8 +208,8 @@ export const schedulesFeatureEnabledAtom = atom(
   (get) => get(developerModeEnabledAtom) && get(schedulesBetaEnabledAtom)
 );
 
-// Opt-in for the unfinished mobile Inbox. Like Tasks, this is reachable only
-// from the beta section while Developer mode is on.
+// Opt-in for the unfinished mobile Inbox. Reachable only from the beta section
+// while Developer mode is on.
 export const inboxBetaEnabledAtom = atomWithStorage<boolean>(
   INBOX_BETA_STORAGE_KEY,
   false,
@@ -252,6 +220,30 @@ export const inboxBetaEnabledAtom = atomWithStorage<boolean>(
 /** The single gate for showing the unfinished mobile Inbox entry. */
 export const inboxFeatureEnabledAtom = atom(
   (get) => get(developerModeEnabledAtom) && get(inboxBetaEnabledAtom)
+);
+
+// Developer-only opt-in. Turning Developer mode off retains the local choice.
+export const promptShortcutsBetaEnabledAtom = atomWithStorage<boolean>(
+  'lody-prompt-shortcuts-beta-enabled',
+  false,
+  undefined,
+  { getOnInit: true }
+);
+
+/** Shared gate for Shortcut settings, discovery and the workspace runtime. */
+export const promptShortcutsFeatureEnabledAtom = atom(
+  (get) => get(developerModeEnabledAtom) && get(promptShortcutsBetaEnabledAtom)
+);
+
+export const semanticShortcutsBetaEnabledAtom = atomWithStorage<boolean>(
+  'lody-semantic-shortcuts-beta-enabled',
+  false,
+  undefined,
+  { getOnInit: true }
+);
+
+export const semanticShortcutsFeatureEnabledAtom = atom(
+  (get) => get(developerModeEnabledAtom) && get(semanticShortcutsBetaEnabledAtom)
 );
 
 /** localStorage keys for the experimental features gate. */

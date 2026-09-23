@@ -71,8 +71,6 @@ type ValidationSuccess = {
   normalizedTarget: PreviewTarget;
 };
 
-type PreviewTargetPolicy = 'agent-candidate' | 'user-approved';
-
 type PreviewRegistryEntry = {
   key: string;
   pid: number;
@@ -109,10 +107,7 @@ const normalizePath = (value: string | undefined): string | undefined => {
   return trimmed;
 };
 
-const normalizeTarget = (
-  target: PreviewTarget,
-  policy: PreviewTargetPolicy
-): PreviewTarget | ValidationFailure => {
+const normalizeTarget = (target: PreviewTarget): PreviewTarget | ValidationFailure => {
   if (target.protocol !== 'http' && target.protocol !== 'https') {
     return {
       code: 'invalid_protocol',
@@ -138,24 +133,36 @@ const normalizeTarget = (
       retryable: false,
     };
   }
-  if (policy === 'agent-candidate' && targetClass !== 'loopback') {
+  // INVARIANT: a managed preview reaches this machine's own loopback and nothing
+  // else, whether the target came from an agent report or a user's address bar.
+  // There is deliberately no policy parameter that could relax this. The tunnel makes this machine the origin of whatever
+  // it connects to, so accepting a LAN address would turn it into a pivot that
+  // lets a remote workspace member — or an agent that talked them into a click —
+  // reach hosts behind this machine that they could never reach themselves.
+  // User approval does not change that: the approver is on the OTHER side of the
+  // tunnel and cannot see what a LAN address here actually is. The client never
+  // routes LAN addresses here (`parseBrowserAddress` sends them to the user's own
+  // local browser), but this check is the authoritative one — it must hold for
+  // any client, including an older or hostile one.
+  if (targetClass !== 'loopback') {
     return {
       code: 'host_not_loopback',
       message: `Preview target host must be loopback, got ${target.host}.`,
       retryable: false,
     };
   }
-  if (policy === 'user-approved' && targetClass !== 'loopback' && targetClass !== 'private-lan') {
+  // `classifyBrowserHostname` reads the hostname TEXT, so it calls any `*.localhost`
+  // name loopback. RFC 6761 says a resolver should answer those from 127.0.0.0/8, but
+  // nothing makes it — a search domain or a rebinding record can point `foo.localhost`
+  // at a LAN host, and `probeHosts` only substitutes literals for the exact string
+  // `localhost`, so the probe and the forwarded request resolve separately. Requiring a
+  // literal or that exact name is what makes the invariant above true of the ADDRESS
+  // rather than of the spelling. Agents report `127.0.0.1` or `localhost`
+  // (`lody_report_preview_candidate`), so nothing legitimate is turned away.
+  if (host !== 'localhost' && net.isIP(host) === 0) {
     return {
-      code: 'host_not_private',
-      message: `Managed preview only accepts loopback or private LAN targets, got ${target.host}.`,
-      retryable: false,
-    };
-  }
-  if (policy === 'user-approved' && targetClass === 'private-lan' && net.isIP(host) === 0) {
-    return {
-      code: 'target_resolution_failed',
-      message: 'Private LAN hostnames are not supported yet. Enter the target IP address.',
+      code: 'host_not_loopback',
+      message: `Preview target host must be a loopback address or "localhost", got ${target.host}.`,
       retryable: false,
     };
   }
@@ -404,7 +411,7 @@ export class PreviewService {
     }
 
     const session = await this.getSessionMeta(request.sessionId);
-    const normalized = normalizeTarget(request.target, 'agent-candidate');
+    const normalized = normalizeTarget(request.target);
     const now = this.now();
     const baseCandidate: PreviewCandidate = {
       status: 'invalid',
@@ -500,12 +507,12 @@ export class PreviewService {
       return this.failCreate(request.sessionId, failure, now, request.target);
     }
 
-    const requestedTarget = normalizeTarget(request.target, 'user-approved');
+    const requestedTarget = normalizeTarget(request.target);
     if (isValidationFailure(requestedTarget)) {
       return this.failCreate(request.sessionId, requestedTarget, now, request.target);
     }
 
-    const approvedTarget = normalizeTarget(request.approval.target, 'user-approved');
+    const approvedTarget = normalizeTarget(request.approval.target);
     const actualTargetClass = classifyBrowserHostname(requestedTarget.host);
     const approvedTargetClass = request.approval.targetClass.replace('_', '-');
     if (
@@ -521,7 +528,7 @@ export class PreviewService {
       return this.failCreate(request.sessionId, failure, now, requestedTarget);
     }
 
-    const validation = await this.validateTargetForCreate(requestedTarget, 'user-approved');
+    const validation = await this.validateTargetForCreate(requestedTarget);
     if ('failure' in validation) {
       return this.failCreate(request.sessionId, validation.failure, now, requestedTarget);
     }
@@ -710,7 +717,7 @@ export class PreviewService {
       };
     }
 
-    const validation = await this.validateTargetForCreate(request.target, 'user-approved');
+    const validation = await this.validateTargetForCreate(request.target);
     if ('failure' in validation) {
       return {
         type: 'session/preview-endpoint-acquire_response',
@@ -860,10 +867,9 @@ export class PreviewService {
   }
 
   private async validateTargetForCreate(
-    target: PreviewTarget,
-    policy: PreviewTargetPolicy
+    target: PreviewTarget
   ): Promise<ValidationSuccess | { failure: ValidationFailure }> {
-    const normalized = normalizeTarget(target, policy);
+    const normalized = normalizeTarget(target);
     if (isValidationFailure(normalized)) {
       return { failure: normalized };
     }

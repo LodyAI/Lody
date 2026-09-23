@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { CreateElicitationRequest, RequestPermissionRequest } from '@agentclientprotocol/sdk';
+import { Loro } from 'loro-crdt';
+import { createSessionMirror } from '../src/session-mirror';
+import type { SessionId } from '../src/ids';
 
 import {
   buildAskUserQuestionElicitationResponse,
@@ -653,5 +656,277 @@ describe('AskUserQuestion form elicitation bridge (Lody extension)', () => {
       action: 'accept',
       content: { next_step: 'Start implementation', api_key: 'secret-value' },
     });
+  });
+});
+
+describe('Core answer notes', () => {
+  const question = {
+    type: 'string',
+    title: 'Approach',
+    enum: ['Small change', 'None of the above'],
+  };
+  const note = (target: unknown, extra = {}) => ({
+    type: 'string',
+    title: 'Context',
+    description: 'Explain constraints',
+    _meta: { lody: { elicitation: { version: 1, noteFor: target, ...extra } } },
+  });
+  const request = (properties: Record<string, unknown>) =>
+    ({
+      mode: 'form',
+      sessionId: 's1',
+      message: 'Choose an approach',
+      requestedSchema: { type: 'object', properties, required: ['approach'] },
+    }) as unknown as CreateElicitationRequest;
+  const parse = () =>
+    parseAskUserQuestionElicitationRequest(
+      request({
+        approach: question,
+        approach_note: note('approach', { secret: true }),
+      })
+    )!;
+
+  it.each(['Small change', 'None of the above'])(
+    'retains %s and its independent secret note',
+    (choice) => {
+      const parsed = parse();
+      expect(parsed.meta.questions).toEqual([
+        {
+          id: 'approach',
+          question: 'Choose an approach',
+          header: 'Approach',
+          options: [{ label: 'Small change' }, { label: 'None of the above' }],
+          multiSelect: false,
+          allowCustomAnswer: false,
+          note: {
+            fieldId: 'approach_note',
+            title: 'Context',
+            description: 'Explain constraints',
+            isSecret: true,
+          },
+        },
+      ]);
+      const answers = { approach: choice, approach_note: 'Keep the API' };
+      const outcome = createAskUserQuestionPermissionOutcome('answer', answers, parsed.meta);
+      expect(extractAskUserQuestionAnswersFromOutcome(parsed.meta, outcome)).toEqual(answers);
+      expect(buildAskUserQuestionElicitationResponse(parsed, { outcome })).toEqual({
+        action: 'accept',
+        content: answers,
+      });
+    }
+  );
+
+  it.each([undefined, '', '   ', ['not a string']])(
+    'omits empty or non-string notes: %j',
+    (value) => {
+      const parsed = parse();
+      const outcome = createAskUserQuestionPermissionOutcome(
+        'answer',
+        {
+          approach: 'Small change',
+          ...(value === undefined ? {} : { approach_note: value }),
+        },
+        parsed.meta
+      );
+      expect(buildAskUserQuestionElicitationResponse(parsed, { outcome })).toEqual({
+        action: 'accept',
+        content: { approach: 'Small change' },
+      });
+    }
+  );
+
+  it('does not infer suffix associations across multiple questions', () => {
+    const parsed = parseAskUserQuestionElicitationRequest(
+      request({
+        approach: question,
+        approach_note: question,
+        context: note('approach'),
+        approach_note_note: note('approach_note'),
+      })
+    )!;
+    const answers = {
+      approach: 'Small change',
+      approach_note: 'None of the above',
+      context: 'First',
+      approach_note_note: 'Second',
+    };
+    expect(
+      buildAskUserQuestionElicitationResponse(parsed, {
+        outcome: createAskUserQuestionPermissionOutcome('answer', answers, parsed.meta),
+      })
+    ).toEqual({ action: 'accept', content: answers });
+  });
+
+  it('keeps multi-select arrays and free-text questions separate from string notes', () => {
+    const parsed = parseAskUserQuestionElicitationRequest(
+      request({
+        approach: { type: 'array', items: { enum: ['A', 'B'] } },
+        n: note('approach'),
+        free: { type: 'string' },
+      })
+    )!;
+    expect(parsed.meta.questions[0]?.allowCustomAnswer).toBe(false);
+    expect(parsed.meta.questions[1]?.allowCustomAnswer).toBe(true);
+    expect(
+      buildAskUserQuestionElicitationResponse(parsed, {
+        outcome: createAskUserQuestionPermissionOutcome(
+          'answer',
+          { approach: ['A', 'B'], n: 'Both', free: 'Text' },
+          parsed.meta
+        ),
+      })
+    ).toEqual({ action: 'accept', content: { approach: ['A', 'B'], n: 'Both', free: 'Text' } });
+  });
+
+  it('rejects unsupported note versions and required notes', () => {
+    expect(
+      parseAskUserQuestionElicitationRequest(
+        request({ approach: question, n: note('approach', { version: 2 }) })
+      )
+    ).toBeNull();
+    const invalid = request({ approach: note('main'), main: question });
+    expect(parseAskUserQuestionElicitationRequest(invalid)).toBeNull();
+  });
+
+  it.each([
+    { approach: question, n: note('missing') },
+    { approach: question, n: note('n') },
+    { approach: question, n: note('approach'), n2: note('n') },
+    { approach: question, n: note('approach'), n2: note('approach') },
+    { approach: question, n: note('approach', { customAnswerFor: 'approach' }) },
+    { approach: question, n: note('') },
+    { approach: question, n: note(1) },
+    { approach: question, n: { ...note('approach'), type: 'array' } },
+    {
+      approach: question,
+      n: note('other'),
+      other: {
+        type: 'string',
+        _meta: { lody: { elicitation: { version: 1, customAnswerFor: 'approach' } } },
+      },
+    },
+    { approach: question, '': note('approach') },
+  ])('rejects malformed associations %#', (properties) => {
+    expect(parseAskUserQuestionElicitationRequest(request(properties))).toBeNull();
+  });
+
+  it('preserves custom replacement and note as different fields', () => {
+    const parsed = parseAskUserQuestionElicitationRequest(
+      request({
+        approach: question,
+        n: note('approach'),
+        other: {
+          type: 'string',
+          _meta: { lody: { elicitation: { version: 1, customAnswerFor: 'approach' } } },
+        },
+      })
+    )!;
+    expect(
+      buildAskUserQuestionElicitationResponse(parsed, {
+        outcome: createAskUserQuestionPermissionOutcome(
+          'answer',
+          { approach: 'Custom', n: 'Context' },
+          parsed.meta
+        ),
+      })
+    ).toEqual({ action: 'accept', content: { other: 'Custom', n: 'Context' } });
+    expect(
+      buildAskUserQuestionElicitationResponse(parsed, { outcome: { outcome: 'cancelled' } })
+    ).toEqual({ action: 'cancel' });
+  });
+
+  it.each([true, false])(
+    'persists and reopens notes through the history writer (notes=%s)',
+    (withNote) => {
+      const parsed = parse();
+      if (!withNote) delete parsed.meta.questions[0]!.note;
+      const doc = new Loro();
+      const open = (document: Loro) =>
+        createSessionMirror({
+          doc: document,
+          initialState: { session: { id: 'notes' as SessionId }, history: [] },
+        });
+      const mirror = open(doc);
+      const metadata = { lody: { elicitation: { version: 1, questions: parsed.meta.questions } } };
+      mirror.historyWriter.append({
+        id: 'turn',
+        role: 'assistant',
+        timestamp: '2026-09-20T00:00:00Z',
+        items: [
+          {
+            type: 'tool_call',
+            toolCallId: 'ask',
+            status: 'pending',
+            permissionRequest: { requestId: 'request', options: [], _meta: metadata },
+          },
+        ],
+      });
+      const answers = {
+        approach: 'Small change',
+        ...(withNote ? { approach_note: 'Private context' } : {}),
+      };
+      expect(
+        mirror.historyWriter.respondPermission(
+          'request',
+          createAskUserQuestionPermissionOutcome('answer', answers, parsed.meta)
+        )
+      ).toBe(true);
+      const reopened = new Loro();
+      reopened.import(doc.export({ mode: 'snapshot' }));
+      const replay = open(reopened);
+      const item = replay.historyWriter.read('turn')?.items?.[0];
+      if (item?.type !== 'tool_call') throw new Error('Missing persisted question');
+      const restored = parseAskUserQuestionPermissionMeta(item.permissionRequest?._meta)!;
+      expect(restored.questions).toEqual(parsed.meta.questions);
+      expect(
+        extractAskUserQuestionAnswersFromOutcome(restored, item.permissionRequest?.outcome)
+      ).toEqual(answers);
+      replay.dispose();
+      mirror.dispose();
+    }
+  );
+
+  it('rejects colliding note ids in stored metadata', () => {
+    const parsed = parse();
+    parsed.meta.questions[0]!.note!.fieldId = 'approach';
+    expect(
+      parseAskUserQuestionPermissionMeta({
+        lody: { elicitation: { version: 1, questions: parsed.meta.questions } },
+      })
+    ).toBeNull();
+  });
+
+  it.each([
+    'duplicate question',
+    'missing question id',
+    'empty question id',
+    'duplicate note',
+    'later question collision',
+  ])('rejects %s in persisted question metadata before reading answers', (invalid) => {
+    const parsed = parse();
+    const first = parsed.meta.questions[0]!;
+    const second = { ...first, id: 'second', note: { fieldId: 'second_note' } };
+    parsed.meta.questions.push(second);
+    if (invalid === 'duplicate question') second.id = first.id!;
+    if (invalid === 'missing question id') delete first.id;
+    if (invalid === 'empty question id') first.id = ' ';
+    if (invalid === 'duplicate note') second.note.fieldId = first.note!.fieldId;
+    if (invalid === 'later question collision') first.note!.fieldId = second.id;
+    const outcome = createAskUserQuestionPermissionOutcome(
+      'answer',
+      {
+        approach: 'Small change',
+        approach_note: 'First',
+        second: 'None of the above',
+        second_note: 'Second',
+      },
+      parsed.meta
+    );
+    expect(
+      parseAskUserQuestionPermissionMeta({
+        lody: { elicitation: { version: 1, questions: parsed.meta.questions } },
+      })
+    ).toBeNull();
+    expect(extractAskUserQuestionAnswersFromOutcome(parsed.meta, outcome)).toBeNull();
   });
 });

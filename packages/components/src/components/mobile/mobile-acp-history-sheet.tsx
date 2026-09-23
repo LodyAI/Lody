@@ -1,9 +1,11 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Locale } from 'date-fns';
-import { enUS, zhCN } from 'date-fns/locale';
+import { enUS } from 'date-fns/locale/en-US';
+import { zhCN } from 'date-fns/locale/zh-CN';
 import { formatDistanceToNow } from 'date-fns';
-import { AlertCircle, Check, Download, Loader2, RefreshCw, X } from 'lucide-react';
+import { AlertCircle, Check, Download, RefreshCw, X } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 import type { LocalProjectHistoryCatalogItem, LocalProjectHistoryProvider } from '@lody/shared';
 
 import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerTitle } from '@/ui/drawer';
@@ -245,7 +247,7 @@ export function MobileAcpHistorySheet({
                     )}
                   >
                     {state.isSyncing ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />
+                      <Spinner className="h-3.5 w-3.5" aria-hidden="true" />
                     ) : (
                       <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
                     )}
@@ -400,10 +402,7 @@ export function MobileAcpHistorySheet({
                                 }}
                               >
                                 {resolving ? (
-                                  <Loader2
-                                    className="mr-1.5 h-3.5 w-3.5 animate-spin"
-                                    aria-hidden="true"
-                                  />
+                                  <Spinner className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
                                 ) : (
                                   <RefreshCw className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
                                 )}
@@ -439,7 +438,7 @@ export function MobileAcpHistorySheet({
                   }}
                 >
                   {state.isImporting ? (
-                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    <Spinner className="h-4 w-4" aria-hidden="true" />
                   ) : (
                     <Download className="h-4 w-4" aria-hidden="true" />
                   )}

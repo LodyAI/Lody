@@ -1,5 +1,5 @@
 import { createFileRoute, Navigate, Outlet, useLocation } from '@tanstack/react-router';
-import { lazy, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useOrganization } from '@/hooks/useOrganization';
 import { useAtomValue, useSetAtom } from 'jotai';
@@ -27,24 +27,20 @@ import {
 } from '@/lib/posthog-analytics';
 import { identifyPostHogUser } from '@/lib/posthog-identity';
 import { scheduleOneSignalTask } from '@/lib/onesignal';
+import { PreloadedMainLayout } from '@/components/preloaded-main-layout';
 import { RouteSuspense } from '@/components/route-suspense';
 import { RouteMessage } from '@/components/route-message';
 import { LoadingPlaceholder } from '@/components/loading-placeholder';
 import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useFireOncePerKey } from '@/hooks/use-fire-once';
 import { writeLastAppRoutePath } from '@/lib/last-app-route';
-import { useWorkspaceBadge } from '@/hooks/use-workspace-badge';
 import { type LodyLiveActivityBridge, useLodyLiveActivity } from '@/hooks/use-lody-live-activity';
 import { isNativeIOSAppShell } from '@/lib/native-platform';
 import { isLocalAppPlatform } from '@/lib/app-platform';
 import { useResolvedWorkspaceScope } from '../../hooks/use-resolved-workspace-scope';
+import { useBillingOverviewPreload } from '../../hooks/use-billing-overview-preload';
 
 const AUTH_ROUTE_ONESIGNAL_LOGIN_IDLE_TIMEOUT_MS = 10_000;
-
-const LazyMainLayout = lazy(async () => {
-  const module = await import('@/components/main-layout');
-  return { default: module.MainLayout };
-});
 
 function normalizeConvexSiteUrl(rawUrl: string | undefined): string | null {
   const trimmed = rawUrl?.trim();
@@ -77,21 +73,89 @@ function MainLayoutComponent() {
 
 function LocalPlatformLayoutContent({ workspaceName }: { workspaceName: string }) {
   // Same dock-badge / live-activity wiring as the cloud layout.
-  useWorkspaceBadge();
   useLodyLiveActivity({ workspaceName });
+  const pathname = useLocation({ select: (location) => location.pathname });
+  const isChatLandingRoute = pathname.endsWith('/chat');
 
   return (
-    <RouteSuspense>
-      <LazyMainLayout>
-        <AuthedWorkspaceRouteTracker />
-        <Outlet />
-        <ElectronSessionCompletionNotifier />
-        <ElectronMenuHandler />
-        <AppCommands />
-        <CommandPalette />
-        <AutoArchivePrWatcher />
-      </LazyMainLayout>
+    <RouteSuspense fallback={isChatLandingRoute ? <CriticalWorkspaceShell /> : null}>
+      <PreloadedMainLayout>
+        <AuthenticatedWorkspaceContent />
+      </PreloadedMainLayout>
     </RouteSuspense>
+  );
+}
+
+/**
+ * Keep the first local workspace frame useful while the full layout chunk is
+ * loading. This is intentionally dependency-free: the real sidebar, dialogs,
+ * editor, and providers arrive through MainLayout after this frame commits.
+ */
+function CriticalWorkspaceShell() {
+  const { t } = useTranslation();
+  const newChatLabel = t('sidebar.newSession', 'New chat');
+  const searchLabel = t('common.search', 'Search');
+  const heading = t('chat.heading2', 'What should we work on?');
+  const messageLabel = t('sessions.typeMessage', 'Type a message...');
+
+  return (
+    <div
+      aria-busy="true"
+      data-critical-workspace-shell="true"
+      style={{
+        display: 'flex',
+        width: '100%',
+        height: '100%',
+        overflow: 'hidden',
+        backgroundColor: 'hsl(var(--background))',
+        color: 'hsl(var(--foreground))',
+        fontFamily: 'var(--font-sans)',
+      }}
+    >
+      <aside
+        aria-label="Workspace navigation"
+        style={{
+          display: 'flex',
+          width: 220,
+          flexDirection: 'column',
+          gap: 12,
+          borderRight: '1px solid hsl(var(--border) / 0.6)',
+          padding: 16,
+          fontSize: 13,
+        }}
+      >
+        <strong style={{ fontSize: 15 }}>Lody</strong>
+        <span style={{ opacity: 0.78 }}>{newChatLabel}</span>
+        <span style={{ opacity: 0.62 }}>{searchLabel}</span>
+        <span style={{ opacity: 0.62 }}>{t('settings.title', 'Settings')}</span>
+      </aside>
+      <main
+        style={{
+          display: 'flex',
+          minWidth: 0,
+          flex: 1,
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 28,
+          padding: 32,
+        }}
+      >
+        <h1 style={{ margin: 0, fontSize: 26, fontWeight: 600 }}>{heading}</h1>
+        <div
+          aria-label={messageLabel}
+          style={{
+            width: 'min(680px, 100%)',
+            border: '1px solid hsl(var(--border) / 0.8)',
+            borderRadius: 12,
+            padding: '14px 16px',
+            color: 'hsl(var(--muted-foreground))',
+          }}
+        >
+          {messageLabel}
+        </div>
+      </main>
+    </div>
   );
 }
 
@@ -335,16 +399,18 @@ function AuthedLayoutContent({
     organizations,
     organizationsLoading,
     error: organizationsError,
+    refetchOrganizations,
+    refetchActiveOrganization,
   } = useOrganization({ targetSlug: workspaceName });
   const user = useAtomValue(userAtom);
   const { workspaceId: currentWorkspaceId } = useResolvedWorkspaceScope();
+  useBillingOverviewPreload(user ? currentWorkspaceId : null);
   const [orgSettled, setOrgSettled] = useState(!organizationsLoading);
   const [userSettled, setUserSettled] = useState(Boolean(user) && Boolean(currentWorkspaceId));
 
   // Push this workspace's owned-by-me unread/waiting counts to the Electron
   // dock badge. No-op on web. Mounted at the workspace layout so it lives
   // for the entire authenticated session (one subscriber per window).
-  useWorkspaceBadge();
   useLodyLiveActivity({ workspaceName });
 
   useEffect(() => {
@@ -367,29 +433,22 @@ function AuthedLayoutContent({
     if (!currentWorkspaceId) {
       return (
         <RouteSuspense>
-          <LazyMainLayout workspaceReady={false}>
+          <PreloadedMainLayout workspaceReady={false}>
             <LoadingPlaceholder
               variant="content"
               title={t('workspace.route.switchingTitle')}
               description={t('workspace.route.switchingDescription')}
             />
-          </LazyMainLayout>
+          </PreloadedMainLayout>
         </RouteSuspense>
       );
     }
 
     return (
       <RouteSuspense>
-        <LazyMainLayout>
-          <AuthedWorkspaceRouteTracker />
-          <Outlet />
-          <ElectronSessionCompletionNotifier />
-          <ElectronMenuHandler />
-          <AppCommands />
-          <CommandPalette />
-          <AutoArchivePrWatcher />
-          <WorkspaceCheckoutPendingDialog />
-        </LazyMainLayout>
+        <PreloadedMainLayout>
+          <AuthenticatedWorkspaceContent showWorkspaceCheckout />
+        </PreloadedMainLayout>
       </RouteSuspense>
     );
   }
@@ -408,6 +467,10 @@ function AuthedLayoutContent({
       <RouteMessage
         title={t('workspace.route.loadingWorkspacesErrorTitle')}
         description={t('workspace.route.loadingWorkspacesErrorDescription')}
+        onRetry={() => {
+          void refetchOrganizations();
+          void refetchActiveOrganization();
+        }}
       />
     );
   }
@@ -426,6 +489,10 @@ function AuthedLayoutContent({
       <RouteMessage
         title={t('workspace.route.loadingWorkspacesErrorTitle')}
         description={t('workspace.route.loadingWorkspacesErrorDescription')}
+        onRetry={() => {
+          void refetchOrganizations();
+          void refetchActiveOrganization();
+        }}
       />
     );
   }
@@ -445,16 +512,29 @@ function AuthedLayoutContent({
 
   return (
     <RouteSuspense>
-      <LazyMainLayout>
-        <AuthedWorkspaceRouteTracker />
-        <Outlet />
-        <ElectronSessionCompletionNotifier />
-        <ElectronMenuHandler />
-        <CommandPalette />
-        <AutoArchivePrWatcher />
-        <WorkspaceCheckoutPendingDialog />
-      </LazyMainLayout>
+      <PreloadedMainLayout>
+        <AuthenticatedWorkspaceContent showWorkspaceCheckout />
+      </PreloadedMainLayout>
     </RouteSuspense>
+  );
+}
+
+function AuthenticatedWorkspaceContent({
+  showWorkspaceCheckout = false,
+}: {
+  showWorkspaceCheckout?: boolean;
+}) {
+  return (
+    <>
+      <AuthedWorkspaceRouteTracker />
+      <Outlet />
+      <ElectronSessionCompletionNotifier />
+      <ElectronMenuHandler />
+      <AppCommands />
+      <CommandPalette />
+      <AutoArchivePrWatcher />
+      {showWorkspaceCheckout && <WorkspaceCheckoutPendingDialog />}
+    </>
   );
 }
 

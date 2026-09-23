@@ -1,4 +1,23 @@
-import { createHash } from 'crypto';
+import { readSessionHistory } from '@lody/shared/session-data';
+import {
+  hashText,
+  hashHistoryEntryV2,
+  hashHistoryForStoredVersion,
+  resolveImportHashVersion,
+  resolveImportedTurnHashes,
+  storedBaselineHashes,
+  areStringArraysEqual,
+  decideHistoryRefresh,
+  decideHistoryConflictResolution,
+  HASH_VERSION,
+  type HistoryConflictResolutionDecision,
+  type HistoryImportInput,
+} from '@lody/shared/session-data';
+export { decideHistoryRefresh, decideHistoryConflictResolution } from '@lody/shared/session-data';
+export type {
+  HistoryRefreshDecision,
+  HistoryConflictResolutionDecision,
+} from '@lody/shared/session-data';
 import { v4 as uuidV4 } from 'uuid';
 import type { SessionInfo } from '@agentclientprotocol/sdk';
 
@@ -28,7 +47,6 @@ import {
   isSessionHistoryPendingForDispatch,
   sanitizeLodyInternalInstructions,
   SessionStatusFactory,
-  type MessageContent,
   type ProjectRef,
   type SessionId,
 } from '@lody/shared';
@@ -88,6 +106,8 @@ export type MaterializedReplay = {
   turnHashes: string[];
   replayDigest: string;
   droppedNotifications: number;
+  /** Canonical-hash version `turnHashes`/`replayDigest` were computed with. */
+  hashVersion: number;
 };
 
 type HistoryCatalogSnapshot = {
@@ -95,26 +115,7 @@ type HistoryCatalogSnapshot = {
   existingByImportKey: Map<string, ExistingHistorySession>;
 };
 
-export type HistoryRefreshDecision =
-  | { status: 'skipped'; reason: 'digest_match' | 'empty_suffix'; appendFromIndex?: number }
-  | { status: 'refreshed'; reason: 'prefix_append'; appendFromIndex: number }
-  | {
-      status: 'conflicted';
-      reason: 'prefix_mismatch' | 'local_history_has_untracked_suffix';
-    };
-
-export type HistoryConflictResolutionDecision =
-  | { status: 'replace' }
-  | { status: 'already_resolved' }
-  | {
-      status: 'blocked';
-      reason:
-        | 'source_replay_empty'
-        | 'source_replay_dropped_notifications'
-        | 'source_replay_behind_import_cursor'
-        | 'session_has_pending_local_turn'
-        | 'not_sync_conflict';
-    };
+class HistoryRefreshConflict extends Error {}
 
 function emptySummary(): LocalProjectHistorySyncSummary {
   return {
@@ -128,38 +129,8 @@ function emptySummary(): LocalProjectHistorySyncSummary {
   };
 }
 
-function stableJson(value: unknown): string {
-  if (value === null || typeof value !== 'object') {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => stableJson(item)).join(',')}]`;
-  }
-  const record = value as Record<string, unknown>;
-  const entries = Object.keys(record)
-    .filter((key) => record[key] !== undefined)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`);
-  return `{${entries.join(',')}}`;
-}
-
-function hashText(value: string): string {
-  return createHash('sha256').update(value).digest('hex');
-}
-
-function normalizeHistoryEntryForHash(entry: SessionHistoryInput): unknown {
-  return {
-    role: entry.role,
-    items: (entry.items ?? []) as unknown as MessageContent[],
-    plan: entry.plan ?? [],
-  };
-}
-
-function hashHistoryEntry(entry: SessionHistoryInput): string {
-  return hashText(stableJson(normalizeHistoryEntryForHash(entry)));
-}
-
-function materializeReplay(args: {
+// Exported only for unit tests; do not call from outside this module.
+export function materializeReplay(args: {
   provider: LocalProjectHistoryProvider;
   acpSessionId: ACPSessionId;
   replayNotifications: Parameters<typeof buildHistoryReplayImport>[0];
@@ -176,7 +147,10 @@ function materializeReplay(args: {
     createId: () => `${providerKey}:${args.acpSessionId}:tmp:${tempId++}`,
     mode: 'imported_snapshot',
   });
-  const turnHashes = replay.history.map(hashHistoryEntry);
+  // New imports hash the canonical v2 item form: a sealed tool_call skeleton and the
+  // full call it came from hash identically, and tool-payload-only source drift does
+  // not by itself trigger a refresh.
+  const turnHashes = replay.history.map(hashHistoryEntryV2);
   const history = replay.history.map((entry, index) => ({
     ...entry,
     id: `${providerKey}:${args.acpSessionId}:turn:${index}:${turnHashes[index]!.slice(0, 16)}`,
@@ -187,136 +161,41 @@ function materializeReplay(args: {
     turnHashes,
     replayDigest: hashText(turnHashes.join('\n')),
     droppedNotifications: replay.droppedNotifications,
+    hashVersion: HASH_VERSION,
   };
 }
 
-function isPrefix(prefix: readonly string[], value: readonly string[]): boolean {
-  if (prefix.length > value.length) {
-    return false;
+async function applyBoundHistoryImport(
+  sessionDoc: SessionDocument,
+  input: HistoryImportInput
+): Promise<number> {
+  const result = await sessionDoc.sessionData.commands.applyHistoryImport(input);
+  if (result.status === 'accepted') return result.appended;
+  if (result.status === 'rejected') {
+    if (
+      result.reason.code === 'prefix_mismatch' ||
+      result.reason.code === 'local_history_has_untracked_suffix'
+    )
+      throw new HistoryRefreshConflict(result.reason.code);
+    throw new Error(`History import was rejected before commit: ${result.reason.code}`);
   }
-  for (let index = 0; index < prefix.length; index += 1) {
-    if (prefix[index] !== value[index]) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function resolveImportedTurnHashes(
-  externalHistory: ExternalAcpHistorySyncMeta,
-  importedTurnHashes?: readonly string[]
-): readonly string[] {
-  return importedTurnHashes ?? externalHistory.importedTurnHashes ?? [];
-}
-
-export function decideHistoryRefresh(args: {
-  externalHistory: ExternalAcpHistorySyncMeta;
-  importedTurnHashes?: readonly string[];
-  replayDigest: string;
-  turnHashes: readonly string[];
-  currentHistoryHashes?: readonly string[];
-}): HistoryRefreshDecision {
-  if (args.replayDigest === args.externalHistory.replayDigest) {
-    return { status: 'skipped', reason: 'digest_match' };
-  }
-
-  const importedTurnHashes = resolveImportedTurnHashes(
-    args.externalHistory,
-    args.importedTurnHashes
-  );
-  if (!isPrefix(importedTurnHashes, args.turnHashes)) {
-    return { status: 'conflicted', reason: 'prefix_mismatch' };
-  }
-
-  if (args.currentHistoryHashes) {
-    if (!isPrefix(args.currentHistoryHashes, args.turnHashes)) {
-      return { status: 'conflicted', reason: 'local_history_has_untracked_suffix' };
-    }
-    const appendFromIndex = args.currentHistoryHashes.length;
-    return args.turnHashes.length > appendFromIndex
-      ? { status: 'refreshed', reason: 'prefix_append', appendFromIndex }
-      : { status: 'skipped', reason: 'empty_suffix', appendFromIndex };
-  }
-
-  const appendFromIndex = args.externalHistory.importedTurnCount;
-  return args.turnHashes.length > appendFromIndex
-    ? { status: 'refreshed', reason: 'prefix_append', appendFromIndex }
-    : { status: 'skipped', reason: 'empty_suffix', appendFromIndex };
-}
-
-function areStringArraysEqual(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && isPrefix(left, right);
+  throw new Error('History import outcome is unknown', { cause: result.cause });
 }
 
 async function readSessionImportedTurnHashes(
   sessionDoc: SessionDocument,
   externalHistory: ExternalAcpHistorySyncMeta
-): Promise<readonly string[]> {
+): Promise<{ importedTurnHashes: readonly string[]; importedTurnHashVersion: number }> {
   const cursor = await sessionDoc.getExternalHistoryCursor();
-  return resolveImportedTurnHashes(externalHistory, cursor?.importedTurnHashes);
-}
-
-async function writeSessionImportedTurnHashes(
-  sessionDoc: SessionDocument,
-  turnHashes: readonly string[]
-): Promise<void> {
-  const current = await sessionDoc.getExternalHistoryCursor();
-  if (areStringArraysEqual(current?.importedTurnHashes ?? [], turnHashes)) {
-    return;
-  }
-  await sessionDoc.setExternalHistoryCursor({
-    importedTurnHashes: [...turnHashes],
-  });
+  return {
+    importedTurnHashes: resolveImportedTurnHashes(externalHistory, cursor?.importedTurnHashes),
+    // The version belongs to whichever holder supplied the effective hashes.
+    importedTurnHashVersion: resolveImportHashVersion(externalHistory, cursor),
+  };
 }
 
 function hasPendingDispatchHistory(history: readonly SessionHistoryInput[]): boolean {
   return history.some((entry) => isSessionHistoryPendingForDispatch(entry));
-}
-
-export function decideHistoryConflictResolution(args: {
-  externalHistory: ExternalAcpHistorySyncMeta;
-  importedTurnHashes?: readonly string[];
-  materialized: Pick<
-    MaterializedReplay,
-    'history' | 'turnHashes' | 'replayDigest' | 'droppedNotifications'
-  >;
-  currentHistoryHashes: readonly string[];
-  currentHistoryHasPendingDispatch: boolean;
-}): HistoryConflictResolutionDecision {
-  if (args.currentHistoryHasPendingDispatch) {
-    return { status: 'blocked', reason: 'session_has_pending_local_turn' };
-  }
-
-  const importedTurnHashes = resolveImportedTurnHashes(
-    args.externalHistory,
-    args.importedTurnHashes
-  );
-  const alreadyResolved =
-    args.externalHistory.status !== 'sync_conflict' &&
-    (areStringArraysEqual(args.currentHistoryHashes, importedTurnHashes) ||
-      (args.externalHistory.replayDigest === args.materialized.replayDigest &&
-        areStringArraysEqual(args.currentHistoryHashes, args.materialized.turnHashes)));
-  if (alreadyResolved) {
-    return { status: 'already_resolved' };
-  }
-
-  if (args.externalHistory.status !== 'sync_conflict') {
-    return { status: 'blocked', reason: 'not_sync_conflict' };
-  }
-
-  if (args.materialized.droppedNotifications > 0) {
-    return { status: 'blocked', reason: 'source_replay_dropped_notifications' };
-  }
-
-  if (args.materialized.history.length === 0) {
-    return { status: 'blocked', reason: 'source_replay_empty' };
-  }
-
-  if (args.materialized.turnHashes.length < importedTurnHashes.length) {
-    return { status: 'blocked', reason: 'source_replay_behind_import_cursor' };
-  }
-
-  return { status: 'replace' };
 }
 
 function formatHistoryConflictResolutionBlocker(
@@ -536,6 +415,8 @@ function buildExternalHistoryMeta(args: {
     sourceAcpSessionId: args.sourceAcpSessionId,
     sourceUpdatedAt: args.sourceUpdatedAt ?? undefined,
     replayDigest: args.materialized.replayDigest,
+    // Versions the digest only. The doc cursor versions its own importedTurnHashes.
+    hashVersion: args.materialized.hashVersion,
     importedTurnCount: args.materialized.turnHashes.length,
     lastSyncAt: getServerNow(),
     status: args.status ?? 'synced',
@@ -782,7 +663,7 @@ export class LocalProjectHistorySyncService {
     }
 
     const sessionDoc = await this.manager.getOrCreateSessionDoc(args.sessionId);
-    const currentHistoryBeforeReplay = await sessionDoc.getHistory();
+    const currentHistoryBeforeReplay = readSessionHistory(sessionDoc.sessionData.history);
     if (hasPendingDispatchHistory(currentHistoryBeforeReplay)) {
       throw new Error(
         'Cannot replace history while the imported session has a pending local turn.'
@@ -793,12 +674,16 @@ export class LocalProjectHistorySyncService {
       throw new Error('Imported session metadata no longer matches the selected ACP history.');
     }
     if (existingExternalHistory.status !== 'sync_conflict') {
-      const importedTurnHashes = await readSessionImportedTurnHashes(
+      const cursor = await sessionDoc.getExternalHistoryCursor();
+      const { importedTurnHashes, importedTurnHashVersion } = await readSessionImportedTurnHashes(
         sessionDoc,
         existingExternalHistory
       );
       if (
-        areStringArraysEqual(currentHistoryBeforeReplay.map(hashHistoryEntry), importedTurnHashes)
+        areStringArraysEqual(
+          hashHistoryForStoredVersion(currentHistoryBeforeReplay, importedTurnHashVersion),
+          storedBaselineHashes(cursor, importedTurnHashes)
+        )
       ) {
         return finishResolved(meta);
       }
@@ -840,16 +725,22 @@ export class LocalProjectHistorySyncService {
       throw new Error('Imported session metadata no longer matches the selected ACP history.');
     }
 
-    const latestImportedTurnHashes = await readSessionImportedTurnHashes(
-      sessionDoc,
-      latestExternalHistory
-    );
-    const latestHistory = await sessionDoc.getHistory();
+    const {
+      importedTurnHashes: latestImportedTurnHashes,
+      importedTurnHashVersion: latestImportedTurnHashVersion,
+    } = await readSessionImportedTurnHashes(sessionDoc, latestExternalHistory);
+    const latestCursor = await sessionDoc.getExternalHistoryCursor();
+    const latestHistory = readSessionHistory(sessionDoc.sessionData.history);
     const decision = decideHistoryConflictResolution({
       externalHistory: latestExternalHistory,
       importedTurnHashes: latestImportedTurnHashes,
+      importedTurnHashVersion: latestImportedTurnHashVersion,
       materialized,
-      currentHistoryHashes: latestHistory.map(hashHistoryEntry),
+      currentHistoryHashes: hashHistoryForStoredVersion(
+        latestHistory,
+        latestImportedTurnHashVersion
+      ),
+      storedHistoryHashes: storedBaselineHashes(latestCursor, latestImportedTurnHashes),
       currentHistoryHasPendingDispatch: hasPendingDispatchHistory(latestHistory),
     });
     if (decision.status === 'blocked') {
@@ -867,24 +758,11 @@ export class LocalProjectHistorySyncService {
     });
     const lastMessageAt = resolveSourceUpdatedAtMs(info, getServerNow());
 
-    await sessionDoc.updateHistory((history) => {
-      const writeTimeDecision = decideHistoryConflictResolution({
-        externalHistory: latestExternalHistory,
-        importedTurnHashes: latestImportedTurnHashes,
-        materialized,
-        currentHistoryHashes: history.map(hashHistoryEntry),
-        currentHistoryHasPendingDispatch: hasPendingDispatchHistory(history),
-      });
-      if (writeTimeDecision.status !== 'replace') {
-        const message =
-          writeTimeDecision.status === 'blocked'
-            ? formatHistoryConflictResolutionBlocker(writeTimeDecision)
-            : 'History conflict was already resolved before replacement.';
-        throw new Error(message);
-      }
-      return materialized.history;
+    await applyBoundHistoryImport(sessionDoc, {
+      mode: 'resolve-conflict',
+      replay: materialized,
+      externalHistory: latestExternalHistory,
     });
-    await writeSessionImportedTurnHashes(sessionDoc, materialized.turnHashes);
     await this.manager.repo.upsertDocMeta(roomId, {
       origin: 'external-acp',
       lastMessageAt,
@@ -1068,8 +946,7 @@ export class LocalProjectHistorySyncService {
 
     try {
       const sessionDoc = await this.manager.getOrCreateSessionDoc(sessionId);
-      await sessionDoc.updateHistory(() => args.materialized.history);
-      await writeSessionImportedTurnHashes(sessionDoc, args.materialized.turnHashes);
+      await applyBoundHistoryImport(sessionDoc, { mode: 'initialize', replay: args.materialized });
       await this.manager.repo.upsertDocMeta(roomId, meta);
       const synced = await sessionDoc.waitUntilSynced();
       if (!synced) {
@@ -1136,54 +1013,16 @@ export class LocalProjectHistorySyncService {
       userId: this.context.userId,
     });
     const sessionDoc = await this.manager.getOrCreateSessionDoc(args.existing.sessionId);
-    const importedTurnHashes = await readSessionImportedTurnHashes(sessionDoc, externalHistory);
-
-    const replayDecision = decideHistoryRefresh({
-      externalHistory,
-      importedTurnHashes,
-      replayDigest: materialized.replayDigest,
-      turnHashes: materialized.turnHashes,
-    });
-
-    if (replayDecision.reason === 'digest_match') {
-      await writeSessionImportedTurnHashes(sessionDoc, materialized.turnHashes);
-      await this.manager.repo.upsertDocMeta(getSessionRoomId(args.existing.sessionId), {
-        origin: 'external-acp',
-        externalHistory: buildExternalHistoryMeta({
-          provider: this.provider,
-          sourceAcpSessionId: args.acpSessionId,
-          sourceUpdatedAt: args.info.updatedAt,
-          materialized,
-        }),
-      } satisfies Partial<SessionMeta>);
-      return 'skipped';
-    }
-
-    if (replayDecision.status === 'conflicted') {
-      await this.markConflict(
-        args.existing.sessionId,
-        args.info,
-        materialized,
-        replayDecision.reason
-      );
-      return 'conflicted';
-    }
-
-    const currentHistory = await sessionDoc.getHistory();
-    const appendDecision = decideHistoryRefresh({
-      externalHistory,
-      importedTurnHashes,
-      replayDigest: materialized.replayDigest,
-      turnHashes: materialized.turnHashes,
-      currentHistoryHashes: currentHistory.map(hashHistoryEntry),
-    });
-    if (appendDecision.status === 'conflicted') {
-      await this.markConflict(
-        args.existing.sessionId,
-        args.info,
-        materialized,
-        appendDecision.reason
-      );
+    let appended = 0;
+    try {
+      appended = await applyBoundHistoryImport(sessionDoc, {
+        mode: 'refresh',
+        replay: materialized,
+        externalHistory,
+      });
+    } catch (error) {
+      if (!(error instanceof HistoryRefreshConflict)) throw error;
+      await this.markConflict(args.existing.sessionId, args.info, materialized, error.message);
       // Wait for the conflict marker to reach Streams before unloading the doc
       // handle. If we unload too early, the conflict state can remain
       // local-cache only and the user sees an "imported" session while other
@@ -1200,9 +1039,6 @@ export class LocalProjectHistorySyncService {
       return 'conflicted';
     }
 
-    const suffix = materialized.history.slice(appendDecision.appendFromIndex);
-    await sessionDoc.updateHistory((history) => [...history, ...suffix]);
-    await writeSessionImportedTurnHashes(sessionDoc, materialized.turnHashes);
     await this.manager.repo.upsertDocMeta(getSessionRoomId(args.existing.sessionId), {
       origin: 'external-acp',
       lastMessageAt: resolveSourceUpdatedAtMs(args.info, getServerNow()),
@@ -1227,9 +1063,7 @@ export class LocalProjectHistorySyncService {
       );
     }
     await this.manager.cleanSessionDoc(args.existing.sessionId, { preserveStatus: true });
-    return externalHistory.status === 'metadata_only' || suffix.length > 0
-      ? 'refreshed'
-      : 'skipped';
+    return externalHistory.status === 'metadata_only' || appended > 0 ? 'refreshed' : 'skipped';
   }
 
   private async markConflict(

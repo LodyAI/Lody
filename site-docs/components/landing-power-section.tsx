@@ -6,8 +6,13 @@
  * (shared sessions, private machines). Diff review stays in the play stage.
  */
 
-import { useEffect, useRef, useState } from 'react';
-import { LandingPowerDemo, type PowerDemoId } from './landing-power-demos';
+import { scheduleAfterLoadIdle } from '@site/lib/after-first-paint';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import type { PowerDemoId } from './landing-power-demos';
+
+const LandingPowerDemo = lazy(() =>
+  import('./landing-power-demos').then((module) => ({ default: module.LandingPowerDemo }))
+);
 
 export type PowerSectionCopy = {
   /** Optional category label, e.g. Team. */
@@ -19,6 +24,7 @@ export type PowerSectionCopy = {
    * Rendered as a short list under the header — no pills / media.
    */
   points?: readonly string[];
+  docsLink?: { href: string; label: string };
   features: readonly {
     id: PowerDemoId;
     title: string;
@@ -36,29 +42,34 @@ function ClientPowerDemo({
   locale,
   title,
   summary,
+  ready,
 }: {
   id: PowerDemoId;
   locale: 'en' | 'zh';
   title: string;
   /** SSR-visible summary so crawlers still get the feature without hydrate. */
   summary?: string;
+  ready: boolean;
 }) {
-  const [ready, setReady] = useState(false);
-  useEffect(() => setReady(true), []);
+  const placeholder = (
+    <div
+      className="uw-power__demo uw-power__demo--ssr lody-app-preview dark"
+      data-power-scroll-scene={id === 'pr' ? '' : undefined}
+      aria-hidden
+      inert
+    >
+      <p className="uw-power__demo-ssr-title">{title}</p>
+      {summary ? <p className="uw-power__demo-ssr-body">{summary}</p> : null}
+    </div>
+  );
   if (!ready) {
-    return (
-      <div
-        className="uw-power__demo uw-power__demo--ssr lody-app-preview dark"
-        data-power-scroll-scene={id === 'pr' ? '' : undefined}
-        aria-hidden
-        inert
-      >
-        <p className="uw-power__demo-ssr-title">{title}</p>
-        {summary ? <p className="uw-power__demo-ssr-body">{summary}</p> : null}
-      </div>
-    );
+    return placeholder;
   }
-  return <LandingPowerDemo id={id} locale={locale} />;
+  return (
+    <Suspense fallback={placeholder}>
+      <LandingPowerDemo id={id} locale={locale} />
+    </Suspense>
+  );
 }
 
 export function LandingPowerSection({
@@ -69,6 +80,20 @@ export function LandingPowerSection({
   locale: 'en' | 'zh';
 }) {
   const sectionRef = useRef<HTMLElement>(null);
+  const [demosReady, setDemosReady] = useState(false);
+
+  useEffect(() => {
+    const section = sectionRef.current;
+    const arm = () => setDemosReady(true);
+    if (!section || typeof IntersectionObserver === 'undefined') {
+      return scheduleAfterLoadIdle(arm, { timeoutMs: 10_000 });
+    }
+    const io = new IntersectionObserver(([entry]) => {
+      if (entry?.isIntersecting) arm();
+    });
+    io.observe(section);
+    return () => io.disconnect();
+  }, []);
 
   useEffect(() => {
     const section = sectionRef.current;
@@ -142,6 +167,11 @@ export function LandingPowerSection({
             {copy.title}
           </h2>
           <p className="uw-power__body">{copy.body}</p>
+          {copy.docsLink ? (
+            <p className="uw-section-docs">
+              <a href={copy.docsLink.href}>{copy.docsLink.label}</a>
+            </p>
+          ) : null}
           {copy.points && copy.points.length > 0 ? (
             <ul className="uw-power__points">
               {copy.points.map((point) => (
@@ -159,6 +189,7 @@ export function LandingPowerSection({
                 locale={locale}
                 title={feature.title}
                 summary={feature.body}
+                ready={demosReady}
               />
               <h3 className="uw-power__card-title">{feature.title}</h3>
               {feature.body ? <p className="uw-power__card-body">{feature.body}</p> : null}

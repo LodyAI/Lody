@@ -6,12 +6,12 @@ import { flushSync } from 'react-dom';
 import { createRoot, type Root } from 'react-dom/client';
 import { Provider } from 'jotai';
 import { SessionList } from '../src/components/session-list';
-import { SessionPrIcon, SessionRowLeadingSlot } from '../src/components/sidebar-row-shared';
+import { SessionPrIcon, SidebarRowEndSlot } from '../src/components/sidebar-row-shared';
 import { initI18n } from '../src/i18n';
 
 const PR_STATUS_CASES = [
   ['open', '.lucide-git-pull-request', 'text-github-open'],
-  ['merged', '.lucide-git-merge', 'text-github-merged'],
+  ['merged', '.lucide-git-merge', 'text-pr-merged'],
   ['closed', '.lucide-git-pull-request-closed', 'text-github-closed'],
   ['draft', '.lucide-git-pull-request-draft', 'text-github-draft'],
 ] as const;
@@ -196,16 +196,11 @@ describe('SessionList PR badge', () => {
     expect(passedVerdict?.getAttribute('height')).toBe('10');
     expect(passedVerdict?.classList.contains('text-status-success')).toBe(true);
     expect(passedPrIcon?.querySelector('.bg-sidebar')).toBeNull();
-    expect(rowWithPr?.querySelector('.text-code-added')?.textContent).toBe('+12');
-    expect(rowWithPr?.querySelector('.text-code-removed')?.textContent).toBe('-4');
-    expect(
-      Array.from(
-        rowWithPr?.querySelectorAll('.text-code-removed, [data-pr-ci-verdict="success"]') ?? []
-      )
-    ).toEqual([rowWithPr?.querySelector('.text-code-removed'), passedPrIcon]);
+    expect(rowWithPr?.querySelector('.text-code-added')).toBeNull();
+    expect(rowWithPr?.querySelector('.text-code-removed')).toBeNull();
     expect(rowWithoutPr?.querySelector('[data-pr-ci-verdict]')).toBeNull();
-    expect(rowWithoutPr?.querySelector('.text-code-added')?.textContent).toBe('+8');
-    expect(rowWithoutPr?.querySelector('.text-code-removed')?.textContent).toBe('-2');
+    expect(rowWithoutPr?.querySelector('.text-code-added')).toBeNull();
+    expect(rowWithoutPr?.querySelector('.text-code-removed')).toBeNull();
   });
 
   it('replaces diff stats with a Mergeable pill only while the ready session is inactive', () => {
@@ -350,22 +345,21 @@ describe('SessionList PR badge', () => {
     expect(emittedRenderUpdateWarning).toBe(false);
   });
 
-  it('keeps the working animation on an active-only fixed SVG', () => {
+  it('keeps the working animation on an active-only fixed wrapper', () => {
     container = document.createElement('div');
     document.body.appendChild(container);
     root = createRoot(container);
 
     flushSync(() => {
       root?.render(
-        React.createElement(SessionRowLeadingSlot, {
+        React.createElement(SidebarRowEndSlot, {
           isWorking: true,
-          menuLabel: 'More actions',
         })
       );
     });
 
     const spinner = container.querySelector('[data-session-working-spinner]');
-    expect(spinner?.tagName).toBe('svg');
+    expect(spinner?.tagName).toBe('SPAN');
     expect(spinner?.classList.contains('h-3')).toBe(true);
     expect(spinner?.classList.contains('w-3')).toBe(true);
     expect(spinner?.classList.contains('shrink-0')).toBe(true);
@@ -374,10 +368,9 @@ describe('SessionList PR badge', () => {
 
     flushSync(() => {
       root?.render(
-        React.createElement(SessionRowLeadingSlot, {
+        React.createElement(SidebarRowEndSlot, {
           isWorking: false,
           hasUnreadMessages: true,
-          menuLabel: 'More actions',
         })
       );
     });

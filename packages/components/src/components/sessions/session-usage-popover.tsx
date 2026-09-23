@@ -1,9 +1,10 @@
 import { memo, useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { formatDistance, type Locale } from 'date-fns';
-import { enUS, zhCN } from 'date-fns/locale';
+import { enUS } from 'date-fns/locale/en-US';
+import { zhCN } from 'date-fns/locale/zh-CN';
 import { getServerNow, type SessionContextWindowUsage } from '@lody/shared';
-import { Loader2 } from 'lucide-react';
+import { Spinner } from '@/ui/spinner';
 
 import { Button } from '@/ui/button';
 import {
@@ -19,6 +20,7 @@ import { cn } from '@/lib/utils';
 import {
   FIVE_HOUR_WINDOW_SECONDS,
   SEVEN_DAY_WINDOW_SECONDS,
+  formatAgentRateLimitWindowLabel,
   formatRateLimitWindowShortLabel,
   getAgentRateLimitWindows,
   getContextWindowUsageData,
@@ -133,7 +135,7 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
           >
             {isContextCompacting ? (
               <>
-                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
+                <Spinner className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                 <span className="text-[11px]">{t('sessions.usage.compacting', 'Compacting')}</span>
               </>
             ) : (
@@ -157,7 +159,7 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
                 {t('sessions.usage.context', 'Context')}
               </div>
               <div className="flex items-center gap-2 text-xs text-foreground">
-                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+                <Spinner className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 <span>{t('sessions.usage.compactingContext', 'Compacting context')}</span>
               </div>
             </div>
@@ -185,7 +187,11 @@ export const SessionUsagePopover = memo(function SessionUsagePopover({
                 rateLimitWindows.map((window, index) => (
                   <UsageMeter
                     key={`${window.windowDurationSeconds ?? 'unknown'}-${index}`}
-                    label={formatWindowLabel(window.windowDurationSeconds)}
+                    label={formatAgentRateLimitWindowLabel(
+                      window,
+                      formatWindowLabel(window.windowDurationSeconds),
+                      t
+                    )}
                     value={window.usedPercent}
                     detail={formatReset(window.resetsAtEpochSeconds)}
                   />

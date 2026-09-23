@@ -1,10 +1,15 @@
 import type { ReactNode } from 'react';
-import { useAtom } from 'jotai';
+import { useAtomValue, useSetAtom } from 'jotai';
 import { Archive, ChevronDown, PanelLeft, Trash2, Undo2, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
-import { sidebarCollapsedAtom } from '@/atoms/sidebar-state';
+import { navigationSidebarHiddenAtom, showNavigationSidebarAtom } from '@/atoms/layout-state';
 import { isMacOSElectronRenderer, useElectronFullscreen } from '@/lib/electron';
+import {
+  useMacTrafficLightRowPadClass,
+  useWindowDragRegionClass,
+  useWindowsCaptionPadClass,
+} from '@/ui/window-drag-region';
 import { isNativeAppShell } from '@/lib/native-platform';
 import { Button } from '@/ui/button';
 import {
@@ -48,8 +53,12 @@ export function WebArchiveScreen({
   children,
 }: WebArchiveScreenProps) {
   const { t } = useTranslation();
-  const [isLeftSidebarCollapsed, setLeftSidebarCollapsed] = useAtom(sidebarCollapsedAtom);
+  const isLeftSidebarHidden = useAtomValue(navigationSidebarHiddenAtom);
+  const showNavigationSidebar = useSetAtom(showNavigationSidebarAtom);
   const isElectronFullscreen = useElectronFullscreen();
+  const windowDragClass = useWindowDragRegionClass();
+  const windowsCaptionPadClass = useWindowsCaptionPadClass();
+  const macTrafficLightRowPadClass = useMacTrafficLightRowPadClass({ bottomBorder: true });
   // Traffic lights auto-hide in native fullscreen — no inset to reserve then.
   // Mirrors the same derivation in session-detail.tsx.
   const hasMacOSTitlebarInset =
@@ -63,15 +72,20 @@ export function WebArchiveScreen({
         <header
           className={cn(
             'flex h-[calc(2.75rem+var(--safe-area-top))] w-full shrink-0 items-center gap-3 border-b border-border bg-background pl-[calc(16px+var(--safe-area-left))] pr-[calc(16px+var(--safe-area-right))] pt-[var(--safe-area-top)]',
-            isLeftSidebarCollapsed && hasMacOSTitlebarInset && 'pl-[4.5rem]'
+            // Compensate for the button's -ml-1: its left edge sits at 96px,
+            // matching Chat Landing and clearing the traffic lights by 24px.
+            isLeftSidebarHidden && hasMacOSTitlebarInset && 'pl-[100px]',
+            windowDragClass,
+            windowsCaptionPadClass,
+            macTrafficLightRowPadClass
           )}
         >
-          {isLeftSidebarCollapsed ? (
+          {isLeftSidebarHidden ? (
             <Button
               type="button"
               variant="ghost"
               size="icon"
-              onClick={() => setLeftSidebarCollapsed(false)}
+              onClick={() => showNavigationSidebar()}
               aria-label={t('sessions.leftSidebar.show', 'Show navigation sidebar')}
               className="-ml-1 h-7 w-7 shrink-0 text-muted-foreground"
             >
@@ -164,9 +178,9 @@ export function WebArchiveScreen({
           )}
         </header>
 
-        {/* Plain overflow scroller (not Radix ScrollArea): Radix's viewport uses
-            display:table which shrink-wraps children and never fills the pane. */}
-        <div className="min-h-0 w-full min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
+        {/* The archive list owns its own scrollport so virtualization can attach
+            to a sibling node instead of this chrome ancestor. */}
+        <div className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
           {children}
         </div>
         {dialogs}

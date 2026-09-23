@@ -1,7 +1,9 @@
-import { lazy, Suspense, useMemo, type ReactNode } from 'react';
+import { lazy, Suspense, useMemo, useState, type ReactNode } from 'react';
 import NumberFlow from '@number-flow/react';
 import { useTranslation } from 'react-i18next';
-import { Coins, DollarSign } from 'lucide-react';
+import { Coins, DollarSign, Share2 } from 'lucide-react';
+import { Button } from '@/ui/button';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/ui/tooltip';
 import { formatCompactNumber, formatUsdAmount } from '@/lib/format-compact-number';
 import { toIntlLocaleOrEn } from '@/lib/intl-locale';
 import { cn } from '@/lib/utils';
@@ -10,6 +12,7 @@ import {
   type StackedAreaBucket,
   type StackedAreaSeriesMarkerRender,
 } from './usage-stacked-area-chart';
+import { UsageCalendarSkeleton } from './usage-calendar-skeleton';
 import type {
   SettingsUsageCalendarData,
   SettingsUsageDayData,
@@ -50,6 +53,11 @@ export type StatsSettingsViewProps = {
    * so large totals ($23,740) fit the tile without clipping.
    */
   costFractionDigits?: number;
+  /**
+   * Opt-in share entry. Off by default so the public landing demo neither shows
+   * an action it cannot perform nor pulls the capture pipeline into its bundle.
+   */
+  shareCard?: boolean;
 };
 
 const RANGE_ORDER: SettingsUsageRange[] = ['day', 'week', 'month', 'total'];
@@ -60,6 +68,12 @@ const RANGE_ORDER: SettingsUsageRange[] = ['day', 'week', 'month', 'total'];
 const UsageCalendarVisualization = lazy(async () => {
   const module = await import('./usage-calendar-visualization');
   return { default: module.UsageCalendarVisualization };
+});
+
+// snapdom + qrcode are only needed once someone opens the share dialog.
+const UsageShareImageDialog = lazy(async () => {
+  const module = await import('./usage-share-image-dialog');
+  return { default: module.UsageShareImageDialog };
 });
 
 export function formatTokens(value: number, locale?: string | null): string {
@@ -122,9 +136,11 @@ function StatTile({
         className
       )}
     >
-      <p className="text-[0.8rem] font-medium text-muted-foreground">{label}</p>
+      <p className="text-[0.8rem] font-normal text-muted-foreground">{label}</p>
       <div className="mt-auto">
-        <div className="min-w-0 whitespace-nowrap text-3xl font-bold leading-none tracking-tight tabular-nums text-foreground text-[clamp(1.5rem,16cqw,2.75rem)]">
+        {/* NumberFlow measures ~68px tall at the clamp's 2.75rem cap; reserve
+           that height so the loading "—" cannot grow into it on resolve. */}
+        <div className="flex min-h-[4.25rem] min-w-0 items-center whitespace-nowrap text-3xl font-normal leading-none tracking-tight tabular-nums text-foreground text-[clamp(1.5rem,16cqw,2.75rem)]">
           {children}
         </div>
         {footer ? <div className="mt-2">{footer}</div> : null}
@@ -157,7 +173,7 @@ function RangeSelector({
             aria-selected={active}
             onClick={() => onRangeChange(value)}
             className={cn(
-              'rounded-md px-3 py-1 text-xs font-medium transition-colors',
+              'rounded-md px-3 py-1 text-xs font-normal transition-colors',
               active
                 ? 'bg-background text-foreground shadow-xs'
                 : 'text-muted-foreground hover:text-foreground'
@@ -191,8 +207,10 @@ export function StatsSettingsView({
   tintModelSeriesLabel,
   tintMemberSeriesLabel,
   costFractionDigits = 2,
+  shareCard = false,
 }: StatsSettingsViewProps) {
   const { t, i18n } = useTranslation();
+  const [shareOpen, setShareOpen] = useState(false);
   const locale = toIntlLocaleOrEn(i18n.resolvedLanguage ?? i18n.language);
   const windowCaption = t(`workspace.usage.window.${range}.long`);
   const costDigits = Math.max(0, Math.min(2, costFractionDigits));
@@ -206,13 +224,43 @@ export function StatsSettingsView({
          says Usage). Workspace name + the time-window selector. */}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="truncate text-lg font-semibold leading-tight text-foreground">
+          <h2 className="truncate text-lg font-normal leading-tight text-foreground">
             {workspaceName || t('workspace.usage.title')}
           </h2>
           <p className="mt-0.5 text-xs text-muted-foreground">{windowCaption}</p>
         </div>
-        <RangeSelector range={range} onRangeChange={onRangeChange} />
+        <div className="flex items-center gap-1.5">
+          <RangeSelector range={range} onRangeChange={onRangeChange} />
+          {shareCard && usageCalendar ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  aria-label={t('workspace.usage.shareImage.action')}
+                  onClick={() => setShareOpen(true)}
+                >
+                  <Share2 />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t('workspace.usage.shareImage.action')}</TooltipContent>
+            </Tooltip>
+          ) : null}
+        </div>
       </div>
+
+      {shareCard && usageCalendar && shareOpen ? (
+        <Suspense fallback={null}>
+          <UsageShareImageDialog
+            open={shareOpen}
+            onOpenChange={setShareOpen}
+            calendar={usageCalendar}
+            timeline={usageTimeline}
+            range={range}
+            workspaceName={workspaceName}
+          />
+        </Suspense>
+      ) : null}
 
       {/* KPI overview band — 2 cards with icon watermarks. */}
       <div className="grid grid-cols-2 gap-3">
@@ -250,8 +298,12 @@ export function StatsSettingsView({
         </StatTile>
       </div>
 
+      {/* The calendar keeps its eventual footprint while either its data or the
+         lazy three.js chunk is still resolving; `undefined` after a workspace is
+         selected always means "query in flight" — an empty workspace still gets
+         a zeroed calendar object. */}
       {usageCalendar ? (
-        <Suspense fallback={null}>
+        <Suspense fallback={<UsageCalendarSkeleton range={range} />}>
           <UsageCalendarVisualization
             calendar={usageCalendar}
             timeline={usageTimeline}
@@ -261,6 +313,8 @@ export function StatsSettingsView({
             onSelectedDayChange={onSelectedUsageDayChange}
           />
         </Suspense>
+      ) : workspaceId ? (
+        <UsageCalendarSkeleton range={range} />
       ) : null}
 
       <UsageStackedAreaChart
@@ -271,6 +325,8 @@ export function StatsSettingsView({
         tooltipValueFormatter={tokensCompact}
         renderSeriesMarker={renderModelSeriesMarker}
         tintSeriesLabel={tintModelSeriesLabel}
+        loading={loading}
+        loadingText={t('workspace.usage.loading', 'Loading usage data...')}
       />
       <UsageStackedAreaChart
         title={t('workspace.usage.byUser')}
@@ -280,16 +336,13 @@ export function StatsSettingsView({
         tooltipValueFormatter={tokensCompact}
         renderSeriesMarker={renderMemberSeriesMarker}
         tintSeriesLabel={tintMemberSeriesLabel}
+        loading={loading}
+        loadingText={t('workspace.usage.loading', 'Loading usage data...')}
       />
 
       {!workspaceId && (
         <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
           {t('workspace.usage.workspaceRequired', 'Select a workspace to view usage')}
-        </div>
-      )}
-      {workspaceId && loading && (
-        <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
-          {t('workspace.usage.loading', 'Loading usage data...')}
         </div>
       )}
     </div>

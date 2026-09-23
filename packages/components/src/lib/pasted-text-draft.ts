@@ -1,4 +1,5 @@
 import type { TextRewrite } from '@lody/shared';
+import { getExpandedClipboardTextForSelection } from '@/lib/composer-clipboard';
 
 export interface PastedTextDraft {
   id: string;
@@ -9,6 +10,17 @@ export interface PastedTextDraft {
 }
 
 export const LARGE_PASTED_TEXT_MIN_CHAR_COUNT = 1024;
+
+/**
+ * Hard ceiling for a single paste, in UTF-8 bytes of the text we would store.
+ *
+ * Above this the collapse stops helping: the chip hides the blob in the
+ * composer, but the full text still rides along in every draft save, every
+ * prompt rewrite, and the turn itself. A log dump this size is never something
+ * the user meant to type into a message, so the paste is refused outright and
+ * they are pointed at the file-attachment path instead.
+ */
+export const MAX_PASTED_TEXT_BYTE_SIZE = 500 * 1024;
 
 export const createPastedTextDraftId = (): string => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -29,6 +41,19 @@ export const getPastedTextLineCount = (text: string): number => {
   }
   return normalized.split('\n').length;
 };
+
+const pastedTextEncoder = new TextEncoder();
+
+/**
+ * UTF-8 size of the text a paste would actually store, so the ceiling is
+ * measured against the same normalized-and-trimmed string `insertPastedTextDraft`
+ * keeps rather than the raw clipboard payload.
+ */
+export const getPastedTextByteSize = (text: string): number =>
+  pastedTextEncoder.encode(normalizePastedTextDraft(text).trim()).length;
+
+export const isPastedTextTooLarge = (text: string): boolean =>
+  getPastedTextByteSize(text) > MAX_PASTED_TEXT_BYTE_SIZE;
 
 export const isLargePastedText = (text: string): boolean => {
   const characterCount = getPastedTextCharacterCount(text);
@@ -247,54 +272,13 @@ export const getPastedTextClipboardTextForSelection = ({
   drafts: readonly PastedTextDraft[];
   selectionStart: number | null;
   selectionEnd: number | null;
-}): string | null => {
-  const safeStart = Math.max(0, Math.min(selectionStart ?? 0, value.length));
-  const safeEnd = Math.max(safeStart, Math.min(selectionEnd ?? safeStart, value.length));
-
-  if (safeStart === safeEnd) {
-    return null;
-  }
-
-  const sortedDrafts = sanitizePastedTextDrafts(drafts);
-  let cursor = safeStart;
-  let clipboardText = '';
-  let expandedDraftCount = 0;
-
-  for (const draft of sortedDrafts) {
-    if (draft.start >= safeEnd) {
-      break;
-    }
-
-    if (
-      draft.start < 0 ||
-      draft.end <= draft.start ||
-      draft.end > value.length ||
-      draft.end <= safeStart ||
-      draft.end <= cursor
-    ) {
-      continue;
-    }
-
-    if (draft.start < cursor && cursor !== safeStart) {
-      continue;
-    }
-
-    if (draft.start > cursor) {
-      clipboardText += value.slice(cursor, Math.min(draft.start, safeEnd));
-    }
-
-    clipboardText += normalizePastedTextDraft(draft.text);
-    expandedDraftCount += 1;
-    cursor = Math.max(cursor, Math.min(draft.end, safeEnd));
-  }
-
-  if (expandedDraftCount === 0) {
-    return null;
-  }
-
-  clipboardText += value.slice(cursor, safeEnd);
-  return clipboardText;
-};
+}): string | null =>
+  getExpandedClipboardTextForSelection({
+    value,
+    selectionStart,
+    selectionEnd,
+    rewrites: buildPastedTextRewrites(sanitizePastedTextDrafts(drafts)),
+  });
 
 export const arePastedTextDraftsEqual = (
   current: readonly PastedTextDraft[],

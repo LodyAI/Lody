@@ -1,3 +1,4 @@
+import type { AgentRunRef } from '@/components/shared/agent-run-ref';
 import {
   getBuiltinDefaultModeId,
   type AgentConfigId,
@@ -7,7 +8,6 @@ import {
   type ScheduleDestination,
   type ScheduleProposalMeta,
   type SessionMeta,
-  type TaskAgentRef,
 } from '@lody/shared';
 
 /** What the conversation the proposal came from was running with. */
@@ -18,7 +18,7 @@ export type ProposalConversation = {
 };
 
 export type ResolvedProposalTarget = {
-  agent: TaskAgentRef;
+  agent: AgentRunRef;
   agentConfig: AgentConfigMeta;
   project: ProjectRef | null;
   destination: ScheduleDestination;
@@ -90,7 +90,7 @@ export function resolveScheduleProposalTarget(args: {
       ? (conversation?.runConfig ?? {})
       : { modeId: getBuiltinDefaultModeId(agentConfig.cliType, agentConfig.agentType) };
 
-  const agent: TaskAgentRef = {
+  const agent: AgentRunRef = {
     agentConfigId: agentConfig.id as AgentConfigId,
     ...(runConfig.modeId ? { modeId: runConfig.modeId } : {}),
     ...(runConfig.modelId ? { modelId: runConfig.modelId } : {}),

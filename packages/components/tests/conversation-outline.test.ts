@@ -1,9 +1,11 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { SessionHistoryParsed } from '@lody/shared';
 import {
+  OUTLINE_MIN_USER_ROUNDS,
   OUTLINE_PREVIEW_MAX_LENGTH,
   OUTLINE_TITLE_MAX_LENGTH,
   buildConversationOutline,
+  countUserDrivenRounds,
   reuseConversationOutline,
   type ConversationOutlineSource,
 } from '../src/lib/conversation-outline';
@@ -204,6 +206,33 @@ describe('buildConversationOutline', () => {
 
       expect(outline[0]?.weight).toBe(0);
     });
+  });
+});
+
+describe('countUserDrivenRounds', () => {
+  const rounds = (count: number): ConversationOutlineSource[] =>
+    Array.from({ length: count }, (_unused, index) =>
+      message('user', [text(`round ${index + 1}`)])
+    );
+
+  it('counts one round per user turn', () => {
+    expect(countUserDrivenRounds(buildConversationOutline(rounds(9)))).toBe(9);
+    expect(countUserDrivenRounds(buildConversationOutline(rounds(10)))).toBe(10);
+    expect(OUTLINE_MIN_USER_ROUNDS).toBe(10);
+  });
+
+  it('does not count a leading agent round toward the rail threshold', () => {
+    const outline = buildConversationOutline([
+      message('assistant', [text('Scheduled run starting.')]),
+      ...rounds(OUTLINE_MIN_USER_ROUNDS - 1),
+    ]);
+
+    expect(outline).toHaveLength(OUTLINE_MIN_USER_ROUNDS);
+    expect(countUserDrivenRounds(outline)).toBe(OUTLINE_MIN_USER_ROUNDS - 1);
+  });
+
+  it('returns zero for an empty outline', () => {
+    expect(countUserDrivenRounds([])).toBe(0);
   });
 });
 

@@ -9,6 +9,8 @@
   `schedule-engine.ts` owns serialized planning and handoff; `schedule-store.ts`
   owns the Host-local SQLite ledger. Cursor advancement and a run intent share
   an IMMEDIATE transaction. Preserve cursor/run ids across restarts.
+- Session history goes through `sessionData` (`readSessionHistory` reads,
+  `commands.appendTurn` appends missing entries); there is no whole-list rewrite.
 - Freeze JSON `PreparedSessionInput` before Session mutation. Its fixed user turn
   uses `prepared`, inert until `latestUserMsgId` is committed. After this pointer,
   the ordinary watcher owns execution. Never retry with another Session or Turn,
@@ -17,10 +19,10 @@
   requires the initial and current connection sync; a previously resolved
   first-sync promise is insufficient after reconnect. Pure local bypasses only
   this cloud gate, never ownership/config validation.
-- `AgentExecutionSlots` is shared with delegated Task automation. Restore accepted
-  Schedule occupancy before starting Task automation; retain it while Session
+- `AgentExecutionSlots` is host-local, per-Agent-config Schedule admission.
+  Restore accepted occupancy before evaluating; retain it while Session
   dispatch, queues, Operations or deliveries still have work. Release before
-  prehandoff retry. Task release must not trigger its own immediate failed retry.
+  prehandoff retry.
 - Configuration unavailability is recoverable without consuming an attempt.
   Infrastructure failures use bounded backoff; all prehandoff work expires after
   its fixed dispatch age. Only unprepared pending automatic runs may be superseded.
@@ -58,7 +60,7 @@
   `SESSION_UNAVAILABLE` as a recoverable configuration problem. The command
   service applies the same rule on create/edit and rejects a project on a
   schedule that sends into a chat.
-- Dispose Task/Schedule workers before tearing down a workspace's Lody runtime.
+- Dispose Schedule workers before tearing down a workspace's Lody runtime.
   Timers and active evaluations must not survive workspace revocation.
 - Deterministic tests use injected clocks, explicit sync barriers and temporary
   SQLite files. Do not add wall-clock sleep or live-provider timing assertions.
