@@ -115,6 +115,19 @@ Measured in the same production build and workspace (9k nodes):
   Measured over 44 switches: main-thread tasks 6.6s → 4.3s, script 4.6s → 2.2s, blocking
   time 2.1s → 0.5s; the switch commit renders ~2k components instead of ~18k.
 
+  Two follow-ups on the same benchmark (tasks 4.3s → 4.0s, blocking 0.49s → 0.24s):
+  - The router's own scroll restoration is off on conversation routes
+    (`shouldRouterRestoreScroll`): it recorded every scrolled element by CSS selector and wrote
+    `scrollTop` back after the next render, a second writer to a viewport the follow controller
+    owns. The web build's older router-core (1.159) still writes `sessionStorage` from its
+    throttled scroll listener; 1.171, used here, only records targets.
+  - The input area, composer and mention textarea each built the session mention items and
+    rewrote the slug cache on every switch; they now share one result
+    (`getSessionMentionItems`) and remember it once. The slug cache keeps the first 200
+    insertions in order, which are rarely the recent sessions; left as is.
+  - Markdown parsing is repeated per mount inside Streamdown (~1.6ms per switch); caching it
+    would need a patch to the library, not taken.
+
 ## Open
 
 Konsta's `theme.css` still imports all Konsta styles; only this utility was shown to matter. No
