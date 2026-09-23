@@ -70,7 +70,7 @@ app.on('browser-window-created', (_createdEvent, win) => {
     }
     if (win.__claim)
       log({ kind: 'native-show-start', id: win.id, afterClaimMs: performance.now() - win.__claim });
-    return show();
+    show();
   };
   wc.send = (channel, ...args) => {
     if (channel === 'app.prepareWindowTarget') {
@@ -104,7 +104,7 @@ app.on('browser-window-created', (_createdEvent, win) => {
     if (message.startsWith('RuntimeProvider:'))
       log({ kind: 'runtime', id: win.id, message, at: performance.now() });
   });
-  win.on('show', async () => {
+  const checkShownWindow = async () => {
     if (!win.__claim) return;
     const claimToShowMs = performance.now() - win.__claim;
     log({ kind: 'native-show-event', id: win.id, claimToShowMs });
@@ -162,6 +162,9 @@ app.on('browser-window-created', (_createdEvent, win) => {
     } catch (error) {
       running?.reject(error);
     }
+  };
+  win.on('show', () => {
+    void checkShownWindow().catch(error => running?.reject(error));
   });
 });
 require(process.env.PROBE_ENTRY);
@@ -174,7 +177,7 @@ const waitFor = async (check, label) => {
   }
   throw new Error('Timed out: ' + label);
 };
-app.whenReady().then(async () => {
+void app.whenReady().then(async () => {
   try {
     const source = await waitFor(
       () =>

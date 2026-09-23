@@ -300,7 +300,7 @@ describe('session snapshot adoption', () => {
     expect(handle.doc).toBe(owned.doc);
     expect(observed).toEqual({ fields: { remote: 'peer', local: 'unsent' } });
     unsubscribe();
-    owned.release();
+    await owned.release();
     await repo.destroy();
   });
 
