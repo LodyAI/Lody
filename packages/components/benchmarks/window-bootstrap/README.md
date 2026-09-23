@@ -118,6 +118,70 @@ React lifecycle. One earlier baseline process crashed before completion and was
 excluded; its replacement run completed. These small sequential samples and the
 earlier outlier cannot establish a stable tail distribution.
 
+
+## macOS prepared-content prototype
+
+This is an isolated experiment, not a product feature. The probe opens the target
+in advance through the real desktop path, intercepts presentation while it prepares,
+then presents that same live window through probe-only IPC. A source-window sender
+check restricts this IPC to the isolated harness. Target preparation is measured
+separately and excluded from presentation timing: the experiment deliberately has a
+100% prepared-target hit rate, with no prediction or cache-miss model.
+
+Run from components with the same built desktop/CLI prerequisites:
+
+```sh
+PROBE_INPUT=1 node benchmarks/window-bootstrap/run-app.mjs 5 current-input
+PROBE_PREPARED=1 PROBE_INPUT=1 node benchmarks/window-bootstrap/run-app.mjs 5 prepared
+PROBE_PREPARED=1 PROBE_INPUT=1 PROBE_MAC_NATIVE=1 node benchmarks/window-bootstrap/run-app.mjs 10 prepared-native
+```
+
+The last command compiles the probe-only N-API addon with Xcode command-line tools.
+Headers default to `~/Library/Caches/node-gyp/<electron-version>/include/node`;
+set `PROBE_NODE_HEADERS` to an existing compatible header directory if needed.
+The addon takes Electron's NSView handle and sets its NSWindow's
+`animationBehavior` to `NSWindowAnimationBehaviorNone`. It runs on the main thread,
+uses public AppKit APIs, and is neither packaged nor loaded by the product.
+Prepared/native modes refuse non-macOS hosts. The experiment does not use IOSurface.
+
+Input validation focuses the real composer and inserts a unique token via
+`webContents.insertText`, then verifies its retention after an animation frame.
+It neither assigns the textarea value nor submits a message. Each token must be
+absent before insertion; persistent drafts cannot produce a false pass. This
+measures Chromium text insertion with focus/verification IPC overhead, not physical
+keyboard latency or IME correctness. Capture begins at native show, concurrently
+with validation; native show is not proof of display scanout.
+
+
+[Recorded macOS prototype results](results-macos-prepared-2026-09-23.json), 3,000
+entries on the reference M4 Max, with the same built desktop and CLI:
+
+| Path | Samples | Native show median | Unique input confirmed median |
+| --- | --- | --- | --- |
+| Current production opening path | 5 | 443.82 ms | 490.78 ms |
+| Target prepared before request | 5 | 38.31 ms | 84.64 ms |
+| Prepared target, native animation disabled | 10 | 40.76 ms | 90.15 ms |
+
+All 29 first-show/input checks passed, including warmups. The ten native samples
+ranged from 32.85–75.72 ms for show and 80.73–144.70 ms for input confirmation.
+About 409 ms of target preparation moved before the request. These are small,
+sequential samples: disabling native animation alone has no established stable
+benefit, and input tails exceed the proposed 100 ms target.
+
+Earlier exploratory runs reused one input token, making draft persistence a source
+of false passes; one repetition also failed its exact-value assertion for an
+undetermined reason. Those runs are excluded from this table. The revised unique
+token and next-frame check avoids the repeated-token ambiguity without retrying
+insertion. A five-sample exploratory 22.43 ms show median was not sustained in the
+ten-sample repeat and is not the headline result.
+
+Production adoption still needs bounded target selection/eviction, side-effect
+suppression (read state, focus, notifications), invalidation, cancellation and
+failure ownership. The probe uses the ordinary Session UI with synthetic data, so
+it intentionally does not establish that speculative production mounting is safe.
+The [architecture proposal](../../../../.agents/notes/proposed/architecture/2026-09-23-prepared-session-surfaces.md)
+owns those outstanding decisions.
+
 ## Earlier regression
 
 [Original results](results-2026-09-23.json) retain the 50-sample measurement of the
