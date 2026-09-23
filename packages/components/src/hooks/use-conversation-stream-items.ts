@@ -8,6 +8,7 @@ import {
 import type { VisibleTurnRange } from '@/components/ai-gui/view';
 import type { ConversationView } from '@/lib/conversation-view';
 import { LRUCache } from '@/lib/lru-cache';
+import { scrollDebug } from './scroll-debug-log';
 import { useConversationVersion, useTurnRange } from './use-conversation-view';
 
 /** Per-turn render items survive a tab switch; 20 sessions is the working set. */
@@ -109,6 +110,28 @@ export function useConversationStreamItems(
   );
   if (tailReady && (!visibleRange || rangeReady)) initialRef.current.ready = true;
   const initialWindowReady = !!view && initialRef.current.ready;
+  useEffect(() => {
+    scrollDebug('hydration-window', {
+      sessionId,
+      turnCount,
+      from: hydrationWindow.from,
+      to: hydrationWindow.to,
+      tailFrom,
+      visible: visibleRange,
+      tailReady,
+      rangeReady,
+      initialWindowReady,
+    });
+  }, [
+    hydrationWindow,
+    initialWindowReady,
+    rangeReady,
+    sessionId,
+    tailFrom,
+    tailReady,
+    turnCount,
+    visibleRange,
+  ]);
 
   const [retained, setRetained] = useState<{
     source: ConversationView;

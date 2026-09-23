@@ -2400,7 +2400,6 @@ export const SessionChatInterface = memo(
     const searchInputRef = useRef<HTMLInputElement>(null);
     const messageAreaRef = useRef<HTMLDivElement>(null);
     const [outlineOverlayRoot, setOutlineOverlayRoot] = useState<HTMLDivElement | null>(null);
-    const skipNextViewportResizeAutoScrollRef = useRef(false);
     const suppressStickyAutoScrollRef = useRef(false);
     const [isSearchOpen, setIsSearchOpen] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
@@ -3659,8 +3658,13 @@ export const SessionChatInterface = memo(
     // Waiting on the user is not work in progress: that status does not shimmer.
     const agentActivityShimmer = agentActivityTone !== 'warning';
 
-    const scrollChatToBottom = useCallback(() => {
-      requestAnimationFrame(() => chatStreamRef.current?.scrollToBottom());
+    /**
+     * A direct send holds its message at the top of the viewport while the
+     * reply streams into the room below it. A guide (sent while the agent is
+     * working) leaves the reader's position alone, as a queued message does.
+     */
+    const anchorChatToMessage = useCallback((messageId: string) => {
+      chatStreamRef.current?.anchorMessage(messageId);
     }, []);
 
     const guideHistoryEntry = useCallback(
@@ -3778,7 +3782,7 @@ export const SessionChatInterface = memo(
               });
           }
 
-          scrollChatToBottom();
+          if (userTurnId && !options?.guideExpectedTurnId) anchorChatToMessage(userTurnId);
           return true;
         } catch (err) {
           console.error('Failed to queue session message', err);
@@ -3802,7 +3806,7 @@ export const SessionChatInterface = memo(
         mcpSelection.selectedIds,
         repoFullName,
         requestSessionDispatch,
-        scrollChatToBottom,
+        anchorChatToMessage,
         selectedModeId,
         selectedModelId,
         session.acpSessionId,
@@ -6052,9 +6056,6 @@ export const SessionChatInterface = memo(
                                 handleLastCompletedAssistantMessageIdChange
                               }
                               conversationFontSize={conversationFontSize}
-                              skipNextViewportResizeAutoScrollRef={
-                                skipNextViewportResizeAutoScrollRef
-                              }
                               suppressStickyAutoScrollRef={suppressStickyAutoScrollRef}
                               outlineOverlayRoot={outlineOverlayRoot}
                             />
@@ -6254,7 +6255,6 @@ export const SessionChatInterface = memo(
                         mcp={mcpSelection.menu}
                         // The info bar above owns this gap (and seats the queue).
                         hideTopSpacer
-                        skipNextViewportResizeAutoScrollRef={skipNextViewportResizeAutoScrollRef}
                         onModeChange={handleModeChange}
                         onModelChange={handleModelChange}
                         onConfigOptionChange={handleConfigOptionChange}

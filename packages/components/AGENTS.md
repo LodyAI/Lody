@@ -44,6 +44,12 @@ mobile surfaces. Background for the rules below:
 - System theme state, persistence, and browser preference tracking are owned by
   `next-themes`. Keep Lody's wrapper focused on preview state, fixed VS Code theme
   application, and the Electron native-theme bridge.
+- Never `@source`-scan a third-party component library in `src/tailwind/index.css`:
+  it emits that library's utilities globally. Konsta's `last-child-hairline-b-none`
+  (unanchored `:last-child … ::after`) made every portal open/close restyle the whole
+  app. Keep `#root` off `<body>`'s tail (`lib/body-tail-sentinel.ts`, mounted by
+  `routes/__root.tsx`). Rationale:
+  [portal restyle note](../../.agents/notes/implemented/bug-fix/2026-09-23-portal-full-restyle.md).
 
 ## Rules shared by callers
 

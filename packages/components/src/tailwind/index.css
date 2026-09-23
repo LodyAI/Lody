@@ -6,9 +6,11 @@
 
 @config "../../tailwind.config.js";
 @source "../**/*.{ts,tsx}";
-@source "../../node_modules/konsta/react";
-@source "../../node_modules/konsta/shared";
-@source "../../node_modules/konsta/styles";
+/* Konsta is imported for its theme, safe-area utilities and the `safe-areas`
+   hook only; no Konsta component is rendered. Do NOT scan Konsta's sources:
+   that generates utilities such as `last-child-hairline-b-none`, whose
+   unanchored `:last-child … ::after` selectors make every portal open/close
+   restyle the whole app (~25ms per popover on a large workspace). */
 
 @custom-variant dark (&:where(.dark, .dark *, .dark-scope, .dark-scope *):not(:where(.light-scope, .light-scope *)));
 
