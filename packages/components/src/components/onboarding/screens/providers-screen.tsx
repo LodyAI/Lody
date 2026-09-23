@@ -917,6 +917,9 @@ export function ProvidersScreen({
           machineId: args.machineId,
           workspaceId,
           configId: args.configId,
+          // Onboarding's provider test exists to prove the agent really starts,
+          // so it never accepts a cached answer.
+          force: true,
         },
         { signal: args.signal, onProgress: args.onProgress }
       );

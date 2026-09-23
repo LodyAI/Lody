@@ -510,6 +510,7 @@ export function isLocalSessionControlRequest(value: unknown): value is LocalSess
       typeof value.workspaceId === 'string' &&
       typeof value.configId === 'string' &&
       value.configId.trim().length > 0 &&
+      (typeof value.force === 'undefined' || typeof value.force === 'boolean') &&
       typeof value.cliType === 'undefined' &&
       typeof value.agentType === 'undefined' &&
       typeof value.customAcp === 'undefined' &&

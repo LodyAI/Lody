@@ -488,6 +488,65 @@ export const getAcpCapabilityCacheStaleReason = (
   return undefined;
 };
 
+/**
+ * How long a persisted runtime capability entry may answer a
+ * `machine/acp-capabilities-refresh` request without starting the agent again.
+ *
+ * `sourceVersion` already covers every input Lody controls (adapter version,
+ * managed-runtime version, runtime-override path, custom launch spec, and the
+ * env values that change an agent's identity), so the TTL exists only for drift
+ * Lody cannot observe: slash commands, sub-agents or model entitlements that the
+ * user changes in the agent's own configuration. Two other paths converge faster
+ * than the TTL — creating a real session rewrites the entry from that session's
+ * own `session/new` response, and Settings offers an explicit forced refresh —
+ * so the TTL only bounds staleness for agents nobody launches, where it costs at
+ * most one probe per config per day.
+ */
+export const ACP_CAPABILITY_REFRESH_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+
+export type AcpCapabilityRefreshCacheMissReason =
+  | AcpCapabilityCacheStaleReason
+  | 'source-version-unresolved'
+  | 'not-runtime-provenance'
+  | 'expired';
+
+export type AcpCapabilityRefreshCacheDecision =
+  | { hit: true; entry: AcpCapabilityCacheEntry }
+  | { hit: false; reason: AcpCapabilityRefreshCacheMissReason };
+
+/**
+ * Decides whether a capability refresh may be answered from the persisted entry.
+ *
+ * `expectedSourceVersion` is `undefined` when the caller cannot name the version
+ * a fresh probe would produce (an uninstalled managed runtime, for example); that
+ * is always a miss, never an implicit hit. A future-dated `fetchedAt` counts as
+ * fresh because both sides stamp it from the same server clock, so a negative age
+ * means clock adjustment rather than an entry worth re-probing.
+ */
+export const decideAcpCapabilityRefreshCache = (args: {
+  entry: AcpCapabilityCacheEntry | undefined;
+  expectedSourceVersion: string | undefined;
+  nowMs: number;
+  ttlMs?: number;
+}): AcpCapabilityRefreshCacheDecision => {
+  const { entry, expectedSourceVersion, nowMs } = args;
+  const ttlMs = args.ttlMs ?? ACP_CAPABILITY_REFRESH_CACHE_TTL_MS;
+  if (expectedSourceVersion === undefined) {
+    return { hit: false, reason: 'source-version-unresolved' };
+  }
+  const staleReason = getAcpCapabilityCacheStaleReason(entry, expectedSourceVersion);
+  if (staleReason || !entry) {
+    return { hit: false, reason: staleReason ?? 'missing' };
+  }
+  if (entry.provenance !== 'runtime') {
+    return { hit: false, reason: 'not-runtime-provenance' };
+  }
+  if (nowMs - entry.fetchedAt > ttlMs) {
+    return { hit: false, reason: 'expired' };
+  }
+  return { hit: true, entry };
+};
+
 export const isBuiltinAgentType = (agentType: string): agentType is BuiltinAgentType =>
   BUILTIN_AGENTS.some((agent) => agent.agentType === agentType);
 

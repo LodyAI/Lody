@@ -189,6 +189,7 @@ describe('MessageHandler machine registration', () => {
       localFileResources: 1,
       providerSetup: 1,
       acpProtocolAuthentication: 2,
+      acpCapabilityRefreshCache: 1,
       subagentCancellation: 1,
     });
 

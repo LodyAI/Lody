@@ -216,6 +216,10 @@ export class ProviderSetupManager {
         machineId: this.machineId,
         workspaceId: this.workspaceId,
         configId: verifying.config.id,
+        // Provider setup publishes a config only after the runtime it just
+        // installed answered session/new, so this verification never accepts a
+        // cached entry from an earlier install.
+        force: true,
       });
       if (response.success) {
         await this.publishVerifiedConfig(verifying.id, attempt);

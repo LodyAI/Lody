@@ -276,6 +276,7 @@ import {
   type BufferedACPUpdate,
 } from '@/lib/session-transient-store';
 import { fetchAcpCapabilities, type FetchAcpCapabilitiesOptions } from '@/agent/acp-capabilities';
+import { resolveExpectedAcpCapabilitySourceVersion } from '@/agent/setting';
 import type { WorkspaceWatchCoordinatorApi } from './code-collab/workspace-watch-coordinator';
 import { appendIssuePrMentionsToPrompt } from '@/session/session-execution-helpers';
 import {
@@ -3054,6 +3055,8 @@ export class MessageHandler {
           runtimeOverrides,
           options
         ),
+      resolveAcpCapabilitySourceVersion: async (input) =>
+        await resolveExpectedAcpCapabilitySourceVersion(input),
       evictForMemoryPressure: async (excludeSessionId) =>
         await this.evictForMemoryPressureFn(excludeSessionId),
     });
@@ -3163,13 +3166,14 @@ export class MessageHandler {
             this.triggerPendingProcessLifecycleAction(response.requestId);
           }
         },
-        refreshMachineAcpCapabilities: async ({ configId, onAcpBinaryProgress, signal }) =>
+        refreshMachineAcpCapabilities: async ({ configId, force, onAcpBinaryProgress, signal }) =>
           await this.executionService.refreshMachineAcpCapabilities(
             {
               type: 'machine/acp-capabilities-refresh',
               machineId: this.machineId,
               workspaceId: this.workspaceId,
               configId,
+              force,
             },
             { onAcpBinaryProgress, signal }
           ),
