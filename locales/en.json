@@ -2719,7 +2719,7 @@
   "settings.conversationFontSize.larger": "Larger",
   "settings.conversationFontSize.small": "Small",
   "settings.conversationFontSize.smaller": "Smaller",
-  "settings.fontLigatures.helper": "Applies to conversation code, tool output, and the Terminal preview.",
+  "settings.fontLigatures.helper": "Applies to conversation, code, and tool output.",
   "settings.fontLigatures.label": "Font ligatures",
   "settings.autoArchive.description": "Automatically archive a session conversation when one of the following happens. Applies to sessions you own and only on this device.",
   "settings.autoArchive.onPrClosed": "When the PR is closed",

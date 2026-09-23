@@ -2719,7 +2719,7 @@
   "settings.conversationFontSize.larger": "更大",
   "settings.conversationFontSize.small": "小",
   "settings.conversationFontSize.smaller": "更小",
-  "settings.fontLigatures.helper": "应用于对话代码、工具输出和这条预览。",
+  "settings.fontLigatures.helper": "应用于对话、代码、工具输出。",
   "settings.fontLigatures.label": "字体连字",
   "settings.autoArchive.description": "在以下情况发生时，自动归档 session 对话。仅对你自己创建的 session 生效，且仅在当前设备上启用。",
   "settings.autoArchive.onPrClosed": "PR 被关闭时",

@@ -8,11 +8,11 @@ Translation: current
 ## Abstract
 
 Appearance now has a boolean Font ligatures switch, default on, in its own card
-after the Terminal section. It writes `--lody-font-ligatures` so conversation
-Markdown code, tool-output terminal cards, and the Appearance Terminal preview
-follow one preference. Ghostty-style `font-feature` strings and a Terminal-group
-placement were rejected because the setting is not an OpenType DSL and is not a
-Terminal font/size control. Local xterm and Monaco stay unchanged.
+after the Terminal section on every platform. It writes `--lody-font-ligatures`
+so conversation, code, and tool output follow one preference. Ghostty-style
+`font-feature` strings and a Terminal-group placement were rejected because the
+setting is not an OpenType DSL and is not a Terminal font/size control. Local
+xterm and Monaco stay unchanged.
 
 ## Decision
 
@@ -25,8 +25,9 @@ DOM CSS, Monaco, and xterm do not share one OpenType channel.
 Placement is a separate card after Terminal, not inside the Terminal group.
 Terminal font and size only drive the Appearance preview and local xterm; the
 ligature surfaces are conversation Markdown and the DOM tool-output card. Putting
-the switch in the Terminal group would describe the wrong owner. Helper copy
-states the three surfaces it applies to and does not mention local Terminal.
+the switch in the Terminal group would describe the wrong owner. Helper copy is
+"Applies to conversation, code, and tool output." The row is not Electron-only:
+web Appearance and mobile Appearance show it too.
 
 The controller writes `contextual` or `none` onto `--lody-font-ligatures`. CSS
 that previously hard-coded `font-variant-ligatures: contextual` now reads that
@@ -35,7 +36,8 @@ the former is the file viewer, the latter needs a ligatures addon.
 
 ## Verification
 
-The appearance suite asserts the Electron-only row sits after Terminal, defaults
-on, and can be turned off. The controller suite asserts the CSS variable updates
-on every platform and that non-boolean stored values stay enabled. Not exercised
-here: packaged native-app checks, live ligature shaping of a specific font face.
+The appearance suite asserts the row is visible outside Electron, sits after
+Terminal when that section is present, defaults on, and can be turned off. The
+controller suite asserts the CSS variable updates on every platform and that
+non-boolean stored values stay enabled. Not exercised here: packaged native-app
+checks, live ligature shaping of a specific font face.

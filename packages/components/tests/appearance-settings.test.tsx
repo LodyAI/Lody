@@ -121,7 +121,18 @@ describe('AppearanceSettingsView', () => {
     expect(container?.textContent).toContain('Language');
     expect(container?.textContent).not.toContain('Interface font');
     expect(container?.textContent).not.toContain('Terminal');
-    expect(container?.textContent).not.toContain('Font ligatures');
+    expect(container?.textContent).toContain('Font ligatures');
+    expect(container?.textContent).toContain('conversation, code, and tool output');
+    const ligaturesSwitch = container?.querySelector<HTMLButtonElement>(
+      'button[aria-label="Font ligatures"]'
+    );
+    expect(ligaturesSwitch?.getAttribute('aria-checked')).toBe('true');
+    await act(async () => {
+      ligaturesSwitch?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    expect(
+      container?.querySelector('button[aria-label="Font ligatures"]')?.getAttribute('aria-checked')
+    ).toBe('false');
   });
 
   it('offers the five named font size tiers and commits the picked one', async () => {
@@ -207,7 +218,7 @@ describe('AppearanceSettingsView', () => {
     expect(container?.textContent).toContain('Font size');
     expect(container?.textContent).not.toContain('Interface font');
     expect(container?.textContent).not.toContain('Terminal');
-    expect(container?.textContent).not.toContain('Font ligatures');
+    expect(container?.textContent).toContain('Font ligatures');
   });
 
   it('places native app icon selection below font size in narrow and wide appearance layouts', async () => {
@@ -260,7 +271,7 @@ describe('AppearanceSettingsView', () => {
     expect(preview?.style.fontFamily).toBe('inherit');
     expect(container?.textContent).toContain('$');
     expect(container?.textContent).toContain('Font ligatures');
-    expect(container?.textContent).toContain('conversation code');
+    expect(container?.textContent).toContain('conversation, code, and tool output');
     const content = container?.textContent ?? '';
     expect(content.indexOf('Font ligatures')).toBeGreaterThan(content.indexOf('Terminal'));
 

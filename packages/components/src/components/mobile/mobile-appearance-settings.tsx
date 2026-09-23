@@ -5,7 +5,7 @@ import type { SupportedLanguage } from '@lody/shared';
 import { Check, ChevronDown, Monitor, Moon, Sun } from 'lucide-react';
 import { motion } from 'framer-motion';
 
-import { conversationFontSizeAtom, languageAtom } from '@/atoms';
+import { conversationFontSizeAtom, fontLigaturesEnabledAtom, languageAtom } from '@/atoms';
 import {
   MobileInlineMenu,
   MobileInlinePickerCoordinator,
@@ -18,6 +18,7 @@ import { MobileAppIconSettings } from '@/components/mobile/mobile-app-icon-setti
 import { buildConversationFontSizeChoices } from '@/components/settings/conversation-font-size-options';
 import { currentSupportedLanguages, languageCodeToName } from '../../i18n';
 import { cn } from '@/lib/utils';
+import { Switch } from '@/ui/switch';
 import { withOneSignal } from '@/lib/onesignal';
 import { useTheme, type Theme } from '../../theme-provider';
 
@@ -26,6 +27,7 @@ export function MobileAppearanceSettings() {
   const { theme, setTheme } = useTheme();
   const [language, setLanguage] = useAtom(languageAtom);
   const [conversationFontSize, setConversationFontSize] = useAtom(conversationFontSizeAtom);
+  const [fontLigaturesEnabled, setFontLigaturesEnabled] = useAtom(fontLigaturesEnabledAtom);
   const selectedThemeLabel =
     theme === 'light'
       ? t('settings.theme.light')
@@ -118,6 +120,22 @@ export function MobileAppearanceSettings() {
             />
           </MobileSettingsRow>
         </MobileInlinePickerRowSlot>
+      </MobileSettingsSection>
+
+      <MobileSettingsSection>
+        <MobileSettingsRow
+          label={t('settings.fontLigatures.label', 'Font ligatures')}
+          helper={t(
+            'settings.fontLigatures.helper',
+            'Applies to conversation, code, and tool output.'
+          )}
+        >
+          <Switch
+            checked={fontLigaturesEnabled}
+            onCheckedChange={setFontLigaturesEnabled}
+            aria-label={t('settings.fontLigatures.label', 'Font ligatures')}
+          />
+        </MobileSettingsRow>
       </MobileSettingsSection>
 
       <MobileAppIconSettings />

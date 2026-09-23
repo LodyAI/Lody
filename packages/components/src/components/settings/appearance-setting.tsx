@@ -340,23 +340,21 @@ export function AppearanceSettingsView({
           </div>
         </CompactSection>
       ) : null}
-      {isElectron ? (
-        <CompactSection>
-          <CompactRow
-            label={t('settings.fontLigatures.label', 'Font ligatures')}
-            helper={t(
-              'settings.fontLigatures.helper',
-              'Applies to conversation code, tool output, and the Terminal preview.'
-            )}
-          >
-            <Switch
-              checked={fontLigaturesEnabled}
-              onCheckedChange={onFontLigaturesEnabledChange}
-              aria-label={t('settings.fontLigatures.label', 'Font ligatures')}
-            />
-          </CompactRow>
-        </CompactSection>
-      ) : null}
+      <CompactSection>
+        <CompactRow
+          label={t('settings.fontLigatures.label', 'Font ligatures')}
+          helper={t(
+            'settings.fontLigatures.helper',
+            'Applies to conversation, code, and tool output.'
+          )}
+        >
+          <Switch
+            checked={fontLigaturesEnabled}
+            onCheckedChange={onFontLigaturesEnabledChange}
+            aria-label={t('settings.fontLigatures.label', 'Font ligatures')}
+          />
+        </CompactRow>
+      </CompactSection>
     </div>
   );
 }
