@@ -145,5 +145,28 @@ Both editors now use the slot, and the hand-built slash box is gone.
 `test/field.test.tsx` pins the label association, the ring on the shell, and
 where `className` and `inputClassName` land.
 
+## Owner review in the running app: one line per row, one kind of control
+
+The owner's screenshots of the running app showed four more defects:
+
+- **Rows broke in two.** The run-config menu drew each icon above its label and
+  the tick below its model. Rows migrated with their Radix markup pass a mark, a
+  value or a switch as children. `@lody/ui` put all of that in the label slot,
+  and preflight's `svg { display: block }` gave each glyph a line of its own.
+  The label slot is now a line, with words boxed so they still truncate
+  (`popup/row-label.tsx`). That fixes every such caller at once: 27 files go
+  through the product `Menu` wrapper alone. The run-config rows also moved onto
+  `icon` and `endContent`.
+- **Mixed sizes.** A form trigger at 36px with 12px text (`h-9 text-xs`) opened
+  a list of 28px rows at 13px. Both editors dropped the overrides, so the medium
+  control sits over rows that are its height less the popup inset.
+- **Four kinds of select on the Appearance page.** The hand-built
+  `PreviewSelect` became a `@lody/ui` Select that previews the focused row and
+  cancels when closed without a pick. Both font pickers became Comboboxes, and
+  the terminal size became a `NumberField`.
+- **The switch.** On is now a layer that grows from the start edge with the
+  thumb, not a whole-track colour swap. The emoji slot gained a 6px gap before
+  the value.
+
 Related: [token gallery](2026-09-09-ui-token-gallery.md),
 [call-site migration](2026-09-22-ui-radix-callsite-migration.md).

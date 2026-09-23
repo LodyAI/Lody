@@ -118,5 +118,24 @@ Prompt Shortcut 两个编辑器都把 emoji 选择器和名称输入框并排放
 删除。`test/field.test.tsx` 固定了标签关联、外壳上的红环，以及 `className` 与
 `inputClassName` 各自落在哪个元素上。
 
+## 负责人在运行中的应用里复查：每行一条线，每类值一种控件
+
+负责人在运行中的应用里截图，又发现了四个问题：
+
+- **菜单行被拆成两行。** 运行配置菜单里，图标跑到文字上方，勾跑到模型名下面。
+  按 Radix 写法迁移过来的行会把图标、值、开关当作 children 传进来，`@lody/ui`
+  把它们都放进文字槽，而 preflight 的 `svg { display: block }` 让每个图标自占一行。
+  现在文字槽是横向的一行，文字另外包一层，所以仍然能截断
+  （`popup/row-label.tsx`）。这一处修改让所有同类调用方一次排正：仅经过产品层
+  `Menu` 封装的就有 27 个文件。运行配置菜单的几行也改用了 `icon` 和 `endContent`。
+- **尺寸不统一。** 表单里的下拉触发器写成 36px 高、12px 字（`h-9 text-xs`），
+  打开的却是 28px 高、13px 字的行。两个编辑器都去掉了这些覆盖，于是默认 32px 的
+  控件下面，正好是减去浮层内缩后的 28px 行。
+- **外观页有四种下拉。** 手写的 `PreviewSelect` 换成 `@lody/ui` Select：获得焦点的
+  行即是预览，不选就关闭则取消。两个字体选择器换成 Combobox，终端字号换成
+  `NumberField`。
+- **开关。** 「开」改为一层从起点边随圆钮一起生长的颜色，而不是整条轨道瞬间变色。
+  emoji 插槽与输入值之间也加了 6px 间距。
+
 相关：[token gallery](2026-09-09-ui-token-gallery.md)、
 [调用点迁移](2026-09-22-ui-radix-callsite-migration.md)。

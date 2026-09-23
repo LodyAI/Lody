@@ -16,11 +16,11 @@ import {
 } from '@/atoms';
 import { MobileAppearanceSettings } from '@/components/mobile/mobile-appearance-settings';
 import { MobileAppIconSettings } from '@/components/mobile/mobile-app-icon-settings';
-import { OptionSelector, type OptionSelectorOption } from '@/components/shared/option-selector';
 import { buildTerminalFontPreviewFamily } from '@/components/terminal/terminal-theme';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { listSystemFontFamilies } from '@/lib/local-fonts';
-import { Input } from '@lody/ui/input';
+import { Combobox } from '@lody/ui/combobox';
+import { NumberField } from '@lody/ui/number-field';
 import { LanguageSelector } from '../../i18n';
 import { useTheme, type Theme } from '../../theme-provider';
 import { settingContainerClass } from '.';
@@ -54,7 +54,7 @@ function buildSystemFontOptions(
   selectedFamily: string,
   defaultLabel: string,
   defaultKey: string
-): OptionSelectorOption<string>[] {
+): SystemFontOption[] {
   const availableFamilies = families.some(
     (family) => family.toLowerCase() === selectedFamily.toLowerCase()
   )
@@ -67,6 +67,77 @@ function buildSystemFontOptions(
     { key: defaultKey, value: '', label: defaultLabel },
     ...availableFamilies.map((family) => ({ value: family, label: family })),
   ];
+}
+
+interface SystemFontOption {
+  value: string;
+  label: string;
+  key?: string;
+}
+
+/** Names shown in the default face: a list of fonts set in themselves is unreadable. */
+const DEFAULT_FACE = { fontFamily: 'var(--font-sans-default)' };
+
+/**
+ * A system font, picked by typing part of its name.
+ *
+ * A Combobox rather than a button that opens a search box: the list is every
+ * installed family, so the field a person types into is the control itself, in
+ * the same well as every other field on the page. The first time the list opens
+ * is what loads the families.
+ */
+function SystemFontCombobox({
+  value,
+  options,
+  onChange,
+  onOpen,
+  searchPlaceholder,
+  openLabel,
+  emptyText,
+  'aria-label': ariaLabel,
+}: {
+  value: string;
+  options: SystemFontOption[];
+  onChange: (family: string) => void;
+  onOpen: () => void;
+  searchPlaceholder: string;
+  openLabel: string;
+  emptyText: string;
+  'aria-label': string;
+}) {
+  const selected = options.find((option) => option.value === value) ?? options[0] ?? null;
+  return (
+    <Combobox.Root
+      items={options}
+      value={selected}
+      itemToStringLabel={(option: SystemFontOption) => option.label}
+      isItemEqualToValue={(left: SystemFontOption, right: SystemFontOption) =>
+        left.value === right.value
+      }
+      onValueChange={(option: SystemFontOption | null) => {
+        if (option) onChange(option.value);
+      }}
+      onOpenChange={(open) => {
+        if (open) onOpen();
+      }}
+    >
+      <Combobox.InputGroup className="w-full sm:w-[220px]">
+        <Combobox.Input
+          aria-label={ariaLabel}
+          placeholder={searchPlaceholder}
+          style={DEFAULT_FACE}
+        />
+        <Combobox.Trigger aria-label={openLabel} />
+      </Combobox.InputGroup>
+      <Combobox.Content empty={<Combobox.Empty>{emptyText}</Combobox.Empty>}>
+        {(option: SystemFontOption) => (
+          <Combobox.Item key={option.key ?? option.value} value={option}>
+            <span style={DEFAULT_FACE}>{option.label}</span>
+          </Combobox.Item>
+        )}
+      </Combobox.Content>
+    </Combobox.Root>
+  );
 }
 
 export function AppearanceSettingsView({
@@ -93,28 +164,28 @@ export function AppearanceSettingsView({
     {
       value: 'light',
       label: (
-        <div className="flex items-center gap-2">
+        <span className="flex items-center gap-2">
           <Sun className="h-4 w-4" />
           <span>{t('settings.theme.light')}</span>
-        </div>
+        </span>
       ),
     },
     {
       value: 'dark',
       label: (
-        <div className="flex items-center gap-2">
+        <span className="flex items-center gap-2">
           <Moon className="h-4 w-4" />
           <span>{t('settings.theme.dark')}</span>
-        </div>
+        </span>
       ),
     },
     {
       value: 'system',
       label: (
-        <div className="flex items-center gap-2">
+        <span className="flex items-center gap-2">
           <Monitor className="h-4 w-4" />
           <span>{t('settings.theme.system')}</span>
-        </div>
+        </span>
       ),
     },
   ];
@@ -167,6 +238,7 @@ export function AppearanceSettingsView({
       <CompactSection>
         <CompactRow label={t('settings.theme.label')}>
           <PreviewSelect
+            aria-label={t('settings.theme.label')}
             value={theme}
             options={themeOptions}
             onPreview={onThemePreview}
@@ -196,44 +268,24 @@ export function AppearanceSettingsView({
               </span>
             }
           >
-            <OptionSelector
+            <SystemFontCombobox
               value={interfaceFontFamily}
               options={interfaceFontOptions}
-              onSelect={(option) => onInterfaceFontFamilyChange(option.value)}
-              placeholder={defaultFontLabel}
-              searchable
+              onChange={onInterfaceFontFamilyChange}
+              onOpen={onSystemFontMenuOpen}
+              aria-label={t('settings.interfaceFontFamily.label', 'Interface font')}
               searchPlaceholder={t(
                 'settings.terminal.fontFamily.searchPlaceholder',
                 'Search system fonts...'
               )}
+              openLabel={t('settings.terminal.fontFamily.openList', 'Show all fonts')}
               emptyText={t('settings.terminal.fontFamily.empty', 'No matching fonts')}
-              align="end"
-              className="w-full rounded-md border-input-border bg-input-field text-input-foreground shadow-xs sm:w-[220px] hover:bg-hover"
-              contentClassName="w-[320px]"
-              onOpenChange={(open) => {
-                if (open) onSystemFontMenuOpen();
-              }}
-              renderTriggerValue={(option) => (
-                <span
-                  className="truncate font-normal"
-                  style={{ fontFamily: 'var(--font-sans-default)' }}
-                >
-                  {option?.label ?? interfaceFontFamily}
-                </span>
-              )}
-              renderOption={(option) => (
-                <span
-                  className="min-w-0 flex-1 truncate"
-                  style={{ fontFamily: 'var(--font-sans-default)' }}
-                >
-                  {option.label}
-                </span>
-              )}
             />
           </CompactRow>
         ) : null}
         <CompactRow label={t('settings.conversationFontSize.label', 'Font size')}>
           <PreviewSelect
+            aria-label={t('settings.conversationFontSize.label', 'Font size')}
             value={String(normalizeConversationFontSize(conversationFontSize))}
             options={conversationFontSizeOptions}
             onCommit={(value) => onConversationFontSizeChange(Number(value))}
@@ -250,56 +302,44 @@ export function AppearanceSettingsView({
             label={t('settings.terminal.fontFamily.label', 'Font')}
             helper={fontLoadStatus}
           >
-            <OptionSelector
+            <SystemFontCombobox
               value={terminalFontFamily}
               options={terminalFontOptions}
-              onSelect={(option) => onTerminalFontFamilyChange(option.value)}
-              placeholder={defaultFontLabel}
-              searchable
+              onChange={onTerminalFontFamilyChange}
+              onOpen={onSystemFontMenuOpen}
+              aria-label={t('settings.terminal.fontFamily.label', 'Font')}
               searchPlaceholder={t(
                 'settings.terminal.fontFamily.searchPlaceholder',
                 'Search system fonts...'
               )}
+              openLabel={t('settings.terminal.fontFamily.openList', 'Show all fonts')}
               emptyText={t('settings.terminal.fontFamily.empty', 'No matching fonts')}
-              align="end"
-              className="w-full rounded-md border-input-border bg-input-field text-input-foreground shadow-xs sm:w-[220px] hover:bg-hover"
-              contentClassName="w-[320px]"
-              onOpenChange={(open) => {
-                if (open) onSystemFontMenuOpen();
-              }}
-              renderTriggerValue={(option) => (
-                <span
-                  className="truncate font-normal"
-                  style={{ fontFamily: 'var(--font-sans-default)' }}
-                >
-                  {option?.label ?? terminalFontFamily}
-                </span>
-              )}
-              renderOption={(option) => (
-                <span
-                  className="min-w-0 flex-1 truncate"
-                  style={{ fontFamily: 'var(--font-sans-default)' }}
-                >
-                  {option.label}
-                </span>
-              )}
             />
           </CompactRow>
           <CompactRow label={t('settings.terminal.fontSize.label', 'Font size')}>
-            <Input
-              type="number"
+            {/* A size somebody nudges, so the range owns the clamp and the steppers
+                rather than a bare number box parsing what was typed. */}
+            <NumberField.Root
+              value={terminalFontSize}
               min={TERMINAL_FONT_SIZE_MIN}
               max={TERMINAL_FONT_SIZE_MAX}
               step={1}
-              value={terminalFontSize}
-              aria-label={t('settings.terminal.fontSize.label', 'Font size')}
-              className="w-24"
-              onChange={(event) => {
-                if (Number.isFinite(event.target.valueAsNumber)) {
-                  onTerminalFontSizeChange(normalizeTerminalFontSize(event.target.valueAsNumber));
-                }
+              onValueChange={(next) => {
+                if (next != null) onTerminalFontSizeChange(normalizeTerminalFontSize(next));
               }}
-            />
+            >
+              <NumberField.Group className="w-28">
+                <NumberField.Input
+                  aria-label={t('settings.terminal.fontSize.label', 'Font size')}
+                />
+                <NumberField.Decrement
+                  aria-label={t('settings.terminal.fontSize.decrease', 'Decrease font size')}
+                />
+                <NumberField.Increment
+                  aria-label={t('settings.terminal.fontSize.increase', 'Increase font size')}
+                />
+              </NumberField.Group>
+            </NumberField.Root>
           </CompactRow>
           <div
             aria-label={t('settings.terminal.preview', 'Terminal preview')}
