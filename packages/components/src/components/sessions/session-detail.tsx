@@ -178,6 +178,8 @@ import {
 import { getAppShareUrl } from '@/lib/app-location';
 import { getCommandKeybindings, useCommand } from '@/lib/commands';
 import { useDesktopTabCloser } from '@/lib/desktop-tab-or-window-close';
+import { useSemanticActionRouter } from '@/lib/commands/use-semantic-action-router';
+import { semanticShortcutsFeatureEnabledAtom } from '@/atoms/settings';
 import { cn, getBasename } from '@/lib';
 
 import {
@@ -766,6 +768,8 @@ const SessionDetail = ({
   >(new Map());
   const sendingDraftIdsRef = useRef<Set<DraftSessionTab['id']>>(new Set());
   const desktopTabFocusRegionRef = useRef<SessionTabFocusRegion>('conversation');
+  const desktopActionRootRef = useRef<HTMLDivElement>(null);
+  const semanticShortcutsEnabled = useAtomValue(semanticShortcutsFeatureEnabledAtom);
   const initialTabState = getSessionDetailInitialTabState(sessionId, urlTab, {
     oneActiveSurface: isMobile,
   });
@@ -4436,8 +4440,57 @@ const SessionDetail = ({
     ]
   );
 
+  const semanticCloseEnabled =
+    semanticShortcutsEnabled && isElectronRenderer() && !isMobile && Boolean(activeSession);
+  const semanticRouterRef = useSemanticActionRouter({
+    rootRef: desktopActionRootRef,
+    enabled: semanticCloseEnabled,
+    resetKey: sessionId,
+    defaultScopeId: 'conversation',
+    scopes: {
+      conversation: {
+        close: () => {
+          const target = getSessionTabCloseTarget({
+            focusRegion: 'conversation',
+            sidePanelOpen: false,
+            activeSidePanelTabId: null,
+            activeConversationTabId: activeTabSessionId,
+            parentConversationTabId: sessionId,
+            conversationTabCount: orderedSessionTabIds.length,
+          });
+          if (target?.kind === 'window') return 'unhandled';
+          if (target?.kind === 'conversation') void handleTabClose(target.tabId);
+          return 'handled';
+        },
+      },
+      'side-panel': {
+        close: () => {
+          if (activeSidePanelTabId) handleSidePanelTabClose(activeSidePanelTabId);
+          else setIsSidebarOpen(false);
+          return 'handled';
+        },
+      },
+    },
+  });
+  const previousSemanticPanelRef = useRef({ sessionId, visible: isSidebarVisible });
+  useLayoutEffect(() => {
+    const previous = previousSemanticPanelRef.current;
+    previousSemanticPanelRef.current = { sessionId, visible: isSidebarVisible };
+    if (
+      !semanticCloseEnabled ||
+      previous.sessionId !== sessionId ||
+      !previous.visible ||
+      isSidebarVisible
+    )
+      return;
+    desktopTabFocusRegionRef.current = 'conversation';
+    semanticRouterRef.current?.activate('conversation');
+    chatRefsMap.current.get(activeTabSessionId)?.focusInput();
+  }, [sessionId, isSidebarVisible, semanticCloseEnabled, activeTabSessionId, semanticRouterRef]);
+
   useDesktopTabCloser(
     () => {
+      if (semanticCloseEnabled) return semanticRouterRef.current?.dispatch('close') ?? 'handled';
       const target = resolveFocusedTabCloseTarget();
       if (!target) return 'handled';
       if (target.kind === 'window') {
@@ -6028,6 +6081,7 @@ const SessionDetail = ({
         // the sidebar header; the macOS row pad centers its controls on the
         // traffic-light centerline. Re-derive if the row or pill height changes.
         'h-11',
+        'group-data-[lody-action-active=true]/close-scope:shadow-[inset_0_-1px_0_var(--primary)]',
         macTrafficLightRowPadClass,
         isLeftSidebarHidden && hasMacOSTitlebarInset && 'pl-[4.5rem]',
         !isSidebarVisible && windowsCaptionPadClass
@@ -6187,7 +6241,8 @@ const SessionDetail = ({
   const desktopSecondaryPanel = (
     <div
       data-lody-session-tab-region="side-panel"
-      className="flex h-full min-w-0 flex-col overflow-hidden border-l border-border/70 bg-background"
+      data-lody-action-scope="side-panel"
+      className="group/close-scope flex h-full min-w-0 flex-col overflow-hidden border-l border-border/70 bg-background"
     >
       <SessionSidePanelTabBar
         tabs={sidePanelTabs}
@@ -6209,6 +6264,7 @@ const SessionDetail = ({
         endSlot={sidebarToggleButton}
         className={cn(
           'border-b border-border/50 bg-background',
+          'group-data-[lody-action-active=true]/close-scope:border-primary',
           // Right panel is never under the macOS traffic lights (top-left) —
           // it must not reserve the titlebar inset the left sidebar needs. It
           // still shares the traffic-light centerline with the main tab bar.
@@ -6243,6 +6299,7 @@ const SessionDetail = ({
 
   return (
     <div
+      ref={desktopActionRootRef}
       className="h-full"
       onPointerDownCapture={(event) =>
         handleDesktopTabRegionInteraction(event.target, event.currentTarget)

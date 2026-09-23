@@ -225,6 +225,17 @@ export const promptShortcutsFeatureEnabledAtom = atom(
   (get) => get(developerModeEnabledAtom) && get(promptShortcutsBetaEnabledAtom)
 );
 
+export const semanticShortcutsBetaEnabledAtom = atomWithStorage<boolean>(
+  'lody-semantic-shortcuts-beta-enabled',
+  false,
+  undefined,
+  { getOnInit: true }
+);
+
+export const semanticShortcutsFeatureEnabledAtom = atom(
+  (get) => get(developerModeEnabledAtom) && get(semanticShortcutsBetaEnabledAtom)
+);
+
 /** localStorage keys for the experimental features gate. */
 export const EXPERIMENTAL_FEATURES_STORAGE_KEY = 'lody-experimental-features-enabled';
 export const REVIEW_AGENT_EXPERIMENT_STORAGE_KEY = 'lody-review-agent-enabled';

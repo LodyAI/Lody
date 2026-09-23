@@ -6,6 +6,8 @@ import {
   developerModeEnabledAtom,
   inboxBetaEnabledAtom,
   inboxFeatureEnabledAtom,
+  semanticShortcutsBetaEnabledAtom,
+  semanticShortcutsFeatureEnabledAtom,
 } from '@/atoms/settings';
 import { settingContainerClass } from '@/components/settings';
 
@@ -15,12 +17,14 @@ import { settingContainerClass } from '@/components/settings';
  */
 function GateReadout() {
   const inboxEnabled = useAtomValue(inboxFeatureEnabledAtom);
+  const semanticEnabled = useAtomValue(semanticShortcutsFeatureEnabledAtom);
   return (
     <div className="mt-3 space-y-1 text-xs text-muted-foreground">
       <p>
         <span className="font-mono">inboxFeatureEnabledAtom</span> ={' '}
         <span className="font-mono font-semibold">{String(inboxEnabled)}</span>
       </p>
+      <p>Pointer-aware close shortcut: {String(semanticEnabled)}</p>
     </div>
   );
 }
@@ -28,9 +32,11 @@ function GateReadout() {
 function Harness({
   developerMode,
   inboxBeta,
+  semanticShortcuts = false,
 }: {
   developerMode: boolean;
   inboxBeta: boolean;
+  semanticShortcuts?: boolean;
 }) {
   // Seeded once per story: a store rebuilt on every render would throw away the
   // switch the viewer just clicked.
@@ -38,6 +44,7 @@ function Harness({
     const next = createStore();
     next.set(developerModeEnabledAtom, developerMode);
     next.set(inboxBetaEnabledAtom, inboxBeta);
+    next.set(semanticShortcutsBetaEnabledAtom, semanticShortcuts);
     return next;
   });
 
@@ -81,4 +88,8 @@ export const InboxBetaEnabled: Story = {
  */
 export const OptInRetainedWhileHidden: Story = {
   args: { developerMode: false, inboxBeta: true },
+};
+
+export const SemanticShortcutsEnabled: Story = {
+  args: { developerMode: true, inboxBeta: false, semanticShortcuts: true },
 };

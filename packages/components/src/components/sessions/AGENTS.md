@@ -16,7 +16,7 @@ Parent rules apply. Read each heading’s linked context before edits.
   may replace the current choice with a neighbour or local draft. Close writes
   `isTabClosed`, never archive or delete.
   Reopening archives restores lifecycle first.
-- Cmd/Ctrl+W: lone conversation closes window; focused side-panel tab closes first.
+- Cmd/Ctrl+W ownership: [command rules](../../lib/commands/AGENTS.md); lone conversation closes window.
 - `Change owner` writes the OWNER `SessionMeta.userId`, never sharing/visibility;
   they stay separate actions.
 
@@ -26,8 +26,8 @@ Parent rules apply. Read each heading’s linked context before edits.
   closeable right-panel tabs. `sidePanelTabs` is the one strip order; every close
   handler takes its fallback neighbour from it.
 - A Side Chat is a durable child Session (`childSessionPlacement: 'side-panel'`):
-  no top tab, no sidebar row, but it still rolls up into the parent row. Only its
-  explicit tab `X` deletes it; mount it lazily.
+  no top tab, no sidebar row, but it still rolls up into the parent row. Only explicit
+  tab close deletes it; mount it lazily.
 - `SessionMeta.openedBySessionId` is presentation-only provenance: never
   `parentSessionId`, never rolled into the opener, never filtered out of the
   list. Navigation carries root + exact tab ids.

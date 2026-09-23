@@ -56,8 +56,11 @@ It remains device-local, preserves existing input, retains the closed-list reope
 and does not deactivate a mobile viewer. Hidden
 conversations do not receive read receipts or composer commands. Input drafts remain
 local. Local unsent drafts, Side Chats, and file/tool panels retain their own lifecycle.
-The close accelerator closes the focused tab; closing the final draft returns to a
-fresh local draft. File/tool panels retain their existing close behavior.
+Explicit tab close on the final draft returns to a fresh local draft. The desktop
+close accelerator follows [window-close behavior](desktop-windows.md), including
+window close for a lone conversation/draft, and the opt-in
+[semantic targeting beta](semantic-action-targeting.md). File/tool panels retain
+their existing close lifecycle.
 
 ## Compatibility and evidence
 
