@@ -295,3 +295,66 @@ describe('the surface Select and Combobox share', () => {
     expect(selectRow).toEqual(comboRow);
   });
 });
+
+describe('Combobox button', () => {
+  function Fonts(props: Partial<React.ComponentProps<typeof Combobox.Root<string>>>) {
+    return (
+      <Combobox.Root items={LANGUAGES} {...props}>
+        <Combobox.Button aria-label="Language" placeholder="Pick a language" />
+        <Combobox.Content
+          search={<Combobox.Search placeholder="Search languages" />}
+          empty={<Combobox.Empty>No language matches.</Combobox.Empty>}
+        >
+          {(item: string) => (
+            <Combobox.Item key={item} value={item}>
+              {item}
+            </Combobox.Item>
+          )}
+        </Combobox.Content>
+      </Combobox.Root>
+    );
+  }
+  const button = () => one('button[aria-label="Language"]') as HTMLButtonElement;
+  const search = () =>
+    document.querySelector<HTMLInputElement>('input[placeholder="Search languages"]');
+
+  test('names what it holds, or prompts while it holds nothing', async () => {
+    mounted = await mount(<Fonts />);
+    expect(button().textContent).toContain('Pick a language');
+    await mounted.unmount();
+    mounted = await mount(<Fonts defaultValue="Rust" />);
+    expect(button().textContent).toContain('Rust');
+  });
+
+  test('opens a list that starts with its own search, and a pick lands on the button', async () => {
+    mounted = await mount(<Fonts />);
+    await click(button());
+    // The search is part of the popup, not the page: the button stays a button.
+    expect(search()).not.toBeNull();
+    expect(button().contains(search())).toBe(false);
+
+    await typeInto(search()!, 'ru');
+    expect(labels()).toEqual(['Rust', 'Ruby']);
+
+    await click(options()[1]);
+    expect(button().textContent).toContain('Ruby');
+  });
+
+  test('is the same field a Select trigger is, not a second kind of control', async () => {
+    mounted = await mount(
+      <>
+        <Fonts defaultValue="Rust" />
+        <Select.Root items={[{ value: 'a', label: 'A' }]} defaultValue="a">
+          <Select.Trigger aria-label="Plain">
+            <Select.Value placeholder="Pick" />
+          </Select.Trigger>
+          <Select.Content />
+        </Select.Root>
+      </>
+    );
+    const plain = one('button[aria-label="Plain"]');
+    // One material down a column: holding a value, the two triggers carry the
+    // same classes.
+    expect(classesOf(button()).sort()).toEqual(classesOf(plain).sort());
+  });
+});

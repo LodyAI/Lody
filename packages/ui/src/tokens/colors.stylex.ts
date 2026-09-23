@@ -7,7 +7,7 @@ export const colors = stylex.defineVars({
   elevatedBackground: { default: 'hsl(0 0% 100%)', [DARK]: 'hsl(0 0% 8.6%)' },
   raisedBackground: { default: 'hsl(0 0% 100%)', [DARK]: 'hsl(0 0% 13.7%)' },
   secondaryBackground: { default: 'hsl(220 23% 97.5%)', [DARK]: 'hsl(0 0% 8.6%)' },
-  wellBackground: { default: 'hsl(216 12% 92%)', [DARK]: 'hsl(0 0% 11%)' },
+  wellBackground: { default: 'hsl(220 16% 96%)', [DARK]: 'hsl(0 0% 12%)' },
   label: { default: 'hsl(225 7% 11%)', [DARK]: 'hsl(0 0% 100%)' },
   secondaryLabel: { default: 'hsl(220 9% 46%)', [DARK]: 'hsl(0 0% 62.7%)' },
   tertiaryLabel: { default: 'hsl(220 8% 62%)', [DARK]: 'hsl(0 0% 45%)' },
@@ -34,9 +34,12 @@ export const colors = stylex.defineVars({
 });
 
 export const shadow = stylex.defineVars({
+  // Not a recess: nothing in this system is sunken. A place that holds a value
+  // — a field, a track — is a flat fill a step off the surface, edged by one
+  // hairline, so a field and a select in one column are one material.
   inset: {
-    default: 'inset 0 1px 2px hsl(225 10% 11% / 0.06), inset 0 0 0 0.5px hsl(225 10% 11% / 0.07)',
-    [DARK]: 'inset 0 1px 2px hsl(0 0% 0% / 0.6), inset 0 0 0 0.5px hsl(0 0% 0% / 0.45)',
+    default: 'inset 0 0 0 1px hsl(225 10% 11% / 0.09)',
+    [DARK]: 'inset 0 0 0 1px hsl(0 0% 100% / 0.07)',
   },
   raised: {
     default:
@@ -98,7 +101,7 @@ export const darkTheme = stylex.createTheme(colors, {
   elevatedBackground: 'hsl(0 0% 8.6%)',
   raisedBackground: 'hsl(0 0% 13.7%)',
   secondaryBackground: 'hsl(0 0% 8.6%)',
-  wellBackground: 'hsl(0 0% 11%)',
+  wellBackground: 'hsl(0 0% 12%)',
   label: 'hsl(0 0% 100%)',
   secondaryLabel: 'hsl(0 0% 62.7%)',
   tertiaryLabel: 'hsl(0 0% 45%)',
@@ -125,7 +128,7 @@ export const lightTheme = stylex.createTheme(colors, {
   elevatedBackground: 'hsl(0 0% 100%)',
   raisedBackground: 'hsl(0 0% 100%)',
   secondaryBackground: 'hsl(220 23% 97.5%)',
-  wellBackground: 'hsl(216 12% 92%)',
+  wellBackground: 'hsl(220 16% 96%)',
   label: 'hsl(225 7% 11%)',
   secondaryLabel: 'hsl(220 9% 46%)',
   tertiaryLabel: 'hsl(220 8% 62%)',
@@ -148,7 +151,7 @@ export const lightTheme = stylex.createTheme(colors, {
 });
 
 export const darkShadowTheme = stylex.createTheme(shadow, {
-  inset: 'inset 0 1px 2px hsl(0 0% 0% / 0.6), inset 0 0 0 0.5px hsl(0 0% 0% / 0.45)',
+  inset: 'inset 0 0 0 1px hsl(0 0% 100% / 0.07)',
   raised:
     'inset 0 1px 0 hsl(0 0% 100% / 0.08), 0 0 0 0.5px hsl(0 0% 0% / 0.7), 0 1px 2px hsl(0 0% 0% / 0.5)',
   inkEdge: 'inset 0 1px 0 hsl(0 0% 100% / 0.55), 0 1px 2px hsl(0 0% 0% / 0.5)',
@@ -161,7 +164,7 @@ export const darkShadowTheme = stylex.createTheme(shadow, {
 });
 
 export const lightShadowTheme = stylex.createTheme(shadow, {
-  inset: 'inset 0 1px 2px hsl(225 10% 11% / 0.06), inset 0 0 0 0.5px hsl(225 10% 11% / 0.07)',
+  inset: 'inset 0 0 0 1px hsl(225 10% 11% / 0.09)',
   raised:
     '0 0 0 0.5px hsl(225 10% 11% / 0.16), 0 1px 1px hsl(225 10% 11% / 0.06), 0 2px 4px -1px hsl(225 10% 11% / 0.07)',
   inkEdge: 'inset 0 1px 0 hsl(0 0% 100% / 0.18), 0 1px 1.5px hsl(225 10% 11% / 0.18)',

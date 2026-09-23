@@ -69,11 +69,6 @@ export const field = stylex.defineVars({
   thumb: colors.raisedBackground,
   thumbShadow: shadow.raised,
   thumbSheen: sheen.raised,
-  // A Select's trigger is pressed, not typed into, so it is raised rather than
-  // a well — the same fill, edge and sheen a secondary Button takes.
-  triggerBackground: colors.raisedBackground,
-  triggerEdge: shadow.raised,
-  triggerSheen: sheen.raised,
 });
 
 /**
@@ -99,7 +94,4 @@ export const fieldPaletteTheme = stylex.createTheme(field, {
   thumb: colors.raisedBackground,
   thumbShadow: shadow.raised,
   thumbSheen: sheen.raised,
-  triggerBackground: colors.raisedBackground,
-  triggerEdge: shadow.raised,
-  triggerSheen: sheen.raised,
 });

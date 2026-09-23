@@ -310,17 +310,15 @@ describe('AppearanceSettingsView', () => {
       (node) => node.textContent === 'npx lody daemon start'
     );
 
-    // Each font is a field showing the family it holds, typed into to search the rest.
-    const interfaceFontTrigger = container?.querySelector<HTMLInputElement>(
-      'input[aria-label="Interface font"]'
+    // Each font opens like the selects above it and names the family it holds.
+    const interfaceFontTrigger = container?.querySelector<HTMLElement>(
+      'button[aria-label="Interface font"]'
     );
-    const terminalFontTrigger = container?.querySelector<HTMLInputElement>(
-      'input[aria-label="Font"]'
-    );
+    const terminalFontTrigger = container?.querySelector<HTMLElement>('button[aria-label="Font"]');
     expect(container?.textContent).toContain('Interface font');
     expect(container?.textContent).not.toContain('Choose a font installed on this computer.');
-    expect(interfaceFontTrigger?.value).toBe('Atkinson Hyperlegible');
-    expect(terminalFontTrigger?.value).toBe('Maple Mono');
+    expect(interfaceFontTrigger?.textContent).toContain('Atkinson Hyperlegible');
+    expect(terminalFontTrigger?.textContent).toContain('Maple Mono');
     expect(sizeInput).toBeTruthy();
     expect(preview).toBeTruthy();
     expect(preview?.parentElement?.style.fontFamily).toContain('Maple Mono');
@@ -347,7 +345,7 @@ describe('AppearanceSettingsView', () => {
     );
 
     const dialog = document.body.querySelector<HTMLElement>('[role="dialog"]');
-    const openFonts = dialog?.querySelector<HTMLElement>('[aria-label="Show all fonts"]');
+    const openFonts = dialog?.querySelector<HTMLElement>('button[aria-label="Interface font"]');
     expect(dialog).toBeTruthy();
     expect(openFonts).toBeTruthy();
 
@@ -358,5 +356,10 @@ describe('AppearanceSettingsView', () => {
     const fonts = visibleOptions();
     expect(fonts.map((node) => node.textContent)).toContain('Fira Code');
     expect(fonts.every((node) => dialog?.contains(node))).toBe(true);
+    // The search the list opens with is inside the same popup.
+    const search = document.body.querySelector<HTMLInputElement>(
+      'input[placeholder="Search system fonts..."]'
+    );
+    expect(dialog?.contains(search ?? null)).toBe(true);
   });
 });

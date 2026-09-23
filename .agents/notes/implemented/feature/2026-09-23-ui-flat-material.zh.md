@@ -137,5 +137,28 @@ Prompt Shortcut 两个编辑器都把 emoji 选择器和名称输入框并排放
 - **开关。** 「开」改为一层从起点边随圆钮一起生长的颜色，而不是整条轨道瞬间变色。
   emoji 插槽与输入值之间也加了 6px 间距。
 
+## 更正：所有承载值的控件只用一种平面材质，不再有凹陷
+
+本 PR 前后两版都把同一列控件拆成了两种，都被负责人否定了。第一版里，凹下去的字段
+放在凸起的卡片上，看起来像被挖出的洞。第二版只把 Select 触发器改成凸起（「打字的
+凹、按下的凸」），结果一个表单变成一半洞、一半凸块，更糟。
+
+对其他系统的调研表明，这里确实有两种做法。按原生控件建模的系统（macOS、WinUI 3、
+Radix Themes classic）把下拉当按钮，做成凸起；按表单建模的系统（Primer、Material、
+Fluent web、Bootstrap、shadcn）让下拉用输入框的材质。Radix classic 里两者之所以还能
+读成一类，是因为两种字段底色都接近白色，只靠光的方向区分；而这里的差别是 92% 灰底
+对纯白。
+
+现在的规则是：所有承载值的控件只用一种平面材质。输入框、文本框、Select 与
+Combobox 的触发器、数字框、密码框，以及复选框、单选、开关、tab 条的轨道，都是比
+表面偏一档的填充（`wellBackground`，提亮到 96% / 12%）加一道内发丝边
+（`shadow.inset`，不再是内阴影）。只有可按的东西（按钮、圆钮、tab 滑块）是凸起的。
+凸起触发器的 token 已删除。
+
+字体选择器由负责人选定为「像 Select 一样的触发器」，而不是可输入的字段。
+`Combobox.Button` 复用 Select 触发器的样式（现在统一放在 `field/trigger.ts`），
+`Combobox.Content` 的 `search` 把 `Combobox.Search` 放在弹层顶部。这样外观页那一列是
+同一种控件，`OptionSelector` 的调用方以后也可以迁到这个部件上。
+
 相关：[token gallery](2026-09-09-ui-token-gallery.md)、
 [调用点迁移](2026-09-22-ui-radix-callsite-migration.md)。

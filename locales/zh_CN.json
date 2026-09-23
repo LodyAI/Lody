@@ -3004,7 +3004,6 @@
   "settings.terminal.fontFamily.loading": "正在加载系统字体...",
   "settings.terminal.fontFamily.placeholder": "默认",
   "settings.terminal.fontFamily.searchPlaceholder": "搜索系统字体...",
-  "settings.terminal.fontFamily.openList": "显示全部字体",
   "settings.terminal.fontFamily.unavailable": "无法加载系统字体，请重新打开菜单重试。",
   "settings.terminal.fontSize.label": "字号",
   "settings.terminal.fontSize.decrease": "减小字号",

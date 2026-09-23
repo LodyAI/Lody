@@ -627,7 +627,7 @@ const SHADOWS = [
     box: shadow.inset,
     fill: colors.wellBackground,
     ink: false,
-    note: 'wells',
+    note: 'fields and tracks: one hairline, not a recess',
   },
   {
     name: 'shadow.raised',
@@ -1626,11 +1626,18 @@ function PopupReplica() {
 }
 
 /** A Combobox with the chevron beside its input, the shape a picker takes. */
-function LanguageCombobox({ children, ...rest }: ComponentProps<typeof Combobox.Root<string>>) {
+function LanguageCombobox({
+  children,
+  search,
+  ...rest
+}: ComponentProps<typeof Combobox.Root<string>> & { search?: ReactNode }) {
   return (
     <Combobox.Root items={LANGUAGES} {...rest}>
       {children}
-      <Combobox.Content empty={<Combobox.Empty>No language matches.</Combobox.Empty>}>
+      <Combobox.Content
+        search={search}
+        empty={<Combobox.Empty>No language matches.</Combobox.Empty>}
+      >
         {(item: string) => (
           <Combobox.Item key={item} value={item}>
             {item}
@@ -4238,7 +4245,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
 
       <Section
         title="Select · trigger and list"
-        rule="A trigger is pressed, not typed into, so it is raised — a secondary Button's fill, edge and sheen — while taking the field family's size ladder, ring, invalid ring and disabled opacity; the list it opens is on the floating rung and reads the popup group instead. A row states two facts: selected is the row that holds the value, highlighted is where the keyboard or the pointer is, and the highlight wins the fill because it is the one that moves. The open list below is a stand-in built from the same rules the popup applies, because a board cannot show a popup without covering what is under it."
+        rule="A trigger is a field like the input above it — one flat material for every control that holds a value — so it takes the field family's size ladder, ring, invalid ring and disabled opacity; the list it opens is on the floating rung and reads the popup group instead. A row states two facts: selected is the row that holds the value, highlighted is where the keyboard or the pointer is, and the highlight wins the fill because it is the one that moves. The open list below is a stand-in built from the same rules the popup applies, because a board cannot show a popup without covering what is under it."
       >
         <PaletteSplit palettes={palettes}>
           <Rows>
@@ -4270,26 +4277,6 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
             {POPUP_COLORS.map((token) => (
               <Swatch key={token.name} {...token} />
             ))}
-            <Swatch
-              name="field.triggerBackground"
-              value={field.triggerBackground}
-              note="the trigger is raised, not a well"
-            />
-            <ShadowChip
-              name="field.triggerEdge"
-              box={field.triggerEdge}
-              fill={field.triggerBackground}
-              ink={false}
-              note="a trigger's edge and lift"
-            />
-            <ShadowChip
-              name="field.triggerSheen"
-              box={field.triggerEdge}
-              fill={field.triggerBackground}
-              ink={false}
-              sheen={field.triggerSheen}
-              note="the light falling off it"
-            />
             <ShadowChip
               name="popup.shadow"
               box={popup.shadow}
@@ -4323,6 +4310,17 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
                     <Combobox.Input placeholder="Search a language" />
                     <Combobox.Trigger aria-label="Open the language list" />
                   </Combobox.InputGroup>
+                </LanguageCombobox>
+              </Field.Root>
+            </FieldRow>
+            <FieldRow legend="button · search inside">
+              <Field.Root>
+                <Field.Label>Language</Field.Label>
+                <LanguageCombobox
+                  defaultValue="Rust"
+                  search={<Combobox.Search placeholder="Search a language" />}
+                >
+                  <Combobox.Button />
                 </LanguageCombobox>
               </Field.Root>
             </FieldRow>

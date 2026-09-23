@@ -168,5 +168,32 @@ The owner's screenshots of the running app showed four more defects:
   thumb, not a whole-track colour swap. The emoji slot gained a 6px gap before
   the value.
 
+## Correction: one flat material for every value, nothing sunken
+
+Two turns of this PR each broke a column in two, and the owner rejected both.
+Sunken fields on a raised card read as holes cut into it. Raising only the
+Select trigger ("typed into is sunken, pressed is raised") then made a form one
+half holes and one half blocks, which was worse.
+
+Research into other systems showed the split is real. Native-modelled systems
+(macOS, WinUI 3, Radix Themes classic) raise a select like a button;
+form-modelled ones (Primer, Material, Fluent web, Bootstrap, shadcn) give it
+the input's material. In Radix classic the two still read as one family only
+because both fields are near-white and differ in light direction alone. Here
+the difference was a 92% gray fill against white.
+
+The rule is now that everything holding a value is one flat material. Inputs,
+textareas, Select and Combobox triggers, numbers, passwords, and the tracks of
+checkboxes, radios, switches and tab strips all use a fill a step off the
+surface (`wellBackground`, lightened to 96% / 12%) with one inner hairline
+(`shadow.inset`, no longer an inner shadow). Only pressable things (Buttons,
+thumbs, tab pills) stand up. The raised-trigger tokens were removed.
+
+For the font pickers the owner chose a Select-like trigger over a typed field.
+`Combobox.Button` uses the Select trigger's styles (now shared in
+`field/trigger.ts`), and `Combobox.Content search` puts `Combobox.Search` at the
+top of the popup. That makes the Appearance column one kind of control, and it
+is the part `OptionSelector`'s callers can move onto.
+
 Related: [token gallery](2026-09-09-ui-token-gallery.md),
 [call-site migration](2026-09-22-ui-radix-callsite-migration.md).

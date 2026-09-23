@@ -9,6 +9,8 @@ import { surface } from '../popup/surface';
 import { rowLabel } from '../popup/row-label';
 import { field } from './field.tokens.stylex';
 import { isInvalid } from './invalid';
+import { popup } from '../popup/popup.tokens.stylex';
+import { trigger, triggerSizes } from './trigger';
 import { well } from './well';
 
 /** The gap between a control and the list it opens; the rules' rise distance. */
@@ -45,6 +47,20 @@ export interface ComboboxTriggerProps extends Omit<TriggerBaseProps, 'className'
   className?: string;
 }
 
+export interface ComboboxButtonProps extends Omit<TriggerBaseProps, 'className' | 'children'> {
+  /** Control height and density, on the ladder a Select trigger takes. */
+  size?: ComboboxSize;
+  /** What the button says while nothing is picked. */
+  placeholder?: ReactNode;
+  /** The value, drawn another way; defaults to the picked item's label. */
+  children?: ComponentProps<typeof BaseCombobox.Value>['children'];
+  className?: string;
+}
+
+export interface ComboboxSearchProps extends Omit<InputBaseProps, 'className' | 'size'> {
+  className?: string;
+}
+
 export interface ComboboxClearProps extends Omit<ClearBaseProps, 'className' | 'children'> {
   children?: ReactNode;
   className?: string;
@@ -62,6 +78,11 @@ export interface ComboboxContentProps extends Omit<
   empty?: ReactNode;
   /** Where the popup mounts. Defaults to the nearest `PopupContainerProvider`. */
   container?: PopupContainer;
+  /**
+   * A `Combobox.Search` above the rows, for a list opened by a `Combobox.Button`
+   * rather than typed into from the page.
+   */
+  search?: ReactNode;
   className?: string;
 }
 
@@ -105,6 +126,19 @@ const styles = stylex.create({
   },
   /** The controls beside the input keep the shell's end padding off them. */
   shell: { gap: field.triggerGap },
+  /**
+   * The search field at the top of a popup: typed into, so still a well, one
+   * row tall at the row's radius, clear of the rows by the popup's inset.
+   */
+  search: {
+    display: 'block',
+    flexShrink: 0,
+    height: popup.itemHeight,
+    paddingInline: popup.itemPaddingX,
+    borderRadius: popup.itemRadius,
+    fontSize: popup.text,
+    marginBottom: popup.inset,
+  },
 });
 
 const sizeStyles = {
@@ -201,6 +235,59 @@ export const ComboboxTrigger = forwardRef<HTMLButtonElement, ComboboxTriggerProp
       >
         {children ?? <ChevronDownGlyph />}
       </BaseCombobox.Trigger>
+    );
+  }
+);
+
+/**
+ * A list picked from rather than typed into, whose search sits inside its
+ * popup: a font from every installed family, a model from a long catalogue.
+ * It is the trigger a `Select` takes, so a column of settings reads as one kind
+ * of control whether or not its list can be searched; the typing happens in
+ * `Combobox.Search`, at the top of the popup.
+ */
+export const ComboboxButton = forwardRef<HTMLButtonElement, ComboboxButtonProps>(
+  function ComboboxButton({ size = 'medium', placeholder, children, className, ...rest }, ref) {
+    const ariaInvalid = rest['aria-invalid'];
+    return (
+      <BaseCombobox.Trigger
+        ref={ref}
+        nativeButton
+        data-size={size}
+        {...rest}
+        className={(state) =>
+          appendClassName(
+            stylex.props(
+              well.base,
+              trigger.base,
+              triggerSizes[size],
+              state.placeholder && trigger.placeholder,
+              isInvalid(state.valid, ariaInvalid) && well.invalid
+            ).className,
+            className
+          )
+        }
+      >
+        <span {...stylex.props(trigger.value)}>
+          <BaseCombobox.Value placeholder={placeholder}>{children}</BaseCombobox.Value>
+        </span>
+        <span {...stylex.props(trigger.icon)}>
+          <ChevronDownGlyph />
+        </span>
+      </BaseCombobox.Trigger>
+    );
+  }
+);
+
+/** The field a person filters with, at the top of a `Combobox.Button`'s popup. */
+export const ComboboxSearch = forwardRef<HTMLInputElement, ComboboxSearchProps>(
+  function ComboboxSearch({ className, ...rest }, ref) {
+    return (
+      <BaseCombobox.Input
+        ref={ref}
+        {...rest}
+        className={appendClassName(stylex.props(well.base, styles.search).className, className)}
+      />
     );
   }
 );
@@ -314,7 +401,7 @@ export const ComboboxSeparator = forwardRef<HTMLDivElement, ComboboxSeparatorPro
  */
 export const ComboboxContent = forwardRef<HTMLDivElement, ComboboxContentProps>(
   function ComboboxContent(
-    { className, children, empty, container, sideOffset = POPUP_GAP, ...rest },
+    { className, children, empty, search, container, sideOffset = POPUP_GAP, ...rest },
     ref
   ) {
     const inheritedContainer = usePopupContainer();
@@ -354,6 +441,7 @@ export const ComboboxContent = forwardRef<HTMLDivElement, ComboboxContentProps>(
               );
             }}
           >
+            {search}
             {empty}
             <BaseCombobox.List className={stylex.props(surface.list).className}>
               {children}
@@ -375,6 +463,8 @@ export const Combobox = {
   Root: BaseCombobox.Root,
   InputGroup: ComboboxInputGroup,
   Input: ComboboxInput,
+  Button: ComboboxButton,
+  Search: ComboboxSearch,
   Trigger: ComboboxTrigger,
   Clear: ComboboxClear,
   Content: ComboboxContent,

@@ -47,15 +47,16 @@ One rung per component. The rung fixes background and shadow together.
 
 ## Fields
 
-**Typed into is sunken; pressed is raised.** A control a person types into —
-input, textarea, a Combobox's field, a number — is the well rung, and so are the
-tracks a checkbox, radio or switch sits in. A Select's trigger is pressed to
-open a list, so it is raised like a secondary Button (`field.triggerBackground`,
-`field.triggerEdge`, `field.triggerSheen`). A sunken trigger on a raised card
-read as a hole cut into it beside buttons standing up from it.
+**Everything that holds a value is one flat material.** Input, textarea,
+Select and Combobox triggers, a number, a password, and the tracks a checkbox,
+radio, switch or tab strip sits in: a fill a step off the surface
+(`wellBackground`) edged by one hairline (`shadow.inset`), neither sunken nor
+raised. Two earlier versions each broke a column in two — sunken fields read as
+holes cut into a raised card, and raising only the Select made a form one half
+holes and one half blocks. The material a person presses — a Button, a thumb, a
+tab's pill — is the only thing that stands up.
 
-A typed control is the well rung: `wellBackground` plus `shadow.inset`, never a
-border. One component token group, `field`, serves the whole family — input,
+The rung keeps its name, the well, and never a border. One component token group, `field`, serves the whole family — input,
 textarea, checkbox, radio, switch and the Select and Combobox triggers — so a
 state has one colour in one place instead of one per component. The lists those
 triggers open are on the floating rung and read `popup` instead; see below.
@@ -773,8 +774,10 @@ of the light, and it takes four rules.
   spread keeps it under the object instead of haloing round it. Dark palettes
   draw the hairline in light (`white` at 6–10%) and keep the inset top highlight,
   because a dark shadow does not read on a near-black page.
-- **A well is recessed, not outlined.** `shadow.inset` is a 1px shadow from the
-  top edge and a faint inner hairline; it never gains a bottom lip or a groove.
+- **A field is flat, not recessed.** `shadow.inset` is one hairline inside the
+  edge of a fill a step off the surface. Nothing here is sunken: a recess read
+  as a hole on a raised card, and a column mixing recessed and raised fields
+  read as two kinds of thing.
 - **Light falls off down a raised face.** `sheen.raised` and `sheen.ink` are that
   fall-off as a `background-image` over the fill, a few percent at most, so a
   hover that changes the fill keeps it. A press drops it: a thing pressed flush

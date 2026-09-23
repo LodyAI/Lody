@@ -3004,7 +3004,6 @@
   "settings.terminal.fontFamily.loading": "Loading system fonts...",
   "settings.terminal.fontFamily.placeholder": "Default",
   "settings.terminal.fontFamily.searchPlaceholder": "Search system fonts...",
-  "settings.terminal.fontFamily.openList": "Show all fonts",
   "settings.terminal.fontFamily.unavailable": "System fonts could not be loaded. Reopen the menu to try again.",
   "settings.terminal.fontSize.label": "Font size",
   "settings.terminal.fontSize.decrease": "Decrease font size",

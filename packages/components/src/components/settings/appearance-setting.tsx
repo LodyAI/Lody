@@ -79,12 +79,11 @@ interface SystemFontOption {
 const DEFAULT_FACE = { fontFamily: 'var(--font-sans-default)' };
 
 /**
- * A system font, picked by typing part of its name.
+ * A system font, picked from every installed family.
  *
- * A Combobox rather than a button that opens a search box: the list is every
- * installed family, so the field a person types into is the control itself, in
- * the same well as every other field on the page. The first time the list opens
- * is what loads the families.
+ * It opens like the Selects above it — one kind of control down the column —
+ * and the list it opens starts with a search field, because it is every family
+ * on the machine. The first time the list opens is what loads the families.
  */
 function SystemFontCombobox({
   value,
@@ -92,7 +91,6 @@ function SystemFontCombobox({
   onChange,
   onOpen,
   searchPlaceholder,
-  openLabel,
   emptyText,
   'aria-label': ariaLabel,
 }: {
@@ -101,7 +99,6 @@ function SystemFontCombobox({
   onChange: (family: string) => void;
   onOpen: () => void;
   searchPlaceholder: string;
-  openLabel: string;
   emptyText: string;
   'aria-label': string;
 }) {
@@ -121,15 +118,21 @@ function SystemFontCombobox({
         if (open) onOpen();
       }}
     >
-      <Combobox.InputGroup className="w-full sm:w-[220px]">
-        <Combobox.Input
-          aria-label={ariaLabel}
-          placeholder={searchPlaceholder}
-          style={DEFAULT_FACE}
-        />
-        <Combobox.Trigger aria-label={openLabel} />
-      </Combobox.InputGroup>
-      <Combobox.Content empty={<Combobox.Empty>{emptyText}</Combobox.Empty>}>
+      <Combobox.Button
+        aria-label={ariaLabel}
+        className="w-full sm:w-[220px]"
+        style={DEFAULT_FACE}
+      />
+      <Combobox.Content
+        search={
+          <Combobox.Search
+            aria-label={searchPlaceholder}
+            placeholder={searchPlaceholder}
+            style={DEFAULT_FACE}
+          />
+        }
+        empty={<Combobox.Empty>{emptyText}</Combobox.Empty>}
+      >
         {(option: SystemFontOption) => (
           <Combobox.Item key={option.key ?? option.value} value={option}>
             <span style={DEFAULT_FACE}>{option.label}</span>
@@ -278,7 +281,6 @@ export function AppearanceSettingsView({
                 'settings.terminal.fontFamily.searchPlaceholder',
                 'Search system fonts...'
               )}
-              openLabel={t('settings.terminal.fontFamily.openList', 'Show all fonts')}
               emptyText={t('settings.terminal.fontFamily.empty', 'No matching fonts')}
             />
           </CompactRow>
@@ -312,7 +314,6 @@ export function AppearanceSettingsView({
                 'settings.terminal.fontFamily.searchPlaceholder',
                 'Search system fonts...'
               )}
-              openLabel={t('settings.terminal.fontFamily.openList', 'Show all fonts')}
               emptyText={t('settings.terminal.fontFamily.empty', 'No matching fonts')}
             />
           </CompactRow>
