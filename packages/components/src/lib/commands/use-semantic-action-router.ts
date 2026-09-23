@@ -20,7 +20,7 @@ export function useSemanticActionRouter({
 
   useLayoutEffect(() => {
     const root = rootRef.current;
-    if (!enabled || !root) return;
+    if (!enabled || !root) return undefined;
     const router = createSemanticActionRouter(
       root,
       () => {

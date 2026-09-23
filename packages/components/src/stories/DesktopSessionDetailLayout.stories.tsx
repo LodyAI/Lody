@@ -87,7 +87,7 @@ function LayoutHarness({
     },
   });
   useEffect(() => {
-    if (!semanticShortcuts) return;
+    if (!semanticShortcuts) return undefined;
     const onKey = (event: KeyboardEvent) => {
       // Browser-safe substitute for the native close entry point in this story.
       if (event.key === 'F8') {

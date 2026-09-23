@@ -61,7 +61,7 @@ export function PublicBrowserSurface({
   const semanticShortcutsEnabled = useAtomValue(semanticShortcutsFeatureEnabledAtom);
 
   useEffect(() => {
-    if (!nativeViewVisible || !semanticShortcutsEnabled || !bridge) return;
+    if (!nativeViewVisible || !semanticShortcutsEnabled || !bridge) return undefined;
     return bridge.onInteraction((event) => {
       if (event.browserId === browserId && hostRef.current) {
         reportSemanticActionInteraction(hostRef.current, event.source);
