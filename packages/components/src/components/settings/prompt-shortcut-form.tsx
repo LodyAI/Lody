@@ -159,7 +159,6 @@ export function PromptShortcutForm({
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <Input
               id="shortcut-name"
-              size="large"
               autoComplete="off"
               aria-label={t('settings.promptShortcuts.name', 'Name')}
               placeholder={t('settings.promptShortcuts.name', 'Name')}
@@ -193,7 +192,6 @@ export function PromptShortcutForm({
             />
             <Input
               id="shortcut-slug"
-              size="large"
               autoComplete="off"
               aria-label={t('settings.promptShortcuts.command', 'Slash command')}
               placeholder={t('settings.promptShortcuts.commandPlaceholder', 'review-pr')}
@@ -223,7 +221,6 @@ export function PromptShortcutForm({
               'settings.promptShortcuts.descriptionPlaceholder',
               'Description — shown in the / menu'
             )}
-            size="large"
             value={value.description ?? ''}
             maxLength={PROMPT_SHORTCUT_LIMITS.description}
             disabled={saving}
@@ -437,7 +434,7 @@ function ScopeSelect({
         if (next != null) onChange(next === SHORTCUT_SCOPE_NONE ? '' : next);
       }}
     >
-      <Select.Trigger id={id} className="h-9 gap-1.5 text-xs" aria-label={label}>
+      <Select.Trigger id={id} aria-label={label}>
         {/* Not a <span>: the trigger line-clamps its direct span children, which
             turns a flex row into a stacked box. The axis names itself here
             because these three sit inline above the prompt with no field label

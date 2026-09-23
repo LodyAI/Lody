@@ -6,6 +6,7 @@ import { appendClassName } from '../internal/class-name';
 import { usePopupContainer, type PopupContainer } from '../popup/portal-container';
 import { useForcedThemeClassNames } from '../theme/theme';
 import { surface } from '../popup/surface';
+import { rowLabel } from '../popup/row-label';
 import { field } from './field.tokens.stylex';
 import { isInvalid } from './invalid';
 import { well } from './well';
@@ -231,7 +232,7 @@ export const SelectItem = forwardRef<HTMLDivElement, SelectItemProps>(function S
       }
     >
       <BaseSelect.ItemText className={stylex.props(surface.itemText).className}>
-        {children}
+        {rowLabel(children)}
       </BaseSelect.ItemText>
       {endContent}
       <span {...stylex.props(surface.indicator)}>

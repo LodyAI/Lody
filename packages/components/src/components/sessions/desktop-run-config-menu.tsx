@@ -98,14 +98,10 @@ function OptionItem({
       aria-checked={selected}
       closeOnClick={false}
       onClick={onSelect}
-      className="h-7 min-h-0 items-center gap-2 py-0"
+      icon={icon}
+      endContent={selected ? <Check className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /> : null}
     >
-      {icon}
-      {/* nowrap (no min-w-0) so the submenu's max-content includes the label. */}
-      <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap font-normal leading-tight">
-        {label}
-      </span>
-      {selected ? <Check className="h-3 w-3 shrink-0" aria-hidden="true" /> : null}
+      {label}
     </Menu.Item>
   );
 }
@@ -153,23 +149,17 @@ function ToggleItem({
       aria-checked={checked}
       closeOnClick={false}
       onClick={onToggle}
-      className="h-7 min-h-0 py-0"
+      icon={icon}
+      endContent={
+        <Switch
+          checked={checked}
+          aria-hidden="true"
+          tabIndex={-1}
+          className="pointer-events-none shrink-0"
+        />
+      }
     >
-      <span
-        className={cn(
-          'flex h-3.5 w-3.5 shrink-0 items-center justify-center',
-          checked ? 'text-foreground' : 'text-muted-foreground'
-        )}
-      >
-        {icon}
-      </span>
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      <Switch
-        checked={checked}
-        aria-hidden="true"
-        tabIndex={-1}
-        className="pointer-events-none ml-2 h-3.5 w-6 shrink-0 [&>span]:h-3 [&>span]:w-3 [&>span]:data-[state=checked]:translate-x-2.5"
-      />
+      {label}
     </Menu.Item>
   );
 }

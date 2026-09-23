@@ -57,7 +57,9 @@ const styles = stylex.create({
  */
 const INSET = space[1];
 const shellStyles = stylex.create({
-  shell: { gap: 0, paddingInlineStart: INSET },
+  // The slot's content and the value are two things in one control: the gap
+  // keeps a glyph from touching the first letter without splitting them apart.
+  shell: { gap: space[1.5], paddingInlineStart: INSET },
   leading: {
     display: 'flex',
     alignItems: 'center',

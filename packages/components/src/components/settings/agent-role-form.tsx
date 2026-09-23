@@ -109,7 +109,6 @@ export function AgentRoleForm({
         <div className="space-y-1.5">
           <Input
             id={`${fieldId}-name`}
-            size="large"
             autoComplete="off"
             aria-label={t('settings.agentRoles.form.name')}
             leading={
@@ -166,7 +165,6 @@ export function AgentRoleForm({
                 }}
               >
                 <Select.Trigger
-                  className="h-9 text-xs"
                   aria-label={t('settings.agentRoles.form.machine')}
                   aria-invalid={hasError('machine_required') || undefined}
                 >
@@ -209,7 +207,6 @@ export function AgentRoleForm({
                 }}
               >
                 <Select.Trigger
-                  className="h-9 text-xs"
                   aria-label={t('settings.agentRoles.form.agentConfig')}
                   aria-invalid={hasError('agent_config_required') || undefined}
                 >
@@ -405,7 +402,7 @@ function ValueSelect({
         if (next != null) onChange(next);
       }}
     >
-      <Select.Trigger className="h-9 text-xs" aria-label={label}>
+      <Select.Trigger aria-label={label}>
         <Select.Value />
       </Select.Trigger>
       <Select.Content>

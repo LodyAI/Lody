@@ -75,8 +75,11 @@ A checkbox and a radio are the "16px things" the corner rule names: a
 `field.boxSize` box at `radius.mini`, round for a radio. A switch is a
 `field.switchWidth` by `field.switchHeight` track at `radius.full` holding a
 `field.thumb` thumb raised with `field.thumbShadow`, the same height as the box
-so a settings row carrying both lines up. Off is the well; on is the accent
-fill, which is where the well's shadow gives way to `field.checkedEdge`. Because CSS cannot
+so a settings row carrying both lines up. Off is the well. On, the accent is
+uncovered rather than switched: it is a layer over the well that grows from the
+start edge on the thumb's own duration and easing, so the colour is what the
+thumb has passed over, the way a physical switch shows its "on" side. It is
+also where the well's shadow gives way to `field.checkedEdge`. Because CSS cannot
 append to a box-shadow list, a control that changes its edge restates the ring
 with it, the way each Button variant does.
 
@@ -158,6 +161,12 @@ popup's own children.
 | submenu chevron | drawn by the part, so a caller cannot forget it                             |
 | destructive     | `popup.destructive` label, `popup.destructiveHighlight` under the keyboard  |
 | open            | the row owning an open submenu keeps the highlight fill                     |
+
+A row's label slot is a line, not a block: whatever a caller puts in it — a
+value beside the name, a mark, a switch — stays on the row's one line, and its
+words are boxed so they can take the ellipsis. The leading box, `shortcut` and
+`endContent` are still where an icon, a key and a trailing control belong. The
+line is what keeps a row migrated with its old markup from breaking in two.
 
 A row that holds no icon holds no box, so an icon-less menu is not indented for
 nothing; a row in a mixed list asks for the box with `inset` and lines up with

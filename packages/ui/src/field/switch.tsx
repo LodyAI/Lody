@@ -19,6 +19,16 @@ export interface SwitchProps extends Omit<
 /** The distance the thumb travels: the track less the thumb and both insets. */
 const TRAVEL = `calc(${field.switchWidth} - ${field.switchThumbSize} - 2 * ${field.switchInset})`;
 
+/**
+ * On is a colour the thumb uncovers, not a colour the track turns. The accent is
+ * a layer over the well that grows from the start edge as the thumb travels, on
+ * the thumb's own duration and easing: half-way, its edge is under the thumb's
+ * centre, so the colour reads as what the thumb has passed over — the way a
+ * physical switch shows its "on" side — rather than the whole track flipping at
+ * once. The sheen rides the same layer so it never lights the empty well.
+ */
+const FILL = `${field.checkedSheen}, linear-gradient(${field.checkedFill}, ${field.checkedFill})`;
+
 const styles = stylex.create({
   track: {
     width: field.switchWidth,
@@ -28,6 +38,18 @@ const styles = stylex.create({
     cornerShape: corner.round,
     justifyContent: 'flex-start',
     padding: field.switchInset,
+    backgroundImage: FILL,
+    backgroundRepeat: 'no-repeat',
+    backgroundSize: '0% 100%, 0% 100%',
+    transitionProperty: 'background-size, box-shadow, opacity',
+    transitionDuration: duration.fast,
+    transitionTimingFunction: ease.standard,
+  },
+  /** On: the well stays the well; the layer over it has reached the far end. */
+  trackOn: {
+    backgroundColor: field.background,
+    backgroundImage: FILL,
+    backgroundSize: '100% 100%, 100% 100%',
   },
   thumb: {
     display: 'block',
@@ -66,7 +88,10 @@ export const Switch = forwardRef<HTMLButtonElement, SwitchProps>(function Switch
           stylex.props(
             well.box,
             styles.track,
+            // `well.checked` for its edge and its ring; `trackOn` then puts the
+            // fill back on the layer instead of the whole track.
             state.checked && well.checked,
+            state.checked && styles.trackOn,
             isInvalid(state.valid, ariaInvalid) &&
               (state.checked ? well.checkedInvalid : well.invalid)
           ).className,

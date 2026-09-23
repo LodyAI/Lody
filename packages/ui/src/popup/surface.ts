@@ -204,9 +204,25 @@ export const surface = stylex.create({
   /**
    * The label of a row. It takes the remaining width so a long one truncates
    * instead of pushing the tick out of the popup.
+   *
+   * It is a line, not a block: whatever a caller put in it — a value beside
+   * the name, a mark, a switch — sits on the row's one line. As a block, a
+   * glyph there took a line of its own (the product's preflight makes every
+   * `svg` a block), and every row that carried more than its name broke in
+   * two. Its words ride in `itemTextRun`, which is what truncates.
    */
   itemText: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: popup.itemGap,
     flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
+    overflow: 'hidden',
+    whiteSpace: 'nowrap',
+  },
+  /** A row's words, inside `itemText`: the part that gives way to an ellipsis. */
+  itemTextRun: {
     flexShrink: 1,
     minWidth: 0,
     overflow: 'hidden',

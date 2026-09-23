@@ -6,6 +6,7 @@ import { ChevronDownGlyph, TickGlyph } from '../internal/glyphs';
 import { usePopupContainer, type PopupContainer } from '../popup/portal-container';
 import { useForcedThemeClassNames } from '../theme/theme';
 import { surface } from '../popup/surface';
+import { rowLabel } from '../popup/row-label';
 import { field } from './field.tokens.stylex';
 import { isInvalid } from './invalid';
 import { well } from './well';
@@ -243,7 +244,7 @@ export const ComboboxItem = forwardRef<HTMLDivElement, ComboboxItemProps>(functi
         )
       }
     >
-      <span {...stylex.props(surface.itemText)}>{children}</span>
+      <span {...stylex.props(surface.itemText)}>{rowLabel(children)}</span>
       <span {...stylex.props(surface.indicator)}>
         <BaseCombobox.ItemIndicator
           className={stylex.props(surface.indicatorGlyph).className}

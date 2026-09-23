@@ -1,10 +1,12 @@
 import * as stylex from '@stylexjs/stylex';
 import { useRef, useState, type ComponentProps, type ReactNode } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { ContextMenu } from '../src/menu/context-menu';
 import { Menu } from '../src/menu/menu';
 import { Menubar } from '../src/menu/menubar';
 import { PopupContainerProvider } from '../src/popup/portal-container';
+import { rowLabel } from '../src/popup/row-label';
 import { surface } from '../src/popup/surface';
 import { ThemeRoot, forcedThemeClassNames } from '../src/theme/theme';
 import { all, classesOf, click, hover, mount, one, press, step, type Mounted } from './dom';
@@ -654,5 +656,20 @@ describe('Menubar', () => {
     await press('ArrowRight');
 
     expect(items().map((node) => node.textContent)).toEqual(['Undo']);
+  });
+});
+
+describe('a row label', () => {
+  test('words get a box that can truncate, and a caller mark stays beside them', () => {
+    const html = renderToStaticMarkup(
+      <span>{rowLabel(['5.6-Sol', <svg key="tick" data-mark="" />, 42])}</span>
+    );
+    const run = stylex.props(surface.itemTextRun).className ?? '';
+    expect(run).toBeTruthy();
+    // Both runs of text are boxed — a bare text node in a flex line cannot take
+    // an ellipsis — and the element is passed through untouched, in order.
+    expect(html).toBe(
+      `<span><span class="${run}">5.6-Sol</span><svg data-mark=""></svg><span class="${run}">42</span></span>`
+    );
   });
 });
