@@ -12,11 +12,11 @@ const meta = {
   tags: ['autodocs'],
   args: {
     size: 14,
-    cornerRadius: 0.4,
+    cornerRadius: 0.2,
     brightness: 'wave',
     scale: 'center',
     minScale: 0.3,
-    gap: 0.18,
+    gap: 0.25,
     wavelength: 1.5,
     direction: 'across',
     rowPitch: 28,
