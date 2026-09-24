@@ -662,7 +662,8 @@ function NavButton({
           'focus-visible:ring-1 focus-visible:ring-sidebar-ring/30',
           active
             ? 'bg-sidebar-selection text-sidebar-selection-foreground'
-            : 'text-sidebar-foreground dark:text-sidebar-foreground/75 hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
+            : // Same brightness as unselected session titles; hover changes the fill only.
+              'text-sidebar-row-foreground hover:bg-sidebar-hover',
           // Keep the label clear of the trailing control instead of letting it
           // truncate under it.
           action && 'pr-8'

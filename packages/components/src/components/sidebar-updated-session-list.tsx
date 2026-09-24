@@ -56,7 +56,6 @@ import {
   type SidebarRowKind,
   type SessionRowOpenedByTreeSlot,
   SIDEBAR_ROW_LIST_CLASS,
-  SIDEBAR_ROW_REST_ICON_CLASS,
 } from '@/components/sidebar-row-shared';
 import {
   sidebarCollapsedOpenedBySessionsAtom,
@@ -854,9 +853,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
     <span
       className={cn(
         'min-w-0 flex-1 truncate font-normal',
-        showSelectedState
-          ? 'text-sidebar-selection-foreground'
-          : 'text-sidebar-foreground group-hover/row:text-sidebar-hover-foreground'
+        showSelectedState ? 'text-sidebar-selection-foreground' : 'text-sidebar-row-foreground'
       )}
     >
       {item.title}
@@ -894,11 +891,12 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
         !showSelectedState &&
           onSelect &&
           !isMobile &&
-          'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground data-[menu-open]:bg-sidebar-hover data-[menu-open]:text-sidebar-hover-foreground',
+          // Hover marks the row with its fill only; the title keeps its color.
+          'hover:bg-sidebar-hover data-[menu-open]:bg-sidebar-hover',
         showSelectedState &&
           'bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection',
         // Unselected titles sit below the reading column's brightness.
-        !showSelectedState && ['text-sidebar-row-foreground', SIDEBAR_ROW_REST_ICON_CLASS],
+        !showSelectedState && 'text-sidebar-row-foreground',
         // Keyboard-only focus ring — see SessionList: plain :focus-within also
         // matches after mouse clicks via the overlay <a> and left a permanent
         // inset ring on the selected row.

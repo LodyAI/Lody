@@ -204,7 +204,6 @@ import {
   buildSessionRowOpenedByTreeSlot,
   type SessionRowOpenedByTreeSlot,
   SIDEBAR_ROW_LIST_CLASS,
-  SIDEBAR_ROW_REST_ICON_CLASS,
 } from '@/components/sidebar-row-shared';
 import {
   buildOpenedBySessionTree,
@@ -706,7 +705,6 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
           'hover:bg-sidebar-hover data-[menu-open]:bg-sidebar-hover',
         showSelectedState &&
           'bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection',
-        !showSelectedState && SIDEBAR_ROW_REST_ICON_CLASS,
         showSelectedState ? 'text-sidebar-selection-foreground' : 'text-sidebar-row-foreground'
       )}
       onClick={(event) => {
@@ -1212,10 +1210,9 @@ export const LocalProjectItem = memo(function LocalProjectItem({
                     showSelectedState
                       ? 'text-sidebar-selection-foreground'
                       : cn(
-                          // Project folder names are content rather than section chrome,
-                          // but still recede behind the conversation in dark mode.
-                          'text-sidebar-foreground dark:text-sidebar-foreground/75',
-                          !isMobile && 'hover:text-sidebar-hover-foreground'
+                          // Project folder names share the sidebar row color, below the
+                          // conversation; hover does not change text color.
+                          'text-sidebar-row-foreground'
                         )
                   )}
                   onClick={handleNavigate}

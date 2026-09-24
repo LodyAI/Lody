@@ -772,12 +772,12 @@ const resolveInputFieldColor = (
  * strokes bloom and dense text (CJK especially) blurs, most for readers with
  * astigmatism. Vesper's #FFFFFF on #101010 is 19:1. Conversation prose is
  * capped at 13:1 in dark themes (still AAA; headings keep the full
- * foreground), unselected sidebar titles at 6.5:1 (above AA) so the sidebar
+ * foreground), unselected sidebar text at 5.5:1 (above AA) so the sidebar
  * always sits below the reading column and only the selected row stands out. Light themes are capped higher, where glare is milder.
  */
 const READING_CONTRAST_CAP = {
-  dark: { reading: 13, sidebarRow: 6.5 },
-  light: { reading: 16, sidebarRow: 9 },
+  dark: { reading: 13, sidebarRow: 5.5 },
+  light: { reading: 16, sidebarRow: 8 },
 } as const;
 
 /**

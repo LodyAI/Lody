@@ -677,9 +677,7 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
     <span
       className={cn(
         'min-w-0 flex-1 truncate font-normal',
-        showSelectedState
-          ? 'text-sidebar-selection-foreground'
-          : 'text-sidebar-foreground group-hover/row:text-sidebar-hover-foreground'
+        showSelectedState ? 'text-sidebar-selection-foreground' : 'text-sidebar-row-foreground'
       )}
     >
       {item.title}

@@ -94,7 +94,6 @@ import {
   SidebarListSkeleton,
   buildSessionRowOpenedByTreeSlot,
   SIDEBAR_ROW_LIST_CLASS,
-  SIDEBAR_ROW_REST_ICON_CLASS,
 } from '@/components/sidebar-row-shared';
 import { SessionInfoHoverCard } from '@/components/session-info-hover-card';
 import type { SessionSharingState } from '@/lib/session-sharing';
@@ -729,10 +728,10 @@ const SessionGroupRow = memo(function SessionGroupRow({
         !showSelectedState &&
           isSelectable &&
           !isMobile &&
-          'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground',
+          // Hover marks the row with its fill only; the title keeps its color.
+          'hover:bg-sidebar-hover',
         showSelectedState &&
           'bg-sidebar-selection text-sidebar-selection-foreground hover:bg-sidebar-selection',
-        !showSelectedState && SIDEBAR_ROW_REST_ICON_CLASS,
         // Keyboard-only focus ring. Plain :focus-within also matches
         // after a mouse click (the overlay <a> keeps focus), which
         // left a permanent inset ring on the selected row that read
@@ -1166,21 +1165,15 @@ const SessionGroupSection = memo(function SessionGroupSection({
     ? t('sessions.showLess', 'Show less')
     : t('sessions.showAll', 'Show all ({{count}})', { count: group.sessions.length });
   const resolvedTrailingContent = trailingContent ?? (group.collapsed ? null : dragHandle);
-  // Repo group labels (e.g. "loro-dev/loro") name concrete content, but dark-mode
-  // resting chrome should still recede behind the conversation. Hover and active
-  // states restore full contrast. "Chats" uses the full muted token (same as
-  // SidebarSectionHeader) — not an extra /55 fade on top of muted.
-  const headerBaseColorClass =
-    group.kind === 'repo'
-      ? 'text-sidebar-foreground dark:text-sidebar-foreground/75'
-      : 'text-sidebar-foreground-muted';
+  // Group labels (a repo such as "loro-dev/loro", or "Chats") share the sidebar
+  // row color: nothing in the sidebar outshines the conversation, and hover
+  // changes a row's fill, not its text color.
+  const headerBaseColorClass = 'text-sidebar-row-foreground';
   // Typography splits with color: repo headers read as content (regular weight,
   // full foreground; the leading repo icon marks them as a group), the "Chats"
   // header reads as section chrome (medium, muted) so section labels recede.
   const headerTypographyClass =
     group.kind === 'repo' ? 'text-[0.9em] font-normal' : 'text-[0.9em] font-medium';
-  const headerToggleHoverClass =
-    group.kind === 'repo' ? 'hover:text-sidebar-hover-foreground' : 'hover:text-sidebar-foreground';
 
   return (
     <div className={cn('flex flex-col gap-0.5', getSidebarGroupSpacingClass(group.collapsed))}>
@@ -1202,14 +1195,10 @@ const SessionGroupSection = memo(function SessionGroupSection({
                 ? cn(
                     'cursor-pointer bg-transparent',
                     headerBaseColorClass,
-                    !isMobile && 'hover:bg-sidebar-hover hover:text-sidebar-hover-foreground'
+                    !isMobile && 'hover:bg-sidebar-hover'
                   )
                 : canToggle
-                  ? cn(
-                      'cursor-pointer bg-transparent',
-                      headerBaseColorClass,
-                      !isMobile && headerToggleHoverClass
-                    )
+                  ? cn('cursor-pointer bg-transparent', headerBaseColorClass)
                   : cn('cursor-default bg-transparent', headerBaseColorClass)
           )}
           onClick={canNavigate ? handleNavigate : handleToggleGroup}

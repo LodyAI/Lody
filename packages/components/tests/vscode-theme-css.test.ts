@@ -258,8 +258,9 @@ describe('createLodyThemeCssVariables', () => {
       variables['--sidebar-row-foreground']!,
       variables['--sidebar-background']!
     );
-    expect(sidebarRow).toBeLessThanOrEqual(6.5);
-    expect(sidebarRow).toBeGreaterThan(6);
+    expect(sidebarRow).toBeLessThanOrEqual(5.5);
+    // Still above WCAG AA for normal text.
+    expect(sidebarRow).toBeGreaterThan(5);
     // The sidebar never outshines the reading column.
     expect(sidebarRow).toBeLessThan(reading);
   });

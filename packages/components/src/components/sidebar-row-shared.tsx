@@ -358,14 +358,6 @@ export function SessionRowOpenedByMenuItems({
 export const SIDEBAR_ROW_LIST_CLASS = 'flex flex-col gap-px sidebar-row-list';
 
 /**
- * An unselected session row's icons (PR, worktree, status marks) sit below the
- * reading column's brightness and recover on hover. Avatars keep full opacity:
- * a faded face reads as a disabled account. Only the selected row is shown at
- * full strength.
- */
-export const SIDEBAR_ROW_REST_ICON_CLASS = '[&_svg]:opacity-55 hover:[&_svg]:opacity-100';
-
-/**
  * Marks one flat-list row with opened-by tree depth. `gutter={false}` leaves
  * a list with no nesting untouched. Connectors live in the leading slot.
  */
@@ -540,13 +532,13 @@ export function GitHubOwnerIcon({
 
 // Shared section-header metrics. Every sidebar organize mode (Workspace local
 // project / GitHub Worktrees sections and the flat Updated list) uses these so
-// section labels read identically (0.9em medium, muted — full muted token, not a
-// further /55 fade: that made "Pinned"/"Chats" and the filter icon nearly
-// illegible on light sidebars).
+// section labels read identically (0.9em medium, in the sidebar row color — not
+// brighter than the session titles under them, and not a further /55 fade: that
+// made "Pinned"/"Chats" and the filter icon nearly illegible on light sidebars).
 const SECTION_HEADER_BUTTON_CLASS = cn(
   'relative flex h-7 min-w-0 flex-1 select-none items-center gap-1.5 rounded-md px-2 text-left',
   'border border-transparent bg-transparent',
-  'text-[0.9em] font-medium text-sidebar-foreground-muted transition-colors',
+  'text-[0.9em] font-medium text-sidebar-row-foreground transition-colors',
   // The outer row paints the focus ring; suppress the global :focus-visible
   // box-shadow here so the ring wraps the whole row (label + action).
   'focus-visible:shadow-none'

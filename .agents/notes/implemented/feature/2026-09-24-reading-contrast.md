@@ -12,7 +12,7 @@ Vesper every prose line, heading, user bubble and sidebar title was #FFFFFF on #
 (19.7:1), so strokes halated, dense CJK text blurred and nothing marked the reading column
 as the brightest area. The theme layer now derives a contrast-capped reading color (13:1 in
 dark themes, still above WCAG AAA) for prose and user bubbles, keeps the full foreground for
-headings and bold, and caps unselected sidebar titles at 6.5:1 with dimmed row icons, so
+headings and bold, and caps all unselected sidebar text at 5.5:1, so
 only the selected row outshines the prose. Themes already below the caps and high-contrast
 themes are unchanged; a warm tint was not applied.
 
@@ -20,13 +20,15 @@ themes are unchanged; a warm tint was not applied.
 
 - `vscode-theme-css.ts` derives `--reading-foreground` and `--sidebar-row-foreground` by
   moving the foreground toward its background until the contrast meets the cap (dark 13:1
-  and 6.5:1, light 16:1 and 9:1). Unthemed builds fall back to the plain foregrounds.
+  and 5.5:1, light 16:1 and 8:1). Unthemed builds fall back to the plain foregrounds.
 - Markdown body text and user bubbles use `text-reading`; headings and `strong` keep
   `text-foreground`, so hierarchy reads by brightness.
 - Inline code: 7% fill instead of 14%, text in the reading color, so chips no longer read
   as bright patches in a sentence.
-- Unselected session rows use the row color and `SIDEBAR_ROW_REST_ICON_CLASS` (icons 55%, full
-  on hover; avatars keep full opacity, since a faded face reads as a disabled account); the selected row is unchanged.
+- Unselected session titles, group and project labels, section headers and the New chat /
+  Search items all use the sidebar row color; the selected row is unchanged. Hover changes a
+  row's fill only, not its text color. Row icons and avatars keep full opacity: dimming them
+  was tried and read as disabled or broken.
 - List items are 0.5rem apart, more than wrapped lines of one item; the outline rail rests
   at /32 instead of /45 and lifts while the pointer is on it.
 
@@ -41,8 +43,8 @@ themes are unchanged; a warm tint was not applied.
 ## Verification and limits
 
 - `tests/vscode-theme-css.test.ts`: Vesper's reading color is at most 13:1 (foreground
-  still 19.7:1), sidebar rows at most 6.5:1 and below the reading color; a soft theme and a
+  still 19.7:1), sidebar text at most 5.5:1 (above AA) and below the reading color; a soft theme and a
   high-contrast theme get no derived color. Components suite passes.
-- Local production build with Vesper: prose #D5D5D5, unselected sidebar titles #9A9A9A,
+- Local production build with Vesper: prose #D5D5D5, all unselected sidebar text #8D8D8D, unchanged on hover,
   selected row unchanged. Other bundled themes were not inspected one by one.
 - File names in tool cards and other non-prose chrome still use the full foreground.
