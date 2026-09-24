@@ -579,6 +579,8 @@ const SURFACES = [
   { name: 'raisedBackground', value: colors.raisedBackground, note: 'secondary button, menu' },
   { name: 'secondaryBackground', value: colors.secondaryBackground, note: 'sidebar, footer band' },
   { name: 'wellBackground', value: colors.wellBackground, note: 'input, track, switch off' },
+  { name: 'trayBackground', value: colors.trayBackground, note: 'a segmented strip' },
+  { name: 'trayRaised', value: colors.trayRaised, note: 'the key on that strip' },
 ];
 
 const CONTENT_COLORS = [
@@ -811,12 +813,12 @@ const STRIP_COLORS = [
   {
     name: 'disclosure.trackBackground',
     value: disclosureTokens.trackBackground,
-    note: 'the well the strip sits in',
+    note: 'the flat tray the strip is',
   },
   {
     name: 'disclosure.indicator',
     value: disclosureTokens.indicator,
-    note: 'the one tab raised out of it',
+    note: 'the one tab standing on it',
   },
   { name: 'disclosure.tabLabel', value: disclosureTokens.tabLabel, note: 'a tab you are not on' },
   {
@@ -3535,8 +3537,8 @@ function ToggleDisabledRow() {
  * The same three choices as a strip and as a set, which is the comparison this
  * section exists to make.
  *
- * A `Tabs` strip picks what a person *sees*: one control, so a sunken track
- * with one thing raised out of it and a pill that slides. A `ToggleGroup`
+ * A `Tabs` strip picks what a person *sees*: one control, so a tray with one
+ * thing standing on it and a pill that slides. A `ToggleGroup`
  * stores what is *on*: no track, and each member sinking on its own — because
  * two of them can be pressed at once, and a sliding pill cannot say that.
  */
@@ -4496,7 +4498,7 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
       </Section>
       <Section
         title="Tabs · the choices side by side"
-        rule="A tab strip is the elevation ladder read twice over: a well-rung track with one thing raised out of it, which is the same pair a Switch takes and says the same thing — the track is where something sits, and the thing sitting in it is the one you can press. The pill is one element that slides rather than a fill on each tab, because the strip is one control. A tab carries no fill in any state; what changes when you take one is its colour, and the pill arriving under it. The size is stated once on the strip: the tabs take the track less its inset, and their corner is the track's less the same inset. Arrow keys move without taking, because a tab swaps a panel that may be expensive to build."
+        rule="A tab strip is a flat tray with one key standing on it. The tray is not a field's well: a tab picks what is shown rather than what is stored, so the strip has no rim and no inner shadow — only a tint a step off whatever it sits on — and the pill is the one thing raised, lighter than the tray in both palettes. The pill is one element that slides rather than a fill on each tab, because the strip is one control. A tab carries no fill in any state; what changes when you take one is its colour, and the pill arriving under it. The size is stated once on the strip: the tabs take the track less a 2px inset, so a 32px strip holds a 28px pill, and their corner is the track's less the same inset. Arrow keys move without taking, because a tab swaps a panel that may be expensive to build."
       >
         <PaletteSplit palettes={palettes}>
           <Rows>
@@ -4512,13 +4514,6 @@ export function UiGallery({ palettes = 'both' }: UiGalleryProps) {
             {STRIP_COLORS.map((token) => (
               <Swatch key={token.name} {...token} />
             ))}
-            <ShadowChip
-              name="disclosure.trackWell"
-              box={disclosureTokens.trackWell}
-              fill={disclosureTokens.trackBackground}
-              ink={false}
-              note="the track, sunken"
-            />
             <ShadowChip
               name="disclosure.indicatorShadow"
               box={disclosureTokens.indicatorShadow}

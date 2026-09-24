@@ -54,7 +54,7 @@ export const disclosureSurface = stylex.create({
     gap: disclosure.panelGap,
     minWidth: 0,
   },
-  /** The track: the well rung, holding the one thing raised out of it. */
+  /** The track: a flat tray, holding the one thing raised out of it. */
   track: {
     position: 'relative',
     display: 'inline-flex',
@@ -62,7 +62,6 @@ export const disclosureSurface = stylex.create({
     boxSizing: 'border-box',
     padding: disclosure.trackInset,
     backgroundColor: disclosure.trackBackground,
-    boxShadow: disclosure.trackWell,
     cornerShape: corner.shape,
   },
   /**

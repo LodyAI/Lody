@@ -211,5 +211,27 @@ StyleX，直接读 `@lody/ui` 自己的 token。这样只有一个事实来源�
   外框要像面板一样加 padding。弹出列表行的高亮不加过渡：它跟随指针和方向键，
   淡入淡出会让它落在后面。
 
+## Tabs 是托盘而不是凹槽；Billing 并入设置卡片
+
+owner 觉得 tab 条很过时，和其他部分"不在一个世纪"。tab 条借用了输入框的凹槽材质：
+在 Lody Light 里画出来是一个带边框的盒子里再套一个描边的盒子，像老式按钮组；在
+Vesper 里则是一道黑槽里放一块扁平的灰块。tab 选择的是显示什么，而不是存储什么，
+所以 tab 条不再用凹槽：
+
+- 轨道是扁平的托盘，没有边框也没有内阴影：新增调色板 token `trayBackground`
+  （墨色 6% / 亮色 6%）和 `trayRaised`（白 / 21%）。Vesper 里选中块有自己的值，
+  因为 raised 档（13.7%）和浅色托盘几乎同高。
+- 内边距从 4px 改为 2px，选中块几乎填满托盘：32px 的条里是 28px、`radius.small`
+  的选中块。
+- 存值的控件仍用凹槽。两个手写的二选一条（分享图片对话框、排队消息设置）也改为
+  读取托盘 token。
+
+Billing（`billing-setting-pure.tsx`）之前还是 Tailwind。它的卡片用了自带 padding
+的 `Card`，内容又再加一层 padding；升级和账单历史卡片还画了带底线的着色标题条。
+于是标题、正文和相邻卡片的起始缩进各不相同。现在改为 StyleX 的 `CompactSection`：
+每一行统一 16px 缩进，分组名在卡片上方，发票是带分隔线的行，兑换码和付款方式是
+`CompactRow`，付费周期切换是 `Tabs` 条，它的面板就是价格。创建工作区页面仍有自己
+手写的周期切换。
+
 相关：[token gallery](2026-09-09-ui-token-gallery.md)、
 [调用点迁移](2026-09-22-ui-radix-callsite-migration.md)。

@@ -258,5 +258,31 @@ copies kept in step by hand.
   A popup row's highlight has no transition. It follows the pointer and the
   arrow keys, and a fade left it lagging behind them.
 
+## Tabs are a tray, not a well; billing joins the settings cards
+
+The owner found the tab strip dated, "from a different century" next to
+everything else. The strip had borrowed the fields' recess. In Lody Light that
+drew a rimmed box with a second, outlined box inside it, like an old button
+group. In Vesper it drew a black slot holding a flat gray block. A tab picks what
+is shown, not what is stored, so the strip leaves the well:
+
+- The track is a flat tray with no rim and no inner shadow: new palette tokens
+  `trayBackground` (ink 6% / light 6%) and `trayRaised` (white / 21%). In Vesper
+  the key has its own value because the raised rung (13.7%) sits level with a
+  light tray.
+- The inset is 2px rather than 4px, so the pill nearly fills the tray: a 32px
+  strip holds a 28px pill at `radius.small`.
+- Value holders keep the well. The two hand-built two-way strips (the
+  share-image dialog, the queued-message setting) read the tray tokens too.
+
+Billing (`billing-setting-pure.tsx`) was still Tailwind. Its cards used the
+padded `Card` and then padded their contents again, and the offer and history
+cards drew a tinted header band with a rule under it. So the heading, the body
+and the neighbouring cards each started at a different inset. It is now
+`CompactSection`s in StyleX: one 16px inset on every line, group names above
+their cards, invoices as ruled rows, the redeem and payment rows as
+`CompactRow`s, and the interval switch a `Tabs` strip whose panel is the price.
+The workspace-creation page still has its own hand-built interval switch.
+
 Related: [token gallery](2026-09-09-ui-token-gallery.md),
 [call-site migration](2026-09-22-ui-radix-callsite-migration.md).

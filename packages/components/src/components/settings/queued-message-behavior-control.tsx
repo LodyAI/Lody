@@ -16,8 +16,8 @@ import { withClassName } from '@/lib/stylex';
 const RING = `0 0 0 2px ${colors.accent}`;
 
 /**
- * A two-way choice is a segmented strip: the track is the well, the choice that
- * holds is the one thing raised out of it.
+ * A two-way choice is a segmented strip, as `@lody/ui`'s Tabs draw one: a flat
+ * tray, and the choice that holds is the one thing standing on it.
  */
 const styles = stylex.create({
   track: {
@@ -26,8 +26,7 @@ const styles = stylex.create({
     gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
     height: control.small,
     padding: '2px',
-    backgroundColor: colors.wellBackground,
-    boxShadow: shadow.inset,
+    backgroundColor: colors.trayBackground,
     borderRadius: radius.small,
     cornerShape: corner.shape,
   },
@@ -54,7 +53,7 @@ const styles = stylex.create({
     transitionTimingFunction: ease.standard,
   },
   optionSelected: {
-    backgroundColor: colors.raisedBackground,
+    backgroundColor: colors.trayRaised,
     backgroundImage: sheen.raised,
     boxShadow: { default: shadow.raised, ':focus-visible': `${shadow.raised}, ${RING}` },
     color: { default: colors.label, ':hover': colors.label },

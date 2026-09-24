@@ -21,19 +21,20 @@ import { radius, space, text } from '../tokens/scales.stylex';
  * shared component vocabulary.
  */
 export const disclosure = stylex.defineVars({
-  // A tab strip is a track with one thing raised out of it, which is the ladder
-  // read twice over: the track is the well rung, and the indicator under the
-  // selected tab is the same raised pair a secondary Button takes — because the
-  // selected tab is the one that reads as a thing you can press.
-  trackBackground: colors.wellBackground,
-  trackWell: shadow.inset,
-  // The inset the popup surface also takes, and for the same reason: the row
-  // inside is the track less this on both sides, and its radius is the track's
-  // less this. Nested radius is outer minus inset.
-  trackInset: space[1],
+  // A tab strip is a flat tray with one key standing on it. The tray is not the
+  // well: a strip picks what is shown, not what is stored, so it is no recess —
+  // no rim, no inner shadow, just a tint a step off whatever it sits on (ink in
+  // Lody Light, light in Vesper). The pill is the one raised thing, and it is
+  // lighter than the tray in both palettes; in Vesper the plain raised rung
+  // would sit level with a light tray, so the palette names its own key.
+  trackBackground: colors.trayBackground,
+  // The pill fills the tray but for a hairline of tray around it, so a 32px
+  // strip holds a 28px pill: the small control height, at `radius.small` —
+  // nested radius is outer minus inset.
+  trackInset: '2px',
   trackRadiusSmall: radius.small,
   trackRadiusMedium: radius.medium,
-  indicator: colors.raisedBackground,
+  indicator: colors.trayRaised,
   indicatorShadow: shadow.raised,
   indicatorSheen: sheen.raised,
   tabPaddingX: space[3],
@@ -75,9 +76,8 @@ export const disclosure = stylex.defineVars({
  * root keeps the root palette inside a themed subtree.
  */
 export const disclosurePaletteTheme = stylex.createTheme(disclosure, {
-  trackBackground: colors.wellBackground,
-  trackWell: shadow.inset,
-  indicator: colors.raisedBackground,
+  trackBackground: colors.trayBackground,
+  indicator: colors.trayRaised,
   indicatorShadow: shadow.raised,
   indicatorSheen: sheen.raised,
   tabLabel: colors.secondaryLabel,

@@ -40,7 +40,7 @@ const RING = `0 0 0 2px ${colors.accent}`;
 const HOVER_RING = `0 0 0 2px color-mix(in oklab, transparent, ${colors.accent} 40%)`;
 const REGION = `color-mix(in oklab, transparent, ${colors.label} 3%)`;
 /** A segment's corner: the track's, less the inset it keeps from it. */
-const SEGMENT_RADIUS = `calc(${radius.medium} - ${space[1]})`;
+const SEGMENT_RADIUS = `calc(${radius.medium} - 2px)`;
 
 const styles = stylex.create({
   // The preview scrolls in its own column: a card taller than the surface is
@@ -64,16 +64,16 @@ const styles = stylex.create({
   exportFrame: { width: 'fit-content' },
   agentIcon: { width: '20px', height: '20px' },
 
-  // A two-way choice is a strip: a sunken track with the chosen one raised out of it.
+  // A two-way choice is a strip, as `@lody/ui`'s Tabs draw one: a flat tray with
+  // the chosen one standing on it.
   track: {
     display: 'inline-grid',
     gridTemplateColumns: '1fr 1fr',
     flexShrink: 0,
     boxSizing: 'border-box',
     height: control.medium,
-    padding: space[1],
-    backgroundColor: colors.wellBackground,
-    boxShadow: shadow.inset,
+    padding: '2px',
+    backgroundColor: colors.trayBackground,
     borderRadius: radius.medium,
     cornerShape: corner.shape,
   },
@@ -106,7 +106,7 @@ const styles = stylex.create({
   },
   segmentWide: { minWidth: '64px' },
   segmentSelected: {
-    backgroundColor: colors.raisedBackground,
+    backgroundColor: colors.trayRaised,
     backgroundImage: sheen.raised,
     color: colors.label,
     boxShadow: { default: shadow.raised, ':focus-visible': `${shadow.raised}, ${RING}` },

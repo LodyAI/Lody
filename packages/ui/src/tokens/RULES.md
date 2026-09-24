@@ -49,7 +49,7 @@ One rung per component. The rung fixes background and shadow together.
 
 **Everything that holds a value is one recessed material.** Input, textarea,
 Select and Combobox triggers, a number, a password, and the tracks a checkbox,
-radio, switch or tab strip sits in all take the well: `wellBackground` under
+radio or switch sits in all take the well: `wellBackground` under
 `shadow.inset`. In a system where cards lift and buttons stand up, the fields
 are material too, and they are all the same material — a column that mixes a
 recess with a raised or a flat field reads as two kinds of thing. The recess is
@@ -297,23 +297,29 @@ cannot become two decisions.
 
 None of the three holds a value. A tab picks what is shown rather than what is
 stored, so it takes no name, answers to no `Field.Root` and has no invalid
-state; it borrows the well the controls sit in because the ladder puts it there,
-not because it is one of them.
+state — and it takes no well either. A strip borrowing the field's recess read
+as a box with a second box in it: a rimmed slot in Lody Light, a black one in
+Vesper.
 
 ### The strip
 
-| part      | what it is                                                                       |
-| --------- | -------------------------------------------------------------------------------- |
-| track     | `disclosure.trackBackground` under `disclosure.trackWell`, inset by `trackInset` |
-| indicator | the one thing raised out of it: `disclosure.indicator` under `indicatorShadow`   |
-| tab       | the track's height less the inset on both sides, at the control type rule        |
-| panel     | what the strip swaps, `disclosure.panelGap` under it                             |
+| part      | what it is                                                                   |
+| --------- | ---------------------------------------------------------------------------- |
+| track     | a flat tray: `disclosure.trackBackground`, no shadow, inset by `trackInset`  |
+| indicator | the one thing standing on it: `disclosure.indicator` under `indicatorShadow` |
+| tab       | the track's height less the inset on both sides, at the control type rule    |
+| panel     | what the strip swaps, `disclosure.panelGap` under it                         |
 
-The strip is the ladder read twice over — a well with one raised thing in it,
-the same pair a Switch takes — and it says the same thing: the track is where
-something sits, and the thing sitting in it is the one you can press. Nested
-radius applies: a 28px track at `radius.small` holds a 4px tab, a 32 or 36px one
-at `radius.medium` holds a 6px tab, and neither is a token of its own.
+The strip is a tray with one key standing on it. The tray is `trayBackground`, a
+tint a step off whatever it sits on — ink at 6% in Lody Light, light at 6% in
+Vesper — with no rim and no inner shadow, so it reads as one control rather than
+as a box. The pill is `trayRaised`, the one raised thing, lighter than the tray
+in both palettes: white in Lody Light, 21% in Vesper, where the plain raised rung
+would sit level with a light tray. Any two-way strip a product builds itself
+reads these two tokens too. The inset is 2px, so the pill
+nearly fills the tray: a 32px strip holds a 28px pill, the small control height.
+Nested radius applies: a 28px track at `radius.small` holds a 6px tab, a 32 or
+36px one at `radius.medium` holds an 8px tab, and neither is a token of its own.
 
 The indicator is one element that moves rather than a fill on each tab, because
 the strip is one control and a pill sliding across it says so. It is drawn by
@@ -392,7 +398,7 @@ because both read the same scale, not because one reads the other's group.
 
 A `ToggleGroup` is **not** a `Tabs` strip, and the two cannot be folded
 together. A strip picks what a person _sees_: it is one control, so it is a
-sunken track with one thing raised out of it and one pill sliding between the
+tray with one thing standing on it and one pill sliding between the
 choices. A set stores what is _on_: two of its members can be pressed at once,
 which no sliding pill can say, so it has no track and each member sinks on its
 own. Asked for one choice out of several it still draws no track, because the
