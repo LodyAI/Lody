@@ -330,5 +330,24 @@ Also: conversation steps are as wide as their words and brighten their file
 name on hover; the MCP transport is a segmented strip rather than two radio
 rows (radios stay where each option carries a sentence).
 
+## A project is a window
+
+The owner found the stacked Projects page thought-through only at the list:
+what opens under a project was one long scroll — header, share, two 8-row
+script editors, skills, conversation sync, delete — and the sync list, which
+can hold thousands of conversations, rendered every one inside a card with no
+search and only "select all". The editor is now a 960×680 project window: a
+rail with the project's identity (name, machine and state) and its pages —
+General, Worktree, Skills, Conversations (showing the conflict count, or how
+many wait to import) — beside the page. General holds the folder (copy /
+reveal), the machine, sharing and the danger zone. Conversations is built for
+scale: the agent strip with "last synced" and Sync beside it; search and a
+state filter (All · To import · Imported · Conflicts, with counts); "Select all
+N shown" acting on what the filter shows; "Import N"; and a windowed list
+(`virtua`), so five thousand rows scroll like five. Mobile keeps its own
+sheets and the shared import panel.
+A conversation step's file name is now a link: the row is `select-none`, and
+only the name brightens and underlines under the pointer.
+
 Related: [token gallery](2026-09-09-ui-token-gallery.md),
 [call-site migration](2026-09-22-ui-radix-callsite-migration.md).

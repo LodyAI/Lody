@@ -12,7 +12,6 @@ import {
   AlertCircle,
   BrushCleaning,
   ChevronRight,
-  Copy,
   Download,
   Ellipsis,
   ExternalLink,
@@ -22,6 +21,7 @@ import {
   Info,
   Plus,
   RefreshCw,
+  Search,
   TerminalSquare,
   Wrench,
 } from 'lucide-react';
@@ -73,6 +73,8 @@ import { Switch } from '@lody/ui/switch';
 import { Tabs } from '@lody/ui/tabs';
 import { Badge } from '@lody/ui/badge';
 import { Textarea } from '@lody/ui/textarea';
+import { Input } from '@lody/ui/input';
+import { VList } from 'virtua';
 
 import { AlertDialog } from '@/ui/dialog';
 import { Tooltip } from '@lody/ui/tooltip';
@@ -231,9 +233,11 @@ const MONO = 'var(--font-mono, ui-monospace, monospace)';
 
 /* The project editor is a wider panel than a dialog's default column, and its
    body scrolls edge to edge, so the panel drops its own padding and gap. */
+/** A project is a window of its own: a rail of pages beside the page. */
 const EDITOR_PANEL_STYLE: CSSProperties = {
-  width: 'min(640px, 96vw)',
-  maxHeight: 'min(88dvh, 820px)',
+  width: 'min(960px, 96vw)',
+  height: 'min(680px, 88dvh)',
+  maxWidth: 'none',
   padding: 0,
   gap: 0,
   overflow: 'hidden',
@@ -1418,11 +1422,13 @@ function ProjectSettingsDesktop({
               'Local folders and GitHub repositories available in this workspace.'
             )}
           </Dialog.Description>
-          <div {...withClassName(stylex.props(styles.editorBody), SCROLLBAR_CLASS)}>
-            {editingProject ? (
-              <ProjectDetailPane selection={editingProject} {...detailHandlers} />
-            ) : null}
-          </div>
+          {editingProject ? (
+            <ProjectWindow
+              key={editingProject.key}
+              selection={editingProject}
+              {...detailHandlers}
+            />
+          ) : null}
         </Dialog.Content>
       </Dialog.Root>
     </>
@@ -1574,7 +1580,7 @@ function ProjectAddMenu({
   );
 }
 
-function ProjectDetailPane({
+function ProjectWindow({
   selection,
   onSharedWithTeamChange,
   onSyncHistory,
@@ -1609,37 +1615,903 @@ function ProjectDetailPane({
     localMachineId?: MachineId | null;
     onlineMachineIds?: ReadonlySet<MachineId>;
   }) {
-  if (selection.kind === 'github') {
+  const { t } = useTranslation();
+  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
+  const isLocal = selection.kind === 'local';
+  const localRow = selection.kind === 'local' ? selection.row : null;
+  const githubRow = selection.kind === 'github' ? selection.row : null;
+  const [page, setPage] = useState<ProjectWindowPage>('general');
+
+  const machineReachable = localRow
+    ? (localMachineId != null && localRow.machineId === localMachineId) ||
+      Boolean(onlineMachineIds?.has(localRow.machineId))
+    : true;
+  const removalState = localRow ? (localProjectRemovalStateByKey?.get(localRow.key) ?? null) : null;
+  const skillsSource: ProjectSkillsSource | null = workspaceId
+    ? localRow
+      ? {
+          kind: 'local',
+          workspaceId,
+          machineId: localRow.machineId,
+          localProjectId: localRow.project.id,
+        }
+      : githubRow
+        ? { kind: 'github', workspaceId, repoFullName: githubRow.repoFullName }
+        : null
+    : null;
+
+  const historyCounts = useMemo(() => {
+    const sessions = (localRow?.historyImports ?? []).flatMap(
+      (state) => state.catalog?.sessions ?? []
+    );
+    return {
+      available: sessions.filter((session) => historyStatusOf(session) === 'available').length,
+      conflicts: sessions.filter((session) => historyStatusOf(session) === 'sync_conflict').length,
+    };
+  }, [localRow?.historyImports]);
+
+  const pages: { id: ProjectWindowPage; label: string; meta?: string; warn?: boolean }[] = [
+    { id: 'general', label: t('workspace.projects.window.general', 'General') },
+    { id: 'worktree', label: t('workspace.projects.window.worktree', 'Worktree') },
+    { id: 'skills', label: t('workspace.projects.window.skills', 'Skills') },
+    ...(isLocal
+      ? [
+          {
+            id: 'conversations' as const,
+            label: t('workspace.projects.window.conversations', 'Conversations'),
+            meta:
+              historyCounts.conflicts > 0
+                ? String(historyCounts.conflicts)
+                : historyCounts.available > 0
+                  ? String(historyCounts.available)
+                  : undefined,
+            warn: historyCounts.conflicts > 0,
+          },
+        ]
+      : []),
+  ];
+
+  const offlineNote =
+    localRow && !machineReachable ? (
+      <p {...stylex.props(win.note)}>
+        {t(
+          'workspace.projects.selectedMachineOffline',
+          '{{name}} is offline. Worktree setup and skills will load when it comes online.',
+          { name: localRow.machineName }
+        )}
+      </p>
+    ) : null;
+
+  const pageTitle = pages.find((entry) => entry.id === page)?.label ?? '';
+  const pageDescription =
+    page === 'general'
+      ? t(
+          'workspace.projects.window.generalDescription',
+          'Where this project lives and who can use it.'
+        )
+      : page === 'worktree'
+        ? t(
+            'workspace.projects.window.worktreeDescription',
+            'Scripts that run when a conversation gets its own worktree, and when it is archived.'
+          )
+        : page === 'skills'
+          ? t(
+              'workspace.projects.window.skillsDescription',
+              'Skills the agent finds in this project.'
+            )
+          : t(
+              'workspace.projects.window.conversationsDescription',
+              'Bring conversations you had with an agent outside Lody into this workspace.'
+            );
+
+  return (
+    <Tooltip.Provider delay={200}>
+      <div {...stylex.props(win.window)}>
+        <nav {...stylex.props(win.rail)} aria-label={t('settings.tabs.projects', 'Projects')}>
+          <div {...stylex.props(win.identity)}>
+            <p
+              {...stylex.props(win.identityName)}
+              title={localRow?.project.name ?? githubRow?.name}
+            >
+              {localRow?.project.name ?? githubRow?.name}
+            </p>
+            <p {...stylex.props(win.identityMeta)}>
+              {localRow
+                ? [
+                    localRow.machineName,
+                    machineReachable
+                      ? t('workspace.machines.online', 'Online')
+                      : t('workspace.machines.offline', 'Offline'),
+                  ].join(' · ')
+                : [
+                    t('chat.contextSwitch.github', 'GitHub'),
+                    githubRow?.private
+                      ? t('workspace.projects.privateRepo', 'Private')
+                      : t('workspace.projects.window.public', 'Public'),
+                  ].join(' · ')}
+            </p>
+          </div>
+          <div {...stylex.props(win.nav)}>
+            {pages.map((entry) => (
+              <button
+                key={entry.id}
+                type="button"
+                aria-current={page === entry.id ? 'page' : undefined}
+                onClick={() => setPage(entry.id)}
+                {...stylex.props(surface.listRow, page === entry.id && surface.listRowSelected)}
+              >
+                <span {...stylex.props(surface.listRowLabel)}>{entry.label}</span>
+                {entry.meta ? (
+                  <span {...stylex.props(surface.listRowMeta, entry.warn && win.navWarn)}>
+                    {entry.meta}
+                  </span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        </nav>
+
+        <section {...stylex.props(win.main)}>
+          <header {...stylex.props(win.pageHeader)}>
+            <h2 {...stylex.props(win.pageTitle)}>{pageTitle}</h2>
+            <p {...stylex.props(win.pageDescription)}>{pageDescription}</p>
+          </header>
+
+          {page === 'conversations' && localRow ? (
+            <ConversationsPage
+              row={localRow}
+              onSyncHistory={onSyncHistory}
+              onImportHistory={onImportHistory}
+              onResolveHistoryConflict={onResolveHistoryConflict}
+              onHistorySelectionChange={onHistorySelectionChange}
+            />
+          ) : (
+            <div {...withClassName(stylex.props(win.pageBody), SCROLLBAR_CLASS)}>
+              {page === 'general' && localRow ? (
+                <>
+                  {offlineNote}
+                  <CompactSection>
+                    <CompactRow
+                      label={t('workspace.projects.window.folder', 'Folder')}
+                      helper={<span {...stylex.props(win.mono)}>{localRow.project.rootPath}</span>}
+                    >
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="small"
+                        onClick={() => copyProjectPath(localRow.project.rootPath, t)}
+                      >
+                        {t('sessions.copyPath', 'Copy path')}
+                      </Button>
+                      {getIpcServices() ? (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="small"
+                          onClick={() => revealProjectPath(localRow.project.rootPath, t)}
+                        >
+                          {t('sidebar.localProjects.reveal', 'Reveal in file manager')}
+                        </Button>
+                      ) : null}
+                    </CompactRow>
+                    <CompactRow
+                      label={t('workspace.projects.window.machine', 'Machine')}
+                      helper={
+                        removalState === 'waiting_for_device'
+                          ? t(
+                              'sidebar.localProjects.remove.waitingForDevice',
+                              'Waiting for device…'
+                            )
+                          : removalState === 'removing'
+                            ? t('sidebar.localProjects.remove.removing', 'Removing…')
+                            : undefined
+                      }
+                    >
+                      <span {...stylex.props(win.value)}>
+                        {localRow.machineName} ·{' '}
+                        {machineReachable
+                          ? t('workspace.machines.online', 'Online')
+                          : t('workspace.machines.offline', 'Offline')}
+                      </span>
+                    </CompactRow>
+                  </CompactSection>
+                  <ProjectShareControl
+                    row={localRow}
+                    onSharedWithTeamChange={onSharedWithTeamChange}
+                  />
+                  {canRemoveLocalProject?.(localRow) && onRequestRemoveLocalProject ? (
+                    <CompactSection tone="danger">
+                      <CompactRow
+                        label={t('workspace.projects.delete', 'Delete project')}
+                        helper={t(
+                          'sidebar.localProjects.remove.originalDirectorySafe',
+                          'Lody never deletes the original project folder or its files.'
+                        )}
+                      >
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="small"
+                          disabled={removalState != null}
+                          onClick={() => onRequestRemoveLocalProject(localRow)}
+                        >
+                          {t('workspace.projects.delete', 'Delete project')}
+                        </Button>
+                      </CompactRow>
+                    </CompactSection>
+                  ) : null}
+                </>
+              ) : null}
+
+              {page === 'general' && githubRow ? (
+                <CompactSection>
+                  <CompactRow
+                    label={t('workspace.projects.window.repository', 'Repository')}
+                    helper={<span {...stylex.props(win.mono)}>{githubRow.repoFullName}</span>}
+                  >
+                    {onOpenGitHubSettings ? (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="small"
+                        onClick={onOpenGitHubSettings}
+                      >
+                        {t(
+                          'workspace.projects.manageInGithubSettings',
+                          'Manage in GitHub settings'
+                        )}
+                      </Button>
+                    ) : null}
+                  </CompactRow>
+                  <CompactRow label={t('workspace.projects.window.visibility', 'Visibility')}>
+                    <span {...stylex.props(win.value)}>
+                      {githubRow.private
+                        ? t('workspace.projects.privateRepo', 'Private')
+                        : t('workspace.projects.window.public', 'Public')}
+                    </span>
+                  </CompactRow>
+                </CompactSection>
+              ) : null}
+
+              {page === 'worktree' ? (
+                <>
+                  {offlineNote}
+                  <CompactSection>
+                    <div {...stylex.props(styles.cardLine)}>
+                      {localRow ? (
+                        <WorktreeSetupEditor
+                          phase="setup"
+                          config={localRow.worktreeSetup}
+                          shell={localRow.shell}
+                          isLoading={machineReachable && localRow.isWorktreeSetupLoading}
+                          isSaving={localRow.isWorktreeSetupSaving}
+                          errorMessage={
+                            machineReachable &&
+                            !isUnreachableMachineError(localRow.worktreeSetupError)
+                              ? localRow.worktreeSetupError
+                              : null
+                          }
+                          onSave={
+                            machineReachable
+                              ? (config) => onWorktreeSetupChange?.(localRow, config)
+                              : undefined
+                          }
+                        />
+                      ) : githubRow ? (
+                        <WorktreeSetupEditor
+                          phase="setup"
+                          config={githubRow.worktreeSetup}
+                          isSaving={githubRow.isWorktreeSetupSaving}
+                          errorMessage={githubRow.worktreeSetupError}
+                          onSave={(config) => onGithubWorktreeSetupChange?.(githubRow, config)}
+                        />
+                      ) : null}
+                    </div>
+                  </CompactSection>
+                  <CompactSection>
+                    <div {...stylex.props(styles.cardLine)}>
+                      {localRow ? (
+                        <WorktreeSetupEditor
+                          phase="cleanup"
+                          config={localRow.worktreeCleanup}
+                          shell={localRow.shell}
+                          isLoading={machineReachable && localRow.isWorktreeCleanupLoading}
+                          isSaving={localRow.isWorktreeCleanupSaving}
+                          errorMessage={
+                            machineReachable &&
+                            !isUnreachableMachineError(localRow.worktreeCleanupError)
+                              ? localRow.worktreeCleanupError
+                              : null
+                          }
+                          onSave={
+                            machineReachable
+                              ? (config) => onWorktreeCleanupChange?.(localRow, config)
+                              : undefined
+                          }
+                        />
+                      ) : githubRow ? (
+                        <WorktreeSetupEditor
+                          phase="cleanup"
+                          config={githubRow.worktreeCleanup}
+                          isSaving={githubRow.isWorktreeCleanupSaving}
+                          errorMessage={githubRow.worktreeCleanupError}
+                          onSave={(config) => onGithubWorktreeCleanupChange?.(githubRow, config)}
+                        />
+                      ) : null}
+                    </div>
+                  </CompactSection>
+                </>
+              ) : null}
+
+              {page === 'skills' ? (
+                localRow && !machineReachable ? (
+                  <CompactSection>
+                    <p {...stylex.props(surface.cardNote)}>
+                      {t(
+                        'workspace.projects.machineUnreachable',
+                        'This machine isn’t connected. Worktree setup and skills will load when it comes online.'
+                      )}
+                    </p>
+                  </CompactSection>
+                ) : (
+                  <CompactSection>
+                    <div {...stylex.props(styles.cardLine)}>
+                      <ProjectSkillsTab source={skillsSource} />
+                    </div>
+                  </CompactSection>
+                )
+              ) : null}
+            </div>
+          )}
+        </section>
+      </div>
+    </Tooltip.Provider>
+  );
+}
+
+type ProjectWindowPage = 'general' | 'worktree' | 'skills' | 'conversations';
+
+type HistoryStatus = 'available' | 'imported' | 'sync_conflict';
+type HistoryFilter = 'all' | HistoryStatus;
+
+const historyStatusOf = (session: LocalProjectHistoryCatalogItem): HistoryStatus =>
+  session.status === 'imported' || session.status === 'sync_conflict'
+    ? session.status
+    : 'available';
+
+/**
+ * A project's conversations in another agent's history, at any size: one
+ * agent at a time, found by search and narrowed by state, the list windowed so
+ * five thousand scroll like five. "Select all" means what is shown, and the
+ * import states how many it will bring in.
+ */
+function ConversationsPage({
+  row,
+  onSyncHistory,
+  onImportHistory,
+  onResolveHistoryConflict,
+  onHistorySelectionChange,
+}: Pick<
+  ProjectRowProps,
+  | 'row'
+  | 'onSyncHistory'
+  | 'onImportHistory'
+  | 'onResolveHistoryConflict'
+  | 'onHistorySelectionChange'
+>) {
+  const { t, i18n } = useTranslation();
+  const localeObj: Locale = i18n.language?.startsWith('zh') ? zhCN : enUS;
+  const intlLocale = toIntlLocale(i18n.resolvedLanguage ?? i18n.language);
+  const states = row.historyImports.filter((state) => state.canSync || state.catalog);
+  const [providerKey, setProviderKey] = useState<string | null>(states[0]?.providerKey ?? null);
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<HistoryFilter>('all');
+  const [conflictToResolve, setConflictToResolve] = useState<LocalProjectHistoryCatalogItem | null>(
+    null
+  );
+  const state = states.find((entry) => entry.providerKey === providerKey) ?? states[0] ?? null;
+
+  const catalogSessions = state?.catalog?.sessions;
+  const sessions = useMemo(() => catalogSessions ?? [], [catalogSessions]);
+  const counts = useMemo(() => {
+    const byStatus = { available: 0, imported: 0, sync_conflict: 0 };
+    for (const session of sessions) byStatus[historyStatusOf(session)] += 1;
+    return byStatus;
+  }, [sessions]);
+  const shown = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return sessions.filter(
+      (session) =>
+        (filter === 'all' || historyStatusOf(session) === filter) &&
+        (!needle || session.title.toLowerCase().includes(needle))
+    );
+  }, [sessions, query, filter]);
+
+  if (!state) {
     return (
-      <GithubProjectDetail
-        row={selection.row}
-        onWorktreeSetupChange={onGithubWorktreeSetupChange}
-        onWorktreeCleanupChange={onGithubWorktreeCleanupChange}
-        onOpenGitHubSettings={onOpenGitHubSettings}
-      />
+      <div {...stylex.props(win.pageBody)}>
+        <div {...stylex.props(win.empty)}>
+          <p {...stylex.props(win.emptyText)}>
+            {t(
+              'workspace.projects.historySyncEmptyHint',
+              'No agents detected on this machine yet. Conversation sync becomes available once an ACP agent has run here.'
+            )}
+          </p>
+        </div>
+      </div>
     );
   }
 
+  const providerLabel = getHistoryProviderLabel(state.provider);
+  const selected = new Set(state.selectedSessionIds);
+  const canManage = state.canSync && !state.isImporting;
+  const shownSelectable = canManage
+    ? shown.filter((session) => historyStatusOf(session) === 'available')
+    : [];
+  const allShownSelected =
+    shownSelectable.length > 0 &&
+    shownSelectable.every((session) => selected.has(session.acpSessionId));
+  const someShownSelected = shownSelectable.some((session) => selected.has(session.acpSessionId));
+  const setSelection = (ids: Iterable<string>) =>
+    onHistorySelectionChange?.(row, state.provider, [...new Set(ids)]);
+  const toggle = (id: string) => {
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelection(next);
+  };
+  const toggleShown = () => {
+    const next = new Set(selected);
+    for (const session of shownSelectable) {
+      if (allShownSelected) next.delete(session.acpSessionId);
+      else next.add(session.acpSessionId);
+    }
+    setSelection(next);
+  };
+  const sync = () => void onSyncHistory?.(row, state.provider);
+  const lastListed =
+    typeof state.catalog?.lastListedAt === 'number' ? new Date(state.catalog.lastListedAt) : null;
+  const failures = state.syncSummary
+    ? getVisibleLocalProjectHistoryFailures(state.syncSummary)
+    : null;
+  const syncButton = state.canSync ? (
+    <Button
+      type="button"
+      variant="secondary"
+      size="small"
+      disabled={state.isSyncing || state.isImporting || !onSyncHistory}
+      onClick={sync}
+    >
+      {state.isSyncing ? (
+        <Spinner size="small" />
+      ) : (
+        <RefreshCw {...stylex.props(styles.buttonIcon)} />
+      )}
+      {state.catalog
+        ? t('workspace.projects.syncHistoryAgain', 'Sync again')
+        : t('workspace.projects.syncHistory', 'Sync')}
+    </Button>
+  ) : null;
+
   return (
-    <LocalProjectDetail
-      row={selection.row}
-      onSharedWithTeamChange={onSharedWithTeamChange}
-      onSyncHistory={onSyncHistory}
-      onImportHistory={onImportHistory}
-      onResolveHistoryConflict={onResolveHistoryConflict}
-      onHistorySelectionChange={onHistorySelectionChange}
-      onWorktreeSetupChange={onWorktreeSetupChange}
-      onWorktreeCleanupChange={onWorktreeCleanupChange}
-      canRemove={canRemoveLocalProject?.(selection.row) === true}
-      onRemove={() => onRequestRemoveLocalProject?.(selection.row)}
-      removalState={localProjectRemovalStateByKey?.get(selection.row.key) ?? null}
-      machineReachable={
-        (localMachineId != null && selection.row.machineId === localMachineId) ||
-        Boolean(onlineMachineIds?.has(selection.row.machineId))
-      }
-    />
+    <div {...stylex.props(win.conversations)}>
+      <div {...stylex.props(win.sourceRow)}>
+        {states.length > 1 ? (
+          <div {...stylex.props(win.hug)}>
+            <Tabs.Root
+              value={state.providerKey}
+              onValueChange={(value) => setProviderKey(String(value))}
+            >
+              <Tabs.List size="small">
+                {states.map((entry) => (
+                  <Tabs.Tab key={entry.providerKey} value={entry.providerKey}>
+                    <AgentIcon
+                      cliType={entry.provider.cliType}
+                      agentType={entry.provider.agentType}
+                      className={stylex.props(win.agentGlyph).className}
+                    />
+                    {getHistoryProviderLabel(entry.provider)}
+                  </Tabs.Tab>
+                ))}
+              </Tabs.List>
+            </Tabs.Root>
+          </div>
+        ) : null}
+        {sessions.length > 0 ? (
+          <div {...stylex.props(win.toolbarEnd)}>
+            <span {...stylex.props(win.status)}>
+              {lastListed
+                ? t('workspace.projects.historyLastSynced', {
+                    defaultValue: 'Last synced {{relative}}',
+                    relative: formatDistanceToNow(lastListed, {
+                      addSuffix: true,
+                      locale: localeObj,
+                    }),
+                  })
+                : t('workspace.projects.historyNotSyncedYet', 'Not synced yet')}
+            </span>
+            {syncButton}
+          </div>
+        ) : null}
+      </div>
+
+      {sessions.length === 0 ? (
+        <div {...stylex.props(win.empty)}>
+          <p {...stylex.props(win.emptyText)}>
+            {state.catalog
+              ? t('workspace.projects.historyEmptyHint', {
+                  defaultValue:
+                    'Start a conversation for this project in {{provider}}, then sync again.',
+                  provider: providerLabel,
+                })
+              : t('workspace.projects.historyInitialSyncHint', {
+                  defaultValue:
+                    "Find this project's conversations in {{provider}}, then choose which ones to import.",
+                  provider: providerLabel,
+                })}
+          </p>
+          {syncButton}
+          {state.errorMessage ? <p {...stylex.props(win.error)}>{state.errorMessage}</p> : null}
+        </div>
+      ) : (
+        <>
+          <div {...stylex.props(win.toolbar)}>
+            <div {...stylex.props(win.search)}>
+              <Input
+                size="small"
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={t(
+                  'workspace.projects.history.searchPlaceholder',
+                  'Search conversations'
+                )}
+                leading={<Search aria-hidden="true" {...stylex.props(styles.buttonIcon)} />}
+              />
+            </div>
+            <Tabs.Root value={filter} onValueChange={(value) => setFilter(value as HistoryFilter)}>
+              <Tabs.List size="small">
+                <Tabs.Tab value="all">
+                  {t('workspace.projects.history.filterAll', 'All')} {sessions.length}
+                </Tabs.Tab>
+                <Tabs.Tab value="available">
+                  {t('workspace.projects.history.filterAvailable', 'To import')} {counts.available}
+                </Tabs.Tab>
+                <Tabs.Tab value="imported">
+                  {t('workspace.projects.history.filterImported', 'Imported')} {counts.imported}
+                </Tabs.Tab>
+                {counts.sync_conflict > 0 ? (
+                  <Tabs.Tab value="sync_conflict">
+                    {t('workspace.projects.history.filterConflicts', 'Conflicts')}{' '}
+                    {counts.sync_conflict}
+                  </Tabs.Tab>
+                ) : null}
+              </Tabs.List>
+            </Tabs.Root>
+          </div>
+
+          {state.errorMessage || state.syncSummary ? (
+            <div {...stylex.props(win.report, Boolean(state.errorMessage) && win.reportError)}>
+              {state.errorMessage ?? formatHistorySyncSummary(state.syncSummary!, t)}
+              {failures && failures.failures.length > 0 ? (
+                <ul {...stylex.props(styles.failureList)}>
+                  {failures.failures.map((failure) => (
+                    <li key={failure.acpSessionId} {...stylex.props(styles.breakWords)}>
+                      {failure.acpSessionId}: {failure.message}
+                    </li>
+                  ))}
+                  {failures.remaining > 0 ? (
+                    <li>
+                      {t('workspace.projects.historySyncMoreFailures', {
+                        defaultValue: '{{count}} more failures',
+                        count: failures.remaining,
+                      })}
+                    </li>
+                  ) : null}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div {...stylex.props(surface.card, win.listCard)}>
+            <div {...stylex.props(win.listHead)}>
+              <label {...stylex.props(win.selectShown)}>
+                <Checkbox
+                  checked={allShownSelected}
+                  indeterminate={someShownSelected && !allShownSelected}
+                  disabled={shownSelectable.length === 0}
+                  onCheckedChange={toggleShown}
+                />
+                {t('workspace.projects.history.selectShown', 'Select all {{count}} shown', {
+                  count: shownSelectable.length,
+                })}
+              </label>
+              <Button
+                type="button"
+                variant="primary"
+                size="small"
+                disabled={selected.size === 0 || !canManage || !onImportHistory}
+                onClick={() => void onImportHistory?.(row, state.provider)}
+              >
+                {state.isImporting ? <Spinner size="small" /> : null}
+                {selected.size > 0
+                  ? t('workspace.projects.history.importCount', 'Import {{count}}', {
+                      count: selected.size,
+                    })
+                  : t('workspace.projects.importSelectedHistory', 'Import')}
+              </Button>
+            </div>
+            {shown.length === 0 ? (
+              <p {...stylex.props(surface.cardNote, surface.lineRuled)}>
+                {t('workspace.projects.history.noMatches', 'No conversations match.')}
+              </p>
+            ) : (
+              <VList {...withClassName(stylex.props(win.list, surface.lineRuled), SCROLLBAR_CLASS)}>
+                {shown.map((session, index) => {
+                  const status = historyStatusOf(session);
+                  const selectable = status === 'available' && canManage;
+                  const isSelected = selected.has(session.acpSessionId);
+                  const resolving = state.resolvingSessionIds.includes(session.acpSessionId);
+                  const updated = parseHistoryUpdatedAt(session.updatedAt);
+                  return (
+                    <div
+                      key={session.acpSessionId}
+                      role="checkbox"
+                      aria-checked={status === 'imported' || isSelected}
+                      aria-disabled={!selectable}
+                      tabIndex={selectable ? 0 : -1}
+                      onClick={() => selectable && toggle(session.acpSessionId)}
+                      onKeyDown={(event) => {
+                        if (!selectable) return;
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault();
+                          toggle(session.acpSessionId);
+                        }
+                      }}
+                      {...stylex.props(
+                        win.session,
+                        index > 0 && surface.lineRuled,
+                        selectable && surface.pressableLine
+                      )}
+                    >
+                      <Checkbox
+                        checked={status === 'imported' || isSelected}
+                        disabled={!selectable}
+                        tabIndex={-1}
+                        onClick={(event) => event.stopPropagation()}
+                        onCheckedChange={() => selectable && toggle(session.acpSessionId)}
+                      />
+                      <span {...stylex.props(win.sessionText)}>
+                        <span {...stylex.props(win.sessionTitle)}>{session.title}</span>
+                        <span
+                          {...stylex.props(win.sessionTime)}
+                          title={updated ? updated.toLocaleString(intlLocale) : undefined}
+                        >
+                          {formatHistoryUpdatedAt(session.updatedAt, localeObj, t)}
+                        </span>
+                      </span>
+                      {status === 'imported' ? (
+                        <Badge>{t('workspace.projects.historyImported', 'Imported')}</Badge>
+                      ) : null}
+                      {status === 'sync_conflict' ? (
+                        <span {...stylex.props(win.conflict)}>
+                          <Badge tone="danger">
+                            {t('workspace.projects.historyConflict', 'Conflict')}
+                          </Badge>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="small"
+                            disabled={
+                              resolving ||
+                              !state.canSync ||
+                              state.isSyncing ||
+                              state.isImporting ||
+                              !session.importedSessionId ||
+                              !onResolveHistoryConflict
+                            }
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setConflictToResolve(session);
+                            }}
+                          >
+                            {resolving ? <Spinner size="small" /> : null}
+                            {t('workspace.projects.resolveHistoryConflict', 'Re-import')}
+                          </Button>
+                        </span>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </VList>
+            )}
+          </div>
+        </>
+      )}
+
+      <AlertDialog.Root
+        open={conflictToResolve !== null}
+        onOpenChange={(open) => {
+          if (!open) setConflictToResolve(null);
+        }}
+      >
+        <AlertDialog.Content>
+          <AlertDialog.Header>
+            <AlertDialog.Title>
+              {t('workspace.projects.resolveHistoryConflictTitle', 'Re-import conversation?')}
+            </AlertDialog.Title>
+            <AlertDialog.Description>
+              {t('workspace.projects.resolveHistoryConflictConfirm', {
+                defaultValue:
+                  'Re-import this conversation from {{provider}}? This replaces the current imported history with the latest source history and may discard local-only turns.',
+                provider: providerLabel,
+              })}
+            </AlertDialog.Description>
+          </AlertDialog.Header>
+          <AlertDialog.Footer>
+            <AlertDialog.Cancel>{t('common.cancel', 'Cancel')}</AlertDialog.Cancel>
+            <AlertDialog.Action
+              variant="destructive"
+              onClick={() => {
+                const session = conflictToResolve;
+                setConflictToResolve(null);
+                if (session) void onResolveHistoryConflict?.(row, state.provider, session);
+              }}
+            >
+              {t('workspace.projects.resolveHistoryConflict', 'Re-import')}
+            </AlertDialog.Action>
+          </AlertDialog.Footer>
+        </AlertDialog.Content>
+      </AlertDialog.Root>
+    </div>
   );
 }
+
+/** The project window's own layout: a rail of pages beside the page. */
+const win = stylex.create({
+  window: { display: 'flex', height: '100%', minHeight: 0, minWidth: 0 },
+  rail: {
+    boxSizing: 'border-box',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[4],
+    width: '220px',
+    flexShrink: 0,
+    padding: space[3],
+    paddingTop: space[4],
+    borderInlineEndWidth: '1px',
+    borderInlineEndStyle: 'solid',
+    borderInlineEndColor: colors.separator,
+  },
+  identity: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '2px',
+    paddingInline: space[2],
+    minWidth: 0,
+  },
+  identityName: {
+    margin: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: '15px',
+    fontWeight: 600,
+    lineHeight: 1.3,
+    color: colors.label,
+  },
+  identityMeta: { margin: 0, fontSize: '12px', lineHeight: 1.4, color: colors.secondaryLabel },
+  nav: { display: 'flex', flexDirection: 'column', gap: '2px' },
+  navWarn: { color: colors.warning },
+  main: { display: 'flex', flexDirection: 'column', flexGrow: 1, minWidth: 0, minHeight: 0 },
+  pageHeader: {
+    flexShrink: 0,
+    paddingTop: space[4],
+    paddingBottom: space[3],
+    paddingInlineStart: space[6],
+    // The dialog's close cross sits in this corner.
+    paddingInlineEnd: '56px',
+  },
+  pageTitle: { margin: 0, fontSize: '16px', fontWeight: 600, lineHeight: 1.4, color: colors.label },
+  pageDescription: { margin: 0, fontSize: '12px', lineHeight: 1.45, color: colors.secondaryLabel },
+  pageBody: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[4],
+    flexGrow: 1,
+    minHeight: 0,
+    overflowY: 'auto',
+    paddingInline: space[6],
+    paddingBottom: space[6],
+  },
+  note: { margin: 0, fontSize: '12px', lineHeight: 1.45, color: colors.secondaryLabel },
+  mono: { fontFamily: MONO, overflowWrap: 'anywhere' },
+  value: { fontSize: '0.9em', color: colors.secondaryLabel },
+
+  conversations: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[3],
+    flexGrow: 1,
+    minHeight: 0,
+    paddingInline: space[6],
+    paddingBottom: space[6],
+  },
+  agentGlyph: { width: '14px', height: '14px' },
+  /** A strip hugs its tabs instead of taking the column. */
+  hug: { display: 'flex', alignSelf: 'flex-start' },
+  toolbar: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space[2] },
+  search: { width: '220px', maxWidth: '100%' },
+  /** Which agent's history, and when it was last read, with the way to re-read it. */
+  sourceRow: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: space[2] },
+  toolbarEnd: { display: 'flex', alignItems: 'center', gap: space[2], marginInlineStart: 'auto' },
+  status: { fontSize: '12px', color: colors.tertiaryLabel, whiteSpace: 'nowrap' },
+  report: {
+    fontSize: '12px',
+    lineHeight: 1.45,
+    color: colors.secondaryLabel,
+    paddingInline: space[3],
+    paddingBlock: space[2],
+    backgroundColor: `color-mix(in oklab, transparent, ${colors.label} 3%)`,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+  },
+  reportError: { color: colors.destructive },
+  listCard: { display: 'flex', flexDirection: 'column', flexGrow: 1, minHeight: '160px' },
+  listHead: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: space[3],
+    paddingInline: space[4],
+    paddingBlock: space[2],
+  },
+  selectShown: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: space[2],
+    fontSize: '0.85em',
+    color: colors.secondaryLabel,
+    cursor: 'pointer',
+  },
+  list: { flexGrow: 1, minHeight: 0 },
+  session: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[3],
+    paddingInline: space[4],
+    paddingBlock: '10px',
+    cursor: 'default',
+    outlineStyle: 'none',
+  },
+  sessionText: { display: 'flex', flexDirection: 'column', gap: '2px', flexGrow: 1, minWidth: 0 },
+  sessionTitle: {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    lineHeight: 1.3,
+    color: colors.label,
+  },
+  sessionTime: { fontSize: '0.8em', color: colors.tertiaryLabel },
+  conflict: { display: 'inline-flex', alignItems: 'center', gap: space[1], flexShrink: 0 },
+  empty: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space[3],
+    flexGrow: 1,
+    minHeight: '200px',
+    textAlign: 'center',
+  },
+  emptyText: {
+    margin: 0,
+    maxWidth: '380px',
+    fontSize: '13px',
+    lineHeight: 1.5,
+    color: colors.secondaryLabel,
+  },
+  error: { margin: 0, maxWidth: '420px', fontSize: '12px', color: colors.destructive },
+});
 
 function isUnreachableMachineError(message: string | null | undefined): boolean {
   if (!message) return false;
@@ -1666,185 +2538,6 @@ function revealProjectPath(path: string, t: TFunction) {
       toast.error(t('sessions.fileActions.revealFailed', 'Unable to show this folder'));
     }
   });
-}
-
-function LocalProjectDetail({
-  row,
-  onSharedWithTeamChange,
-  onSyncHistory,
-  onImportHistory,
-  onResolveHistoryConflict,
-  onHistorySelectionChange,
-  onWorktreeSetupChange,
-  onWorktreeCleanupChange,
-  canRemove = false,
-  onRemove,
-  removalState = null,
-  machineReachable = true,
-}: ProjectRowProps & {
-  canRemove?: boolean;
-  onRemove?: () => void;
-  removalState?: LocalProjectRemovalState | null;
-  machineReachable?: boolean;
-}) {
-  const { t } = useTranslation();
-  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
-  const skillsSource: ProjectSkillsSource | null = workspaceId
-    ? {
-        kind: 'local',
-        workspaceId,
-        machineId: row.machineId,
-        localProjectId: row.project.id,
-      }
-    : null;
-  const rootPath = typeof row.project.rootPath === 'string' ? row.project.rootPath : '';
-  const canReveal = Boolean(getIpcServices());
-  const removalStateLabel =
-    removalState === 'waiting_for_device'
-      ? t('sidebar.localProjects.remove.waitingForDevice', 'Waiting for device…')
-      : removalState === 'removing'
-        ? t('sidebar.localProjects.remove.removing', 'Removing…')
-        : null;
-
-  const worktreeSetupError =
-    machineReachable && !isUnreachableMachineError(row.worktreeSetupError)
-      ? row.worktreeSetupError
-      : null;
-  const worktreeCleanupError =
-    machineReachable && !isUnreachableMachineError(row.worktreeCleanupError)
-      ? row.worktreeCleanupError
-      : null;
-
-  return (
-    <Tooltip.Provider delay={200}>
-      <div {...stylex.props(styles.detail)}>
-        <div {...stylex.props(styles.detailHeader)}>
-          <div {...stylex.props(styles.detailHeading)}>
-            <h3 {...stylex.props(styles.detailTitle)}>{row.project.name}</h3>
-            {rootPath ? (
-              <div {...stylex.props(styles.pathRow)}>
-                <p {...stylex.props(styles.path)} title={rootPath}>
-                  {rootPath}
-                </p>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="mini"
-                  icon
-                  aria-label={t('sessions.copyPath', 'Copy path')}
-                  onClick={() => copyProjectPath(rootPath, t)}
-                >
-                  <Copy {...stylex.props(styles.glyph)} />
-                </Button>
-                {canReveal ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="mini"
-                    icon
-                    aria-label={t('sidebar.localProjects.reveal', 'Reveal in file manager')}
-                    onClick={() => revealProjectPath(rootPath, t)}
-                  >
-                    <FolderOpen {...stylex.props(styles.glyph)} />
-                  </Button>
-                ) : null}
-              </div>
-            ) : null}
-            {removalStateLabel ? (
-              <p {...stylex.props(styles.detailNote)}>{removalStateLabel}</p>
-            ) : null}
-            {!machineReachable ? (
-              <p {...stylex.props(styles.detailNote)}>
-                {t(
-                  'workspace.projects.selectedMachineOffline',
-                  '{{name}} is offline. Worktree setup and skills will load when it comes online.',
-                  { name: row.machineName }
-                )}
-              </p>
-            ) : null}
-          </div>
-        </div>
-
-        <ProjectShareControl row={row} onSharedWithTeamChange={onSharedWithTeamChange} />
-
-        <CompactSection title={t('workspace.projects.worktreeSetupTitle', 'Worktree')}>
-          <div {...stylex.props(styles.cardLine)}>
-            <WorktreeSetupEditor
-              phase="setup"
-              config={row.worktreeSetup}
-              shell={row.shell}
-              isLoading={machineReachable && row.isWorktreeSetupLoading}
-              isSaving={row.isWorktreeSetupSaving}
-              errorMessage={worktreeSetupError}
-              onSave={
-                machineReachable ? (config) => onWorktreeSetupChange?.(row, config) : undefined
-              }
-            />
-          </div>
-          <div {...stylex.props(styles.cardLine)}>
-            <WorktreeSetupEditor
-              phase="cleanup"
-              config={row.worktreeCleanup}
-              shell={row.shell}
-              isLoading={machineReachable && row.isWorktreeCleanupLoading}
-              isSaving={row.isWorktreeCleanupSaving}
-              errorMessage={worktreeCleanupError}
-              onSave={
-                machineReachable ? (config) => onWorktreeCleanupChange?.(row, config) : undefined
-              }
-            />
-          </div>
-        </CompactSection>
-
-        <CompactSection title={t('workspace.projects.skills.tabLabel', 'Skills')}>
-          {machineReachable ? (
-            <div {...stylex.props(styles.cardLine)}>
-              <ProjectSkillsTab source={skillsSource} />
-            </div>
-          ) : (
-            <p {...stylex.props(surface.cardNote)}>
-              {t(
-                'workspace.projects.machineUnreachable',
-                'This machine isn’t connected. Worktree setup and skills will load when it comes online.'
-              )}
-            </p>
-          )}
-        </CompactSection>
-
-        <CompactSection title={t('workspace.projects.historySyncSection', 'Conversation sync')}>
-          <LocalHistorySection
-            row={row}
-            onSyncHistory={onSyncHistory}
-            onImportHistory={onImportHistory}
-            onResolveHistoryConflict={onResolveHistoryConflict}
-            onHistorySelectionChange={onHistorySelectionChange}
-          />
-        </CompactSection>
-
-        {canRemove && onRemove ? (
-          <CompactSection tone="danger">
-            <CompactRow
-              label={t('workspace.projects.delete', 'Delete project')}
-              helper={t(
-                'sidebar.localProjects.remove.originalDirectorySafe',
-                'Lody never deletes the original project folder or its files.'
-              )}
-            >
-              <Button
-                type="button"
-                variant="destructive"
-                size="small"
-                disabled={removalState != null}
-                onClick={onRemove}
-              >
-                {t('workspace.projects.delete', 'Delete project')}
-              </Button>
-            </CompactRow>
-          </CompactSection>
-        ) : null}
-      </div>
-    </Tooltip.Provider>
-  );
 }
 
 function ProjectShareControl({
@@ -1924,159 +2617,6 @@ export type ProjectRowProps = {
     config: WorktreeCleanupScriptConfig
   ) => Promise<void>;
 };
-
-type LocalHistorySectionProps = Pick<
-  ProjectRowProps,
-  | 'row'
-  | 'onSyncHistory'
-  | 'onImportHistory'
-  | 'onResolveHistoryConflict'
-  | 'onHistorySelectionChange'
->;
-
-function LocalHistorySection({
-  row,
-  onSyncHistory,
-  onImportHistory,
-  onResolveHistoryConflict,
-  onHistorySelectionChange,
-}: LocalHistorySectionProps) {
-  const { t } = useTranslation();
-  const visibleHistoryImports = row.historyImports.filter(
-    (state) => state.canSync || state.catalog
-  );
-  const [activeProviderKey, setActiveProviderKey] = useState<string | null>(
-    visibleHistoryImports[0]?.providerKey ?? null
-  );
-  const activeHistoryState =
-    visibleHistoryImports.find((state) => state.providerKey === activeProviderKey) ??
-    visibleHistoryImports[0] ??
-    null;
-
-  if (!activeHistoryState) {
-    return (
-      <p {...stylex.props(surface.cardNote)}>
-        {t(
-          'workspace.projects.historySyncEmptyHint',
-          'No agents detected on this machine yet. Conversation sync becomes available once an ACP agent has run here.'
-        )}
-      </p>
-    );
-  }
-
-  return (
-    <div {...stylex.props(styles.column)}>
-      {visibleHistoryImports.map((state, index) => {
-        const active = state.providerKey === activeHistoryState.providerKey;
-        const providerLabel = getHistoryProviderLabel(state.provider);
-        return (
-          <button
-            key={state.providerKey}
-            type="button"
-            {...stylex.props(
-              styles.providerRow,
-              index > 0 && surface.lineRuled,
-              active && styles.providerRowActive
-            )}
-            onClick={() => setActiveProviderKey(state.providerKey)}
-          >
-            <AgentIcon
-              cliType={state.provider.cliType}
-              agentType={state.provider.agentType}
-              className={stylex.props(styles.providerIcon).className}
-            />
-            <span {...stylex.props(styles.providerLabel)}>{providerLabel}</span>
-          </button>
-        );
-      })}
-      <div {...stylex.props(surface.lineRuled)}>
-        <ProjectHistoryImportPanel
-          key={activeHistoryState.providerKey}
-          row={row}
-          state={activeHistoryState}
-          onSyncHistory={onSyncHistory}
-          onImportHistory={onImportHistory}
-          onResolveHistoryConflict={onResolveHistoryConflict}
-          onHistorySelectionChange={onHistorySelectionChange}
-        />
-      </div>
-    </div>
-  );
-}
-
-function GithubProjectDetail({
-  row,
-  onWorktreeSetupChange,
-  onWorktreeCleanupChange,
-  onOpenGitHubSettings,
-}: {
-  row: GithubProjectSettingsRow;
-  onWorktreeSetupChange?: (
-    row: GithubProjectSettingsRow,
-    config: WorktreeSetupScriptConfig
-  ) => Promise<void>;
-  onWorktreeCleanupChange?: (
-    row: GithubProjectSettingsRow,
-    config: WorktreeCleanupScriptConfig
-  ) => Promise<void>;
-  onOpenGitHubSettings?: () => void;
-}) {
-  const { t } = useTranslation();
-  const workspaceId = useAtomValue(currentWorkspaceIdAtom);
-  const skillsSource: ProjectSkillsSource | null = workspaceId
-    ? {
-        kind: 'github',
-        workspaceId,
-        repoFullName: row.repoFullName,
-      }
-    : null;
-  return (
-    <div {...stylex.props(styles.detail)}>
-      <div {...stylex.props(styles.detailHeader)}>
-        <div {...stylex.props(styles.detailHeading)}>
-          <div {...stylex.props(styles.detailTitleRow)}>
-            <h3 {...stylex.props(styles.detailTitle)}>{row.name}</h3>
-            <Badge>{row.private ? t('workspace.projects.privateRepo', 'Private') : 'Public'}</Badge>
-          </div>
-          <p {...stylex.props(styles.path)}>{row.repoFullName}</p>
-        </div>
-        {onOpenGitHubSettings ? (
-          <Button type="button" variant="secondary" size="small" onClick={onOpenGitHubSettings}>
-            <Github {...stylex.props(styles.buttonIcon)} />
-            {t('workspace.projects.manageInGithubSettings', 'Manage in GitHub settings')}
-          </Button>
-        ) : null}
-      </div>
-
-      <CompactSection title={t('workspace.projects.worktreeSetupTitle', 'Worktree')}>
-        <div {...stylex.props(styles.cardLine)}>
-          <WorktreeSetupEditor
-            phase="setup"
-            config={row.worktreeSetup}
-            isSaving={row.isWorktreeSetupSaving}
-            errorMessage={row.worktreeSetupError}
-            onSave={(config) => onWorktreeSetupChange?.(row, config)}
-          />
-        </div>
-        <div {...stylex.props(styles.cardLine)}>
-          <WorktreeSetupEditor
-            phase="cleanup"
-            config={row.worktreeCleanup}
-            isSaving={row.isWorktreeCleanupSaving}
-            errorMessage={row.worktreeCleanupError}
-            onSave={(config) => onWorktreeCleanupChange?.(row, config)}
-          />
-        </div>
-      </CompactSection>
-
-      <CompactSection title={t('workspace.projects.skills.tabLabel', 'Skills')}>
-        <div {...stylex.props(styles.cardLine)}>
-          <ProjectSkillsTab source={skillsSource} />
-        </div>
-      </CompactSection>
-    </div>
-  );
-}
 
 function buildWorktreeSetupConfig(args: {
   bash: string;

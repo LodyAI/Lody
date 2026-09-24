@@ -3756,7 +3756,7 @@ const ACTIVITY_PROCESS_ICON_CLASS = 'h-3.5 w-3.5 shrink-0 text-muted-foreground/
 const ACTIVITY_STEP_BUTTON_CLASS = cn(
   /* As wide as its words: a step is a line of text, not a bar across the
      column. Hover brightens the words (see the title class), not a fill. */
-  'w-fit max-w-full min-h-6 items-start rounded-md px-[4px] py-0.5',
+  'w-fit max-w-full min-h-6 select-none items-start rounded-md px-[4px] py-0.5',
   ACTIVITY_PROCESS_TEXT_CLASS
 );
 const ACTIVITY_STEP_TITLE_CLASS = cn(
@@ -6839,7 +6839,13 @@ const ToolCallCard = memo(function ToolCallCard({
                                 ACTIVITY_PROCESS_TEXT_CLASS
                               )
                             : 'inline-flex min-w-0 max-w-[240px] shrink items-center gap-1 rounded-md border border-border/60 px-2 py-0.5 text-[11px]',
-                          isFilePathClickable ? 'cursor-pointer hover:bg-hover/60' : ''
+                          isFilePathClickable
+                            ? isActivityRow
+                              ? /* The file name is a link inside the step: the pointer
+                                   says so, and only it brightens under the pointer. */
+                                'cursor-pointer'
+                              : 'cursor-pointer hover:bg-hover/60'
+                            : ''
                         )}
                       >
                         {normalizedFilePath && !isActivityRow ? (
@@ -6856,7 +6862,9 @@ const ToolCallCard = memo(function ToolCallCard({
                             isActivityRow
                               ? cn(
                                   ACTIVITY_PROCESS_TEXT_CLASS,
-                                  'transition-colors group-hover:text-foreground'
+                                  'transition-colors',
+                                  isFilePathClickable &&
+                                    'underline-offset-2 hover:text-foreground hover:underline'
                                 )
                               : 'font-mono text-xs'
                           )}
