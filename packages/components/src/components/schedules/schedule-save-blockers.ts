@@ -33,7 +33,7 @@ export type ScheduleSaveContext = {
 };
 
 /** Where a save blocker is shown: next to the control that fixes it. */
-export type ScheduleIssueField = 'form' | 'agent' | 'project' | 'destination';
+export type ScheduleIssueField = 'form' | 'machine' | 'agent' | 'project' | 'destination';
 
 export type ScheduleSaveIssue = {
   field: ScheduleIssueField;
@@ -75,7 +75,7 @@ export function collectScheduleSaveIssues(
     if (!context.disabledReason) {
       if (!machine)
         push(
-          'agent',
+          'machine',
           'invalid',
           t(
             'schedules.machineMissing',
@@ -84,13 +84,13 @@ export function collectScheduleSaveIssues(
         );
       else if (context.userId && machine.ownerUserId !== context.userId)
         push(
-          'agent',
+          'machine',
           'invalid',
           t('schedules.requireOwnedMachine', 'Choose an Agent on a machine you own.')
         );
       else if (!machineSupportsSchedulesProtocol(machine))
         push(
-          'agent',
+          'machine',
           'invalid',
           t('schedules.upgrade', 'Update the target machine’s CLI to edit schedules.')
         );

@@ -26,6 +26,7 @@ import {
   type SessionId,
   type SessionMeta,
   type AgentConfigId,
+  type MachineId,
   type AgentConfigMeta,
   type ProjectRef,
   type ScheduleDestination,
@@ -53,7 +54,7 @@ import { useVisibleMachineMetas } from '@/hooks/use-visible-machine-metas';
 import { useVisibleLocalProjects } from '@/hooks/use-visible-local-projects';
 import { useOpenSettings } from '@/hooks/use-open-settings';
 import { cloudOperations } from '@/lib/cloud-api-operations';
-import { AgentRunConfigMenu } from '@/components/shared/agent-run-config-menu';
+import { DesktopMachineMenu } from '@/components/sessions/desktop-run-config-menu';
 import { ProjectRefSelector } from '@/components/shared/project-ref-selector';
 import { Button } from '@/ui/button';
 import { cn } from '@/lib/utils';
@@ -67,14 +68,9 @@ import {
 } from './schedule-view';
 import { scheduleCardClass } from './schedule-property-row';
 import { collectScheduleSaveIssues, type ScheduleIssueField } from './schedule-save-blockers';
-import {
-  RunBarItem,
-  ScheduleChatPill,
-  ScheduleDestinationPill,
-  runPillIssueClass,
-  runWorktreePillClass,
-  type PickableSession,
-} from './schedule-run-bar';
+import { ScheduleDestinationRows, type PickableSession } from './schedule-destination-rows';
+import { ScheduleAgentControls } from './schedule-agent-controls';
+import { FieldIssueMark } from './schedule-field-issue-mark';
 
 export function SchedulesWorkspace({ scheduleId }: { scheduleId?: string }) {
   const enabled = useAtomValue(schedulesFeatureEnabledAtom);
@@ -474,7 +470,39 @@ function ScheduleEditor({
     activityId: uuid(),
   }));
   const selected = agents.find((config) => config.id === agent?.agentConfigId);
-  const machine = selected ? machines.get(selected.machineId) : undefined;
+  // The machine is its own choice, as on the chat landing; the Agent is picked
+  // among that machine's agents. Until an Agent exists it is chosen directly.
+  // Schedules run only on the person's own machines, so only those are offered.
+  const machineOptions = useMemo(
+    () =>
+      [...machines.values()]
+        .filter(
+          (entry) =>
+            entry.ownerUserId === user?.id && agents.some((config) => config.machineId === entry.id)
+        )
+        .map((entry) => ({ value: entry.id as MachineId, label: entry.name })),
+    [agents, machines, user?.id]
+  );
+  const [pickedMachineId, setPickedMachineId] = useState<MachineId | null>(null);
+  const machineId =
+    (selected?.machineId as MachineId | undefined) ??
+    pickedMachineId ??
+    (machineOptions.length === 1 ? machineOptions[0]!.value : null);
+  const machine = machineId ? machines.get(machineId) : undefined;
+  const machineAgents = useMemo(
+    () =>
+      agents
+        .filter((config) => config.machineId === machineId)
+        .sort((left, right) => left.name.localeCompare(right.name)),
+    [agents, machineId]
+  );
+  const chooseMachine = (next: MachineId) => {
+    if (next === machineId) return;
+    setPickedMachineId(next);
+    // An Agent and a local project belong to one machine; neither follows.
+    setAgent(null);
+    if (project?.kind === 'local') setProject(null);
+  };
 
   // Chats runs may be appended to. Only the person's own, unarchived chats:
   // the daemon refuses any other owner, so offering them would only produce a
@@ -611,37 +639,20 @@ function ScheduleEditor({
     destination.kind === 'existing_session' && destinationMeta
       ? describeSession(destinationMeta)
       : null;
-  // One line saying what the current run choice means — the only prose left
-  // from what used to be four rows.
-  const runNote =
-    destination.kind === 'own_session'
-      ? ownSession
+  const note =
+    destination.kind !== 'new_session'
+      ? undefined
+      : project?.kind === 'local' && !project.useWorktree
         ? t(
-            'schedules.destination.ownSessionLockedHint',
-            'The Agent is now this chat’s Agent. Start a new chat to change it.'
+            'schedules.originalDirectory',
+            'Runs share the original directory. Work from other Agents may overlap here.'
           )
-        : t(
-            'schedules.destination.ownSessionPendingHint',
-            'Created on the first run; every later run continues it.'
-          )
-      : destination.kind === 'existing_session'
-        ? pickedSession
+        : !project
           ? t(
-              'schedules.destination.existingSessionHint',
-              'Runs use this chat’s Agent and workspace.'
+              'schedules.chatOnlyHelp',
+              'Without a project each run is a plain chat with the Agent — no repository is checked out.'
             )
-          : undefined
-        : project?.kind === 'local' && !project.useWorktree
-          ? t(
-              'schedules.originalDirectory',
-              'Runs share the original directory. Work from other Agents may overlap here.'
-            )
-          : !project
-            ? t(
-                'schedules.chatOnlyHelp',
-                'Without a project each run is a plain chat with the Agent — no repository is checked out.'
-              )
-            : undefined;
+          : undefined;
   return (
     <ScheduleForm
       initial={initial}
@@ -651,102 +662,85 @@ function ScheduleEditor({
       autoFocus={!document}
       timeZone={machine?.timeZone ?? getDeviceTimeZone()}
       clockName={machine?.name}
-      runNote={runNote}
+      contextNote={note}
       onSave={(value) => void save(value)}
-      runBar={({ revealMissing }) => {
-        const destinationIssues = issuesFor('destination', revealMissing);
-        const agentIssues = issuesFor('agent', revealMissing);
-        const projectIssues = issuesFor('project', revealMissing);
-        const chatHoldsIssues = destination.kind === 'existing_session';
-        return (
-          <>
-            <RunBarItem issues={chatHoldsIssues ? [] : destinationIssues}>
-              <ScheduleDestinationPill
-                value={destination}
-                onChange={chooseDestination}
-                ownSession={ownSession}
-                onOpenSession={onOpenSession}
-                issues={chatHoldsIssues ? [] : destinationIssues}
-                disabled={!!disabledReason}
+      agentBar={({ revealMissing }) => (
+        <>
+          <ScheduleAgentControls
+            machine={machine}
+            agentConfigs={machineAgents}
+            value={agent}
+            onChange={setAgent}
+            disabledReason={
+              disabledReason ??
+              (machine
+                ? undefined
+                : t('chat.machineSelector.selectFirst', 'Select a machine first'))
+            }
+          />
+          <FieldIssueMark messages={issuesFor('agent', revealMissing)} />
+        </>
+      )}
+      contextBar={({ revealMissing }) => (
+        <>
+          <DesktopMachineMenu
+            value={machineId}
+            options={machineOptions}
+            selectedLabel={machine?.name}
+            onChange={chooseMachine}
+            disabled={!!disabledReason}
+          />
+          <FieldIssueMark messages={issuesFor('machine', revealMissing)} />
+          {destination.kind === 'new_session' ? (
+            <>
+              <ProjectRefSelector
+                triggerVariant="chip"
+                value={project}
+                onChange={setProject}
+                localProjects={[...local.projects.values()]
+                  .filter((entry) => entry.machineId === machineId)
+                  .map((entry) => ({
+                    key: entry.key,
+                    machineId: entry.machineId,
+                    localProjectId: entry.project.id,
+                    name: entry.project.name,
+                    rootPath: entry.project.rootPath,
+                  }))}
+                repositories={(repos ?? []).flatMap((r) =>
+                  r.repoFullName || r.fullName
+                    ? [{ fullName: (r.repoFullName ?? r.fullName)! }]
+                    : []
+                )}
+                onAddLocalProject={() => openSettings('projects')}
+                onConnectGitRepo={() => openSettings('github')}
               />
-            </RunBarItem>
-            {destination.kind === 'existing_session' ? (
-              <RunBarItem issues={destinationIssues}>
-                <ScheduleChatPill
-                  sessions={pickableSessions}
-                  value={destination.sessionId}
-                  label={pickedSession?.title}
-                  onChange={(sessionId) =>
-                    chooseDestination({ kind: 'existing_session', sessionId })
-                  }
-                  issues={destinationIssues}
-                  disabled={!!disabledReason}
-                />
-              </RunBarItem>
-            ) : null}
-            <RunBarItem issues={agentIssues}>
-              <AgentRunConfigMenu
-                requireExplicitPermission
-                value={agent}
-                triggerClassName={agentIssues.length ? runPillIssueClass : undefined}
-                onChange={(next) => {
-                  setAgent(next);
-                  if (
-                    agents.find((a) => a.id === next.agentConfigId)?.machineId !==
-                    selected?.machineId
-                  )
-                    setProject(null);
-                }}
-                disabled={!!disabledReason}
-              />
-            </RunBarItem>
-            {destination.kind === 'new_session' ? (
-              <RunBarItem issues={projectIssues}>
-                <ProjectRefSelector
-                  triggerVariant="chip"
-                  className={runProjectPillClass}
-                  value={project}
-                  onChange={setProject}
-                  localProjects={[...local.projects.values()]
-                    .filter((entry) => entry.machineId === selected?.machineId)
-                    .map((entry) => ({
-                      key: entry.key,
-                      machineId: entry.machineId,
-                      localProjectId: entry.project.id,
-                      name: entry.project.name,
-                      rootPath: entry.project.rootPath,
-                    }))}
-                  repositories={(repos ?? []).flatMap((r) =>
-                    r.repoFullName || r.fullName
-                      ? [{ fullName: (r.repoFullName ?? r.fullName)! }]
-                      : []
-                  )}
-                  onAddLocalProject={() => openSettings('projects')}
-                  onConnectGitRepo={() => openSettings('github')}
-                />
-              </RunBarItem>
-            ) : null}
-            {project?.kind === 'local' && destination.kind === 'new_session' ? (
-              <WorktreeCheckboxPill
-                className={runWorktreePillClass}
-                checked={project.useWorktree === true}
-                disabled={!!disabledReason}
-                onCheckedChange={(checked) => setProject({ ...project, useWorktree: checked })}
-              />
-            ) : null}
-          </>
-        );
-      }}
+              <FieldIssueMark messages={issuesFor('project', revealMissing)} />
+            </>
+          ) : null}
+          {project?.kind === 'local' && destination.kind === 'new_session' ? (
+            <WorktreeCheckboxPill
+              checked={project.useWorktree === true}
+              disabled={!!disabledReason}
+              onCheckedChange={(checked) => setProject({ ...project, useWorktree: checked })}
+            />
+          ) : null}
+        </>
+      )}
+      destination={({ revealMissing }) => (
+        <ScheduleDestinationRows
+          value={destination}
+          onChange={chooseDestination}
+          sessions={pickableSessions}
+          ownSession={ownSession}
+          pickedSession={pickedSession}
+          onOpenSession={onOpenSession}
+          issues={issuesFor('destination', revealMissing)}
+          disabled={!!disabledReason}
+        />
+      )}
     />
   );
 }
-
-/**
- * The composer's project chip, flattened into the run bar: no lifted surface,
- * the same height, ink and hover as the other pills beside it.
- */
-const runProjectPillClass =
-  'h-7 rounded-md border-0 bg-transparent px-2 text-[0.9em] text-muted-foreground shadow-none hover:bg-foreground/[0.05] hover:text-foreground data-[state=open]:bg-foreground/[0.05] dark:bg-transparent dark:hover:bg-white/[0.08] dark:data-[state=open]:bg-white/[0.08]';
 
 function ScheduleSessionHistory({ scheduleId }: { scheduleId: string }) {
   const { t } = useTranslation();

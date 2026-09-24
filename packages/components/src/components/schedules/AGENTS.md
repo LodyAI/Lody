@@ -11,18 +11,26 @@
   `schedules-workspace.tsx` owns domain writes, selectors and composition.
   `schedule-save-blockers.ts` is the one save rule, `schedule-format.ts` the one
   vocabulary and the only place that constructs `Intl` formatters (normalize
-  `locale` with `toIntlLocaleOrEn`; `zh_CN` is a RangeError). Agent/Project
-  selectors and `AgentRunRef` live in `components/shared`.
+  `locale` with `toIntlLocaleOrEn`; `zh_CN` is a RangeError). `AgentRunRef` and the project
+  selector live in `components/shared`; the Agent and machine controls are the
+  composer's (`sessions/desktop-run-config-menu.tsx`).
 - Save needs an Agent with an explicit permission mode on an owned, capable
   machine; never a project (none = plain chat, end to end). No consent checkbox,
   directory-scope checkbox, full-access warning or resume dialog — do not add one
   back in any shape; ownership, capability and permission still gate save/run.
-- The editor is laid out like the composer: one box holds name, prompt and the
-  run bar (`schedule-run-bar.tsx`: destination, chat, Agent, project, worktree
-  pills, all `runPillClass` ghosts). The time rule is its own card of
-  `PropertyRow`s. Name autofocuses on a new schedule.
+- The editor reuses the composer's parts: one box holds name, a hairline, the
+  prompt and, along its bottom, the composer's own Agent controls
+  (`ScheduleAgentControls` = `DesktopRunConfigMenu` + `DesktopPermissionModeButton`).
+  Under the box are the chat landing's context pills — `DesktopMachineMenu`, the
+  project chip, the worktree checkbox. The destination is its own card above the
+  trigger card. Name autofocuses on a new schedule. Do not fork look-alikes of
+  these controls; pass props to the shared ones.
+- The machine is its own choice (owned machines with agents; preselected when
+  there is one); the Agent is picked among that machine's agents. Changing the
+  machine clears the Agent and a local project. Picking an Agent leaves the
+  permission mode unset on purpose.
 - `collectScheduleSaveIssues` tags every blocker with the control that fixes it
-  (`form | agent | project | destination`) and `missing | invalid`. Each is an
+  (`form | machine | agent | project | destination`) and `missing | invalid`. Each is an
   exclamation mark (`FieldIssueMark`) next to that control, never a list at the
   bottom; `missing` shows only after a save attempt, `invalid` at once. Only
   `form` reasons sit beside Save and disable it; everything else lets Save
@@ -41,7 +49,7 @@
 - Destination: new chat per run, ONE owned chat (`own_session`, id derived from
   schedule id + `epoch`, "Start a new chat" = `epoch + 1`, never stored), or a
   picked chat. A chat destination has no project and follows the chat's Agent;
-  mismatches are `invalid` issues on the Agent / chat pill.
+  mismatches are `invalid` issues on the Agent controls / chat row.
 - An agent can only PROPOSE (`schedule_proposal` notice →
   `ScheduleProposalNotice`); Create on the card is the creation, with
   `proposalId` as schedule id. `resolveScheduleProposalTarget` defaults to the

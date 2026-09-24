@@ -51,9 +51,11 @@ proposing conversation's Agent, effective mode, machine and project; a named Rol
 Agent, machine or project overrides only that part, and a named Agent gets the
 builtin default mode, never another Agent's.
 
-**Editor (2026-09-24 revision).** Name, prompt and the run choices sit in one box
-like the composer: destination, Agent and project are pills along its bottom edge
-instead of four property rows. There is no time zone control: the CLI publishes
+**Editor (2026-09-24 revision).** The editor is built from the composer's own
+parts instead of look-alikes: name and prompt (split by a hairline) share one box
+whose bottom edge carries the composer's Agent/model/permission controls; the
+chat landing's machine, project and worktree pills sit under it; where runs go is
+its own card above the time rule. This replaced four property rows. There is no time zone control: the CLI publishes
 its IANA zone as `MachineMeta.timeZone` (under 50 bytes, written at registration),
 wall-clock rules and one-off times are read on that clock, and older CLIs fall
 back to the viewer's zone. Save problems are marked where they are fixed — an

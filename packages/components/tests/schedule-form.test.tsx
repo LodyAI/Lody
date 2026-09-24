@@ -123,7 +123,7 @@ describe('Schedule editor', () => {
   });
 
   it('marks a real conflict at once and keeps it off the footer', () => {
-    props.runBar = ({ revealMissing }) => (
+    props.agentBar = ({ revealMissing }) => (
       <span data-testid="run-bar">{revealMissing ? 'revealed' : 'quiet'}</span>
     );
     props.issues = [{ field: 'agent', kind: 'invalid', message: en['schedules.choosePermission'] }];
@@ -132,7 +132,7 @@ describe('Schedule editor', () => {
     expect(footer().textContent).toBe('');
     submit();
     expect(props.onSave).not.toHaveBeenCalled();
-    // The run bar owns the Agent mark and is told the person tried to save.
+    // The Agent controls own the Agent mark and are told the person tried to save.
     expect(container.querySelector('[data-testid="run-bar"]')!.textContent).toBe('revealed');
   });
 

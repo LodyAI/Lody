@@ -39,8 +39,8 @@ import {
   triggerTimeZone,
   type ScheduleStatus,
 } from './schedule-format';
-import { ScheduleSection } from './schedule-property-row';
-import { FieldIssueMark } from './schedule-run-bar';
+import { ScheduleSection, scheduleCardClass } from './schedule-property-row';
+import { FieldIssueMark } from './schedule-field-issue-mark';
 import type { ScheduleSaveIssue } from './schedule-save-blockers';
 import { ScheduleRecurrenceEditor } from './schedule-recurrence-editor';
 
@@ -437,8 +437,10 @@ export function ScheduleForm({
   initial,
   timeZone = getDeviceTimeZone(),
   clockName,
-  runBar,
-  runNote,
+  agentBar,
+  contextBar,
+  contextNote,
+  destination,
   issues = [],
   saving,
   error,
@@ -452,10 +454,14 @@ export function ScheduleForm({
   timeZone?: string;
   /** That machine's name, for "Next runs … (MacBook Pro time)". */
   clockName?: string;
-  /** Destination / Agent / Project pills, owned by the workspace container. */
-  runBar?: (state: ScheduleRunBarState) => ReactNode;
-  /** One muted line under the box: what the current run choice means. */
-  runNote?: ReactNode;
+  /** The composer's Agent controls, along the bottom edge of the prompt box. */
+  agentBar?: (state: ScheduleRunBarState) => ReactNode;
+  /** Machine / project / worktree pills under the box, as on the chat landing. */
+  contextBar?: (state: ScheduleRunBarState) => ReactNode;
+  /** One muted line under those pills: what the current choice means. */
+  contextNote?: ReactNode;
+  /** Where each run's prompt goes: its own card, above the trigger. */
+  destination?: (state: ScheduleRunBarState) => ReactNode;
   issues?: readonly ScheduleSaveIssue[];
   saving: boolean;
   error?: string;
@@ -531,14 +537,14 @@ export function ScheduleForm({
           if (resolved.trigger) onSave({ ...value, trigger: resolved.trigger });
         }}
       >
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-2">
           <div
             className={cn(
               'flex flex-col rounded-xl border border-foreground/[0.08] bg-card transition-colors',
               'focus-within:border-foreground/[0.16] dark:border-white/[0.08] dark:bg-foreground/[0.03] dark:focus-within:border-white/[0.16]'
             )}
           >
-            <div className="flex items-center gap-2 px-3 pt-2.5">
+            <div className="flex items-center gap-2 px-3 py-2.5">
               <input
                 ref={titleRef}
                 required
@@ -556,7 +562,8 @@ export function ScheduleForm({
                 <FieldIssueMark messages={[t('schedules.requireName', 'Enter a schedule name.')]} />
               ) : null}
             </div>
-            <div className="flex items-start gap-2 px-3 pb-1 pt-1.5">
+            <div className="mx-3 border-t-[0.5px] border-foreground/[0.10] dark:border-white/[0.10]" />
+            <div className="flex items-start gap-2 px-3 pb-1 pt-2.5">
               <Textarea
                 ref={promptRef}
                 required
@@ -578,17 +585,27 @@ export function ScheduleForm({
                 />
               ) : null}
             </div>
-            {runBar ? (
-              <div className="flex flex-wrap items-center gap-0.5 px-1.5 pb-1.5">
-                {runBar({ revealMissing: attempted })}
+            {agentBar ? (
+              // The composer face: the same controls and the same container
+              // query that drops their labels in a narrow panel.
+              <div className="@container/composer-face flex flex-wrap items-center gap-x-1.5 px-1.5 pb-1.5">
+                {agentBar({ revealMissing: attempted })}
               </div>
             ) : null}
           </div>
-          {runNote ? (
-            <p className="px-3 text-[0.8em] leading-snug text-muted-foreground">{runNote}</p>
+          {contextBar ? (
+            <div className="flex flex-wrap items-center gap-1 px-1">
+              {contextBar({ revealMissing: attempted })}
+            </div>
+          ) : null}
+          {contextNote ? (
+            <p className="px-1.5 text-[0.8em] leading-snug text-muted-foreground">{contextNote}</p>
           ) : null}
         </div>
 
+        {destination ? (
+          <div className={scheduleCardClass}>{destination({ revealMissing: attempted })}</div>
+        ) : null}
         <ScheduleSection
           title={t('schedules.trigger.label', 'Trigger')}
           action={
