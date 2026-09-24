@@ -109,7 +109,7 @@ const styles = stylex.create({
     backgroundColor: colors.trayRaised,
     backgroundImage: sheen.raised,
     color: colors.label,
-    boxShadow: { default: shadow.raised, ':focus-visible': `${shadow.raised}, ${RING}` },
+    boxShadow: { default: shadow.raised, ':focus-visible': `${RING}, ${shadow.raised}` },
   },
 
   labelled: { display: 'flex', alignItems: 'center', gap: space[2] },
@@ -147,7 +147,7 @@ const styles = stylex.create({
     boxShadow: {
       default: shadow.raised,
       ':hover': `${shadow.raised}, ${HOVER_RING}`,
-      ':focus-visible': `${shadow.raised}, ${RING}`,
+      ':focus-visible': `${RING}, ${shadow.raised}`,
     },
     transitionProperty: 'box-shadow, opacity',
     transitionDuration: duration.fast,
@@ -155,9 +155,9 @@ const styles = stylex.create({
   },
   swatchSelected: {
     boxShadow: {
-      default: `${shadow.raised}, ${RING}`,
-      ':hover': `${shadow.raised}, ${RING}`,
-      ':focus-visible': `${shadow.raised}, ${RING}`,
+      default: `${RING}, ${shadow.raised}`,
+      ':hover': `${RING}, ${shadow.raised}`,
+      ':focus-visible': `${RING}, ${shadow.raised}`,
     },
   },
   swatchNone: {

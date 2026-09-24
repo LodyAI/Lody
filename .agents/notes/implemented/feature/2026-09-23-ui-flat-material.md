@@ -299,5 +299,22 @@ progress while the tool runs ("Searching", shimmering), done once it has
 ("Searched").
 
 
+## Rings on top, and the provider dialog's structure
+
+- A focus ring now comes first in every composed box-shadow. It came after the
+  edge, and earlier shadows paint on top: a field's lit lower lip (a 1px light
+  line under it) covered the ring's bottom edge, so the ring read 2px at the
+  sides and 1px below. Buttons' hairline and contact shadow did the same.
+- `AgentConfigDialog`: the wide layout drops the rail's "Choose a type" title —
+  a second heading beside the form's — and puts the search on the form header's
+  row. Testing a runtime path or a custom command is a square button beside the
+  field: its glyph cross-fades between play, spinner, tick and warning, and its
+  tooltip (opening left) says the action at rest and "Ready" once it passed.
+- The optional settings (title generation, custom prompt, environment) were
+  three 12px gray captions that could not hold the lower half of the form. They
+  are one block now: a region card of ruled 40px rows, each naming its setting
+  at the control step with its count and actions at the end and the chevron
+  last, folding open in place.
+
 Related: [token gallery](2026-09-09-ui-token-gallery.md),
 [call-site migration](2026-09-22-ui-radix-callsite-migration.md).

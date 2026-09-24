@@ -115,7 +115,7 @@ const styles = stylex.create({
     color: button.primaryLabel,
     boxShadow: {
       default: button.primaryEdge,
-      ':focus-visible': `${button.primaryEdge}, ${RING}`,
+      ':focus-visible': `${RING}, ${button.primaryEdge}`,
       ':active': 'none',
     },
     transform: { default: 'none', ':active': PRESS.transform },
@@ -129,7 +129,7 @@ const styles = stylex.create({
     color: colors.label,
     boxShadow: {
       default: button.secondaryShadow,
-      ':focus-visible': `${button.secondaryShadow}, ${RING}`,
+      ':focus-visible': `${RING}, ${button.secondaryShadow}`,
       // Pressed flush: the lift goes and the edge stays, sunk by one hair, so
       // a white button on a white card does not vanish under the finger.
       ':active': PRESSED_EDGE,
@@ -150,7 +150,7 @@ const styles = stylex.create({
     color: colors.onDestructive,
     boxShadow: {
       default: button.primaryEdge,
-      ':focus-visible': `${button.primaryEdge}, ${RING}`,
+      ':focus-visible': `${RING}, ${button.primaryEdge}`,
       ':active': 'none',
     },
     transform: { default: 'none', ':active': PRESS.transform },

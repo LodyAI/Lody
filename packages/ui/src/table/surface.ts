@@ -125,7 +125,7 @@ export const tableSurface = stylex.create({
   pressableRow: {
     cursor: 'pointer',
     outlineStyle: 'none',
-    boxShadow: { default: LINE, ':focus-visible': `${LINE}, ${RING}` },
+    boxShadow: { default: LINE, ':focus-visible': `${RING}, ${LINE}` },
   },
   pressableRowLast: {
     boxShadow: { default: 'none', ':focus-visible': RING },

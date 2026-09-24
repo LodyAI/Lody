@@ -55,7 +55,7 @@ const styles = stylex.create({
   optionSelected: {
     backgroundColor: colors.trayRaised,
     backgroundImage: sheen.raised,
-    boxShadow: { default: shadow.raised, ':focus-visible': `${shadow.raised}, ${RING}` },
+    boxShadow: { default: shadow.raised, ':focus-visible': `${RING}, ${shadow.raised}` },
     color: { default: colors.label, ':hover': colors.label },
   },
 });

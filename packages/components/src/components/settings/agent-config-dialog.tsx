@@ -54,6 +54,9 @@ import {
 } from '@/components/shared/acp-selector-options';
 import {
   AlertTriangle,
+  CircleAlert,
+  CircleCheck,
+  CirclePlay,
   ArrowLeft,
   Check,
   ChevronDown,
@@ -208,6 +211,13 @@ const styles = stylex.create({
     color: colors.label,
   },
   search: { position: 'relative', flexShrink: 0, paddingInline: space[2] },
+  /** On the form header's 36px row, so the two columns start on one line. */
+  searchOnHeaderRow: {
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    minHeight: control.large,
+  },
   searchClear: {
     position: 'absolute',
     insetBlockStart: '50%',
@@ -326,6 +336,24 @@ const styles = stylex.create({
   stack: { display: 'flex', flexDirection: 'column', gap: space[3], minWidth: 0 },
   stackTight: { display: 'flex', flexDirection: 'column', gap: space[2], minWidth: 0 },
   actionRow: { display: 'flex', alignItems: 'center', gap: space[2] },
+  /** A field and the one button that checks it, on one row. */
+  inputWithTest: { display: 'flex', alignItems: 'center', gap: space[2], minWidth: 0 },
+  /** Two glyphs in one box, cross-faded: the button changes what it says, not where. */
+  testGlyphs: { position: 'relative', display: 'block', width: '16px', height: '16px' },
+  testGlyph: {
+    position: 'absolute',
+    inset: 0,
+    width: '16px',
+    height: '16px',
+    opacity: 0,
+    transform: 'scale(0.85)',
+    transitionProperty: 'opacity, transform',
+    transitionDuration: duration.regular,
+    transitionTimingFunction: ease.standard,
+  },
+  testGlyphShown: { opacity: 1, transform: 'scale(1)' },
+  testGlyphReady: { color: colors.success },
+  testGlyphError: { color: colors.warning },
   ready: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -458,32 +486,46 @@ const styles = stylex.create({
     color: colors.label,
   },
 
-  /** A group that folds: its name is the trigger, no bar and no box around it. */
-  sectionHead: { display: 'flex', alignItems: 'center', gap: space[1], minHeight: control.small },
+  /** The optional settings: one block of the panel, its rows ruled. */
+  sectionGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    backgroundColor: REGION,
+    borderRadius: radius.medium,
+    cornerShape: corner.shape,
+  },
+  /** One setting of the block; every one but the first is ruled from the last. */
+  sectionItem: {
+    boxShadow: { default: `inset 0 1px 0 ${colors.separator}`, ':first-child': 'none' },
+  },
+  sectionHead: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[1],
+    minHeight: '40px',
+    paddingInlineEnd: space[2],
+  },
   sectionTrigger: {
     display: 'flex',
     flexGrow: 1,
     alignItems: 'center',
-    gap: space[1.5],
+    gap: space[2],
     minWidth: 0,
-    height: control.small,
+    height: '40px',
     margin: 0,
-    paddingInline: 0,
+    paddingInlineStart: space[3],
+    paddingInlineEnd: 0,
     borderWidth: 0,
     borderStyle: 'none',
-    borderRadius: radius.small,
-    cornerShape: corner.shape,
     backgroundColor: 'transparent',
     fontFamily: 'inherit',
-    fontSize: '12px',
-    fontWeight: 400,
+    fontSize: '13px',
+    fontWeight: 500,
     lineHeight: 1.25,
     textAlign: 'start',
-    color: { default: colors.secondaryLabel, ':hover': colors.label },
+    color: colors.label,
     cursor: 'pointer',
-    transitionProperty: 'color',
-    transitionDuration: duration.fast,
-    transitionTimingFunction: ease.standard,
+    outlineStyle: 'none',
   },
   sectionTitle: {
     minWidth: 0,
@@ -493,14 +535,22 @@ const styles = stylex.create({
   },
   sectionCount: {
     marginInlineStart: 'auto',
-    fontSize: '11px',
+    fontSize: '12px',
+    fontWeight: 400,
     color: colors.tertiaryLabel,
     fontVariantNumeric: 'tabular-nums',
   },
-  sectionBody: { display: 'flex', flexDirection: 'column', gap: space[2], paddingTop: space[1.5] },
+  sectionChevron: { flexShrink: 0, color: colors.tertiaryLabel },
+  sectionBody: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: space[2],
+    paddingInline: space[3],
+    paddingBottom: space[3],
+  },
   sectionHint: {
     margin: 0,
-    paddingBlock: space[2],
+    paddingBlock: space[1],
     fontSize: '12px',
     color: colors.secondaryLabel,
   },
@@ -2354,8 +2404,10 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
       aria-label={t('agents.agentTypeList', 'Agent types')}
       {...stylex.props(styles.rail, isNarrowLayout && styles.railNarrow)}
     >
-      <div {...stylex.props(styles.railHeader, isNarrowLayout && styles.railHeaderNarrow)}>
-        {isNarrowLayout && (
+      {/* The wide layout names the rail by its search, on the form header's row:
+          a second title beside the form's read as two headings competing. */}
+      {isNarrowLayout ? (
+        <div {...stylex.props(styles.railHeader, styles.railHeaderNarrow)}>
           <Button
             type="button"
             variant="ghost"
@@ -2366,12 +2418,12 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
           >
             <ArrowLeft {...stylex.props(styles.glyphFill)} />
           </Button>
-        )}
-        <div {...stylex.props(styles.railTitle)}>
-          {t('settings.agent.dialog.chooseType', 'Choose a type')}
+          <div {...stylex.props(styles.railTitle)}>
+            {t('settings.agent.dialog.chooseType', 'Choose a type')}
+          </div>
         </div>
-      </div>
-      <div {...stylex.props(styles.search)}>
+      ) : null}
+      <div {...stylex.props(styles.search, !isNarrowLayout && styles.searchOnHeaderRow)}>
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -2638,44 +2690,30 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 )}
                 icon={<SquareTerminal aria-hidden="true" {...stylex.props(catalog.icon)} />}
               >
-                <Input
-                  id="custom-acp-command"
-                  value={formData.customCommandLine ?? ''}
-                  onChange={(event) =>
-                    setFormData({ ...formData, customCommandLine: event.target.value })
-                  }
-                  placeholder={t(
-                    'settings.agent.dialog.custom.commandPlaceholder',
-                    'npx -y my-acp-agent'
-                  )}
-                  autoComplete="off"
-                  spellCheck={false}
-                />
+                <div {...stylex.props(styles.inputWithTest)}>
+                  <Input
+                    id="custom-acp-command"
+                    value={formData.customCommandLine ?? ''}
+                    onChange={(event) =>
+                      setFormData({ ...formData, customCommandLine: event.target.value })
+                    }
+                    placeholder={t(
+                      'settings.agent.dialog.custom.commandPlaceholder',
+                      'npx -y my-acp-agent'
+                    )}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                  <TestButton
+                    label={t('settings.agent.dialog.custom.test', 'Test command')}
+                    status={
+                      probing ? 'testing' : probeError ? 'error' : customReady ? 'ready' : 'idle'
+                    }
+                    disabled={!parsedCustomAcp || probing}
+                    onClick={() => void runCustomProbe()}
+                  />
+                </div>
               </Field>
-              <div {...stylex.props(styles.actionRow)}>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="small"
-                  disabled={!parsedCustomAcp || probing}
-                  onClick={() => void runCustomProbe()}
-                >
-                  {probing ? (
-                    <Spinner size="small" />
-                  ) : (
-                    <FlaskConical {...stylex.props(catalog.icon)} />
-                  )}
-                  {probing
-                    ? t('settings.agent.dialog.custom.testing', 'Testing…')
-                    : t('settings.agent.dialog.custom.test', 'Test command')}
-                </Button>
-                {customReady && !probing && (
-                  <span {...stylex.props(styles.ready)}>
-                    <Check aria-hidden="true" {...stylex.props(catalog.icon)} />
-                    {t('settings.agent.dialog.ready', 'Ready')}
-                  </span>
-                )}
-              </div>
               <p {...stylex.props(styles.hint)}>
                 {t(
                   'settings.agent.dialog.custom.testHint',
@@ -2696,64 +2734,56 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
                 )}
                 icon={<SquareTerminal aria-hidden="true" {...stylex.props(catalog.icon)} />}
               >
-                <Input
-                  id="builtin-runtime-path"
-                  value={builtinRuntimeOverrideValue}
-                  onChange={(event) => updateBuiltinRuntimeOverride(event.target.value)}
-                  placeholder={
-                    formData.agentType === 'codex'
-                      ? t(
-                          'settings.agent.dialog.runtimeOverride.codexPlaceholder',
-                          '/path/to/codex'
-                        )
-                      : formData.agentType === 'kimi'
+                <div {...stylex.props(styles.inputWithTest)}>
+                  <Input
+                    id="builtin-runtime-path"
+                    value={builtinRuntimeOverrideValue}
+                    onChange={(event) => updateBuiltinRuntimeOverride(event.target.value)}
+                    placeholder={
+                      formData.agentType === 'codex'
                         ? t(
-                            'settings.agent.dialog.runtimeOverride.kimiPlaceholder',
-                            '/path/to/kimi'
+                            'settings.agent.dialog.runtimeOverride.codexPlaceholder',
+                            '/path/to/codex'
                           )
-                        : formData.agentType === 'grok'
+                        : formData.agentType === 'kimi'
                           ? t(
-                              'settings.agent.dialog.runtimeOverride.grokPlaceholder',
-                              '/path/to/grok'
+                              'settings.agent.dialog.runtimeOverride.kimiPlaceholder',
+                              '/path/to/kimi'
                             )
-                          : t(
-                              'settings.agent.dialog.runtimeOverride.claudePlaceholder',
-                              '/path/to/claude'
-                            )
-                  }
-                  autoComplete="off"
-                  spellCheck={false}
-                />
+                          : formData.agentType === 'grok'
+                            ? t(
+                                'settings.agent.dialog.runtimeOverride.grokPlaceholder',
+                                '/path/to/grok'
+                              )
+                            : t(
+                                'settings.agent.dialog.runtimeOverride.claudePlaceholder',
+                                '/path/to/claude'
+                              )
+                    }
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                  <TestButton
+                    label={t('settings.agent.dialog.runtimeOverride.test', 'Test runtime')}
+                    status={
+                      probing
+                        ? 'testing'
+                        : probeError
+                          ? 'error'
+                          : capabilitiesReady
+                            ? 'ready'
+                            : 'idle'
+                    }
+                    disabled={!hasBuiltinRuntimeOverride || probing}
+                    onClick={() => {
+                      setProbeError(null);
+                      setManuallyTested(false);
+                      setVerifiedBuiltinContext(null);
+                      setProbeTick((n) => n + 1);
+                    }}
+                  />
+                </div>
               </Field>
-              <div {...stylex.props(styles.actionRow)}>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="small"
-                  disabled={!hasBuiltinRuntimeOverride || probing}
-                  onClick={() => {
-                    setProbeError(null);
-                    setManuallyTested(false);
-                    setVerifiedBuiltinContext(null);
-                    setProbeTick((n) => n + 1);
-                  }}
-                >
-                  {probing ? (
-                    <Spinner size="small" />
-                  ) : (
-                    <FlaskConical {...stylex.props(catalog.icon)} />
-                  )}
-                  {probing
-                    ? t('settings.agent.dialog.runtimeOverride.testing', 'Testing…')
-                    : t('settings.agent.dialog.runtimeOverride.test', 'Test runtime')}
-                </Button>
-                {capabilitiesReady && !probing && (
-                  <span {...stylex.props(styles.ready)}>
-                    <Check aria-hidden="true" {...stylex.props(catalog.icon)} />
-                    {t('settings.agent.dialog.ready', 'Ready')}
-                  </span>
-                )}
-              </div>
             </div>
           ) : null}
 
@@ -2888,113 +2918,118 @@ export function AgentConfigDialog(props: AgentConfigDialogProps) {
             </div>
           )}
 
-          {!isPreset &&
-            !acpProvidesSessionTitle &&
-            (capabilitiesReady ? titleSelectors.length > 0 : true) && (
-              <Section
-                title={t('settings.agent.dialog.section.titleGen', 'Title generation')}
-                defaultOpen
-                disabled={!capabilitiesReady}
-                disabledHint={
-                  probing
-                    ? t('settings.agent.dialog.probing', 'Probing…')
-                    : t(
-                        'settings.agent.dialog.testToRefreshCapabilities',
-                        'Click Test to refresh available options.'
-                      )
-                }
-              >
-                <TitleGenerationFields
-                  selectors={titleSelectors}
-                  values={formData.titleGeneration?.configOptionValues}
-                  onChange={(configId, value) => {
-                    const nextValues = {
-                      ...formData.titleGeneration?.configOptionValues,
-                      [configId]: value,
-                    };
-                    setFormData({
-                      ...formData,
-                      titleGeneration: {
-                        ...formData.titleGeneration,
-                        configOptionValues: nextValues,
-                      },
-                    });
-                  }}
-                />
-              </Section>
-            )}
-
-          <Section
-            title={t('settings.agent.dialog.section.prompt', 'Custom prompt')}
-            action={
-              formData.prompt.trim().length > 0 ? (
-                <InlineCopyButton value={formData.prompt} ariaLabel={t('common.copy', 'Copy')} />
-              ) : null
-            }
-          >
-            <Textarea
-              value={formData.prompt}
-              onChange={(event) => setFormData({ ...formData, prompt: event.target.value })}
-              placeholder={t(
-                'agents.customPromptPlaceholder',
-                'Optional instructions to include before task details'
+          {/* The optional settings are one block — a card of ruled rows, each
+              naming its setting and folding open in place — so they hold the
+              lower half of the form as one object rather than three captions. */}
+          <div {...stylex.props(styles.sectionGroup)}>
+            {!isPreset &&
+              !acpProvidesSessionTitle &&
+              (capabilitiesReady ? titleSelectors.length > 0 : true) && (
+                <Section
+                  title={t('settings.agent.dialog.section.titleGen', 'Title generation')}
+                  defaultOpen
+                  disabled={!capabilitiesReady}
+                  disabledHint={
+                    probing
+                      ? t('settings.agent.dialog.probing', 'Probing…')
+                      : t(
+                          'settings.agent.dialog.testToRefreshCapabilities',
+                          'Click Test to refresh available options.'
+                        )
+                  }
+                >
+                  <TitleGenerationFields
+                    selectors={titleSelectors}
+                    values={formData.titleGeneration?.configOptionValues}
+                    onChange={(configId, value) => {
+                      const nextValues = {
+                        ...formData.titleGeneration?.configOptionValues,
+                        [configId]: value,
+                      };
+                      setFormData({
+                        ...formData,
+                        titleGeneration: {
+                          ...formData.titleGeneration,
+                          configOptionValues: nextValues,
+                        },
+                      });
+                    }}
+                  />
+                </Section>
               )}
-              rows={3}
-            />
-          </Section>
 
-          <Section
-            title={
-              activePreset || isDeepSeekBuiltin
-                ? t(
-                    'settings.agent.dialog.section.envAdditional',
-                    'Additional environment variables'
-                  )
-                : t('settings.agent.dialog.section.env', 'Environment variables')
-            }
-            count={envCount}
-            action={
-              envCount > 0 ? (
-                <InlineCopyButton
-                  value={envVarsToText(additionalEnv)}
-                  ariaLabel={t('common.copy', 'Copy')}
-                />
-              ) : null
-            }
-          >
-            {activePreset ? (
-              <p {...stylex.props(styles.note)}>
-                {t(
-                  'settings.agent.dialog.presetEnvHint',
-                  'Preset variables (shown above) are injected automatically and cannot be overridden here.'
+            <Section
+              title={t('settings.agent.dialog.section.prompt', 'Custom prompt')}
+              action={
+                formData.prompt.trim().length > 0 ? (
+                  <InlineCopyButton value={formData.prompt} ariaLabel={t('common.copy', 'Copy')} />
+                ) : null
+              }
+            >
+              <Textarea
+                value={formData.prompt}
+                onChange={(event) => setFormData({ ...formData, prompt: event.target.value })}
+                placeholder={t(
+                  'agents.customPromptPlaceholder',
+                  'Optional instructions to include before task details'
                 )}
-              </p>
-            ) : null}
-            {!activePreset && isDeepSeekBuiltin ? (
-              <p {...stylex.props(styles.note)}>
-                {t(
-                  'settings.agent.dialog.deepseek.envHint',
-                  'DEEPSEEK_API_KEY and DEEPSEEK_BASE_URL are set above and cannot be overridden here.'
-                )}
-              </p>
-            ) : null}
-            <EnvVarsTextarea
-              value={additionalEnv}
-              onChange={(env) => {
-                if (!isDeepSeekBuiltin) {
-                  updateEnvironment(env);
-                  return;
-                }
-                const next = omitDeepSeekProtectedEnv(env);
-                if (formData.env[DEEPSEEK_HARNESS_API_KEY_ENV]) {
-                  next[DEEPSEEK_HARNESS_API_KEY_ENV] = formData.env[DEEPSEEK_HARNESS_API_KEY_ENV];
-                }
-                updateEnvironment(next);
-              }}
-              showLabel={false}
-              rows={5}
-            />
-          </Section>
+                rows={3}
+              />
+            </Section>
+
+            <Section
+              title={
+                activePreset || isDeepSeekBuiltin
+                  ? t(
+                      'settings.agent.dialog.section.envAdditional',
+                      'Additional environment variables'
+                    )
+                  : t('settings.agent.dialog.section.env', 'Environment variables')
+              }
+              count={envCount}
+              action={
+                envCount > 0 ? (
+                  <InlineCopyButton
+                    value={envVarsToText(additionalEnv)}
+                    ariaLabel={t('common.copy', 'Copy')}
+                  />
+                ) : null
+              }
+            >
+              {activePreset ? (
+                <p {...stylex.props(styles.note)}>
+                  {t(
+                    'settings.agent.dialog.presetEnvHint',
+                    'Preset variables (shown above) are injected automatically and cannot be overridden here.'
+                  )}
+                </p>
+              ) : null}
+              {!activePreset && isDeepSeekBuiltin ? (
+                <p {...stylex.props(styles.note)}>
+                  {t(
+                    'settings.agent.dialog.deepseek.envHint',
+                    'DEEPSEEK_API_KEY and DEEPSEEK_BASE_URL are set above and cannot be overridden here.'
+                  )}
+                </p>
+              ) : null}
+              <EnvVarsTextarea
+                value={additionalEnv}
+                onChange={(env) => {
+                  if (!isDeepSeekBuiltin) {
+                    updateEnvironment(env);
+                    return;
+                  }
+                  const next = omitDeepSeekProtectedEnv(env);
+                  if (formData.env[DEEPSEEK_HARNESS_API_KEY_ENV]) {
+                    next[DEEPSEEK_HARNESS_API_KEY_ENV] = formData.env[DEEPSEEK_HARNESS_API_KEY_ENV];
+                  }
+                  updateEnvironment(next);
+                }}
+                showLabel={false}
+                rows={5}
+              />
+            </Section>
+          </div>
         </div>
       </div>
 
@@ -3646,6 +3681,58 @@ function PresetPanel({
   );
 }
 
+/**
+ * The one button that checks the field beside it. At rest it says what it will
+ * do (its tooltip, opening away from the field); while it works it spins; once
+ * the check passed it is a tick; a failure is a warning. The glyphs cross-fade
+ * in one box, so the button changes what it says, not where it is.
+ */
+function TestButton({
+  label,
+  status,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  status: 'idle' | 'testing' | 'ready' | 'error';
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  const { t } = useTranslation();
+  // The tooltip says what the glyph means now: the action at rest, the result
+  // once there is one. Pressing it again always re-runs the check.
+  const said = status === 'ready' ? t('settings.agent.dialog.ready', 'Ready') : label;
+  const glyph = (shown: boolean, extra?: false | stylex.StyleXStyles) =>
+    stylex.props(styles.testGlyph, shown && styles.testGlyphShown, extra);
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger
+        render={
+          <Button
+            type="button"
+            variant="secondary"
+            size="medium"
+            icon
+            aria-label={said}
+            disabled={disabled}
+            onClick={onClick}
+          />
+        }
+      >
+        <span aria-hidden="true" {...stylex.props(styles.testGlyphs)}>
+          <CirclePlay {...glyph(status === 'idle')} />
+          <span {...glyph(status === 'testing')}>
+            <Spinner size="small" />
+          </span>
+          <CircleCheck {...glyph(status === 'ready', styles.testGlyphReady)} />
+          <CircleAlert {...glyph(status === 'error', styles.testGlyphError)} />
+        </span>
+      </Tooltip.Trigger>
+      <Tooltip.Content side="left">{said}</Tooltip.Content>
+    </Tooltip.Root>
+  );
+}
+
 function Section({
   title,
   count,
@@ -3665,27 +3752,34 @@ function Section({
 }) {
   const [open, setOpen] = useState(!!defaultOpen);
   return (
-    <Collapsible.Root open={open} onOpenChange={setOpen}>
-      <div {...stylex.props(styles.sectionHead)}>
-        <Collapsible.Trigger
-          render={<button type="button" {...stylex.props(styles.sectionTrigger)} />}
-        >
+    <div {...stylex.props(styles.sectionItem)}>
+      <Collapsible.Root open={open} onOpenChange={setOpen}>
+        <div {...stylex.props(styles.sectionHead)}>
+          <Collapsible.Trigger
+            render={<button type="button" {...stylex.props(styles.sectionTrigger)} />}
+          >
+            <span {...stylex.props(styles.sectionTitle)}>{title}</span>
+            {typeof count === 'number' && count > 0 ? (
+              <span {...stylex.props(styles.sectionCount)}>{count}</span>
+            ) : null}
+          </Collapsible.Trigger>
+          {action}
           <ChevronDown
-            {...stylex.props(styles.disclosureIcon, open && styles.disclosureIconOpen)}
+            aria-hidden="true"
+            {...stylex.props(
+              styles.disclosureIcon,
+              styles.sectionChevron,
+              open && styles.disclosureIconOpen
+            )}
           />
-          <span {...stylex.props(styles.sectionTitle)}>{title}</span>
-          {typeof count === 'number' && count > 0 ? (
-            <span {...stylex.props(styles.sectionCount)}>{count}</span>
-          ) : null}
-        </Collapsible.Trigger>
-        {action}
-      </div>
-      <Collapsible.Panel>
-        <div {...stylex.props(styles.sectionBody)}>
-          {disabled ? <p {...stylex.props(styles.sectionHint)}>{disabledHint}</p> : children}
         </div>
-      </Collapsible.Panel>
-    </Collapsible.Root>
+        <Collapsible.Panel>
+          <div {...stylex.props(styles.sectionBody)}>
+            {disabled ? <p {...stylex.props(styles.sectionHint)}>{disabledHint}</p> : children}
+          </div>
+        </Collapsible.Panel>
+      </Collapsible.Root>
+    </div>
   );
 }
 

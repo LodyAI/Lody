@@ -87,7 +87,7 @@ const styles = stylex.create({
     transitionDuration: duration.fast,
     transitionTimingFunction: ease.standard,
   },
-  projectRowRuled: { boxShadow: { default: LINE, ':focus-visible': `${LINE}, ${RING}` } },
+  projectRowRuled: { boxShadow: { default: LINE, ':focus-visible': `${RING}, ${LINE}` } },
   projectRowSelected: {
     backgroundColor: { default: colors.selectedFill, ':hover': colors.selectedFill },
   },
