@@ -1,0 +1,28 @@
+diff --git a/lib/index.cjs b/lib/index.cjs
+index 3e58957730be864e8e4e5fd7ecf0b3fa2f94f8e4..ad0039dfb071153b6d34cb5e108a42bbf11f75aa 100644
+--- a/lib/index.cjs
++++ b/lib/index.cjs
+@@ -266,7 +266,8 @@ const n = null, {min: r, max: s, abs: i, floor: l} = Math, c = (e, t, o) => r(o,
+                         e[l] = t;
+                     });
+                 }
+-                f[i] = R(e.C() + t, s), o && u();
++                // A second correction in the same frame must add to the first: e.C() is the last scroll event's offset.
++                { const jumpBase = e.C(), jumpSum = f.__virtuaJumpBase === jumpBase && R(f[i], s) === f.__virtuaJumpAt ? f.__virtuaJumpSum + t : t; f[i] = R(jumpBase + jumpSum, s), f.__virtuaJumpBase = jumpBase, f.__virtuaJumpSum = jumpSum, f.__virtuaJumpAt = R(f[i], s); } o && u();
+             }), r[1](!0);
+         },
+         v() {
+diff --git a/lib/index.js b/lib/index.js
+index 76feb0ffe34ebaa48d410ce9c9ea0c93154ce907..367c2e4e0ee555b5481ed169e9a09a2cb2da1514 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -270,7 +270,8 @@ const d = null, {min: a, max: h, abs: p, floor: g} = Math, v = (e, t, o) => a(o,
+                         e[l] = t;
+                     });
+                 }
+-                u[s] = B(e.C() + t, i), o && f();
++                // A second correction in the same frame must add to the first: e.C() is the last scroll event's offset.
++                { const jumpBase = e.C(), jumpSum = u.__virtuaJumpBase === jumpBase && B(u[s], i) === u.__virtuaJumpAt ? u.__virtuaJumpSum + t : t; u[s] = B(jumpBase + jumpSum, i), u.__virtuaJumpBase = jumpBase, u.__virtuaJumpSum = jumpSum, u.__virtuaJumpAt = B(u[s], i); } o && f();
+             }), r[1](!0);
+         },
+         v() {
