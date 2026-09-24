@@ -30,7 +30,9 @@ export type WorkingGridProps = Omit<ComponentPropsWithoutRef<'span'>, 'children'
   superellipse?: number;
   brightness?: WorkingGridBrightness;
   scale?: WorkingGridScale;
-  /** Smallest tile size in a double trough, as a fraction of the tile (0–1). */
+  /** Largest a tile gets, at a double crest, as a fraction of its cell (0–1). */
+  maxScale?: number;
+  /** Smallest tile size in a double trough, as a fraction of its cell (0–1). */
   minScale?: number;
   /** Gap between tiles as a fraction of the tile edge. */
   gap?: number;
@@ -59,17 +61,19 @@ const SINE = 'cubic-bezier(0.37, 0, 0.63, 1)';
  * Keyframes for one wave layer: crest → trough → crest. Each tile nests two
  * layers, one per wave, whose scales and opacities multiply; the per-layer
  * range is the square root of the whole range so a double trough lands exactly
- * on `minScale` and the brightness floor.
+ * on `minScale` and the brightness floor. The tile box is already drawn at
+ * `maxScale`, so the layers scale relative to that.
  */
 function layerKeyframes(
   scale: WorkingGridScale,
   brightness: WorkingGridBrightness,
-  minScale: number
+  minScale: number,
+  maxScale: number
 ): Keyframe[] | null {
   const animateScale = scale !== 'none';
   const animateOpacity = brightness !== 'steady';
   if (!animateScale && !animateOpacity) return null;
-  const low = Math.sqrt(Math.min(Math.max(minScale, 0), 1));
+  const low = Math.sqrt(Math.min(Math.max(minScale / maxScale, 0), 1));
   const dim = Math.sqrt(BRIGHTNESS_FLOOR[brightness]);
   const frame = (atCrest: boolean): Keyframe => ({
     ...(animateScale ? { transform: `scale(${atCrest ? 1 : low})` } : {}),
@@ -112,6 +116,7 @@ export function WorkingGrid({
   superellipse,
   brightness = 'wave',
   scale = 'center',
+  maxScale = 0.9,
   minScale = 0.3,
   gap = 0.18,
   wavelength = 1.2,
@@ -122,14 +127,19 @@ export function WorkingGrid({
   ...props
 }: WorkingGridProps) {
   const rootRef = useRef<HTMLSpanElement>(null);
-  const tile = size / (3 + 2 * gap);
-  const pitch = tile * (1 + gap);
+  const cell = size / (3 + 2 * gap);
+  const pitch = cell * (1 + gap);
+  // Tiles are drawn at maxScale inside their cell, centred (or bottom-aligned when
+  // scaling from the bottom), so the grid's footprint and spacing stay fixed.
+  const tile = cell * Math.min(Math.max(maxScale, 0), 1);
+  const inset = (cell - tile) / 2;
+  const insetTop = scale === 'bottom' ? cell - tile : inset;
 
   useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root || typeof root.animate !== 'function') return undefined;
     if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return undefined;
-    const keyframes = layerKeyframes(scale, brightness, minScale);
+    const keyframes = layerKeyframes(scale, brightness, minScale, maxScale);
     if (!keyframes) return undefined;
 
     const rect = root.getBoundingClientRect();
@@ -154,7 +164,7 @@ export function WorkingGrid({
       });
     }
     return () => animations.forEach((animation) => animation.cancel());
-  }, [size, brightness, scale, minScale, gap, wavelength, direction, rowPitch]);
+  }, [size, brightness, scale, minScale, maxScale, gap, wavelength, direction, rowPitch]);
 
   const shape: CSSProperties =
     superellipse != null
@@ -183,8 +193,8 @@ export function WorkingGrid({
             data-col={col}
             className="absolute block"
             style={{
-              left: col * pitch,
-              top: row * pitch,
+              left: col * pitch + inset,
+              top: row * pitch + insetTop,
               width: tile,
               height: tile,
               transformOrigin: origin,

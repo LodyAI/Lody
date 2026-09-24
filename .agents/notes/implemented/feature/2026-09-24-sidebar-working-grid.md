@@ -39,8 +39,8 @@ The kept form and its defaults:
 - 3×3 tiles, corner radius 40% of the tile, gap 0.18 of the tile, 14px overall.
 - Two plane waves, 3.2 and 4.4 cells long (× wavelength 1.2), periods 1.9s and
   2.7s (19:27, so the pattern repeats only after ~51s), travelling down-right and
-  down-left. Tiles scale from their centre to a minimum of 0.3 and brightness
-  follows the wave down to 0.16 opacity.
+  down-left. Tiles are at most 0.9 of their cell and scale from their centre
+  down to 0.3 of it; brightness follows the wave down to 0.16 opacity.
 - One sea for the page: a tile's phase depends only on its page position. In a
   list the sea between rows is skipped ("stitched", `rowPitch = 28`): the 14px
   mark covers half of each 28px row, and without stitching a wave moves more than
