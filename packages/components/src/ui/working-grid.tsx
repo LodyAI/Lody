@@ -264,7 +264,7 @@ export function WorkingGrid({
       : loopKeyframes(scale === 'none' ? null : Math.sqrt(clamp01(relativeMin)), opacityLow);
     const innerFrames = vanishing ? vanishingKeyframes(relativeMin, opacityLow) : outerFrames;
     if (outerFrames && innerFrames) {
-      const waves = workingGridWaves(direction);
+      const crossing = workingGridWaves(direction);
       for (const outer of root.querySelectorAll<HTMLElement>('[data-working-grid-tile]')) {
         const inner = outer.firstElementChild;
         if (!(inner instanceof HTMLElement)) continue;
@@ -274,7 +274,7 @@ export function WorkingGrid({
           Number(outer.dataset.row)
         );
         [outer, inner].forEach((layer, index) => {
-          const wave = waves[index];
+          const wave = crossing[index];
           play(
             layer,
             index === 0 ? outerFrames : innerFrames,
