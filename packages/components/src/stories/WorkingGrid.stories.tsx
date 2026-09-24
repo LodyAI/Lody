@@ -16,7 +16,7 @@ const meta = {
     brightness: 'wave',
     scale: 'center',
     minScale: 0.3,
-    gap: 0.25,
+    gap: 0.35,
     wavelength: 1.5,
     direction: 'across',
     rowPitch: 28,
