@@ -159,13 +159,21 @@ describe('WorkingGrid', () => {
     expect(recorded.every((animation) => animation.cancelled)).toBe(true);
   });
 
-  it('bottoms out a double trough at minScale', () => {
-    render(<WorkingGrid minScale={0.25} brightness="steady" />);
+  it('spans exactly minScale to maxScale of the cell', () => {
+    const size = 30;
+    const gap = 0.5;
+    render(
+      <WorkingGrid size={size} gap={gap} minScale={0.25} maxScale={0.8} brightness="steady" />
+    );
+    const cell = size / (3 + 2 * gap);
+    const tile = container.querySelector<HTMLElement>('[data-working-grid-tile]')!;
+    // At a double crest both layers sit at scale 1: the tile is maxScale of its cell.
+    expect(parseFloat(tile.style.width)).toBeCloseTo(cell * 0.8, 9);
     const scales = recorded.map((animation) =>
       Number(/scale\(([\d.]+)\)/.exec(String(animation.keyframes[1]!.transform))![1])
     );
-    // The two stacked layers multiply.
-    expect(scales[0]! * scales[1]!).toBeCloseTo(0.25, 9);
+    // At a double trough the two stacked layers multiply down to minScale of the cell.
+    expect(parseFloat(tile.style.width) * scales[0]! * scales[1]!).toBeCloseTo(cell * 0.25, 9);
     expect(recorded.every((a) => a.keyframes.every((frame) => !('opacity' in frame)))).toBe(true);
   });
 
