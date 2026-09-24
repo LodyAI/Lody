@@ -7,7 +7,7 @@ import { PromptShortcutError, type PromptShortcutScope } from '@lody/shared/prom
 import { capturePostHogEvent } from '@/lib/posthog-analytics';
 import { getPromptShortcutAnalyticsProperties } from '@/lib/prompt-shortcut-analytics';
 import { usePromptShortcuts } from '../../providers/prompt-shortcut-provider';
-import type { MentionCategorySources } from './mention-registry';
+import { isCommandMenuTrigger, type MentionCategorySources } from './mention-registry';
 import {
   selectPromptShortcutCandidates,
   shortcutAvailabilityMessage,
@@ -86,7 +86,9 @@ export function useShortcutMentionSource(
                   clear();
                   if (result && !request.signal.aborted) {
                     capturePostHogEvent(postHog, 'prompt_shortcut/invoked', {
-                      source: request.text[request.start] === '/' ? 'slash_menu' : 'mention_menu',
+                      source: isCommandMenuTrigger(request.text[request.start] ?? '')
+                        ? 'slash_menu'
+                        : 'mention_menu',
                       ...getPromptShortcutAnalyticsProperties(entry, result.mentions.length),
                     });
                   }
