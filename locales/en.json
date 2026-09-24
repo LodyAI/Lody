@@ -4116,5 +4116,6 @@
   "sessions.permission.sendFailed": "Your answer didn't reach the agent. Try again.",
   "sessions.permission.connecting": "Connecting to the workspace…",
   "sessions.permission.waitingInline": "Waiting for your answer",
-  "sessions.permission.moreAnswers": "More answers"
+  "sessions.permission.moreAnswers": "More answers",
+  "workspace.projects.thisMachine": "This machine"
 }
