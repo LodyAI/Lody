@@ -1000,7 +1000,9 @@ const UpdatedItemRow = memo(function UpdatedItemRow({
                   <SessionRowWorktreeIndicator
                     isWorktree={item.kind === 'local' && item.isWorktree}
                   />
-                  {showPr ? <SessionPrIcon prStatus={prStatus} prCiState={item.prCiState} /> : null}
+                  {showPr ? (
+                    <SessionPrIcon compact prStatus={prStatus} prCiState={item.prCiState} />
+                  ) : null}
                 </span>
               ) : undefined
             }

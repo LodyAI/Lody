@@ -180,8 +180,9 @@ function hasSessionRowStatus({
 
 /**
  * ③ The PR status icon shown in the final slot (colored, non-interactive —
- * opening the PR is handled by the row context menu + info card). Sized to match
- * the Archive button that replaces it on hover.
+ * opening the PR is handled by the row context menu + info card). Sidebar rows
+ * pass `compact` so the mark stays below the title's weight; the info bar and
+ * mobile row keep the full 14px size.
  *
  * The mobile conversation row (`mobile/mobile-project-screen.tsx`) renders this
  * same component at the end of its own metric cluster, so PR status tone and the
@@ -190,10 +191,13 @@ function hasSessionRowStatus({
 export function SessionPrIcon({
   prStatus,
   prCiState,
+  compact = false,
   className,
 }: {
   prStatus: PrStatus;
   prCiState?: SessionPullRequestCiState | null;
+  /** Sidebar rows: a 12px mark (14px with a CI verdict) so status stays secondary to the title. */
+  compact?: boolean;
   className?: string;
 }) {
   const meta = PR_STATUS_META[prStatus] ?? PR_STATUS_META.open;
@@ -224,13 +228,22 @@ export function SessionPrIcon({
         VerdictIcon={VerdictIcon}
         baseToneClassName={meta.iconColorClassName}
         verdict={verdict}
-        className={cn(prStatus === 'merged' && 'translate-x-px', className)}
+        className={cn(
+          compact && 'h-3.5 w-3.5',
+          prStatus === 'merged' && 'translate-x-px',
+          className
+        )}
       />
     );
   }
   return (
     <BaseIcon
-      className={cn('h-3.5 w-3.5 shrink-0', meta.iconColorClassName, className)}
+      className={cn(
+        compact ? 'h-3 w-3' : 'h-3.5 w-3.5',
+        'shrink-0',
+        meta.iconColorClassName,
+        className
+      )}
       strokeWidth={2.25}
       aria-hidden="true"
     />

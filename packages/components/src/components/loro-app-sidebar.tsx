@@ -758,7 +758,9 @@ const LocalProjectSessionItem = memo(function LocalProjectSessionItem({
             showPr || showWorktreeIcon ? (
               <span className="flex items-center gap-1.5">
                 <SessionRowWorktreeIndicator isWorktree={showWorktreeIcon} />
-                {showPr ? <SessionPrIcon prStatus={prStatus} prCiState={prInfo.ciState} /> : null}
+                {showPr ? (
+                  <SessionPrIcon compact prStatus={prStatus} prCiState={prInfo.ciState} />
+                ) : null}
               </span>
             ) : undefined
           }

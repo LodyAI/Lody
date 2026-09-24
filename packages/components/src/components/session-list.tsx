@@ -830,7 +830,9 @@ const SessionGroupRow = memo(function SessionGroupRow({
                   />
                 ) : null}
                 {showMergeablePill ? <SessionMergeablePill /> : null}
-                {hasPr ? <SessionPrIcon prStatus={prStatus} prCiState={session.prCiState} /> : null}
+                {hasPr ? (
+                  <SessionPrIcon compact prStatus={prStatus} prCiState={session.prCiState} />
+                ) : null}
               </span>
             ) : undefined
           }

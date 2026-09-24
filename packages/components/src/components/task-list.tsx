@@ -879,7 +879,11 @@ const TaskGroupSection = memo(function TaskGroupSection({
                             ) : null}
                             {showMergeablePill ? <SessionMergeablePill /> : null}
                             {hasPr ? (
-                              <SessionPrIcon prStatus={prStatus} prCiState={task.prCiState} />
+                              <SessionPrIcon
+                                compact
+                                prStatus={prStatus}
+                                prCiState={task.prCiState}
+                              />
                             ) : null}
                             {task.sharing ? <SessionSharingIndicator state={task.sharing} /> : null}
                           </span>
