@@ -7,7 +7,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import * as stylex from '@stylexjs/stylex';
-import { ChevronLeft, ChevronRight, CircleStop } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, CircleStop } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '@lody/ui/button';
 import { Spinner } from '@lody/ui/spinner';
@@ -24,6 +24,7 @@ import {
   type SessionId,
   type SessionStatus,
 } from '@lody/shared';
+import { Menu } from '@/ui/menu';
 import { ScrollArea } from '@/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { withClassName } from '@/lib/stylex';
@@ -210,20 +211,20 @@ const styles = stylex.create({
   statusError: { color: colors.destructive },
 
   /**
-   * The answers: one column of small raised buttons, every answer the same
-   * kind of object in one place, in the provider's order. Their words read
-   * from the start like a list; the suggestion is the primary one.
+   * The answers: one row at the end, one split button per kind of answer —
+   * refuse, then allow — each showing its one-time answer, with the answers
+   * that change what happens from now on ("don't ask again", "block this
+   * host") in its menu, where a provider's long sentence reads naturally.
    */
-  answers: { display: 'flex', flexDirection: 'column', gap: space[1], paddingTop: space[1] },
-  answer: { width: '100%' },
-  answerLabel: {
-    flexGrow: 1,
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    textAlign: 'start',
+  footer: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: space[2],
+    paddingTop: space[1],
   },
+  split: { display: 'inline-flex', alignItems: 'center', gap: '2px', minWidth: 0 },
 
   queueStrip: {
     display: 'flex',
@@ -270,9 +271,10 @@ export interface PermissionPromptProps {
 
 /**
  * One permission request at the composer's scale: the question and why, what
- * it is about, and the answers as one column of small raised buttons in the
- * provider's order, the suggestion primary. The answers are the provider's own
- * words, never rewritten.
+ * it is about, and one row of answers at the end — a split button for refusing
+ * and one for allowing, each showing its one-time answer (the suggestion
+ * primary) with the standing answers in its menu. The answers are the
+ * provider's own words, never rewritten.
  *
  * Keyboard: the arrows walk the answers starting from the suggested one, Enter
  * or Space presses the one focused, and Escape refuses once. Enter on the card
@@ -304,7 +306,34 @@ export function PermissionPrompt({
   const dismissOptionId = resolveDismissOptionId(permission.options);
   const disabled = !isReady || sendingOptionId !== null;
 
-  const answers = permission.options;
+  // Two families of answer, refuse and allow (an unknown kind keeps the allow
+  // family's company: it is an answer, not a refusal). Each shows one answer —
+  // the suggestion if it is in the family, else its one-time answer — and keeps
+  // the rest behind its chevron, in the provider's order.
+  const families = useMemo(() => {
+    const build = (members: PermissionOption[], onceTone: 'allow' | 'reject') => {
+      if (members.length === 0) return null;
+      const main =
+        members.find((option) => option.optionId === suggestedOptionId) ??
+        members.find((option) => resolvePermissionOptionTone(option) === onceTone) ??
+        members[0]!;
+      return { main, more: members.filter((option) => option !== main) };
+    };
+    const refuse = permission.options.filter((option) => {
+      const tone = resolvePermissionOptionTone(option);
+      return tone === 'reject' || tone === 'rejectAlways';
+    });
+    const allow = permission.options.filter((option) => !refuse.includes(option));
+    return [build(refuse, 'reject'), build(allow, 'allow')].filter(
+      (family): family is { main: PermissionOption; more: PermissionOption[] } => family !== null
+    );
+  }, [permission.options, suggestedOptionId]);
+  const answers = families.map((family) => family.main);
+  const sendingFamily = families.find(
+    (family) =>
+      family.main.optionId === sendingOptionId ||
+      family.more.some((option) => option.optionId === sendingOptionId)
+  );
 
   useEffect(() => {
     if (!autoFocus) return;
@@ -337,8 +366,14 @@ export function PermissionPrompt({
       (option) => answerRefs.current.get(option.optionId) === document.activeElement
     );
     if (currentIndex === -1) {
-      // The first step lands on the suggestion, whichever arrow it was.
-      focusAnswer(suggestedOptionId);
+      // The first step lands on the suggestion, whichever arrow it was: its
+      // family's shown answer, even when the suggestion itself is in a menu.
+      const suggestedFamily = families.find(
+        (family) =>
+          family.main.optionId === suggestedOptionId ||
+          family.more.some((option) => option.optionId === suggestedOptionId)
+      );
+      focusAnswer(suggestedFamily?.main.optionId ?? answers[answers.length - 1]?.optionId);
       return;
     }
     const step = forward ? 1 : -1;
@@ -346,28 +381,56 @@ export function PermissionPrompt({
     focusAnswer(next?.optionId);
   };
 
-  const renderAnswer = (option: PermissionOption) => {
-    const sending = option.optionId === sendingOptionId;
-    const description = resolvePermissionOptionDescription(option);
+  const renderFamily = (family: { main: PermissionOption; more: PermissionOption[] }) => {
+    const { main, more } = family;
+    const description = resolvePermissionOptionDescription(main);
     return (
-      <Button
-        key={option.optionId}
-        ref={(node: HTMLButtonElement | null) => {
-          if (node) answerRefs.current.set(option.optionId, node);
-          else answerRefs.current.delete(option.optionId);
-        }}
-        variant={option.optionId === suggestedOptionId ? 'primary' : 'secondary'}
-        size="small"
-        disabled={disabled}
-        title={description ?? option.name}
-        aria-keyshortcuts={option.optionId === dismissOptionId ? 'Escape' : undefined}
-        data-tone={resolvePermissionOptionTone(option)}
-        onClick={() => onSelect(option.optionId)}
-        {...stylex.props(styles.answer)}
-      >
-        <span {...stylex.props(styles.answerLabel)}>{option.name}</span>
-        {sending ? <Spinner size="small" /> : null}
-      </Button>
+      <div key={main.optionId} {...stylex.props(styles.split)}>
+        <Button
+          ref={(node: HTMLButtonElement | null) => {
+            if (node) answerRefs.current.set(main.optionId, node);
+            else answerRefs.current.delete(main.optionId);
+          }}
+          variant={main.optionId === suggestedOptionId ? 'primary' : 'secondary'}
+          size="small"
+          disabled={disabled}
+          title={description ?? undefined}
+          aria-keyshortcuts={main.optionId === dismissOptionId ? 'Escape' : undefined}
+          data-tone={resolvePermissionOptionTone(main)}
+          onClick={() => onSelect(main.optionId)}
+        >
+          {sendingFamily === family ? <Spinner size="small" /> : null}
+          {main.name}
+        </Button>
+        {more.length > 0 ? (
+          <Menu.Root>
+            <Menu.Trigger
+              render={
+                <Button
+                  variant={main.optionId === suggestedOptionId ? 'primary' : 'secondary'}
+                  size="small"
+                  icon
+                  disabled={disabled}
+                  aria-label={t('sessions.permission.moreAnswers', 'More answers')}
+                />
+              }
+            >
+              <ChevronDown aria-hidden="true" />
+            </Menu.Trigger>
+            <Menu.Content align="end">
+              {more.map((option) => (
+                <Menu.Item
+                  key={option.optionId}
+                  data-tone={resolvePermissionOptionTone(option)}
+                  onClick={() => onSelect(option.optionId)}
+                >
+                  {option.name}
+                </Menu.Item>
+              ))}
+            </Menu.Content>
+          </Menu.Root>
+        ) : null}
+      </div>
     );
   };
 
@@ -437,7 +500,7 @@ export function PermissionPrompt({
         </p>
       ) : null}
 
-      <div {...stylex.props(styles.answers)}>{answers.map(renderAnswer)}</div>
+      <div {...stylex.props(styles.footer)}>{families.map(renderFamily)}</div>
     </div>
   );
 }

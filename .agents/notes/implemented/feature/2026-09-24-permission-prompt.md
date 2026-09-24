@@ -95,6 +95,17 @@ secondary buttons in the provider's order, labels from the start, the
 suggestion primary: every answer the same object in one place. The conversation
 steps lost their icons in the same pass — the verb says what kind of step it is.
 
+## Fifth review: split buttons
+
+A column of full-width buttons still read as a stack of bars. The answers now
+follow the pattern the agent tools converged on for inline approvals (VS Code
+Copilot, Zed, Cursor): one row at the end with a split button per family —
+refuse, then allow. Each shows its one-time answer, the suggestion primary, and
+its chevron menu holds the standing answers ("Yes, and don't ask again for …",
+"No, and block this host …"), where a long provider sentence reads naturally.
+The row stays compact whatever the provider sends; the arrows walk the two
+shown answers and Escape still refuses once.
+
 ## Alternatives not taken
 
 - **Buttons in a row** (Allow / Always / Deny). Provider names are sentences; a

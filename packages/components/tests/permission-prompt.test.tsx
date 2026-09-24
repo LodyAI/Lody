@@ -130,7 +130,7 @@ describe('PermissionPrompt', () => {
     expect(selected).toEqual([]);
   });
 
-  it('lands the first arrow on the suggested answer, then walks the rest', async () => {
+  it('lands the first arrow on the suggested answer, then walks the shown answers', async () => {
     await render(makeRequest([ALLOW_ALWAYS, ALLOW_ONCE, REJECT_ONCE]), { autoFocus: true });
 
     // The suggestion is the one-time allow, not the first option: widening
@@ -138,14 +138,16 @@ describe('PermissionPrompt', () => {
     await press('ArrowUp');
     expect(document.activeElement).toBe(optionButton('Yes'));
 
-    // Then down the provider's order, wrapping round.
+    // The standing answer is behind the allow family's chevron, not a button
+    // of its own, so the arrows walk the two shown answers.
+    expect(optionButton(ALLOW_ALWAYS.name)).toBeUndefined();
     await press('ArrowDown');
     expect(document.activeElement).toBe(optionButton('No'));
     await press('ArrowDown');
-    expect(document.activeElement).toBe(optionButton(ALLOW_ALWAYS.name));
+    expect(document.activeElement).toBe(optionButton('Yes'));
 
     await act(async () => (document.activeElement as HTMLButtonElement).click());
-    expect(selected).toEqual(['always']);
+    expect(selected).toEqual(['allow']);
   });
 
   it('suggests the refusal when the provider marks the request defaultToNo', async () => {

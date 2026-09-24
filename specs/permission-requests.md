@@ -30,9 +30,10 @@ their hands already are, and they must not answer by accident.
   refusal when the provider marks the request `defaultToNo`, otherwise the first
   one-time allow. An "always" answer is never the suggestion.
 - **Shape.** The composer's scale, not a dialog's: the question and why, the
-  subject, and the answers as one column of small raised buttons in the
-  provider's order, the suggestion primary. Every answer is the same kind of
-  object in one place.
+  subject, and one row of answers at the end — a split button for refusing and
+  one for allowing. Each shows its one-time answer (the suggestion is primary)
+  and keeps the answers that change what happens from now on ("don't ask
+  again", "block this host") in its menu, in the provider's words.
 - **Keyboard.** The arrows walk the answers, starting on the suggestion; Enter or
   Space answers the one focused. Escape refuses once and never picks an "always"
   refusal; with no one-time refusal, Escape answers nothing. Enter on the prompt

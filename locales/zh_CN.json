@@ -4115,5 +4115,6 @@
   "sessions.permission.stop": "停止 Agent",
   "sessions.permission.sendFailed": "回答没有送达 Agent，请重试。",
   "sessions.permission.connecting": "正在连接工作区…",
-  "sessions.permission.waitingInline": "等待你的回答"
+  "sessions.permission.waitingInline": "等待你的回答",
+  "sessions.permission.moreAnswers": "更多回答"
 }

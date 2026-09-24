@@ -4115,5 +4115,6 @@
   "sessions.permission.stop": "Stop the agent",
   "sessions.permission.sendFailed": "Your answer didn't reach the agent. Try again.",
   "sessions.permission.connecting": "Connecting to the workspace…",
-  "sessions.permission.waitingInline": "Waiting for your answer"
+  "sessions.permission.waitingInline": "Waiting for your answer",
+  "sessions.permission.moreAnswers": "More answers"
 }
