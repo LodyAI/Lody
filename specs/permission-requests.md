@@ -29,11 +29,11 @@ their hands already are, and they must not answer by accident.
 - **The suggestion.** One answer is marked as suggested: the first one-time
   refusal when the provider marks the request `defaultToNo`, otherwise the first
   one-time allow. An "always" answer is never the suggestion.
-- **Shape.** The design system's anatomy for a question that needs an answer —
-  an AlertDialog's, without taking the page: a title and one sentence, the
-  subject, and the answers as Buttons from the end. The suggestion is the
-  primary button and comes last; the rest are secondary. Answers that do not
-  fit one line stack full width, the suggestion still last.
+- **Shape.** The composer's scale, not a dialog's: the question and why, the
+  subject, and one row of answers. Refusing once and the suggestion are small
+  buttons at the end, the suggestion primary and last; answers that change what
+  the agent may do from now on keep the provider's words as ghost buttons at the
+  start.
 - **Keyboard.** The arrows walk the answers, starting on the suggestion; Enter or
   Space answers the one focused. Escape refuses once and never picks an "always"
   refusal; with no one-time refusal, Escape answers nothing. Enter on the prompt

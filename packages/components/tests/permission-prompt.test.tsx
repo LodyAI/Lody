@@ -138,13 +138,14 @@ describe('PermissionPrompt', () => {
     await press('ArrowUp');
     expect(document.activeElement).toBe(optionButton('Yes'));
 
-    await press('ArrowDown');
-    expect(document.activeElement).toBe(optionButton('No'));
-    await press('ArrowDown');
+    // The row reads left to right: the standing answer, then No, then Yes.
+    await press('ArrowRight');
     expect(document.activeElement).toBe(optionButton(ALLOW_ALWAYS.name));
+    await press('ArrowRight');
+    expect(document.activeElement).toBe(optionButton('No'));
 
     await act(async () => (document.activeElement as HTMLButtonElement).click());
-    expect(selected).toEqual(['always']);
+    expect(selected).toEqual(['reject']);
   });
 
   it('suggests the refusal when the provider marks the request defaultToNo', async () => {

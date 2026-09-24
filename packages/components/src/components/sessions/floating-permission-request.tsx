@@ -118,22 +118,18 @@ export function hasPendingPermissionRequest(
 const REGION = `color-mix(in oklab, transparent, ${colors.label} 4%)`;
 const MONO = 'var(--font-mono, ui-monospace, monospace)';
 
-/** Answers fit on one line from the end only when every one of them is short. */
-const INLINE_ANSWER_MAX_LENGTH = 24;
-const INLINE_ANSWER_MAX_COUNT = 3;
-
 const styles = stylex.create({
   /**
-   * An AlertDialog that does not take the page: the same anatomy — a title and
-   * one sentence, what it is about, the answers from the end — on the card
-   * rung, which is the composer's, because it stands in the composer's place.
+   * It stands in the composer's place, so it is the composer's rung and scale:
+   * a card of small controls, not a dialog. The question, what it is about,
+   * and one row of answers.
    */
   card: {
     boxSizing: 'border-box',
     display: 'flex',
     flexDirection: 'column',
-    gap: space[3],
-    padding: space[4],
+    gap: space[2],
+    padding: space[3],
     backgroundColor: colors.elevatedBackground,
     boxShadow: shadow.card,
     borderRadius: radius.large,
@@ -142,24 +138,23 @@ const styles = stylex.create({
     outlineStyle: 'none',
   },
   header: { display: 'flex', alignItems: 'flex-start', gap: space[2], minWidth: 0 },
-  /** The title and the sentence under it: one block. */
   headerText: {
     display: 'flex',
     flexDirection: 'column',
-    gap: space[1.5],
+    gap: '2px',
     flexGrow: 1,
     minWidth: 0,
   },
   title: {
     margin: 0,
-    fontSize: text.headlineSize,
-    lineHeight: text.headlineLeading,
+    fontSize: text.bodySize,
+    lineHeight: text.bodyLeading,
     fontWeight: 600,
   },
   description: {
     margin: 0,
-    fontSize: text.bodySize,
-    lineHeight: text.bodyLeading,
+    fontSize: text.footnoteSize,
+    lineHeight: text.footnoteLeading,
     color: colors.secondaryLabel,
     overflowWrap: 'anywhere',
   },
@@ -169,7 +164,7 @@ const styles = stylex.create({
     flexShrink: 0,
     alignItems: 'center',
     gap: '2px',
-    marginBlockStart: '-2px',
+    marginBlockStart: '-4px',
     marginInlineEnd: `calc(-1 * ${space[1.5]})`,
     fontSize: text.footnoteSize,
     color: colors.tertiaryLabel,
@@ -214,16 +209,34 @@ const styles = stylex.create({
   },
   statusError: { color: colors.destructive },
 
-  /** The answers, from the end, the suggested one last. */
+  /**
+   * One row of answers. The two that answer this request — refuse once, and
+   * the suggestion — are small buttons at the end. Answers that change what
+   * the agent may do from now on keep the provider's words whole, as quiet
+   * ghost buttons at the start: available, and not competing.
+   */
   footer: {
     display: 'flex',
     flexWrap: 'wrap',
-    justifyContent: 'flex-end',
-    gap: space[2],
+    alignItems: 'center',
+    columnGap: space[2],
+    rowGap: space[1],
+    paddingTop: space[1],
   },
-  /** Stacked when they do not fit a line: full width, the suggestion nearest the thumb. */
-  footerStacked: { flexDirection: 'column', alignItems: 'stretch' },
-  answerStacked: { width: '100%' },
+  standing: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: space[1],
+    minWidth: 0,
+    marginInlineStart: `calc(-1 * ${space[2]})`,
+  },
+  direct: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: space[2],
+    marginInlineStart: 'auto',
+  },
 
   queueStrip: {
     display: 'flex',
@@ -269,11 +282,11 @@ export interface PermissionPromptProps {
 }
 
 /**
- * One permission request, in the design system's own anatomy for a question
- * that needs an answer — an AlertDialog's, without taking the page: a title and
- * one sentence, what it is about, and the answers as Buttons from the end. The
- * suggested answer is the primary button and comes last; the rest are
- * secondary. The answers are the provider's own words, never rewritten.
+ * One permission request at the composer's scale: the question and why, what
+ * it is about, and one row of answers — refuse once and the suggestion as small
+ * buttons at the end (the suggestion primary, last), and any answer that changes
+ * what the agent may do from now on as a ghost button at the start. The answers
+ * are the provider's own words, never rewritten.
  *
  * Keyboard: the arrows walk the answers starting from the suggested one, Enter
  * or Space presses the one focused, and Escape refuses once. Enter on the card
@@ -305,17 +318,24 @@ export function PermissionPrompt({
   const dismissOptionId = resolveDismissOptionId(permission.options);
   const disabled = !isReady || sendingOptionId !== null;
 
-  // From the end, the suggestion last: the provider lists its answers most
-  // permissive first, so reading them from the end puts the refusal first and
-  // the suggested answer where the eye and the thumb finish.
-  const answers = useMemo(() => {
-    const reversed = [...permission.options].reverse();
-    const suggested = reversed.find((option) => option.optionId === suggestedOptionId);
-    return suggested ? [...reversed.filter((option) => option !== suggested), suggested] : reversed;
-  }, [permission.options, suggestedOptionId]);
-  const stacked =
-    answers.length > INLINE_ANSWER_MAX_COUNT ||
-    answers.some((option) => option.name.length > INLINE_ANSWER_MAX_LENGTH);
+  // The two direct answers go to the end — refuse once, then the suggestion
+  // last; everything else (an "always", a second refusal, a mode choice) stands
+  // at the start in the provider's order.
+  const { standing, direct, answers } = useMemo(() => {
+    const byId = (id: string | null) =>
+      id ? permission.options.find((option) => option.optionId === id) : undefined;
+    const suggested = byId(suggestedOptionId);
+    const dismiss = dismissOptionId !== suggestedOptionId ? byId(dismissOptionId) : undefined;
+    const directAnswers = [dismiss, suggested].filter(
+      (option): option is PermissionOption => option !== undefined
+    );
+    const standingAnswers = permission.options.filter((option) => !directAnswers.includes(option));
+    return {
+      standing: standingAnswers,
+      direct: directAnswers,
+      answers: [...standingAnswers, ...directAnswers],
+    };
+  }, [permission.options, suggestedOptionId, dismissOptionId]);
 
   useEffect(() => {
     if (!autoFocus) return;
@@ -340,26 +360,45 @@ export function PermissionPrompt({
       }
       return;
     }
-    const forward = stacked ? 'ArrowDown' : 'ArrowRight';
-    const backward = stacked ? 'ArrowUp' : 'ArrowLeft';
-    const isStep = event.key === forward || event.key === backward;
-    const isEntry = event.key === 'ArrowDown' || event.key === 'ArrowUp';
-    if (!isStep && !isEntry) return;
+    const forward = event.key === 'ArrowDown' || event.key === 'ArrowRight';
+    const backward = event.key === 'ArrowUp' || event.key === 'ArrowLeft';
+    if (!forward && !backward) return;
+    event.preventDefault();
     const currentIndex = answers.findIndex(
       (option) => answerRefs.current.get(option.optionId) === document.activeElement
     );
     if (currentIndex === -1) {
-      if (!isEntry && !isStep) return;
-      event.preventDefault();
       // The first step lands on the suggestion, whichever arrow it was.
       focusAnswer(suggestedOptionId);
       return;
     }
-    if (!isStep) return;
-    event.preventDefault();
-    const step = event.key === forward ? 1 : -1;
+    const step = forward ? 1 : -1;
     const next = answers[(currentIndex + step + answers.length) % answers.length];
     focusAnswer(next?.optionId);
+  };
+
+  const renderAnswer = (option: PermissionOption, variant: 'primary' | 'secondary' | 'ghost') => {
+    const sending = option.optionId === sendingOptionId;
+    const description = resolvePermissionOptionDescription(option);
+    return (
+      <Button
+        key={option.optionId}
+        ref={(node: HTMLButtonElement | null) => {
+          if (node) answerRefs.current.set(option.optionId, node);
+          else answerRefs.current.delete(option.optionId);
+        }}
+        variant={variant}
+        size="small"
+        disabled={disabled}
+        title={description ?? undefined}
+        aria-keyshortcuts={option.optionId === dismissOptionId ? 'Escape' : undefined}
+        data-tone={resolvePermissionOptionTone(option)}
+        onClick={() => onSelect(option.optionId)}
+      >
+        {sending ? <Spinner size="small" /> : null}
+        {option.name}
+      </Button>
+    );
   };
 
   return (
@@ -428,30 +467,17 @@ export function PermissionPrompt({
         </p>
       ) : null}
 
-      <div {...stylex.props(styles.footer, stacked && styles.footerStacked)}>
-        {answers.map((option) => {
-          const sending = option.optionId === sendingOptionId;
-          const description = resolvePermissionOptionDescription(option);
-          return (
-            <Button
-              key={option.optionId}
-              ref={(node: HTMLButtonElement | null) => {
-                if (node) answerRefs.current.set(option.optionId, node);
-                else answerRefs.current.delete(option.optionId);
-              }}
-              variant={option.optionId === suggestedOptionId ? 'primary' : 'secondary'}
-              disabled={disabled}
-              title={description ?? undefined}
-              aria-keyshortcuts={option.optionId === dismissOptionId ? 'Escape' : undefined}
-              data-tone={resolvePermissionOptionTone(option)}
-              onClick={() => onSelect(option.optionId)}
-              {...stylex.props(stacked && styles.answerStacked)}
-            >
-              {sending ? <Spinner size="small" /> : null}
-              {option.name}
-            </Button>
-          );
-        })}
+      <div {...stylex.props(styles.footer)}>
+        {standing.length > 0 ? (
+          <div {...stylex.props(styles.standing)}>
+            {standing.map((option) => renderAnswer(option, 'ghost'))}
+          </div>
+        ) : null}
+        <div {...stylex.props(styles.direct)}>
+          {direct.map((option) =>
+            renderAnswer(option, option.optionId === suggestedOptionId ? 'primary' : 'secondary')
+          )}
+        </div>
       </div>
     </div>
   );

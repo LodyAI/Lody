@@ -76,6 +76,16 @@ the subject is a region block of the card, the type is the system's steps, and
 Stop is the corner icon a dismissible panel carries. Answers stack full width
 when any is longer than 24 characters or there are more than three.
 
+## Third owner review: the composer's scale
+
+As an AlertDialog the prompt was an action sheet: a 16px bold title and three
+full-width 48px bars dominating the conversation. A dialog's anatomy is for a
+panel that takes the page; this is an inline decision in the composer's place.
+It now has the composer's scale: a 14px title, a 12px reason, and one row of
+small buttons — refuse once (secondary) and the suggestion (primary, last) at
+the end, and any standing answer ("Yes, and don't ask again for …") as a ghost
+button at the start, the provider's words whole but not competing.
+
 ## Alternatives not taken
 
 - **Buttons in a row** (Allow / Always / Deny). Provider names are sentences; a
